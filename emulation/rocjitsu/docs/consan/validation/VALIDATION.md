@@ -77,6 +77,13 @@ Run a matching clean comparator and precommit fault expectations for a changed
 preset. Label the preset explicitly in the ledger; a denser configuration's
 success cannot qualify the standard profile or erase its detection misses.
 
+For a separate SuperCollider sampling investigation, set
+`CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL=1`. This selects every workgroup
+and cell with zero offsets in both clean and fault children; native and Default
+runs are unaffected. Unset it or use `0` for the standard profile. Precommit the
+fault matrix and run a matching clean comparator. Record this explicitly as a
+separate configuration; its results do not qualify standard sampling.
+
 ## Validation layers
 
 ConSan uses four complementary layers:

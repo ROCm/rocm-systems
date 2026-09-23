@@ -6656,6 +6656,37 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
                     "default", workload, root / "hook.so", "gfx1201", root)
 
 
+class SuperColliderSamplingEnvironmentTest(unittest.TestCase):
+    def test_sample_all_is_explicit_and_profile_scoped(self):
+        with temporary_root() as root, mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL": "1",
+            "RJ_CONSAN_CELL_SAMPLE_STRIDE": "999",
+        }, clear=True):
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            for profile in (None, "default", "supercollider"):
+                clean = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1201", root)
+                if profile != "supercollider":
+                    self.assertNotIn("RJ_CONSAN_CELL_SAMPLE_STRIDE", clean)
+                    continue
+                fault = validation_faults._fault_trial_environment(
+                    profile, workload, root / "hook.so", "gfx1201",
+                    {"environment": {}}, {}, {}, root)
+                for environment in (clean, fault):
+                    for selector in ("WORKGROUP", "CELL"):
+                        self.assertEqual(environment[f"RJ_CONSAN_{selector}_SAMPLE_STRIDE"], "1")
+                        self.assertEqual(environment[f"RJ_CONSAN_{selector}_SAMPLE_OFFSET"], "0")
+                    self.assertNotIn("RJ_CONSAN_PRESET", environment)
+            os.environ["CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL"] = "0"
+            clean = validation_commands._clean_environment(
+                "supercollider", workload, root / "hook.so", "gfx1201", root)
+            self.assertNotIn("RJ_CONSAN_CELL_SAMPLE_STRIDE", clean)
+            os.environ["CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL"] = "typo"
+            with self.assertRaises(validation.ValidationError):
+                validation_commands._clean_environment(
+                    "supercollider", workload, root / "hook.so", "gfx1201", root)
+
+
 class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
     def test_allowlist_survives_clean_inventory_and_fault_environment(self):
         with temporary_root() as root:
