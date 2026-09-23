@@ -852,8 +852,9 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
         return false;
     }
 
-    if(pm4_factory->GetGpuId() < aql_profile::MI200_GPU_ID ||
-       pm4_factory->GetGpuId() > aql_profile::MI350_GPU_ID)
+    const auto gpu_id = pm4_factory->GetGpuId();
+    if(gpu_id < aql_profile::MI200_GPU_ID ||
+       (gpu_id > aql_profile::MI350_GPU_ID && gpu_id != aql_profile::MI450_GPU_ID))
         return false;
 
     const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);
