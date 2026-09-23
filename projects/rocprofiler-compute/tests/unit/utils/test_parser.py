@@ -341,6 +341,56 @@ class TestBuildDfs:
 
         assert set(ac.dfs.keys()) == expected_table_ids
 
+    def test_filter_block_3_does_not_auto_include_block_30(self):
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"MC": {"value": "AVG(MEM)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["3"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+        )
+
+        assert 301 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_no_auto_inject_when_filter_excludes_block_3(self):
+        ac = _make_arch_config([
+            (200, _metric_panel(200, 201, metrics={"M1": {"value": "AVG(COUNTER_A)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["2"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+        )
+
+        assert 201 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_alias_filter_does_not_auto_include_block_30(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"memchart": "3"},
+        )
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"MC": {"value": "AVG(MEM)"}})),
+            (3000, _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC)"}})),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["memchart"],
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": True},
+            arch="gfx950",
+        )
+
+        assert 301 in ac.dfs
+        assert 3001 not in ac.dfs
+
 
 # =============================================================================
 # expand_placeholder_ranges

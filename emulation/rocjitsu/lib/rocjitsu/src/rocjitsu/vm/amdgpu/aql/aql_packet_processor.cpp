@@ -55,12 +55,14 @@ AqlPacketProcessResult AqlPacketProcessor::admit(const Request &request,
                                                  AqlPreparedPacket prepared) {
   if (!callbacks_.admit)
     return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingAdmissionCallback);
+  const bool blocks_following = prepared.blocks_following;
   const AqlAdmissionResult admission = callbacks_.admit(request, std::move(prepared));
   switch (admission.status) {
   case AqlAdmissionStatus::Complete:
     return {.packet = {.status = PacketProcessStatus::Complete,
                        .retirement = PacketRetirement::Retire,
-                       .retirement_bytes = kAqlPacketBytes}};
+                       .retirement_bytes = kAqlPacketBytes},
+            .blocks_following = blocks_following};
   case AqlAdmissionStatus::Blocked:
     return blocked(AqlBlockedReason::AdmissionUnavailable);
   case AqlAdmissionStatus::Faulted:
@@ -172,6 +174,8 @@ AqlPacketProcessor::process_vendor(const Request &request,
   }
 
   if (extension.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+    if (!request.kernel_admission_enabled)
+      return blocked(AqlBlockedReason::AdmissionUnavailable);
     if (extension.dep_signal.handle != 0) {
       if (!callbacks_.load_signal)
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingSignalReader);
@@ -242,6 +246,8 @@ AqlPacketProcessResult AqlPacketProcessor::process(Request request) {
   case HSA_PACKET_TYPE_INVALID:
     return blocked(AqlBlockedReason::HeaderInvalid);
   case HSA_PACKET_TYPE_KERNEL_DISPATCH:
+    if (!request.kernel_admission_enabled)
+      return blocked(AqlBlockedReason::AdmissionUnavailable);
     return admit(request,
                  {.kind = AqlPreparedPacketKind::KernelDispatch, .kernel_dispatch = packet});
   case HSA_PACKET_TYPE_BARRIER_AND:

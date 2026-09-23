@@ -123,6 +123,11 @@ class OmniAnalyze_Base:
         )
         parser.nullify_unevaluated_metric_values(workload)
 
+    def membw_analysis_collected(self) -> bool:
+        """True when block 30 data was collected during profiling."""
+        config = getattr(self, "_profiling_config", {})
+        return config.get("membw_analysis", False)
+
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
 
@@ -177,7 +182,6 @@ class OmniAnalyze_Base:
             sys_info=sys_info,
             profiling_config=profiling_config,
             arch=arch,
-            membw_analysis=getattr(self.get_args(), "membw_analysis", False),
         )
         self._arch_configs[arch] = ac
         return self._arch_configs

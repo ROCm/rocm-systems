@@ -128,6 +128,8 @@ class LoweringContext:
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
     mode_sensitive_f16_dst: bool = True
+    mode_arithmetic: bool = True
+    dx9_zero_fma: bool = False
     integer_saturation_dtype: str | None = None
 
 
@@ -200,6 +202,9 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
     if block.is_empty:
         return '  (void)wf;'
 
+    # Legacy MAD has a distinct intermediate-precision policy.
+    ctx.mode_arithmetic = not block.instruction_name.startswith('V_MAD')
+    ctx.dx9_zero_fma = block.instruction_name == 'V_FMA_DX9_ZERO_F32'
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -528,6 +533,33 @@ def _lower_less_greater_once(node: SemaNode, ctx: LoweringContext) -> str | None
     return f'([&]() {{ auto a = {lhs}; auto b = {rhs}; return (a < b) || (a > b); }}())'
 
 
+def _mode_arithmetic(
+    node: SemaNode, ctx: LoweringContext, operation: str, operands: list[str]
+) -> str | None:
+    if (
+        not ctx.mode_arithmetic
+        or ctx.exec_model != ExecModel.VECTOR
+        or not node.ty
+        or node.ty.base != 'F'
+    ):
+        return None
+    width = node.ty.size
+    if width not in (16, 32, 64):
+        return None
+    mode = 'f32' if width == 32 else 'f16_f64'
+    arguments = operands + (
+        ['0.0' if width == 64 else '0.0f'] if len(operands) == 2 else []
+    )
+    arguments += [f'wf.fp_round_mode_{mode}()', f'wf.fp_denorm_mode_{mode}()']
+    if operation == 'FMA' and ctx.dx9_zero_fma:
+        operation = 'FMA_DX9_ZERO'
+    helper = 'arithmetic_f16' if width == 16 else 'arithmetic'
+    return (
+        f'amdgpu::fp_mode::{helper}<amdgpu::fp_mode::Arithmetic::{operation}>'
+        f'({", ".join(arguments)})'
+    )
+
+
 def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower an expression node to a C++ expression string."""
     kind = node.kind
@@ -549,6 +581,11 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
             return expr
         lhs = _lower_expr(node.children[0], ctx)
         rhs = _lower_expr(node.children[1], ctx)
+        if kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL):
+            if (
+                arithmetic := _mode_arithmetic(node, ctx, kind.name, [lhs, rhs])
+            ) is not None:
+                return arithmetic
         op = _INFIX_OPS[kind]
         return f'({lhs} {op} {rhs})'
 
@@ -570,6 +607,20 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     if kind == SemaNodeKind.LDEXP:
         val = _lower_expr(node.children[0], ctx)
         exp = _lower_expr(node.children[1], ctx)
+        if ctx.exec_model == ExecModel.VECTOR and node.ty == SemaType.F16:
+            return (
+                f'amdgpu::fp_mode::ldexp_f16({val}, {exp}, '
+                'wf.fp_denorm_mode_f16_f64())'
+            )
+        if ctx.exec_model == ExecModel.VECTOR and node.ty in (
+            SemaType.F32,
+            SemaType.F64,
+        ):
+            mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
+            return (
+                f'amdgpu::ldexp({val}, {exp}, wf.fp_round_mode_{mode}(), '
+                f'wf.fp_denorm_mode_{mode}())'
+            )
         return f'std::ldexp({val}, {exp})'
 
     if kind in _STD_MATH:
@@ -584,6 +635,8 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         a = _lower_expr(node.children[0], ctx)
         b = _lower_expr(node.children[1], ctx)
         c = _lower_expr(node.children[2], ctx)
+        if (arithmetic := _mode_arithmetic(node, ctx, 'FMA', [a, b, c])) is not None:
+            return arithmetic
         return f'std::fma({a}, {b}, {c})'
 
     if kind == SemaNodeKind.BITNEG:
@@ -1017,6 +1070,24 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     return 0
 
 
+def _contains_mode_arithmetic(node: SemaNode) -> bool:
+    return (
+        (
+            node.kind
+            in (
+                SemaNodeKind.ADD,
+                SemaNodeKind.SUB,
+                SemaNodeKind.MUL,
+                SemaNodeKind.FMA,
+                SemaNodeKind.LDEXP,
+            )
+            or (node.kind == SemaNodeKind.CALL and node.call_name == 'mul_legacy')
+        )
+        and node.ty is not None
+        and node.ty.base == 'F'
+    ) or any(_contains_mode_arithmetic(child) for child in node.children)
+
+
 def _lower_dst_write(
     lhs_node: SemaNode,
     rhs_node: SemaNode,
@@ -1031,7 +1102,12 @@ def _lower_dst_write(
     lhs_ty = _get_operand_dtype(lhs_node)
     binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
     if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16:
-        if ctx.mode_sensitive_f16_dst:
+        if ctx.mode_arithmetic and _contains_mode_arithmetic(rhs_node):
+            rhs = (
+                f'amdgpu::fp_mode::finish_arithmetic_f16({rhs}, '
+                'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())'
+            )
+        elif ctx.mode_sensitive_f16_dst:
             rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
         else:
             rhs = f'util::f32_to_f16({rhs})'
@@ -1169,7 +1245,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
     ' : static_cast<uint32_t>(v)); }}()',
-    'rndne': 'std::nearbyint({0})',
+    'rndne': 'util::rndne_scalar({0})',
     'ceil': 'util::ceil_scalar({0})',
     'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
@@ -1260,9 +1336,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
     ' return a == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
-    'frexp_exp_f32': '[&]() {{ float s = {0}; int exp = 0;'
-    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
+    'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
     'frexp_exp_f16': '[&]() {{ float s = {0}; int exp = 0;'
     ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
     ' return static_cast<uint32_t>(exp); }}()',
@@ -1273,7 +1347,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'frexp_mant_f64': '[&]() {{ double s = {0};'
     ' int exp = 0;'
     ' return std::frexp(s, &exp); }}()',
-    'frexp_mant_f32': '[&]() {{ int e; return std::frexp(static_cast<float>({0}), &e); }}()',
+    'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
     'cvt_f32_u32': 'std::bit_cast<uint32_t>(static_cast<float>({0}))',
@@ -1337,7 +1411,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_ubyte2': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 16) & 0xFFu))',
     'cvt_f32_ubyte3': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 24) & 0xFFu))',
     'cvt_rpi_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-    ' float r = std::ceil(s - 0.5f);'
+    ' float r = std::floor(s);'
+    ' if (s - r >= 0.5f) r += 1.0f;'
     ' if (std::isnan(r)) return 0u;'
     ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
     ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
@@ -1762,6 +1837,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
+    if callee == 'mul_legacy':
+        if (arithmetic := _mode_arithmetic(node, ctx, 'MUL_LEGACY', args)) is not None:
+            return arithmetic
 
     add_minmax_calls = {
         'add_max_i32': ('int32_t', 'true'),
@@ -1969,7 +2047,15 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
-    fp_type = 'double' if is_f64 else 'float'
+    mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
+    wide_result = is_f64 or (node.ty == SemaType.F16 and mode_arithmetic)
+    fp_type = 'double' if wide_result else 'float'
+    mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
+    environment = (
+        f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
+        if mode_arithmetic
+        else ''
+    )
     suffix = '' if is_f64 else 'f'
     if is_f64:
         omod_expr = (
@@ -1991,13 +2077,17 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
             'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod)'
         )
+    if node.ty in (SemaType.F32, SemaType.F64) and any(
+        child.kind == SemaNodeKind.LDEXP for child in node.children[1].walk()
+    ):
+        return f'amdgpu::div_apply_omod({rhs}, wf.fp_round_mode_{mode}(), {omod_expr})'
     return (
-        f'[&]() {{ {fp_type} v = {rhs};'
+        f'[&]() {{ {environment}{fp_type} v = {rhs};'
         f' const uint32_t effective_omod = {omod_expr};'
         f' if (effective_omod == 1) v *= 2.0{suffix};'
         f' else if (effective_omod == 2) v *= 4.0{suffix};'
         f' else if (effective_omod == 3) v *= 0.5{suffix};'
-        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'
+        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if wide_result else "f32"}(v, effective_omod);'
         f' return v; }}()'
     )
 
@@ -2015,9 +2105,17 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
-    fp_type = 'double' if is_f64 else 'float'
+    mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
+    wide_result = is_f64 or (node.ty == SemaType.F16 and mode_arithmetic)
+    fp_type = 'double' if wide_result else 'float'
+    mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
+    environment = (
+        f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
+        if mode_arithmetic
+        else ''
+    )
     return (
-        f'[&]() {{ {fp_type} v = {rhs};'
+        f'[&]() {{ {environment}{fp_type} v = {rhs};'
         ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf);'
         f' return v; }}()'
     )

@@ -152,3 +152,27 @@ def test_initalize_runs_corrects_specs_only_when_asked(
     assert workload.sys_info["num_xcd"].item() == expected_num_xcd
     # initalize_runs reads ip_blocks off sys_info straight after the correction.
     assert workload.avail_ips == sysinfo["ip_blocks"].split("|")
+
+
+# =============================================================================
+# membw_analysis_collected tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "profiling_config,expected",
+    [
+        pytest.param({"membw_analysis": True}, True, id="collected"),
+        pytest.param({"membw_analysis": False}, False, id="not_collected"),
+        pytest.param({}, False, id="absent"),
+    ],
+)
+def test_membw_analysis_collected(profiling_config, expected) -> None:
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    inst._profiling_config = profiling_config
+    assert inst.membw_analysis_collected() is expected
+
+
+def test_membw_analysis_collected_without_config_attribute() -> None:
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    assert inst.membw_analysis_collected() is False

@@ -98,7 +98,7 @@ This includes the ROCm profilers, dependencies, and base packages.
             source .venv/bin/activate
 
             # Install ROCm and the profilers from the AMD package repository.
-            python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
+            python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[profiler]"
 
          .. note::
 
@@ -124,7 +124,7 @@ its own ``torch`` or ``numpy``, and a shared environment breaks either side.
 
    python3 -m venv ~/.venvs/rocprof-compute-analyze
    source ~/.venvs/rocprof-compute-analyze/bin/activate
-   python -m pip install --extra-index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm-profiler[compute-analyze]"
+   python -m pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
 
 This command uses ``--extra-index-url`` rather than the ``--index-url`` used
 above because the analyze packages come from PyPI while ``rocm-profiler`` comes
