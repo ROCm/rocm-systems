@@ -792,10 +792,10 @@ protected:
     void expect_event_type_count(profiler_hub::reader_types::event_type_t type,
                                  size_t                                   expected) const
     {
-        auto counts = m_reader->get_event_counts();
-        auto it     = counts.find(type);
-        ASSERT_NE(it, counts.end());
-        EXPECT_EQ(it->second, expected);
+        auto counts   = m_reader->get_event_counts();
+        auto count_it = counts.find(type);
+        ASSERT_NE(count_it, counts.end());
+        EXPECT_EQ(count_it->second, expected);
     }
 
     void expect_region_times_by_name(const char* name, std::uint64_t start_ts,
@@ -2182,10 +2182,10 @@ void
 expect_event_count(profiler_hub::reader_t&                  reader,
                    profiler_hub::reader_types::event_type_t type, size_t expected)
 {
-    auto counts = reader.get_event_counts();
-    auto it     = counts.find(type);
-    ASSERT_NE(it, counts.end());
-    EXPECT_EQ(it->second, expected);
+    auto counts   = reader.get_event_counts();
+    auto count_it = counts.find(type);
+    ASSERT_NE(count_it, counts.end());
+    EXPECT_EQ(count_it->second, expected);
 }
 
 void
@@ -2313,23 +2313,23 @@ expect_multiple_event_saw_flags(const multi_event_saw_flags& saw)
 
 void
 expect_one_multi_event(profiler_hub::reader_t&                             reader,
-                       const profiler_hub::reader_types::timeline_event_t& tl,
+                       const profiler_hub::reader_types::timeline_event_t& tl_event,
                        const multi_event_timestamps&                       timestamps,
                        multi_event_saw_flags&                              saw)
 {
-    switch(tl.unique_identifier.type)
+    switch(tl_event.unique_identifier.type)
     {
         case profiler_hub::reader_types::event_type_t::region:
-            expect_multi_db_region_details(reader, tl, timestamps, saw);
+            expect_multi_db_region_details(reader, tl_event, timestamps, saw);
             break;
         case profiler_hub::reader_types::event_type_t::kernel_dispatch:
-            expect_multi_db_kernel_details(reader, tl, timestamps, saw);
+            expect_multi_db_kernel_details(reader, tl_event, timestamps, saw);
             break;
         case profiler_hub::reader_types::event_type_t::memory_copy:
-            expect_multi_db_memory_copy_details(reader, tl, timestamps, saw);
+            expect_multi_db_memory_copy_details(reader, tl_event, timestamps, saw);
             break;
         case profiler_hub::reader_types::event_type_t::memory_allocate:
-            expect_multi_db_scratch_details(reader, tl, timestamps, saw);
+            expect_multi_db_scratch_details(reader, tl_event, timestamps, saw);
             break;
         default: break;
     }
