@@ -38,7 +38,7 @@ A notional workflow we need to support is something like this:
       storage must support subsequent querying for timestamp translation.
     - **Note: whether these operations are done by the same or separate threads, whether those threads are part of the
       ROCR instance or a separate system daemon(s), and how storage is managed are design considerations we
-      will elaborate on below.**
+      will elaborate on [here](docs/arch.md).**
 3. Kernel dispatch/completion events produced by the workload, which include raw GPU timestamps, are surfaced into rocprof
 4. rocprof calls into ROCR through HSA API to convert these raw GPU timestamps to the system/realtime timeline (e.g.,
 via something like
@@ -48,14 +48,14 @@ with the provided GPU timestamp to produce the offset to translate to realtime.
 
 ## Components
 
-### `rocm-timesyncd`
+### rocm-timesyncd
 
 `rocm-timesync` is a new standalone ROCm system service. One instance of this service runs per node. The service:
 - queries KFD for crosststamps by calling into
   [libhsakmt](https://github.com/ROCm/rocm-systems/tree/users/bkocolos/precision-time/projects/rocr-runtime/libhsakmt).
 - stores crosststamps into a ringbuffer(s)
 
-### Configuration
+#### Configuration
 
 `rocm-timesync` accepts a config with the following format:
 ```yml
@@ -82,7 +82,7 @@ memory.
 These channels are internally implemented as ringbuffers. Old data will be overwritten by the producer once the pointer
 wraps around to the front of the buffer.
 
-### `librocm-timesync`
+### librocm-timesync
 
 `librocm-timesync` is a shared library that connects to the channels published by `rocm-timesyncd`, streams them into
 a backend (memory and/or storage), and uses that backend to implement time translation calls made to it by ROCR. This
