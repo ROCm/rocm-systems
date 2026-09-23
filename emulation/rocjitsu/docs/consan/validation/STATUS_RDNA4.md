@@ -301,3 +301,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   sequences) and scatter-reduce (16 atomic sites per weakening family).
   These are static candidates requiring review, not fault-detection passes.
   Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/inventory-round2/`.
+- Alias-fix regression gates: all **1,056 host ConSan tests** and **447 physical
+  device tests** pass with the rebuilt hook. Physical execution was serialized.
+  Logs: `topk-debug/fix-host-tests.log` and `topk-debug/fix-physical-tests.log`
+  under `/home/benoit/workspace/consan-validation/rdna4-20260923/`.
+  These gates preserve the 40 clean passes as campaign evidence; external
+  reviewed-fault qualification still needs to be completed against the final
+  hook and each cell's recorded configuration.
