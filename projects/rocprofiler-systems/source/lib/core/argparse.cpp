@@ -10,7 +10,6 @@
 #include "gpu.hpp"
 #include "state.hpp"
 #include <cstdint>
-#include <tuple>
 
 #include <timemory/settings/types.hpp>
 
@@ -20,38 +19,10 @@
 
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace argparse
+namespace rocprofsys::argparse
 {
 namespace
 {
-auto
-get_clock_id_choices()
-{
-#define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
-    std::make_tuple(utility::string::clock_name(#VAL), VAL, std::string_view{ #VAL })
-
-    auto _choices = strvec_t{};
-    auto _aliases = std::map<std::string, strvec_t>{};
-    for(auto itr : { ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
-                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) })
-    {
-        auto _choice = std::to_string(std::get<1>(itr));
-        _choices.emplace_back(_choice);
-        _aliases[_choice] = { std::get<0>(itr), std::string{ std::get<2>(itr) } };
-    }
-
-#undef ROCPROFSYS_CLOCK_IDENTIFIER
-
-    return std::make_pair(_choices, _aliases);
-}
-
 using rocprofsys::common::update_mode;
 
 // NOLINTBEGIN - ignore argument number issue
@@ -774,7 +745,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.reg.environ_filter("trace_clock_id", _data))
     {
-        auto _clock_id_choices = get_clock_id_choices();
         _parser
             .add_argument(
                 { "--trace-clock-id" },
@@ -791,10 +761,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("clock-id")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_PERIOD_CLOCK_ID,
-                           p.get<double>("trace-clock-id"));
+                           p.get<std::string>("trace-clock-id"));
             })
-            .choices(_clock_id_choices.first)
-            .choice_aliases(_clock_id_choices.second);
+            .choices({ "realtime", "cputime" });
 
         _data.reg.processed_environs.emplace("trace_clock_id");
         _data.reg.processed_environs.emplace("trace_period_clock_id");
@@ -1442,5 +1411,4 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
 
     return _data;
 }
-}  // namespace argparse
-}  // namespace rocprofsys
+}  // namespace rocprofsys::argparse

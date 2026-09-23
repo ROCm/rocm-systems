@@ -537,13 +537,15 @@ std::unordered_map<std::string, FactoryFn> &factories() {
                        const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       auto l2 = std::make_unique<amdgpu::L2Cache>(n);
       l2->set_backing_memory(mem);
+      l2->set_legacy_maintenance_memory(mem);
       return l2;
     };
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
-                                rj_code_arch_t, rj_code_target_id_t, amdgpu::GpuMemory *,
+                                rj_code_arch_t, rj_code_target_id_t, amdgpu::GpuMemory *mem,
                                 const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::MemorySideCache>(n);
+      return std::make_unique<amdgpu::MemorySideCache>(
+          n, std::make_shared<amdgpu::DeviceCacheCoherence>(), mem);
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
@@ -745,8 +747,6 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     for (auto *c : all) {
       if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(c))
         cu->set_memory(mem);
-      if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(c))
-        cp->set_memory(mem);
     }
   }
 
@@ -766,8 +766,6 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     for (auto *c : all) {
       if (auto *xcd = dynamic_cast<amdgpu::Xcd *>(c)) {
         result.xcds.push_back(xcd);
-        if (soc)
-          soc->add_xcd(xcd);
 
         amdgpu::CommandProcessor *xcd_cp = nullptr;
         amdgpu::L2Cache *xcd_l2 = nullptr;
@@ -791,14 +789,16 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
         // from the topology and must wire it here.
         if (xcd_cp && xcd_l2)
           xcd_cp->add_l2_cache(xcd_l2);
+        if (soc)
+          soc->add_xcd(xcd);
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {
         if (soc)
           soc->add_iod(iod);
       }
     }
     result.num_xcds = static_cast<uint32_t>(result.xcds.size());
-    if (soc)
-      soc->set_memory(mem);
+    if (soc && !soc->set_memory(mem))
+      throw std::logic_error("cannot replace GPU memory while address spaces are active");
   }
 
   // Wire SPIs after CUs are added to SEs (above), so the lazily created

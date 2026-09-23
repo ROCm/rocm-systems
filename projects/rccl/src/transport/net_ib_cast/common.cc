@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
+#include "qp_sharing.h"
 
 char IbCastIfName[MAX_IF_NAME_SIZE + 1];
 union ncclSocketAddress IbCastIfAddr;
@@ -23,6 +24,8 @@ NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
 extern int ncclParamIbCastOooRq();
+extern int ncclParamIbCastResiliencyPortFailover();
+
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {

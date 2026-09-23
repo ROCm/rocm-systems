@@ -250,6 +250,14 @@ enum SdwaUnused : uint32_t {
   UNUSED_PRESERVE = 2,
 };
 
+/// @brief Semantic arithmetic result format for SDWA output modifiers.
+enum class ResultFormat {
+  NONE,
+  F16,
+  PK_F16,
+  F32,
+};
+
 /// @brief Floating-point representation used by SDWA source modifiers.
 ///
 /// SDWA selection and sign extension apply to every source. Absolute-value and

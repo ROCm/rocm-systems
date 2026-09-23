@@ -26,9 +26,7 @@
 #include <thread>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -501,7 +499,6 @@ mpi_gotcha::publish_rank_and_size(int rank, int size)
     }
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::mpi_gotcha)

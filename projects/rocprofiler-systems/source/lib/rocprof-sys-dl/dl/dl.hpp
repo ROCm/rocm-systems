@@ -149,9 +149,7 @@ extern "C"
 #endif  // ROCPROFSYS_DL_SOURCE
 }
 
-namespace rocprofsys
-{
-namespace dl
+namespace rocprofsys::dl
 {
 enum class instrument_mode : int
 {
@@ -161,7 +159,6 @@ enum class instrument_mode : int
     python_profile = 2,  // python setprofile
     last,
 };
-}  // namespace dl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::dl
 
 #endif  // ROCPROFSYS_DL_HPP_ 1
