@@ -459,3 +459,11 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   tests pass, including regression cases for failed admission, missing results,
   and continuing admitted misses. A single FP16 transform diagnostic is running
   with a 900-second diagnostic deadline; no further matrix is scheduled.
+- Matmul timeout diagnosis: an offline debugger stack caught whole-object
+  indirect-branch analysis constructing its quadratic dominance matrix before
+  finding a qualifying lane-saved call target. Changed this to construct the
+  same matrix lazily after the existing save/restore checks; no proof is skipped
+  for qualifying candidates. The selected ConSan/indirect/relocation test run
+  passes all 834 tests. Offline timing verification is running; the installed
+  hook has not been replaced while the original GPU diagnostic is active.
+  Evidence: `matmul-debug/lazy-dominance-tests.log` under the campaign root.

@@ -4853,8 +4853,10 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     return it == writes.begin() ? nullptr : &*std::prev(it);
   };
 
-  const AnalysisDominators dominators =
-      compute_analysis_dominators(ctx, blocks, block_by_offset, known_recovered);
+  // The dense dominance matrix is quadratic in the number of blocks. Most
+  // objects have no complete lane-saved call target, so defer this proof until
+  // a candidate passes the cheaper save/restore and preservation checks.
+  std::optional<AnalysisDominators> dominators;
   // Revisit consumers already present in known_recovered. Each fixed-point
   // round may add call edges and therefore change dominance or preservation;
   // a still-valid proof must be re-emitted in this round, while a proof made
@@ -4904,12 +4906,15 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     if (!complete || saved_sgprs[0] >= kMaxTrackedSgprPair ||
         saved_sgprs[1] != static_cast<uint16_t>(saved_sgprs[0] + 1))
       continue;
+    if (!dominators)
+      dominators.emplace(
+          compute_analysis_dominators(ctx, blocks, block_by_offset, known_recovered));
     // This recovery intentionally models one 64-bit PC pair. A future
     // lane-carried scalar analysis can generalize the same dominance and
     // preservation machinery to an arbitrary consecutive register run.
     for (uint16_t half = 0; half < 2; ++half) {
-      if (!dominators.instruction_dominates(save_indices[half], consumer_index) ||
-          !dominators.instruction_dominates(restore_indices[half], consumer_index)) {
+      if (!dominators->instruction_dominates(save_indices[half], consumer_index) ||
+          !dominators->instruction_dominates(restore_indices[half], consumer_index)) {
         complete = false;
         break;
       }
