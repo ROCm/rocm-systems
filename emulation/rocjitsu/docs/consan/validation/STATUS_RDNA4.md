@@ -380,3 +380,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   Both profiles require at least one detection in eight trials. Spec loading
   passes; live trials are pending the serialized clean sweep. The earlier
   single-pair review remains valid, but no new mutation mechanism is needed.
+- WMMA grouped-drop preparation: both existing host regressions pass
+  (`FaultDropBarrierExactGroup*`), including four physical rewrites accounted
+  as one mutation and rejection of duplicate/reversed/partial groups without
+  writes. The current hook contains both companion controls, and the Python
+  runner retains all identity controls and checks one applied logical mutation.
+  This is preparation evidence, not physical fault qualification.
+  Log: `/home/benoit/workspace/consan-validation/rdna4-20260923/wmma-debug/grouped-drop-tests.log`.
