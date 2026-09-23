@@ -184,18 +184,6 @@ using rocprofiler_sdk::wrapper;
 
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
 
-// Populates a kernel-dispatch/memory-copy/memory-allocation record's external
-// correlation id with the HIP stream and roctx-region correlation stashed by
-// the kernel-rename/hip-stream-display service (see roctx_client and
-// tool_hip_stream_callback). Defined further down (needs stream_id_top());
-// forward-declared so external_dependencies can expose it to the buffered
-// domains as their external-correlation-id-request dependency.
-int
-set_kernel_rename_and_stream_correlation_id(
-    rocprofiler_thread_id_t, rocprofiler_context_id_t,
-    rocprofiler_external_correlation_id_request_kind_t, rocprofiler_tracing_operation_t,
-    std::uint64_t, rocprofiler_user_data_t*, void*);
-
 struct external_dependencies
 {
     using agent_t         = ::rocprofsys::agent;
@@ -401,12 +389,6 @@ struct external_dependencies
         kernel_dispatch_bundle_data.pop();
     }
 
-    // External-correlation-id-request dependency shared by the kernel_dispatch,
-    // memory_copy, and memory_allocation buffered domains (see each domain's
-    // correlation_dependency): supplies get_stream_id()'s stream/region data.
-    static constexpr auto request_stream_correlation_id =
-        &set_kernel_rename_and_stream_correlation_id;
-
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
     static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
@@ -506,60 +488,6 @@ ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
 }
 
 #endif
-
-auto&
-get_stream_stack()
-{
-    static thread_local std::vector<rocprofiler_stream_id_t> _v{ rocprofiler_stream_id_t{
-        0 } };
-    return _v;
-}
-
-void
-stream_id_push(rocprofiler_stream_id_t stream_id)
-{
-    get_stream_stack().emplace_back(stream_id);
-}
-
-rocprofiler_stream_id_t
-stream_id_top()
-{
-    auto stream_id = get_stream_stack().back();
-    return stream_id;
-}
-
-void
-stream_id_pop()
-{
-    get_stream_stack().pop_back();
-}
-
-// Stores stream ids and kernel region ids for kernel-rename service and hip stream
-// display service
-struct kernel_rename_and_stream_data
-{
-    std::uint64_t           region_id = 0;  // roctx region correlation id
-    rocprofiler_stream_id_t stream_id = { 0 };
-};
-
-template <typename Tp>
-rocprofiler_stream_id_t
-get_stream_id(Tp* _record)
-{
-    auto _stream_id = rocprofiler_stream_id_t{ 0 };
-    if(_record->correlation_id.external.ptr != nullptr)
-    {
-        // Extract the stream id
-        auto* _ecid_data = static_cast<kernel_rename_and_stream_data*>(
-            _record->correlation_id.external.ptr);
-        _stream_id                             = _ecid_data->stream_id;
-        auto _region_id                        = _ecid_data->region_id;
-        _record->correlation_id.external.value = _region_id;
-        delete _ecid_data;
-        _record->correlation_id.external.ptr = nullptr;
-    }
-    return _stream_id;
-}
 
 // this function creates a rocprofiler profile config on the first entry
 std::vector<rocprofiler_counter_id_t>
@@ -874,7 +802,7 @@ tool_tracing_callback_stop(
 
         std::uint64_t _beg_ts   = begin_ts;
         std::uint64_t _end_ts   = ts;
-        auto          stream_id = stream_id_top();
+        auto          stream_id = production_backend::stream_id_top();
 
         tracing::push_perfetto_ts(
             CategoryT{}, name.data(), _beg_ts,
@@ -1346,7 +1274,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
         }
 
         std::uint64_t _beg_ts   = ts;
-        auto          stream_id = stream_id_top();
+        auto          stream_id = production_backend::stream_id_top();
 
         tracing::push_perfetto_ts(
             category::rocm_ompt_api{}, _name.data(), _beg_ts,
@@ -2001,23 +1929,6 @@ flush()
     }
 }
 
-int
-set_kernel_rename_and_stream_correlation_id(
-    rocprofiler_thread_id_t /* thr_id */, rocprofiler_context_id_t /* ctx_id */,
-    rocprofiler_external_correlation_id_request_kind_t /* kind */,
-    rocprofiler_tracing_operation_t /* op */, std::uint64_t /* internal_corr_id */,
-    rocprofiler_user_data_t* external_corr_id, void* /* user_data */)
-{
-    auto* _info = new kernel_rename_and_stream_data{};
-
-    _info->stream_id = stream_id_top();
-
-    // Set the external correlation id service to point to struct
-    external_corr_id->ptr = _info;
-
-    return 0;
-}
-
 #if(ROCPROFILER_VERSION >= 700)
 void
 tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
@@ -2047,7 +1958,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
             LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                       "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id={}",
                       (unsigned long) stream_id.handle);
-            stream_id_push(stream_id);
+            production_backend::stream_id_push(stream_id);
         }
         // Pop stream ID off of stream stack after underlying HIP function is
         // completed
@@ -2056,7 +1967,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
             LOG_TRACE("operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                       "ROCPROFILER_CALLBACK_PHASE_EXIT, stream_id={}",
                       (unsigned long) stream_id.handle);
-            stream_id_pop();
+            production_backend::stream_id_pop();
         }
     }
     else

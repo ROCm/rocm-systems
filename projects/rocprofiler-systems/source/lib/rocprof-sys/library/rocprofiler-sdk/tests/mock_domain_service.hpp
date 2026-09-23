@@ -79,7 +79,7 @@ using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*
 using external_correlation_request_kind_t  = std::size_t;
 using external_correlation_id_request_cb_t = int (*)(std::uint64_t, context_id_t,
                                                      external_correlation_request_kind_t,
-                                                     std::uint32_t, std::uint64_t,
+                                                     tracing_operation_t, std::uint64_t,
                                                      user_data_t*, void*);
 
 struct agent_id_t
@@ -601,6 +601,21 @@ struct mock_sdk
     {
         return record.allocation_size;
     }
+
+    // Stub external-correlation-id-request callback shared by the kernel_dispatch,
+    // memory_copy, and memory_allocation buffered domains' correlation_dependency. No
+    // test currently asserts on its invocation; add an EXPECT_CALL-backed variant here
+    // if one needs to.
+    static int request_stream_correlation_id(std::uint64_t /*thread_id*/,
+                                             context_id_t /*context_id*/,
+                                             external_correlation_request_kind_t /*kind*/,
+                                             tracing_operation_t /*operation*/,
+                                             std::uint64_t /*internal_corr_id*/,
+                                             user_data_t* /*external_corr_id*/,
+                                             void* /*user_data*/)
+    {
+        return 0;
+    }
 };
 
 // Stand-in for the agent/trace_cache::info shapes every on_kfd_*<...> touches through
@@ -1074,19 +1089,6 @@ struct externals
 
     static constexpr std::string_view scratch_memory_category_name =
         "rocm_scratch_memory";
-
-    // Stub external-correlation-id-request callback shared by the kernel_dispatch,
-    // memory_copy, and memory_allocation buffered domains' correlation_dependency.
-    // No test currently asserts on its invocation; add an EXPECT_CALL-backed
-    // variant here if one needs to.
-    static int request_stream_correlation_id(
-        std::uint64_t /*thread_id*/, test_support::context_id_t /*context_id*/,
-        test_support::external_correlation_request_kind_t /*kind*/,
-        std::uint32_t /*operation*/, std::uint64_t /*internal_corr_id*/,
-        test_support::user_data_t* /*external_corr_id*/, void* /*user_data*/)
-    {
-        return 0;
-    }
 
     // Forward to gmock_metadata_registry/gmock_buffer_storage (defined at namespace
     // scope above, alongside gmock_externals) so tests can EXPECT_CALL every member

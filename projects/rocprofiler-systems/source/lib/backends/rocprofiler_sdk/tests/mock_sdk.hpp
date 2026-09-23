@@ -61,6 +61,9 @@ struct callback_thread_id
     std::uint64_t handle{};
     bool          operator==(const callback_thread_id&) const = default;
 };
+// Real SDK defines rocprofiler_thread_id_t as plain std::uint64_t; match that
+// so backend<mock_sdk> type-checks cleanly.
+using thread_id = std::uint64_t;
 // Real SDK defines rocprofiler_counter_instance_id_t as plain std::uint64_t;
 // match that so backend<mock_sdk> type-checks cleanly.
 using counter_instance_id = std::uint64_t;
@@ -424,6 +427,7 @@ struct mock_sdk
     using callback_tracing_kind                = testing::tracing_kind_cb;
     using buffer_tracing_kind                  = testing::tracing_kind_buf;
     using tracing_operation                    = testing::tracing_op;
+    using thread_id                            = testing::thread_id;
     using callback_thread_id                   = testing::callback_thread_id;
     using runtime_library_t                    = testing::runtime_library;
     using external_correlation_request_kind    = testing::ext_corr_kind;

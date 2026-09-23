@@ -202,10 +202,17 @@ private:
     void configure_correlation_dependency(
         const domains::external_correlation_domain_definition<SdkBackend>& dependency)
     {
-        LOG_DEBUG("Configuring external-correlation dependency (kind {})",
-                  static_cast<std::underlying_type_t<
-                      typename SdkBackend::external_correlation_request_kind_t>>(
-                      dependency.kind));
+        using kind_t = SdkBackend::external_correlation_request_kind_t;
+        if constexpr(std::is_enum_v<kind_t>)
+        {
+            LOG_DEBUG("Configuring external-correlation dependency (kind {})",
+                      static_cast<std::underlying_type_t<kind_t>>(dependency.kind));
+        }
+        else
+        {
+            LOG_DEBUG("Configuring external-correlation dependency (kind {})",
+                      dependency.kind);
+        }
 
         m_correlation_domains.emplace_back(dependency, context());
         m_correlation_domains.back().configure();

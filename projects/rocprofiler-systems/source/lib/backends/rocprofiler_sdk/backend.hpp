@@ -10,8 +10,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <fmt/format.h>
 #include <memory>
+#include <stack>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -44,6 +46,7 @@ template <typename Wrapper>
 struct backend
 {
     using status_t                     = Wrapper::status_t;
+    using thread_id_t                  = Wrapper::thread_id;
     using context_id_t                 = Wrapper::context_id;
     using agent_id_t                   = Wrapper::agent_id;
     using buffer_id_t                  = Wrapper::buffer_id;
@@ -572,9 +575,7 @@ public:
             return 0;
         }
     }
-    /// Extracts the HIP-stream correlation stashed on the record's external
-    /// correlation id by the kernel-rename service (see roctx_client), leaving the
-    /// record's external id holding the roctx region id for downstream lookups.
+
     template <typename RecordT>
     static stream_id_t get_stream_id(RecordT* record)
     {
@@ -583,7 +584,7 @@ public:
         {
             auto* ecid_data = static_cast<kernel_dispatch_stream_correlation_t*>(
                 record->correlation_id.external.ptr);
-            stream_id                             = ecid_data->stream_id;
+            stream_id                             = ecid_data->handle;
             auto region_id                        = ecid_data->region_id;
             record->correlation_id.external.value = region_id;
             delete ecid_data;
@@ -654,12 +655,44 @@ public:
         }
     }
 
+    // Pushed/popped by the HIP-stream callback to track the HIP stream active on the
+    // current thread; read back by request_stream_correlation_id() below and by
+    // perfetto annotation of the currently active stream.
+    static void stream_id_push(stream_id_t sid) { get_stream_id_stack().push(sid); }
+    static stream_id_t stream_id_top() { return get_stream_id_stack().top(); }
+    static void        stream_id_pop() { get_stream_id_stack().pop(); }
+
+    // Answers the rocprofiler-sdk external-correlation-id-request service for the
+    // kernel_dispatch/memory_copy/memory_allocation buffered domains: stashes the HIP
+    // stream currently on top of the stream stack on the record's external correlation
+    // id, for get_stream_id() above to pick back up.
+    static int request_stream_correlation_id(thread_id_t /*thread_id*/,
+                                             context_id_t /*context_id*/,
+                                             external_correlation_request_kind_t /*kind*/,
+                                             tracing_operation_t /*operation*/,
+                                             std::uint64_t /*internal_corr_id*/,
+                                             user_data_t* external_corr_id,
+                                             void* /*user_data*/)
+    {
+        auto* info            = new kernel_dispatch_stream_correlation_t{};
+        info->handle          = stream_id_top();
+        external_corr_id->ptr = info;
+        return 0;
+    }
+
 private:
     struct kernel_dispatch_stream_correlation_t
     {
         std::uint64_t region_id = 0;
-        stream_id_t   stream_id = {};
+        stream_id_t   handle    = {};
     };
+
+    static std::stack<stream_id_t>& get_stream_id_stack()
+    {
+        static thread_local std::stack<stream_id_t> s_stack{ std::deque<stream_id_t>{
+            stream_id_t{} } };
+        return s_stack;
+    }
 };
 
 template <typename Wrapper>
