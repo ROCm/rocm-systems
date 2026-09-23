@@ -927,18 +927,18 @@ static void ncclRmaStampSendWrs(struct ibv_send_wr* wr, int nWr, uint64_t wrId, 
 // If nothing posted, free the slot and leave *request unset. If a prefix posted,
 // keep the request so Test() can drain. A rejected signaled tail cannot produce
 // a CQE; mark FAILED so Test() reports it instead of polling forever.
-static ncclResult_t ncclRmaCompletePostedRequest(struct ncclIbRequest* req, int devIndex, ncclResult_t postRet,
-                                                int posted, int nWr, void** request) {
+static ncclResult_t ncclRmaFinishPostedRequest(struct ncclIbRequest* req, int devIndex, ncclResult_t postRet, int posted,
+                                              int nWr, void** request) {
+  int keep = 0, failed = 0;
+  ncclResult_t status = ncclRmaCompletePostedRequest(postRet, posted, nWr, &keep, &failed);
   if (posted > 0) ncclIbAddEvent(req, devIndex);
-  if (postRet != ncclSuccess && posted == 0) {
+  if (!keep) {
     (void)ncclIbFreeRequest(req);
-    return postRet;
+    return status;
   }
   *request = req;
-  if (ncclRmaPrefixPostLostSignaledTail(posted, nWr)) {
-    req->type = NCCL_NET_IB_REQ_FAILED;
-  }
-  return ncclRmaPostedRequestStatus(postRet, posted);
+  if (failed) req->type = NCCL_NET_IB_REQ_FAILED;
+  return status;
 }
 
 ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -983,7 +983,7 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   // (events[0]==0). Posting wr[0] here would submit an uninitialized WR.
   int posted = 0;
   ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
-  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, nWr, request);
+  return ncclRmaFinishPostedRequest(req, qp->devIndex, postRet, posted, nWr, request);
 }
 
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
@@ -1029,7 +1029,7 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   // size==0 yields nWr==0: nothing to post; the request completes in test().
   int posted = 0;
   ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
-  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, nWr, request);
+  return ncclRmaFinishPostedRequest(req, qp->devIndex, postRet, posted, nWr, request);
 }
 
 ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -1122,7 +1122,7 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
 
   int posted = 0;
   ncclResult_t postRet = ncclRmaPostWrs(qp, nPut > 0 ? &wr[0] : sigWr, nPut + 1, &posted);
-  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, nPut + 1, request);
+  return ncclRmaFinishPostedRequest(req, qp->devIndex, postRet, posted, nPut + 1, request);
 }
 
 ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
@@ -1227,7 +1227,7 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   int posted = 0;
   ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
   TIME_STOP(4);
-  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, nWr, request);
+  return ncclRmaFinishPostedRequest(req, qp->devIndex, postRet, posted, nWr, request);
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
