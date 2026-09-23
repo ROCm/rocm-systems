@@ -1,0 +1,66 @@
+{
+  "evaluations": [
+    {
+      "id": "customer-archive-which-kernel-faulted",
+      "skill_should_trigger": true,
+      "prompt": "A customer sent us an HRR archive at /work/incoming/crash.hrr. Which kernel faulted?",
+      "expected_behavior": [
+        "Replays the archive rather than reasoning from the archive listing alone",
+        "Reports the outcome and fault class alongside the kernel, rather than the kernel on its own"
+      ],
+      "unexpected_behavior": [
+        "Names a kernel taken from the archive's kernel list without a replay attributing the fault to it"
+      ]
+    },
+    {
+      "id": "multi-process-archive-which-directory",
+      "skill_should_trigger": true,
+      "prompt": "This HRR archive has three pid-* directories and one of them says state: incomplete. Which one do I work from?",
+      "expected_behavior": [
+        "Works from the process whose state is incomplete, because that is the one that died",
+        "Says the archive travels whole even though each process is triaged separately"
+      ],
+      "unexpected_behavior": [
+        "Picks the process with the largest events.bin without considering which one crashed"
+      ]
+    },
+    {
+      "id": "replay-reports-an-aten-kernel",
+      "skill_should_trigger": true,
+      "prompt": "I replayed a customer's archive and the fault came back on at::native::vectorized_elementwise_kernel. Is that their bug?",
+      "expected_behavior": [
+        "Asks for the customer's original failure signature before attributing the fault to their workload",
+        "Explains that an archive recorded before chevron-launch pointer support can fault on replay for a workload that was fine"
+      ]
+    },
+    {
+      "id": "replay-crashed-with-no-verdict",
+      "skill_should_trigger": true,
+      "prompt": "The triage run exited 134 and the finding says outcome ABORT, fault class replay_crashed. What does that tell me about the customer's kernel?",
+      "expected_behavior": [
+        "Says the replay process itself died and implicates no kernel"
+      ],
+      "unexpected_behavior": [
+        "Treats replay_crashed as evidence about the captured workload"
+      ]
+    },
+    {
+      "id": "no-archive-yet",
+      "skill_should_trigger": false,
+      "note": "Nothing to triage: recording the failure first is the other skill's job.",
+      "prompt": "Our training job crashes on an MI300 with a memory access fault. What do we send AMD so they can reproduce it?"
+    },
+    {
+      "id": "performance-question",
+      "skill_should_trigger": false,
+      "note": "Replay timings are replay-side and measure nothing about the original run.",
+      "prompt": "Our model runs slower than we expect on MI300X. Where is the time going?"
+    },
+    {
+      "id": "cuda-crash",
+      "skill_should_trigger": false,
+      "note": "No HRR archive and no AMD GPU involved.",
+      "prompt": "My CUDA application segfaults inside a kernel on an NVIDIA card. How do I find the cause?"
+    }
+  ]
+}

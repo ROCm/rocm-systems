@@ -347,6 +347,12 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
     if m:
         finding.d2h_pass = int(m.group(1))
         finding.d2h_fail = int(m.group(2))
+        if finding.d2h_attempted is None:
+            # The summary is the only source on a clean replay, since the
+            # progress line that carries `attempted` is printed at a fault.
+            # Left unset it rendered as `pass=32 fail=0 attempted=0`, which
+            # reads as a contradiction.
+            finding.d2h_attempted = finding.d2h_pass + finding.d2h_fail + int(m.group(3))
 
     new_class = _classify(text, finding)
     if new_class != "unknown" or finding.fault_class in (None, "unknown"):
@@ -494,6 +500,10 @@ def render_markdown(f: Finding) -> str:
         f"- **Kernel**: `{f.kernel_name or 'unknown'}`",
         f"- **Kernel family**: `{f.kernel_family or 'unknown'}`",
         "",
+        # A clean replay has no fault details and no fault to be at, and
+        # printing a progress counter under "at fault" read as one: a PASS came
+        # back naming a failing event and a kernel taken from a progress line.
+        *([] if f.outcome == "PASS" else [
         "## Fault details",
         f"- **Fault address**: `{f.fault_address or 'n/a'}`",
         f"- **Fault reason**: {f.fault_reason or 'n/a'}",
@@ -510,6 +520,8 @@ def render_markdown(f: Finding) -> str:
         f"- **Last progress kernel**: `{f.last_progress_kernel or 'n/a'}`",
         f"- **Last launch before fault**: `{f.last_event_kernel or 'n/a'}`",
         "",
+        ]),
+        *([f"## Replay result", f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} attempted={f.d2h_attempted or 0}", f"- **Kernels launched**: {f.kernels_launched or 'n/a'}", ""] if f.outcome == "PASS" else []),
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",
         f"- **Kernels (archive)**: {f.archive_kernels or 'n/a'}",

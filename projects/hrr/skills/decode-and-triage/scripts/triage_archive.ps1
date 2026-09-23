@@ -7,7 +7,8 @@
 #                        [-o <path>] [--format markdown|json] [-h]
 #
 # Environment knobs (mirror the Linux version):
-#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: current dir)
+#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: a temp dir,
+#                        never the archive: triage must not write into it)
 #   HRR_PLAYBACK         Explicit path to hrr-playback.exe
 #   HIP_PATH / ROCM_PATH HIP SDK root (default: C:\Program Files\AMD\ROCm\6.2)
 #   GPU                  Replay GPU ordinal (default: 0)
@@ -119,7 +120,7 @@ if (-not (Test-Path $Archive -PathType Container)) {
 
 $Name    = Split-Path $Archive -Leaf
 $Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
-$Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { (Get-Location).Path }
+$Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
 New-Item -ItemType Directory -Force -Path $Workdir | Out-Null
 $Ext     = if ($Format -eq "json") { ".finding.json" } else { ".finding.md" }
 $Finding = if ($Output) { $Output } else { Join-Path $Workdir "${Name}-${Ts}${Ext}" }
