@@ -22,6 +22,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added Python 3.14 support.
 
+* Added an analyze-only install path. `pip install "rocm-profiler[compute-analyze]"` into a virtual environment installs the analysis dependencies for you.
+
+* Added `rocprof-compute analyze --verify-deps`, which reports any missing analysis dependencies.
+
 ### Changed
 
 * Dispatch IDs now start at 1 instead of 0.
