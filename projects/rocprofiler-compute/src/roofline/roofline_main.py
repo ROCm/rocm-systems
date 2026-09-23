@@ -386,6 +386,7 @@ class Roofline:
         total_time = self.__ai_data.get("totalTime", [])
         pct_runtime = self.__ai_data.get("pctRuntime", [])
         time_unit = self.__ai_data.get("timeUnit", "")
+        total_dispatches = sum(count for count in counts if count is not None)
         compute_cap, compute_cap_label = self._envelope_compute_cap(compute_peaks)
 
         for kernel_index, kernel_name in enumerate(kernel_names):
@@ -424,6 +425,7 @@ class Roofline:
                         limiter=limiter,
                         limiter_category=limiter_category,
                         count=count_val,
+                        total_dispatches=total_dispatches,
                         total_time=time_val,
                         time_unit=time_unit,
                         pct_runtime=pct_val,
@@ -478,20 +480,56 @@ class Roofline:
             # This kernel's own achieved bandwidth at this level (not the
             # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
             achieved_bandwidth = performance / ai_value
+            peak_bandwidth = self._peak_value(ceiling_data, cache_key)
             pct_roof = 100.0 * performance / roof_perf if roof_perf else None
             points.append({
                 "peak": level_name,
                 "ai": ai_value,
                 "perf": performance,
-                "hoverCells": [
-                    format_hover_number(roof_perf, ",.0f"),
-                    format_hover_number(pct_roof, ",.2f"),
-                    format_bandwidth(achieved_bandwidth),
-                ],
+                "level_name": level_name,
+                "roof_perf_txt": format_hover_number(roof_perf, ",.0f"),
+                "pct_roof_txt": format_hover_number(pct_roof, ",.2f"),
+                "achieved_bandwidth": achieved_bandwidth,
+                "peak_bandwidth": peak_bandwidth,
             })
             level_ai[level_name] = ai_value
 
+        bandwidth_html = self._build_bandwidth_hover_html(points)
+        for point in points:
+            point["hoverCells"] = [
+                point.pop("roof_perf_txt"),
+                point.pop("pct_roof_txt"),
+                bandwidth_html,
+            ]
+            point.pop("level_name")
+            point.pop("achieved_bandwidth")
+            point.pop("peak_bandwidth")
+
         return points, level_ai
+
+    @staticmethod
+    def _build_bandwidth_hover_html(points: list[dict[str, Any]]) -> str:
+        """One 'Bandwidth:' block listing every cache level this kernel has a
+        point for, each formatted like the Performance field: percent
+        (achieved/peak)."""
+        if not points:
+            return "Bandwidth: N/A"
+        lines = ["Bandwidth:"]
+        for point in points:
+            peak_bandwidth = point["peak_bandwidth"]
+            achieved_bandwidth = point["achieved_bandwidth"]
+            pct_bandwidth = (
+                100.0 * achieved_bandwidth / peak_bandwidth
+                if peak_bandwidth
+                else None
+            )
+            lines.append(
+                f" {point['level_name']}: "
+                f"{format_hover_number(pct_bandwidth, ',.2f')}% "
+                f"({format_bandwidth(achieved_bandwidth)}/"
+                f"{format_bandwidth(peak_bandwidth)})"
+            )
+        return "<br>".join(lines)
 
     @demarcate
     def construct_plotly_figures(

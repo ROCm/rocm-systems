@@ -41,6 +41,7 @@ def build_kernel_hover_template(
     limiter: str,
     limiter_category: str,
     count: Optional[float],
+    total_dispatches: Optional[float],
     total_time: Optional[float],
     time_unit: str,
     pct_runtime: Optional[float],
@@ -48,21 +49,29 @@ def build_kernel_hover_template(
 ) -> str:
     """Kernel hover template; per-point values come from customdata."""
     unit = f"G{ops_flops}s/s"
-    time_txt = (
-        f"{format_hover_number(total_time, ',.2f')} {time_unit}".strip()
-        if total_time is not None
-        else "N/A"
+    kernel_time_txt = format_hover_number(total_time, ",.0f")
+    total_app_time = (
+        total_time / (pct_runtime / 100.0)
+        if total_time is not None and pct_runtime
+        else None
     )
+    total_app_time_txt = format_hover_number(total_app_time, ",.0f")
+    pct_runtime_txt = format_hover_number(pct_runtime, ",.2f")
+    pct_dispatches = (
+        100.0 * count / total_dispatches
+        if count is not None and total_dispatches
+        else None
+    )
+    pct_dispatches_txt = format_hover_number(pct_dispatches, ",.2f")
     return _hover(
         name_html,
         [
             f"<b>Limited by {limiter_category}: {limiter}</b>",
             f"Performance: %{{customdata[1]}}% (%{{y:,.0f}} / %{{customdata[0]}} {unit})",
+            "%{customdata[2]}",
+            f"Dispatch Number: {pct_dispatches_txt}% ({_format_integer(count)} / {_format_integer(total_dispatches)})",
+            f"Duration: {pct_runtime_txt}% ({kernel_time_txt} / {total_app_time_txt} {time_unit})",
             "AI: %{x:.6g}",
-            "Cache level bandwidth: %{customdata[2]}",
-            f"Total dispatches: {_format_integer(count)}",
-            f"Aggregate time in kernel: {time_txt}",
-            f"Aggregate percent runtime: {format_hover_number(pct_runtime, '.5f')} %",
         ],
     )
 

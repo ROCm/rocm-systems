@@ -166,7 +166,11 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         compute_peaks=[],
     )
     assert "Limited by Unknown: Unknown" in unroofed_traces[0].hovertemplate
-    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A", "900.000 GB/s"]
+    assert unroofed[0]["points"][0]["hoverCells"] == [
+        "N/A",
+        "N/A",
+        "Bandwidth:<br> HBM: N/A% (900.000 GB/s/N/A)",
+    ]
 
 
 def test_kernel_hover_carries_the_whole_name_up_to_the_limit() -> None:
