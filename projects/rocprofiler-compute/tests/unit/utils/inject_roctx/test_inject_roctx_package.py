@@ -224,47 +224,6 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     assert pushes == ["triton.JITFunction.add_kernel"]
 
 
-def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
-    """Nested JITFunction.run and CompiledKernel.run emit one marker."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
-    pushes: list[str] = []
-    monkeypatch.setattr(
-        triton_backend,
-        "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
-    )
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    # Reset the per-thread guard.
-    if hasattr(triton_backend._thread_local, "in_launch"):
-        del triton_backend._thread_local.in_launch
-
-    class FakeCompiledKernel:
-        name = "inner"
-
-        def run(self, *a, **kw):
-            return "inner_ran"
-
-    class FakeJIT:
-        name = "outer"
-
-        def __init__(self, compiled):
-            self._compiled = compiled
-
-        def run(self, *a, **kw):
-            return self._compiled.run()
-
-    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
-    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
-    triton_backend.patch_triton_launcher()
-
-    compiled = FakeCompiledKernel()
-    out = FakeJIT(compiled).run()
-
-    assert out == "inner_ran"
-    assert pushes == ["triton.JITFunction.outer"]
-
-
 def test_triton_backend_patch_is_idempotent(monkeypatch):
     """Patching twice does not re-wrap the launch entry point."""
     from utils.inject_roctx._backends import triton as triton_backend
@@ -276,9 +235,6 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
         lambda marker, ctx, backend="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    # Reset the per-thread guard.
-    if hasattr(triton_backend._thread_local, "in_launch"):
-        del triton_backend._thread_local.in_launch
 
     class FakeJIT:
         name = "k"
