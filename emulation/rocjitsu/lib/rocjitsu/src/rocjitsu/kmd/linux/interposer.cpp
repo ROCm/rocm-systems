@@ -75,6 +75,7 @@ RJ_DIAGNOSTIC_POP
 #include <string_view>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -324,6 +325,45 @@ __attribute__((constructor)) void rj_install_signal_handler() {
   sigaction(SIGSEGV, &sa, nullptr);
 }
 
+void preallocate_backing_fd_table() {
+  // A late load may already share its descriptor table with application threads.
+  // Skip that case: growth would still wait for RCU, and another thread could
+  // replace a temporary descriptor or change the process limit. The optional
+  // dynamic lookup keeps older libc versions supported without assuming that
+  // their threading state is known.
+  const char *single_threaded =
+      static_cast<const char *>(dlsym(RTLD_DEFAULT, "__libc_single_threaded"));
+  if (!single_threaded || !*single_threaded)
+    return;
+  struct rlimit original {};
+  if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &original) != 0)
+    return;
+  const bool raise_limit = original.rlim_cur <= SimulatedKfd::kBackingFdMin;
+  if (raise_limit) {
+    if (original.rlim_max <= SimulatedKfd::kBackingFdMin)
+      return;
+    // SimulatedKfd::open can raise a low soft limit later, after workers exist.
+    // Temporarily lift it while this thread owns the process limit exclusively.
+    struct rlimit temporary = original;
+    temporary.rlim_cur = SimulatedKfd::kBackingFdMin + 1;
+    if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &temporary, nullptr) != 0)
+      return;
+  }
+  // Use only raw syscalls until the limit is restored: no callback can create a
+  // thread while the process limit differs from the application's setting.
+  const int temporary_fd =
+      static_cast<int>(syscall(SYS_openat, AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC, 0));
+  if (temporary_fd >= 0) {
+    const int high_fd = static_cast<int>(
+        syscall(SYS_fcntl, temporary_fd, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin));
+    if (high_fd >= 0)
+      syscall(SYS_close, high_fd);
+    syscall(SYS_close, temporary_fd);
+  }
+  if (raise_limit && syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &original, nullptr) != 0)
+    std::fprintf(stderr, "rocjitsu: cannot restore descriptor limit: %s\n", std::strerror(errno));
+}
+
 /// @brief All mutable interposer state.
 class InterposerContext {
 public:
@@ -355,6 +395,14 @@ public:
   static InterposerContext &ctx;
 
   static void init() {
+    // Grow the descriptor table before the backend starts worker threads. Growing
+    // a shared Linux descriptor table for the first high backing descriptor can
+    // wait for an RCU grace period. Keep the driver's existing descriptor range;
+    // only the table capacity survives these temporary descriptors. Failure is
+    // harmless, including when the hard descriptor limit excludes that range.
+    const int saved_errno = errno;
+    preallocate_backing_fd_table();
+    errno = saved_errno;
     new (storage_) InterposerContext();
     ctx.owner_pid_ = getpid();
     // Record the HOST KFD device identity once, here, while single-threaded and
@@ -2719,38 +2767,29 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   if (!backend_lease)
     return {};
 
-  auto raw_drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
-  if (raw_drm_fd < 0)
+  // Descriptor identity is tracked explicitly; moving it to a high number only
+  // forces the host to grow its descriptor table after threads have started.
+  const int drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
+  if (drm_fd < 0)
     return {true, -1};
-
-  // Use real().fcntl, not the unqualified fcntl: this TU defines the interposed
-  // fcntl with external linkage, so an unqualified call would re-enter our own
-  // hook (reserve_dup_backend/untrack_dup, fd_mutex_) needlessly.
-  int high_fd = InterposerContext::real().fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
-  int saved_errno = errno;
-  InterposerContext::real().close(raw_drm_fd);
-  if (high_fd < 0) {
-    errno = saved_errno;
-    return {true, -1};
-  }
 
   InterposerContext::DrmFinalRelease displaced;
   try {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     // backend_lease stays OURS across this call: on a throw it is released at this
     // function's scope exit, by which point drm_lifecycle is gone. See track_drm().
-    displaced = InterposerContext::ctx.track_drm(high_fd, render_minor, backend_lease);
+    displaced = InterposerContext::ctx.track_drm(drm_fd, render_minor, backend_lease);
   } catch (const std::exception &) {
     // Not just bad_alloc: unique_lock's constructor can throw system_error, and this
     // is an extern "C" entry point -- letting anything escape into a C caller frame
     // is undefined.
     const int saved_errno = ENOMEM;
-    InterposerContext::real().close(high_fd);
+    InterposerContext::real().close(drm_fd);
     errno = saved_errno;
     return {true, -1};
   }
   InterposerContext::ctx.complete_drm_release(std::move(displaced));
-  return {true, high_fd};
+  return {true, drm_fd};
 }
 
 /// @brief True if @p st describes a device rocJITsu emulates.
