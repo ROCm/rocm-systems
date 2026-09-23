@@ -1931,56 +1931,6 @@ flush()
     }
 }
 
-#if(ROCPROFILER_VERSION >= 700)
-void
-tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
-                         rocprofiler_user_data_t* /* user_data */, void* /* data */)
-{
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
-    // Extract stream ID from record
-    auto* stream_handle_data =
-        static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
-    auto stream_id = stream_handle_data->stream_id;
-
-    // STREAM_HANDLE_CREATE and DESTROY are no-ops
-    if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
-    {
-        LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_CREATE");
-    }
-    else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
-    {
-        LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_DESTROY");
-    }
-    else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
-    {
-        // Push the stream ID onto the stream stack before underlying HIP function is
-        // called
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-        {
-            LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_SET, phase = "
-                      "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id={}",
-                      (unsigned long) stream_id.handle);
-            production_stream_stack_service::push(stream_id);
-        }
-        // Pop stream ID off of stream stack after underlying HIP function is
-        // completed
-        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
-        {
-            LOG_TRACE("operation = ROCPROFILER_HIP_STREAM_SET, phase = "
-                      "ROCPROFILER_CALLBACK_PHASE_EXIT, stream_id={}",
-                      (unsigned long) stream_id.handle);
-            production_stream_stack_service::pop();
-        }
-    }
-    else
-    {
-        LOG_CRITICAL("Unknown operation for hip_stream_callback!");
-        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
-        ::std::exit(1);
-    }
-}
-#endif
-
 // True when tool_init must skip starting the main (primary/counter) contexts,
 // leaving them for the "rocm" subscriber's on_resume to start once the session
 // goes active.
@@ -2068,16 +2018,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         }
     }
 
-#if(ROCPROFILER_VERSION >= 700)
-    if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
-       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
-    {
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-            _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
-            tool_hip_stream_callback, nullptr));
-    }
-#endif
-
     if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
     {
         rocprofiler_sdk::rccl_comm_data_initialize();
@@ -2101,6 +2041,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.name = "memory_copy";
         domain_selection_list.push_back(selection);
     }
+
+#if(ROCPROFILER_VERSION >= 700)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
+       _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
+    {
+        domain_selection selection;
+        selection.name = "hip_stream";
+        domain_selection_list.push_back(selection);
+    }
+#endif
 
 #if(ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))

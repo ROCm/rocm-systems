@@ -22,6 +22,7 @@
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback/hip/compiler_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
+#include "library/rocprofiler-sdk/callback/hip_stream.hpp"
 #include "library/rocprofiler-sdk/callback/hipfile_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/amd_ext_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/core_api.hpp"
@@ -165,7 +166,7 @@ private:
 
     consteval static auto collect_callback_domains()
     {
-        constexpr auto k_callback_domains_size = 11;
+        constexpr auto k_callback_domains_size = 12;
         simple_static_vector<callback_domain_definition<SdkBackend>,
                              k_callback_domains_size>
             result;
@@ -177,6 +178,14 @@ private:
         result.add(callback::hsa::k_amd_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
+
+        constexpr auto k_hip_stream_min_version =
+            version{ .major = 0, .minor = 7, .patch = 0 };
+        if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
+                     k_hip_stream_min_version)
+        {
+            result.add(callback::k_hip_stream<SdkBackend, Externals>);
+        }
 
         constexpr auto k_rocdecode_min_version =
             version{ .major = 0, .minor = 6, .patch = 0 };
