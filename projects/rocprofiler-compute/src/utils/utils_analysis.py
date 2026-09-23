@@ -621,6 +621,24 @@ def attach_unlocated_trees_by_launcher_thread(
     return attach_errors
 
 
+def _prune_cpu_only_call_tree_node(node: CallTreeNode) -> bool:
+    """Drop CPU-only children. True if this node has kernel work."""
+    node.children = [
+        child for child in node.children if _prune_cpu_only_call_tree_node(child)
+    ]
+    return bool(node.kernels) or bool(node.children)
+
+
+def _prune_cpu_only_call_trees(forest: dict[str, list[CallTreeNode]]) -> None:
+    """Drop subtrees with no kernel dispatches."""
+    for thread_id, roots in list(forest.items()):
+        kept_roots = [root for root in roots if _prune_cpu_only_call_tree_node(root)]
+        if kept_roots:
+            forest[thread_id] = kept_roots
+            continue
+        del forest[thread_id]
+
+
 def _nested_invocation_keys(
     forest: dict[str, list[CallTreeNode]],
 ) -> set[tuple[str, str]]:
@@ -1473,6 +1491,7 @@ def process_ml_api_trace_output(
     _validate_all_markers_nested(
         workload.ml_api_trace_df, workload.ml_api_call_trees, errors
     )
+    _prune_cpu_only_call_trees(workload.ml_api_call_trees)
     for roots in workload.ml_api_call_trees.values():
         for node in roots:
             rollup_node_stats(node)
