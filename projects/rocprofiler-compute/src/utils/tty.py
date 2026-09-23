@@ -527,8 +527,9 @@ def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
         print_wrapped_tree_line("", heading)
         for variant_line in format_args_variant_lines(root):
             print_wrapped_tree_line("", variant_line)
-        for i, child in enumerate(root.children):
-            child_is_last = (i == len(root.children) - 1) and not root.kernels
+        children = fold_identical_sibling_subtrees(root.children)
+        for child_index, child in enumerate(children):
+            child_is_last = (child_index == len(children) - 1) and not root.kernels
             print_operator_node(child, is_last=child_is_last)
         _print_node_kernels(root, "")
 
