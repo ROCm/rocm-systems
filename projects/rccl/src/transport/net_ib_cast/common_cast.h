@@ -529,6 +529,15 @@ struct ncclIbMrHandle {
 // Forward declaration
 struct ncclIbResiliency;
 
+struct IbCastQpSharingInfo {
+  uint16_t commId;
+  bool     isPrimary;
+  int      groupIdx;
+  int      remIbDevIdx;
+  int      groupNqps;
+  uint64_t peerProcTag;       // remote process identity, 0 = unknown
+};
+
 struct alignas(32) ncclIbNetCommBase {
   ncclNetVDeviceProps_t vProps;
   bool isSend;
@@ -580,12 +589,7 @@ struct alignas(32) ncclIbNetCommBase {
   struct ncclIbResiliency* resiliency;
 
   // QP Sharing fields — see qp_sharing.h for state query helpers
-  uint16_t commId;
-  bool     isSharedQpPrimary;
-  int      sharedGroupIdx;
-  int      remIbDevIdx;
-  int      sharedGroupNqps;
-  uint64_t peerProcTag;         // remote process identity, 0 = unknown
+  struct IbCastQpSharingInfo qpSharing;
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);

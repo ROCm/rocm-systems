@@ -118,7 +118,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     wr_id += (uint64_t)(slot & 0xff) << (r * 8);
     // QP Sharing: encode commId in upper 16 bits of wr_id for completion routing
     if (IbCastCommIsSharing(&comm->base)) {
-      wr->wr_id = IbCastEncodeCommId(wr_id, comm->base.commId);
+      wr->wr_id = IbCastEncodeCommId(wr_id, comm->base.qpSharing.commId);
     } else {
       wr->wr_id = wr_id;
     }
@@ -182,7 +182,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   // route the send completion to the right comm on a shared QP. The scheduler
   // (BY_INDEX) is disabled under sharing, so wr_id is not remapped here.
   if (IbCastCommIsSharing(&comm->base)) {
-    lastWr->wr_id = IbCastEncodeCommId(wr_id, comm->base.commId);
+    lastWr->wr_id = IbCastEncodeCommId(wr_id, comm->base.qpSharing.commId);
   } else {
     lastWr->wr_id = wr_id;
   }
@@ -601,7 +601,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
     // QP Sharing: encode commId in upper bits of CTS wr_id
     if (IbCastCommIsSharing(&comm->base)) {
-      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.commId);
+      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.qpSharing.commId);
     }
     IbCastAddEventCTS(req, ctsQp->devIndex);
   }
@@ -774,8 +774,8 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
   struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[last];
 
   INFO(NCCL_NET, "NET/IB: %s: flush commId=%u group=%d isPrimary=%d ndevs=%d",
-       __func__, comm->base.commId, comm->base.sharedGroupIdx,
-       comm->base.isSharedQpPrimary, comm->base.vProps.ndevs);
+       __func__, comm->base.qpSharing.commId, comm->base.qpSharing.groupIdx,
+       comm->base.qpSharing.isPrimary, comm->base.vProps.ndevs);
 
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
@@ -788,7 +788,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
     if (IbCastCommIsSharing(&comm->base)) {
-      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.commId);
+      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.qpSharing.commId);
     }
 
     if (useGpuFlushMem) {
