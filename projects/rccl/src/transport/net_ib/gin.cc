@@ -670,16 +670,18 @@ static ncclResult_t ncclRmaIbProxyQueueWrs(struct ncclRmaIbProxyCtx* ctx, struct
 // If nothing posted, release the slot and its sequence id and leave *request unset.
 // If a prefix posted, keep the request so Test() can drain. A rejected signaled
 // tail cannot produce a CQE; mark FAILED so Test() reports it.
-static ncclResult_t ncclRmaCompletePostedRequest(struct ncclIbRequest* req, uint64_t* postedSeq, ncclResult_t postRet,
-                                                 int posted, int nWr, void** request) {
-  if (postRet != ncclSuccess && posted == 0) {
+static ncclResult_t ncclRmaFinishPostedRequest(struct ncclIbRequest* req, uint64_t* postedSeq, ncclResult_t postRet,
+                                               int posted, int nWr, void** request) {
+  int keep = 0, failed = 0;
+  ncclResult_t status = ncclRmaCompletePostedRequest(postRet, posted, nWr, &keep, &failed);
+  if (!keep) {
     if (req->id == *postedSeq) (*postedSeq)--;
     (void)ncclIbFreeRequest(req);
-    return postRet;
+    return status;
   }
   *request = req;
-  if (ncclRmaPrefixPostLostSignaledTail(posted, nWr)) req->type = NCCL_NET_IB_REQ_FAILED;
-  return ncclRmaPostedRequestStatus(postRet, posted);
+  if (failed) req->type = NCCL_NET_IB_REQ_FAILED;
+  return status;
 }
 
 ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** rmaCtx) {
@@ -1129,7 +1131,7 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   ncclResult_t postRet =
     ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
   ncclIbAddEvent(req, qp->devIndex);
-  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
 }
 
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
@@ -1177,7 +1179,7 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   int posted = 0;
   ncclResult_t postRet =
     ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
-  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
 }
 
 ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -1269,7 +1271,7 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   int posted = 0;
   ncclResult_t postRet =
     ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nPut + 1, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
-  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, nPut + 1, request);
+  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nPut + 1, request);
 }
 
 ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
@@ -1397,7 +1399,7 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   int posted = 0;
   ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
   TIME_STOP(4);
-  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
