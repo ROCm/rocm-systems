@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **1/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **2/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -47,7 +47,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 85 accesses and 72 barriers; fault bundle | 🟩 exact; 85/85 accesses; fault bundle |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟩 exact; 135 accesses and 168 barriers; fault bundle | 🟩 exact; 135/135 accesses; fault bundle |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 exact/complete; effective reviewed fault pending | 🟨 exact/complete; effective reviewed fault pending |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟥 Sep 23: native oracle passes; strict load rejects relocation of `s_swappc_b64` at `.text+121248`; fix in progress | 🟩 exact; 12/12 accesses; fault bundle |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟥 Sep 23: native oracle passes; strict load rejects relocation of `s_swappc_b64` at `.text+121248`; fix in progress | 🟥 Sep 23: strict load rejects the same indirect-call relocation; fix in progress |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
@@ -63,3 +63,8 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   `/home/benoit/workspace/consan-validation/rdna4-20260923/attempt-01/d128-block/`.
 - Host ConSan gate: 1,055 tests passed in the fresh build. Validation runner:
   191 tests passed, including generated-allowlist environment tests.
+- `d128-block` / SuperCollider, attempt 02: same strict relocation rejection,
+  exit 92. Evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/attempt-02/d128-block/`.
+- Qwen preparation and production matmul compilation now pass. All 245 hook
+  unit tests passed; the labeled nonphysical gate completed (see preparation log).
