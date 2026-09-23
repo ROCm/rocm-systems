@@ -409,3 +409,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `pytorch-scatter-reduce` / supercollider: no applicable code object; analysis incomplete. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-scatter-reduce-supercollider`.
 - `pytorch-rdna4-compiled-softmax` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-compiled-softmax-default`.
 - `pytorch-rdna4-compiled-softmax` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-compiled-softmax-supercollider`.
+- Production FP8 fault review: current-library offline inventory confirms
+  ELF `fnv1a64:0ffc359899105b1d`, initial-tile publication signal/wait
+  `.text+0x3f2200/0x3f2260`. Both validation K sizes execute this edge.
+  Precommitted eight trials per mode, requiring at least one detection.
+  WMMA and then FP16/FP8 fault trials are queued after the complete round-10
+  clean sweep; each completed fault cell will be recorded separately.
+  Review: `/home/benoit/workspace/consan-validation/rdna4-20260923/matmul-debug/fp8-inventory.txt`.
