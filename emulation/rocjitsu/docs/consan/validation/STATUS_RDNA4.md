@@ -27,14 +27,15 @@ incomplete; historical green results do not count as passes for this campaign.
 - Preparation: current hook and production matmul built; generated per-workload
   allowlists applied; Qwen build provenance verified through the campaign symlinks.
 - Fresh clean assessments: **42/42**, with **40 clean passes** across recorded
-  configurations. No cell has passed fresh fault qualification.
+  configurations. No standard-profile cell has passed fresh fault qualification;
+  WMMA attention has a qualified `preset=max` alternative recorded below.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix |
+| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix; preset=max clean passes, fault matrix running | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: clean pass; fault transformation times out before admission; no sensitivity result | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 8/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
