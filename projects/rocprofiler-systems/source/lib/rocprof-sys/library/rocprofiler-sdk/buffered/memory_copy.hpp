@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
+
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
@@ -48,7 +50,8 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record, void* data)
     const auto& src_agent =
         Externals::get_agent_manager().get_agent_by_handle(record->src_agent_id.handle);
 
-    const std::uint64_t stream_id = SdkBackend::get_stream_id(record).handle;
+    const std::uint64_t stream_id =
+        rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     Externals::get_metadata_registry().add_thread_info(
         { Externals::get_ppid(), Externals::get_pid(), record->thread_id,
@@ -88,7 +91,8 @@ template <policies::domain_service::backend   SdkBackend,
 inline constexpr external_correlation_domain_definition<SdkBackend>
     k_memory_copy_stream_correlation = external_correlation_domain_definition<SdkBackend>{
         .kind       = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-        .on_request = SdkBackend::request_stream_correlation_id,
+        .on_request = rocprofiler_sdk::stream_stack_service<
+            SdkBackend>::request_stream_correlation_id,
     };
 
 template <policies::domain_service::backend   SdkBackend,

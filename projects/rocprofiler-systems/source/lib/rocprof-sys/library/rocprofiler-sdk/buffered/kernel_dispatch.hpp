@@ -5,6 +5,7 @@
 
 #include "core/demangler.hpp"
 
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -53,7 +54,8 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record, void* 
     const auto& agent            = Externals::get_agent_manager().get_agent_by_handle(
         record->dispatch_info.agent_id.handle);
 
-    std::uint64_t stream_id = SdkBackend::get_stream_id(record).handle;
+    std::uint64_t stream_id =
+        rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     {
         Externals::get_metadata_registry().add_thread_info(
@@ -100,7 +102,8 @@ inline constexpr external_correlation_domain_definition<SdkBackend>
     k_kernel_dispatch_stream_correlation =
         external_correlation_domain_definition<SdkBackend>{
             .kind       = SdkBackend::EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-            .on_request = SdkBackend::request_stream_correlation_id,
+            .on_request = rocprofiler_sdk::stream_stack_service<
+                SdkBackend>::request_stream_correlation_id,
         };
 
 template <policies::domain_service::backend   SdkBackend,

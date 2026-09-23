@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
+
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
@@ -42,8 +44,9 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record, void* da
     constexpr auto        k_zero_start_timestamp = 0;
     constexpr auto        k_zero_end_timestamp   = 0;
 
-    const std::uint64_t stream_id = SdkBackend::get_stream_id(record).handle;
-    const auto&         agent =
+    const std::uint64_t stream_id =
+        rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
+    const auto& agent =
         Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
 
     Externals::get_metadata_registry().add_thread_info(
