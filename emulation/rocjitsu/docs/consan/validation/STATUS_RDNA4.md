@@ -286,3 +286,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - Validation runner preset integration: all **194 Python tests** pass. Log:
   `/home/benoit/workspace/consan-validation/rdna4-20260923/preset-runner-tests.log`.
 - `pytorch-rdna4-llm-topk` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round8/pytorch-rdna4-llm-topk-default`.
+- `pytorch-rdna4-llm-topk` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round8/pytorch-rdna4-llm-topk-supercollider`.
