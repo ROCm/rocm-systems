@@ -3,6 +3,7 @@
 
 #include "amdgpu_elf_test_support.h"
 #include "aql_queue.h"
+#include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -37,8 +38,6 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 using namespace rocjitsu;
-
-const std::string kConfigDirectory = CONFIG_DIR;
 
 enum class Gfx1251E2eSetup {
   PackedLshlAddU64,
@@ -165,7 +164,7 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   ASSERT_NE(descriptor_offset, 0u);
 
   auto loaded =
-      config::load_config(kConfigDirectory + "/gfx1251_synthetic.json", rocjitsu::kEmbeddedSchema);
+      config::load_config(test::config_path("gfx1251_synthetic.json"), rocjitsu::kEmbeddedSchema);
   ASSERT_EQ(loaded.target, code_object.target_id());
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
@@ -348,7 +347,7 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   ASSERT_NE(descriptor_offset, 0u);
 
   auto loaded =
-      config::load_config(kConfigDirectory + "/gfx1251_synthetic.json", rocjitsu::kEmbeddedSchema);
+      config::load_config(test::config_path("gfx1251_synthetic.json"), rocjitsu::kEmbeddedSchema);
   ASSERT_EQ(loaded.target, code_object.target_id());
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();

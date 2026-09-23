@@ -5,6 +5,7 @@
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
+#include "test_paths.h"
 
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
@@ -88,6 +89,14 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+bool replace_exactly_once(std::string &text, std::string_view from, std::string_view to) {
+  const size_t offset = text.find(from);
+  if (offset == std::string::npos || text.find(from, offset + from.size()) != std::string::npos)
+    return false;
+  text.replace(offset, from.size(), to);
+  return true;
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
@@ -1422,15 +1431,27 @@ TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
 }
 
 TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
-  constexpr std::array mismatches{
-      R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
-        "device":{"gfx_target_version":120501}}}})",
-      R"({"vm":{"arch":"cdna5","target":"gfx1251","gpu":{
-        "device":{"gfx_target_version":120500}}}})",
-  };
-  for (const char *json : mismatches)
-    EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
-                 std::runtime_error);
+  std::ifstream base(test::config_path("gfx1251_synthetic.json"));
+  ASSERT_TRUE(base.is_open());
+  const std::string gfx1251_config((std::istreambuf_iterator<char>(base)),
+                                   std::istreambuf_iterator<char>());
+  ASSERT_NO_THROW((void)config::load_config_from_string(gfx1251_config, rocjitsu::kEmbeddedSchema));
+
+  std::string gfx1250_config = gfx1251_config;
+  ASSERT_TRUE(
+      replace_exactly_once(gfx1250_config, R"("target": "gfx1251")", R"("target": "gfx1250")"));
+  ASSERT_TRUE(replace_exactly_once(gfx1250_config, "120501", "120500"));
+  ASSERT_NO_THROW((void)config::load_config_from_string(gfx1250_config, rocjitsu::kEmbeddedSchema));
+
+  std::array<std::string, 2> mismatches{gfx1251_config, gfx1251_config};
+  ASSERT_TRUE(
+      replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
+  ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
+  for (const std::string &json : mismatches) {
+    EXPECT_THAT([&] { (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema); },
+                testing::ThrowsMessage<std::runtime_error>(
+                    "vm target does not match device.gfx_target_version"));
+  }
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {

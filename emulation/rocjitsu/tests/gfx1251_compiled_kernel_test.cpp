@@ -5,7 +5,10 @@
 #include "test_paths.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -14,14 +17,17 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <iomanip>
 #include <memory>
-#include <span>
+#include <string_view>
 #include <vector>
 
 #ifdef HAS_GFX1251_DEVICE_KERNELS
@@ -63,30 +69,45 @@ protected:
     AmdGpuCodeObject *code_object = executable.code_object(ROCJITSU_CODE_TARGET_GFX1251, 0);
     ASSERT_NE(code_object, nullptr);
     ASSERT_EQ(code_object->target_id(), ROCJITSU_CODE_TARGET_GFX1251);
-    ASSERT_FALSE(code_object->text_sections().empty());
+    ASSERT_EQ(code_object->text_sections().size(), 1u);
+
+    const Section &text = *code_object->text_sections().front();
+    const auto *image_bytes = reinterpret_cast<const uint8_t *>(code_object->image_data());
+    const std::vector<KernelDescriptorInfo> kernels = scan_kernel_descriptors(
+        {image_bytes, code_object->image_size()}, text.sectionOffset(), text.size());
+    const auto selected_kernel = std::ranges::find(kernels, std::string_view(kernel_name),
+                                                   &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(selected_kernel, kernels.end()) << "Kernel descriptor symbol not found";
+
+    const std::vector<TextFunctionSymbolRange> function_symbols =
+        discover_text_function_symbol_ranges(*code_object);
+    ASSERT_FALSE(function_symbols.empty()) << "No sized .text function symbols found";
+    std::vector<BasicBlock::CodeRange> function_ranges;
+    function_ranges.reserve(function_symbols.size());
+    for (const TextFunctionSymbolRange &symbol : function_symbols)
+      function_ranges.push_back({.start_offset = symbol.start_offset, .size = symbol.size});
+    ASSERT_TRUE(std::ranges::any_of(function_ranges, [&](const BasicBlock::CodeRange &range) {
+      return selected_kernel->entry_text_offset >= range.start_offset &&
+             selected_kernel->entry_text_offset - range.start_offset < range.size;
+    })) << "Kernel entry is outside every sized .text function symbol";
 
     std::unique_ptr<Decoder> decoder =
         Decoder::create(default_isa_target_registry(), ROCJITSU_CODE_TARGET_GFX1251);
     ASSERT_NE(decoder, nullptr);
+    const std::array<uint64_t, 1> entries{selected_kernel->entry_text_offset};
+    util::StringDiagnostic cfg_error;
+    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> reachable = BasicBlock::build_reachable(
+        *code_object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries, cfg_error.emitter(),
+        function_ranges, {}, {}, ROCJITSU_CODE_TARGET_GFX1251);
+    ASSERT_FALSE(reachable.failed()) << cfg_error.message();
+
     size_t instruction_count = 0;
     bool all_instructions_executable = true;
-    for (const Section *section : code_object->text_sections()) {
-      ASSERT_EQ(section->size() % sizeof(uint32_t), 0u);
-      const auto *words = reinterpret_cast<const uint32_t *>(section->data());
-      std::span<const uint32_t> remaining(words, section->size() / sizeof(uint32_t));
-      uint64_t pc = section->vaddr();
-      while (!remaining.empty()) {
-        DecodeResult decoded = decoder->decode_window(remaining, pc);
-        ASSERT_TRUE(decoded.succeeded()) << "decode failed at PC 0x" << std::hex << pc;
-        ASSERT_NE(decoded.value(), nullptr);
-        all_instructions_executable &= decoded.value()->execute != nullptr;
-        EXPECT_NE(decoded.value()->execute, nullptr)
-            << decoded.value()->mnemonic() << " at PC 0x" << std::hex << pc;
-        const size_t instruction_words = decoded.value()->size() / sizeof(uint32_t);
-        ASSERT_GT(instruction_words, 0u);
-        ASSERT_LE(instruction_words, remaining.size());
-        remaining = remaining.subspan(instruction_words);
-        pc += decoded.value()->size();
+    for (const std::unique_ptr<BasicBlock> &block : reachable.value()) {
+      for (const Instruction &instruction : block->instructions()) {
+        all_instructions_executable &= instruction.execute != nullptr;
+        EXPECT_NE(instruction.execute, nullptr) << instruction.mnemonic() << " at PC 0x" << std::hex
+                                                << text.vaddr() + instruction.src_loc();
         ++instruction_count;
       }
     }
