@@ -41,6 +41,43 @@ at `.text+0x3df90`. The numerical result can still be correct despite the missin
 barrier; race detection, rather than output corruption, is the qualification
 oracle.
 
+## Qualification after both fixes
+
+| Preset | Banks | Strict clean | Fault detections | Result |
+| --- | ---: | --- | --- | --- |
+| default | 8 | Pass | 0/8 | Below bar; no sampled access records |
+| high | 8 | Pass | 0/8 | Below bar; no sampled access records |
+| higher | 8 | Pass | 0/8 | Insufficient retained evidence |
+| higher | 256 | Pass | **6/8** | **Green** at the existing 6/8 bar |
+
+All fault trials in this table were admitted and reached, with complete evidence
+and healthy GPU checks. `higher` is the lowest preset reaching green in this
+search; its bank override is essential and is shown in the status cell. The
+smaller presets do not produce access observations for this workload, which
+increasing retention capacity cannot repair. This does not calibrate the minimum
+bank count: intermediate bank counts were not searched.
+
+In the successful eight-trial batch, each detection retained all four sampled
+initialization stores across the two workgroups. Both missed trials retained
+only the two stores from workgroup 0. Finite-bank collisions still occur; the
+change removes the unconditional XOR alias rather than promising collision-free
+retention for arbitrary identities. The numerical oracle passed in every trial.
+
+Reproduce the green configuration with the existing environment and allowlist:
+
+```sh
+export CONSAN_VALIDATION_DEFAULT_PRESET=higher
+export CONSAN_VALIDATION_WATCHPOINT_BANKS=256
+python emulation/rocjitsu/tests/dbi/consan/consan_validation.py --target gfx1201 run \
+  --workload pytorch-torch-histc --profile default --phase clean \
+  --artifact-root /path/to/fresh-artifacts
+python emulation/rocjitsu/tests/dbi/consan/consan_validation.py --target gfx1201 fault \
+  --workload pytorch-torch-histc --profile default \
+  --spec emulation/rocjitsu/tests/dbi/consan/consan_validation_faults_gfx1201.json \
+  --fault barrier-drop-histogram-initialization-preset-higher-banks-256 \
+  --allow-destructive --artifact-root /path/to/fresh-artifacts
+```
+
 ## Verification and artifacts
 
 - Capability repair: `4e3ce0b6e0e`.
