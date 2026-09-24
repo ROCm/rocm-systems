@@ -182,6 +182,18 @@ if(BUILD_TESTS)
     ${ROCM_PATH}
   )
 
+  # The copied rocSHMEM GDA headers include each other as "gda/...", so the
+  # rocshmem_gda directory itself has to be on the include path, not just its
+  # parent (same requirement as rccl's own BEFORE PRIVATE entry in
+  # src/CMakeLists.txt). Targets that link rccl inherit this from its INTERFACE
+  # include directories, but the ones that deliberately don't link it -
+  # rccl-UnitTestsDevRuntime and the host micro-tests - still reach these
+  # headers through nccl_device.h and need it spelled out.
+  if(ENABLE_ROCSHMEM_GIN)
+    list(APPEND RCCL_COMMON_INCLUDE_DIRS
+      ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
+  endif()
+
   # Add MPI include directories if MPI tests are enabled
   if(ENABLE_MPI_TESTS AND MPI_CXX_INCLUDE_DIRS)
     list(APPEND RCCL_COMMON_INCLUDE_DIRS ${MPI_CXX_INCLUDE_DIRS})
@@ -988,6 +1000,13 @@ if(BUILD_TESTS)
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+
+    # copy_rocshmem_headers stages the GDA headers at build time. Targets that
+    # link rccl get the ordering through it; the ones that don't would race the
+    # copy, so make it explicit for everything.
+    if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
+      add_dependencies(${test_executable} copy_rocshmem_headers)
+    endif()
 
     # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
     # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1 and pulls in rocSHMEM's sdma headers.
