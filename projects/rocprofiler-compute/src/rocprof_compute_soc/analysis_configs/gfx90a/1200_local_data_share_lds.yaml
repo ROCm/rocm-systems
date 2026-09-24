@@ -25,7 +25,6 @@ Panel Config:
           unit: Percent
       comparable: false
       cli_style: simple_bar
-      tui_style: simple_bar
   - metric_table:
       id: 1202
       title: LDS Statistics

@@ -13,7 +13,6 @@ from typing import Any, Optional, TextIO
 
 import pandas as pd
 
-import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import csv_compression, file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -165,16 +164,6 @@ class OmniAnalyze_Base:
                 if single_panel_config
                 else str(Path(config_dir) / config_arch)
             ]
-            # Use restructured perf metrics in TUI analyze mode
-            if self.get_args().tui and arch in ["gfx942", "gfx950"]:
-                arch_panel_config.append(
-                    str(
-                        config.rocprof_compute_home
-                        / "rocprof_compute_tui"
-                        / "utils"
-                        / arch
-                    )
-                )
             ac.panel_configs = load_panel_configs(arch_panel_config)
 
         parser.build_dfs(
@@ -280,9 +269,6 @@ class OmniAnalyze_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
-
-        if args.tui:
-            return
 
         if not args.path:
             console_error("The following arguments are required: -p/--path")

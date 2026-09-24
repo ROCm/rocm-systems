@@ -180,8 +180,6 @@ def add_general_group(
         default=False,
         help=(
             "Enable experimental feature(s):\n"
-            "   GUI (--gui)\n"
-            "   TUI (--tui)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
             "   Triton trace (--triton-trace, --list-triton-operators, "
             "--triton-operator)\n"
@@ -931,12 +929,6 @@ Examples:
     )
 
     analyze_advanced_group.add_argument(
-        "--random-port",
-        action="store_true",
-        help="\t\tRandomly generate a port to launch GUI application.\n"
-        "\t\tRegistered Ports range inclusive (1024-49151).",
-    )
-    analyze_advanced_group.add_argument(
         "--max-stat-num",
         dest="max_stat_num",
         metavar="",
@@ -1036,30 +1028,3 @@ Examples:
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-    analyze_group.add_argument(
-        "--gui",
-        type=int,
-        nargs="?",
-        const=8050,
-        default=None,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="GUI",
-        help=(
-            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
-            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
-        ),
-    )
-    analyze_group.add_argument(
-        "--tui",
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="TUI",
-        help="\t\tActivate a Textual User Interface (TUI) to "
-        "interact with rocprofiler-compute metrics.",
-    )
