@@ -1,0 +1,70 @@
+{
+  "evaluations": [
+    {
+      "id": "roof-compute-or-memory-bound",
+      "skill_should_trigger": true,
+      "prompt": "is this rocprof-compute kernel compute bound or memory bound?",
+      "expected_behavior": [
+        "analyzes the roof block for a single kernel id",
+        "compares arithmetic intensity against the empirical peaks printed in the table",
+        "says when the kernel is below both ceilings instead of forcing a bound"
+      ],
+      "unexpected_behavior": [
+        "opens the generated roofline HTML chart instead of reading the table",
+        "calculates a peak instead of using the measured one"
+      ],
+      "logs_contain": ["-b roof"]
+    },
+    {
+      "id": "roof-arithmetic-intensity",
+      "skill_should_trigger": true,
+      "prompt": "what is the arithmetic intensity of my hottest kernel and how much performance am I leaving on the table?",
+      "expected_behavior": [
+        "reads FLOPs per byte and the peak values from the roofline table",
+        "narrows to one kernel id first"
+      ],
+      "logs_contain": ["roof"]
+    },
+    {
+      "id": "roof-precision-selection",
+      "skill_should_trigger": true,
+      "prompt": "my half precision GEMM looks terrible on the roofline, is that right?",
+      "expected_behavior": [
+        "sets -R to the precision the kernel actually issues instead of the FP32 default",
+        "confirms the precision from the instruction mix rather than assuming it"
+      ],
+      "unexpected_behavior": [
+        "compares a half precision kernel against the FP32 ceiling and calls it slow"
+      ],
+      "logs_contain": ["-R"]
+    },
+    {
+      "id": "roof-missing-data",
+      "skill_should_trigger": true,
+      "prompt": "my rocprof-compute report has no roofline section, what went wrong?",
+      "expected_behavior": [
+        "checks whether the profile used --no-roof",
+        "checks whether the architecture supports the roofline microbenchmarks before advising a re-profile"
+      ],
+      "unexpected_behavior": [
+        "tells the user to re-profile without --no-roof when the architecture is the actual reason"
+      ]
+    },
+    {
+      "id": "roof-generic-optimization",
+      "skill_should_trigger": false,
+      "prompt": "how can I make my application faster?"
+    },
+    {
+      "id": "roof-cuda-roofline",
+      "skill_should_trigger": false,
+      "prompt": "generate a roofline for my CUDA kernel with Nsight Compute"
+    },
+    {
+      "id": "roof-concept-question",
+      "skill_should_trigger": false,
+      "note": "Asks what a roofline is in the abstract, with no workload to analyze.",
+      "prompt": "explain the roofline performance model to me"
+    }
+  ]
+}
