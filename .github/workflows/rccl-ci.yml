@@ -4,6 +4,12 @@ name: RCCL cluster CI
 # on ruby, gin on tw). Each leg is self-contained: it provisions the ROCm floor from
 # TheRock CI artifacts, builds rocSHMEM/RCCL/rccl-tests from the PR sources, and runs.
 # ROCm tracks TheRock automatically (latest main run); pass artifact_run_id to pin one.
+#
+# GIN must use the role label `rccl-gin` (runner
+# tw-gfx950-ainic-ROCm-scale-rccl-gin-1), not tw-gfx950-ainic-ROCm-scale-runner.
+# Those role runners were registered with --no-default-labels, so runs-on is the
+# role label alone -- adding self-hosted matches nothing and the job queues
+# forever. Sharing the generic runner serialises GIN behind the 4-node perf-gate.
 
 on:
   workflow_dispatch:
@@ -41,6 +47,11 @@ permissions:
   contents: read
   id-token: write
 
+# Per-PR: a new push cancels the previous GitHub run. submit_slurm_job.py
+# scancels the Slurm allocation so cancelled GIN jobs do not keep holding
+# rccl_ci nodes until wall clock.
+# GHA cancel signals the submit step PID; rccl-suite.yml exec's python so
+# submit_slurm_job.py actually receives SIGINT/SIGTERM and scancels.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
@@ -97,7 +108,8 @@ jobs:
       id-token: write
     with:
       suite: gin
-      runs_on: '["self-hosted", "tw-gfx950-ainic-ROCm-scale-runner"]'
+      # Role label only; see file header. Do not add self-hosted.
+      runs_on: '["rccl-gin"]'
       partition: amd-tw
       # Dedicated RCCL CI nodes on Tensorwave (mia1-p01-g[22,26,28,32]).
       reservation: rccl_ci
