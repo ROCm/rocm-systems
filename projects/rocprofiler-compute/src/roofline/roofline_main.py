@@ -360,16 +360,6 @@ class Roofline:
         performance: float,
         compute_peaks: list[tuple[str, float]],
     ) -> tuple[str, str, Optional[float]]:
-        """Name the specific binding roof for a kernel: the roof with the lowest
-        achievable performance at the kernel's operating point. Each stacked
-        datatype's compute peak, and each memory level's own bandwidth * AI,
-        is judged on its own, and only candidates the kernel's own measured
-        performance doesn't already exceed are eligible, so the roof named (and
-        its value) is one this kernel could actually be bound by, instead of an
-        already-impossible ceiling or always the tallest peak drawn.
-
-        Returns (label, category, roof_value); category is "Memory" or
-        "Compute", roof_value is None when no candidate is eligible."""
         candidates: list[tuple[float, str, str]] = []
         for level_name, ai_value in level_ai.items():
             bandwidth = self._peak_value(ceiling_data, level_name.lower())
