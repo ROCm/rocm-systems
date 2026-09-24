@@ -398,18 +398,24 @@ class cli_analysis(OmniAnalyze_Base):
         kernel_ids: set[int] = set()
         for node in matched_nodes:
             kernel_ids.update(_assign_kernel_ids_from_top(node, name_to_id))
+        if not kernel_ids:
+            console_warning(
+                "ml api trace",
+                f"No {labels} kernels mapped to kernel-top IDs",
+            )
+            return
         selected_ids = sorted(kernel_ids)
         if workload.filter_kernel_ids:
             existing_ids = set(workload.filter_kernel_ids)
             selected_ids = [
                 kernel_id for kernel_id in selected_ids if kernel_id in existing_ids
             ]
-        if not selected_ids:
-            console_warning(
-                "ml api trace",
-                f"No {labels} operators matched the -k filter: {args.kernel}",
-            )
-            return
+            if not selected_ids:
+                console_warning(
+                    "ml api trace",
+                    f"No {labels} operators matched the -k filter: {args.kernel}",
+                )
+                return
         workload.filter_kernel_ids = selected_ids
 
         console_log(
