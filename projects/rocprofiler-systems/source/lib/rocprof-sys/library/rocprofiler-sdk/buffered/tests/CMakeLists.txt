@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 add_library(
-    buffered-domains-unit-test
+    buffered-domains-unit-tests
     OBJECT
     test_kernel_dispatch.cpp
     test_memory_copy.cpp
@@ -12,7 +12,7 @@ add_library(
 )
 
 target_link_libraries(
-    buffered-domains-unit-test
+    buffered-domains-unit-tests
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-common-library
@@ -20,7 +20,7 @@ target_link_libraries(
 )
 
 target_include_directories(
-    buffered-domains-unit-test
+    buffered-domains-unit-tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/source/lib
         ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys

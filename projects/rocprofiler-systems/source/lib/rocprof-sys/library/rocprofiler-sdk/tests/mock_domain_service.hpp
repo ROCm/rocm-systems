@@ -14,10 +14,21 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <vector>
 
 namespace rocprofsys::domains::test_support
 {
+
+// Satisfies policies::trace_cache::buffered_type_identifier_enum, required by
+// policies::domain_service::externals's buffer_storage_policy checks on
+// externals::kfd_sample_t/region_sample.
+enum class type_identifier_t : std::uint32_t
+{
+    kfd_sample       = 0,
+    region           = 1,
+    fragmented_space = 0xFFFF
+};
 
 // Shared stand-in for SdkBackend, satisfying policies::domain_service::backend for
 // every test that instantiates callback_domain<>, buffered_domain<>, registry<>,
@@ -708,6 +719,19 @@ struct track_data_t
     bool operator==(const track_data_t&) const = default;
 };
 
+// Satisfies policies::trace_cache::metadata_registry_policy's Process parameter,
+// mirroring trace_cache::info::process's field layout.
+struct process_data_t
+{
+    std::int32_t  pid  = 0;
+    std::int32_t  ppid = 0;
+    std::string   command;
+    std::string   environment;
+    std::string   extdata;
+    std::uint32_t start = 0;
+    std::uint32_t end   = 0;
+};
+
 // Mirrors the field layout of trace_cache::kernel_dispatch_sample's constructor
 // (9 std::uint64_t, 8 std::uint32_t, 1 std::uint64_t) as a plain aggregate -- tests
 // verify calls via gmock_buffer_storage, not by reading fields back.
@@ -864,6 +888,10 @@ struct externals
         std::string                 pmc_info_name;
         double                      value = 0.0;
         std::optional<std::int64_t> system_tid;
+
+        // NOLINTNEXTLINE(readability-identifier-naming)
+        static constexpr type_identifier_t type_identifier =
+            type_identifier_t::kfd_sample;
     };
 
     // Satisfies policies::agent_manager_policy (required transitively by
@@ -993,6 +1021,9 @@ struct externals
         std::string_view call_stack;
         std::string_view args_str;
         std::string_view category;
+
+        // NOLINTNEXTLINE(readability-identifier-naming)
+        static constexpr type_identifier_t type_identifier = type_identifier_t::region;
     };
 
     struct backtrace_json_t
@@ -1098,6 +1129,42 @@ struct externals
     // this type's behavior before the externals/get_metadata_registry() unification.
     struct metadata_registry_t
     {
+        // Satisfies policies::trace_cache::metadata_registry_policy's remaining
+        // mutators/accessors; untested by any current test, so plain stubs.
+        void set_process(const process_data_t& /*process*/) {}
+
+        [[nodiscard]] process_data_t            get_process_info() const { return {}; }
+        [[nodiscard]] std::optional<pmc_info_t> get_pmc_info(
+            std::string_view /*unique_name*/) const
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] std::optional<thread_info_t> get_thread_info(
+            std::uint32_t /*thread_id*/) const
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] std::optional<track_t> get_track_info(
+            std::string_view /*track_name*/) const
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] std::vector<pmc_info_t>    get_pmc_info_list() const { return {}; }
+        [[nodiscard]] std::vector<thread_info_t> get_thread_info_list() const
+        {
+            return {};
+        }
+        [[nodiscard]] std::vector<track_t> get_track_info_list() const { return {}; }
+        [[nodiscard]] std::vector<std::uint64_t>    get_queue_list() const { return {}; }
+        [[nodiscard]] std::vector<std::uint64_t>    get_stream_list() const { return {}; }
+        [[nodiscard]] std::vector<std::string_view> get_string_list() const { return {}; }
+        [[nodiscard]] bool                          save_to_file(
+                                     const std::string& /*filepath*/,
+                                     const std::vector<std::shared_ptr<agent_t>>& /*agents*/) const
+        {
+            return true;
+        }
+
         void add_string(std::string_view value)
         {
             if(g_metadata_registry_mock)
@@ -1144,28 +1211,37 @@ struct externals
 
     struct buffer_storage_t
     {
-        void store(kernel_dispatch_sample_t&& sample)
+        // Constructor/start/shutdown/is_running satisfy
+        // policies::trace_cache::buffer_storage_policy; untested by any current test,
+        // so plain stubs.
+        explicit buffer_storage_t(std::string /*filepath*/) {}
+
+        void               start(const pid_t& /*current_pid*/) {}
+        void               shutdown(const pid_t& /*current_pid*/) {}
+        [[nodiscard]] bool is_running() const { return true; }
+
+        void store(const kernel_dispatch_sample_t& sample)
         {
             if(g_buffer_storage_mock)
             {
                 g_buffer_storage_mock->store(sample);
             }
         }
-        void store(memory_copy_sample_t&& sample)
+        void store(const memory_copy_sample_t& sample)
         {
             if(g_buffer_storage_mock)
             {
                 g_buffer_storage_mock->store_memory_copy(sample);
             }
         }
-        void store(memory_allocation_sample_t&& sample)
+        void store(const memory_allocation_sample_t& sample)
         {
             if(g_buffer_storage_mock)
             {
                 g_buffer_storage_mock->store_memory_allocation(sample);
             }
         }
-        void store(scratch_memory_sample_t&& sample)
+        void store(const scratch_memory_sample_t& sample)
         {
             if(g_buffer_storage_mock)
             {
@@ -1175,8 +1251,8 @@ struct externals
         // kfd_sample_t storage is not verified by any current test -- plain no-op,
         // matching this domain family's behavior before the unification onto
         // get_buffer_storage().
-        void store(kfd_sample_t&& /*sample*/) {}
-        void store(region_sample&& sample)
+        void store(const kfd_sample_t& /*sample*/) {}
+        void store(const region_sample& sample)
         {
             if(g_buffer_storage_mock)
             {
@@ -1196,7 +1272,7 @@ struct externals
 
     static buffer_storage_t& get_buffer_storage()
     {
-        static buffer_storage_t s_storage;
+        static buffer_storage_t s_storage{ std::string{} };
         return s_storage;
     }
 

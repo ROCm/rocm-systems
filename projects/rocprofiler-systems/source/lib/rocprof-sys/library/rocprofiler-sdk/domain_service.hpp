@@ -109,6 +109,14 @@ public:
     }
 
 private:
+    std::vector<domains::domain_info>                 m_available_domains;
+    std::vector<domains::domain_configuration>        m_configuration;
+    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
+    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
+    std::vector<typename SdkBackend::external_correlation_request_kind_t>
+                             m_correlation_domains;
+    SdkBackend::context_id_t m_context{};
+
     [[nodiscard]] std::vector<domains::domain_configuration> resolve_configuration(
         std::span<const domain_selection> selections) const
     {
@@ -199,20 +207,6 @@ private:
         }
     }
 
-    void configure_pending_external_correlation_id()
-    {
-        if(m_correlation_domains.empty())
-        {
-            return;
-        }
-
-        SdkBackend::configure_external_correlation_id_request_service(
-            m_context, m_correlation_domains.data(), m_correlation_domains.size(),
-            rocprofiler_sdk::stream_stack_service<
-                SdkBackend>::request_stream_correlation_id,
-            nullptr);
-    }
-
     SdkBackend::context_id_t context()
     {
         if(m_context.handle != 0)
@@ -226,14 +220,19 @@ private:
         return m_context;
     }
 
-private:
-    std::vector<domains::domain_info>                 m_available_domains;
-    std::vector<domains::domain_configuration>        m_configuration;
-    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
-    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
-    std::vector<typename SdkBackend::external_correlation_request_kind_t>
-                             m_correlation_domains;
-    SdkBackend::context_id_t m_context{};
+    void configure_pending_external_correlation_id()
+    {
+        if(m_correlation_domains.empty())
+        {
+            return;
+        }
+
+        SdkBackend::configure_external_correlation_id_request_service(
+            m_context, m_correlation_domains.data(), m_correlation_domains.size(),
+            rocprofiler_sdk::stream_stack_service<
+                SdkBackend>::request_stream_correlation_id,
+            nullptr);
+    }
 
     std::vector<domains::domain_info> filter_supported_domains(
         const auto& table, domains::collection_mode mode)
@@ -351,11 +350,7 @@ private:
         std::vector<domains::operation_id_t> resolved;
 
         // No explicit operation filter requested: leave `resolved` empty so the SDK
-        // is configured with (nullptr, 0), meaning "trace all operations". Some
-        // buffer-tracing kinds (e.g. MEMORY_ALLOCATION on rocprofiler-sdk v1.4.1)
-        // silently deliver zero records when given an explicit operations array
-        // that enumerates every known operation id, even though the configure call
-        // itself reports success.
+        // is configured with (nullptr, 0), meaning "trace all operations".
         if(!requested.has_value())
         {
             return resolved;

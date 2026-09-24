@@ -32,8 +32,9 @@ struct stream_stack_service
         SdkBackend::tracing_operation_t /*operation*/, std::uint64_t /*internal_corr_id*/,
         SdkBackend::user_data_t* external_corr_id, void* /*user_data*/)
     {
-        external_corr_id->value = top().handle;
-        return 0;
+        constexpr auto k_success_code = 0;
+        external_corr_id->value       = top().handle;
+        return k_success_code;
     }
 
     template <typename RecordT>
