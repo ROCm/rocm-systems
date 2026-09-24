@@ -146,20 +146,9 @@ Analyze mode
    generated metrics. It generates metrics from the entirety of your profiled
    application or a subset identified through the ROCm Compute Profiler CLI analysis filters.
 
-   To generate a lightweight GUI interface, you can add the ``--experimental --gui`` flags to your
-   analysis command.
-
    .. code-block:: shell
 
       $ rocprof-compute analyze --help
-
-   Analyze mode now supports a lightweight Text-based User Interface (TUI) that
-   provides an interactive terminal experience for enhanced usability. To enable TUI mode,
-   use the ``--experimental --tui`` flags when running the analyze command:
-
-   .. code-block:: shell
-
-      $ rocprof-compute analyze --experimental --tui
 
 See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
@@ -213,10 +202,6 @@ The following table lists ROCm Compute Profiler's basic operations, their
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
      - ``--name`` or ``--output-directory``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
-
-   * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
-     - ``analyze``
-     - ``--path``, ``--experimental``, ``--gui``
 
    * - :doc:`Interact with profiling results from CLI </how-to/analyze/cli>`
      - ``analyze``
