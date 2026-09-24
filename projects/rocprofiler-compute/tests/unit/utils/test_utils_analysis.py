@@ -14,7 +14,10 @@ import pytest
 import utils.utils_analysis as utils_analysis
 from utils import csv_compression, schema
 from utils.ml_api_trace_errors import (
+    MissingSourceLocationError,
     OverlappingMarkerRangeError,
+    PassMarkerMismatchError,
+    UnaccountedKernelError,
     UncorrelatedLauncherIntervalError,
 )
 from utils.utils_analysis import (
@@ -2932,7 +2935,8 @@ def test_nest_marker_intervals_tensor_backward_and_autograd_worker():
     assert forest["1"][0].name == "torch.Tensor.backward"
     worker = forest["2"][0]
     assert worker.name == "autograd::engine::evaluate_function: AddmmBackward0"
-    errors = attach_unlocated_trees_by_launcher_thread(forest)
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
     assert errors == []
     assert worker in forest["1"][0].children
     assert "2" not in forest
@@ -2955,7 +2959,10 @@ def test_nest_marker_intervals_torch_root_without_file_stays_unlocated():
     root = forest["1"][0]
     assert root.name == "aten::addmm"
     assert root.file_name is None
-    errors = attach_unlocated_trees_by_launcher_thread(forest)
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
+    assert errors == []
+    utils_analysis._record_missing_source_location_errors(forest, errors)
     assert len(errors) == 1
     assert isinstance(errors[0], MissingSourceLocationError)
     assert errors[0].operator_name == "aten::addmm"
@@ -3043,7 +3050,7 @@ def test_process_outer_join_keeps_wrap_with_empty_kernel_names(tmp_path):
     workload = schema.Workload()
     process_ml_api_trace_output(workload, str(workload_dir))
     assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
-    assert workload.ml_api_call_trees["1"][0].kernels == {}
+    assert workload.ml_api_call_trees == {}
 
 
 def test_process_collapses_two_counter_rows_to_one_dispatch_duration(tmp_path):
@@ -3096,7 +3103,7 @@ def test_process_two_dispatches_same_marker_keep_both_kernel_names(tmp_path):
     assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
 
 
-def test_process_unmatched_kernel_exits_before_ml_api_trace_df(tmp_path, monkeypatch):
+def test_process_unmatched_kernel_records_error(tmp_path):
     workload_dir = tmp_path / "unmatched"
     write_ml_api_pass(
         workload_dir,
@@ -3104,20 +3111,19 @@ def test_process_unmatched_kernel_exits_before_ml_api_trace_df(tmp_path, monkeyp
         [linear_marker_row(1, 0, 100)],
         [counter_row(99, "orphan_kernel", 10, 20)],
     )
-    messages = record_console_error_and_exit(monkeypatch)
     workload = schema.Workload()
-    with pytest.raises(SystemExit) as excinfo:
-        process_ml_api_trace_output(workload, str(workload_dir))
-    assert excinfo.value.code == 1
-    assert "UnaccountedKernelError" in messages[0] or (
-        "no matching ROCTX marker" in messages[0] and "orphan_kernel" in messages[0]
-    )
+    process_ml_api_trace_output(workload, str(workload_dir))
     assert len(workload.unmatched_kernel_frames) == 1
     assert not workload.unmatched_kernel_frames[0].empty
-    assert workload.ml_api_trace_df.empty
+    assert any(
+        isinstance(err, UnaccountedKernelError) for err in workload.ml_api_trace_errors
+    )
+    assert "orphan_kernel" in str(workload.ml_api_trace_errors[0])
+    assert "unmatched dispatches" in str(workload.ml_api_trace_errors[0])
+    assert not workload.ml_api_trace_df.empty
 
 
-def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path, monkeypatch):
+def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path):
     workload_dir = tmp_path / "unmatched_two_counters"
     write_ml_api_pass(
         workload_dir,
@@ -3142,10 +3148,8 @@ def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path, monkey
             ),
         ],
     )
-    record_console_error_and_exit(monkeypatch)
     workload = schema.Workload()
-    with pytest.raises(SystemExit):
-        process_ml_api_trace_output(workload, str(workload_dir))
+    process_ml_api_trace_output(workload, str(workload_dir))
     unmatched = workload.unmatched_kernel_frames[0]
     assert len(unmatched) == 1
     assert unmatched.iloc[0]["Kernel_Name"] == "orphan_kernel"
@@ -3200,6 +3204,18 @@ def test_process_two_passes_collapse_to_one_launch(tmp_path):
     assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
 
 
+def test_marker_stitch_key_keeps_seqnr_tid_ftid_omits_ltid():
+    with_ltid = (
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|ltid=7|scope=FUNCTION|args=()|torch"
+    )
+    other_ltid = (
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|ltid=9|scope=FUNCTION|args=()|torch"
+    )
+    expected = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+    assert utils_analysis._marker_stitch_key(with_ltid) == expected
+    assert utils_analysis._marker_stitch_key(other_ltid) == expected
+
+
 def test_process_two_wraps_same_stitch_key_keep_ordinals(tmp_path):
     workload_dir = tmp_path / "two_ordinals"
     first = linear_marker_row(1, 0, 50)
@@ -3230,7 +3246,7 @@ def test_process_two_wraps_same_stitch_key_keep_ordinals(tmp_path):
     assert [root.call_count for root in roots] == [1, 1]
 
 
-def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
+def test_process_pass_null_kernel_name_mismatch_records_error(tmp_path):
     workload_dir = tmp_path / "kernel_mismatch"
     write_ml_api_pass(
         workload_dir,
@@ -3262,14 +3278,15 @@ def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
         index=False,
         compression="gzip",
     )
-    messages = record_console_error_and_exit(monkeypatch)
-    with pytest.raises(SystemExit) as excinfo:
-        process_ml_api_trace_output(schema.Workload(), str(workload_dir))
-    assert excinfo.value.code == 1
-    assert "PassMarkerMismatchError" in messages[0] or "Kernel_Names" in messages[0]
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert any(
+        isinstance(err, PassMarkerMismatchError) for err in workload.ml_api_trace_errors
+    )
+    assert not workload.ml_api_trace_df.empty
 
 
-def test_process_pass_marker_count_mismatch_exits(tmp_path, monkeypatch):
+def test_process_pass_marker_count_mismatch_records_error(tmp_path):
     workload_dir = tmp_path / "count_mismatch"
     write_ml_api_pass(
         workload_dir,
@@ -3286,10 +3303,9 @@ def test_process_pass_marker_count_mismatch_exits(tmp_path, monkeypatch):
         [linear_marker_row(1, 0, 50)],
         [counter_row(1, "kernel_a", 10, 20)],
     )
-    messages = record_console_error_and_exit(monkeypatch)
-    with pytest.raises(SystemExit) as excinfo:
-        process_ml_api_trace_output(schema.Workload(), str(workload_dir))
-    assert excinfo.value.code == 1
-    assert "PassMarkerMismatchError" in messages[0] or (
-        "per-pass marker counts" in messages[0]
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert any(
+        isinstance(err, PassMarkerMismatchError) for err in workload.ml_api_trace_errors
     )
+    assert "per-pass marker counts" in str(workload.ml_api_trace_errors[0])
