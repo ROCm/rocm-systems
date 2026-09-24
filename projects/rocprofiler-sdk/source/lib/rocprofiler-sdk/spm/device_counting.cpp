@@ -180,8 +180,14 @@ spm_start_agent_ctx(const context::context* ctx)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
     }
 
+    // Track which agents have been started so we can roll back on failure.
+    size_t agents_started = 0;
+    bool   device_locked  = false;
+
     for(auto& callback_data : agent_ctx.agent_data)
     {
+        device_locked = false;
+
         const auto* agent = agent::get_agent_cache(agent::get_agent(callback_data.agent_id));
 
         if(!agent)
@@ -212,6 +218,8 @@ spm_start_agent_ctx(const context::context* ctx)
         }
 
         counters::counter_collection_ptl_disable(agent->get_rocp_agent());
+
+        device_locked = true;
 
         callback_data.set_profile = false;
 
@@ -303,6 +311,67 @@ spm_start_agent_ctx(const context::context* ctx)
                                                                   UINT64_MAX,
                                                                   HSA_WAIT_STATE_BLOCKED) != 0)
         {};
+
+        agents_started++;
+    }
+
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        // Roll back the agent that took the device lock but failed before kfd_start completed
+        if(device_locked)
+        {
+            auto&       failed       = agent_ctx.agent_data[agents_started];
+            const auto* failed_agent = agent::get_agent_cache(agent::get_agent(failed.agent_id));
+            if(failed_agent)
+            {
+                counters::counter_collection_ptl_enable(failed_agent->get_rocp_agent());
+                counters::counter_collection_device_unlock(failed_agent->get_rocp_agent());
+            }
+        }
+
+        // Roll back all agents that were fully started
+        for(size_t i = 0; i < agents_started; i++)
+        {
+            auto& cb_data = agent_ctx.agent_data[i];
+            if(!cb_data.packet) continue;
+
+            const auto* ag = agent::get_agent_cache(cb_data.profile->agent);
+            if(!ag || !ag->profile_queue()) continue;
+
+            cb_data.packet->profile.packets.stop_packet.completion_signal = cb_data.stop_signal;
+            hsa::get_core_table()->hsa_signal_store_screlease_fn(cb_data.stop_signal, 1);
+            submitPacket(cb_data.queue, &cb_data.packet->profile.packets.stop_packet);
+            while(hsa::get_core_table()->hsa_signal_wait_scacquire_fn(cb_data.stop_signal,
+                                                                      HSA_SIGNAL_CONDITION_EQ,
+                                                                      0,
+                                                                      UINT64_MAX,
+                                                                      HSA_WAIT_STATE_BLOCKED) != 0)
+            {};
+
+            cb_data.packet->kfd_stop();
+            counters::counter_collection_ptl_enable(ag->get_rocp_agent());
+            counters::counter_collection_device_unlock(ag->get_rocp_agent());
+
+            if(hsa::use_ondemand_queue())
+            {
+                if(cb_data.stop_signal.handle != 0)
+                {
+                    hsa::get_core_table()->hsa_signal_destroy_fn(cb_data.stop_signal);
+                    cb_data.stop_signal.handle = 0;
+                }
+                if(cb_data.start_signal.handle != 0)
+                {
+                    hsa::get_core_table()->hsa_signal_destroy_fn(cb_data.start_signal);
+                    cb_data.start_signal.handle = 0;
+                }
+                cb_data.packet.reset();
+                cb_data.queue = nullptr;
+                ag->destroy_device_counting_service_queue();
+            }
+        }
+
+        agent_ctx.status.store(rocprofiler::context::spm_device_counting_service::state::DISABLED);
+        return status;
     }
 
     agent_ctx.status.store(rocprofiler::context::spm_device_counting_service::state::ENABLED);

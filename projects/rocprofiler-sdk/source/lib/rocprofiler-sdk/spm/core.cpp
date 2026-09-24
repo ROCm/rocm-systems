@@ -361,6 +361,8 @@ configure_agent_collection(rocprofiler_context_id_t                 context_id,
 
     if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
 
+    if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
     if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
