@@ -216,10 +216,8 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
     {
         return errno;  // If there was an error, return the error code
     }
-    else
-    {
-        *sig = ret;  // sig is declared as non-null so skip check
-    }
+
+    *sig = ret;  // sig is declared as non-null so skip check
 
     return 0;
 }

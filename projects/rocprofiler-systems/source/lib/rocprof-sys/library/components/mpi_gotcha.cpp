@@ -262,7 +262,7 @@ mpi_gotcha::update()
         {
             continue;
         }
-        else if(_rank_data.comm == null_comm())
+        if(_rank_data.comm == null_comm())
         {
             // if currently have null comm, replace
             _rank_data = itr.second;

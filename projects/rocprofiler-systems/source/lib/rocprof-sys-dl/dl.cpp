@@ -766,10 +766,9 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -783,13 +782,12 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
         }
-        else
+
+        if(dl::get_thread_count()-- == 0)
         {
-            if(dl::get_thread_count()-- == 0)
-            {
-                dl::get_thread_enabled() = true;
-            }
+            dl::get_thread_enabled() = true;
         }
+
         return 0;
     }
 
@@ -806,10 +804,9 @@ extern "C"
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_category_region_f,
                                         _category, name, _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -826,10 +823,9 @@ extern "C"
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
                                         _category, name, _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 

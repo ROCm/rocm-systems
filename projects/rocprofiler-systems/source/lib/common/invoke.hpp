@@ -98,7 +98,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
             }
             return std::invoke(std::forward<FuncT>(_func), _args...);
         }
-        else if(_verbose >= 2)
+        if(_verbose >= 2)
         {
             fflush(stderr);
             ROCPROFSYS_COMMON_LIBRARY_LOG_START

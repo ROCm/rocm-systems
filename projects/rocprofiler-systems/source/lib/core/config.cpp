@@ -1977,12 +1977,10 @@ set_signal_handler(signal_handler_t _func)
         {
             return _handler;
         }
-        else
-        {
-            _handler = get_signal_handler().load(std::memory_order_seq_cst);
-            get_signal_handler().store(_func);
-            return _handler;
-        }
+
+        _handler = get_signal_handler().load(std::memory_order_seq_cst);
+        get_signal_handler().store(_func);
+        return _handler;
     }
 
     return get_signal_handler().load();
@@ -2549,11 +2547,11 @@ get_mode()
         {
             return state::process::Mode::sampling;
         }
-        else if(_mode == "causal")
+        if(_mode == "causal")
         {
             return state::process::Mode::causal;
         }
-        else if(_mode == "coverage")
+        if(_mode == "coverage")
         {
             return state::process::Mode::coverage;
         }
@@ -3901,7 +3899,7 @@ tmp_file::close()
         stream.close();
         return !stream.is_open();
     }
-    else if(fd > 0)
+    if(fd > 0)
     {
         auto _ret = ::close(fd);
         if(_ret == 0)

@@ -373,11 +373,11 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
     {
         return migration_direction::host_to_device;
     }
-    else if(!src_is_cpu && dst_is_cpu)
+    if(!src_is_cpu && dst_is_cpu)
     {
         return migration_direction::device_to_host;
     }
-    else if(!src_is_cpu && !dst_is_cpu)
+    if(!src_is_cpu && !dst_is_cpu)
     {
         return migration_direction::device_to_device;
     }
