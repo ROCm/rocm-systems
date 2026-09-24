@@ -182,6 +182,8 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
 
     def dump_min_max(label):
         bounds_min, bounds_max = get_min_max_time(connection)
+        if bounds_min is None or bounds_max is None:
+            return None
         # bounds_min /= 1.0e9
         # bounds_max /= 1.0e9
         delta = bounds_max - bounds_min
@@ -191,6 +193,10 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
         return delta
 
     orig_delta = dump_min_max("Initial")
+    if orig_delta is None:
+        raise ValueError(
+            "ERROR: Cannot create time window - trace file contains no timing data"
+        )
 
     # Get start and end times
     if not is_marker_mode:
@@ -264,8 +270,12 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
     # create_view(connection, "rocpd_track", create_view_query)
 
     upd_delta = dump_min_max("Windowed")
+    if upd_delta is None:
+        raise ValueError(
+            f"ERROR: Time window {start_time} : {end_time} nsec contains no trace records"
+        )
 
-    reduction = (1.0 - (upd_delta / orig_delta)) * 100.0
+    reduction = (1.0 - (upd_delta / orig_delta)) * 100.0 if orig_delta > 0 else 0.0
     print(f"# Time windowing reduced the duration by {reduction:6.2f}%")
 
     return connection

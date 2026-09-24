@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Fixed `rocpd` time windowing crashing when the window contains no trace records, for example a window between the runs of separately profiled processes, or when the trace has no timing data. Both cases now report a clear error.
+
 ### Known issues
 
 ### Removed

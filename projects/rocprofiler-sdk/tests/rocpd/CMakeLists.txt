@@ -34,6 +34,15 @@ foreach(_SUBPARSER "" "-convert" "-query" "-summary")
         ENVIRONMENT "${rocpd-env}")
 endforeach()
 
+rocprofiler_add_integration_execute_test(
+    rocpd-time-window
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_time_window.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocpd-env}")
+
 foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
     rocprofiler_add_integration_execute_test(
         rocpd-module-${_MODULE}-help
