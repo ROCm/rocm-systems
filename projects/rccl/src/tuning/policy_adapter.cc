@@ -71,10 +71,58 @@ int rcclPlannedP2pConnectorIndex(
   const ncclComm* comm, rcclExecutionTransport transport) {
   if (transport == RCCL_EXECUTION_TRANSPORT_IPC) return 1;
   if (transport == RCCL_EXECUTION_TRANSPORT_SHM)
-    return rcclPolicyTransportToggleEligible(comm)
+    return rcclPolicyCanonicalShmEligible(comm)
              ? RCCL_CONN_IDX_P2P_SHM
              : 1;
   return -1;
+}
+
+// Default connectors carry the configured transport and run every shape.
+// Another transport runs only on its dedicated slot, which the collective
+// connector adapter materializes for Ring/Simple.
+bool rcclPolicyTransportHasDedicatedConnector(
+  const ncclComm* comm, rcclExecutionTransport transport) {
+  return transport == RCCL_EXECUTION_TRANSPORT_SHM &&
+         rcclPolicyCanonicalShmEligible(comm);
+}
+
+void rcclSetCollectiveTransportCapabilities(
+  const ncclComm* comm, rcclExecutionPolicyValidationContext* validation) {
+  rcclExecutionTransport primary =
+    rcclConfiguredPolicyTransport(ncclParamP2pDisable());
+  validation->validateTransportCapabilities = true;
+  for (int t = 0; t < RCCL_EXECUTION_TRANSPORT_COUNT; t++) {
+    rcclExecutionTransport transport = static_cast<rcclExecutionTransport>(t);
+    bool isPrimary =
+      transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN && transport == primary;
+    bool dedicated = rcclPolicyTransportHasDedicatedConnector(comm, transport);
+    for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++) {
+      for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++) {
+        validation->transportAlgoProtoAvailable[t][algorithm][protocol] =
+          validation->algoProtoAvailable[algorithm][protocol] &&
+          (isPrimary || (dedicated && algorithm == NCCL_ALGO_RING &&
+                         protocol == NCCL_PROTO_SIMPLE));
+      }
+    }
+  }
+}
+
+// Read/write transfer selection applies to IPC connectors only.
+void rcclSetP2pTransportCapabilities(
+  const ncclComm* comm, bool p2pDisabled,
+  rcclExecutionPolicyValidationContext* validation) {
+  rcclExecutionTransport primary = rcclConfiguredPolicyTransport(p2pDisabled);
+  uint32_t ipcTransfers = uint32_t{1} << RCCL_P2P_TRANSFER_WRITE;
+  if (ncclParamP2pReadEnable() != 0)
+    ipcTransfers |= uint32_t{1} << RCCL_P2P_TRANSFER_READ;
+  validation->validateTransportCapabilities = true;
+  for (int t = 0; t < RCCL_EXECUTION_TRANSPORT_COUNT; t++)
+    validation->transportP2pTransferMask[t] = 0;
+  if (primary == RCCL_EXECUTION_TRANSPORT_IPC ||
+      rcclPolicyTransportHasDedicatedConnector(
+        comm, RCCL_EXECUTION_TRANSPORT_IPC))
+    validation->transportP2pTransferMask[RCCL_EXECUTION_TRANSPORT_IPC] =
+      ipcTransfers;
 }
 
 void rcclBuildCollectiveExecutionPolicyValidationContext(
@@ -114,6 +162,7 @@ void rcclBuildCollectiveExecutionPolicyValidationContext(
         algorithmAllowedByTask && table[algorithm][protocol] >= 0.0f;
     }
   }
+  rcclSetCollectiveTransportCapabilities(comm, validation);
 }
 
 } // namespace
@@ -126,14 +175,24 @@ rcclExecutionTransportIntent rcclPolicyTransportIntent(bool p2pDisabled) {
                      : RCCL_EXECUTION_TRANSPORT_INTENT_IPC;
 }
 
-bool rcclPolicyTransportToggleEligible(const ncclComm* comm) {
-  return comm != nullptr &&
-         rcclPolicyTransportIntent(ncclParamP2pDisable()) ==
-           RCCL_EXECUTION_TRANSPORT_INTENT_AUTO &&
-         rcclPolicyRuntimeToggleRequested() &&
-         ncclParamP2pDisable() == 0 && ncclParamShmDisable() == 0 &&
+bool rcclPolicyCanonicalTransportEligible(const ncclComm* comm) {
+  return comm != nullptr && rcclPolicyRuntimeToggleRequested() &&
          comm->nNodes == 1 && comm->nRanks == 8 &&
          IsArchMatch(comm->archName, "gfx1201");
+}
+
+bool rcclPolicyTransportToggleEligible(const ncclComm* comm) {
+  return rcclPolicyCanonicalTransportEligible(comm) &&
+         rcclPolicyTransportIntent(ncclParamP2pDisable()) ==
+           RCCL_EXECUTION_TRANSPORT_INTENT_AUTO &&
+         ncclParamP2pDisable() == 0 && ncclParamShmDisable() == 0;
+}
+
+bool rcclPolicyCanonicalShmEligible(const ncclComm* comm) {
+  return rcclPolicyCanonicalTransportEligible(comm) &&
+         ncclParamShmDisable() == 0 &&
+         rcclPolicyTransportIntent(ncclParamP2pDisable()) !=
+           RCCL_EXECUTION_TRANSPORT_INTENT_IPC;
 }
 
 uint32_t rcclPolicyAvailableTransportMask(
@@ -185,12 +244,20 @@ bool rcclCollectiveTaskBuffersOverlap(
 int rcclGetCollectiveExecutionPolicyRequiredChannels(
   ncclComm* comm, bool p2pDisabled) {
   if (comm == nullptr) return 0;
+  // Canonical mode provisions for every toggle transport regardless of
+  // intent, so forced modes share AUTO's channel pools.
+  bool canonical =
+    rcclPolicyCanonicalTransportEligible(comm) && ncclParamShmDisable() == 0;
   rcclExecutionPolicyProvisioningInput input = {
     comm->archName,
     comm->nNodes,
     comm->nRanks,
-    rcclPolicyAvailableTransportMask(comm, p2pDisabled),
-    rcclPolicyTransportIntent(p2pDisabled),
+    canonical
+      ? rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_IPC) |
+          rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_SHM)
+      : rcclPolicyAvailableTransportMask(comm, p2pDisabled),
+    canonical ? RCCL_EXECUTION_TRANSPORT_INTENT_AUTO
+              : rcclPolicyTransportIntent(p2pDisabled),
   };
   return rcclResolveExecutionPolicyRequiredChannels(&input);
 }
@@ -284,6 +351,7 @@ bool rcclExecutionPolicyForP2pTask(
   validation.validateTransport = true;
   validation.transportMask =
     rcclPolicyAvailableTransportMask(comm, p2pDisabled);
+  rcclSetP2pTransportCapabilities(comm, p2pDisabled, &validation);
 
   rcclExecutionPolicyResolution resolution =
     rcclGetCollectiveExecutionPolicyWithValidation(
@@ -375,7 +443,11 @@ int rcclPolicyCollectiveConnectorIndex(
   if (channel.ring.next < 0 || channel.ring.next >= comm->nRanks ||
       channel.ring.prev < 0 || channel.ring.prev >= comm->nRanks)
     return -1;
-  for (int connIndex = 0; connIndex < NCCL_MAX_CONNS; connIndex++) {
+  bool canonicalShm = transport == RCCL_EXECUTION_TRANSPORT_SHM &&
+                      rcclPolicyCanonicalShmEligible(comm);
+  for (int connIndex = canonicalShm ? RCCL_CONN_IDX_COLL_SHM : 0;
+       connIndex < (canonicalShm ? RCCL_CONN_IDX_COLL_SHM + 1 : NCCL_MAX_CONNS);
+       connIndex++) {
     const ncclConnector& send =
       channel.peers[channel.ring.next]->send[connIndex];
     const ncclConnector& recv =
@@ -412,6 +484,10 @@ int rcclPolicyP2pConnectorIndex(
       rcclPolicyTransportComm(transport, isSendNotRecv) == nullptr)
     return -1;
 
+  if (transport == RCCL_EXECUTION_TRANSPORT_SHM &&
+      rcclPolicyCanonicalShmEligible(comm))
+    return RCCL_CONN_IDX_P2P_SHM;
+
   const ncclChannelPeer* channelPeer = comm->channels[channelId].peers[peer];
   if (channelPeer != nullptr) {
     for (int connIndex = 1; connIndex < NCCL_MAX_CONNS; connIndex++) {
@@ -424,4 +500,147 @@ int rcclPolicyP2pConnectorIndex(
     }
   }
   return rcclPlannedP2pConnectorIndex(comm, transport);
+}
+
+// IPC registration bypasses proxy connectors and is incompatible with the
+// policy-selected SHM path.
+bool rcclPolicyCollectiveAllowsRegistration(const ncclTaskColl* info) {
+  return info == nullptr ||
+         info->executionTransport != RCCL_EXECUTION_TRANSPORT_SHM;
+}
+
+bool rcclPolicyAllToAllUsesSendRecvPath(
+  const ncclComm* comm, size_t aggregateBytes, bool inPlace) {
+  rcclCollectiveExecutionPolicy policy;
+  return rcclGetCollectiveExecutionPolicy(
+           comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, aggregateBytes,
+           ncclParamP2pDisable(), inPlace, &policy) &&
+         policy.path == RCCL_P2P_PATH_SENDRECV;
+}
+
+void rcclPolicyPlanP2pWork(
+  ncclComm* comm, ncclTaskP2p* const tasks[2], bool logSelection,
+  rcclP2pPolicyWorkPlan* plan) {
+  const bool p2pDisabled = ncclParamP2pDisable();
+  bool hasTask = false;
+  bool uniformSendRecv = true;
+  int activeChannels = comm->p2pnChannels;
+  for (int dir = 0; dir < 2; dir++) {
+    rcclDefaultCollectiveExecutionPolicy(&plan->policy[dir]);
+    plan->matched[dir] =
+      rcclExecutionPolicyForP2pTask(comm, tasks[dir], p2pDisabled, &plan->policy[dir]);
+    plan->channels[dir] = plan->matched[dir] ? plan->policy[dir].nChannels : -1;
+    if (tasks[dir] == nullptr) continue;
+    hasTask = true;
+    // A work item has one channel namespace shared by send and receive. Never
+    // cap a mixed item containing an ordinary grouped P2P operation.
+    if (!plan->matched[dir] || plan->policy[dir].path != RCCL_P2P_PATH_SENDRECV) {
+      uniformSendRecv = false;
+    } else if (plan->policy[dir].nChannels > 0) {
+      activeChannels = std::min(activeChannels, plan->policy[dir].nChannels);
+    }
+  }
+  plan->activeChannels =
+    hasTask && uniformSendRecv ? activeChannels : comm->p2pnChannels;
+
+  if (!logSelection || (!plan->matched[0] && !plan->matched[1])) return;
+  int dir = plan->matched[0] ? 0 : 1;
+  const rcclCollectiveExecutionPolicy& policy = plan->policy[dir];
+  size_t taskBytes = tasks[dir]->bytes;
+  size_t aggregateBytes =
+    taskBytes > SIZE_MAX / comm->nRanks ? SIZE_MAX : taskBytes * static_cast<size_t>(comm->nRanks);
+  const char* transferName = policy.transferMode == RCCL_P2P_TRANSFER_READ    ? "read"
+                             : policy.transferMode == RCCL_P2P_TRANSFER_WRITE ? "write"
+                                                                             : "auto";
+  INFO(NCCL_COLL,
+       "RCCL P2P execution policy: arch=%s coll=%d aggregateBytes=%zu inPlace=%d channels=%d->%d path=SendRecv "
+       "protocol=%s transfer=%s transport=%d",
+       comm->archName, (int)tasks[dir]->collAPI, aggregateBytes, (int)tasks[dir]->inPlace,
+       comm->p2pnChannels, plan->activeChannels,
+       policy.protocol >= 0 ? ncclProtoStr[policy.protocol] : "auto", transferName,
+       (int)policy.transport);
+}
+
+int rcclPolicyP2pWorkConnectorIndex(
+  const ncclComm* comm, const rcclP2pPolicyWorkPlan* plan, int dir,
+  int channelId, int peer, int defaultConnIndex) {
+  if (!plan->matched[dir]) return defaultConnIndex;
+  const rcclCollectiveExecutionPolicy& policy = plan->policy[dir];
+  bool isSendNotRecv = dir != 0;
+  int connIndex = defaultConnIndex;
+  if (policy.transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN) {
+    int transportConnIndex =
+      rcclPolicyP2pConnectorIndex(comm, channelId, peer, isSendNotRecv, policy.transport);
+    if (transportConnIndex >= 0) connIndex = transportConnIndex;
+  }
+  if (policy.transport == RCCL_EXECUTION_TRANSPORT_SHM ||
+      policy.transferMode == RCCL_P2P_TRANSFER_AUTO)
+    return connIndex;
+
+  int requiredFlag =
+    policy.transferMode == RCCL_P2P_TRANSFER_READ ? NCCL_P2P_READ : NCCL_P2P_WRITE;
+  constexpr int candidateConnIndices[] = {1, RCCL_CONN_IDX_P2P_ALT};
+  for (int candidate : candidateConnIndices) {
+    if (candidate == RCCL_CONN_IDX_P2P_ALT && comm->p2pNet) continue;
+    const ncclChannelPeer* channelPeer = comm->channels[channelId].peers[peer];
+    const ncclConnector& conn =
+      isSendNotRecv ? channelPeer->send[candidate] : channelPeer->recv[candidate];
+    if (conn.connected && (conn.conn.flags & requiredFlag)) return candidate;
+  }
+  INFO(NCCL_COLL,
+       "RCCL P2P execution policy transfer mode unavailable; preserving default connector "
+       "(dir=%s requested=%s)",
+       isSendNotRecv ? "send" : "recv",
+       policy.transferMode == RCCL_P2P_TRANSFER_READ ? "read" : "write");
+  return connIndex;
+}
+
+int rcclPolicyP2pWorkProtocol(
+  const rcclP2pPolicyWorkPlan* plan, int dir, int selectedProtocol,
+  bool useLL128, bool latencyBufferAvailable) {
+  int requestedProtocol = plan->matched[dir] ? plan->policy[dir].protocol : -1;
+  if (requestedProtocol < 0) return selectedProtocol;
+  if (requestedProtocol == NCCL_PROTO_SIMPLE) return NCCL_PROTO_SIMPLE;
+  if (requestedProtocol == NCCL_PROTO_LL && !useLL128 && latencyBufferAvailable) return NCCL_PROTO_LL;
+  if (requestedProtocol == NCCL_PROTO_LL128 && useLL128 && latencyBufferAvailable) return NCCL_PROTO_LL128;
+  return selectedProtocol;
+}
+
+bool rcclPolicyP2pWorkAllowsRegistration(
+  const rcclP2pPolicyWorkPlan* plan, int dir) {
+  return !plan->matched[dir] ||
+         plan->policy[dir].transport != RCCL_EXECUTION_TRANSPORT_SHM;
+}
+
+bool rcclPolicyP2pTaskAllowsRegistration(ncclComm* comm, ncclTaskP2p* task) {
+  rcclCollectiveExecutionPolicy policy;
+  return !rcclExecutionPolicyForP2pTask(comm, task, ncclParamP2pDisable(), &policy) ||
+         policy.transport != RCCL_EXECUTION_TRANSPORT_SHM;
+}
+
+bool rcclPolicyP2pPreconnect(
+  ncclComm* comm, ncclTaskP2p* task, rcclP2pPolicyPreconnect* preconnect) {
+  preconnect->nChannels = comm->p2pnChannels;
+  preconnect->nChannelsPerPeer = comm->p2pnChannelsPerPeer;
+  preconnect->nConnIndices = 0;
+  rcclCollectiveExecutionPolicy policy;
+  if (!rcclExecutionPolicyForP2pTask(comm, task, ncclParamP2pDisable(), &policy))
+    return false;
+
+  bool usesShm = policy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
+  if (policy.nChannels <= 0 && policy.transferMode == RCCL_P2P_TRANSFER_AUTO && !usesShm)
+    return true;
+  if (policy.nChannels > 0)
+    preconnect->nChannels = std::min(comm->p2pnChannels, policy.nChannels);
+  preconnect->nChannelsPerPeer =
+    std::min(comm->p2pnChannelsPerPeer, preconnect->nChannels);
+  int transportConnIndex = rcclPlannedP2pConnectorIndex(comm, policy.transport);
+  if (usesShm && transportConnIndex == RCCL_CONN_IDX_P2P_SHM) {
+    preconnect->connIndices[preconnect->nConnIndices++] = RCCL_CONN_IDX_P2P_SHM;
+    return true;
+  }
+  preconnect->connIndices[preconnect->nConnIndices++] = 1;
+  if (!usesShm && policy.transferMode != RCCL_P2P_TRANSFER_AUTO && !comm->p2pNet)
+    preconnect->connIndices[preconnect->nConnIndices++] = RCCL_CONN_IDX_P2P_ALT;
+  return true;
 }

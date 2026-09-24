@@ -28,7 +28,7 @@ ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
       NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &channel->ring.prev, 1, &channel->ring.next, 0), ret, fail);
     }
     NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_RING], 0), ret, fail);
-    if (rcclPolicyTransportToggleEligible(comm)) {
+    if (rcclPolicyCanonicalShmEligible(comm)) {
       for (int c = 0; c < comm->nChannels; c++) {
         struct ncclChannel* channel = comm->channels + c;
         NCCLCHECKGOTO(ncclTransportP2pConnect(

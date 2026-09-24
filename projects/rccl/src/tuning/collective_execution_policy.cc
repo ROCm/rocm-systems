@@ -223,26 +223,21 @@ rcclExecutionTransport rcclExecutionPolicyRequestedTransport(
   }
 }
 
-bool rcclAlgoProtoShapeAvailable(const rcclExecutionPolicyValidationContext& validation,
+bool rcclAlgoProtoShapeAvailable(const bool available[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS],
                                  int algorithm, int protocol) {
   if (algorithm < -1 || algorithm >= NCCL_NUM_ALGORITHMS ||
       protocol < -1 || protocol >= NCCL_NUM_PROTOCOLS)
     return false;
   if (algorithm >= 0 && protocol >= 0)
-    return validation.algoProtoAvailable[algorithm][protocol];
-  if (algorithm >= 0) {
+    return available[algorithm][protocol];
+  for (int candidateAlgorithm = 0; candidateAlgorithm < NCCL_NUM_ALGORITHMS; candidateAlgorithm++) {
+    if (algorithm >= 0 && candidateAlgorithm != algorithm) continue;
     for (int candidateProtocol = 0; candidateProtocol < NCCL_NUM_PROTOCOLS; candidateProtocol++) {
-      if (validation.algoProtoAvailable[algorithm][candidateProtocol]) return true;
+      if (protocol >= 0 && candidateProtocol != protocol) continue;
+      if (available[candidateAlgorithm][candidateProtocol]) return true;
     }
-    return false;
   }
-  if (protocol >= 0) {
-    for (int candidateAlgorithm = 0; candidateAlgorithm < NCCL_NUM_ALGORITHMS; candidateAlgorithm++) {
-      if (validation.algoProtoAvailable[candidateAlgorithm][protocol]) return true;
-    }
-    return false;
-  }
-  return true;
+  return false;
 }
 
 bool rcclExecutionPolicyValidationContextIsValid(
@@ -306,7 +301,7 @@ rcclExecutionPolicyValidationError rcclValidateCollectiveExecutionPolicy(
       policy.algorithm >= 0 ? policy.algorithm : validation->baselineAlgorithm;
     int protocol =
       policy.protocol >= 0 ? policy.protocol : validation->baselineProtocol;
-    if (!rcclAlgoProtoShapeAvailable(*validation, algorithm, protocol))
+    if (!rcclAlgoProtoShapeAvailable(validation->algoProtoAvailable, algorithm, protocol))
       return RCCL_EXECUTION_POLICY_VALIDATION_ALGO_PROTO_UNAVAILABLE;
   }
 
@@ -326,6 +321,25 @@ rcclExecutionPolicyValidationError rcclValidateCollectiveExecutionPolicy(
       (validation->transportMask &
        rcclExecutionTransportBit(policy.transport)) == 0)
     return RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_UNAVAILABLE;
+
+  if (policy.transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
+      policy.transport < RCCL_EXECUTION_TRANSPORT_COUNT &&
+      validation->validateTransportCapabilities && hasScope) {
+    if (scope == RCCL_EXECUTION_SCOPE_COLLECTIVE) {
+      int algorithm =
+        policy.algorithm >= 0 ? policy.algorithm : validation->baselineAlgorithm;
+      int protocol =
+        policy.protocol >= 0 ? policy.protocol : validation->baselineProtocol;
+      if (!rcclAlgoProtoShapeAvailable(
+            validation->transportAlgoProtoAvailable[policy.transport],
+            algorithm, protocol))
+        return RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_CAPABILITY_UNAVAILABLE;
+    } else if (policy.transferMode != RCCL_P2P_TRANSFER_AUTO &&
+               (validation->transportP2pTransferMask[policy.transport] &
+                (1u << policy.transferMode)) == 0) {
+      return RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_CAPABILITY_UNAVAILABLE;
+    }
+  }
 
   return RCCL_EXECUTION_POLICY_VALIDATION_NONE;
 }
