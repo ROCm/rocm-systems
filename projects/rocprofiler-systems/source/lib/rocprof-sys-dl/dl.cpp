@@ -47,8 +47,8 @@
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
     if(HANDLE)                                                                           \
     {                                                                                    \
-        *(void**) (&VARNAME) = dlsym(HANDLE, FUNCNAME);                                  \
-        if(VARNAME == nullptr && _rocprofsys_dl_verbose >= _warn_verbose)                \
+        *(void**) (&(VARNAME)) = dlsym(HANDLE, FUNCNAME);                                \
+        if((VARNAME) == nullptr && _rocprofsys_dl_verbose >= _warn_verbose)              \
         {                                                                                \
             ROCPROFSYS_COMMON_LIBRARY_LOG_START                                          \
             fprintf(stderr, "[rocprof-sys][dl][pid=%i]> %s :: %s\n", getpid(), FUNCNAME, \
