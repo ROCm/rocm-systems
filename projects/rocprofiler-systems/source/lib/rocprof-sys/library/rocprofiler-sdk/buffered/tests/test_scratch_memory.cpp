@@ -97,25 +97,31 @@ TEST(scratch_memory_test, on_scratch_memory_forwards_record_fields_to_dependenci
     constexpr std::uint64_t k_mock_stream_id = 0;
     constexpr std::uint32_t k_mock_device_id = 0;
 
-    const auto expected_thread_info =
-        thread_info_data_t{ 0, 0, record.thread_id, 0, 0, "{}" };
+    const auto expected_thread_info = thread_info_data_t{ .parent_process_id = 0,
+                                                          .process_id        = 0,
+                                                          .thread_id = record.thread_id,
+                                                          .start     = 0,
+                                                          .end       = 0,
+                                                          .extdata   = "{}" };
     const auto expected_track =
-        track_data_t{ fmt::format("GPU Scratch Memory [{}] Thread {}", k_mock_device_id,
-                                  record.thread_id),
-                      record.thread_id, "{}" };
-    const auto expected_sample =
-        scratch_memory_sample_data_t{ record.start_timestamp,
-                                      record.end_timestamp,
-                                      record.thread_id,
-                                      record.agent_id.handle,
-                                      record.queue_id.handle,
-                                      static_cast<std::int32_t>(record.kind),
-                                      static_cast<std::int32_t>(record.operation),
-                                      static_cast<std::int32_t>(record.flags),
-                                      record.allocation_size,
-                                      record.correlation_id.internal,
-                                      std::uint64_t{ 0 },
-                                      k_mock_stream_id };
+        track_data_t{ .track_name = fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                                k_mock_device_id, record.thread_id),
+                      .thread_id  = record.thread_id,
+                      .extdata    = "{}" };
+    const auto expected_sample = scratch_memory_sample_data_t{
+        .start_timestamp         = record.start_timestamp,
+        .end_timestamp           = record.end_timestamp,
+        .thread_id               = record.thread_id,
+        .agent_id_handle         = record.agent_id.handle,
+        .queue_id_handle         = record.queue_id.handle,
+        .kind                    = static_cast<std::int32_t>(record.kind),
+        .operation               = static_cast<std::int32_t>(record.operation),
+        .flags                   = static_cast<std::int32_t>(record.flags),
+        .allocation_size         = record.allocation_size,
+        .correlation_id_internal = record.correlation_id.internal,
+        .correlation_id_ancestor = std::uint64_t{ 0 },
+        .stream_handle           = k_mock_stream_id
+    };
 
     EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
         .Times(1);

@@ -93,20 +93,25 @@ TEST(memory_allocation_test, on_memory_allocation_forwards_record_fields_to_depe
     constexpr std::uint64_t k_mock_stream_id = 0;
     constexpr std::uint64_t k_mock_address   = 0;
 
-    const auto expected_thread_info =
-        thread_info_data_t{ 0, 0, record.thread_id, 0, 0, "{}" };
-    const auto expected_sample =
-        memory_allocation_sample_data_t{ record.start_timestamp,
-                                         record.end_timestamp,
-                                         record.thread_id,
-                                         record.agent_id.handle,
-                                         static_cast<std::int32_t>(record.kind),
-                                         static_cast<std::int32_t>(record.operation),
-                                         record.allocation_size,
-                                         record.correlation_id.internal,
-                                         record.correlation_id.ancestor,
-                                         k_mock_address,
-                                         k_mock_stream_id };
+    const auto expected_thread_info = thread_info_data_t{ .parent_process_id = 0,
+                                                          .process_id        = 0,
+                                                          .thread_id = record.thread_id,
+                                                          .start     = 0,
+                                                          .end       = 0,
+                                                          .extdata   = "{}" };
+    const auto expected_sample      = memory_allocation_sample_data_t{
+             .start_timestamp         = record.start_timestamp,
+             .end_timestamp           = record.end_timestamp,
+             .thread_id               = record.thread_id,
+             .agent_id_handle         = record.agent_id.handle,
+             .kind                    = static_cast<std::int32_t>(record.kind),
+             .operation               = static_cast<std::int32_t>(record.operation),
+             .allocation_size         = record.allocation_size,
+             .correlation_id_internal = record.correlation_id.internal,
+             .correlation_id_ancestor = record.correlation_id.ancestor,
+             .address_value           = k_mock_address,
+             .stream_handle           = k_mock_stream_id
+    };
 
     EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
         .Times(1);
