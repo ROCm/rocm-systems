@@ -94,7 +94,6 @@ markers = [
     "roofline_extra_options",
     "roofline_bench",
     "roofline_plot",
-    "sci_notion",
     "iteration_multiplexing",
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
@@ -102,5 +101,4 @@ markers = [
     "torch_ops",
     "torch_trace",
     "experimental_feature",
-    "tui",
 ]
