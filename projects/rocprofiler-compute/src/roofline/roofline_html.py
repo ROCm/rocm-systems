@@ -115,8 +115,12 @@ def build_interactive_document(
             "resident time reaches this cutoff. The rightmost stop shows every "
             "plotted kernel."
         ),
-        CSS=_read_asset("roofline_plot.css"),
+        CSS=_read_asset("roofline_plot.css")
+        + "\n"
+        + _read_asset("roofline_kernel_list_tooltip.css"),
         PLOT_FRAGMENT=fragment,
         MODEL_JSON=view_model.to_json(),
-        JS=_read_asset("roofline_plot.js"),
+        JS=_read_asset("roofline_kernel_list_tooltip.js")
+        + "\n"
+        + _read_asset("roofline_plot.js"),
     )

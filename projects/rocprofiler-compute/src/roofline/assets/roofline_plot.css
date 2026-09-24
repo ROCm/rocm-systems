@@ -499,34 +499,6 @@ body {
   cursor: pointer;
 }
 
-.roofline-name-tooltip {
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 500;
-  max-width: min(480px, calc(100vw - 24px));
-  padding: 6px 10px;
-  background: var(--roofline-surface);
-  color: var(--roofline-text);
-  border: 1px solid var(--roofline-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  font-family: var(--roofline-kernel-font, monospace);
-  font-size: 12px;
-  line-height: 1.35;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.1s ease;
-}
-
-.roofline-name-tooltip.visible {
-  opacity: 1;
-  visibility: visible;
-}
-
 @media (max-width: 900px) {
   .roofline-body {
     flex-direction: column;
