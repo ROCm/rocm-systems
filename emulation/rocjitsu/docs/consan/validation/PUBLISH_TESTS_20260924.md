@@ -261,3 +261,17 @@ corrected runtime overlay. GCC also passes the final 135-test memory/cache/
 scratch selection. A fresh complete ASan/UBSan run is in progress in
 `sanitizers-final.log`; its results supersede earlier repaired attempts only
 once it completes.
+
+During the final run, launching all slow jobs together exceeded RCCL's inner
+150-second rank deadline. `368a20819d5` raises only ASan's rank/test budgets to
+600/660 seconds. All five cases then passed under concurrent suite load in
+86 seconds wall time (`asan-rccl-final.xml`). Numerical and sanitizer checks
+are unchanged.
+
+Rebuilding that harness also relinked the launcher while CTest was running;
+75 cases encountered unavailable executables/libraries in that interval.
+This was a campaign orchestration error. After all builds completed, all 75
+passed in `launcher-rerun.xml`. The full-run XML retains the original failures;
+qualification combines those explicit reruns with the full matrix rather than
+overwriting evidence. Both disabled instruction-timing tests also passed again
+on the final code.
