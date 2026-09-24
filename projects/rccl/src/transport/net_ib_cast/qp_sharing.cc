@@ -177,7 +177,7 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
     : &((struct ncclIbRecvComm*)g_IbCastCommTable[commId].comm)->base;
 }
 
-struct ncclIbNetCommBase* IbCastRouteCommFromImmData(struct ncclIbNetCommBase* base, uint32_t immDataHost) {
+struct ncclIbNetCommBase* IbCastRouteCommFromImmData(uint32_t immDataHost) {
   if (IbCastQpSharingEnabled()) {
     uint16_t immCommId = (immDataHost & WR_IMM_BYID_COMM_ID_MASK) >> WR_IMM_BYID_COMM_ID_BIT_POS;
     if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {

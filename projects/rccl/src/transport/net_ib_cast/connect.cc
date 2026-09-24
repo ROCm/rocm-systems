@@ -1182,7 +1182,8 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
         comm->devs[devIdx].base.ibDevN, comm->base.qps[q].devIndex, 1);
     if (entry == NULL) {
       WARN("NET/IB: %s: QP sharing PRIMARY sender commId=%u group=%d: shared-QP pool exhausted "
-           "registering qpIdx=%d/%d", __func__, comm->base.qpSharing.netIbCommId, comm->base.qpSharing.groupIdx, q, nqps);
+           "registering qpIdx=%d/%d",
+           __func__, comm->base.qpSharing.netIbCommId, comm->base.qpSharing.groupIdx, q, nqps);
       return ncclInternalError;
     }
     if (q == 0) {
@@ -2014,8 +2015,10 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
         if (flushSlot) {
           rComm->devs[i].gpuFlush.qp.qp = flushSlot->qp;
           flushSlot->refcount++;
-          INFO(NCCL_NET, "NET/IB: %s: SECONDARY recv sharing flush QP qpn=%u dev=%d group=%d refcount=%d commId=%u",
-               __func__, flushSlot->qp->qp_num, i, recvGroupIdx, flushSlot->refcount, rComm->base.qpSharing.netIbCommId);
+          INFO(NCCL_NET,
+               "NET/IB: %s: SECONDARY recv sharing flush QP qpn=%u dev=%d group=%d refcount=%d commId=%u",
+               __func__, flushSlot->qp->qp_num, i, recvGroupIdx, flushSlot->refcount,
+               rComm->base.qpSharing.netIbCommId);
         } else {
           WARN("NET/IB: %s: SECONDARY recv could not find shared flush QP for dev=%d group=%d commId=%u",
                __func__, i, recvGroupIdx, rComm->base.qpSharing.netIbCommId);
@@ -2065,7 +2068,8 @@ static ncclResult_t IbCastQpSharingReceiverRegisterPrimary(
         rComm->devs[devIdx].base.ibDevN, rComm->base.qps[q].devIndex, 1);
     if (entry == NULL) {
       WARN("NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d: shared-QP pool exhausted "
-           "registering qpIdx=%d/%d", __func__, rComm->base.qpSharing.netIbCommId, rComm->base.qpSharing.groupIdx, q, nqps);
+           "registering qpIdx=%d/%d",
+           __func__, rComm->base.qpSharing.netIbCommId, rComm->base.qpSharing.groupIdx, q, nqps);
       return ncclInternalError;
     }
     if (q == 0) {
