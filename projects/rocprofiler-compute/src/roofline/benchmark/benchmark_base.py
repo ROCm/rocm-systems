@@ -9,9 +9,7 @@
 # -----------------------------------------------------------------------------
 
 import csv
-import math
 from abc import ABC
-from collections import namedtuple
 from collections.abc import Generator
 from contextlib import contextmanager
 from ctypes import (
@@ -39,9 +37,6 @@ from utils import utils_profile
 # =============================================================================
 # GLOBAL VARIABLES
 # =============================================================================
-
-Stats = namedtuple("Stats", ["mean", "stdev", "confidence"])
-PerfMetrics = namedtuple("PerfMetrics", ["mean", "low", "high"])
 
 DEFAULT_WORKGROUP_SIZE = 256
 DEFAULT_WORKGROUPS = 8192
@@ -72,8 +67,6 @@ class Bench_base(ABC):
         self.csv_cols_map: dict[str, str]
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
-        self.event_start = hip.hipEventCreate()
-        self.event_stop = hip.hipEventCreate()
 
         self.cache_sizes = cache_sizes
 
@@ -170,19 +163,9 @@ class Bench_base(ABC):
 
         print(f"\r{int(pct * 100):3d}% {bar}", end="", flush=True)
 
-    def calc_stats(self, samples: list) -> Stats:
-        """Returns a named tuple with the mean, std deviation and confidence."""
-        mean = sum(samples) / len(samples)
-        m = max(samples)
-
-        stdev = 0.0
-
-        for i in range(len(samples)):
-            stdev += math.pow(samples[i] - mean, 2)
-
-        stdev = math.sqrt(stdev / len(samples))
-
-        return Stats(m, stdev, 1.96 * stdev / math.sqrt(len(samples)))
+    def calc_stats(self, samples: list) -> float:
+        """Returns the peak (max) value from the samples."""
+        return max(samples)
 
     class Program:
         """Helper class for loading and compiling kernels."""
@@ -417,7 +400,7 @@ class Bench_base(ABC):
     # -----------------------------------------------------------------------------
 
     # HBM bandwidth benchmark
-    def hbm_bw_benchmark(self, device: int) -> PerfMetrics:
+    def hbm_bw_benchmark(self, device: int) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         hip.hipSetDevice(device)
 
@@ -464,28 +447,21 @@ class Bench_base(ABC):
             [d_src, c_int64(num_steps)],
         )
 
-        stats = self.calc_stats(samples)
+        peak = self.calc_stats(samples)
 
-        mean = stats.mean
-        stdev = stats.stdev
-
-        perf_metrics = PerfMetrics(
-            mean, mean - stats.confidence, mean + stats.confidence
-        )
-
-        event_ms = total_bytes / mean / 1e6
+        event_ms = total_bytes / peak / 1e6
 
         print(
             f"HBM BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
-            f"mean:{mean:.1f} GB/sec, stdev:{stdev:.1f} GB/sec"
+            f"peak:{peak:.1f} GB/sec"
         )
 
-        return perf_metrics
+        return peak
 
     # Generic cache bandwidth benchmark
-    def cache_bw_bench(self, device: int, type: str, iters: int) -> PerfMetrics:
+    def cache_bw_bench(self, device: int, type: str, iters: int) -> float:
         hip.hipSetDevice(device)
 
         num_experiments = DEFAULT_NUM_EXPERIMENTS
@@ -526,43 +502,37 @@ class Bench_base(ABC):
             [mem_block, dummy, iters],
         )
 
-        stats = self.calc_stats(samples)
-        mean = stats.mean
-        stdev = stats.stdev
+        peak = self.calc_stats(samples)
 
-        perf_metrics = PerfMetrics(
-            mean, mean - stats.confidence, mean + stats.confidence
-        )
-
-        event_ms = total_bytes / mean / 1e6
+        event_ms = total_bytes / peak / 1e6
 
         print(
             f"{type} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
-            f"mean:{mean:.1f} GB/sec, stdev:{stdev:1f} GB/sec"
+            f"peak:{peak:.1f} GB/sec"
         )
 
-        return perf_metrics
+        return peak
 
     # MALL cache bandwidth benchmark
-    def mall_bw_bench(self, device: int) -> PerfMetrics:
+    def mall_bw_bench(self, device: int) -> float:
         return self.cache_bw_bench(device, "MALL", 1)
 
     # L0 cache bandwidth benchmark
-    def l0_bw_bench(self, device: int) -> PerfMetrics:
+    def l0_bw_bench(self, device: int) -> float:
         return self.cache_bw_bench(device, "L0", 100)
 
     # L1 cache bandwidth benchmark
-    def l1_bw_bench(self, device: int) -> PerfMetrics:
+    def l1_bw_bench(self, device: int) -> float:
         return self.cache_bw_bench(device, "L1", 100)
 
     # L2 cache bandwidth benchmark
-    def l2_bw_bench(self, device: int) -> PerfMetrics:
+    def l2_bw_bench(self, device: int) -> float:
         return self.cache_bw_bench(device, "L2", 10)
 
     # LDS cache bandwidth benchmark
-    def lds_bw_benchmark(self, device: int) -> PerfMetrics:
+    def lds_bw_benchmark(self, device: int) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         workgroup_size = DEFAULT_WORKGROUP_SIZE
 
@@ -595,27 +565,21 @@ class Bench_base(ABC):
             [iters, dummy],
         )
 
-        stats = self.calc_stats(samples)
-        mean = stats.mean
-        stdev = stats.stdev
+        peak = self.calc_stats(samples)
 
-        perf_metrics = PerfMetrics(
-            mean, mean - stats.confidence, mean + stats.confidence
-        )
-
-        event_ms = total_bytes / mean / 1e6
+        event_ms = total_bytes / peak / 1e6
 
         print(
             f"LDS BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
-            f"mean:{mean:.1f} GB/sec, stdev:{stdev:1f} GB/sec"
+            f"peak:{peak:.1f} GB/sec"
         )
 
-        return perf_metrics
+        return peak
 
     # Generic FLOPs benchmark
-    def flops_bench(self, device: int, type: str, unit: str, rate: int) -> PerfMetrics:
+    def flops_bench(self, device: int, type: str, unit: str, rate: int) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         workgroup_size = DEFAULT_WORKGROUP_SIZE
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
@@ -664,28 +628,22 @@ class Bench_base(ABC):
             [memblock, iterations],
         )
 
-        stats = self.calc_stats(samples)
-        mean = stats.mean
-        stdev = stats.stdev
+        peak = self.calc_stats(samples)
 
-        perf_metrics = PerfMetrics(
-            mean, mean - stats.confidence, mean + stats.confidence
-        )
-
-        event_ms = total_flops / mean / 1e6
+        event_ms = total_flops / peak / 1e6
 
         print(
             f"Peak VALU {unit}s ({type}), GPU ID: {device}, "
             f"workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"{unit}:{total_flops}, duration:{event_ms:.1f} ms, "
-            f"mean:{mean:.1f} {rate}, stdev={stdev:.1f} GFLOPS"
+            f"peak:{peak:.1f} {rate}"
         )
 
-        return perf_metrics
+        return peak
 
     # Generic matrix operations benchmark
-    def matrix_bench(self, device: int, type: str, unit: str, rate: int) -> PerfMetrics:
+    def matrix_bench(self, device: int, type: str, unit: str, rate: int) -> float:
         experiments = DEFAULT_NUM_EXPERIMENTS
         iters = 2000
 
@@ -735,78 +693,71 @@ class Bench_base(ABC):
             [iters, dummy],
         )
 
-        stats = self.calc_stats(samples)
-        mean = stats.mean
-        stdev = stats.stdev
+        peak = self.calc_stats(samples)
 
-        perf_metrics = PerfMetrics(
-            mean, mean - stats.confidence, mean + stats.confidence
-        )
-
-        event_ms = total_flops / mean / 1e6
+        event_ms = total_flops / peak / 1e6
 
         print(
             f"Peak {self.MATRIX_OPS_TYPE} {unit}s ({type}), GPU ID: {device}, "
             f"workgroupSize:{workgroup_size}, workgroups:{workgroups}, "
             f"experiments:{experiments}, {unit}:{total_flops}, "
-            f"duration:{event_ms:.2f} ms, mean:{mean:.1f} {rate}, "
-            f"stdev:{stdev:.1f} GFLOPS"
+            f"duration:{event_ms:.2f} ms, peak:{peak:.1f} {rate}"
         )
 
-        return perf_metrics
+        return peak
 
-    def matrix_f32_bench(self, device: int) -> PerfMetrics:
+    def matrix_f32_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F32", "FLOP", "GFLOPS")
 
-    def matrix_f16_bench(self, device: int) -> PerfMetrics:
+    def matrix_f16_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F16", "FLOP", "GFLOPS")
 
-    def matrix_bf16_bench(self, device: int) -> PerfMetrics:
+    def matrix_bf16_bench(self, device: int) -> float:
         return self.matrix_bench(device, "BF16", "FLOP", "GFLOPS")
 
-    def matrix_f64_bench(self, device: int) -> PerfMetrics:
+    def matrix_f64_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F64", "FLOP", "GFLOPS")
 
-    def matrix_f8_bench(self, device: int) -> PerfMetrics:
+    def matrix_f8_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F8", "FLOP", "GFLOPS")
 
-    def matrix_i8_bench(self, device: int) -> PerfMetrics:
+    def matrix_i8_bench(self, device: int) -> float:
         return self.matrix_bench(device, "I8", "IOP", "GOPS")
 
-    def matrix_f4_bench(self, device: int) -> PerfMetrics:
+    def matrix_f4_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F4", "FLOP", "GFLOPS")
 
-    def matrix_f6_bench(self, device: int) -> PerfMetrics:
+    def matrix_f6_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F6", "FLOP", "GFLOPS")
 
-    def matrix_f6f4_bench(self, device: int) -> PerfMetrics:
+    def matrix_f6f4_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F6F4", "FLOP", "GFLOPS")
 
-    def fp16_benchmark(self, device: int) -> PerfMetrics:
+    def fp16_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "FP16", "FLOP", "GFLOPS")
 
-    def bf16_benchmark(self, device: int) -> PerfMetrics:
+    def bf16_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "BF16", "FLOP", "GFLOPS")
 
-    def fp32_benchmark(self, device: int) -> PerfMetrics:
+    def fp32_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "FP32", "FLOP", "GFLOPS")
 
-    def fp64_benchmark(self, device: int) -> PerfMetrics:
+    def fp64_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "FP64", "FLOP", "GFLOPS")
 
-    def int8_benchmark(self, device: int) -> PerfMetrics:
+    def int8_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "INT8", "IOP", "GOPS")
 
-    def int32_benchmark(self, device: int) -> PerfMetrics:
+    def int32_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "INT32", "IOP", "GOPS")
 
-    def int64_benchmark(self, device: int) -> PerfMetrics:
+    def int64_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
-    def run_benchmark(self, device: int) -> dict[PerfMetrics]:
+    def run_benchmark(self, device: int) -> dict[str, float]:
         """
         Run the roofline tests on the specified device.
-        Returns a dictionary of PerfMetrics.
+        Returns a dictionary mapping test name to its peak performance.
         """
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
@@ -819,16 +770,16 @@ class Bench_base(ABC):
             for name, func in self.tests.items():
                 if name in self.unsupported_data_types:
                     print(f"Skipping {name}")
-                    metrics = PerfMetrics(0, 0, 0)
+                    peak = 0.0
                 else:
-                    metrics = func(device)
+                    peak = func(device)
 
-                metrics_dict[name] = metrics
+                metrics_dict[name] = peak
 
             print("GPU Benchmarking completed")
             return metrics_dict
 
-    def dump_csv(self, metrics: dict[PerfMetrics], file_path: str) -> None:
+    def dump_csv(self, metrics: dict[str, float], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
         with open(file_path, "w", newline="", encoding="utf-8") as f:
@@ -840,15 +791,11 @@ class Bench_base(ABC):
             row = ["device"]
             for t in types:
                 row.append(self.csv_cols_map[t])
-                row.append(self.csv_cols_map[t] + "Low")
-                row.append(self.csv_cols_map[t] + "High")
 
             writer.writerow(row)
 
             row = [self.device_id]
             for t in types:
-                row.append(metrics[t].mean)
-                row.append(metrics[t].low)
-                row.append(metrics[t].high)
+                row.append(metrics[t])
 
             writer.writerow(row)
