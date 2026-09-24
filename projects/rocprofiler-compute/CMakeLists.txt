@@ -426,6 +426,13 @@ add_test(
         ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_membw
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_membw.xml
+        ${COV_OPTION} tests/integration/test_profile_membw.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -444,6 +451,7 @@ set_tests_properties(
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
     test_profile_triton_trace
+    test_profile_membw
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -1075,6 +1083,7 @@ if(${ENABLE_COVERAGE})
         test_profile_roofline_validation
         test_profile_section
         test_profile_sets_func
+        test_profile_membw
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads

@@ -26,6 +26,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added `rocprof-compute analyze --verify-deps`, which reports any missing analysis dependencies.
 
+* Added Memory Bandwidth Analysis for gfx950 under `--experimental --membw-analysis`. Profile with the flag to collect block 30 counters; analyze detects the data automatically and annotates active GL1/GL2/EA stall bottlenecks on the memory chart with a guidance panel.
+
 ### Changed
 
 * Dispatch IDs now start at 1 instead of 0.
