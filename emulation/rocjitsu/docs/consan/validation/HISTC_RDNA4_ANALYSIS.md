@@ -78,6 +78,22 @@ python emulation/rocjitsu/tests/dbi/consan/consan_validation.py --target gfx1201
   --allow-destructive --artifact-root /path/to/fresh-artifacts
 ```
 
+## Checks for regressions in existing green rows
+
+Both fixes affect shared access/retention paths, so two other workloads were
+rerun with their established presets and ordinary eight-bank budget:
+
+| Workload | Preset | Strict clean | Fault detections | Evidence / health |
+| --- | --- | --- | --- | --- |
+| Stream-K arrival | higher | Pass | 8/8 | Complete; healthy |
+| Production FP16 matmul | high | Pass | 8/8 | Complete; healthy |
+
+Stream-K exercises atomic publication ordering and the corresponding banked
+synchronization metadata. FP16 matmul exercises ordinary LDS barrier ordering
+and the production-size numerical oracle. Their existing green qualifications
+survive the histogram fixes. Artifacts are in `regression/`, with an aggregate
+`regression-audit.json` checking all 16 trials and retaining hook hashes.
+
 ## Verification and artifacts
 
 - Capability repair: `4e3ce0b6e0e`.
@@ -94,5 +110,8 @@ python emulation/rocjitsu/tests/dbi/consan/consan_validation.py --target gfx1201
   fault results, aggregate acceptance, coverage, health, and provenance.
 - Hook SHA-256 after both fixes:
   `cf1c6916f8ec77ae42f334dbb4d8d20dd46b7259ca6e0be1fdb2394f6c210319`.
+
+The machine-readable `qualification-audit.json` checks clean acceptance, all
+32 fault trials’ completeness and GPU health, detection counts, and hook hashes.
 
 See [STATUS_RDNA4.md](STATUS_RDNA4.md) for the latest qualification state.
