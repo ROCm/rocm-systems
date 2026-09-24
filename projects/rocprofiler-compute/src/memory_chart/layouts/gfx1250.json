@@ -1,0 +1,204 @@
+{
+    "schema_version": 2,
+    "arch": "gfx1250",
+    "_doc": "Layout: col0=CU | edges | col1=[TCP(LDS+GL0),SQC(ICache+DCache)] | edges | col2=GL1 | edges | col3=GLARB | edges | col4=GL2 | edges | col5=EA/DF | edges | col6=[HBM,IO,HDM,GMI]",
+    "blocks": [
+        {
+            "id": "cu",
+            "title": "Compute Units",
+            "column": 0,
+            "order": 0,
+            "content": [
+                {"metric": "Wavefront Occupancy", "title": "Wave Occ", "category": "util"},
+                {"metric": "VGPR", "title": "vGPRs", "category": "util"},
+                {"metric": "SGPR", "title": "sGPRs", "category": "util"},
+                {"metric": "LDS Allocation", "title": "LDS Alloc", "category": "util"},
+                {"metric": "Scratch Allocation", "title": "Scratch", "category": "util"},
+                {"metric": "Workgroups", "title": "Workgroups", "category": "util"}
+            ]
+        },
+        {
+            "id": "tcp",
+            "title": "TCP",
+            "column": 1,
+            "order": 0,
+            "children": ["lds", "gl0"],
+            "content": []
+        },
+        {
+            "id": "lds",
+            "title": "LDS",
+            "column": 1,
+            "content": [
+                {"metric": "LDS Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "LDS Bank Conflict Stall Rate", "title": "Bank Conflict Stall", "category": "stall", "unit": "%"},
+                {"metric": "LDS Load Bandwidth", "title": "Load BW", "category": "bw", "unit": "Bytes/s"},
+                {"metric": "LDS Store Bandwidth", "title": "Store BW", "category": "bw", "unit": "Bytes/s"},
+                {"metric": "LDS Atomic Bandwidth", "title": "Atomic BW", "category": "bw", "unit": "Bytes/s"}
+            ]
+        },
+        {
+            "id": "gl0",
+            "title": "GL0",
+            "column": 1,
+            "content": [
+                {"metric": "GL0 Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "GL0 Hit Rate", "title": "Hit Rate", "category": "hit", "unit": "%"}
+            ]
+        },
+        {
+            "id": "sqc",
+            "title": "SQC",
+            "column": 1,
+            "order": 1,
+            "children": ["icache", "dcache"],
+            "content": []
+        },
+        {
+            "id": "icache",
+            "title": "Instruction Cache",
+            "column": 1,
+            "content": [
+                {"metric": "ICache Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "ICache Hit Rate", "title": "Hit Rate", "category": "hit", "unit": "%"},
+                {"metric": "ICache Latency", "title": "Latency", "category": "util", "unit": "cycles"},
+                {"metric": "ICache Request Stall Rate", "title": "Stall Rate", "category": "stall", "unit": "%"},
+                {"metric": "ICache-GL1 Request Latency", "title": "GL1 Req Latency", "category": "util", "unit": "cycles"}
+            ]
+        },
+        {
+            "id": "dcache",
+            "title": "Scalar Data Cache",
+            "column": 1,
+            "content": [
+                {"metric": "Dcache Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "Dcache Hit Rate", "title": "Hit Rate", "category": "hit", "unit": "%"},
+                {"metric": "Dcache Latency", "title": "Latency", "category": "util", "unit": "cycles"},
+                {"metric": "Dcache Request Stall Rate", "title": "Stall Rate", "category": "stall", "unit": "%"},
+                {"metric": "Dcache Request Bandwidth", "title": "BW", "category": "bw", "unit": "Bytes/s"},
+                {"metric": "Dcache-GL1 Request Latency", "title": "GL1 Req Latency", "category": "util", "unit": "cycles"}
+            ]
+        },
+        {
+            "id": "gl1",
+            "title": "GL1",
+            "column": 2,
+            "order": 0,
+            "content": [
+                {"metric": "GL1A Utilization", "title": "GL1A Util", "category": "util", "unit": "%"},
+                {"metric": "GL1C Utilization", "title": "GL1C Util", "category": "util", "unit": "%"},
+                {"metric": "GL1C Buffer Full Stall", "title": "Buffer Full Stall", "category": "stall", "unit": "%"}
+            ]
+        },
+        {
+            "id": "glarb",
+            "title": "GLARB",
+            "column": 3,
+            "order": 0,
+            "content": [
+                {"metric": "GLARBA Utilization", "title": "GLARBA Util", "category": "util", "unit": "%"},
+                {"metric": "GLARBC Utilization", "title": "GLARBC Util", "category": "util", "unit": "%"},
+                {"metric": "GLARBC Buffer Full Stall", "title": "Buffer Full Stall", "category": "stall", "unit": "%"}
+            ]
+        },
+        {
+            "id": "gl2",
+            "title": "GL2",
+            "column": 4,
+            "order": 0,
+            "content": [
+                {"metric": "GL2A Utilization", "title": "GL2A Util", "category": "util", "unit": "%"},
+                {"metric": "GL2C Hit Rate", "title": "Hit Rate", "category": "hit", "unit": "%"}
+            ]
+        },
+        {
+            "id": "ea_df",
+            "title": "EA/DF",
+            "column": 5,
+            "order": 0,
+            "content": [
+                {"metric": "EA Utilization", "title": "EA Util", "category": "util", "unit": "%"},
+                {"metric": "EA Stall Rate", "title": "Stall Rate", "category": "stall", "unit": "%"}
+            ]
+        },
+        {
+            "id": "hbm",
+            "title": "HBM",
+            "column": 6,
+            "order": 0,
+            "content": []
+        },
+        {
+            "id": "io",
+            "title": "IO",
+            "column": 6,
+            "order": 1,
+            "content": []
+        },
+        {
+            "id": "hdm",
+            "title": "HDM",
+            "column": 6,
+            "order": 2,
+            "content": []
+        },
+        {
+            "id": "gmi",
+            "title": "GMI",
+            "column": 6,
+            "order": 3,
+            "content": []
+        }
+    ],
+    "arrows": [
+        {"from": "cu", "to": "lds", "direction": "backward", "metric": "LDS Load Requests", "title": "Load", "category": "read"},
+        {"from": "cu", "to": "lds", "direction": "forward", "metric": "LDS Store Requests", "title": "Store", "category": "write"},
+        {"from": "cu", "to": "lds", "direction": "both", "metric": "LDS Atomic Requests", "title": "Atomic", "category": "atomic"},
+        {"from": "cu", "to": "lds", "direction": "backward", "metric": "Async Load Requests", "title": "Async Ld", "category": "read"},
+        {"from": "cu", "to": "lds", "direction": "forward", "metric": "Async Store Requests", "title": "Async St", "category": "write"},
+        {"from": "cu", "to": "lds", "direction": "backward", "metric": "TDM Load Requests", "title": "TDM Ld", "category": "read"},
+        {"from": "cu", "to": "lds", "direction": "forward", "metric": "TDM Store Requests", "title": "TDM St", "category": "write"},
+
+        {"from": "cu", "to": "gl0", "direction": "backward", "metric": "GL0 Read Requests", "title": "Read", "category": "read"},
+        {"from": "cu", "to": "gl0", "direction": "forward", "metric": "GL0 Write Requests", "title": "Write", "category": "write"},
+        {"from": "cu", "to": "gl0", "direction": "both", "metric": "GL0 Atomic Requests", "title": "Atomic", "category": "atomic"},
+
+        {"from": "cu", "to": "icache", "direction": "backward", "metric": "ICache Requests", "title": "ICACHE", "category": "read"},
+        {"from": "cu", "to": "dcache", "direction": "backward", "metric": "Dcache Requests", "title": "SMEM", "category": "read"},
+
+        {"from": "lds", "to": "gl1", "direction": "backward", "metric": "Async Load Bandwidth", "title": "Async Load", "category": "read"},
+        {"from": "lds", "to": "gl1", "direction": "forward", "metric": "Async Store Bandwidth", "title": "Async Store", "category": "write"},
+        {"from": "lds", "to": "gl1", "direction": "backward", "metric": "TDM Load Bandwidth", "title": "TDM Load", "category": "read"},
+        {"from": "lds", "to": "gl1", "direction": "forward", "metric": "TDM Store Bandwidth", "title": "TDM Store", "category": "write"},
+
+        {"from": "gl0", "to": "gl1", "direction": "backward", "metric": "GL0-GL1 Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "gl0", "to": "gl1", "direction": "forward", "metric": "GL0-GL1 Write Bandwidth", "title": "Write BW", "category": "write"},
+        {"from": "gl0", "to": "gl1", "direction": "both", "metric": "GL0-GL1 Atomic Bandwidth", "title": "Atomic BW", "category": "atomic"},
+
+        {"from": "icache", "to": "gl1", "direction": "backward", "metric": "ICache-GL1 Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "dcache", "to": "gl1", "direction": "backward", "metric": "Dcache-GL1 Read Bandwidth", "title": "Read BW", "category": "read"},
+
+        {"from": "gl1", "to": "glarb", "direction": "backward", "metric": "GL1-GLARB Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "gl1", "to": "glarb", "direction": "forward", "metric": "GL1-GLARB Write Bandwidth", "title": "Write BW", "category": "write"},
+
+        {"from": "glarb", "to": "gl2", "direction": "backward", "metric": "GLARB-GL2 Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "glarb", "to": "gl2", "direction": "forward", "metric": "GLARB-GL2 Write Bandwidth", "title": "Write BW", "category": "write"},
+        {"from": "glarb", "to": "gl2", "direction": "both", "metric": "GLARB-GL2 Atomic Bandwidth", "title": "Atomic BW", "category": "atomic"},
+
+        {"from": "gl2", "to": "ea_df", "direction": "backward", "metric": "GL2-EA Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "gl2", "to": "ea_df", "direction": "forward", "metric": "GL2-EA Write Bandwidth", "title": "Write BW", "category": "write"},
+        {"from": "gl2", "to": "ea_df", "direction": "both", "metric": "GL2-EA Atomic Bandwidth", "title": "Atomic BW", "category": "atomic"},
+
+        {"from": "ea_df", "to": "hbm", "direction": "backward", "metric": "DRAM Read Bandwidth", "title": "DRAM Read", "category": "read"},
+        {"from": "ea_df", "to": "hbm", "direction": "forward", "metric": "DRAM Write Bandwidth", "title": "DRAM Write", "category": "write"},
+
+        {"from": "ea_df", "to": "io", "direction": "backward", "metric": "IO Read Bandwidth", "title": "IO Read", "category": "read"},
+        {"from": "ea_df", "to": "io", "direction": "forward", "metric": "IO Write Bandwidth", "title": "IO Write", "category": "write"},
+
+        {"from": "ea_df", "to": "hdm", "direction": "backward", "metric": "HDM Read Bandwidth", "title": "HDM Read", "category": "read"},
+        {"from": "ea_df", "to": "hdm", "direction": "forward", "metric": "HDM Write Bandwidth", "title": "HDM Write", "category": "write"},
+
+        {"from": "ea_df", "to": "gmi", "direction": "backward", "metric": "GMI Read Bandwidth", "title": "GMI Read", "category": "read"},
+        {"from": "ea_df", "to": "gmi", "direction": "forward", "metric": "GMI Write Bandwidth", "title": "GMI Write", "category": "write"}
+    ]
+}

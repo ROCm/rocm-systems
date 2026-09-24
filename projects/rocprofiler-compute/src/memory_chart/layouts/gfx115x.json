@@ -1,0 +1,114 @@
+{
+    "schema_version": 2,
+    "arch": "gfx115x",
+    "_doc": "Layout: col0=CU | edges | col1=[LDS,GL0(TCP),SQC] | edges | col2=GL1 | edges | col3=GL2 | edges | col4=GCEA | edges | col5=DRAM",
+    "blocks": [
+        {
+            "id": "cu",
+            "title": "Compute Units",
+            "column": 0,
+            "order": 0,
+            "content": [
+                {"metric": "Wavefront Occupancy", "title": "Wave Occ", "category": "util"},
+                {"metric": "VGPR", "title": "vGPRs", "category": "util"},
+                {"metric": "SGPR", "title": "sGPRs", "category": "util"},
+                {"metric": "Scratch Allocation", "title": "Scratch", "category": "util"},
+                {"metric": "LDS Allocation", "title": "LDS Alloc", "category": "util"},
+                {"metric": "Workgroups", "title": "Workgroups", "category": "util"}
+            ]
+        },
+        {
+            "id": "lds",
+            "title": "LDS",
+            "column": 1,
+            "order": 0,
+            "content": [
+                {"metric": "LDS Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "LDS Estimated Bandwidth", "title": "BW", "category": "bw", "unit": "Bytes/s"},
+                {"metric": "LDS Bank Conflict Rate", "title": "Bank Conflict", "category": "stall", "unit": "%"}
+            ]
+        },
+        {
+            "id": "gl0_tcp",
+            "title": "GL0 (TCP Cache)",
+            "column": 1,
+            "order": 1,
+            "content": [
+                {"metric": "GL0 Cache Hit Rate (TCP Cache)", "title": "Hit Rate", "category": "hit", "unit": "%"},
+                {"metric": "GL0 Cache BW (TCP Cache)", "title": "BW", "category": "bw", "unit": "Bytes/s"}
+            ]
+        },
+        {
+            "id": "sqc",
+            "title": "SQC",
+            "column": 1,
+            "order": 2,
+            "content": [
+                {"metric": "ICache Hit Rate", "title": "ICache Hit Rate", "category": "hit", "unit": "%"},
+                {"metric": "DCache Hit Rate", "title": "DCache Hit Rate", "category": "hit", "unit": "%"}
+            ]
+        },
+        {
+            "id": "gl1",
+            "title": "GL1 Cache",
+            "column": 2,
+            "order": 0,
+            "content": [
+                {"metric": "GL1 Cache Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "GL1 Cache Hit Rate", "title": "Hit Rate", "category": "hit", "unit": "%"},
+                {"metric": "GL1 Cache Stall GL2 Backpressure", "title": "GL2 Stall", "category": "stall", "unit": "%"}
+            ]
+        },
+        {
+            "id": "gl2",
+            "title": "GL2 Cache",
+            "column": 3,
+            "order": 0,
+            "content": [
+                {"metric": "GL2 Cache Utilization", "title": "Util", "category": "util", "unit": "%"},
+                {"metric": "GL2 Cache Hit Rate", "title": "Hit Rate", "category": "hit", "unit": "%"}
+            ]
+        },
+        {
+            "id": "gcea",
+            "title": "GCEA",
+            "column": 4,
+            "order": 0,
+            "content": [
+                {"metric": "SysArb Utilization", "title": "SysArb Util", "category": "util", "unit": "%"},
+                {"metric": "SysArb Stall Rate", "title": "SysArb Stall", "category": "stall", "unit": "%"}
+            ]
+        },
+        {
+            "id": "dram",
+            "title": "DRAM",
+            "column": 5,
+            "order": 0,
+            "content": []
+        }
+    ],
+    "arrows": [
+        {"from": "cu", "to": "lds", "direction": "backward", "metric": "LDS Req", "title": "Request", "category": "read"},
+
+        {"from": "cu", "to": "gl0_tcp", "direction": "backward", "metric": "TCP Read Requests", "title": "Read", "category": "read"},
+        {"from": "cu", "to": "gl0_tcp", "direction": "forward", "metric": "TCP Write Requests", "title": "Write", "category": "write"},
+
+        {"from": "cu", "to": "sqc", "direction": "backward", "metric": "ICache Requests", "title": "ICache Read", "category": "read"},
+        {"from": "cu", "to": "sqc", "direction": "backward", "metric": "DCache Requests", "title": "DCache Read", "category": "read"},
+
+        {"from": "gl0_tcp", "to": "gl1", "direction": "backward", "metric": "TCP-GL1 Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "gl0_tcp", "to": "gl1", "direction": "forward", "metric": "TCP-GL1 Write Bandwidth", "title": "Write BW", "category": "write"},
+
+        {"from": "sqc", "to": "gl1", "direction": "backward", "metric": "ICache-GL1 Read Bandwidth", "title": "ICache Read BW", "category": "read"},
+        {"from": "sqc", "to": "gl1", "direction": "backward", "metric": "DCache-GL1 Read Bandwidth", "title": "DCache Read BW", "category": "read"},
+
+        {"from": "gl1", "to": "gl2", "direction": "backward", "metric": "GL1-GL2 Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "gl1", "to": "gl2", "direction": "forward", "metric": "GL1-GL2 Write Bandwidth", "title": "Write BW", "category": "write"},
+
+        {"from": "gl2", "to": "gcea", "direction": "backward", "metric": "GL2-Fabric Read BW", "title": "Read BW", "category": "read"},
+        {"from": "gl2", "to": "gcea", "direction": "forward", "metric": "GL2-Fabric Write BW", "title": "Write BW", "category": "write"},
+
+        {"from": "gcea", "to": "dram", "direction": "backward", "metric": "DRAM Read Bandwidth", "title": "Read BW", "category": "read"},
+        {"from": "gcea", "to": "dram", "direction": "forward", "metric": "DRAM Write Bandwidth", "title": "Write BW", "category": "write"}
+    ]
+}
