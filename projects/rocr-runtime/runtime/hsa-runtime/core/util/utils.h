@@ -443,6 +443,8 @@ static __forceinline void store_fence() {
   _mm_sfence();
 #elif __has_builtin(__builtin_arm_dmb)
   __builtin_arm_dmb(0x2);  // oshst
+#elif defined(__riscv)
+  __asm__ __volatile__("fence ow, ow" ::: "memory");
 #else
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
@@ -453,6 +455,8 @@ static __forceinline void memory_fence() {
   _mm_mfence();
 #elif __has_builtin(__builtin_arm_dsb)
   __builtin_arm_dsb(0xf);  // sy
+#elif defined(__riscv)
+  __asm__ __volatile__("fence iorw, iorw" ::: "memory");
 #else
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 #endif
@@ -461,8 +465,8 @@ static __forceinline void memory_fence() {
 static __forceinline void cacheline_flush(const void* p) {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   _mm_clflush(p);
-#elif __has_builtin(__builtin_arm_dcimvac)
-  __builtin_arm_dcimvac(const_cast<void*>(p));
+#elif defined(__aarch64__) && defined(__linux__)
+  __asm__ __volatile__("dc civac, %0" ::"r"(p) : "memory");
 #else
 #warning "No cacheline_flush() implementation for this processor"
   (void)p;
