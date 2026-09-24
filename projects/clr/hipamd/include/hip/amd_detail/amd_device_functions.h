@@ -164,9 +164,15 @@ __device__ static inline unsigned int __lastbit_u32_u64(__hip_uint64_t input) {
 
 __device__ static inline unsigned int __bitextract_u32(unsigned int src0, unsigned int src1,
                                                        unsigned int src2) {
-  __hip_uint32_t offset = src1 & 31;
-  __hip_uint32_t width = src2 & 31;
-  return width == 0 ? 0 : (src0 << (32 - offset - width)) >> (32 - width);
+  // v_bfe_u32 is this function: it takes the offset from src1[4:0] and the width from src2[4:0],
+  // which is the same masking the shift form did by hand, and it already yields 0 for a width of
+  // 0, so the compare-and-select disappears along with the shifts.
+  //
+  // The shift form was only defined for offset + width <= 32; past that it shifted by a negative
+  // amount, so there is no previous behaviour to preserve outside that range.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ubfe))
+    return __builtin_amdgcn_ubfe(src0, src1, src2);
+  __builtin_trap();
 }
 
 __device__ static inline __hip_uint64_t __bitextract_u64(__hip_uint64_t src0, unsigned int src1,
