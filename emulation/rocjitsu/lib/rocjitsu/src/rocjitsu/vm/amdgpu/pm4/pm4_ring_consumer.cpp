@@ -24,6 +24,8 @@ Pm4RingStatus map(VmAccessOutcome outcome) {
     return Pm4RingStatus::Faulted;
   case VmAccessOutcome::Malformed:
     return Pm4RingStatus::Malformed;
+  case VmAccessOutcome::Revoked:
+    return Pm4RingStatus::Faulted;
   }
   return Pm4RingStatus::Malformed;
 }

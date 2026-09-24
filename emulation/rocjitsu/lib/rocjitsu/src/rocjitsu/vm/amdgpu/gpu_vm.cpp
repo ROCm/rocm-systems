@@ -113,7 +113,8 @@ access_translated(const AddressSpaceTranslator &translator, PhysicalMemoryAccess
             : translator.translate(address + completed_bytes, bytes.size() - completed_bytes,
                                    access);
     if (!translated) {
-      if (fault_reporter && translated.outcome != VmAccessOutcome::Unavailable)
+      if (fault_reporter && translated.outcome != VmAccessOutcome::Unavailable &&
+          translated.outcome != VmAccessOutcome::Revoked)
         fault_reporter(address + completed_bytes, access);
       return translated.outcome;
     }
@@ -207,7 +208,12 @@ VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable, .translation = {}};
   std::shared_lock state_lock(access_state_->mutex);
-  VmTranslationResult translated = !access_state_->valid || translator_ == nullptr
+  VmTranslationResult translated = !access_state_->valid
+                                       ? VmTranslationResult{
+                                             .outcome = VmAccessOutcome::Revoked,
+                                             .translation = {},
+                                         }
+                                   : translator_ == nullptr
                                        ? VmTranslationResult{
                                              .outcome = VmAccessOutcome::Unavailable,
                                              .translation = {},
@@ -215,6 +221,10 @@ VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
                                        : translator_->translate(address, size, access);
   report_terminal_fault(address, access, translated.outcome);
   return translated;
+}
+
+bool GpuVmAccess::revoked() const {
+  return access_state_ != nullptr && !access_state_->valid.load(std::memory_order_acquire);
 }
 
 bool GpuVmAccess::try_read_contiguous(uint64_t address, std::span<std::byte> bytes) const {
@@ -282,7 +292,9 @@ VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAc
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (translator_ == nullptr)
     return VmAccessOutcome::Unavailable;
   if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address) {
     if (report_fault)
@@ -314,7 +326,7 @@ VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAc
 void GpuVmAccess::report_terminal_fault(uint64_t address, VmAccessKind access,
                                         VmAccessOutcome outcome) const {
   if (fault_reporter_ && outcome != VmAccessOutcome::Complete &&
-      outcome != VmAccessOutcome::Unavailable) {
+      outcome != VmAccessOutcome::Unavailable && outcome != VmAccessOutcome::Revoked) {
     fault_reporter_(address, access);
   }
 }
@@ -332,7 +344,9 @@ VmAccessOutcome GpuVmAccess::read(uint64_t address, std::span<std::byte> bytes,
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (translator_ == nullptr || physical_memory_ == nullptr)
     return VmAccessOutcome::Unavailable;
   return access_translated(*translator_, *physical_memory_, address, bytes, completed_bytes, access,
                            fault_reporter_);
@@ -348,7 +362,9 @@ VmAccessOutcome GpuVmAccess::write(uint64_t address, std::span<const std::byte> 
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (translator_ == nullptr || physical_memory_ == nullptr)
     return VmAccessOutcome::Unavailable;
   return access_translated(*translator_, *physical_memory_, address, bytes, completed_bytes,
                            VmAccessKind::Write, fault_reporter_);
@@ -363,7 +379,9 @@ AtomicLoadResult GpuVmAccess::atomic_load(uint64_t address, uint32_t width) cons
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return {.outcome = VmAccessOutcome::Revoked, .value = 0};
+  if (translator_ == nullptr || physical_memory_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
 
   const VmTranslationResult translated =
@@ -388,7 +406,9 @@ VmAccessOutcome GpuVmAccess::atomic_store(uint64_t address, uint32_t width, uint
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (translator_ == nullptr || physical_memory_ == nullptr)
     return VmAccessOutcome::Unavailable;
 
   const VmTranslationResult translated =
@@ -415,7 +435,9 @@ AtomicCompareExchangeResult GpuVmAccess::compare_exchange(uint64_t address, uint
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable};
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return {.outcome = VmAccessOutcome::Revoked};
+  if (translator_ == nullptr || physical_memory_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable};
 
   const VmTranslationResult translated =
@@ -443,7 +465,9 @@ GpuVmAccess::atomic_modify(uint64_t address, uint32_t width,
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (translator_ == nullptr || physical_memory_ == nullptr)
     return VmAccessOutcome::Unavailable;
 
   const VmTranslationResult translated =

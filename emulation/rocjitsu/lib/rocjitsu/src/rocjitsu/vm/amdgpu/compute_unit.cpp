@@ -1068,7 +1068,9 @@ template <bool EnableAsync>
     }
   };
 
-  std::optional<GpuVmAccess> vm_access;
+  std::optional<GpuVmAccess> fallback_vm_access;
+  const GpuVmAccess *vm_access = active->vm_access();
+  const bool using_retained_vm_access = vm_access != nullptr;
   if (active->address_space() || vmid != 0) {
     if (gpu_vm_ == nullptr) {
       drain_async_window();
@@ -1077,8 +1079,11 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    vm_access = active->address_space() ? gpu_vm_->snapshot(active->address_space())
-                                        : gpu_vm_->snapshot_vmid(vmid);
+    if (vm_access == nullptr) {
+      fallback_vm_access = active->address_space() ? gpu_vm_->snapshot(active->address_space())
+                                                   : gpu_vm_->snapshot_vmid(vmid);
+      vm_access = fallback_vm_access ? &*fallback_vm_access : nullptr;
+    }
     if (!vm_access) {
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -1088,7 +1093,7 @@ template <bool EnableAsync>
       return;
     }
   }
-  const bool vm_address_space = vm_access.has_value();
+  const bool vm_address_space = vm_access != nullptr;
 
   rj_code_binary_inst_t words[4];
   static_assert(sizeof(words) == InstructionCache::kFetchBytes,
@@ -1118,6 +1123,15 @@ template <bool EnableAsync>
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
+    if (fetch_outcome == VmAccessOutcome::Revoked) {
+      // Invalidation deliberately revokes pinned snapshots. Drop this wave's
+      // retained fast path so the next issue can capture the new translation
+      // epoch, or report a terminal fault if the binding is gone.
+      if (using_retained_vm_access)
+        active->set_vm_access({});
+      request_functional_yield();
+      return;
+    }
     if (fetch_outcome == VmAccessOutcome::Unavailable) {
       request_functional_yield();
       return;
@@ -1172,9 +1186,8 @@ template <bool EnableAsync>
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words, first.size(), first.begin());
-        issuer =
-            admission->inspect(*decoder_, inst_cache_, *memory_, vm_access ? &*vm_access : nullptr,
-                               active->pc, vmid, active->num_vgprs(), storage->has_accvgprs, first);
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+                                    active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }
     }

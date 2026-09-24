@@ -110,6 +110,8 @@ SdmaPacketExecutionOutcome map_outcome(VmAccessOutcome outcome) {
     return SdmaPacketExecutionOutcome::Faulted;
   case VmAccessOutcome::Malformed:
     return SdmaPacketExecutionOutcome::Malformed;
+  case VmAccessOutcome::Revoked:
+    return SdmaPacketExecutionOutcome::Faulted;
   }
   return SdmaPacketExecutionOutcome::Malformed;
 }

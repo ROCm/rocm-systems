@@ -306,6 +306,9 @@ struct DispatchEntry {
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
+  /// Immutable VM snapshot captured by the queue-service transaction that
+  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  std::shared_ptr<const GpuVmAccess> execution_access;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 

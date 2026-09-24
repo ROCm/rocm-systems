@@ -35,6 +35,7 @@ enum class VmAccessOutcome : uint8_t {
   Unavailable, ///< The transport/backing is temporarily unavailable; retry may succeed.
   Faulted,     ///< The mapping is absent or rejects the requested access.
   Malformed,   ///< The address, page-table encoding, or request is invalid.
+  Revoked,     ///< This snapshot was retired; the owner must recapture or terminate.
 };
 
 /// @brief Memory domain selected by a translation.
@@ -461,16 +462,22 @@ public:
   friend bool operator==(const VmCacheNamespace &, const VmCacheNamespace &) = default;
 };
 
-/// @brief Immutable, operation-scoped view of one GPU address-space binding.
+/// @brief Immutable view of one GPU address-space binding.
 ///
 /// @details The snapshot retains the translator and physical backing selected under the
 /// GpuVm lock.  A multi-page access therefore cannot observe half of an old
 /// root and half of its replacement.  Replacement or invalidation advances the
 /// cache namespace used by subsequent snapshots; an already-started operation
-/// is allowed to finish against the binding it captured.
+/// is allowed to finish against the binding it captured. Snapshots returned by
+/// snapshot_pinned() may be retained by longer transactions such as an admitted
+/// kernel dispatch, and remain on that root until the transaction ends or the
+/// address space is synchronously revoked. Operations on a revoked snapshot
+/// report @ref VmAccessOutcome::Revoked, never the retryable Unavailable outcome.
 class GpuVmAccess {
 public:
   [[nodiscard]] AddressSpaceInfo info() const { return info_; }
+  /// @brief Whether invalidation, unregister, or reset permanently retired this snapshot.
+  [[nodiscard]] bool revoked() const;
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
   }

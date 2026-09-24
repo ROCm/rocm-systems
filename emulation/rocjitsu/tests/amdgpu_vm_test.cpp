@@ -24,6 +24,7 @@
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
@@ -55,6 +56,7 @@ RJ_DIAGNOSTIC_POP
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <future>
 #include <limits>
@@ -878,6 +880,292 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
     for (const auto &wf : snap->snapshots())
       EXPECT_EQ(wf.mode_raw, mode_case.expected_mode);
   }
+}
+
+TEST(AqlDispatchTest, AdmittedWavesShareTheDispatchVmSnapshot) {
+  class SnapshotPlugin final : public ExecutionPlugin {
+  public:
+    SnapshotPlugin() : ExecutionPlugin("dispatch_vm_snapshot") {}
+
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+      const amdgpu::GpuVmAccess *access = wf.vm_access();
+      if (dispatched == 0)
+        shared_access = access;
+      ++dispatched;
+      all_share_access &= access != nullptr && access == shared_access;
+    }
+
+    uint32_t dispatched = 0;
+    const amdgpu::GpuVmAccess *shared_access = nullptr;
+    bool all_share_access = true;
+  };
+
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint32_t code[] = {kCdna5Endpgm};
+  VmFixture fixture("cdna5");
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<SnapshotPlugin>();
+  SnapshotPlugin *observed = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+  ASSERT_NO_THROW(fixture.engine->run());
+
+  EXPECT_EQ(observed->dispatched, 4u);
+  EXPECT_TRUE(observed->all_share_access);
+}
+
+TEST(AqlDispatchTest, InvalidatedAdmissionSnapshotRecapturesBeforeFirstFetch) {
+  class InvalidateOnDispatch final : public ExecutionPlugin {
+  public:
+    InvalidateOnDispatch(amdgpu::GpuVm &gpu_vm, amdgpu::AddressSpaceHandle address_space)
+        : ExecutionPlugin("invalidate_dispatch_vm_snapshot"), gpu_vm_(gpu_vm),
+          address_space_(address_space) {}
+
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) override {
+      if (!attempted_) {
+        attempted_ = true;
+        invalidated_ = gpu_vm_.invalidate(address_space_);
+      }
+    }
+
+    bool attempted() const { return attempted_; }
+    bool invalidated() const { return invalidated_; }
+
+  private:
+    amdgpu::GpuVm &gpu_vm_;
+    amdgpu::AddressSpaceHandle address_space_;
+    bool attempted_ = false;
+    bool invalidated_ = false;
+  };
+
+  constexpr uint32_t kProcessId = 77;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  VmFixture fixture("cdna5");
+  auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+  const amdgpu::AddressSpaceHandle address_space = fixture.soc_ptr->gpu_vm().register_translated(
+      kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+  ASSERT_TRUE(address_space);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InvalidateOnDispatch>(fixture.soc_ptr->gpu_vm(), address_space);
+  InvalidateOnDispatch *observed = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  const uint64_t kernel = fixture.write_kernel(0x1000, &kCdna5Endpgm, sizeof(kCdna5Endpgm));
+  test::AqlQueue queue(fixture.mem(), fixture.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, kProcessId);
+  queue.dispatch(kernel, /*grid_size=*/32, /*workgroup_size=*/32);
+
+  for (uint32_t step = 0; step < 100 && fixture.engine->step(); ++step) {
+  }
+
+  ASSERT_TRUE(observed->attempted());
+  ASSERT_TRUE(observed->invalidated());
+  EXPECT_TRUE(fixture.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
+  class InvalidateAfterFirstInstruction final : public ExecutionPlugin {
+  public:
+    InvalidateAfterFirstInstruction(amdgpu::GpuVm &gpu_vm, amdgpu::AddressSpaceHandle address_space,
+                                    amdgpu::GpuMemory &memory, uint64_t next_pc)
+        : ExecutionPlugin("invalidate_cached_dispatch_vm_snapshot"), gpu_vm_(gpu_vm),
+          address_space_(address_space), memory_(memory), next_pc_(next_pc) {}
+
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                         amdgpu::Wavefront &) override {
+      ++instruction_count_;
+      if (instruction_count_ == 1) {
+        memory_.write32(next_pc_, 0xBFB00000u); // CDNA5 s_endpgm.
+        invalidated_ = gpu_vm_.invalidate(address_space_);
+      }
+    }
+
+    uint32_t instruction_count() const { return instruction_count_; }
+    bool invalidated() const { return invalidated_; }
+
+  private:
+    amdgpu::GpuVm &gpu_vm_;
+    amdgpu::AddressSpaceHandle address_space_;
+    amdgpu::GpuMemory &memory_;
+    uint64_t next_pc_ = 0;
+    uint32_t instruction_count_ = 0;
+    bool invalidated_ = false;
+  };
+
+  constexpr uint32_t kProcessId = 77;
+  constexpr size_t kNopCount = 64;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  VmFixture fixture("cdna5");
+  auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+  const amdgpu::AddressSpaceHandle address_space = fixture.soc_ptr->gpu_vm().register_translated(
+      kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+  ASSERT_TRUE(address_space);
+
+  std::vector<uint32_t> code(kNopCount, SOPP_S_NOP);
+  code.push_back(kCdna5Endpgm);
+  const uint64_t kernel = fixture.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  const uint64_t entry_pc = kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InvalidateAfterFirstInstruction>(
+      fixture.soc_ptr->gpu_vm(), address_space, *fixture.mem(), entry_pc + sizeof(uint32_t));
+  InvalidateAfterFirstInstruction *observed = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  test::AqlQueue queue(fixture.mem(), fixture.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, kProcessId);
+  queue.dispatch(kernel, /*grid_size=*/32, /*workgroup_size=*/32);
+
+  for (uint32_t step = 0; step < 100 && fixture.engine->step(); ++step) {
+  }
+
+  ASSERT_TRUE(observed->invalidated());
+  EXPECT_EQ(observed->instruction_count(), 1u);
+  EXPECT_TRUE(fixture.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot) {
+  using namespace std::chrono_literals;
+
+  class InstructionGate final : public ExecutionPlugin {
+  public:
+    InstructionGate() : ExecutionPlugin("dispatch_vm_replacement_gate") {}
+
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                          amdgpu::Wavefront &) override {
+      instruction_count_.fetch_add(1, std::memory_order_relaxed);
+      std::unique_lock lock(mutex_);
+      if (released_)
+        return;
+      ++entered_;
+      changed_.notify_all();
+      changed_.wait(lock, [this] { return released_; });
+    }
+
+    bool wait_for_entries(size_t count, std::chrono::milliseconds timeout) {
+      std::unique_lock lock(mutex_);
+      return changed_.wait_for(lock, timeout, [&] { return entered_ >= count; });
+    }
+
+    void release() {
+      std::lock_guard lock(mutex_);
+      released_ = true;
+      changed_.notify_all();
+    }
+
+    uint64_t instruction_count() const {
+      return instruction_count_.load(std::memory_order_relaxed);
+    }
+
+  private:
+    std::atomic<uint64_t> instruction_count_{0};
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    size_t entered_ = 0;
+    bool released_ = false;
+  };
+
+  constexpr uint32_t kProcessId = 77;
+  constexpr uint64_t kKernelObject = 0x1000;
+  constexpr size_t kNopCount = 2048;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  VmFixture fixture("cdna5", /*num_cus=*/2, /*num_wf_slots=*/1);
+  fixture.soc_ptr->set_dispatch_threads(2);
+  ASSERT_EQ(fixture.cp()->dispatch_threads(), 2u);
+
+  auto original_memory = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+  const amdgpu::AddressSpaceHandle address_space = fixture.soc_ptr->gpu_vm().register_translated(
+      kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), original_memory);
+  ASSERT_TRUE(address_space);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InstructionGate>();
+  InstructionGate *gate = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  std::vector<uint32_t> code(kNopCount, SOPP_S_NOP);
+  code.push_back(kCdna5Endpgm);
+  const uint64_t kernel =
+      fixture.write_kernel(kKernelObject, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(fixture.mem(), fixture.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, kProcessId);
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/32);
+
+  ASSERT_TRUE(fixture.engine->step()); // Admit both workgroups and schedule the pool batch.
+  auto execution = std::async(std::launch::async, [&] { return fixture.engine->step(); });
+  const bool both_waves_entered = gate->wait_for_entries(2, 2s);
+  if (!both_waves_entered) {
+    gate->release();
+    (void)execution.get();
+    FAIL() << "both pool workers did not reach instruction execution";
+  }
+
+  const uint64_t second_instruction =
+      kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) + sizeof(uint32_t);
+  auto replacement_a = std::make_shared<amdgpu::GpuMemory>("replacement_a");
+  auto replacement_b = std::make_shared<amdgpu::GpuMemory>("replacement_b");
+  replacement_a->write32(second_instruction, kCdna5Endpgm);
+  replacement_b->write32(second_instruction, kCdna5Endpgm);
+  auto access_a = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*replacement_a);
+  auto access_b = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*replacement_b);
+  auto translator = std::make_shared<amdgpu::IdentityAddressSpaceTranslator>();
+
+  std::atomic<bool> stop_replacing{false};
+  std::atomic<uint64_t> replacements{0};
+  auto replacement = std::async(std::launch::async, [&] {
+    bool all_succeeded = true;
+    bool select_a = false;
+    do {
+      select_a = !select_a;
+      all_succeeded &= fixture.soc_ptr->gpu_vm().replace_translated(address_space, translator,
+                                                                    select_a ? access_a : access_b);
+      replacements.fetch_add(1, std::memory_order_release);
+    } while (!stop_replacing.load(std::memory_order_acquire));
+    return all_succeeded;
+  });
+
+  const auto replacement_deadline = std::chrono::steady_clock::now() + 2s;
+  while (replacements.load(std::memory_order_acquire) < 16 &&
+         std::chrono::steady_clock::now() < replacement_deadline)
+    std::this_thread::yield();
+  const bool replacement_started = replacements.load(std::memory_order_acquire) >= 16;
+
+  gate->release();
+  bool first_quantum_ran = false;
+  std::exception_ptr execution_error;
+  try {
+    first_quantum_ran = execution.get();
+    fixture.engine->run();
+  } catch (...) {
+    execution_error = std::current_exception();
+  }
+  stop_replacing.store(true, std::memory_order_release);
+  const bool replacements_succeeded = replacement.get();
+
+  EXPECT_EQ(execution_error, nullptr);
+  ASSERT_TRUE(replacement_started);
+  EXPECT_TRUE(replacements_succeeded);
+  EXPECT_TRUE(first_quantum_ran);
+  EXPECT_EQ(gate->instruction_count(), 2 * code.size());
+  EXPECT_TRUE(fixture.cu(0)->is_idle());
+  EXPECT_TRUE(fixture.cu(1)->is_idle());
 }
 
 TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {

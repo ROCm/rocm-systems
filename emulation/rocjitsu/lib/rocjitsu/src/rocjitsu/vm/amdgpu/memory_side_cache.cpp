@@ -99,6 +99,8 @@ simdojo::MessageStatus MemorySideCache::message_status(VmAccessOutcome outcome) 
     return simdojo::MessageStatus::Faulted;
   case VmAccessOutcome::Malformed:
     return simdojo::MessageStatus::Malformed;
+  case VmAccessOutcome::Revoked:
+    return simdojo::MessageStatus::Faulted;
   }
   return simdojo::MessageStatus::Malformed;
 }
