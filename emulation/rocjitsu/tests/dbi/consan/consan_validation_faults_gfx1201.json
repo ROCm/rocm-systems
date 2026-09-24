@@ -6936,6 +6936,68 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-matmul-tile-publication-sc-sleep-15-sweep-wave15-all",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with the exact workload HIP flags; identity matches the clean-run log. Native allowlist selects prefill_bs1$async_dispatch_13_matmul_Dx256x256_f16xf16xf32. For the recorded nonempty prefill and K=256, the initial tile path stages LDS through ds_store_2addr_b64 at .text+0x9ee0..0x9f18, then the signal/wait at 0x9f24/0x9f28 publishes operands to cross-wave tiled reads at 0x9f2c..0x9f84. Remove that pair as one mutation, retaining following reuse/publication barriers. Exact compilation, pristine ELF, inventory and disassembly: rdna4-20260923/tp1-debug. Prospectively require 6/8 detections: Default preset=higher, SuperCollider delay 0/16/64/256 twice; matching clean, coverage, completeness and health checks remain mandatory. Prospective sleep calibration at delay=15: eight trials require 6 detections and a matching clean comparator with the same sleep controls. Run only if the earlier configuration remains unqualified. Prospective September 24 remaining-yellow sweep: unchanged workload, native allowlist and fault, eight trials at the existing 6/8 bar; matched clean and healthy complete evidence required. Wave-dependent maximum 15; delay all replayed accesses."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=prefill_bs1$async_dispatch_13_matmul_Dx256x256_f16xf16xf32|kind=barrier|pc=0x0000000000009f24|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=prefill_bs1$async_dispatch_13_matmul_Dx256x256_f16xf16xf32|event=barrier|pc=0x0000000000009f24|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=prefill_bs1$async_dispatch_13_matmul_Dx256x256_f16xf16xf32|event=barrier|pc=0x0000000000009f28|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15",
+                  "RJ_CONSAN_SC_DELAY_READS_ONLY": "0"
+                }
+              ]
+            }
+          }
         }
       ]
     },
