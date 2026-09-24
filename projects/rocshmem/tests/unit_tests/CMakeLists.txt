@@ -107,6 +107,7 @@ if (USE_HOST_VERBS)
       ibv_shim_gtest.cpp
       ib_ctrl_gtest.cpp
       rdma_loopback_gtest.cpp
+      rma_engine_gtest.cpp
   )
 endif()
 
