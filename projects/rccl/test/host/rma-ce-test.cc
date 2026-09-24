@@ -579,24 +579,26 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindo
   }
 }
 
-// Releasing the stream is the first thing teardown does after the task queue, so
-// a failure there propagates with the contexts still standing.
-TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_Propagates) {
+// Destroying the stream is best-effort: teardown swallows a failure there
+// (CUDACHECKIGNORE), reports a clean finalize, and still runs to completion,
+// clearing the initialized flag.
+TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
 
-  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
 }
 
-// A device buffer that will not release stops teardown rather than carrying on
-// and reporting a clean finalize.
+// A device buffer that will not release surfaces as the return value, but
+// teardown is best-effort: it carries on releasing the rest and finishes with
+// the state cleared rather than stopping at the failed free.
 TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it
@@ -623,17 +625,15 @@ TEST_F(RmaCeFinalizeTest, Finalize_PendingInitTasks_DrainsTheQueue) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->rmaCeInitTaskQueue));
 }
 
-// A failed deregistration stops teardown and surfaces, rather than carrying on
-// and reporting the state as cleanly torn down.
-TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarked) {
+// A failed deregistration surfaces as the return value, but teardown is
+// best-effort: it keeps releasing the remaining resources and finishes with the
+// state cleared rather than stopping at the failure.
+TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   g_devrNcclCommWindowDeregister = [](ncclComm_t, ncclWindow_t) { return ncclInternalError; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
-  // Not retried here, and the state is left allocated on purpose: the failed
-  // attempt already released this context's buffers before the deregister, and
-  // Finalize restarts at context 0, so a second call double-frees them.
+  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
 }
 
 // ---------------------------------------------------------------------------

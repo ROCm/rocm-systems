@@ -47,9 +47,11 @@ unset(_rccl_src_root)
 set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  gin-plugin-init-test.cc              # src/plugin/gin.cc init/devices leak (NVIDIA/nccl#2179)
   rma-test.cc                          # RMA launch dispatch + plan scheduling coverage
   rma-ce-test.cc                       # RMA CE init/finalize + put/wait launch coverage
   ras-test.cc                          # src/ras/ras.cc: complete host-side line coverage
+  tuning-general-test.cc               # src/tuning/tuning_general.cc
   ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
   group-test.cc
   devcomm-test.cc
@@ -153,6 +155,7 @@ if(BUILD_TESTS)
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/ras.cc"
+    TUNING_GENERAL_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/tuning/tuning_general.cc"
     RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
@@ -167,6 +170,8 @@ if(BUILD_TESTS)
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
+    # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
+    GIN_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/plugin/gin.cc"
   )
 
   # sym_kernels_host.cc only exists when GENERATE_SYM_KERNELS is ON (OFF via --disable-sym-kernels).
@@ -243,7 +248,7 @@ if(BUILD_TESTS)
   # (fakes/dev_runtime_fakes.cc) instead of compiling real dev_runtime.cc.
   set(TEST_MICRO_SCHEDULER_SOURCE_FILES
     scheduler-test.cc
-    fakes/enqueue_symbols_fakes.cc       # enqueue.cc's own externals, reached transitively by the scheduler UUTs
+    fakes/enqueue_fakes.cc               # enqueue.cc's own externals, reached transitively by the scheduler UUTs
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -512,7 +517,7 @@ if(BUILD_TESTS)
   # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
-    fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
+    fakes/enqueue_test_deps.cc           # ResetEnqueueTestDeps chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -1063,6 +1068,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/ras.cc"
+  TUNING_GENERAL_CC_PATH="${RCCL_HIPIFY_DIR}/src/tuning/tuning_general.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   RMA_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_tmp.cc"
@@ -1074,6 +1080,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
   DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
+  GIN_CC_PATH="${RCCL_HIPIFY_DIR}/src/plugin/gin.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
@@ -1114,7 +1121,7 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
 # vs real-compile decision.
 set(TEST_MICRO_SCHEDULER_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/scheduler-test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_symbols_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
@@ -1263,7 +1270,7 @@ endforeach()
 # Same --gc-sections coupling as the in-build list; see the comment there.
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_test_deps.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc

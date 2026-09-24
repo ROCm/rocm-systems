@@ -26,7 +26,7 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
-#include "fakes/enqueue_fakes.h"
+#include "fakes/enqueue_test_deps.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
 // transitive includes see them.
@@ -71,7 +71,7 @@
 // ---------------------------------------------------------------------------
 #define NCCL_DEVICE_COMMON_H_
 // ncclDevKernelArgsDefaultStorage comes from src/include/device.h, already in
-// scope via fakes/enqueue_fakes.h -> sym_kernels.h (enqueue.cc itself is only
+// scope via fakes/enqueue_test_deps.h -> sym_kernels.h (enqueue.cc itself is only
 // included later). The generated device_table.h is NOT needed here.
 void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage) {}
@@ -92,8 +92,8 @@ class EnqueueMicrotest : public ::testing::Test {
   // identical for every global in the reset closure today, but nothing enforces
   // that, and SetUp costs one line to stop relying on it. It also means a future
   // second fixture in this binary cannot inherit a dirty process.
-  void SetUp() override { ResetEnqueueFakes(); }
-  void TearDown() override { ResetEnqueueFakes(); }
+  void SetUp() override { ResetEnqueueTestDeps(); }
+  void TearDown() override { ResetEnqueueTestDeps(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -252,6 +252,18 @@ TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_SimpleTermDominatesAtWarp32) {
   static_assert(kSimple > kLL128, "SIMPLE is expected to dominate at gfx942/warp32");
   EXPECT_EQ((kSimple + 15) & -16, rcclShmemScratchWarpSize(942, 32));
   EXPECT_EQ(4112, rcclShmemScratchWarpSize(942, 32)) << "measured constant";
+}
+
+TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_Ll128TermDominatesAtGfx1250) {
+  // gfx1250 is the only arch where LL128 wins the max(): 32 elems/thread, and
+  // ncclCollUnroll(1250) is 6 rather than 8.
+  constexpr int kLL128 = (32 * 32) * int(sizeof(uint64_t));
+  constexpr int kSimple = (ncclCollUnroll(1250) * 32 + 1) * 16;
+  static_assert(kLL128 > kSimple, "LL128 is expected to dominate at gfx1250/warp32");
+  EXPECT_EQ((kLL128 + 15) & -16, rcclShmemScratchWarpSize(1250, 32));
+  EXPECT_EQ(8192, rcclShmemScratchWarpSize(1250, 32)) << "measured constant";
+  EXPECT_EQ(8, rcclLL128ShmemElemsPerThread(942)) << "non-gfx1250 unchanged";
+  EXPECT_EQ(32, rcclLL128ShmemElemsPerThread(1250));
 }
 
 TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_NvlsTermNeverWins) {
@@ -718,7 +730,7 @@ struct ChunkComm {
   explicit ChunkComm(int protoSimpleBuf = 1 << 22) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) comm.buffSizes[p] = protoSimpleBuf;
     // LOAD-BEARING: rcclProtoGrainSize(LL128) (scheduler.h:22) is
-    //   WarpSize * ELEMS_PER_THREAD * ll128DataElems * 8 / ll128LineElems
+    //   WarpSize * ll128ShmemElemsPerThread * ll128DataElems * 8 / ll128LineElems
     // so a zero WarpSize makes grainSize 0, and :3028's
     // `chunkSize / grainSize * grainSize` then SIGFPEs. A zero-initialised
     // ncclComm is not a usable fixture for any LL128 path.
@@ -729,6 +741,7 @@ struct ChunkComm {
     comm.nvlsTreeMaxChunkSize = 128 * 1024;
     comm.ll128LineElems = 120;
     comm.ll128DataElems = 112;
+    comm.ll128ShmemElemsPerThread = 8;
     comm.channels[0].tree.depth = 4;
     comm.channels[0].collnetDirect.depth = 4;
     comm.channels[0].collnetDirect.nHeads = 1;
@@ -1105,8 +1118,8 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
   // divides by zero. This fails loudly instead of core-dumping the suite.
   ChunkComm cc;
   EXPECT_GT(rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()), 0)
-      << "LL128 grain is WarpSize*8*ll128DataElems*8/ll128LineElems -- a zero "
-         "WarpSize or ll128DataElems makes calcCollChunking:3028 SIGFPE";
+      << "LL128 grain is WarpSize*ll128ShmemElemsPerThread*ll128DataElems*8/ll128LineElems -- a zero "
+         "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkSizeIsAlwaysWritten) {
@@ -1471,7 +1484,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SingleRank_ShortCircuitsToRingSimpl
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlltoAllFuncs_TakeTheSameFastPath) {
   // Three funcs share the nRanks==1 short circuit even at many ranks.
   for (auto f : {ncclFuncAlltoAllPivot, ncclFuncAlltoAllGda, ncclFuncAlltoAllvGda}) {
-    ResetEnqueueFakes();
+    ResetEnqueueTestDeps();
     CostComm cc(/*nRanks=*/8);
     CostTable tbl;
     auto task = CostTask(f);
@@ -1515,7 +1528,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TooManyLocalRanks_SkipsCollNetAlgor
   }
 
   // Control: at the arity limit the CollNet rows ARE populated.
-  ResetEnqueueFakes();
+  ResetEnqueueTestDeps();
   CostComm ok;
   ok.get()->maxLocalRanks = NCCL_MAX_DIRECT_ARITY + 1;
   CostTable tbl2;
@@ -1569,7 +1582,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8RingAboveEightRanks_IsPenalised)
   // nRanks > 8 and the datatype is fp8. Assert the RATIO, so the penalty factor
   // itself is pinned rather than just "bigger".
   for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
-    ResetEnqueueFakes();
+    ResetEnqueueTestDeps();
     CostComm big(/*nRanks=*/16);
     CostTable tbl;
     auto task = CostTask(ncclFuncAllReduce, dt);
@@ -3289,7 +3302,7 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_SelectsTheCheapestScriptedCell) {
 // ===========================================================================
 // Seams whose comments promised a tested rejection path. Driving them here so
 // the promise holds; the remaining declared-but-undriven seams are marked in
-// enqueue_fakes.h as link-floor-only rather than left to imply coverage.
+// enqueue_test_deps.h as link-floor-only rather than left to imply coverage.
 // ===========================================================================
 
 TEST_F(EnqueueMicrotest, RedOpCreate_CommNotReady_IsRejected) {

@@ -572,11 +572,9 @@
 
   v_mov_b32         v0, 1
   v_mov_b32         v1, 0
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+
+  // Use SYSTEM scope to push through the GL2 cache.
   global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0                                       // Wait for atomic operation to complete and return value
 
   // At this point, ttmp[4:5] is free. ttmp13 is free
@@ -1009,11 +1007,8 @@
   v_mov_b32         v1, 1                                   // buf_written_valX
  
   // Perform atomic add and return previous value
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+  // Use SYSTEM scope to push through the GL2 cache.
   global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0
 
   // Check Watermark and Signal Host

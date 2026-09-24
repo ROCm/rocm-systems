@@ -171,10 +171,8 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   post = post || large_delta;
   I ve = exp(v), scaled_exp = ve + adjustment;
   U result = (v & U(~F::infinity)) | (util::stdx::static_simd_cast<U>(scaled_exp) << F::fraction);
-  uint64_t post_bits = 0;
+  uint64_t post_bits = util::simd_mask_to_bits(post);
   for (std::size_t i = 0; i < U::size(); ++i) {
-    if (post[i])
-      post_bits |= uint64_t{1} << i;
     if (ve[i] == 0 || ve[i] == int(F::infinity >> F::fraction) || scaled_exp[i] <= 0 ||
         scaled_exp[i] >= int(F::infinity >> F::fraction) || (d[i] & ~F::sign) == 0 ||
         (n[i] & ~F::sign) == 0) {
@@ -390,9 +388,8 @@ template <bool Extended, typename Slot>
         result = av;
         break;
       case 9: {
-        U choose([&](auto i) { return uint32_t((condition >> (base + i)) & 1u); });
         result = av;
-        util::stdx::where(choose != U(0), result) = bv;
+        util::stdx::where(util::simd_mask_from_bits<U>(condition >> base), result) = bv;
         break;
       }
       case 10:
