@@ -1977,7 +1977,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // SendRecv auto-windows need the internodal LL128 staging buffer; allocate it even when
   // NCCL_ALLOC_P2P_NET_LL_BUFFERS is unset so those ranges actually dispatch LL128 over NET.
   comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1 ||
-                               (rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, nNodes, nranks) > 0 && nNodes > 1);
+                               (rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, nNodes, nranks) > 0 && nranks > 4);
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[5] = {ringGraph, treeGraph, collNetDirectGraph, collNetChainGraph, nvlsGraph};

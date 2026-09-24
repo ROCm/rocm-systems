@@ -284,9 +284,12 @@ inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool un
 constexpr ssize_t rcclGfx1250SendRecvLl128MinBytes = 4 << 10;
 inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nRanks) {
   if (cudaArch != 1250) return 0;
-  if (nNodes == 1 && nRanks == 4) return 16 << 10;    // 4 KiB .. 16 KiB
-  if (nNodes == 2 && nRanks == 8) return 256 << 10;   // 4 KiB .. 256 KiB
-  if (nNodes == 4 && nRanks == 16) return 128 << 10;  // 4 KiB .. 128 KiB
+  // MNNVL folds multi-host gfx1250 into nNodes=1 (one NVL domain). 4 GPU/node
+  // SendRecv windows are keyed off nRanks: 4 / 8 / 16.
+  (void)nNodes;
+  if (nRanks == 4) return 16 << 10;    // 1 host, 4 KiB .. 16 KiB
+  if (nRanks == 8) return 256 << 10;   // 2 host, 4 KiB .. 256 KiB
+  if (nRanks == 16) return 128 << 10;  // 4 host, 4 KiB .. 128 KiB
   return 0;
 }
 #ifdef ENABLE_WARP_SPEED
