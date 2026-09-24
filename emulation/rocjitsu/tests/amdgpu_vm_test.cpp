@@ -918,6 +918,125 @@ TEST(AqlDispatchTest, AdmittedWavesShareTheDispatchVmSnapshot) {
   EXPECT_TRUE(observed->all_share_access);
 }
 
+TEST(AqlDispatchTest, InvalidatedAdmissionSnapshotRecapturesBeforeFirstFetch) {
+  class InvalidateOnDispatch final : public ExecutionPlugin {
+  public:
+    InvalidateOnDispatch(amdgpu::GpuVm &gpu_vm, amdgpu::AddressSpaceHandle address_space)
+        : ExecutionPlugin("invalidate_dispatch_vm_snapshot"), gpu_vm_(gpu_vm),
+          address_space_(address_space) {}
+
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) override {
+      if (!attempted_) {
+        attempted_ = true;
+        invalidated_ = gpu_vm_.invalidate(address_space_);
+      }
+    }
+
+    bool attempted() const { return attempted_; }
+    bool invalidated() const { return invalidated_; }
+
+  private:
+    amdgpu::GpuVm &gpu_vm_;
+    amdgpu::AddressSpaceHandle address_space_;
+    bool attempted_ = false;
+    bool invalidated_ = false;
+  };
+
+  constexpr uint32_t kProcessId = 77;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  VmFixture fixture("cdna5");
+  auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+  const amdgpu::AddressSpaceHandle address_space = fixture.soc_ptr->gpu_vm().register_translated(
+      kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+  ASSERT_TRUE(address_space);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InvalidateOnDispatch>(fixture.soc_ptr->gpu_vm(), address_space);
+  InvalidateOnDispatch *observed = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  const uint64_t kernel = fixture.write_kernel(0x1000, &kCdna5Endpgm, sizeof(kCdna5Endpgm));
+  test::AqlQueue queue(fixture.mem(), fixture.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, kProcessId);
+  queue.dispatch(kernel, /*grid_size=*/32, /*workgroup_size=*/32);
+
+  for (uint32_t step = 0; step < 100 && fixture.engine->step(); ++step) {
+  }
+
+  ASSERT_TRUE(observed->attempted());
+  ASSERT_TRUE(observed->invalidated());
+  EXPECT_TRUE(fixture.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
+  class InvalidateAfterFirstInstruction final : public ExecutionPlugin {
+  public:
+    InvalidateAfterFirstInstruction(amdgpu::GpuVm &gpu_vm, amdgpu::AddressSpaceHandle address_space,
+                                    amdgpu::GpuMemory &memory, uint64_t next_pc)
+        : ExecutionPlugin("invalidate_cached_dispatch_vm_snapshot"), gpu_vm_(gpu_vm),
+          address_space_(address_space), memory_(memory), next_pc_(next_pc) {}
+
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                         amdgpu::Wavefront &) override {
+      ++instruction_count_;
+      if (instruction_count_ == 1) {
+        memory_.write32(next_pc_, 0xBFB00000u); // CDNA5 s_endpgm.
+        invalidated_ = gpu_vm_.invalidate(address_space_);
+      }
+    }
+
+    uint32_t instruction_count() const { return instruction_count_; }
+    bool invalidated() const { return invalidated_; }
+
+  private:
+    amdgpu::GpuVm &gpu_vm_;
+    amdgpu::AddressSpaceHandle address_space_;
+    amdgpu::GpuMemory &memory_;
+    uint64_t next_pc_ = 0;
+    uint32_t instruction_count_ = 0;
+    bool invalidated_ = false;
+  };
+
+  constexpr uint32_t kProcessId = 77;
+  constexpr size_t kNopCount = 64;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  VmFixture fixture("cdna5");
+  auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem());
+  const amdgpu::AddressSpaceHandle address_space = fixture.soc_ptr->gpu_vm().register_translated(
+      kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+  ASSERT_TRUE(address_space);
+
+  std::vector<uint32_t> code(kNopCount, SOPP_S_NOP);
+  code.push_back(kCdna5Endpgm);
+  const uint64_t kernel = fixture.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  const uint64_t entry_pc = kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InvalidateAfterFirstInstruction>(
+      fixture.soc_ptr->gpu_vm(), address_space, *fixture.mem(), entry_pc + sizeof(uint32_t));
+  InvalidateAfterFirstInstruction *observed = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  test::AqlQueue queue(fixture.mem(), fixture.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, kProcessId);
+  queue.dispatch(kernel, /*grid_size=*/32, /*workgroup_size=*/32);
+
+  for (uint32_t step = 0; step < 100 && fixture.engine->step(); ++step) {
+  }
+
+  ASSERT_TRUE(observed->invalidated());
+  EXPECT_EQ(observed->instruction_count(), 1u);
+  EXPECT_TRUE(fixture.cu()->is_idle());
+}
+
 TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot) {
   using namespace std::chrono_literals;
 
