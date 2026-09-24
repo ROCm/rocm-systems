@@ -141,7 +141,7 @@ and `skips.json`. `failures.json` retains every failing test's output. All 469
 physical GPU tests per build completed under the shared lock; the 22 outside
 ConSan passed in every build.
 
-## GCC repair pass (in progress)
+## GCC repair pass — resolved
 
 The [other host's report](https://gist.github.com/bjacob/e96ca161cf0623a2824a96a140b18095)
 reproduces the same 21 gfx1201 emulator failures. Repairs are being completed
@@ -174,7 +174,13 @@ with GCC before moving to UBSan and ASan. Evidence is retained locally in
   All five RCCL tests now pass.
 
 The first complete GCC rerun (`gcc-full1.xml`) reduced failures to five.
-All five are now fixed in the focused 97-test run (`gcc-focused12.xml`),
-including paired incorrect controls, all-architecture many-owner cases,
-and host publication tests. A second complete GCC run is underway.
-Sanitizer repair and qualification remain pending until GCC is resolved.
+All five passed in the focused 97-test run (`gcc-focused12.xml`). The second
+complete run (`gcc-full2.xml`) passed 11,420 tests, with one failure, 30 runtime
+skips, and one disabled test. All 2,010 ConSan emulator and 447 physical gfx1201
+cases passed. The only failure was a Python capability-probe timeout fixture
+that required child startup within 50 ms. It now checks the parent-observed
+PID instead; all 33 VFIO launcher unit tests, 24 concurrent timeout repetitions,
+and its CTest rerun (`gcc-vfio-fixed.xml`) pass. No GCC failure remains.
+
+Sanitizer rebuilds and qualification are now underway, using the GCC repairs.
+The original matrix above remains the pre-repair baseline.
