@@ -4537,17 +4537,20 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
 
     auto _children = get_children();
     ROCP_WARNING << fmt::format(
-        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 reaping exited children ({} found)",
         this_ppid,
         this_pid,
         this_tid,
         context,
         _children.size());
 
+    // Single non-blocking pass: never wait for a child that is still running. wait_pid()
+    // polls until the child exits even with WNOHANG, which deadlocks on children that only
+    // exit after this process does.
     for(auto itr : _children)
     {
-        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-        if(status) diagnose_status(itr, status.value());
+        int status = 0;
+        if(waitpid(itr, &status, WUNTRACED | WNOHANG) > 0) diagnose_status(itr, status);
     }
 }
 
@@ -4653,7 +4656,9 @@ signal_finalization_worker()
     // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
     // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
     // is the app's/OS's job; a child that received the signal finalizes via its own worker.
-    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    // Skipped on normal exit (signo == 0): the application owns its children, and some, such
+    // as Python's multiprocessing resource tracker, only exit once this process has exited.
+    if(sw.signo != 0) wait_for_children(this_pid, this_ppid, this_tid, this_func);
 
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",

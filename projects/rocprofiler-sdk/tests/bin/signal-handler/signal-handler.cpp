@@ -28,12 +28,18 @@
 // Usage:
 //   timeout --signal=INT 3s signal-handler-test [--app-signal-handler|--no-app-signal-handler]
 //                                               [--single-process|--fork|--fork-exec|--spawn]
+//   signal-handler-test --outlived-helper
 //
 // Good case (--app-signal-handler): app installs handler, coordinates shutdown.
 //   Used with rocprofv3 --disable-signal-handlers. Profiler flushes via atexit.
 //
 // Bad case (--no-app-signal-handler): app has SIG_DFL everywhere.
 //   Profiler's signal handler is the only thing that can flush data before death.
+//
+// Outlived helper (--outlived-helper): no signal. The app forks a helper that only exits
+//   after the app itself has exited (like Python's multiprocessing resource tracker), runs a
+//   bounded number of kernels and returns from main. Exit-time finalization must not wait
+//   for the helper.
 //
 // TODO: --raw-fork (_Fork without exec) is not supported. _Fork skips
 // pthread_atfork handlers, leaving stale profiler state. Extremely rare in practice.
@@ -117,9 +123,9 @@ sigint_handler(int)
     g_shutdown.store(true, std::memory_order_relaxed);
 }
 
-// Runs HIP kernels in a loop until g_shutdown is set.
+// Runs HIP kernels in a loop until g_shutdown is set or max_iters (if positive) is reached.
 void
-run_kernels(const char* label)
+run_kernels(const char* label, int max_iters = -1)
 {
     roctxRangePush(str_join(label, "_pid_", getpid()).c_str());
 
@@ -127,7 +133,7 @@ run_kernels(const char* label)
     HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
 
     int iter = 0;
-    while(!g_shutdown.load(std::memory_order_relaxed))
+    while(!g_shutdown.load(std::memory_order_relaxed) && iter != max_iters)
     {
         roctxRangePush(str_join(label, "_iter_", iter).c_str());
         test_kernel<<<4, 256>>>(d_buf, 1024);
@@ -198,6 +204,39 @@ mode_good_single_process()
     run_kernels("parent");
 
     emit_roctx_marker("exit_marker parent single-process ppid:%d pid:%d", getppid(), getpid());
+    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
+    return 0;
+}
+
+int
+mode_outlived_helper()
+{
+    fprintf(stderr, "Mode: outlived-helper, PID=%d\n", getpid());
+
+    int fds[2];
+    if(pipe(fds) != 0)
+        throw std::runtime_error(std::string("signal-handler-test pipe() failed with error code ") +
+                                 std::to_string(errno));
+
+    pid_t pid = fork();
+    if(pid == 0)
+    {
+        // Block until the parent exits and the write end closes. _exit skips profiler
+        // finalization so the helper produces no output of its own.
+        close(fds[1]);
+        char    byte  = 0;
+        ssize_t nread = 0;
+        do
+        {
+            nread = read(fds[0], &byte, 1);
+        } while(nread > 0 || (nread < 0 && errno == EINTR));
+        _exit(0);
+    }
+    close(fds[0]);
+
+    run_kernels("parent", 50);
+
+    emit_roctx_marker("exit_marker parent outlived-helper ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
     return 0;
 }
@@ -441,6 +480,8 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; i++)
     {
+        if(std::strcmp(argv[i], "--outlived-helper") == 0) return mode_outlived_helper();
+
         if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0)
         {

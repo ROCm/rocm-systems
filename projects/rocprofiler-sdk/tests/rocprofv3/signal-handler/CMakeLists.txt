@@ -29,7 +29,9 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 # add_signal_handler_test(<name> [keyword args])
 #
 #   <name>                            : scenario name; ctest is registered as "app-<name>-<type>"
-#   PROCESS_TYPE <type>               : single-process | fork | fork-exec | spawn
+#   PROCESS_TYPE <type>               : single-process | fork | fork-exec | spawn |
+#                                       outlived-helper
+#   NO_SIGNAL                         : run without the SIGINT timeout (app exits on its own)
 #   VALIDATE_EXPECT <outcome>         : what validate.py asserts:
 #                                          clean-exit: app exits cleanly via atexit, exit_marker present
 #                                          flushed-markers: profiler flushed >10 markers before signal death
@@ -45,8 +47,13 @@ set(BASE_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #   validate runs after execute (FIXTURES_REQUIRED <name>).
 # cmake-format: on
 function(add_signal_handler_test NAME)
-    cmake_parse_arguments(arg "" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
+    cmake_parse_arguments(arg "NO_SIGNAL" "PROCESS_TYPE;VALIDATE_EXPECT;PASS_REGEX"
                           "APP_EXTRA_FLAGS;ROCPROFV3_EXTRA_FLAGS" ${ARGN})
+
+    set(_timeout_cmd ${TIMEOUT_CMD})
+    if(arg_NO_SIGNAL)
+        set(_timeout_cmd)
+    endif()
 
     set(_name "app-${NAME}-${arg_PROCESS_TYPE}")
     set(_subdir "${NAME}-${arg_PROCESS_TYPE}")
@@ -61,7 +68,7 @@ function(add_signal_handler_test NAME)
     rocprofiler_add_integration_execute_test(
         ${_name}
         COMMAND
-            ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
+            ${_timeout_cmd} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace
             --marker-trace --output-format json ${arg_ROCPROFV3_EXTRA_FLAGS} -d ${_outdir}
             -o out_%pid% -- $<TARGET_FILE:signal-handler-test> --${arg_PROCESS_TYPE}
             ${arg_APP_EXTRA_FLAGS}
@@ -164,3 +171,13 @@ add_signal_handler_test(
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "clean exit"
     APP_EXTRA_FLAGS --app-signal-handler)
+
+# Normal exit with a child that only exits after its parent has (the pattern of Python's
+# multiprocessing resource tracker). Exit-time finalization must not wait for that child,
+# else parent and child wait on each other and the execute step hits the ctest TIMEOUT.
+add_signal_handler_test(
+    outlived-helper
+    PROCESS_TYPE outlived-helper
+    NO_SIGNAL
+    VALIDATE_EXPECT clean-exit
+    PASS_REGEX "clean exit")
