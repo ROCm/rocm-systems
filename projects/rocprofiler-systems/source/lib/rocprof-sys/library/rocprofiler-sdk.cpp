@@ -2391,6 +2391,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
     else
     {
+        g_domain_service->start();
         start();
     }
     // no errors
@@ -2578,7 +2579,7 @@ resume()
 
     if(g_domain_service != nullptr)
     {
-        g_domain_service->resume();
+        g_domain_service->start();
     }
 }
 
