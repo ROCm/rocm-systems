@@ -719,6 +719,103 @@ TEST_P(BufferFormatExecutionTest, RdnaBoundsClampRawDwordsButDropFormattedTransf
   EXPECT_EQ(memory.read32(0x1008), 3);
 }
 
+TEST_P(BufferFormatExecutionTest, RdnaSwizzledMode3BoundsIncludeScalarOffset) {
+  if (!amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
+    GTEST_SKIP() << "RDNA3+ bounds modes";
+  struct Case {
+    uint32_t records, scalar, index, offset, valid_modes;
+  };
+  // RDNA3 ISA Table 46 reduces NUM_RECORDS by SOFFSET only in mode 3.
+  // Include the last valid index, equality, saturation, and the stride boundary.
+  constexpr Case cases[] = {
+      {2, 0, 1, 0, 0xf}, {2, 1, 0, 0, 0xf}, {2, 1, 1, 0, 0x7},
+      {2, 2, 0, 0, 0x7}, {2, 3, 0, 0, 0x7}, {2, UINT32_MAX, 0, 0, 0x7},
+      {0, 0, 0, 0, 0x0}, {2, 0, 0, 4, 0xf}, {2, 0, 0, 8, 0x6},
+  };
+  const auto sb = wf->sgpr_alloc().base, vb = wf->vgpr_alloc().base;
+  const uint32_t lane = wf->wf_size() - 1;
+  wf->set_exec(uint64_t{1} << lane);
+  auto decoder = Decoder::create(GetParam());
+  amdgpu::GpuVm vm;
+  auto physical = std::make_shared<test::CountingGpuMemory>(memory);
+  const auto address_space = vm.register_address_space(
+      0, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+  ASSERT_TRUE(address_space);
+  cu->set_gpu_vm(&vm);
+  wf->set_address_space(address_space);
+  for (const auto &c : cases) {
+    cu->write_sgpr(sb + 4, 0x1000);
+    cu->write_sgpr(sb + 5, (8u << 16) | (1u << 30)); // Stride 8, 4-byte swizzle units.
+    cu->write_sgpr(sb + 6, c.records);
+    cu->write_sgpr(sb + 12, c.scalar);
+    cu->write_vgpr(vb, lane, c.index);
+    const uint64_t address = 0x1000ull + c.index * 4 + (c.offset / 4) * 32 + c.scalar;
+    for (uint32_t mode = 0; mode < 4; ++mode) {
+      const bool valid = c.valid_modes & (1u << mode);
+      cu->write_sgpr(sb + 7, identity | (20u << 12) | (mode << 28));
+      for (bool typed : {false, true}) {
+        for (bool load : {false, true}) {
+          SCOPED_TRACE(testing::Message()
+                       << "records=" << c.records << " scalar=" << c.scalar << " index=" << c.index
+                       << " offset=" << c.offset << " mode=" << mode << " typed=" << typed
+                       << " load=" << load);
+          memory.write32(address, 0x12345678);
+          cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+          cu->write_vgpr(vb + 8, 0, 0xfacefeed);
+          std::unique_ptr<Instruction> inst;
+          if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+            const auto words = rdna4::build_vbuffer(
+                typed ? (load ? rdna4::kTbufferLoadFormatXVbuffer
+                              : rdna4::kTbufferStoreFormatXVbuffer)
+                      : (load ? rdna4::kBufferLoadB32Vbuffer : rdna4::kBufferStoreB32Vbuffer),
+                {.soffset = 12,
+                 .vdata = 8,
+                 .rsrc = 4,
+                 .format = 20,
+                 .idxen = 1,
+                 .ioffset = c.offset});
+            inst.reset(decode_valid(*decoder, words.data()));
+          } else {
+            const auto words = typed
+                                   ? rdna3::build_mtbuf(load ? rdna3::kTbufferLoadFormatXMtbuf
+                                                             : rdna3::kTbufferStoreFormatXMtbuf,
+                                                        {.offset = static_cast<uint16_t>(c.offset),
+                                                         .format = 20,
+                                                         .vdata = 8,
+                                                         .srsrc = 1,
+                                                         .idxen = 1,
+                                                         .soffset = 12})
+                                   : rdna3::build_mubuf(load ? rdna3::kBufferLoadB32Mubuf
+                                                             : rdna3::kBufferStoreB32Mubuf,
+                                                        {.offset = static_cast<uint16_t>(c.offset),
+                                                         .vdata = 8,
+                                                         .srsrc = 1,
+                                                         .idxen = 1,
+                                                         .soffset = 12});
+            inst.reset(decode_valid(*decoder, words.data()));
+          }
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          EXPECT_EQ(inst->data_as<amdgpu::VectorMemState>()->lane_mask, valid ? wf->exec() : 0);
+          physical->reads = 0;
+          amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+          ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+          if (load && valid) {
+            EXPECT_GT(physical->reads, 0u); // An unaligned load can span two pages.
+          } else {
+            EXPECT_EQ(physical->reads, 0u);
+          }
+          EXPECT_EQ(cu->read_vgpr(vb + 8, lane), load ? (valid ? 0x12345678u : 0u) : 0xdeadbeefu);
+          EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xfacefeedu);
+          EXPECT_EQ(memory.read32(address), !load && valid ? 0xdeadbeefu : 0x12345678u);
+        }
+      }
+    }
+  }
+  wf->set_address_space({});
+  cu->set_gpu_vm(nullptr);
+}
+
 TEST_P(BufferFormatExecutionTest, IndexedNarrowStoresPreserveNeighborsAndLoadsExpandToVgprs) {
   descriptor(11, 2, 4 | (1 << 9)); // 16_UINT, X001.
   memory.write32(0x1000, 0xaaaaaaaa);

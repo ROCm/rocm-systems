@@ -226,11 +226,13 @@ inline void rdna_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_t
 }
 
 /// RDNA3+ bounds modes, qualified with raw and structured buffer instructions.
-/// Mode 3 includes SOFFSET in its byte limit; the other modes exclude it.
+/// Mode 3 reduces the record limit by SOFFSET; the other modes exclude it.
 inline bool rdna_buffer_range_check_lane(VectorMemState &d, uint32_t lane, uint32_t mode,
                                          uint32_t stride, uint32_t records, uint32_t index,
                                          uint32_t offset, uint32_t soffset, bool swizzle,
                                          bool per_element) {
+  if (mode == 3)
+    records -= std::min(records, soffset);
   const uint32_t count = per_element ? d.num_elems : 1;
   const uint32_t bytes = per_element ? d.elem_size : d.elem_size * d.num_elems;
   bool any = false;
@@ -248,7 +250,7 @@ inline bool rdna_buffer_range_check_lane(VectorMemState &d, uint32_t lane, uint3
       valid = records != 0;
       break;
     default:
-      valid = swizzle && stride != 0 ? index < records && end <= stride : end + soffset <= records;
+      valid = swizzle && stride != 0 ? index < records && end <= stride : end <= records;
       break;
     }
     if (per_element && !valid)

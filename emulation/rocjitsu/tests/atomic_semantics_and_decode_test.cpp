@@ -897,8 +897,9 @@ TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRa
                   (lane << 15) | (active ? c.ptr : 0));
         EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, lane), active ? c.result0 : 0xdeadbeef);
         EXPECT_EQ(compute_unit_->read_vgpr(base_ + 13, lane), active ? c.result1 : 0xdeadbeef);
-        if (addr != last_vgpr)
+        if (addr != last_vgpr) {
           EXPECT_EQ(compute_unit_->read_vgpr(base_ + addr + 1, lane), 0xfacefeed);
+        }
       }
       EXPECT_EQ(wave_->lds().read32(0), 0xfacefeed);
     }
