@@ -138,12 +138,21 @@ def warn_unsupported_stats_output_formats(stats_enabled, output_formats):
     if any(itr in STATS_OUTPUT_FORMATS for itr in requested_formats):
         return
 
-    warning(
-        "--stats has no effect for the requested output format(s) {fmts}; statistics "
-        "are emitted only to csv and json output. For rocpd output, use "
-        "`rocpd2summary -i <database>.db` to generate statistics from the database.".format(
-            fmts=", ".join(requested_formats)
+    if "rocpd" in requested_formats:
+        recovery = (
+            "use `rocpd summary -i <database>.db` to generate statistics from the "
+            "rocpd database"
         )
+    else:
+        recovery = (
+            "add `--output-format rocpd` and use `rocpd summary -i <database>.db` to "
+            "generate statistics from the rocpd database"
+        )
+
+    warning(
+        f"--stats has no effect for the requested output format(s) "
+        f"{', '.join(requested_formats)}; {recovery}. Direct csv and json output also "
+        "support --stats."
     )
 
 

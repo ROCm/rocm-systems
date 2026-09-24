@@ -118,7 +118,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
-        "--stats has no effect.*output format\\(s\\) rocpd.*rocpd2summary -i <database>.db"
+        "--stats has no effect.*output format\\(s\\) rocpd; use `rocpd summary -i <database>.db`"
     )
 
 rocprofiler_add_integration_execute_test(
@@ -130,7 +130,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
-        "--stats has no effect.*output format\\(s\\) pftrace, otf2.*only to csv and json")
+        "--stats has no effect.*output format\\(s\\) pftrace, otf2; add `--output-format rocpd`.*rocpd summary -i <database>.db"
+    )
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-stats-supported-output-format-no-warning
