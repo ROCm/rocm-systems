@@ -196,6 +196,11 @@ TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_BufferSizeFormul
       static_cast<size_t>(c.nBlocks) * (sizeof(ncclGinOutboxState) + ncclGinOutboxState::RequestBytes +
                                         alignUpLocal(size_t(1) << clampedLog2, alignof(ncclGinOutboxState)));
     EXPECT_EQ(req.bufferSize, expected);
+    // A golden literal on one row: the formula above would move with RequestBytes or the state's
+    // alignas(128) if either changed, hiding a real device buffer size change from every row.
+    if (std::strcmp(c.name, "at_floor") == 0) {
+      EXPECT_EQ(req.bufferSize, size_t{25344});  // 3 * (128 + 8192 + 128)
+    }
     EXPECT_EQ(req.bufferAlign, 128u);
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     // The outbox has no GIN signals; only the inbox A2A sibling below sets ginSignalCount.
@@ -210,6 +215,9 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_NoFloorOnSizeL
   ncclDevResourceRequirements_t req = poisonedRequirement();
   ASSERT_EQ(ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/0, &handle, &req), ncclSuccess);
   EXPECT_EQ(handle.size_log2, 0u) << "asymmetric with the outbox's 128-byte floor; no floor here today";
+  // The only case anywhere in this file where alignUpLocal's rounding actually fires: every other
+  // size_log2 used elsewhere is already >= 7, so 1<<size_log2 is already a multiple of 128.
+  EXPECT_EQ(req.bufferSize, size_t{256});  // 128-byte state + alignUp(1<<0, 128) rounding 1 up to 128
 }
 
 // bufferSize and ginSignalCount formulas over a small table of teams and block/size combinations.
@@ -257,7 +265,13 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_BufferSizeAndS
 // but this file compiles for both host and the gfx1151 device pass, which never defines __linux__,
 // so GTEST_HAS_DEATH_TEST is false there and EXPECT_EXIT does not exist (confirmed by a scratch
 // build). Verified empirically instead: the isolated child is killed by signal 8 today.
+//
+// x86_64-only: idivRcp32 is a runtime 64-bit divide, and only x86 raises #DE on divide-by-zero.
+// AArch64 UDIV is defined to return 0 without trapping, so the same call would return ncclSuccess
+// there, and this pin would misreport the still-present defect as fixed. Same guard idiom as
+// src/proxy.cc:887. No aarch64 target exists in tools/scripts/test_runner/configs/ today.
 TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero) {
+#if defined(__x86_64__)
   // Not RUN_ISOLATED_TEST (it EXPECT_TRUE's the run); no lambda assertion either, so a future fix
   // that makes the call return normally flips executeAllTests() true and fails the EXPECT_FALSE below.
   ProcessIsolatedTestRunner::registerTest("GinInboxA2A_SingleRankTeam_DivideByZero", [] {
@@ -270,6 +284,9 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_SingleRankTeam
   });
   EXPECT_FALSE(ProcessIsolatedTestRunner::executeAllTests())
     << "expected the isolated child to be killed by SIGFPE; if it now passes, the defect was fixed";
+#else
+  GTEST_SKIP() << "divide-by-zero trap is x86_64-specific; AArch64 UDIV returns 0 without trapping";
+#endif
 }
 
 // bufferSize == (3*nBarriers + nBarriers*team.nRanks) * sizeof(uint32_t); nBarriers == 0 gives 0.
