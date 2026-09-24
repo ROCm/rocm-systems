@@ -495,11 +495,19 @@ def nest_marker_intervals(
     trace_df: pd.DataFrame,
     errors: Optional[list[MlApiTraceError]] = None,
 ) -> dict[str, list[CallTreeNode]]:
-    """Nest marker intervals per Thread_Id using timestamp containment."""
+    """Nest marker intervals per Thread_Id using timestamp containment.
+
+    Rows are sorted by thread and start time so parents are visited before
+    children. The input frame is not mutated.
+    """
     forest: dict[str, list[CallTreeNode]] = {}
     if trace_df.empty:
         return forest
-    for thread_id, group in trace_df.groupby("Thread_Id", sort=False):
+    ordered = trace_df.sort_values(
+        by=["Thread_Id", "Start_Timestamp", "End_Timestamp"],
+        kind="mergesort",
+    )
+    for thread_id, group in ordered.groupby("Thread_Id", sort=False):
         roots: list[CallTreeNode] = []
         open_ranges: list[tuple[CallTreeNode, float, float]] = []
         thread_key = str(thread_id)
@@ -1417,12 +1425,7 @@ def _collapse_matching_markers_across_passes(
     ]
     if drop_columns:
         collapsed = collapsed.drop(columns=drop_columns)
-    if collapsed.empty:
-        return collapsed
-    return collapsed.sort_values(
-        by=["Thread_Id", "Start_Timestamp", "End_Timestamp"],
-        kind="mergesort",
-    )
+    return collapsed
 
 
 def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
