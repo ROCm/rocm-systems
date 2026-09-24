@@ -45,6 +45,7 @@ add_library(
     rocjitsu_consan_report_analyzer
     STATIC
         rj_hsa_dbi_conflict_analysis.cpp
+        rj_hsa_dbi_publication.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_analyzer

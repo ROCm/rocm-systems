@@ -1829,6 +1829,7 @@ endif()
 add_executable(
     hsa_hooks_unit_test
     dbt/consan_report_test.cpp
+    dbt/consan_publication_test.cpp
     dbt/hsa_code_object_reader_registry_test.cpp
     dbt/hsa_hooks_unit_test.cpp
     dbt/sidecar_registry_test.cpp
