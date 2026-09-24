@@ -46,10 +46,8 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
 
 #if NCCL_SYMK_ASYNC_TILE
   int lw = threadIdx.x / WARP_SIZE;
-  extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks, UnrollPeers>;
-  constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-  tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+  tmaSmemStruct_t* tmaSmem = ncclSymkTileSmem<tmaSmemStruct_t>(lw);
   constexpr size_t tilePack = UnrollPacks * WARP_SIZE;
   constexpr size_t tileSize = tilePack * BytePerPack;
   size_t tmaSize = 0;
@@ -278,6 +276,10 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
 
+  // True only where the deep loop really stages through a DMA engine: EnableTma names a
+  // kernel that can, ncclSymkAsyncTile says whether this pass has an engine to do it with.
+  constexpr bool AsyncTile = ncclSymkAsyncTile && EnableTma;
+
   uint32_t alignment = uint32_t(input.offset - output.offset);
   size_t nBytes = nElts * sizeof(T);
 
@@ -287,14 +289,13 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
 
   if (alignment % 16 == 0) {
     constexpr int BytePerPack = ncclSymkBytePerPack,
-                  UnrollPacks =
-#if NCCL_SYMK_ASYNC_TILE
-                    EnableTma ? ncclSymkDeepUnrollPacks(sizeof(T)) :
-#endif
-                                ncclSymkUnrollPacks,
+                  UnrollPacks = AsyncTile ? ncclSymkDeepUnrollPacks(sizeof(T)) : ncclSymkUnrollPacks,
                   UnrollPeers = 2;
 
-    constexpr int BytePerChunk = EnableTma ? ncclSymkDeepBytePerChunk(sizeof(T)) : ncclSymkBytePerChunk;
+    // Derived from UnrollPacks, not picked alongside it: a pass compiled for a Tma kernel
+    // without an async-tile engine takes the vector unroll, and a chunk wider than what
+    // reduceDeep() then reduces would leave the difference unreduced.
+    constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
     if (chunks != 0) {

@@ -341,6 +341,19 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                      ncclSymkKernelList[kernelIndex];
   int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
   plan->kernelDynSmem = (1 & (ncclSymkDynamicSmemKernelMask() >> (int)kernelId)) ? maxDynamicSmem : 0;
+  // The Tma kernels hand every warp a ncclTmaShmemScratchWarpSize() tile staging window cut
+  // from this grant (ncclSymkTileSmem()). A tile or warp-count change that outgrew it would
+  // put the last warp's window past the block's LDS, and that window is what the store path
+  // DMAs to every peer, so refuse the launch rather than corrupt them. The device side can
+  // only static_assert one window against one tile; the warp count arrives here.
+  if ((1 & (ncclSymkTmaKernelMask() >> (int)kernelId)) &&
+      headTask->nWarps * ncclTmaShmemScratchWarpSize() > maxDynamicSmem) {
+    WARN("Symmetric kernel %s needs %d warps x %d B of tile staging LDS (%d B) but the launch reserves %d B",
+         kernelName, headTask->nWarps, ncclTmaShmemScratchWarpSize(),
+         headTask->nWarps * ncclTmaShmemScratchWarpSize(), maxDynamicSmem);
+    ret = ncclInternalError;
+    goto fail;
+  }
   task = headTask;
   while (task != nullptr && task->devFuncId == devFuncId) {
     workCount++;

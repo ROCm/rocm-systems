@@ -52,6 +52,16 @@
 #define NCCL_SYMK_TILE_TDM 0
 #endif
 #define NCCL_SYMK_ASYNC_TILE (NCCL_SYMK_TILE_TMA || NCCL_SYMK_TILE_TDM)
+// The same answer as the macro, but usable in an ordinary constant expression. EnableTma
+// names a kernel that CAN stage tiles; this says whether the pass being compiled has an
+// engine to do it with. The loop bodies have to be under #if because the engine's API is
+// only declared there, but the tiling arithmetic around them does not, and it has to agree
+// with the bodies -- so both derive from this.
+#if NCCL_SYMK_ASYNC_TILE
+constexpr bool ncclSymkAsyncTile = true;
+#else
+constexpr bool ncclSymkAsyncTile = false;
+#endif
 
 #if NCCL_SYMK_ASYNC_TILE
 #if NCCL_SYMK_TILE_TMA
@@ -508,6 +518,19 @@ struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> {
 #endif
 
 #if NCCL_SYMK_ASYNC_TILE
+// This warp's tile staging window inside the block's dynamic LDS. That the block's grant
+// covers one of these per warp is not checkable here -- the warp count is a launch
+// parameter -- so ncclSymmetricTaskScheduler() checks it before the launch.
+template <typename SmemStruct>
+static __device__ __forceinline__ SmemStruct* ncclSymkTileSmem(int lw) {
+  constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
+  // An overrun lands in warp lw+1's tile, which is then DMA'd out to every peer, so pin the
+  // layout here rather than trusting the tile constants and the window to stay in step.
+  static_assert(sizeof(SmemStruct) <= smemSizePerWarp, "staged tile does not fit its per-warp LDS window");
+  extern __shared__ char smemScratch[];
+  return reinterpret_cast<SmemStruct*>(smemScratch + lw * smemSizePerWarp);
+}
+
 // Round-trip one tile global -> shared -> global. Called by the whole warp with
 // wave-uniform arguments.
 static __device__ __forceinline__ void tmaLoadStoreMc(char* dest, char* smem, char const* source, size_t size,
@@ -540,7 +563,6 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
 #if NCCL_SYMK_ASYNC_TILE
   int lane = t % WARP_SIZE;
   int lw = threadIdx.x / WARP_SIZE;
-  extern __shared__ char smemScratch[];
 #endif
 
   if (alignment % 16 == 0) {
@@ -554,8 +576,7 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
     // Initialize share memory pointer and barrier
     constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
     using tmaSmemStruct_t = tmaSmemStruct<BytePack<BytePerPack>, UnrollPacks>;
-    constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-    tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+    tmaSmemStruct_t* tmaSmem = ncclSymkTileSmem<tmaSmemStruct_t>(lw);
     if NCCL_IF_CONSTEXPR (EnableTma) {
       ncclSymkTileBarInit(&tmaSmem->bar, /*arrivers=*/1, lane);
     }

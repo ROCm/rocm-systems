@@ -43,10 +43,8 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
 
 #if NCCL_SYMK_ASYNC_TILE
   int lw = threadIdx.x / WARP_SIZE;
-  extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks>;
-  constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-  tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+  tmaSmemStruct_t* tmaSmem = ncclSymkTileSmem<tmaSmemStruct_t>(lw);
   constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
 #endif
   bool skip = false; // all lanes issue loads/stores
