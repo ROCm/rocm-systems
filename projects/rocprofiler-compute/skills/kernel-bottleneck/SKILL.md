@@ -1,6 +1,6 @@
 ---
 name: kernel-bottleneck
-description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, covering counter collection, kernel and dispatch selection, occupancy and wavefront limits, and scheduler stalls. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application on an AMD GPU, or asks which kernel is the hotspot. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
+description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
 ---
 
 # Find the bottleneck in an AMD GPU kernel
