@@ -306,6 +306,77 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 endfunction()
 
+# Create one host-only micro-test binary and apply all the boilerplate that
+# differs only by build mode. The per-target specifics are passed in:
+#   SOURCES         the target's source list
+#   EXTRA_INCLUDES  include dirs appended after the mode's include-dir var
+#   EXTRA_DEFS      compile definitions appended after the mode's define baseline
+#   CATEGORIES_YAML CTest category yaml (in-build only; ignored standalone)
+#   REMOVE_DEFS     defines to drop from the mode baseline before EXTRA_DEFS are
+#                   added (init strips the three preprocessor-gated macros it sets
+#                   per variant so they are never inherited from the common set)
+#   NO_PIE          add -no-pie to the link (standalone only; see rccl-HostUnitTests)
+# Everything below keyed on BUILD_TESTS reproduces, verbatim, what each block
+# used to hand-roll per target:
+#   in-build   -> RCCL_COMMON_INCLUDE_DIRS/DEFS, rccl_apply_rocshmem_gin_optout,
+#                 rccl_apply_hip_compile_only, MICRO_TEST_LINK_LIBS, the hipify
+#                 dependency, rccl_apply_host_only_flags (coverage included),
+#                 rocm_install, and CTest category registration.
+#   standalone -> the -Wno-unused* + -ffunction-sections warning/codegen opts,
+#                 RCCL_INCLUDE_DIRS + the __HIP_PLATFORM_AMD__/NCCL_OS_LINUX/
+#                 ROCM_VERSION define baseline, the -no-hip-rt[/-no-pie]/
+#                 --gc-sections link options, and GTest/Threads/fmt. It also
+#                 registers the target in HOST_TEST_BINARIES so the trailing
+#                 HOST_TEST_COVERAGE loop instruments it (matching
+#                 add_test_executable()); coverage is applied there, not here.
+# The define/include *baselines* are supplied here per mode, but each caller
+# still passes its own EXTRA_DEFS/EXTRA_INCLUDES so the deliberate per-target,
+# per-mode differences (fabric/telemetry/USE_AMDSMI, extra include dirs) are
+# preserved exactly.
+function(rccl_add_micro_binary _name)
+  cmake_parse_arguments(_ramb "NO_PIE" "CATEGORIES_YAML"
+    "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
+
+  if(BUILD_TESTS)
+    set(_ramb_base_defs ${RCCL_COMMON_COMPILE_DEFS})
+    if(_ramb_REMOVE_DEFS)
+      list(REMOVE_ITEM _ramb_base_defs ${_ramb_REMOVE_DEFS})
+    endif()
+    add_executable(${_name} ${_ramb_SOURCES})
+    target_include_directories(${_name} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR} ${RCCL_COMMON_INCLUDE_DIRS} ${_ramb_EXTRA_INCLUDES})
+    target_compile_definitions(${_name} PRIVATE
+      ${_ramb_base_defs} ${_ramb_EXTRA_DEFS})
+    rccl_apply_rocshmem_gin_optout(${_name})
+    rccl_apply_hip_compile_only(${_name})   # HIP compile requirements, no runtime link
+    target_link_libraries(${_name} PRIVATE ${MICRO_TEST_LINK_LIBS})
+    add_dependencies(${_name} hipify_all copy_nccl_device_headers)
+    rccl_apply_host_only_flags(${_name})
+    rocm_install(TARGETS ${_name} COMPONENT tests)
+    if(_ramb_CATEGORIES_YAML)
+      rccl_register_test_categories(${_name} "${_ramb_CATEGORIES_YAML}")
+    endif()
+  else()
+    add_executable(${_name} ${_ramb_SOURCES})
+    # Mirror add_test_executable(): record for the HOST_TEST_COVERAGE loop.
+    list(APPEND HOST_TEST_BINARIES ${_name})
+    set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
+    target_compile_options(${_name} PRIVATE
+      -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+    target_include_directories(${_name} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR} ${RCCL_INCLUDE_DIRS} ${_ramb_EXTRA_INCLUDES})
+    target_compile_definitions(${_name} PRIVATE
+      __HIP_PLATFORM_AMD__ NCCL_OS_LINUX ROCM_VERSION=70000 ${_ramb_EXTRA_DEFS})
+    if(_ramb_NO_PIE)
+      target_link_options(${_name} PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
+    else()
+      target_link_options(${_name} PRIVATE -no-hip-rt -Wl,--gc-sections)
+    endif()
+    target_link_libraries(${_name} PRIVATE
+      GTest::GTest Threads::Threads fmt::fmt-header-only)
+  endif()
+endfunction()
+
 # =====================================================================
 # In-RCCL-build integration.
 #
@@ -416,29 +487,16 @@ if(BUILD_TESTS)
   # Source list: TEST_MICRO_SCHEDULER_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
-  add_executable(rccl-UnitTestsMicroWarpSpeed ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
-  target_include_directories(rccl-UnitTestsMicroWarpSpeed PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${RCCL_COMMON_INCLUDE_DIRS})
-  target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE
-    ${RCCL_COMMON_COMPILE_DEFS}
-    ENABLE_WARP_SPEED
-    # Not inherited via RCCL_COMMON_COMPILE_DEFS (unlike ENABLE_FAULT_INJECTION); the default-ON, shipping config.
-    GENERATE_SYM_KERNELS
-    # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
-    ALLGATHERV_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/allgatherv_sched_tmp.cc"
-    SYMMETRIC_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/symmetric_sched.cc")
-
-  rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicroWarpSpeed)
-
-  # HIP compile requirements without linking the runtime.
-  rccl_apply_hip_compile_only(rccl-UnitTestsMicroWarpSpeed)
-  target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE ${MICRO_TEST_LINK_LIBS})
-  add_dependencies(rccl-UnitTestsMicroWarpSpeed hipify_all copy_nccl_device_headers)
-  rccl_apply_host_only_flags(rccl-UnitTestsMicroWarpSpeed)
-  rocm_install(TARGETS rccl-UnitTestsMicroWarpSpeed COMPONENT tests)
-  rccl_register_test_categories(rccl-UnitTestsMicroWarpSpeed
-    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
+  rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
+    SOURCES ${TEST_MICRO_SCHEDULER_SOURCE_FILES}
+    EXTRA_DEFS
+      ENABLE_WARP_SPEED
+      # Not inherited via RCCL_COMMON_COMPILE_DEFS (unlike ENABLE_FAULT_INJECTION); the default-ON, shipping config.
+      GENERATE_SYM_KERNELS
+      # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
+      ALLGATHERV_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/allgatherv_sched_tmp.cc"
+      SYMMETRIC_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/symmetric_sched.cc"
+    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for src/init.cc
@@ -474,33 +532,21 @@ if(BUILD_TESTS)
   # matrix silently tested one side twice. Strip them from the inherited list and
   # set them per variant instead, so both build paths produce the identical
   # three-way matrix by construction.
-  set(RCCL_INIT_COMPILE_DEFS ${RCCL_COMMON_COMPILE_DEFS})
-  list(REMOVE_ITEM RCCL_INIT_COMPILE_DEFS
-    ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   foreach(_variant "" "-uncached" "-faultinj")
     set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
-    add_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
-    target_include_directories(${_init_tgt} PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${RCCL_COMMON_INCLUDE_DIRS})
     # src/init.cc is the first of the duplicate basenames (vs transport/net_ib/
-    # init.cc), so hipify keeps its name -- no _tmp suffix.
-    target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_INIT_COMPILE_DEFS}
-      INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
-    rccl_apply_rocshmem_gin_optout(${_init_tgt})
+    # init.cc), so hipify keeps its name -- no _tmp suffix. REMOVE_DEFS strips the
+    # three per-variant macros so none is inherited from RCCL_COMMON_COMPILE_DEFS.
+    rccl_add_micro_binary(${_init_tgt}
+      SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
+      REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
+      EXTRA_DEFS INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc"
+      CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
     if(_variant STREQUAL "-uncached")
       target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
     elseif(_variant STREQUAL "-faultinj")
       target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
     endif()
-    # HIP compile requirements without linking the runtime.
-    rccl_apply_hip_compile_only(${_init_tgt})
-    target_link_libraries(${_init_tgt} PRIVATE ${MICRO_TEST_LINK_LIBS})
-    add_dependencies(${_init_tgt} hipify_all copy_nccl_device_headers)
-    rccl_apply_host_only_flags(${_init_tgt})
-    rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
-    rccl_register_test_categories(${_init_tgt}
-      "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
   endforeach()
 
   # ---------------------------------------------------------------------------
@@ -536,33 +582,21 @@ if(BUILD_TESTS)
   # Source list: TEST_MICRO_ENQUEUE_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
-  add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
-  target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${RCCL_COMMON_INCLUDE_DIRS}
-    ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
-    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
   # Hipify preserves the src/enqueue/ directory, so the staged file is
   # hipify/src/enqueue/enqueue.cc (not hipify/src/enqueue.cc). Contrast
   # transport/p2p.cc -> p2p_tmp.cc, which is a basename collision.
-  target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
-    ${RCCL_COMMON_COMPILE_DEFS}
-    # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
-    # supplies both, so neither needs a replacement definition.
-    RCCL_STUBS_OMIT_ncclInitKernelsForDevice
-    RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc")
-
-  rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicroEnqueue)
-
-  # HIP compile requirements without linking the runtime.
-  rccl_apply_hip_compile_only(rccl-UnitTestsMicroEnqueue)
-  target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE ${MICRO_TEST_LINK_LIBS})
-  add_dependencies(rccl-UnitTestsMicroEnqueue hipify_all copy_nccl_device_headers)
-  rccl_apply_host_only_flags(rccl-UnitTestsMicroEnqueue)
-  rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
-  rccl_register_test_categories(rccl-UnitTestsMicroEnqueue
-    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
+  rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue
+    SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
+    EXTRA_INCLUDES
+      ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+    EXTRA_DEFS
+      # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
+      # supplies both, so neither needs a replacement definition.
+      RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+      RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+      ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc"
+    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroSymKernels -- host-only microtests for the REAL src/sym_kernels.cc
@@ -584,24 +618,14 @@ if(BUILD_TESTS)
     # Source list: TEST_MICRO_SYM_KERNELS_SOURCE_FILES (rccl_define_micro_source_lists).
     rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
-    add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
-    target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}
-      ${RCCL_COMMON_INCLUDE_DIRS})
-    target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
-      GENERATE_SYM_KERNELS
-      SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
-      SYM_KERNELS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/sym_kernels.cc")
-    rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicroSymKernels)
-    # HIP compile requirements without linking the runtime.
-    rccl_apply_hip_compile_only(rccl-UnitTestsMicroSymKernels)
-    target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE ${MICRO_TEST_LINK_LIBS})
-    add_dependencies(rccl-UnitTestsMicroSymKernels hipify_all copy_nccl_device_headers)
-    rccl_apply_host_only_flags(rccl-UnitTestsMicroSymKernels)
-    rocm_install(TARGETS rccl-UnitTestsMicroSymKernels COMPONENT tests)
     # Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this binary's suites too.
-    rccl_register_test_categories(rccl-UnitTestsMicroSymKernels
-      "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+    rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels
+      SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
+      EXTRA_DEFS
+        GENERATE_SYM_KERNELS
+        SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
+        SYM_KERNELS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/sym_kernels.cc"
+      CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
   endif()
 
   return()
@@ -1002,32 +1026,17 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
 # behind the separate binary, ENABLE_WARP_SPEED, and the dev_runtime.cc fakes
 # vs real-compile decision.
 # Source list: TEST_MICRO_SCHEDULER_SOURCE_FILES (rccl_define_micro_source_lists).
-add_test_executable(rccl-UnitTestsMicroWarpSpeed ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
-target_compile_options(rccl-UnitTestsMicroWarpSpeed PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
-target_include_directories(rccl-UnitTestsMicroWarpSpeed PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${RCCL_INCLUDE_DIRS}
-)
-target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
-  ENABLE_WARP_SPEED
-  # Standalone project has no rccl target to inherit from; the default-ON, shipping config.
-  GENERATE_SYM_KERNELS
-  ALLGATHERV_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
-  SYMMETRIC_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-)
-target_link_options(rccl-UnitTestsMicroWarpSpeed PRIVATE -no-hip-rt -Wl,--gc-sections)
-target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE
-  GTest::GTest
-  Threads::Threads
-  fmt::fmt-header-only
-)
+rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
+  SOURCES ${TEST_MICRO_SCHEDULER_SOURCE_FILES}
+  EXTRA_DEFS
+    ENABLE_WARP_SPEED
+    # Standalone project has no rccl target to inherit from; the default-ON, shipping config.
+    GENERATE_SYM_KERNELS
+    ALLGATHERV_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
+    SYMMETRIC_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>)
 
 # --- Standalone init micro-test binaries --------------------------------
 # rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for
@@ -1046,42 +1055,23 @@ target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE
 # exactly (see there for the full rationale).
 foreach(_variant "" "-uncached" "-faultinj")
   set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
-  add_test_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
-
-  target_compile_options(${_init_tgt} PRIVATE
-    -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
-
-  target_include_directories(${_init_tgt} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${RCCL_INCLUDE_DIRS}
-  )
-
-  target_compile_definitions(${_init_tgt} PRIVATE
-    __HIP_PLATFORM_AMD__
-    NCCL_OS_LINUX
-    ROCM_VERSION=70000
-    # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
-    # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
-    # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
-    # this from RCCL_COMMON_COMPILE_DEFS instead.
-    USE_AMDSMI
-    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
-    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-    INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
-  )
+  # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
+  # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
+  # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
+  # USE_AMDSMI from RCCL_COMMON_COMPILE_DEFS instead.
+  rccl_add_micro_binary(${_init_tgt}
+    SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
+    EXTRA_DEFS
+      USE_AMDSMI
+      $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+      $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+      $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+      INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   elseif(_variant STREQUAL "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
-
-  target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
-  target_link_libraries(${_init_tgt} PRIVATE
-    GTest::GTest
-    Threads::Threads
-    fmt::fmt-header-only
-  )
 endforeach()
 
 # ---------------------------------------------------------------------------
@@ -1104,39 +1094,21 @@ endforeach()
 # the shipping arm would go untested by that workflow entirely.
 foreach(_enq_variant "" "-devlinker")
   set(_enq_tgt "rccl-UnitTestsMicroEnqueue${_enq_variant}")
-  add_test_executable(${_enq_tgt} ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
-
-  target_compile_options(${_enq_tgt} PRIVATE
-    -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
-
-  target_include_directories(${_enq_tgt} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${RCCL_INCLUDE_DIRS}
-    ${RCCL_HIPIFY_DIR}/src/device                # device/common.h (neutered)
-    ${RCCL_HIPIFY_DIR}/src/include/nccl_device
-  )
-
-  target_compile_definitions(${_enq_tgt} PRIVATE
-    __HIP_PLATFORM_AMD__
-    NCCL_OS_LINUX
-    ROCM_VERSION=70000
-    USE_AMDSMI
-    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-    RCCL_STUBS_OMIT_ncclInitKernelsForDevice
-    RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/enqueue.cc"
-  )
+  rccl_add_micro_binary(${_enq_tgt}
+    SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
+    EXTRA_INCLUDES
+      ${RCCL_HIPIFY_DIR}/src/device                # device/common.h (neutered)
+      ${RCCL_HIPIFY_DIR}/src/include/nccl_device
+    EXTRA_DEFS
+      USE_AMDSMI
+      $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+      $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+      RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+      RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+      ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/enqueue.cc")
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)
   endif()
-
-  target_link_options(${_enq_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
-  target_link_libraries(${_enq_tgt} PRIVATE
-    GTest::GTest
-    Threads::Threads
-    fmt::fmt-header-only
-  )
 endforeach()
 
 # --- Standalone sym-kernels micro-test binary ---------------------------
@@ -1146,35 +1118,15 @@ endforeach()
 # No GENERATE_SYM_KERNELS variable exists in this standalone project(); check the file directly.
 if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
   # Source list: TEST_MICRO_SYM_KERNELS_SOURCE_FILES (rccl_define_micro_source_lists).
-  add_test_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
-
-  target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE
-    -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
-
-  target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${RCCL_INCLUDE_DIRS}
-  )
-
-  target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE
-    __HIP_PLATFORM_AMD__
-    NCCL_OS_LINUX
-    ROCM_VERSION=70000
-    USE_AMDSMI
-    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-    GENERATE_SYM_KERNELS
-    SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
-    SYM_KERNELS_CC_PATH="${RCCL_HIPIFY_DIR}/src/sym_kernels.cc"
-  )
-
-  target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE -no-hip-rt -Wl,--gc-sections)
-  target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE
-    GTest::GTest
-    Threads::Threads
-    fmt::fmt-header-only
-  )
-
+  rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels
+    SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
+    EXTRA_DEFS
+      USE_AMDSMI
+      $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+      $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+      GENERATE_SYM_KERNELS
+      SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
+      SYM_KERNELS_CC_PATH="${RCCL_HIPIFY_DIR}/src/sym_kernels.cc")
 endif()
 
 # --- Coverage (all host-only test binaries) -----------------------------
