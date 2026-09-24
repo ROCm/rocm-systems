@@ -496,17 +496,18 @@ pub fn build_specs(
 /// pass here, and the spec already contains their distinct command,
 /// workdir, environment layering and `--clear-env-vars` policy.
 fn warn_if_the_runtime_cannot_see_the_device(desc: &SessionDescription, specs: &[SpawnSpec]) {
-    let notices = unsupported_target_notices(desc, specs, |isa, spec| {
-        let probe = rocr_probe_spec(desc, spec);
-        let env = crate::process::resolved_env(&probe);
-        mirage_core::rocr::check_target_for_process(
-            isa,
-            &probe.command,
-            probe.workdir.as_deref().map(std::path::Path::new),
-            &env,
-            probe.inherit_env,
-        )
-    });
+    let notices =
+        unsupported_target_notices(desc.emulated_gfx_target(), desc, specs, |isa, spec| {
+            let probe = rocr_probe_spec(desc, spec);
+            let env = crate::process::resolved_env(&probe);
+            mirage_core::rocr::check_target_for_process(
+                isa,
+                &probe.command,
+                probe.workdir.as_deref().map(std::path::Path::new),
+                &env,
+                probe.inherit_env,
+            )
+        });
     for notice in notices {
         eprintln!("mirage: {notice}");
     }
@@ -530,7 +531,18 @@ fn rocr_probe_spec(desc: &SessionDescription, spec: &SpawnSpec) -> SpawnSpec {
     probe
 }
 
+/// Which notices this session's specs earn, given the target it
+/// emulates.
+///
+/// `target` is a parameter rather than a field this reads off `desc` for
+/// the reason `support` is a parameter: the module doc's rule is that
+/// ambient state is the *answer* here and never the decision. Deriving it
+/// inside would also make every test of this policy depend on which
+/// backends happened to be linked into the test binary, since the
+/// derivation asks the registry whether the backend presents a device at
+/// all.
 fn unsupported_target_notices(
+    target: Option<mirage_core::hardware::GfxTarget>,
     desc: &SessionDescription,
     specs: &[SpawnSpec],
     mut support: impl FnMut(&str, &SpawnSpec) -> mirage_core::rocr::TargetSupport,
@@ -538,9 +550,10 @@ fn unsupported_target_notices(
     if desc.containers.is_some() {
         return Vec::new();
     }
-    let Some(isa) = desc.emulated_isa.as_deref() else {
+    let Some(target) = target else {
         return Vec::new();
     };
+    let isa = target.to_string();
 
     let mut checked = std::collections::BTreeSet::new();
     let mut notices = std::collections::BTreeSet::new();
@@ -560,7 +573,7 @@ fn unsupported_target_notices(
         if !checked.insert(fingerprint) {
             continue;
         }
-        if let mirage_core::rocr::TargetSupport::Unsupported(problem) = support(isa, spec) {
+        if let mirage_core::rocr::TargetSupport::Unsupported(problem) = support(&isa, spec) {
             notices.insert(problem.explain());
         }
     }
@@ -827,7 +840,7 @@ mod tests {
     fn job(node_count: u32, nproc: u32) -> SessionDescription {
         SessionDescription {
             session: SessionId::new("s").unwrap(),
-            emulated_isa: None,
+            profile: None,
             node_count,
             nproc_per_node: nproc,
             workdir: "/work".to_string(),
@@ -860,6 +873,12 @@ mod tests {
         ExecId::new("e-1").unwrap()
     }
 
+    /// The target the `mi450x` builtin emulates, which is the one the
+    /// original report was filed against.
+    fn gfx1250() -> Option<mirage_core::hardware::GfxTarget> {
+        mirage_core::hardware::GfxTarget::new(120500)
+    }
+
     fn unsupported(isa: &str) -> mirage_core::rocr::TargetSupport {
         mirage_core::rocr::TargetSupport::Unsupported(Box::new(
             mirage_core::rocr::UnsupportedTarget {
@@ -876,13 +895,12 @@ mod tests {
     /// checked against its own loader environment too.
     #[test]
     fn an_unsupported_emulated_target_produces_a_notice_for_the_concrete_process() {
-        let mut description = desc(1);
+        let description = desc(1);
         let mut def = exec_def(1, None);
         def.clear_env = true;
         let specs = build_specs(&description, &def, &id(), CAPTURED).unwrap();
-        description.emulated_isa = Some("gfx1250".to_string());
 
-        let notices = unsupported_target_notices(&description, &specs, |isa, spec| {
+        let notices = unsupported_target_notices(gfx1250(), &description, &specs, |isa, spec| {
             assert_eq!(isa, "gfx1250");
             assert!(
                 !spec.inherit_env,
@@ -906,28 +924,29 @@ mod tests {
             called.set(true);
             unsupported("gfx1250")
         };
-        assert!(unsupported_target_notices(&description, &specs, check).is_empty());
+        assert!(unsupported_target_notices(None, &description, &specs, check).is_empty());
 
         let mut containerised = description;
-        containerised.emulated_isa = Some("gfx1250".to_string());
         containerised.containers = Some(ContainerTargets {
             provider: "provider".to_string(),
             names: vec!["node".to_string()],
             scratch: std::path::PathBuf::from("/tmp"),
         });
-        assert!(unsupported_target_notices(&containerised, &specs, check).is_empty());
+        assert!(
+            unsupported_target_notices(gfx1250(), &containerised, &specs, check).is_empty(),
+            "a containerised session runs the image's ROCm, not the host's"
+        );
         assert!(!called.get(), "neither exempt session may reach the probe");
     }
 
     #[test]
     fn identical_rank_loader_inputs_are_checked_once() {
-        let mut description = job(2, 2);
+        let description = job(2, 2);
         let def = exec_def(2, None);
         let specs = build_specs(&description, &def, &id(), CAPTURED).unwrap();
-        description.emulated_isa = Some("gfx1250".to_string());
         let calls = std::cell::Cell::new(0);
 
-        let notices = unsupported_target_notices(&description, &specs, |isa, _| {
+        let notices = unsupported_target_notices(gfx1250(), &description, &specs, |isa, _| {
             calls.set(calls.get() + 1);
             unsupported(isa)
         });

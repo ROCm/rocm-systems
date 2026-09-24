@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use mirage_core::agent::AgentDef;
+use mirage_core::agent::{AgentDef, KfdDeviceInfo};
 use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{LibSearch, RuntimeLocation};
@@ -181,6 +181,43 @@ impl EmulatorBackend for Rocjitsu {
         self.injection_def_with(ctx, kmd_preload())
     }
 
+    /// rocjitsu synthesises the KFD node the workload enumerates, so the
+    /// agent's ISA is exactly what its ROCm runtime has to recognise.
+    fn presents_emulated_device(&self) -> bool {
+        true
+    }
+
+    /// Point the profile's agent at the device a drop-in `--config`
+    /// describes, because that file — not the profile's own agent — is
+    /// what the interposer will stand up.
+    ///
+    /// A config mirage cannot read leaves the agent with no target rather
+    /// than the profile's original one: the session is about to emulate
+    /// whatever that file says, and naming the device it replaced would be
+    /// a confident wrong answer where silence is available. rocjitsu
+    /// itself reads the file through FlatBuffers, which accepts JSON this
+    /// does not, so failing to parse it here says nothing about whether
+    /// the run will work — only that mirage cannot describe it.
+    fn reconcile_profile(&self, profile: &mut ProfileDef) -> Result<()> {
+        let Some(SimpleValue::String(path)) = profile.emulator.options.get("config") else {
+            return Ok(());
+        };
+        // A default device is one with no `gfx_target_version`, which is
+        // the "mirage cannot name this" answer the doc above promises.
+        let device = device_of_config(std::path::Path::new(path)).unwrap_or_default();
+        // Both already owned by the contract on the trait method: the
+        // caller resolves the profile first. Matching rather than
+        // asserting keeps a misuse a no-op instead of a panic, and the
+        // preflight's answer for an unresolved profile is silence either
+        // way.
+        if let MaybeRef::Owned(topology) = &mut profile.emulator.topology
+            && let MaybeRef::Owned(agent) = &mut topology.agent
+        {
+            agent.vm.gpu.device = device;
+        }
+        Ok(())
+    }
+
     fn daemon_capability(&self) -> Result<()> {
         // Answered once per process; see `located_daemon_capability`.
         located_daemon_capability()
@@ -228,7 +265,7 @@ impl Rocjitsu {
     /// `unsafe`, so a test that could not supply the library could only
     /// assert about the machine it happened to run on. With it as a
     /// parameter, the injection this backend really hands the supervisor
-    /// — `emulated_isa` included — is what the tests check.
+    /// is what the tests check.
     ///
     /// # Errors
     ///
@@ -261,9 +298,6 @@ impl Rocjitsu {
                 unreachable.display(),
             )));
         }
-        let emulated_isa = std::fs::read(&config)
-            .ok()
-            .and_then(|config| isa_of_config(&config));
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -363,7 +397,6 @@ impl Rocjitsu {
             ld_preload: Some(ld_preload.display().to_string()),
             files: Default::default(),
             env,
-            emulated_isa,
             mounts: Default::default(),
             libraries,
             host_gpus: false,
@@ -1063,14 +1096,13 @@ fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> R
 /// A drop-in `--config` is copied here rather than pointed at whenever
 /// it can be, which is what makes the device a session emulates fixed
 /// for as long as the session lives. `kmd_config` used to hand the
-/// interposer the user's
-/// own path, and the interposer reopens it: in `--in-process` mode every
-/// later workload re-read whatever was on disk *then*, so editing the
-/// file after bring-up changed the emulated device while the ISA
-/// captured in [`InjectionDef::emulated_isa`] — and the preflight
-/// warning derived from it — still described the old one. Copying costs
-/// a few kilobytes in a directory that is already the session's and
-/// removes the whole class.
+/// interposer the user's own path, and the interposer reopens it: in
+/// `--in-process` mode every later workload re-read whatever was on disk
+/// *then*, so editing the file after bring-up changed the emulated device
+/// while the agent [`Rocjitsu::reconcile_profile`] read it into — and the
+/// preflight warning drawn from that agent — still described the old one.
+/// Copying costs a few kilobytes in a directory that is already the
+/// session's and removes the whole class.
 ///
 /// The copy is byte for byte apart from one thing: a relative
 /// `dbt_guest.simulator_config` is made absolute against the original's
@@ -1311,25 +1343,21 @@ fn session_config(session_dir: &std::path::Path) -> Result<PathBuf> {
     Ok(PathBuf::from(recorded))
 }
 
-/// The gfx name of the device a rocjitsu `SimulationConfig` describes,
-/// as the workload's ROCm runtime will see it — `gfx1250` for the
-/// `mi450x` builtin.
+/// JSON pointer to the device a rocjitsu `SimulationConfig` describes.
+const VM_DEVICE_POINTER: &str = "/vm/gpu/device";
+
+/// The device a supplied `SimulationConfig` describes, as the workload's
+/// ROCm runtime will see it.
 ///
-/// Read out of the very config the KMD interposer will load, and read at
-/// the moment [`Rocjitsu::injection_def_with`] materialises it, because
-/// the profile's agent is not always the document that will exist: a
-/// drop-in `--config` hands rocjitsu a file of the user's own.
-///
-/// `None` when there is nothing to say: a config that cannot be read or
-/// parsed, or a device with no `gfx_target_version`. The only caller is
-/// a diagnostic, and none of those is worth failing a run over.
-fn isa_of_config(config: &[u8]) -> Option<String> {
-    let config: serde_json::Value = serde_json::from_slice(config).ok()?;
-    let version = config
-        .pointer("/vm/gpu/device/gfx_target_version")?
-        .as_u64()?;
-    let version = u32::try_from(version).ok().filter(|v| *v != 0)?;
-    Some(mirage_core::hardware::gfx_name(version))
+/// `None` when the file cannot be read, cannot be parsed, or carries no
+/// recognisable device. Every one of those means the same thing to the
+/// only caller — mirage does not know what this session will present —
+/// and [`Rocjitsu::reconcile_profile`] turns that into an agent with no
+/// target rather than a guess.
+fn device_of_config(config: &std::path::Path) -> Option<KfdDeviceInfo> {
+    let bytes = std::fs::read(config).ok()?;
+    let config: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    serde_json::from_value(config.pointer(VM_DEVICE_POINTER)?.clone()).ok()
 }
 
 /// Check that `def` describes a machine rocjitsu can stand up, without
@@ -1836,6 +1864,19 @@ mod tests {
         }
     }
 
+    /// A resolved profile around `emulator`, as a session would hold it.
+    ///
+    /// `ctx_for` builds the same profile for the bring-up tests; this is
+    /// the half the derivation needs, without a session directory.
+    fn profile_for(emulator: EmulatorDef) -> ProfileDef {
+        ProfileDef {
+            name: "isa-test".to_string(),
+            description: None,
+            emulator,
+            containerize: None,
+        }
+    }
+
     fn containerise(ctx: &mut SessionContext) {
         ctx.profile.containerize = Some(ContainerizedDef {
             provider: None,
@@ -1861,48 +1902,39 @@ mod tests {
         Some(lib)
     }
 
-    /// The ISA a live session reports is the one its own prepared
-    /// injection emulates.
+    /// The target a session emulates is the one its agent names.
     ///
     /// This is the fact the whole of issue #11361 turns on: a ROCm that
     /// does not know the target skips the emulated agent, so the
     /// workload sees no GPU and exits 0 with nothing said. The warning
-    /// mirage prints is only as good as this answer, and the answer
-    /// travels on the `InjectionDef` — so that is what is asserted on,
-    /// rather than a second lookup no caller uses.
+    /// mirage prints is only as good as this answer, and the answer is
+    /// the agent's own — nothing computes a second copy of it.
     #[test]
-    fn the_emulated_isa_is_the_agents_gfx_target() {
-        let _g = mirage_core::paths::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        mirage_core::paths::set_test_root(tmp.path());
-
+    fn the_emulated_target_is_the_agents_gfx_target() {
         // gfx1250 is the MI450X target, and the one a ROCm 7.0 host has
         // never heard of; gfx942 is one the same host does support, so a
         // passing test cannot be one that answers `gfx1250` to
         // everything.
         for (version, isa) in [(120500, "gfx1250"), (90402, "gfx942")] {
-            let ctx = ctx_for(def_for_target(version), tmp.path(), isa);
-            let injection = Rocjitsu
-                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
-                .unwrap();
-            assert_eq!(injection.emulated_isa.as_deref(), Some(isa));
+            let profile = profile_for(def_for_target(version));
+            assert_eq!(
+                profile.emulated_gfx_target().map(|t| t.to_string()),
+                Some(isa.to_string())
+            );
         }
     }
 
     /// A drop-in `--config` names a device of its own, and that is the
-    /// device the interposer will stand up — so it is the one the
-    /// injection has to report.
+    /// device the interposer will stand up — so `reconcile_profile` makes
+    /// it the agent's device before anything reads the agent.
     ///
-    /// Reading the profile's agent instead would be wrong in both
+    /// Leaving the profile's own agent in place would be wrong in both
     /// directions here: silent about a config whose target this ROCm
     /// cannot see, and warning about a profile agent that is not going
     /// to exist.
     #[test]
-    fn a_supplied_config_names_the_device_that_will_exist() {
-        let _g = mirage_core::paths::test_env_lock();
+    fn a_supplied_config_becomes_the_agents_device() {
         let tmp = tempfile::tempdir().unwrap();
-        mirage_core::paths::set_test_root(tmp.path());
-
         let config = tmp.path().join("mine.json");
         std::fs::write(
             &config,
@@ -1917,11 +1949,49 @@ mod tests {
             SimpleValue::String(config.display().to_string()),
         );
 
-        let ctx = ctx_for(def, tmp.path(), "dropin");
-        let injection = Rocjitsu
-            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
-            .unwrap();
-        assert_eq!(injection.emulated_isa.as_deref(), Some("gfx950"));
+        let mut profile = profile_for(def);
+        Rocjitsu.reconcile_profile(&mut profile).unwrap();
+        assert_eq!(
+            profile.emulated_gfx_target().map(|t| t.to_string()),
+            Some("gfx950".to_string())
+        );
+    }
+
+    /// A `--config` mirage cannot read leaves no target at all, rather
+    /// than the agent's own.
+    ///
+    /// rocjitsu reads these through FlatBuffers, which accepts JSON
+    /// `serde_json` does not, so a file this cannot parse may still run
+    /// perfectly well — it just describes a device mirage cannot name.
+    /// Keeping the profile's original agent would name the device the
+    /// config replaced, which is the one thing worse than saying nothing.
+    #[test]
+    fn a_config_that_cannot_be_read_leaves_no_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commented = tmp.path().join("commented.json");
+        std::fs::write(
+            &commented,
+            br#"{
+  // the device this session stands up
+  "vm": {"gpu": {"device": {"gfx_target_version": 90500}}}
+}"#,
+        )
+        .unwrap();
+
+        for path in [commented, tmp.path().join("absent.json")] {
+            let mut def = def_for_target(120500);
+            def.options.insert(
+                "config".to_string(),
+                SimpleValue::String(path.display().to_string()),
+            );
+            let mut profile = profile_for(def);
+            Rocjitsu.reconcile_profile(&mut profile).unwrap();
+            assert_eq!(
+                profile.emulated_gfx_target(),
+                None,
+                "a config mirage cannot read must not leave the agent's own target in place"
+            );
+        }
     }
 
     /// A device with no ISA is not a device to check a runtime against,
@@ -1939,11 +2009,7 @@ mod tests {
         mirage_core::paths::set_test_root(tmp.path());
 
         // A default agent's `gfx_target_version` is 0.
-        let ctx = ctx_for(def_with_gpus(1), tmp.path(), "no-target");
-        let injection = Rocjitsu
-            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
-            .unwrap();
-        assert_eq!(injection.emulated_isa, None);
+        assert_eq!(profile_for(def_with_gpus(1)).emulated_gfx_target(), None);
 
         // An unresolvable topology reference.
         let mut def = def_with_gpus(1);
@@ -2005,7 +2071,6 @@ mod tests {
         let injection = Rocjitsu
             .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
             .unwrap();
-        assert_eq!(injection.emulated_isa.as_deref(), Some("gfx950"));
 
         // What the interposer will open is the session's copy.
         let runtime_dir = PathBuf::from(
@@ -2029,8 +2094,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            isa_of_config(&std::fs::read(&named).unwrap()).as_deref(),
-            Some("gfx950"),
+            device_of_config(&named).and_then(|d| d.gfx_target()),
+            mirage_core::hardware::GfxTarget::new(90500),
             "a live session must emulate the device it was brought up on"
         );
 
@@ -2101,9 +2166,8 @@ mod tests {
         let ctx = ctx_for(def, tmp.path(), "relative-config");
         let preload = stand_in_interposer(tmp.path());
 
-        let injection =
-            in_working_directory(tmp.path(), || Rocjitsu.injection_def_with(&ctx, preload))
-                .expect("a relative config that exists must bring up");
+        in_working_directory(tmp.path(), || Rocjitsu.injection_def_with(&ctx, preload))
+            .expect("a relative config that exists must bring up");
 
         let handed = session_config(&ctx.runtime_dir).unwrap();
         let snapshot: serde_json::Value =
@@ -2128,9 +2192,10 @@ mod tests {
             parent.display()
         );
 
-        assert!(
-            injection.emulated_isa.is_none(),
-            "the guest config names no device of its own"
+        assert_eq!(
+            device_of_config(&handed).and_then(|d| d.gfx_target()),
+            None,
+            "the guest config names no `vm.gpu.device` of its own"
         );
     }
 
