@@ -16,31 +16,31 @@
     #element = null;
     #timer = null;
 
-    attach(label, action, title) {
+    attachTooltipToKernelRow(kernelRow, kernelLabel, kernelFullName) {
       var self = this;
       var lastMousePosition = { x: 0, y: 0 };
-      label.addEventListener("mouseenter", function (event) {
+      kernelLabel.addEventListener("mouseenter", function (event) {
         lastMousePosition = { x: event.clientX, y: event.clientY };
-        self.#showWithDelay(title, function () {
+        self.#showWithDelay(kernelFullName, function () {
           return lastMousePosition;
         });
       });
-      label.addEventListener("mousemove", function (event) {
+      kernelLabel.addEventListener("mousemove", function (event) {
         lastMousePosition = { x: event.clientX, y: event.clientY };
         if (self.#element && self.#element.classList.contains("visible")) {
           self.#position(event.clientX, event.clientY);
         }
       });
-      label.addEventListener("mouseleave", function () {
+      kernelLabel.addEventListener("mouseleave", function () {
         self.hide();
       });
-      action.addEventListener("focus", function () {
-        var rect = label.getBoundingClientRect();
-        self.#showWithDelay(title, function () {
+      kernelRow.addEventListener("focus", function () {
+        var rect = kernelLabel.getBoundingClientRect();
+        self.#showWithDelay(kernelFullName, function () {
           return { x: rect.left, y: rect.bottom };
         });
       });
-      action.addEventListener("blur", function () {
+      kernelRow.addEventListener("blur", function () {
         self.hide();
       });
     }
@@ -93,7 +93,7 @@
   var tooltip = new RooflineKernelNameTooltip();
 
   window.RooflineKernelListTooltip = {
-    attach: tooltip.attach.bind(tooltip),
+    attachTooltipToKernelRow: tooltip.attachTooltipToKernelRow.bind(tooltip),
     hide: tooltip.hide.bind(tooltip),
   };
 })();
