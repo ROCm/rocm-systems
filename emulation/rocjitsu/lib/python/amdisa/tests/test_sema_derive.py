@@ -283,7 +283,10 @@ class TestDeriveScalarBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.FMA in all_kinds
         cpp = lower_sema_block(block)
-        assert 'amdgpu::fp_mode::fma_f32' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
+        assert 'wf.fp_round_mode_f32()' in cpp
+        assert 'wf.fp_denorm_mode_f32()' in cpp
+        assert 'wf.cu().arch(), wf.ieee_mode()' in cpp
 
     def test_scalar_fma_reads_third_source(self):
         sem = _FakeSem('S_FMAAK_F32', 'scalar_binop', 'fma', 'f32', 'none')
@@ -291,7 +294,10 @@ class TestDeriveScalarBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.FMA in all_kinds
         cpp = lower_sema_block(block)
-        assert 'amdgpu::fp_mode::fma_f32' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
+        assert 'wf.fp_round_mode_f32()' in cpp
+        assert 'wf.fp_denorm_mode_f32()' in cpp
+        assert 'wf.cu().arch(), wf.ieee_mode()' in cpp
         assert 'src2' in cpp
 
     def test_scc_carry(self):
@@ -1741,11 +1747,11 @@ class TestDeriveVectorTernary:
         assert SemaNodeKind.MUL in all_kinds
         assert SemaNodeKind.ADD in all_kinds
 
-    def test_lowers_to_architectural_fma(self):
+    def test_lowers_to_mode_aware_fma(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'amdgpu::fp_mode::fma_f32(' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
 
     def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [

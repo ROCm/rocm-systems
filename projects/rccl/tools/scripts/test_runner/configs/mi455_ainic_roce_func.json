@@ -643,6 +643,31 @@
         }
       ]
     },
+    "cast_grh": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "Cast_GrhSetOnRoceQp",
+          "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 read back from the driver via ibv_query_qp on every RoCE QP, plus a data-integrity send/recv",
+          "test_filter": "NetIbMPITest.CastGrhSetOnRoceQp"
+        }
+      ]
+    },
+    "cast_subnet_routing": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "env_variables": {
+        "NCCL_IB_SUBNET_AWARE_ROUTING": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SubnetAwareRoutingSameSubnet",
+          "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test on single-subnet hardware: exercises the default-device-matches-peer-subnet fast path plus a data-integrity send/recv",
+          "test_filter": "NetIbMPITest.CastSubnetAwareRoutingSameSubnet"
+        }
+      ]
+    },
     "cast_four_qp": {
       "extends": "cast_base",
       "timeout": 120,
@@ -1347,6 +1372,41 @@
           "name": "SkipPresetTopoMatching",
           "description": "SkipPreset arch topology matching and threshold lookup tests",
           "test_filter": "SkipPresetTopoMatching.*"
+        },
+        {
+          "name": "GetPlaneIndexDedup",
+          "description": "IbCastGetPlaneIndex dedups plane IDs into a compact index space",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexDedup"
+        },
+        {
+          "name": "GetPlaneIndexRejectsVirtBit",
+          "description": "IbCastGetPlaneIndex rejects plane IDs with the VIRT_BIT set",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexRejectsVirtBit"
+        },
+        {
+          "name": "GetPlaneIndexNullArgs",
+          "description": "IbCastGetPlaneIndex rejects null count/planes/idx arguments",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexNullArgs"
+        },
+        {
+          "name": "GidSameSubnetIPv4",
+          "description": "gidSameSubnet IPv4 prefix-length matching",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv4"
+        },
+        {
+          "name": "GidSameSubnetIPv6",
+          "description": "gidSameSubnet IPv6 prefix-length matching",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv6"
+        },
+        {
+          "name": "GidSameSubnetFamilyMismatch",
+          "description": "gidSameSubnet rejects AF_INET vs AF_INET6 comparisons",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetFamilyMismatch"
+        },
+        {
+          "name": "SubnetMatchesAny",
+          "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set",
+          "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
         }
       ]
     },
@@ -2950,6 +3010,18 @@
       "name": "NET IB - CAST Single QP (QPS=1)",
       "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
       "config": "cast_single_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST GRH on RoCE QP",
+      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv",
+      "config": "cast_grh",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Subnet-Aware Routing (same subnet)",
+      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv",
+      "config": "cast_subnet_routing",
       "enabled": true
     },
     {

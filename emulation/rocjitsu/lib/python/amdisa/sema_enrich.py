@@ -47,6 +47,7 @@ _DS_ATOMIC_PREFIXES = (
 
 _NO_DST_MODIFIER_INSTRUCTIONS = frozenset(
     {
+        'V_FREXP_EXP_I32_F32',
         'V_CVT_F16_BF8',
         'V_CVT_F16_FP8',
         'V_CVT_NORM_I16_F16',

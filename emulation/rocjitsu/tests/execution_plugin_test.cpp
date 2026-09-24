@@ -43,6 +43,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -4349,12 +4350,14 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
+    amdgpu::fp_mode::detail::ScopedFenv floating_environment(0);
     PluginFixture f(/*num_wf_slots=*/1);
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(kPartialExecMask);
+    wf->set_mode_raw(0xf0u);
 
     const uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {

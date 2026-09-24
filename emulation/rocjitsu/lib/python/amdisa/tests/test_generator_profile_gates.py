@@ -2916,9 +2916,12 @@ def test_div_scale_delegates_classification_and_preserves_explicit_mask(dtype, m
         ['vdst', 'sdst'], ['src0', 'src1', 'src2'], dtype, is_vop3=True
     )
 
+    nan_policy = (
+        ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if dtype == 'f64' else ''
+    )
     assert (
-        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}())'
-        in body
+        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), '
+        f'wf.fp_denorm_mode_{mode}(){nan_policy})' in body
     )
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc)' in body
 
@@ -3445,9 +3448,11 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert (
         '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
     )
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_binary
     assert re.search(
-        r'read_vop3_true16_src\(src1,\s*wf,\s*lane,\s*opsel,\s*1\)',
+        r'read_vop3_true16_src\(\s*src0,\s*wf,\s*lane,\s*opsel,\s*0\)', true16_binary
+    )
+    assert re.search(
+        r'read_vop3_true16_src\(\s*src1,\s*wf,\s*lane,\s*opsel,\s*1\)',
         true16_binary,
     )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_binary
@@ -3585,11 +3590,11 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
 
     assert 'if (wf.fp16_ovfl())' in vop2
     assert 'f32_to_f16_ovfl_simd' in vop2
-    assert 'sdwa::round_f16_result' in vop2
+    assert 'sdwa::finish_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
     assert 'if (wf.fp16_ovfl())' in vop3
     assert 'f32_to_f16_ovfl_simd' in vop3
-    assert 'sdwa::round_f16_result' in vop3
+    assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
 
 
@@ -7033,7 +7038,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'throw util::InvalidInst' not in cpp
     assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
-    assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
+    assert 'if (lhs == 0.0f || rhs == 0.0f)' not in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
     src_neg_body = exec_cpp[
         src_neg_start : exec_cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
@@ -7044,14 +7049,20 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'Vopd::execute_impl' not in cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in cpp
     execute_start = exec_cpp.index('uint32_t Vopd::execute_slot')
+    mul_dx9_start = exec_cpp.index('case kVopdMulDx9ZeroF32:', execute_start)
+    mul_dx9_case = exec_cpp[
+        mul_dx9_start : exec_cpp.index('case kVopdAddF32:', mul_dx9_start)
+    ]
+    assert 'fp_mode::Arithmetic::MUL_LEGACY' in mul_dx9_case
+    assert 'wf.fp_round_mode_f32()' in mul_dx9_case
+    assert 'wf.fp_denorm_mode_f32()' in mul_dx9_case
     fma_start = exec_cpp.index('case kVopdFmaF32', execute_start)
     fma_case = exec_cpp[fma_start : exec_cpp.index('case kVopdSubNcU32:', fma_start)]
-    assert 'amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0),' in fma_case
+    assert 'fp_mode::Arithmetic::FMA' in fma_case
+    assert 'wf.fp_round_mode_f32()' in fma_case
+    assert 'wf.fp_denorm_mode_f32()' in fma_case
     assert 'std::bit_cast<float>(src1),' in fma_case
-    assert (
-        'std::bit_cast<float>(src2), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())'
-        in fma_case
-    )
+    assert 'std::bit_cast<float>(src2),' in fma_case
     assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
     assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
     assert 'bool Vopd::is_float64_op' in cpp

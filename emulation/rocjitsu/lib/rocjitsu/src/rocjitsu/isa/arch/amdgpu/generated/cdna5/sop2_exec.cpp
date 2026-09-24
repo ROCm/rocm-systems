@@ -205,20 +205,20 @@ void SMaxNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f32_sop2(*this, wf); }
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = amdgpu::fp_mode::fma_f32(
+  float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
-      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)), wf.cu().arch(),
-      wf.ieee_mode(), wf.fp_denorm_mode_f32());
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)), wf.fp_round_mode_f32(),
+      wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
   amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = amdgpu::fp_mode::fma_f32(
+  float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)),
-      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)), wf.cu().arch(),
-      wf.ieee_mode(), wf.fp_denorm_mode_f32());
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)), wf.fp_round_mode_f32(),
+      wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
   amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 

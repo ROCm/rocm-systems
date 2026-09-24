@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -88,16 +89,21 @@ uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t 
   case kVopdFmaF64: {
     uint64_t src2 =
         apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src2, lane), slot.neg, 2);
-    double result = std::fma(std::bit_cast<double>(src0), std::bit_cast<double>(src1),
-                             std::bit_cast<double>(src2));
+    double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+        std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2),
+        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
     return std::bit_cast<uint64_t>(result);
   }
   case kVopdAddF64: {
-    double result = std::bit_cast<double>(src0) + std::bit_cast<double>(src1);
+    double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+        std::bit_cast<double>(src0), std::bit_cast<double>(src1), 0.0, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64());
     return std::bit_cast<uint64_t>(result);
   }
   case kVopdMulF64: {
-    double result = std::bit_cast<double>(src0) * std::bit_cast<double>(src1);
+    double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
+        std::bit_cast<double>(src0), std::bit_cast<double>(src1), 0.0, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64());
     return std::bit_cast<uint64_t>(result);
   }
   case kVopdMinNumF64: {
@@ -129,45 +135,53 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 
   switch (slot.op) {
   case kVopdFmacF32: {
-    float result = amdgpu::fp_mode::fma_f32(
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
         std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)), wf.cu().arch(),
-        wf.ieee_mode(), wf.fp_denorm_mode_f32());
+        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)),
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmaakF32: {
-    float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                                            std::bit_cast<float>(src2), wf.cu().arch(),
-                                            wf.ieee_mode(), wf.fp_denorm_mode_f32());
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(src2),
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmamkF32: {
-    float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0), std::bit_cast<float>(src2),
-                                            std::bit_cast<float>(src1), wf.cu().arch(),
-                                            wf.ieee_mode(), wf.fp_denorm_mode_f32());
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src2), std::bit_cast<float>(src1),
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMulF32: {
-    float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMulDx9ZeroF32: {
     float lhs = std::bit_cast<float>(src0);
     float rhs = std::bit_cast<float>(src1);
-    if (lhs == 0.0f || rhs == 0.0f)
-      return std::bit_cast<uint32_t>(0.0f);
-    return std::bit_cast<uint32_t>(lhs * rhs);
+    return std::bit_cast<uint32_t>(
+        amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL_LEGACY>(
+            lhs, rhs, 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()));
   }
   case kVopdAddF32: {
-    float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubF32: {
-    float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubrevF32: {
-    float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
+        std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMovB32:
@@ -191,9 +205,9 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdBitop2B32:
     return bitop2(src0, src1, slot.src2_imm);
   case kVopdFmaF32: {
-    float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                                            std::bit_cast<float>(src2), wf.cu().arch(),
-                                            wf.ieee_mode(), wf.fp_denorm_mode_f32());
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(src2),
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubNcU32:

@@ -70,6 +70,23 @@ public:
     compute_unit_->write_vgpr(base_ + 1, 0, b);
     compute_unit_->write_vgpr(base_ + 2, 0, c);
     compute_unit_->write_vgpr(base_ + 6, 0, 0xfacebeef);
+    execute(words);
+    return compute_unit_->read_vgpr(base_ + 6, 0);
+  }
+  template <size_t N>
+  uint32_t run_scalar(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b,
+                      uint32_t accumulator, uint32_t mode) {
+    wave_->set_mode_raw(mode);
+    const auto base = wave_->sgpr_alloc().base;
+    compute_unit_->write_sgpr(base, a);
+    compute_unit_->write_sgpr(base + 1, b);
+    compute_unit_->write_sgpr(base + 6, accumulator);
+    execute(words);
+    return compute_unit_->read_sgpr(base + 6);
+  }
+
+private:
+  template <size_t N> void execute(const std::array<uint32_t, N> &words) {
     std::array<uint32_t, 4> padded{};
     std::copy(words.begin(), words.end(), padded.begin());
     DecodeResult decoded = decoder_->decode(padded.data());
@@ -77,10 +94,7 @@ public:
       throw std::runtime_error("Instruction encoding rejected by decoder_");
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
     EXPECT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
-    return compute_unit_->read_vgpr(base_ + 6, 0);
   }
-
-private:
   amdgpu::GpuMemory memory_;
   amdgpu::L2Cache cache_;
   std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit_;
@@ -387,6 +401,85 @@ TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
   }
 }
 
+TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
+  // Raw gfx1100/gfx1201 captures at the minimum-normal boundary. A tiny
+  // product changes directed rounding even far below the addend's low bit.
+  struct Case {
+    uint32_t a, b, c;
+    std::array<uint32_t, 4> preserved, flushed;
+  };
+  const Case cases[] = {
+      {1, 1, 0x007fffff, {0x007fffff, 0x00800000, 0x007fffff, 0x007fffff}, {0, 0, 0, 0}},
+      {1, 0x3f000000, 0x007fffff, {0x00800000, 0x00800000, 0x007fffff, 0x007fffff}, {0, 0, 0, 0}},
+      {0x80000001,
+       1,
+       0x00800000,
+       {0x00800000, 0x00800000, 0x007fffff, 0x007fffff},
+       {0x00800000, 0x00800000, 0, 0}},
+      {1,
+       1,
+       0x00800000,
+       {0x00800000, 0x00800001, 0x00800000, 0x00800000},
+       {0x00800000, 0x00800001, 0x00800000, 0x00800000}},
+      {1,
+       0x80000001,
+       0x807fffff,
+       {0x807fffff, 0x807fffff, 0x80800000, 0x807fffff},
+       {0x80000000, 0x80000000, 0x80000000, 0x80000000}},
+  };
+  for (auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    for (uint32_t ieee : {0u, 1u})
+      for (uint32_t denorm : {1u, 3u})
+        for (uint32_t round = 0; round < 4; ++round)
+          for (uint8_t omod : {0, 1}) {
+            const bool scaling =
+                omod && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ||
+                         (!ieee && !(denorm & 2u)));
+            const auto words = fma_f32_words(arch, 0, 0, omod, 0);
+            for (const auto &test : cases) {
+              uint32_t expected =
+                  scaling || !(denorm & 2u) ? test.flushed[round] : test.preserved[round];
+              if (scaling)
+                expected = (expected & 0x7fffffffu) == 0 ? 0 : expected + 0x00800000u;
+              SCOPED_TRACE(::testing::Message()
+                           << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
+                           << " round=" << round << " omod=" << unsigned(omod));
+              EXPECT_EQ(
+                  machine.run(words, test.a, test.b, test.c, (ieee << 9) | (denorm << 4) | round),
+                  expected);
+            }
+          }
+  }
+}
+
+TEST(ValuFloatingPolicy, ScalarFmaF32UsesModeAndNanPolicy) {
+  // CDNA5 section 6.8 gives SALU floating point the same MODE controls as VALU.
+  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  struct Case {
+    uint32_t a, b, c, mode, expected;
+  };
+  const Case cases[] = {
+      {0x3f800001, 0x3f800001, 0, 0x31, 0x3f800003},
+      {0x3f800001, 0x3f800001, 0, 0x30, 0x3f800002},
+      {1, 0x3f800000, 0, 0, 0},
+      {1, 0x3f800000, 0, 0x30, 1},
+      {1, 1, 0x007fffff, 0x11, 0},
+      {0x7f801abc, 0xff803def, 0x7fc01234, 0x30, 0x7fc01abc},
+  };
+  for (uint16_t opcode : {cdna5::kSFmacF32Sop2, cdna5::kSFmaakF32Sop2, cdna5::kSFmamkF32Sop2}) {
+    for (const auto &test : cases) {
+      const auto first = cdna5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 6});
+      const bool multiply_literal = opcode == cdna5::kSFmamkF32Sop2;
+      const std::array<uint32_t, 2> words{first[0], multiply_literal ? test.b : test.c};
+      EXPECT_EQ(
+          machine.run_scalar(words, test.a, multiply_literal ? test.c : test.b, test.c, test.mode),
+          test.expected)
+          << opcode;
+    }
+  }
+}
+
 TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
   // Captured V_FMA_F32 outputs on gfx1100/gfx1201, including both IEEE modes.
   // Earlier RDNA/CDNA share the MODE.IEEE rule; CDNA5, like RDNA4, always quiets.
@@ -409,26 +502,29 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
   for (auto arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     for (uint32_t ieee : {0u, 1u})
-      for (uint32_t denorm : {0u, 3u})
-        for (unsigned variant = 0; variant < 4; ++variant) {
-          const bool modified = variant == 1, clamped = variant == 3;
-          const auto words = fma_f32_words(arch, modified ? 5 : 0, modified ? 3 : 0,
-                                           variant == 2 ? 1 : 0, clamped);
-          for (const auto &test : cases) {
-            uint32_t expected = denorm ? test.preserved : test.flushed;
-            if (modified && (denorm || test.flushed == test.preserved))
-              expected = test.modified;
-            if ((expected & 0x7fffffffu) > 0x7f800000u &&
-                (ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
-              expected |= 0x00400000u;
-            if (clamped && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
-              expected = 0;
-            SCOPED_TRACE(::testing::Message() << "arch=" << arch << " IEEE=" << ieee
-                                              << " denorm=" << denorm << " variant=" << variant);
-            EXPECT_EQ(machine.run(words, test.a, test.b, test.c, (ieee << 9) | (denorm << 4)),
-                      expected);
+      for (uint32_t denorm : {0u, 1u, 2u, 3u})
+        for (uint32_t round : {0u, 1u, 2u, 3u})
+          for (unsigned variant = 0; variant < 4; ++variant) {
+            const bool modified = variant == 1, clamped = variant == 3;
+            const auto words = fma_f32_words(arch, modified ? 5 : 0, modified ? 3 : 0,
+                                             variant == 2 ? 1 : 0, clamped);
+            for (const auto &test : cases) {
+              uint32_t expected = (denorm & 1u) ? test.preserved : test.flushed;
+              if (modified && ((denorm & 1u) || test.flushed == test.preserved))
+                expected = test.modified;
+              if ((expected & 0x7fffffffu) > 0x7f800000u &&
+                  (ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+                expected |= 0x00400000u;
+              if (clamped && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+                expected = 0;
+              SCOPED_TRACE(::testing::Message()
+                           << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
+                           << " round=" << round << " variant=" << variant);
+              EXPECT_EQ(
+                  machine.run(words, test.a, test.b, test.c, (ieee << 9) | (denorm << 4) | round),
+                  expected);
+            }
           }
-        }
   }
 }
 

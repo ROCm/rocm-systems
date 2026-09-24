@@ -187,11 +187,11 @@ void VMacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::fp_mode::fma_f32(
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)), wf.cu().arch(),
-            wf.ieee_mode(), wf.fp_denorm_mode_f32())));
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)),
+            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));
   }
 }
 
