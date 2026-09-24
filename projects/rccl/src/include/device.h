@@ -254,6 +254,12 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * holding two bf16 NaNs (0x7FC07FC0) reads back as a finite float. All-ones is NaN
  * under f16, bf16, f32 and f64 alike, so the invariant survives a dtype change. */
 #define NCCL_NAN_ELEMS_PER_THREAD 8
+/* Wire words per thread the step slot is sized for. Deliberately decoupled from
+ * the register count above, the same way LL128's buffer is: a step holds many
+ * register-slices, so one credit round-trip covers many inner iterations rather
+ * than one. 256 puts the step at 512 KiB, matching Simple, which is where the
+ * measured bandwidth curve flattens. */
+#define NCCL_NAN_STEP_ELEMS_PER_THREAD 256
 #define NCCL_NAN_MAX_NTHREADS NCCL_LL128_MAX_NTHREADS
 #define NCCL_NAN_SENTINEL64 0xFFFFFFFFFFFFFFFFull
 

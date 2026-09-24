@@ -2430,13 +2430,18 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   defaultBuffSizes[NCCL_PROTO_LL128] =
     rcclLL128ElemsPerThreadFromArch(comm->archName) * maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
-  // NaN protocol: every thread owns NCCL_NAN_ELEMS_PER_THREAD words per step, all
-  // payload. Sized off the hard NCCL_MAX_NTHREADS cap rather than a per-protocol
-  // max, because rcclOptThreadBlockSize can raise a kernel's thread count after
-  // the fact and a step slot smaller than nthreads*ELEMS_PER_THREAD words would
-  // let a warp's slice run off the end of the FIFO.
-  defaultBuffSizes[NCCL_PROTO_NAN] =
-    NCCL_NAN_ELEMS_PER_THREAD * NCCL_MAX_NTHREADS * NCCL_STEPS * sizeof(uint64_t);
+  // NaN protocol: every wire word is payload. Sized off the hard NCCL_MAX_NTHREADS
+  // cap rather than a per-protocol max, because rcclOptThreadBlockSize can raise a
+  // kernel's thread count after the fact and a step slot smaller than
+  // nthreads*ELEMS_PER_THREAD words would let a warp's slice run off the end.
+  //
+  // The protocol is opt-in -- nanProtoUsable() rejects it unless the user named a
+  // protocol -- so a comm that never asks for it keeps the one-slice minimum
+  // instead of paying the deep FIFO's few MiB on every connection.
+  const char* nanProtoEnv = ncclGetEnv("NCCL_PROTO");
+  int nanElemsPerThread = (nanProtoEnv && strcasestr(nanProtoEnv, "nan")) ? NCCL_NAN_STEP_ELEMS_PER_THREAD :
+                                                                           NCCL_NAN_ELEMS_PER_THREAD;
+  defaultBuffSizes[NCCL_PROTO_NAN] = nanElemsPerThread * NCCL_MAX_NTHREADS * NCCL_STEPS * sizeof(uint64_t);
 }
 
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount) {

@@ -6,9 +6,14 @@
  ************************************************************************/
 
 // NaN-flag protocol. Coordination mirrors LL128 -- same NCCL_STEPS credit FIFO,
-// same non-temporal / system-scope 128-bit FIFO access -- but the payload is its
-// own ready flag, so there is no flag lane and no register shuffle to move data
-// out of it. A slice has arrived once none of its elements read back as NaN.
+// same 128-bit per-lane FIFO access -- but the payload is its own ready flag, so
+// there is no flag lane and no register shuffle to move data out of it. A slice
+// has arrived once none of its elements read back as NaN.
+//
+// Scopes split by direction: a store lands in the peer's buffer (or has to beat
+// the peer's next write, in the case of the sentinel restore) and goes out at
+// system scope, while a load only reads this GPU's own FIFO and stays at agent
+// scope.
 //
 // Two consequences follow from dropping the flag.
 //
@@ -63,24 +68,37 @@ struct ncclNanBits<hip_bfloat16> {
   static constexpr Bits Mant = 0x007Fu;
 };
 
-// Plain 64-bit FIFO load. Matches load128NT's scope choice (see
-// RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h): on gfx1250 a sibling partition's write
-// to a cacheable FIFO is not observable under a nontemporal load.
-inline __device__ uint64_t loadNanWord(const uint64_t* ptr) {
-#if RCCL_LL_FIFO_SYS_SCOPE
-  return __scoped_atomic_load_n((u64_gptr)ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+// 128-bit FIFO load, one per lane. The receive FIFO is this GPU's own memory,
+// so agent scope is enough to observe what the peer pushed into it.
+inline __device__ void loadNanLine(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_AGENT_SYNCSCOPE);
 #else
-  return __builtin_nontemporal_load((u64_gptr)ptr);
+  u.u64[0] = __builtin_nontemporal_load((u64_gptr)ptr);
+  u.u64[1] = __builtin_nontemporal_load((u64_gptr)ptr + 1);
 #endif
+  v0 = u.u64[0];
+  v1 = u.u64[1];
 }
 
-// Plain 64-bit FIFO store, scope-matched to loadNanWord. Used both for payload
-// and for restoring the sentinel.
-inline __device__ void storeNanWord(uint64_t* ptr, uint64_t v) {
-#if RCCL_LL_FIFO_SYS_SCOPE
-  __scoped_atomic_store_n((u64_gptr)ptr, v, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+// 128-bit FIFO store, one per lane. Payload lands in the peer's buffer, and the
+// sentinel restore has to beat the peer's next write to the same slot, so both
+// go out at system scope.
+inline __device__ void storeNanLine(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  __builtin_nontemporal_store(v, (u64_gptr)ptr);
+  *((v4u_gptr)ptr) = u.v;
 #endif
 }
 
@@ -187,30 +205,36 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   inline __device__ void postRecv() {
     if (recvConnHeadPtr) {
-      // Release the sentinel writes before the credit that acts on them, the same
-      // way postSend releases payload before the tail.
-      __threadfence_system();
+      // Compiler barrier only: keep sentinel stores from floating past the credit.
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);
       STORE(recvConnHeadPtr, recvConnHead += 1);
     }
   }
   inline __device__ void postSend() {
     if (sendConnTailPtr) {
-      __threadfence_system();
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);
       STORE((unsigned long long*)sendConnTailPtr, sendConnTail += 1);
     }
   }
 
-  // True if any element packed into this wire word is NaN, i.e. the word has not
-  // been written yet (wholly or in part) this step.
+  // True if this wire word has not been written yet, wholly or in part.
   __device__ __forceinline__ static bool anyNan(uint64_t word) {
-    using Bits = typename ncclNanBits<T>::Bits;
-    bool nan = false;
-#pragma unroll
-    for (int i = 0; i < EltPerWord; i++) {
-      Bits bits = (Bits)(word >> (i * 8 * sizeof(T)));
-      nan |= ((bits & ncclNanBits<T>::Exp) == ncclNanBits<T>::Exp) && ((bits & ncclNanBits<T>::Mant) != 0);
+    if constexpr (sizeof(T) <= 4) {
+      // Dword granularity is the right unit for these dtypes. Stores land
+      // dword-atomically, so a half-landed 16-byte line always leaves whole
+      // dwords at the sentinel, and every element fits inside one dword. An
+      // all-ones dword is NaN read as f16, bf16 or f32 alike, and NaN input is
+      // forbidden, so this never fires on real data. Two compares replace the
+      // per-element exponent/mantissa decode.
+      return (uint32_t)word == 0xFFFFFFFFu || (uint32_t)(word >> 32) == 0xFFFFFFFFu;
+    } else {
+      // f64 spans both dwords and a finite double can legitimately carry an
+      // all-ones low half, so it keeps the exponent/mantissa test. A torn store
+      // leaves the high dword at the sentinel, which reads as NaN.
+      using Bits = typename ncclNanBits<T>::Bits;
+      Bits bits = (Bits)word;
+      return ((bits & ncclNanBits<T>::Exp) == ncclNanBits<T>::Exp) && ((bits & ncclNanBits<T>::Mant) != 0);
     }
-    return nan;
   }
 
   // Gather the EltPerWord slice elements starting at eltBase into one wire word.
@@ -255,12 +279,25 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     return divUp(eltN, EltPerWord);
   }
 
+  // Wire word inside the warp's slice that register u maps to. A lane owns two
+  // consecutive words per register pair so the pair is one 16-byte access.
+  __device__ __forceinline__ int wordOf(int u) const {
+    return (u & ~1) * WARP_SIZE + 2 * wid + (u & 1);
+  }
+
+  // The pair holding register u is driven whole whenever its first word carries
+  // data. The second word may sit past eltN; it rides the same 16-byte access,
+  // and both sides hold zero there so the receiver's NaN test still terminates.
+  __device__ __forceinline__ bool pairLive(int u, int nWords) const {
+    return wordOf(u & ~1) < nWords;
+  }
+
   __device__ __forceinline__ void loadRegs(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
     int nWords = wordsForElts(eltN);
 #pragma unroll
     for (int u = 0; u < WordPerThread; u++) {
-      int w = u * WARP_SIZE + wid;
-      if (w < nWords) regs[u] = packWord(src, w * EltPerWord, eltN);
+      int w = wordOf(u);
+      regs[u] = w < nWords ? packWord(src, w * EltPerWord, eltN) : 0;
     }
   }
 
@@ -268,7 +305,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     int nWords = wordsForElts(eltN);
 #pragma unroll
     for (int u = 0; u < WordPerThread; u++) {
-      int w = u * WARP_SIZE + wid;
+      int w = wordOf(u);
       if (w < nWords) unpackWord(dst, regs[u], w * EltPerWord, eltN);
     }
   }
@@ -294,31 +331,29 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         do {
           needReload = false;
 #pragma unroll
-          for (int u = 0; u < WordPerThread; u++) {
-            int w = u * WARP_SIZE + wid;
-            if (w < nWords) {
-              vr[u] = loadNanWord(ptr + u * WARP_SIZE);
-              needReload |= anyNan(vr[u]);
+          for (int u = 0; u < WordPerThread; u += 2) {
+            if (pairLive(u, nWords)) {
+              loadNanLine(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+              needReload |= anyNan(vr[u]) || anyNan(vr[u + 1]);
             }
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
 
-        // Hand the slot back to the sentinel while the lines are still hot. The
-        // credit published by postRecv() is what makes this safe to do here: the
-        // peer cannot touch this slot again until it sees that credit.
+        // Hand the slot back to the sentinel while the lines are still hot --
+        // measurably better than deferring it past the forward store. The credit
+        // published by postRecv() is what makes this safe here: the peer cannot
+        // touch this slot again until it sees that credit.
 #pragma unroll
-        for (int u = 0; u < WordPerThread; u++) {
-          int w = u * WARP_SIZE + wid;
-          if (w < nWords) storeNanWord(ptr + u * WARP_SIZE, NCCL_NAN_SENTINEL64);
+        for (int u = 0; u < WordPerThread; u += 2) {
+          if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, NCCL_NAN_SENTINEL64, NCCL_NAN_SENTINEL64);
         }
 
 #pragma unroll
         for (int u = 0; u < WordPerThread; u++) {
-          int w = u * WARP_SIZE + wid;
           // The first peer seeds v[] when there is no local source to reduce
           // against; every peer after that accumulates.
-          if (w < nWords) v[u] = (SRC || i > 0) ? applyReduce(redOp, vr[u], v[u]) : vr[u];
+          if (pairLive(u, nWords)) v[u] = (SRC || i > 0) ? applyReduce(redOp, vr[u], v[u]) : vr[u];
         }
       }
     }
@@ -326,8 +361,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     if (postOp) {
 #pragma unroll
       for (int u = 0; u < WordPerThread; u++) {
-        int w = u * WARP_SIZE + wid;
-        if (w < nWords) v[u] = applyPostOp(redOp, v[u]);
+        if (pairLive(u, nWords)) v[u] = applyPostOp(redOp, v[u]);
       }
     }
 
@@ -335,16 +369,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       for (int i = 1; i < MaxSend && i < fan.nsend(); i++) {
         uint64_t* ptr = sendPtr(i) + wireOffset;
 #pragma unroll
-        for (int u = 0; u < WordPerThread; u++) {
-          int w = u * WARP_SIZE + wid;
-          if (w < nWords) storeNanWord(ptr + u * WARP_SIZE, v[u]);
+        for (int u = 0; u < WordPerThread; u += 2) {
+          if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, v[u], v[u + 1]);
         }
       }
       uint64_t* ptr = sendPtr(0) + wireOffset;
 #pragma unroll
-      for (int u = 0; u < WordPerThread; u++) {
-        int w = u * WARP_SIZE + wid;
-        if (w < nWords) storeNanWord(ptr + u * WARP_SIZE, v[u]);
+      for (int u = 0; u < WordPerThread; u += 2) {
+        if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, v[u], v[u + 1]);
       }
     }
   }
@@ -359,7 +391,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     T const* srcPtr = SrcBuf == -1 ? nullptr : userBufs[SrcBuf] + srcIx;
     T* dstPtr = DstBuf == -1 ? nullptr : userBufs[DstBuf] + dstIx;
     T* accPtr = (DstBuf == -1 || !useAcc) ? nullptr : userBufs[Acc] + dstIx;
-    int wireOffset = WireWordPerSlice * warp + wid;
+    int wireOffset = WireWordPerSlice * warp + 2 * wid;
     const int nwarps = nthreads / WARP_SIZE;
     nelem = nelem < 0 ? 0 : nelem;
 
@@ -380,7 +412,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
           int nWords = wordsForElts(eltInSlice);
 #pragma unroll
           for (int u = 0; u < WordPerThread; u++) {
-            if (u * WARP_SIZE + wid < nWords) regs[u] = applyPreOp(redOp, regs[u]);
+            if (pairLive(u, nWords)) regs[u] = applyPreOp(redOp, regs[u]);
           }
         }
       }
@@ -393,7 +425,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
           int nWords = wordsForElts(eltInSlice);
 #pragma unroll
           for (int u = 0; u < WordPerThread; u++) {
-            if (u * WARP_SIZE + wid < nWords) regs[u] = applyReduce(redOp, accRegs[u], regs[u]);
+            if (wordOf(u) < nWords) regs[u] = applyReduce(redOp, accRegs[u], regs[u]);
           }
         }
         storeRegs(dstPtr, regs, eltInSlice);
