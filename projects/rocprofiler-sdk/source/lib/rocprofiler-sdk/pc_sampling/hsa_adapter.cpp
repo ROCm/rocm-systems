@@ -126,9 +126,11 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
 }  // namespace
 
 /**
- * Callback called by HSA interceptor when the kernel has completed. Declared in
- * hsa_adapter.hpp and invoked from pc_sampling::kernel_dispatch_phase_exit_hook (see
- * pc_sampling/queue_hooks.cpp), so it lives outside the anonymous namespace.
+ * Called when the kernel has completed, from ROCr's async signal handler thread -- not from
+ * the queue write interceptor. hsa::AsyncSignalHandler (see hsa/queue.cpp), registered with
+ * hsa_amd_signal_async_handler, invokes pc_sampling::kernel_dispatch_phase_exit_hook (see
+ * pc_sampling/queue_hooks.cpp), which forwards here. Declared in hsa_adapter.hpp so it lives
+ * outside the anonymous namespace.
  */
 void
 kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
