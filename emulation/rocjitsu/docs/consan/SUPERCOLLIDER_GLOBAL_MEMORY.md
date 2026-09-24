@@ -1,4 +1,4 @@
-# SuperCollider global-memory support: feasibility and qualification
+# SuperCollider for global memory: design, evidence, and expected overhead
 
 September 24, 2026. This is an implementation analysis, not a claim that ConSan
 already detects global-memory races. Current Default and SuperCollider validation
@@ -51,6 +51,91 @@ universal property of this value-change detector. Stable equal-value writes,
 changes followed by restoration, and unobserved interleavings remain limitations.
 No-false-positive requirements must include preservation of program outputs,
 legal atomic accesses, and valid synchronization protocols.
+
+## NVIDIA implementation and the AMD route
+
+NVIDIA implements the detector as an early pass in its production `ptxas`
+backend, before register allocation (paper §4.3). At this point the compiler
+retains PTX weak/strong access semantics and can allocate temporary registers
+for instrumentation. Its runtime supplies reporting buffers and source
+correlation; the race check itself runs in the instrumented device code.
+
+| NVIDIA mechanism | What transfers to AMD | AMD-specific work |
+| --- | --- | --- |
+| Weak-load replay and store readback | Compare the original value with a delayed coherent observation | Target-specific cache controls, completion waits, widths, address capture, and operand preservation |
+| Exclusion of strong/synchronization accesses | The same semantic exclusion is necessary for sound reports | Source atomicity can disappear in machine code; recover it from trusted provenance rather than infer it solely from opcode names |
+| Same-warp ordinary-store collision check | Detect overlapping writes independently of value changes | Active-lane comparisons over 64-bit addresses and byte ranges; AMD wave32/wave64 handling |
+| Warp/subwarp scheduling perturbation | Widen observation windows and vary relative progress | NVIDIA independent subwarp scheduling does not map directly to AMD wave execution; use validated wave-level mechanisms |
+| Block shuffling | Vary which logical workgroups can overlap | Preserve logical workgroup identity consistently; this is additional sensitivity work |
+| Compiler register allocation | Instrumentation values can live in registers | Binary rewriting must find dead registers, increase allocations, or spill; an eventual compiler instrumentation pass could improve this |
+
+**Preferred route for ConSan:** compiler-provided semantic access metadata,
+consumed by the existing binary rewriter. Bootstrap with reviewed, hash-bound
+per-site metadata for these two workloads. This retains ConSan's loading,
+selection, patching, reporting, and coverage infrastructure while addressing the
+semantic ambiguity directly. Metadata classification happens at transformation
+time and adds essentially no per-access device cost. Its production format and
+compiler integration remain to be implemented.
+
+Moving the instrumentation itself into an AMD compiler pass before register
+allocation is a longer-term option if resource pressure and spills make binary
+rewriting too expensive. It would reproduce more of NVIDIA's implementation
+advantages, but requires compiler deployment and recompilation of the relevant
+libraries. Metadata alone does not remove the rewriter's register-allocation costs.
+
+## Expected overhead
+
+These are **engineering planning estimates**, not measured AMD global-detector
+results or performance bounds. They apply to warmed instrumented kernel execution
+with short delays and checks on all eligible accesses in the selected kernels.
+They exclude transformation/startup time and do not describe whole-application
+latency. The proposed global detector has not yet been implemented or benchmarked.
+
+| Workload/configuration | Estimated execution-time multiplier versus native |
+| --- | ---: |
+| TokenSpeed memory-intensive BF16 MoE kernels, short delays | 3–10×; 10–30× plausible if waits or spills dominate |
+| Scatter-reduce, retaining atomic updates unchanged | 1.5–5×, conditional on resolving the BF16 CAS-seed policy |
+| Longer delays used to improve sensitivity | Potentially tens to hundreds × |
+
+Budget roughly **5–10×** for a first useful global implementation; use this to
+plan experiments, not as an acceptance criterion or promise. The scatter estimate
+assumes legal atomics are excluded from value-change checks and the remaining
+ordinary accesses are covered. Broadly suppressing accesses to achieve low cost
+would change the coverage claim. The MoE estimate concerns its GPU kernels,
+not the benchmark adapter's synchronized host latency.
+
+The major costs are:
+
+- An extra read per eligible load/store, plus comparison and report branching.
+  This increases memory traffic, but a simple 2× bandwidth model is insufficient.
+- Coherent readback may lose cache benefits enjoyed by the original load.
+- Completion waits and immediate comparisons shorten the useful overlap between
+  outstanding memory operations. Memory-level parallelism can fall substantially.
+- Saved addresses and values increase register pressure. Larger allocations can
+  lower occupancy; spills add private-memory traffic and instructions.
+- Lane-collision checks and deliberate delays cost more than the basic readback.
+  Longer delays can dominate short kernels even when memory traffic is modest.
+
+NVIDIA provides a useful scale reference, not a prediction for AMD. Paper §5.3.1
+reports these measurements over 130 HeCBench applications without detected races:
+
+| NVIDIA configuration | Median | Geometric mean | Maximum |
+| --- | ---: | ---: | ---: |
+| Short delays: read/write maximum 1 ns | 3.57× | 4.86× | 229× |
+| Longer read delay: read maximum 5,000 ns, write maximum 1 ns | 11.94× | 11.21× | 1,066× |
+| One instrumented memory operation per run, longer read delay | 1.54× | 1.98× | 41.3× |
+
+The last row is a sampling experiment with different coverage; it does not
+estimate the cost of checking every eligible access. NVIDIA's compiler placement
+also avoids some binary-rewriter costs. Its timings cannot be transferred by
+matching sleep immediates: AMD delay encodings and scheduling behavior differ.
+
+Measure gfx1201 hardware first, separating native, readback with minimum delay,
+lane-collision checks, and longer-delay settings. Track spills/occupancy and
+clean/fault qualification alongside time. Use matched coverage and workload
+inputs when comparing configurations. gfx950 emulation can exercise correctness
+cases, but cannot substantiate the overhead estimate. Existing physical
+benchmark results remain authoritative for their recorded configurations.
 
 ## Evidence gathered on this host
 
@@ -195,7 +280,7 @@ Default engine would require a separate cross-workgroup memory/ownership model.
 
 ## Correctness qualification plan
 
-Use the existing [validation rules](VALIDATION.md): exact site selection,
+Use the existing [validation rules](validation/VALIDATION.md): exact site selection,
 prospective faults, matching clean controls, reach witnesses, complete coverage,
 GPU health, and independent numerical outcomes. Global support needs new faults;
 weakening an atomic's ordering while leaving all accesses atomic is not a reliable

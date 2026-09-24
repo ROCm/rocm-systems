@@ -38,7 +38,7 @@ TokenSpeed BF16 MoE is **N/A in all three modes**: every selected kernel loaded
 and dispatched, all static inventories completed with zero applicable sites,
 and all numerical checks passed. Its small shape selects register-only wave
 GEMVs. These outcomes are not sanitizer performance measurements. The subsequent
-[global-support analysis](../validation/SUPERCOLLIDER_GLOBAL_ANALYSIS.md) includes
+[global-support analysis](../SUPERCOLLIDER_GLOBAL_MEMORY.md) includes
 a reduced-shape correctness probe under gfx950 emulation; it does not replace
 this physical benchmark result.
 

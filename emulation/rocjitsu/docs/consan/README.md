@@ -93,6 +93,8 @@ those campaigns or extend their results to a different source revision.
   and validation interfaces.
 - [DESIGN.md](DESIGN.md): architecture, implemented behavior, and semantic
   boundaries.
+- [SUPERCOLLIDER_GLOBAL_MEMORY.md](SUPERCOLLIDER_GLOBAL_MEMORY.md): proposed global-memory
+  support, NVIDIA-to-AMD mapping, feasibility evidence, and estimated overhead.
 - [CAPABILITIES.md](CAPABILITIES.md): normative target-by-mode access,
   barrier, atomic, fence, and typed-exclusion matrix.
 - Target qualification ledgers: [CDNA3 / gfx942](validation/STATUS_CDNA3.md),

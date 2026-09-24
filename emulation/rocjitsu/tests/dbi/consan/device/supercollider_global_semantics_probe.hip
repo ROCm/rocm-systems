@@ -5,7 +5,7 @@
 // Plain and wave-atomic access kernels demonstrate lost source-level semantics.
 // The executable demonstrates why legal atomics must not receive a value-change
 // race check: a positive mismatch count is the EXPECTED successful result.
-// See docs/consan/validation/SUPERCOLLIDER_GLOBAL_ANALYSIS.md.
+// See docs/consan/SUPERCOLLIDER_GLOBAL_MEMORY.md.
 
 #include <hip/hip_runtime.h>
 extern "C" __global__ void plain_load(int *p, int *out) { out[threadIdx.x] = p[threadIdx.x]; }

@@ -4,7 +4,7 @@
 """Reduced TokenSpeed global-memory feasibility probe; not E2E qualification.
 
 Requires the pinned TokenSpeed checkout and tokenspeed-triton package described
-in docs/consan/validation/SUPERCOLLIDER_GLOBAL_ANALYSIS.md. Run on gfx950 hardware
+in docs/consan/SUPERCOLLIDER_GLOBAL_MEMORY.md. Run on gfx950 hardware
 or through the gfx950 emulator. No timing results are reported.
 """
 
