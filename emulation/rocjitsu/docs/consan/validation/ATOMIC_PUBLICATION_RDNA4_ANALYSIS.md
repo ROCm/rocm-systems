@@ -19,7 +19,12 @@ respectively. Both numerical tests pass. All 20 overlapping cross-wave access
 pairs were reconstructed from the access records, including the four tree
 examples omitted by the report's example limit. **Every pair has at least one
 access without attached synchronization metadata.** No overflow, malformed
-sync evidence, or dropped windows accounts for the reports.
+sync evidence, or dropped windows accounts for the reports. Stream-K's ranges
+are `[1024,1056)` in four-byte pieces; tree's are `[0,16)`, `[1024,1040)`, and
+`[2048,2064)`. With 32 lanes × eight floats per subgroup, these are all lane-zero
+partial elements. Both sides of the reported communication therefore use the
+same lane that executes publication/acquisition; the classification does not
+rely on assuming that an atomic in one lane orders unrelated lanes.
 
 The Stream-K counter uses an agent-scope acquire/release atomic increment. The
 last arrival, identified by the returned counter value, reads the earlier
@@ -101,6 +106,125 @@ invalidation, yet its emitted metadata labels the RMW acquire-only. This exposes
 a second limitation: recognition of an LDS-only release must account for waits
 already satisfied or separated by scalar bookkeeping. An extra source fence did
 not remove the false positive.
+
+## What a correct fix needs
+
+### 1. Recognize the actual completion requirements
+
+`consan_sync_analysis.cpp::exact_release_wait_boundary` scans a contiguous
+suffix of waits immediately before the atomic. The target wait classifier marks
+store/flat-store waits as release boundaries but does not mark an LDS-only wait
+as such. The minimal program has completed its generic store earlier, then
+executes scalar/EXEC bookkeeping and a final `s_wait_dscnt 0`. Its release is
+real, but this local pattern loses it.
+
+Recognition should prove completion of the relevant earlier memory operations
+on each admitted path, using their address spaces and target counters. A
+standalone LDS wait is sufficient for preceding LDS accesses only when that
+path proof is available. It must not indiscriminately establish completion of
+outstanding global stores. Similarly, an unrelated earlier wait across a loop
+or a path with later stores is insufficient. This belongs in target wait
+semantics plus bounded CFG/dataflow analysis, with explicit support decisions.
+
+### 2. Replace single-window attachment with publication state
+
+The implementation cannot repair the original workloads just by recognizing
+one more wait. It already recognizes their application atomic sequences.
+One release must cover all sampled writes sequenced before it, and one acquire
+must cover all sampled reads sequenced after it. Multiple independent atomic
+objects can contribute ordering to the same access; bookkeeping atomics must
+not overwrite the application publication.
+
+A concrete representation is a per-owner logical access sequence plus retained
+atomic publication events:
+
+- Every sampled access carries its owner and dynamic sequence, in addition to
+  the existing dispatch, workgroup, generation, and allocation identity.
+- A release publishes the owner's preceding access frontier for that atomic
+  object. An acquire merges the frontier of the publication it actually
+  observed. Later accesses carry or reference that acquired frontier.
+- RMW events preserve release-sequence ancestry. The tree consumer must inherit
+  all three producer frontiers. A single last-owner field cannot represent it.
+- Barriers and report-generation changes delimit/reset the relevant state;
+  hash collisions, lost events, and uncertain joins remain explicitly
+  incomplete, never permission to suppress a conflict.
+
+This would change the report ABI/model, atomic and access emission, pending
+joins, and host conflict analysis. For bounded kernels, an alternative is to
+retain complete per-event access-window association lists and resolve their
+ordering graph on the host. The required semantics are the same: many accesses
+per event, multiple contributing events per access, and dynamic execution
+identity. Merely removing the association pass's deduplication is insufficient;
+its selected-slot fields and emitters still retain only one window.
+
+### 3. Require evidence that the acquire observed the release
+
+The current `SyncMetadata` has address, size, role, scope, outcome class, and
+epochs. It has no observed atomic value, modification identifier, or release
+sequence lineage. The current host predicate matches roles and addresses; that
+alone is not a general happens-before proof. An acquire that read an initial or
+older value must not inherit a later publication to the same address.
+
+A generalized implementation therefore needs a validated observation witness:
+for example, captured RMW old/new values and a proven unambiguous modification
+chain, or a correctly synchronized per-object publication protocol that binds
+the guest atomic transition to its metadata. Repeated values/ABA and concurrent
+publishers must not be guessed through. Non-returning producer ORs are an
+explicit design case: obtaining their modification identity needs additional
+instrumentation or a proven protocol-specific witness. Ordering only sideband
+records, without binding them to the guest operation, is insufficient.
+
+This is a prerequisite for safely broadening suppression, not evidence that
+such a false negative occurred in the current two workloads. Their monotone
+counter/bitmask protocols give a direct ordering proof for this investigation.
+
+### 4. Qualification for the implementation
+
+| Case | Required behavior |
+| --- | --- |
+| One publication, multiple preceding writes and following reads | Clean without adding a workgroup barrier |
+| Either wave is last arrival | Same clean result |
+| Three producer release ORs followed by acquiring OR | All producer partials ordered |
+| Two atomic objects interleaved with bookkeeping | Correct object retained for each publication |
+| LDS-only release completion; earlier completed stores plus scalar bookkeeping | Recognized when the path proves completion |
+| Pending global store not drained by an LDS-only wait | No invented release proof for that store |
+| Relaxed publication or insufficient scope | Conflicts remain detectable |
+| Acquire observes the initial value; later release to the same address | No retroactive synchronization |
+| RMW release sequence, repeated values, CAS failure, loop iterations | Correct lineage or explicit incomplete evidence |
+| Different dispatch/workgroup/generation, collisions or lost records | No cross-identity joins or silent clean result |
+
+Then rerun both unchanged workload clean controls and their meaningful weakened
+scope/order faults with the existing 6/8 bar. The added barrier probe is a
+localization control, not a proposed workload repair. Changing the workloads to
+add a barrier would remove the atomic-publication behavior that these tests
+are intended to exercise.
+
+No production detector fix is implemented in this investigation. The change is
+larger than a preset adjustment or a host-side conflict filter; the plan above
+identifies its required representation, proof obligations, and acceptance tests.
+
+## Reproducing the minimal probe
+
+Use the current ROCm environment, an artifact directory outside the source tree,
+and the current hook. For example, from the repository root:
+
+```sh
+source /home/benoit/workspace/consan-validation/rdna4-20260923/env-current.sh
+hipcc --offload-arch=gfx1201 -O2 -DCOUNT=1 \
+  emulation/rocjitsu/tests/dbi/consan/hip_consan_atomic_publication_probe.hip \
+  -o /tmp/consan-publication
+/tmp/consan-publication
+HSA_TOOLS_LIB="$CONSAN_VALIDATION_HOOK" \
+HSA_TOOLS_ROCPROFILER_V1_TOOLS=1 \
+RJ_CONSAN_MODE=default RJ_CONSAN_PRESET=max RJ_CONSAN_LOG=1 \
+RJ_CONSAN_KERNEL_ALLOWLIST=_Z11publicationPiS_ \
+RJ_CONSAN_FORBID_DIAGNOSTICS=1 /tmp/consan-publication
+```
+
+The current strict detector run exits 89 with a conflict. Recompile with
+`-DCOUNT=8 -DBARRIER=1` for the clean barrier control or `-DCOUNT=8 -DRELAXED=1`
+for the deliberately weakened ordering control. This is a manual regression
+probe, not a passing test added to the default test suite.
 
 ## Artifacts and current status
 
