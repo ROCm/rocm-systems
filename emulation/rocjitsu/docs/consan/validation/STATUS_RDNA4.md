@@ -1,6 +1,6 @@
 # ConSan validation on RDNA4 (gfx1201)
 
-This table records the September 23, 2026 end-to-end ConSan revalidation of
+This table records the September 23–24, 2026 end-to-end ConSan revalidation of
 external workloads on this host’s gfx1201 GPU. **Default** names the sampling preset used by the
 Default engine; **SuperCollider** records its replay and timing-perturbation
 configuration. Fault counts such as **8/8** mean eight detections in eight
@@ -35,6 +35,6 @@ historical color changes and audits the current clean controls.
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 high: strict clean pass; fault 0/8 (bar 6/8); denser preset pending ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 max: strict clean pass, zero conflicts, complete coverage; fault requalification pending ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 higher (lowest passing): strict clean pass; fault 8/8 (bar 6/8) ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 higher (lowest passing): strict clean pass; fault 8/8 (bar 6/8) ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |

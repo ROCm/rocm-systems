@@ -2,15 +2,17 @@
 
 ## Finding
 
-The recorded Default reds for `streamk-arrival` and `tree-atomic-or` are
+The original Default reds for `streamk-arrival` and `tree-atomic-or` were
 **false-positive publication conflicts caused by incomplete atomic ordering
 support in ConSan**. These are two descriptions of the same problem. The clean
-binaries have the synchronization needed for the reported accesses; ConSan does
-not carry that ordering to all their sampled LDS access records.
+binaries have the synchronization needed for the reported accesses; the previous
+ConSan model did not carry that ordering to all their sampled LDS access records.
 
 This finding concerns the reported pairs in these exact binaries, not a proof
-that every access in either workload is race-free on every target. The cells
-remain red until the detector is fixed and clean/fault qualification passes.
+that every access in either workload is race-free on every target. Current
+clean/fault qualification is recorded in
+[STATUS_RDNA4.md](STATUS_RDNA4.md); the implementation and qualification
+updates below supersede the original red-cell measurements.
 
 ## Evidence from the actual workloads
 
@@ -204,7 +206,11 @@ localization control, not a proposed workload repair. Changing the workloads to
 add a barrier would remove the atomic-publication behavior that these tests
 are intended to exercise.
 
-## Implementation progress
+## Historical implementation checkpoints
+
+The following checkpoints retain the intermediate results and their artifacts.
+For the current behavior, see [Complete publication proofs enabled](#complete-publication-proofs-enabled).
+
 
 The host publication proof is implemented in
 `hooks/consan/rj_hsa_dbi_publication.{h,cpp}` (commit `33c59de6606`). It resolves
@@ -309,7 +315,7 @@ could break release sequences, completeness and cross-domain
 checks, and the original clean/fault qualification matrix. Setting the complete
 flag before these conditions hold would be unsound.
 
-## Modification-footprint implementation checkpoint
+## Historical modification-footprint checkpoint
 
 The journal now represents unsupported transitions as opaque address-range
 modifications. The host rejects a publication object if any such modification
@@ -331,7 +337,7 @@ and `journal-opaque-{native,inspect}.log` in the artifact directory.
 **The trace remains incomplete:** ordinary stores and unqualified RMWs still
 need coverage before enabling suppression and rerunning the original cells.
 
-## Capture independent of synchronization qualification
+## Historical capture-expansion checkpoint
 
 Publication modification intents now select relaxed/unqualified RMWs and
 ordinary stores directly from decoded program inventory. Their address capture
@@ -381,8 +387,31 @@ coverage, 40 visible access records in Stream-K and 64 in tree. Logs:
 `complete-*-strict.log`; hook hash and summary in `complete-clean-results.json`.
 The qualification runner accepts Stream-K clean controls at `default` and
 `high`, but their weakened-scope faults detect 0/8 each: these presets retain
-zero sampled access records for this micro-workload. Denser-preset qualification
-is in progress, and no cell is qualified green yet.
+zero sampled access records for this micro-workload. Both workloads qualify at
+`higher`, their lowest passing preset: `default` and `high` each detect 0/8;
+`higher` detects 8/8 (bar 6/8) with matching strict clean controls and healthy
+before/after GPU probes.
+
+| Workload | `default` | `high` | `higher` | Clean at `max` |
+| --- | --- | --- | --- | --- |
+| Stream-K arrival | Clean; fault 0/8 | Clean; fault 0/8 | Clean; fault 8/8 | Zero conflicts; 8 publication pairs ordered |
+| Tree atomic OR | Clean; fault 0/8 | Clean; fault 0/8 | Clean; fault 8/8 | Zero conflicts; 12 publication pairs ordered |
+
+Qualification artifacts are under `qualification-{default,high,higher}/WORKLOAD/`.
+Each contains the clean `result.json`, the fault `summary.json`, eight retained
+trial results, exact fault-spec snapshot, code objects, source provenance, and
+health checks. `completion-audit.json` verifies both accepted `higher` runs
+against the current hook SHA-256:
+`5e1307bcb88cd4944522b2ea699376b8963b912040b8e7a73eb6d83c4686da61`.
+
+The final GPU controls also behave as required: relaxed publication retains two
+conflicts with complete coverage (strict exit 89); journal overflow is rejected
+as incomplete (exit 90); the barrier control passes with zero conflicts and
+complete coverage. See `complete-negative-results.json` and its retained logs.
+The strict probes exercise either wave as last arrival: wave 0 in the
+one-value probe and wave 1 in the relaxed-bookkeeping probe. The one-value,
+four-wave tree, and relaxed-bookkeeping probes were rerun against the final
+hook as well (`final-probe-results.json`), all passing strict completeness checks.
 
 The complete-path checks pass 974 ConSan tests (two benchmark tests skipped)
 and 280 host tests, including omitted/unclassifiable modification sites,
@@ -403,15 +432,15 @@ hipcc --offload-arch=gfx1201 -O2 -DCOUNT=1 \
 /tmp/consan-publication
 HSA_TOOLS_LIB="$CONSAN_VALIDATION_HOOK" \
 HSA_TOOLS_ROCPROFILER_V1_TOOLS=1 \
-RJ_CONSAN_MODE=default RJ_CONSAN_PRESET=max RJ_CONSAN_LOG=1 \
+RJ_CONSAN_MODE=default RJ_CONSAN_POLICY=strict RJ_CONSAN_PRESET=max RJ_CONSAN_LOG=1 \
 RJ_CONSAN_KERNEL_ALLOWLIST=_Z11publicationPiS_ \
 RJ_CONSAN_FORBID_DIAGNOSTICS=1 /tmp/consan-publication
 ```
 
-The current strict one-value journal run is rejected as incomplete. Recompile with
+The current strict one-value journal run passes. Recompile with
 `-DCOUNT=8 -DBARRIER=1` for the clean barrier control or `-DCOUNT=8 -DRELAXED=1`
-for the deliberately weakened ordering control. This is a manual regression
-probe, not a passing test added to the default test suite.
+for the deliberately weakened ordering control, which should retain conflicts.
+This remains a manually run GPU regression probe.
 
 ## Artifacts and current status
 
