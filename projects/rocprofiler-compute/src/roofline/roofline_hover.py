@@ -36,17 +36,17 @@ def wrap_hover_name(name: str) -> str:
     )
 
 
-class DispatchCounts(NamedTuple):
+class KernelDispatchStats(NamedTuple):
     """Per-kernel and total dispatch counts for the tooltip's count ratio."""
 
     kernel: Optional[float]
     total: Optional[float]
 
 
-class DurationStats(NamedTuple):
+class KernelDurationStats(NamedTuple):
     """Per-kernel duration, its share of total runtime, and the time unit."""
 
-    total: Optional[float]
+    kernel: Optional[float]
     pct_runtime: Optional[float]
     unit: str
 
@@ -55,13 +55,13 @@ def build_kernel_hover_template(
     name_html: str,
     limiter: str,
     limiter_category: str,
-    dispatches: DispatchCounts,
-    duration: DurationStats,
+    dispatches: KernelDispatchStats,
+    duration: KernelDurationStats,
     ops_flops: str,
 ) -> str:
     """Kernel hover template; per-point values come from customdata."""
     unit = f"G{ops_flops}s/s"
-    total_app_time = _invert_percent(duration.total, duration.pct_runtime)
+    total_app_time = _invert_percent(duration.kernel, duration.pct_runtime)
     pct_dispatches = _percent_of(dispatches.kernel, dispatches.total)
     return _hover(
         name_html,
@@ -76,7 +76,7 @@ def build_kernel_hover_template(
             f"Dispatch Count: {format_hover_number(pct_dispatches, ',.2f')}% "
             f"({_format_integer(dispatches.kernel)} / {_format_integer(dispatches.total)})",
             f"Duration: {format_hover_number(duration.pct_runtime, ',.2f')}% "
-            f"({format_hover_number(duration.total, ',.0f')} / "
+            f"({format_hover_number(duration.kernel, ',.0f')} / "
             f"{format_hover_number(total_app_time, ',.0f')} {duration.unit})",
         ],
     )
