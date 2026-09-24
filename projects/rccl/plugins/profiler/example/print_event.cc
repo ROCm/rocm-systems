@@ -168,13 +168,13 @@ __hidden void printKernelChEventTrailer(FILE* fh, struct kernelCh* event) {
           "KernelCh", kernelId, getpid(), 1, event->stopTs);
 }
 
-// v7: emit each kernel phase as a complete event; duration is from the GPU globaltimer (ns->us)
+// v7: emit each kernel phase as a complete event; RCCL's GPU globaltimer is 100 MHz.
 __hidden void printKernelPhaseEvents(FILE* fh, struct kernelCh* event) {
   if (event->type != ncclProfileKernelCh) return;
   for (int i = 0; i < MAX_KERNEL_PHASES; i++) {
     struct kernelPhase* p = &event->phases[i];
     if (p->type != ncclProfileKernelPhase) continue;
-    double durUs = (p->stopGpuClk > p->startGpuClk) ? (double)(p->stopGpuClk - p->startGpuClk) / 1000.0 : 0.0;
+    double durUs = (p->stopGpuClk > p->startGpuClk) ? (double)(p->stopGpuClk - p->startGpuClk) / 100.0 : 0.0;
     fprintf(fh, "{\"name\": \"%s\", \"cat\": \"GPU\", \"ph\": \"X\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"dur\": %f, \"args\": {\"Channel\": %d, \"PhaseId\": %d, \"StartGpuClk\": %lu, \"StopGpuClk\": %lu}},\n",
             p->phaseName ? p->phaseName : "phase", kernelId, getpid(), 1, p->startTs, durUs, p->channelId, p->phaseId, p->startGpuClk, p->stopGpuClk);
   }

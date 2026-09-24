@@ -379,6 +379,8 @@ def test_ce_events_traced(paths):
         "-e", "8M",
         "-f", "2",
         "-g", "1",
+        # CE needs symmetrically registered buffers.
+        "-R", "2",
     ]
 
     log_dir = os.path.join(paths.LOGDIR, "allreduce_ext_profiler_test_logs")
@@ -396,7 +398,7 @@ def test_ce_events_traced(paths):
 
     assert result.returncode == 0, f"CE AllReduce profiling test failed, see {log_file}"
 
-    if not paths.check_event_in_log(log_file, "CE 2-shot AllReduce"):
+    if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo CE"):
         pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
 
     trace_files = glob.glob(trace_pattern)
@@ -472,6 +474,7 @@ def test_ce_pool_wrap_does_not_hang(paths):
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
         "-b", "1M", "-e", "4M", "-f", "2", "-g", "1", "-n", "100", "-w", "20",
+        "-R", "2",
     ]
 
     with open(log_file, "w") as logfile:
@@ -482,10 +485,10 @@ def test_ce_pool_wrap_does_not_hang(paths):
         except subprocess.TimeoutExpired:
             pytest.fail(f"CE pool wrap hung, see {log_file}")
 
-    if not paths.check_event_in_log(log_file, "CE 2-shot AllReduce"):
-        pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
-
     assert result.returncode == 0, f"CE AllReduce with a wrapping pool failed, see {log_file}"
+
+    if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo CE"):
+        pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
 
 
 @pytest.mark.ext_profiler
@@ -674,6 +677,210 @@ def test_single_node_detailed_profiling(paths):
         trace_file_size = os.path.getsize(trace_file)
         assert trace_file_size > 0, \
             f"Trace file {trace_file} is empty"
+
+
+@pytest.mark.ext_profiler
+@pytest.mark.allreduce
+def test_kernel_phase_events_traced(paths):
+    """Profiler v7 reports per-kernel initial_sync, compute and final_sync phases.
+
+    The v5/v6 compat shims strip ncclProfileKernelPhase, so these events also prove
+    the plugin was negotiated at v7.
+    """
+
+    dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "allreduce_profiler_dumps")
+    os.makedirs(dump_dir, exist_ok=True)
+
+    dump_file_base = os.path.join(dump_dir, "kernel_phase_events")
+
+    trace_pattern = f"{dump_file_base}*.json"
+    for f in glob.glob(trace_pattern):
+        os.remove(f)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
+        "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
+        # Group + Coll + KernelPhase; RCCL adds KernelCh. The plugin only reaches
+        # phases by walking a group's collectives, so all three are needed.
+        "NCCL_PROFILE_EVENT_MASK": "32771",
+        "NCCL_PROFILE_DUMP_FILE": dump_file_base,
+        # DDA claims this size first and emits no profiler events at all.
+        "RCCL_DDA_ENABLE": "0",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT",
+    })
+
+    args = [
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--mca", "pml", "ucx",
+        "--mca", "btl", "^vader,openib",
+        "-x", "RCCL_DDA_ENABLE",
+        f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
+        "-b", "1M",
+        "-e", "4M",
+        "-f", "2",
+        "-g", "1",
+        # A phase fires per channel per kernel; 2 iterations is tens of MB.
+        "-n", "2",
+        "-w", "1",
+    ]
+
+    log_dir = os.path.join(paths.LOGDIR, "allreduce_ext_profiler_test_logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_file = os.path.join(log_dir, "kernel_phase_events.log")
+    with open(log_file, "w") as logfile:
+        result = subprocess.run(
+            args,
+            env=env,
+            stdout=logfile,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True
+        )
+
+    assert result.returncode == 0, f"Kernel phase profiling test failed, see {log_file}"
+
+    trace_files = glob.glob(trace_pattern)
+    assert len(trace_files) == 8, \
+        f"Should have 8 trace files (one per rank), found {len(trace_files)}: {trace_files}"
+
+    phase_names = ("initial_sync", "compute", "final_sync")
+    totals = {name: 0 for name in phase_names}
+    for trace_file in trace_files:
+        is_valid, message = paths.validate_json_trace(trace_file)
+        assert is_valid, f"Trace file {trace_file} validation failed: {message}"
+        assert paths.count_events_in_trace(trace_file, event_name="KernelCh") > 0, \
+            f"KernelPhase did not implicitly enable parent KernelCh events in {trace_file}"
+
+        for name in phase_names:
+            totals[name] += paths.count_events_in_trace(trace_file, event_name=name)
+
+    missing = [name for name in phase_names if totals[name] == 0]
+    assert not missing, (
+        f"Profiler v7 reported no {', '.join(missing)} phase events in {dump_dir}; "
+        f"counts were {totals}. See {log_file}"
+    )
+
+    seen_ids = set()
+    for trace_file in trace_files:
+        with open(trace_file) as fh:
+            for event in json.load(fh):
+                if isinstance(event, dict) and event.get("name") in phase_names:
+                    args_obj = event.get("args", {})
+                    assert "PhaseId" in args_obj, \
+                        f"Phase event {event.get('name')} is missing PhaseId in {trace_file}"
+                    assert args_obj["StopGpuClk"] > args_obj["StartGpuClk"], \
+                        f"Phase event {event.get('name')} has no positive GPU duration in {trace_file}"
+                    expected_dur = (
+                        args_obj["StopGpuClk"] - args_obj["StartGpuClk"]
+                    ) / 100.0
+                    assert event.get("dur") == pytest.approx(expected_dur, abs=0.01), \
+                        f"Phase duration is not converted from the 100 MHz GPU timer in {trace_file}"
+                    seen_ids.add(args_obj["PhaseId"])
+    assert seen_ids == {0, 1, 2}, \
+        f"Expected phase ids 0, 1 and 2, saw {sorted(seen_ids)}"
+
+
+@pytest.mark.ext_profiler
+@pytest.mark.allreduce
+def test_symmetric_kernel_variant_metadata(paths):
+    """Profiler v7 reports the symmetric kernel variant on collective events.
+
+    A collective is only served symmetrically when its buffers are registered in a
+    symmetric window, so the run passes ``-R 2``. That needs device API support, so
+    the run is skipped when no symmetric collective is reported.
+    """
+
+    dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "allreduce_profiler_dumps")
+    os.makedirs(dump_dir, exist_ok=True)
+
+    dump_file_base = os.path.join(dump_dir, "sym_kernel_variant")
+
+    trace_pattern = f"{dump_file_base}*.json"
+    for f in glob.glob(trace_pattern):
+        os.remove(f)
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
+        "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
+        "NCCL_PROFILE_EVENT_MASK": "3",  # Group + Coll; the metadata rides on Coll
+        "NCCL_PROFILE_DUMP_FILE": dump_file_base,
+        # DDA claims this size first and emits no profiler events at all.
+        "RCCL_DDA_ENABLE": "0",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL",
+    })
+
+    args = [
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--mca", "pml", "ucx",
+        "--mca", "btl", "^vader,openib",
+        "-x", "RCCL_DDA_ENABLE",
+        f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
+        "-b", "1M",
+        "-e", "4M",
+        "-f", "2",
+        "-g", "1",
+        "-R", "2",
+        "-n", "2",
+        "-w", "1",
+    ]
+
+    log_dir = os.path.join(paths.LOGDIR, "allreduce_ext_profiler_test_logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_file = os.path.join(log_dir, "sym_kernel_variant.log")
+    with open(log_file, "w") as logfile:
+        result = subprocess.run(
+            args,
+            env=env,
+            stdout=logfile,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True
+        )
+
+    assert result.returncode == 0, f"Symmetric metadata profiling test failed, see {log_file}"
+
+    if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo SYM"):
+        pytest.skip(
+            f"Symmetric AllReduce was not dispatched on this configuration, "
+            f"see {log_file}"
+        )
+
+    trace_files = glob.glob(trace_pattern)
+    assert len(trace_files) == 8, \
+        f"Should have 8 trace files (one per rank), found {len(trace_files)}: {trace_files}"
+
+    sym_events = []
+    for trace_file in trace_files:
+        is_valid, message = paths.validate_json_trace(trace_file)
+        assert is_valid, f"Trace file {trace_file} validation failed: {message}"
+        with open(trace_file) as fh:
+            events = json.load(fh)
+        for event in events:
+            if not isinstance(event, dict) or event.get("cat") != "COLL":
+                continue
+            args_obj = event.get("args", {})
+            if args_obj.get("IsSymColl") == 1:
+                sym_events.append(args_obj)
+
+    assert sym_events, (
+        f"Symmetric AllReduce emitted no IsSymColl metadata; see {log_file}"
+    )
+
+    for args_obj in sym_events:
+        variant = args_obj.get("KernelVariant")
+        assert variant, \
+            f"A symmetric collective must name its kernel variant, got {args_obj!r}"
+        assert args_obj.get("Algorithm") == variant.split("_", 1)[-1], \
+            f"Algorithm must be the suffix of KernelVariant, got {args_obj!r}"
 
 
 @pytest.mark.ext_profiler
