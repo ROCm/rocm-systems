@@ -34,6 +34,18 @@ include(CTest)
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)
 
+if(WIN32)
+    # common/ requires libdw and every other sample compiles HIP sources with amdclang++,
+    # neither of which is available under MSVC, so Windows builds the ETW sample alone.
+    set(ROCPROFILER_DEFAULT_FAIL_REGEX
+        "threw an exception|failed with error code|Subprocess aborted"
+        CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
+
+    add_subdirectory(hip_api_etw_tracing)
+
+    return()
+endif()
+
 # get the gfx architectures that are present on the system
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-samples-gfx-info ECHO)
 

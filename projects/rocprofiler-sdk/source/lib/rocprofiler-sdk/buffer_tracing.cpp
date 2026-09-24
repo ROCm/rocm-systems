@@ -23,38 +23,46 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
-#include "lib/rocprofiler-sdk/hip/event.hpp"
-#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
-#include "lib/rocprofiler-sdk/hip/stream.hpp"
-#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
-#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
-#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
-#include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
-#include "lib/rocprofiler-sdk/kfd/kfd.hpp"
-#include "lib/rocprofiler-sdk/marker/marker.hpp"
-#include "lib/rocprofiler-sdk/ompt/ompt.hpp"
-#include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/hip/names.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
-#include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
-#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
-#include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/table_id.h>
-#include <rocprofiler-sdk/hipfile/table_id.h>
-#include <rocprofiler-sdk/hsa/table_id.h>
-#include <rocprofiler-sdk/marker/table_id.h>
-#include <rocprofiler-sdk/rccl/table_id.h>
-#include <rocprofiler-sdk/rocdecode/table_id.h>
-#include <rocprofiler-sdk/rocjpeg/table_id.h>
-#include <rocprofiler-sdk/rocshmem/table_id.h>
+
+// Everything below is reached only from the tracing domains that have no Windows
+// implementation yet; the switches that use them are guarded the same way.
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/hip/event.hpp"
+#    include "lib/rocprofiler-sdk/hip/graph.hpp"
+#    include "lib/rocprofiler-sdk/hip/stream.hpp"
+#    include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
+#    include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
+#    include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#    include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
+#    include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#    include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
+#    include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+#    include "lib/rocprofiler-sdk/marker/marker.hpp"
+#    include "lib/rocprofiler-sdk/ompt/ompt.hpp"
+#    include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#    include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
+#    include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#    include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
+#    include "lib/rocprofiler-sdk/runtime_initialization.hpp"
+
+#    include <rocprofiler-sdk/hipfile/table_id.h>
+#    include <rocprofiler-sdk/hsa/table_id.h>
+#    include <rocprofiler-sdk/marker/table_id.h>
+#    include <rocprofiler-sdk/rccl/table_id.h>
+#    include <rocprofiler-sdk/rocdecode/table_id.h>
+#    include <rocprofiler-sdk/rocjpeg/table_id.h>
+#    include <rocprofiler-sdk/rocshmem/table_id.h>
+#endif
 
 #include <atomic>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -192,6 +200,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
             ctx->buffered_tracer->domains, kind, operations[i]));
     }
 
+#if !defined(_WIN32)
     {
         static constexpr auto kfd_events =
             std::array{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
@@ -210,6 +219,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
 
     if(kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
         rocprofiler::hip::event::set_service_configured(true);
+#endif
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -245,6 +255,23 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         {
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
+        // The HIP API domains come first so that everything unavailable on Windows forms one
+        // contiguous run that a single guard can exclude.
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
+        {
+            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Runtime>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
+        {
+            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Compiler>(operation);
+            break;
+        }
+#if defined(_WIN32)
+        default: return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+#else
         case ROCPROFILER_BUFFER_TRACING_HSA_CORE_API:
         {
             val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_Core>(operation);
@@ -299,18 +326,6 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         case ROCPROFILER_BUFFER_TRACING_RCCL_API:
         {
             val = rocprofiler::rccl::name_by_id<ROCPROFILER_RCCL_TABLE_ID>(operation);
-            break;
-        }
-        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
-        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
-        {
-            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Runtime>(operation);
-            break;
-        }
-        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
-        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
-        {
-            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Compiler>(operation);
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
@@ -389,6 +404,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
             break;
         }
+#endif
     };
 
     if(!val)
@@ -431,6 +447,22 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         {
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
+        // see the ordering note in rocprofiler_query_buffer_tracing_kind_operation_name
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
+            break;
+        }
+#if defined(_WIN32)
+        default: return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+#else
         case ROCPROFILER_BUFFER_TRACING_HSA_CORE_API:
         {
             ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_Core>();
@@ -484,18 +516,6 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_RCCL_API:
         {
             ops = rocprofiler::rccl::get_ids<ROCPROFILER_RCCL_TABLE_ID>();
-            break;
-        }
-        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
-        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
-        {
-            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
-            break;
-        }
-        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
-        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
-        {
-            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
@@ -572,6 +592,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
             break;
         }
+#endif
     }
 
     for(const auto& itr : ops)
@@ -588,6 +609,14 @@ rocprofiler_iterate_buffer_tracing_record_args(
     rocprofiler_buffer_tracing_operation_args_cb_t callback,
     void*                                          user_data)
 {
+#if defined(_WIN32)
+    // Stringifying the arguments goes through hip/details/ostream.hpp, which is not ported
+    // yet. The ETW consumer does not carry argument values anyway.
+    (void) record;
+    (void) callback;
+    (void) user_data;
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+#else
     switch(record.kind)
     {
         case ROCPROFILER_BUFFER_TRACING_NONE:
@@ -655,6 +684,7 @@ rocprofiler_iterate_buffer_tracing_record_args(
     }
 
     return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 }
 

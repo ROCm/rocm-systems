@@ -28,6 +28,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/hip/etw/session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
@@ -353,6 +354,18 @@ start_context(rocprofiler_context_id_t context_id)
                               ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
         rocprofiler::kfd::arm_dispatch_log_sessions();
 
+    // On Windows the HIP runtime is an ETW provider rather than an interception target, so
+    // tracing it means running a consumer session for as long as a context wants the records.
+    // Refcounted and a no-op off Windows.
+    if(cfg->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                              ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                              ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                              ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
+    {
+        status = rocprofiler::hip::etw::start_session();
+        if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+    }
+
     if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
@@ -378,6 +391,18 @@ stop_context(rocprofiler_context_id_t idx)
         const context* _expected = itr.load(std::memory_order_acquire);
         if(_expected && _expected->context_idx == idx.handle)
         {
+            // Draining has to happen while the context is still in the active array: the ETW
+            // consumer delivers the tail of the trace during teardown, and those records are
+            // emplaced against whichever contexts are active at that moment. Refcounted and a
+            // no-op off Windows.
+            if(_expected->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                                            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
+            {
+                rocprofiler::hip::etw::stop_session();
+            }
+
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
             if(success)

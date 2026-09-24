@@ -599,29 +599,25 @@ find_clients()
             return std::vector<std::string>{};
         }
 
-        auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
-        auto       val_arr   = std::vector<std::string>{};
-        size_t     pos       = 0;
+        auto val     = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
+        auto val_arr = std::vector<std::string>{};
+#if defined(_WIN32)
+        // ':' cannot separate paths on Windows because it appears in every absolute one
+        const auto delimiter = std::string_view{";"};
+#else
         const auto delimiter = std::string_view{":"};
-        auto       token     = std::string{};
+#endif
 
-        if(val.empty())
+        size_t pos = 0;
+        while((pos = val.find(delimiter)) != std::string::npos)
         {
-            // do nothing
+            auto token = val.substr(0, pos);
+            if(!token.empty()) val_arr.emplace_back(token);
+            val.erase(0, pos + delimiter.length());
         }
-        else if(val.find(delimiter) == std::string::npos)
-        {
-            val_arr.emplace_back(val);
-        }
-        else
-        {
-            while((pos = val.find(delimiter)) != std::string::npos)
-            {
-                token = val.substr(0, pos);
-                if(!token.empty()) val_arr.emplace_back(token);
-                val.erase(0, pos + delimiter.length());
-            }
-        }
+
+        if(!val.empty()) val_arr.emplace_back(val);
+
         return val_arr;
     };
 

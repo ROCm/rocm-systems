@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,36 +20,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Windows stand-in for service.cpp. PC sampling delivers its samples through the KFD
-// ioctl interface, which Windows reaches via D3DKMT instead; there is no session to
-// start, stop, or flush.
+#pragma once
 
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#if defined(hip_api_etw_tracing_client_EXPORTS)
+#    define CLIENT_API __declspec(dllexport)
+#else
+#    define CLIENT_API __declspec(dllimport)
+#endif
 
-#include <rocprofiler-sdk/fwd.h>
+namespace client
+{
+// Nothing loads a tool implicitly on Windows: the HIP runtime reports through ETW instead of
+// rocprofiler-register, so no dispatch-table handshake ever reaches rocprofiler-sdk. The
+// application drives configuration explicitly instead.
+CLIENT_API void
+setup();
 
-namespace rocprofiler
-{
-namespace pc_sampling
-{
-rocprofiler_status_t
-start_service(const context::context*)
-{
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
+// Flushes the buffer and finalizes, which is what makes the collected records available to
+// the validation in tool_fini.
+CLIENT_API void
+shutdown();
 
-rocprofiler_status_t
-stop_service(const context::context*)
-{
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t flush_internal_agent_buffers(rocprofiler_buffer_id_t)
-{
-    // rocprofiler_flush_buffer() calls this before draining the buffer itself, so returning
-    // an error here would break flushing for every tool, not just PC sampling ones. With no
-    // service to configure there is nothing to drain, which is success.
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-}  // namespace pc_sampling
-}  // namespace rocprofiler
+// Records the name of a HIP function the application deliberately called, so that tool_fini
+// can assert the ETW op_name survived the round trip back into a
+// ROCPROFILER_HIP_RUNTIME_API_ID_* operation.
+CLIENT_API void
+expect_operation(const char* name);
+}  // namespace client

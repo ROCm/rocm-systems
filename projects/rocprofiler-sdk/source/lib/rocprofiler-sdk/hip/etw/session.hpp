@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,36 +20,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Windows stand-in for service.cpp. PC sampling delivers its samples through the KFD
-// ioctl interface, which Windows reaches via D3DKMT instead; there is no session to
-// start, stop, or flush.
-
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#pragma once
 
 #include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {
-namespace pc_sampling
+namespace hip
 {
+namespace etw
+{
+// HIP API tracing on Windows is out-of-process: amdhip64 is an ETW provider and
+// rocprofiler-sdk is the consumer. These open and close the real-time consumer session and
+// are reference counted, so every context that traces a HIP domain can call them
+// independently.
+//
+// Declared on both platforms and no-ops off Windows so that the context start/stop call
+// sites need no preprocessor guards.
 rocprofiler_status_t
-start_service(const context::context*)
-{
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
+start_session();
 
 rocprofiler_status_t
-stop_service(const context::context*)
-{
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t flush_internal_agent_buffers(rocprofiler_buffer_id_t)
-{
-    // rocprofiler_flush_buffer() calls this before draining the buffer itself, so returning
-    // an error here would break flushing for every tool, not just PC sampling ones. With no
-    // service to configure there is nothing to drain, which is success.
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-}  // namespace pc_sampling
+stop_session();
+}  // namespace etw
+}  // namespace hip
 }  // namespace rocprofiler

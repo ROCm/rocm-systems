@@ -13,6 +13,7 @@ if(WIN32)
         agent.cpp
         agent_windows.cpp
         buffer.cpp
+        buffer_tracing.cpp
         context.cpp
         counter_config.cpp
         counters.cpp
@@ -66,6 +67,7 @@ add_subdirectory(platform)
 add_subdirectory(hsa)
 
 add_subdirectory(hip)
+add_subdirectory(tracing)
 
 # Subsystems reached from code that does build on Windows. Each one's CMakeLists selects a
 # windows_stubs.cpp in place of its Linux sources, so the call sites in the shared code
@@ -80,7 +82,6 @@ add_subdirectory(thread_trace)
 # Subsystems that are still Linux-only: they depend on ELF/DWARF, ptrace, dlfcn, or
 # runtime API tables that have no Windows equivalent yet.
 if(NOT WIN32)
-    add_subdirectory(tracing)
     add_subdirectory(kernel_dispatch)
     add_subdirectory(details)
     add_subdirectory(hipfile)
@@ -109,6 +110,7 @@ target_link_libraries(
         rocprofiler-sdk::rocprofiler-sdk-sanitizer
         rocprofiler-sdk::rocprofiler-sdk-common-library
         rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+        $<$<BOOL:${WIN32}>:rocprofiler-sdk::rocprofiler-sdk-etw>
         $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-aqlprofile>
         $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-drm>
         $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-dw>
@@ -147,6 +149,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem
             rocprofiler-sdk::rocprofiler-sdk-dl
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+            $<$<BOOL:${WIN32}>:rocprofiler-sdk::rocprofiler-sdk-etw>
             rocprofiler-sdk::rocprofiler-sdk-object-library)
 
 set_target_properties(

@@ -28,6 +28,7 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
+#include "lib/rocprofiler-sdk/hip/names.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/tests/common.hpp"
@@ -310,3 +311,55 @@ TEST(rocprofiler_lib, api_id_names)
         }
     }
 }
+
+#if !defined(_WIN32)
+namespace
+{
+template <size_t TableIdx>
+void
+expect_hip_names_agree()
+{
+    namespace hip = ::rocprofiler::hip;
+
+    constexpr auto table_idx = static_cast<uint32_t>(TableIdx);
+
+    auto names = hip::get_names<TableIdx>();
+
+    ASSERT_EQ(names.size(), hip::get_names_impl(table_idx).size());
+    ASSERT_EQ(hip::get_ids<TableIdx>(), hip::get_ids_impl(table_idx));
+
+    for(size_t i = 0; i < names.size(); ++i)
+    {
+        auto id = static_cast<uint32_t>(i);
+
+        ASSERT_NE(hip::name_by_id_impl(table_idx, id), nullptr)
+            << "table " << table_idx << " operation " << id;
+
+        EXPECT_EQ(std::string_view{hip::name_by_id_impl(table_idx, id)},
+                  std::string_view{names.at(i)});
+
+        EXPECT_EQ(hip::id_by_name_impl(table_idx, names.at(i)),
+                  hip::id_by_name<TableIdx>(names.at(i)));
+    }
+}
+}  // namespace
+
+// hip/names.cpp rebuilds the operation name tables from hip.def.cpp with name-only macros so
+// that the ETW consumer has them on Windows, where hip.cpp cannot be compiled. Nothing forces
+// the two expansions to stay in step, so pin them together here.
+TEST(rocprofiler_lib, hip_names_match_api_tables)
+{
+    namespace hip = ::rocprofiler::hip;
+
+    expect_hip_names_agree<ROCPROFILER_HIP_TABLE_ID_Compiler>();
+    expect_hip_names_agree<ROCPROFILER_HIP_TABLE_ID_Runtime>();
+
+    constexpr auto invalid_table = static_cast<uint32_t>(ROCPROFILER_HIP_TABLE_ID_LAST);
+    constexpr auto runtime_table = static_cast<uint32_t>(ROCPROFILER_HIP_TABLE_ID_Runtime);
+
+    EXPECT_EQ(hip::name_by_id_impl(invalid_table, 0), nullptr);
+    EXPECT_TRUE(hip::get_names_impl(invalid_table).empty());
+    EXPECT_EQ(hip::id_by_name_impl(runtime_table, "notAHipFunction"),
+              static_cast<uint32_t>(ROCPROFILER_HIP_RUNTIME_API_ID_NONE));
+}
+#endif
