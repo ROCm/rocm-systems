@@ -204,7 +204,6 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_HipDrvMemDiscardAndPrefetchBatchAsync_Drv
 
 // @asserts: hipMemDiscardBatchAsync - a batch with a null range never returns hipSuccess (rejected, or reported unsupported)
 HIP_TEST_CASE(Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRejectedOrUnsupported) {
-  SkipIfManagedMemoryUnsupported();
   hip::contract::ContractCleanup cleanup;
 
   hipStream_t stream = nullptr;
