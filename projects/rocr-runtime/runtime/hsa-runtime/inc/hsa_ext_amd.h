@@ -1970,7 +1970,8 @@ typedef enum hsa_amd_memory_pool_flag_s {
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
   /**
-   *  Allocates uncached memory
+   *  Allocates uncached memory. Honored by ::hsa_amd_memory_pool_allocate and
+   *  ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
@@ -4598,7 +4599,9 @@ typedef enum {
  * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
- * @param[in] flags - currently unsupported
+ * @param[in] flags A bit-field of ::hsa_amd_memory_pool_flag_t allocation
+ * directives. ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG is honored; all other bits
+ * are ignored.
  * @param[out] memory_handle - handle for the allocation
  *
  * @retval ::HSA_STATUS_SUCCESS memory allocated successfully
