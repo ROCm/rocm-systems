@@ -784,6 +784,11 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalSkipsQuietWhenClean) {
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
+  // Production always allocates sdmaDirty. Peer 0 dirty + signal on peer 1
+  // proves the skip reads the mask for the signaled peer, not nullptr early-out.
+  DeviceBuffer<uint64_t> d_dirty(1);
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0, channel 0, numChannels=1
+  d_dirty.copyFrom(&peer0Bit, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
@@ -792,6 +797,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalSkipsQuietWhenClean) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
+  host.ctx.sdmaDirty = d_dirty.ptr;
   mapIpcTo(&host, &d_entry, &d_signals, 2 * sizeof(uint64_t));
   d_h.upload(host);
   resetQuietCount();
@@ -813,6 +819,9 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenCle
   d_dst.zero();
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty; signal targets peer 1
+  d_dirty.copyFrom(&peer0Bit, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
@@ -821,6 +830,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenCle
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
+  host.ctx.sdmaDirty = d_dirty.ptr;
   mapIpcToTwo(&host, &d_entry, &d_dst, static_cast<size_t>(kN), &d_signals, 2 * sizeof(uint64_t));
   d_h.upload(host);
   resetQuietCount();
@@ -836,6 +846,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenCle
   }
 }
 
+// H25: dirty-bit path — prior SDMA (or a pre-set peer bit) must quiet before an IPC signal.
 __global__ void kernelPutSdmaThenIpcSignal(TemplateHarness* h, size_t sdmaBytes, size_t ipcBytes) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
@@ -953,6 +964,9 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutCounterOnlySkipsQuietWhenClea
   d_dst.zero();
   DeviceBuffer<uint64_t> d_counters(1);
   d_counters.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty; counter put targets peer 1
+  d_dirty.copyFrom(&peer0Bit, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
@@ -960,6 +974,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutCounterOnlySkipsQuietWhenClea
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.counters = d_counters.ptr;
+  host.ctx.sdmaDirty = d_dirty.ptr;
   mapIpcTo(&host, &d_entry, &d_dst, static_cast<size_t>(kN));
   d_h.upload(host);
   resetQuietCount();
@@ -981,6 +996,9 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalSkipsQuietWh
   d_dst.zero();
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
+  DeviceBuffer<uint64_t> d_dirty(1);
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty; signal targets peer 1
+  d_dirty.copyFrom(&peer0Bit, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
@@ -989,6 +1007,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalSkipsQuietWh
   uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
+  host.ctx.sdmaDirty = d_dirty.ptr;
   mapIpcToTwo(&host, &d_entry, &d_dst, sizeof(uint64_t), &d_signals, 2 * sizeof(uint64_t));
   d_h.upload(host);
   resetQuietCount();
