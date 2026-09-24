@@ -25,28 +25,29 @@ class TestCpuThermal(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
+        self.common.TODO_SKIP_FAIL = False
+        self.common.TODO_SKIP_NOT_COMPLETE = False
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
     def test_get_cpu_prochot_status(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_prochot_status=amdsmi.amdsmi_get_cpu_prochot_status
         )
         return
 
     def test_get_cpu_socket_c0_residency(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_socket_c0_residency=amdsmi.amdsmi_get_cpu_socket_c0_residency
         )
         return
 
     def test_get_cpu_socket_temperature(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_socket_temperature=amdsmi.amdsmi_get_cpu_socket_temperature
         )
         return

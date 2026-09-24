@@ -25,14 +25,15 @@ class TestCpuHsmp(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
+        self.common.TODO_SKIP_FAIL = False
+        self.common.TODO_SKIP_NOT_COMPLETE = False
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
     def test_get_cpu_ddr_bw(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_ddr_bw=amdsmi.amdsmi_get_cpu_ddr_bw)
+        self.common.Test_API_Per_CPU(amdsmi_get_cpu_ddr_bw=amdsmi.amdsmi_get_cpu_ddr_bw)
         return
 
     def test_get_cpu_hsmp_driver_version(self):
@@ -43,7 +44,7 @@ class TestCpuHsmp(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_hsmp_driver_version=amdsmi.amdsmi_get_cpu_hsmp_driver_version
         )
         return
@@ -56,7 +57,7 @@ class TestCpuHsmp(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_hsmp_proto_ver=amdsmi.amdsmi_get_cpu_hsmp_proto_ver
         )
         return
@@ -85,14 +86,14 @@ class TestCpuHsmp(unittest.TestCase):
 
     def test_get_hsmp_metrics_table(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_hsmp_metrics_table=amdsmi.amdsmi_get_hsmp_metrics_table
         )
         return
 
     def test_get_hsmp_metrics_table_version(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_hsmp_metrics_table_version=amdsmi.amdsmi_get_hsmp_metrics_table_version
         )
         return

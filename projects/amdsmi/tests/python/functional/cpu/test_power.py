@@ -25,7 +25,8 @@ class TestCpuPower(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
+        self.common.TODO_SKIP_FAIL = False
+        self.common.TODO_SKIP_NOT_COMPLETE = False
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
@@ -34,14 +35,9 @@ class TestCpuPower(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            ret = amdsmi.amdsmi_get_cpu_handles()
-            cpu_processors = ret["processor_handles"]
+            cpu_processors = amdsmi.amdsmi_get_cpucore_handles()
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
-        if not cpu_processors:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.common.print(msg)
-            self.skipTest(msg)
 
         for i, cpu in enumerate(cpu_processors):
             found_error = False
@@ -95,10 +91,6 @@ class TestCpuPower(unittest.TestCase):
             cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
-        if not cpu_processors:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.common.print(msg)
-            self.skipTest(msg)
 
         for i, cpu in enumerate(cpu_processors):
             found_error = False
@@ -173,10 +165,6 @@ class TestCpuPower(unittest.TestCase):
             cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
-        if not cpu_processors:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.common.print(msg)
-            self.skipTest(msg)
 
         # TODO boost_limit = 0
         boost_limit = 0
@@ -195,26 +183,26 @@ class TestCpuPower(unittest.TestCase):
 
     def test_get_cpu_pwr_svi_telemetry_all_rails(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_pwr_svi_telemetry_all_rails=amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails
         )
         return
 
     def test_get_cpu_socket_power(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_power=amdsmi.amdsmi_get_cpu_socket_power)
+        self.common.Test_API_Per_CPU(amdsmi_get_cpu_socket_power=amdsmi.amdsmi_get_cpu_socket_power)
         return
 
     def test_get_cpu_socket_power_cap(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_socket_power_cap=amdsmi.amdsmi_get_cpu_socket_power_cap
         )
         return
 
     def test_get_cpu_socket_power_cap_max(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_socket_power_cap_max=amdsmi.amdsmi_get_cpu_socket_power_cap_max
         )
         return
@@ -222,12 +210,13 @@ class TestCpuPower(unittest.TestCase):
     def test_set_cpu_pwr_efficiency_mode(self):
         self.common.print_func_name("")
         modes = [0, 1, 2]
-        for i, gpu in enumerate(self.common.processors):
+        cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        for i, cpu in enumerate(cpu_handles):
             self.common.print_device_header(i)
             for mode in modes:
-                msg = f"\t### amdsmi_set_cpu_pwr_efficiency_mode(gpu={i}, mode={mode}):"
+                msg = f"\t### amdsmi_set_cpu_pwr_efficiency_mode(cpu={i}, mode={mode}):"
                 try:
-                    amdsmi.amdsmi_set_cpu_pwr_efficiency_mode(gpu, mode)
+                    amdsmi.amdsmi_set_cpu_pwr_efficiency_mode(cpu, mode)
                     self.common.print(msg, "")
                     self.common.check_ret("", "", self.common.PASS)
                 except amdsmi.AmdSmiLibraryException as e:

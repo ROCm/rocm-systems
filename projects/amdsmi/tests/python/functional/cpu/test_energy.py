@@ -25,7 +25,8 @@ class TestCpuEnergy(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
+        self.common.TODO_SKIP_FAIL = False
+        self.common.TODO_SKIP_NOT_COMPLETE = False
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
@@ -38,7 +39,9 @@ class TestCpuEnergy(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_core_energy=amdsmi.amdsmi_get_cpu_core_energy)
+        self.common.Test_API_Per_CPU_Core(
+            amdsmi_get_cpu_core_energy=amdsmi.amdsmi_get_cpu_core_energy
+        )
         return
 
     # no gpu but have list
@@ -51,20 +54,9 @@ class TestCpuEnergy(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_socket_energy=amdsmi.amdsmi_get_cpu_socket_energy
         )
-        return
-
-    def test_get_energy_count(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_energy_count as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(amdsmi_get_energy_count=amdsmi.amdsmi_get_energy_count)
         return
 
     # no gpu but have list
