@@ -414,7 +414,7 @@ perfetto_annotate_timemory_data(CategoryT, const char* name, Arg&& arg)
     }
     else
     {
-        return std::move(arg);
+        return std::forward<Arg>(arg);
     }
 }
 
