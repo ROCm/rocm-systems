@@ -126,7 +126,7 @@ cache:
   max_entries_per_gpu: -1
 ```
 
-Wherenegative cache size means unlimited (i.e., the database lives entirely in memory)
+Where a negative cache size means unlimited (i.e., the database lives entirely in memory)
 
 In contrast, a config like this puts a fixed size cache with up to 1024 crosststamps per GPU in front of an InfluxDB
 instance reachable at https://influxdb:8086 with a database named "timesync":
