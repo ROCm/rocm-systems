@@ -9153,12 +9153,20 @@ TEST_F(KfdIoctlTest, DbgTrapFailedNotifierWriteRollsBackSingleStep) {
   EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kRetainedException,
                                                        /*retain_on_rejection=*/true));
   exceptions.set_exceptions_enabled.exception_mask = kRetainedException;
+  // Stop retries before this failed write commits so QUERY cannot race a new
+  // pending notification claim that temporarily hides the retained event.
+  driver_->set_debug_notification_result_hook_for_testing([this](bool delivered) {
+    EXPECT_FALSE(delivered);
+    driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  });
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), -ENOSPC);
+  driver_->set_debug_notification_result_hook_for_testing({});
 
   query.query_debug_event.exception_mask = kRetainedException;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
   EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
   EXPECT_EQ(query.query_debug_event.exception_mask, kRetainedException);
+  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
 
   // A failed notifier duplicate is just as observable as a failed write.
   exceptions.set_exceptions_enabled.exception_mask = 0;
@@ -9168,11 +9176,11 @@ TEST_F(KfdIoctlTest, DbgTrapFailedNotifierWriteRollsBackSingleStep) {
   driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
   exceptions.set_exceptions_enabled.exception_mask = kRetainedException;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), -EMFILE);
-  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
   query.query_debug_event.exception_mask = kRetainedException;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
   EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
   EXPECT_EQ(query.query_debug_event.exception_mask, kRetainedException);
+  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
 }
 
 TEST_F(KfdIoctlTest, ConcurrentNotifierFailureCannotEraseSuccessfulPublication) {
