@@ -13,6 +13,8 @@ op_sel_hi fields, derived from the ISA profile at call time.
 
 from __future__ import annotations
 
+from amdisa.isa_profile import FloatDotAccumulation
+
 from .vop3_modifiers import vop3_dst_mod, vop3_src_mod
 
 
@@ -1154,7 +1156,7 @@ def gen_dot2(
     src: list[str],
     cls: str,
     opsel_exprs: tuple[str, str] = ('', ''),
-    replicate_inline: bool = False,
+    dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
 ) -> str:
     """Generate V_DOT2_F32_F16, V_DOT2_I32_I16, V_DOT2_U32_U16.
 
@@ -1171,17 +1173,62 @@ def gen_dot2(
     _append_pk16_src_reads(
         L, [s0, s1], {'dot2_f32_f16': 'f16', 'dot2_f32_bf16': 'bf16'}.get(cls)
     )
-    if replicate_inline and cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
-        for index in range(2):
-            L.append(
-                f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src{index}))'
-            )
-            L.append(f'      raw{index} = (raw{index} & 0xffffu) * 0x10001u;')
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
+    if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        dot_arch = (
+            'gfx12' if dot_accumulation is FloatDotAccumulation.GFX12 else 'gfx11'
+        )
+        if dot_accumulation is not FloatDotAccumulation.GFX12:
+            L.append(
+                '    if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {'
+            )
+        if cls == 'dot2_f32_bf16':
+            # BF16 inline floats broadcast upper16(FP32), without rounding.
+            # GFX11 integers use that half too; GFX12 integers use low16.
+            for index, source in enumerate((s0, s1)):
+                L.append(
+                    f'      if (amdgpu::dot2_src_needs_half_replication(inst_.src{index}))'
+                )
+                if dot_accumulation is FloatDotAccumulation.GFX12:
+                    raw = f'amdgpu::RegisterAccess(wf).read_lane({source}, lane)'
+                    L.append(
+                        f'        raw{index} = (amdgpu::is_inline_float_src(inst_.src{index}) ? ({raw} >> 16) : ({raw} & 0xffffu)) * 0x10001u;'
+                    )
+                else:
+                    L.append(
+                        f'        raw{index} = (amdgpu::RegisterAccess(wf).read_lane({source}, lane) >> 16) * 0x10001u;'
+                    )
+        for name, raw, selection in (
+            ('a0', 'raw0', 'sel0_lo'),
+            ('a1', 'raw0', 'sel0_hi'),
+            ('b0', 'raw1', 'sel1_lo'),
+            ('b1', 'raw1', 'sel1_hi'),
+        ):
+            L.append(
+                f'    uint16_t {name} = static_cast<uint16_t>({selection} ? ({raw} >> 16) : {raw});'
+            )
+        L.append('    if (inst_.neg & 1) a0 ^= 0x8000u;')
+        L.append('    if (inst_.neg & 2) b0 ^= 0x8000u;')
+        L.append('    if (inst_.neg_hi & 1) a1 ^= 0x8000u;')
+        L.append('    if (inst_.neg_hi & 2) b1 ^= 0x8000u;')
+        L.append(
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+        )
+        L.append('    if (inst_.neg & 4) acc ^= 0x80000000u;')
+        bf16 = str(cls == 'dot2_f32_bf16').lower()
+        L.append(
+            f'    uint32_t result = amdgpu::{dot_arch}_dot2_f32<{bf16}>(a0, b0, a1, b1, acc);'
+        )
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
+        if dot_accumulation is FloatDotAccumulation.GFX12:
+            L.append('  }')
+            return '\n'.join(L)
+        L.append('      continue;')
+        L.append('    }')
     if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
         # F16 and BF16 share the dot2 structure but widen differently: BF16 has
         # an 8-bit exponent and no denormal renormalization, so it must use

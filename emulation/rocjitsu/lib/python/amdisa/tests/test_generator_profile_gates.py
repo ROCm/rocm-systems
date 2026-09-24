@@ -2006,7 +2006,7 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     assert 'Isa::resolved_vgpr_offset' not in body
     assert 'amdgpu::resolve_acc(vb, dst,' in body
     assert (
-        'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst, '
+        'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst, '
         'src0_base, src1_base, s2,' in body
     )
 
@@ -2121,7 +2121,7 @@ def test_replicated_halfwave_dense_layout_does_not_depend_on_arch_name():
     )
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_gfx11_wmma_f32(' in body
+    assert 'amdgpu::exec_gfx11_wmma_dot2<false>(' in body
 
 
 def test_runtime_wave_split_k_dense_layout_does_not_depend_on_arch_name():
@@ -2136,8 +2136,8 @@ def test_runtime_wave_split_k_dense_layout_does_not_depend_on_arch_name():
     )
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_wmma_f32(' in body
-    assert 'wf.wf_size()' in _generated_matrix_call(body, 'exec_wmma_f32')
+    assert 'amdgpu::exec_gfx12_wmma_dot4<false>(' in body
+    assert 'wf.wf_size()' in _generated_matrix_call(body, 'exec_gfx12_wmma_dot4<false>')
 
 
 @pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
@@ -2280,12 +2280,32 @@ def _generated_matrix_call(body: str, callee: str) -> str:
         ('V_WMMA_F16_16X16X16_F16', 'cdna5', 'exec_wmma_f16', False),
         ('V_WMMA_BF16_16X16X16_BF16', 'cdna5', 'exec_wmma_bf16', False),
         # Replicated-half-wave and runtime-wave float dispatches.
-        ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_f32', False),
-        ('V_WMMA_F16_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_f16', False),
-        ('V_WMMA_BF16_16X16X16_BF16', 'rdna3', 'exec_gfx11_wmma_bf16', False),
-        ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'exec_wmma_f32', False),
-        ('V_WMMA_F16_16X16X16_F16', 'rdna4', 'exec_wmma_f16', False),
-        ('V_WMMA_BF16_16X16X16_BF16', 'rdna4', 'exec_wmma_bf16', False),
+        ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_dot2<false>', False),
+        (
+            'V_WMMA_F16_16X16X16_F16',
+            'rdna3',
+            'exec_gfx11_wmma_dot2<false, true>',
+            False,
+        ),
+        (
+            'V_WMMA_BF16_16X16X16_BF16',
+            'rdna3',
+            'exec_gfx11_wmma_dot2<true, true>',
+            False,
+        ),
+        ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'exec_gfx12_wmma_dot4<false>', False),
+        (
+            'V_WMMA_F16_16X16X16_F16',
+            'rdna4',
+            'exec_gfx12_wmma_dot4<false, true>',
+            False,
+        ),
+        (
+            'V_WMMA_BF16_16X16X16_BF16',
+            'rdna4',
+            'exec_gfx12_wmma_dot4<true, true>',
+            False,
+        ),
         # MFMA specialized and generic float dispatches.
         (
             'V_MFMA_F32_16X16X32_FP8_FP8',
@@ -2575,14 +2595,12 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
         body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert (
-            'amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(), 16, 16, 16, 16, dst,' in body
-        )
+        assert 'amdgpu::exec_gfx11_wmma_dot2<false>(cu, wf.wf_size(), dst,' in body
         assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
     body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst,' in body
+    assert 'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst,' in body
     assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
 
@@ -2637,23 +2655,28 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
             0,
             operands,
         )
-        lower = dtype.lower()
+        bf16 = str(dtype == 'BF16').lower()
 
         for arch in ('rdna3', 'rdna3_5'):
             body = _gen_mfma(inst, arch)
 
             assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
             assert (
-                f'amdgpu::exec_gfx11_wmma_{lower}(cu, wf.wf_size(), 16, 16, 16, 16, dst,'
+                f'amdgpu::exec_gfx11_wmma_dot2<{bf16}, true>(cu, wf.wf_size(), dst,'
                 in body
             )
-            assert '(inst_.op_sel >> 2) & 0x1u' in body
-            assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16' not in body
+            assert '(inst_.op_sel >> 2) & 1u' in body
+            assert 'inst_.neg, inst_.neg_hi' in body
+            assert 'wf.fp16_ovfl()' in body
+            assert f'dot_packed16::inline_word<{bf16}>' in body
 
         body = _gen_mfma(inst, 'rdna4')
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16, 16, dst,' in body
-        assert 'wf.wf_size());' in body
+        assert (
+            f'amdgpu::exec_gfx12_wmma_dot4<{bf16}, true>(cu, wf.wf_size(), dst,' in body
+        )
+        assert 'inst_.neg, inst_.neg_hi, wf.fp16_ovfl());' in body
+        assert f'dot_packed16::inline_word<{bf16}>' in body
         assert 'exec_gfx11_wmma' not in body
 
 
@@ -6363,6 +6386,10 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
     assert 'facc += a0 * b0 + a1 * b1;' in body
     assert 'throw util::UnimplementedInst' not in body
 
+    assert 'amdgpu::gfx11_dot2_f32<false>' in body
+    assert 'ROCJITSU_CODE_ARCH_RDNA3_5' in body
+    assert 'pk16_src_needs_narrowing(inst.inst_.src0' in body
+
 
 def test_gfx1250_swmmac_reuse_hint_does_not_select_sparse_index_set():
     inst = Instruction(
@@ -6913,9 +6940,53 @@ def test_mode_status_hwreg_semantics_call_central_vm_helpers(arch_name, profile)
     assert 'amdgpu::read_hwreg_field(wf, hwreg, reg_val)' in getreg
     assert 'amdgpu::write_hwreg_field(wf, hwreg, src)' in setreg
     assert 'amdgpu::write_hwreg_field(wf, hwreg, src)' in setreg_imm
+    assert 'HwregWriteKind' not in setreg
+    assert 'HwregWriteKind' not in setreg_imm
     assert 'wf.status_raw()' not in getreg
     assert 'wf.set_status_raw' not in setreg
     assert 'wf.set_status_raw' not in setreg_imm
+
+
+def test_cdna5_setreg_codegen_marks_target_specific_write_kinds():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        profile=Cdna5Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    setreg_inst = Instruction(
+        'S_SETREG_B32',
+        'ENC_SOPK',
+        18,
+        [
+            Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1),
+            Operand('sdst', 32, 'OPR_SDST', True, False, False, True, 2),
+        ],
+    )
+    setreg_imm_inst = Instruction(
+        'S_SETREG_IMM32_B32',
+        'SOPK_INST_LITERAL',
+        20,
+        [Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1)],
+        is_implied_literal_enc=True,
+    )
+
+    setreg = codegen._gen_execute_body(
+        setreg_inst, InstructionSemantics('S_SETREG_B32', 'scalar_setreg')
+    )
+    setreg_imm = codegen._gen_execute_body(
+        setreg_imm_inst,
+        InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm'),
+    )
+
+    assert (
+        'amdgpu::write_hwreg_field(wf, hwreg, src, ' 'amdgpu::HwregWriteKind::Setreg)'
+    ) in setreg
+    assert (
+        'amdgpu::write_hwreg_field(wf, hwreg, src, '
+        'amdgpu::HwregWriteKind::SetregImm32)'
+    ) in setreg_imm
 
 
 def _hwreg_predefined_values(isa_name: str) -> dict[str, int]:

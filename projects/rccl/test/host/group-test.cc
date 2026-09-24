@@ -190,4 +190,35 @@ TEST_F(GroupEndInternalTest, BlockingGroupWithPendingJob_RunsSynchronouslyAndRet
   EXPECT_EQ(nullptr, comm_->groupJob);
 }
 
+// Multi-rank symmetric task preparation must be deferred until every local
+// communicator has enqueued its job. Running the first communicator inline can
+// block in bootstrap consensus before its sibling communicators enter it.
+TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  ASSERT_FALSE(ncclIntruQueueEmpty(&asyncCollJobs));
+
+  ncclAsyncJob* queued = ncclIntruQueueDequeue(&asyncCollJobs);
+  ASSERT_NE(nullptr, queued);
+  EXPECT_EQ(ncclPrepareTasksAndCollPreconnectFunc, queued->func);
+  EXPECT_EQ(ncclGroupJobRunning, queued->state);
+
+  auto* prepareJob =
+    reinterpret_cast<ncclPrepareTasksAndCollPreconnectJob*>(queued);
+  EXPECT_EQ(comm.get(), prepareJob->comm);
+  EXPECT_EQ(&simInfo, prepareJob->simInfo);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+
+  queued->destructor(queued);
+}
+
 }  // namespace

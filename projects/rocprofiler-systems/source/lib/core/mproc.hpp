@@ -6,9 +6,7 @@
 #include <set>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace mproc
+namespace rocprofsys::mproc
 {
 // get the concurrent processes from /proc/<PPID>/task/<PPID>/children
 std::set<int>
@@ -22,5 +20,4 @@ wait_pid(pid_t _pid, int _opts = 0);
 
 int
 diagnose_status(pid_t _pid, int _status, int _verbose = 0);
-}  // namespace mproc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::mproc
