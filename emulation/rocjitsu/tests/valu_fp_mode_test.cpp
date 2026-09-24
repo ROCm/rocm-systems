@@ -1081,6 +1081,73 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
   return cases;
 }
 
+std::vector<ArithmeticCase> trig_fp_cases() {
+  struct Target {
+    const char *name;
+    rj_code_arch_t arch;
+    bool rdna_encoding;
+    bool always_quiets;
+  };
+  const Target targets[] = {
+      {"Cdna1", ROCJITSU_CODE_ARCH_CDNA1, false, false},
+      {"Cdna2", ROCJITSU_CODE_ARCH_CDNA2, false, false},
+      {"Cdna3", ROCJITSU_CODE_ARCH_CDNA3, false, false},
+      {"Cdna4", ROCJITSU_CODE_ARCH_CDNA4, false, false},
+      {"Rdna1", ROCJITSU_CODE_ARCH_RDNA1, true, false},
+      {"Rdna2", ROCJITSU_CODE_ARCH_RDNA2, true, false},
+      {"Rdna3", ROCJITSU_CODE_ARCH_RDNA3, true, false},
+      {"Rdna35", ROCJITSU_CODE_ARCH_RDNA3_5, true, false},
+      {"Rdna4", ROCJITSU_CODE_ARCH_RDNA4, true, true},
+      {"Cdna5", ROCJITSU_CODE_ARCH_CDNA5, true, true},
+  };
+  std::vector<ArithmeticCase> cases;
+  for (const auto &target : targets)
+    for (unsigned cosine = 0; cosine < 2; ++cosine)
+      for (unsigned e64 = 0; e64 < 2; ++e64) {
+        // Assembled with llvm-mc for each target. The hardware captures use
+        // gfx1100/gfx1201; the other targets check shared full-range and MODE
+        // execution without claiming their finite approximations are identical.
+        std::array<uint32_t, 3> words{};
+        if (e64) {
+          words[0] = (target.rdna_encoding ? 0xd5b50006u : 0xd1690006u) + cosine * 0x10000u;
+          words[1] = target.rdna_encoding ? 0x02010100u : 0x00000100u;
+        } else {
+          words[0] = (target.rdna_encoding ? 0x7e0c6b00u : 0x7e0c5300u) + cosine * 0x200u;
+        }
+        const std::string prefix =
+            std::string(target.name) + (cosine ? "Cos" : "Sin") + (e64 ? "E64" : "E32");
+        auto add = [&](const std::string &name, uint32_t input, uint32_t expected, uint32_t mode) {
+          cases.push_back({prefix + name,
+                           target.arch,
+                           words,
+                           {{0, input}},
+                           {{6, expected}},
+                           mode,
+                           FE_UPWARD,
+                           0x8040u,
+                           0x8040u});
+        };
+        add("LargeFinite", 0xff7fffffu, cosine ? 0x3f800000u : 0u, 240u);
+        for (uint32_t ieee = 0; ieee < 2; ++ieee)
+          add("SignalingNan" + std::to_string(ieee), 0xff812345u,
+              target.always_quiets || ieee ? 0xffc12345u : 0xff812345u, 240u | (ieee << 9));
+        for (uint32_t denorm = 0; denorm < 4; ++denorm)
+          for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+            uint32_t mode = 192u | (denorm << 4) | rounding;
+            add("Subnormal" + std::to_string(mode), 0x80000001u,
+                cosine        ? 0x3f800000u
+                : denorm == 3 ? 0x80000006u
+                              : 0x80000000u,
+                mode);
+          }
+        if (target.arch == ROCJITSU_CODE_ARCH_RDNA3 || target.arch == ROCJITSU_CODE_ARCH_RDNA4)
+          for (uint32_t rounding = 0; rounding < 4; ++rounding)
+            add("CapturedOctant" + std::to_string(rounding), 0x3e000000u,
+                cosine ? 0x3f3504f3u : 0x3f3504f4u, 240u | rounding);
+      }
+  return cases;
+}
+
 class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
@@ -1158,6 +1225,11 @@ TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
 }
 
 INSTANTIATE_TEST_SUITE_P(AllTargets, ValuFpModeTest, testing::ValuesIn(kCases),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Trigonometry, ValuFpModeTest, testing::ValuesIn(trig_fp_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

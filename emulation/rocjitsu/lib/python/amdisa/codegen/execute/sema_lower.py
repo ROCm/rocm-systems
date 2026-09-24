@@ -1959,6 +1959,12 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             f'amdgpu::transcendental::rsq_f16({args[0]}, '
             'wf.fp_denorm_mode_f16_f64())'
         )
+    if len(args) == 1 and callee in ('sin', 'cos') and node.ty == SemaType.F32:
+        return (
+            f'amdgpu::transcendental::{callee}_f32({args[0]}, '
+            'wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        )
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:

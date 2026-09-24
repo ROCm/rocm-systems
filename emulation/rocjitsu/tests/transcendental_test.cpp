@@ -131,6 +131,47 @@ TEST(TranscendentalTest, SinCosF32SpecialCases) {
   EXPECT_TRUE(std::isnan(cos_f32(std::numeric_limits<float>::infinity())));
 }
 
+TEST(TranscendentalTest, SinCosF32CapturedRangeBoundaries) {
+  // Raw outputs captured independently on gfx1100 and gfx1201 with denormals
+  // preserved. Include small-input and polynomial boundaries, reflected
+  // intervals, exact quadrants, and finite inputs too large for integer casts.
+  const uint32_t cases[][3] = {
+      {0x00000000u, 0x00000000u, 0x3f800000u}, {0x80000000u, 0x80000000u, 0x3f800000u},
+      {0x00000001u, 0x00000006u, 0x3f800000u}, {0x80000001u, 0x80000006u, 0x3f800000u},
+      {0x007fffffu, 0x01c90fd3u, 0x3f800000u}, {0x00800000u, 0x01c90fd5u, 0x3f800000u},
+      {0x39bfffffu, 0x3b16cbdfu, 0x3f7fffd3u}, {0x39c00000u, 0x3b16cbdfu, 0x3f7fffd3u},
+      {0x39ffffffu, 0x3b490fbeu, 0x3f7fffb1u}, {0x3a000000u, 0x3b490fcbu, 0x3f7fffb1u},
+      {0x3e000000u, 0x3f3504f4u, 0x3f3504f3u}, {0x3e7fffffu, 0x3f800000u, 0x33c90fd9u},
+      {0x3e800000u, 0x3f800000u, 0x00000000u}, {0x3f000000u, 0x00000000u, 0xbf800000u},
+      {0x3f800000u, 0x00000000u, 0x3f800000u}, {0x7f7fffffu, 0x00000000u, 0x3f800000u},
+      {0xff7fffffu, 0x00000000u, 0x3f800000u}, {0x7f800000u, 0xffc00000u, 0xffc00000u},
+      {0xff800000u, 0xffc00000u, 0xffc00000u},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test[0]);
+    EXPECT_EQ(std::bit_cast<uint32_t>(sin_f32(std::bit_cast<float>(test[0]))), test[1]);
+    EXPECT_EQ(std::bit_cast<uint32_t>(cos_f32(std::bit_cast<float>(test[0]))), test[2]);
+  }
+}
+
+TEST(TranscendentalTest, SinCosF32CapturedApproximationBound) {
+  // The staged polynomial still differs from some captured hardware results
+  // by one ULP. Keep those controls explicit instead of treating it as an
+  // exhaustive bit-exact mapping.
+  const uint32_t cases[][3] = {
+      {0x3aab9885u, 0x3c06c500u, 0x3f7ffdc8u},
+      {0x3b8419b1u, 0x3ccf7b0du, 0x3f7feaf9u},
+      {0x3bcf188bu, 0x3d229c2du, 0x3f7fcc55u},
+      {0x3c98be2du, 0x3def6125u, 0x3f7e3ec8u},
+  };
+  for (const auto &test : cases)
+    for (unsigned op = 0; op < 2; ++op) {
+      const float input = std::bit_cast<float>(test[0]);
+      const uint32_t actual = std::bit_cast<uint32_t>(op ? cos_f32(input) : sin_f32(input));
+      EXPECT_LE(std::abs(int64_t{actual} - test[op + 1]), 1) << std::hex << test[0];
+    }
+}
+
 TEST(TranscendentalTest, RcpF64SpecialCases) {
   EXPECT_EQ(rcp_f64(0.0), std::numeric_limits<double>::infinity());
   EXPECT_EQ(rcp_f64(-0.0), -std::numeric_limits<double>::infinity());

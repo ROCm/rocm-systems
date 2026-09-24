@@ -19,6 +19,7 @@
 
 #include "util/amdgpu_rcp.h"
 #include "util/amdgpu_rsq.h"
+#include "util/amdgpu_trig.h"
 
 #include <bit>
 #include <cmath>
@@ -86,26 +87,20 @@ inline float exp_f32(float x) {
   return flush_denorm_f32(std::exp2(x));
 }
 
-/// @brief sin(2*pi*x) (single-precision, ~1 ULP).
+/// @brief sin(2*pi*x) using full-range reduction and a captured RDNA3/4 approximation.
 ///
 /// @details The AMD ISA computes sin(2*pi*x), NOT sin(x). Input is in
 /// units of 2*pi radians. Output range is [-1.0, 1.0].
-inline float sin_f32(float x) {
-  if (std::isnan(x) || std::isinf(x))
-    return std::numeric_limits<float>::quiet_NaN();
-  constexpr float TWO_PI = 6.283185307179586476925286766559f;
-  return std::sin(x * TWO_PI);
+inline float sin_f32(float x, uint32_t denorm_mode = 3, bool quiet_snan = true) {
+  return util::amdgpu_trig_f32(x, false, denorm_mode, quiet_snan);
 }
 
-/// @brief cos(2*pi*x) (single-precision, ~1 ULP).
+/// @brief cos(2*pi*x) using full-range reduction and a captured RDNA3/4 approximation.
 ///
 /// @details The AMD ISA computes cos(2*pi*x), NOT cos(x). Input is in
 /// units of 2*pi radians. Output range is [-1.0, 1.0].
-inline float cos_f32(float x) {
-  if (std::isnan(x) || std::isinf(x))
-    return std::numeric_limits<float>::quiet_NaN();
-  constexpr float TWO_PI = 6.283185307179586476925286766559f;
-  return std::cos(x * TWO_PI);
+inline float cos_f32(float x, uint32_t denorm_mode = 3, bool quiet_snan = true) {
+  return util::amdgpu_trig_f32(x, true, denorm_mode, quiet_snan);
 }
 
 /// @brief Hyperbolic tangent (single-precision, correctly-rounded libm reference).

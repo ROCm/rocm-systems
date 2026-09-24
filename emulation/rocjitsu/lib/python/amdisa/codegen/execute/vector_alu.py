@@ -474,8 +474,10 @@ def gen_vector_unary(
             'fract': 's - std::floor(s)',
             'exp2': 'amdgpu::transcendental::exp_f32(s)',
             'log2': 'amdgpu::transcendental::log_f32(s)',
-            'sin': 'amdgpu::transcendental::sin_f32(s)',
-            'cos': 'amdgpu::transcendental::cos_f32(s)',
+            'sin': 'amdgpu::transcendental::sin_f32(s, wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'cos': 'amdgpu::transcendental::cos_f32(s, wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'abs': 'std::fabs(s)',
             'neg': '-s',
         }
