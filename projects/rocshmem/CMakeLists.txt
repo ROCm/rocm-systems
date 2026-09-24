@@ -345,12 +345,13 @@ if (NOT BUILD_TESTS_ONLY)
       list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX ".*:xnack-$")
     endif()
 
-    # RDNA archs (gfx11xx/gfx12xx) have no xnack+ variant at all, so device
-    # ASAN can never be enabled for them - clang just ignores
-    # -fsanitize=address for that offload arch with a warning. Drop them
-    # instead of leaving a target in GPU_TARGETS that silently gets no
-    # instrumentation.
-    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250 gfx1250-strict)
+    # gfx1100/gfx1201 have no xnack at all, so device ASAN can never be
+    # enabled for them - clang just ignores -fsanitize=address for that
+    # offload arch with a warning. Drop them instead of leaving a target in
+    # GPU_TARGETS that silently gets no instrumentation. gfx1250 (and
+    # gfx1250-strict) are different: xnack is always on, so they take
+    # -fsanitize=address as-is and must not be dropped.
+    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201)
     foreach(_asan_incompatible_arch ${_ASAN_INCOMPATIBLE_ARCHS})
       list(FILTER GPU_TARGETS EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
       if(GPU_TARGETS_FULL)
@@ -364,11 +365,10 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
 
     # CDNA archs (gfx90a/gfx942/gfx950) only get ASAN instrumentation with the
-    # xnack+ feature explicitly enabled; a bare arch name compiles without it.
-    # Force :xnack+ onto any entry that doesn't already request it.
+    # xnack+ feature explicitly enabled.
     set(_ASAN_GPU_TARGETS "")
     foreach(_asan_target ${GPU_TARGETS})
-      if(NOT _asan_target MATCHES "xnack\\+")
+      if(_asan_target MATCHES "^gfx9" AND NOT _asan_target MATCHES "xnack\\+")
         message(STATUS "ASAN: appending :xnack+ to GPU target '${_asan_target}'")
         set(_asan_target "${_asan_target}:xnack+")
       endif()
@@ -379,7 +379,7 @@ if (NOT BUILD_TESTS_ONLY)
     if(GPU_TARGETS_FULL)
       set(_ASAN_GPU_TARGETS_FULL "")
       foreach(_asan_target ${GPU_TARGETS_FULL})
-        if(NOT _asan_target MATCHES "xnack\\+")
+        if(_asan_target MATCHES "^gfx9" AND NOT _asan_target MATCHES "xnack\\+")
           set(_asan_target "${_asan_target}:xnack+")
         endif()
         list(APPEND _ASAN_GPU_TARGETS_FULL "${_asan_target}")

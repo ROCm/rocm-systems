@@ -199,7 +199,8 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 
-# Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
+# Modify GPU architectures for Address Sanitizer builds by requesting "xnack+"
+# on the archs where it is a selectable target-ID feature
 if (BUILD_ADDRESS_SANITIZER)
   set(_suffix "asan")
   set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
@@ -220,11 +221,13 @@ if (BUILD_ADDRESS_SANITIZER)
   endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
+  # ASAN needs xnack+. For gfx9, add it explicitly. Otherwise it is on
+  # by default, or not supported.
   SET(amdgpu_targets "")
   foreach(amdgpu_target IN LISTS GPU_TARGETS)
     if(NOT amdgpu_target STREQUAL "")
-      string(FIND "${amdgpu_target}" ":xnack+" HAS_XNACK_SUFFIX)
-      if(HAS_XNACK_SUFFIX EQUAL -1)
+      if(amdgpu_target MATCHES "^gfx9")
+        string(REGEX REPLACE ":xnack[+-]" "" amdgpu_target "${amdgpu_target}")
         list(APPEND amdgpu_targets "${amdgpu_target}:xnack+")
       else()
         list(APPEND amdgpu_targets "${amdgpu_target}")
