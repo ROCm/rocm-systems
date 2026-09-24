@@ -632,6 +632,28 @@ __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width =
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane_xor))
     return __builtin_amdgcn_permlane_xor(var, lane_mask, width);
 #endif
+  // Not yet implemented: masks 16 and 32 can leave the LDS pipe too, but only on hardware that
+  // was not available to test on. Both would slot in above this switch, guarded the same way as
+  // the DPP cases, and neither needs the value to be a compile-time constant.
+  //
+  //   mask 16, gfx10+  __builtin_amdgcn_permlanex16 with identity selectors (0x76543210,
+  //                    0xfedcba98) is lane ^ 16 within the 32-lane group. Codegen checked on
+  //                    gfx1030/gfx1100/gfx1250: one VALU op plus one loop-invariant s_mov, so
+  //                    it replaces a ds_swizzle with a VALU instruction. This is the last LDS
+  //                    op in a wave32 reduction - adding it takes gfx10+ to zero.
+  //   mask 32, gfx11+  __builtin_amdgcn_permlane64 is exactly the wave64 half swap. Only
+  //                    reachable when RDNA is built for wave64, since wave32 caps width at 32.
+  //   mask 32, gfx950  __builtin_amdgcn_permlane32_swap would remove the last ds_bpermute from
+  //                    a CDNA wave64 reduction. It exchanges halves between two registers and
+  //                    returns a pair, so the mapping onto a single-operand shuffle needs to be
+  //                    worked out, not guessed.
+  //
+  // What blocks all three is behavioural, not mechanical: their inactive-lane behaviour is set
+  // by operands with no safe default (fi and bound_ctrl on permlanex16, the register pairing on
+  // permlane32_swap). Picking those wrong silently returns data from the wrong lane rather than
+  // failing to build, so they need checking against ds_bpermute on a real gfx10+/gfx950 device
+  // the way the DPP cases were on gfx942. Until then these masks take the paths below, which
+  // are correct and still ahead of where this function started.
   if (__HIP_SHFL_XOR_FIXED(lane_mask, width) && lane_mask < 32) {
     switch (lane_mask) {
       case 1: return __HIP_SHFL_XOR_SWIZZLE(1);
