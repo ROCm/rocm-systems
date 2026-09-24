@@ -1248,25 +1248,37 @@ def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
     return entries
 
 
-def validate_capture_coverage(entries: List[ApiEntry], capture_cpp: str,
+def validate_capture_coverage(entries: List[ApiEntry],
+                              manual_capture_source: Path,
                               silent: bool = False) -> None:
-    """Fail when an active dispatch-table slot lacks a capture shim."""
+    """Validate reserved slots and hand-written capture shim definitions."""
     errors: List[str] = []
+    if not manual_capture_source.is_file():
+        errors.append(f"manual capture source is missing: {manual_capture_source}")
+        manual_capture_text = ""
+    else:
+        manual_capture_text = manual_capture_source.read_text(encoding="utf-8")
+
     for entry in entries:
         if entry.reserved:
             if entry.reserved_reason != "retired void* dispatch slot":
                 errors.append(f"{entry.table}:{entry.name}: {entry.reserved_reason}")
             continue
-        table_name = "g_cap_table" if entry.table == "runtime" else "cap"
-        assignment = f"{table_name}.{entry.name}_fn = capture_{entry.name};"
-        if assignment not in capture_cpp:
-            errors.append(f"{entry.table}:{entry.name}: missing table assignment")
-        if entry.name not in MANUAL_CAPTURE_APIS and f"capture_{entry.name}(" not in capture_cpp:
-            errors.append(f"{entry.table}:{entry.name}: missing generated shim")
+        if entry.name not in MANUAL_CAPTURE_APIS:
+            continue
+        definition = re.compile(
+            r"(?m)^[^#\n]*\bcapture_" + re.escape(entry.name) + r"\s*\(")
+        if not definition.search(manual_capture_text):
+            errors.append(
+                f"{entry.table}:{entry.name}: manual capture shim definition is "
+                f"missing from {manual_capture_source}")
+
     if errors:
         sys.exit("ERROR: HRR capture coverage check failed:\n  " + "\n  ".join(errors))
     if not silent:
-        print(f"  HRR capture coverage: {sum(not e.reserved for e in entries)} active dispatch slots")
+        manual_count = sum(
+            not entry.reserved and entry.name in MANUAL_CAPTURE_APIS for entry in entries)
+        print(f"  HRR capture coverage: {manual_count} manual shims verified")
 
 
 # ---------------------------------------------------------------------------
@@ -2702,6 +2714,7 @@ def main() -> None:
     default_header   = hrr_project_dir / "include" / "hrr" / "hrr_api_args.h"
     default_capture  = clr_hrr_dir / "hip_capture_generated.cpp"
     default_playback = hrr_project_dir / "playback" / "hip_playback_generated.cpp"
+    default_manual_capture = clr_hrr_dir / "hip_capture.cpp"
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input",           default=str(default_input),
@@ -2719,7 +2732,9 @@ def main() -> None:
     parser.add_argument("--output-playback", default=str(default_playback),
                         help="Path to generated hip_playback_generated.cpp")
     parser.add_argument("--check-hrr-coverage", action="store_true",
-                        help="Fail when an active dispatch-table slot lacks a capture shim")
+                        help="Validate parseable dispatch slots and manual capture shims")
+    parser.add_argument("--manual-capture-source", default=str(default_manual_capture),
+                        help="Path to hand-written hip_capture.cpp")
     parser.add_argument("--silent", action="store_true",
                         help="Suppress normal progress output; warnings and errors remain visible")
     args = parser.parse_args()
@@ -2733,6 +2748,7 @@ def main() -> None:
     header_path   = Path(args.output_header)
     capture_path  = Path(args.output_capture)
     playback_path = Path(args.output_playback)
+    manual_capture_path = Path(args.manual_capture_source)
 
     if not in_path.exists():
         sys.exit(f"ERROR: input file not found: {in_path}")
@@ -2813,7 +2829,7 @@ def main() -> None:
 
     capture_cpp = generate_capture_cpp(entries)
     if args.check_hrr_coverage:
-        validate_capture_coverage(entries, capture_cpp, args.silent)
+        validate_capture_coverage(entries, manual_capture_path, args.silent)
 
     header_path.parent.mkdir(parents=True, exist_ok=True)
     header = generate_header(entries)

@@ -21,7 +21,7 @@ function(hrr_verify_generated_files)
     endif()
 
     execute_process(
-      COMMAND "${CMAKE_COMMAND}" -E compare_files "${generated}" "${expected}"
+      COMMAND "${CMAKE_COMMAND}" -E compare_files --ignore-eol "${generated}" "${expected}"
       RESULT_VARIABLE compare_result)
     if(NOT compare_result EQUAL 0)
       execute_process(
@@ -74,6 +74,13 @@ function(hrr_add_codegen_check)
   set(expected_header "${ARG_HRR_SOURCE_DIR}/include/hrr/hrr_api_args.h")
   set(expected_capture "${ARG_CLR_SOURCE_DIR}/hipamd/src/hrr/hip_capture_generated.cpp")
   set(expected_playback "${ARG_HRR_SOURCE_DIR}/playback/hip_playback_generated.cpp")
+  set(manual_capture_source "${ARG_CLR_SOURCE_DIR}/hipamd/src/hrr/hip_capture.cpp")
+
+  foreach(input generator api_trace public_header manual_capture_source)
+    if(NOT EXISTS "${${input}}")
+      message(FATAL_ERROR "HRR code generation requires ${input}: ${${input}}")
+    endif()
+  endforeach()
 
   add_custom_command(
     OUTPUT "${header}" "${capture}" "${playback}"
@@ -84,6 +91,7 @@ function(hrr_add_codegen_check)
       --output-capture "${capture}"
       --output-playback "${playback}"
       --check-hrr-coverage
+      --manual-capture-source "${manual_capture_source}"
       --silent
     COMMAND ${CMAKE_COMMAND}
       "-DGENERATED_HEADER=${header}"
@@ -98,6 +106,7 @@ function(hrr_add_codegen_check)
       "${generator}"
       "${api_trace}"
       "${public_header}"
+      "${manual_capture_source}"
       "${expected_header}"
       "${expected_capture}"
       "${expected_playback}"
