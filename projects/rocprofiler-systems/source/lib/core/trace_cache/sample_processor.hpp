@@ -15,9 +15,7 @@
 
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 template <typename T>
@@ -355,5 +353,4 @@ private:
     std::vector<processor_view_t> m_processor_view_list;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

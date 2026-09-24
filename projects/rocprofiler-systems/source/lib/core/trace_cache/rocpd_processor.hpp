@@ -19,9 +19,7 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 class rocpd_processor_t : public processor_t<rocpd_processor_t>
@@ -79,5 +77,4 @@ private:
     std::size_t                     m_dropped_pmc_events_count = 0;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

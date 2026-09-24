@@ -90,14 +90,20 @@ public:
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
                                                       VmAccessKind access) const override {
-    const bool accessible = access == VmAccessKind::Execute
-                                ? address_space_->is_fetchable(address, vmid_)
-                            : access == VmAccessKind::Write || access == VmAccessKind::Atomic
-                                ? address_space_->has_writable_host_backing(address, vmid_, size)
-                                : address_space_->has_host_backing(address, vmid_, size);
+    const auto translated = translate(address, size, access);
+    if (!translated)
+      return translated;
+    // GpuVmAccess walks translation spans. Probe only this span so a large
+    // range does not repeatedly rescan every remaining host page.
+    const auto span_size = std::min<uint64_t>(size, translated.translation.contiguous_bytes);
+    const bool accessible =
+        access == VmAccessKind::Execute ? address_space_->is_fetchable(address, vmid_)
+        : access == VmAccessKind::Write || access == VmAccessKind::Atomic
+            ? address_space_->has_writable_host_backing(address, vmid_, span_size)
+            : address_space_->has_host_backing(address, vmid_, span_size);
     if (!accessible)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    return translate(address, size, access);
+    return translated;
   }
 
   [[nodiscard]] VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
@@ -131,6 +137,19 @@ public:
         address,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
         vmid_));
+  }
+
+  [[nodiscard]] bool try_read_contiguous(VmMemoryDomain domain, uint64_t address,
+                                         std::span<std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, bytes.data(), bytes.size(), vmid_, false);
+  }
+
+  [[nodiscard]] bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
+                                          std::span<const std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, const_cast<std::byte *>(bytes.data()),
+                                               bytes.size(), vmid_, true);
   }
 
   [[nodiscard]] AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address,
@@ -271,8 +290,9 @@ LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
 }
 
 AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
-    uint32_t vmid, LegacyPageTable *page_table, std::shared_mutex *page_table_mutex,
-    const uint64_t *page_table_generation, std::shared_ptr<std::shared_mutex> request_mutex,
+    uint32_t vmid, LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
+    const uint64_t *page_table_generation,
+    std::shared_ptr<util::DistributedSharedMutex> request_mutex,
     std::shared_ptr<void> frontend_lifetime) {
   return register_address_space(vmid,
                                 {.page_table = page_table,

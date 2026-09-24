@@ -198,7 +198,7 @@ rj_client_pid_t peer_pid_for_socket(int fd) {
 
 void close_client(rj_daemon_t *daemon, int client_fd) {
   std::lock_guard lock(daemon->clients_mutex);
-  auto position = std::find(daemon->client_fds.begin(), daemon->client_fds.end(), client_fd);
+  auto position = std::ranges::find(daemon->client_fds, client_fd);
   if (position != daemon->client_fds.end())
     daemon->client_fds.erase(position);
   ::close(client_fd);
