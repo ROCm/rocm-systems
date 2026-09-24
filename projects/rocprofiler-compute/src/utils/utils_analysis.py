@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -19,6 +20,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.ml_api_trace_errors import (
+    KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
     MarkerNotNestedError,
     MissingSourceLocationError,
@@ -421,15 +423,34 @@ def _record_operator_args(
 def _sequence_from_cell(value: object) -> list[object]:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return []
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (str, bytes)):
+        return [value]
+    if isinstance(value, np.ndarray):
+        converted = value.tolist()
+        return converted if isinstance(converted, list) else [converted]
+    if isinstance(value, Sequence):
         return list(value)
     return [value]
 
 
-def _kernel_stats_from_marker_row(row: object) -> dict[str, KernelStats]:
+def _kernel_stats_from_marker_row(
+    row: object,
+    errors: Optional[list[MlApiTraceError]] = None,
+) -> dict[str, KernelStats]:
     kernel_names = _sequence_from_cell(getattr(row, "Kernel_Names", []))
     kernel_starts = _sequence_from_cell(getattr(row, "Kernel_Start_Timestamps", []))
     kernel_ends = _sequence_from_cell(getattr(row, "Kernel_End_Timestamps", []))
+    if not (len(kernel_names) == len(kernel_starts) == len(kernel_ends)):
+        _record_ml_api_trace_error(
+            errors,
+            KernelSequenceLengthMismatchError(
+                operator_name=str(getattr(row, "Operator_Name", "")),
+                name_count=len(kernel_names),
+                start_count=len(kernel_starts),
+                end_count=len(kernel_ends),
+            ),
+        )
+        return {}
     kernels: dict[str, KernelStats] = {}
     for kernel_name, kernel_start, kernel_end in zip(
         kernel_names, kernel_starts, kernel_ends
@@ -453,7 +474,10 @@ def _kernel_stats_from_marker_row(row: object) -> dict[str, KernelStats]:
     return kernels
 
 
-def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
+def _call_tree_node_from_marker_row(
+    row: object,
+    errors: Optional[list[MlApiTraceError]] = None,
+) -> CallTreeNode:
     backend_value = getattr(row, "Backend", None)
     if backend_value is None or (
         isinstance(backend_value, float) and pd.isna(backend_value)
@@ -463,7 +487,7 @@ def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
         backend = str(backend_value)
     node = CallTreeNode(
         name=str(row.Operator_Name),
-        kernels=_kernel_stats_from_marker_row(row),
+        kernels=_kernel_stats_from_marker_row(row, errors),
         file_name=_optional_marker_file_name(getattr(row, "File_Name", "")),
         line_number=_optional_marker_line_number(getattr(row, "Line_Number", "")),
         backend=backend,
@@ -531,7 +555,7 @@ def nest_marker_intervals(
                     ),
                 )
                 continue
-            node = _call_tree_node_from_marker_row(row)
+            node = _call_tree_node_from_marker_row(row, errors)
             if open_ranges:
                 open_ranges[-1][0].children.append(node)
             else:
@@ -570,14 +594,14 @@ def _deepest_containing_node(
 
 def attach_unlocated_trees_by_launcher_thread(
     forest: dict[str, list[CallTreeNode]],
-) -> list[MlApiTraceError]:
+    errors: Optional[list[MlApiTraceError]] = None,
+) -> None:
     """Stack torch/triton trees with no source onto the autograd launcher thread.
 
-    Roots that cannot be placed stay in the forest. Placement errors are returned
-    so the caller can report them after the call tree is shown.
+    Roots that cannot be placed stay in the forest. Placement errors are recorded
+    on errors so the caller can report them after the call tree is shown.
     """
     pending: list[tuple[str, CallTreeNode]] = []
-    attach_errors: list[MlApiTraceError] = []
     for thread_id, roots in forest.items():
         for root in roots:
             if root.file_name is not None:
@@ -593,33 +617,34 @@ def attach_unlocated_trees_by_launcher_thread(
             continue
         launcher_key = str(launcher_thread_id)
         if launcher_key not in forest:
-            attach_errors.append(
+            _record_ml_api_trace_error(
+                errors,
                 LauncherThreadNotFoundError(
                     operator_name=root.name,
                     thread_id=thread_id,
                     start_timestamp=start,
                     launcher_thread_id=launcher_key,
-                )
+                ),
             )
             continue
         dest_roots = [node for node in forest[launcher_key] if node is not root]
         parent = _deepest_containing_node(dest_roots, start, end)
         if parent is None:
-            attach_errors.append(
+            _record_ml_api_trace_error(
+                errors,
                 UncorrelatedLauncherIntervalError(
                     operator_name=root.name,
                     thread_id=thread_id,
                     start_timestamp=start,
                     end_timestamp=end,
                     launcher_thread_id=launcher_key,
-                )
+                ),
             )
             continue
         parent.children.append(root)
         forest[thread_id] = [node for node in forest[thread_id] if node is not root]
     for thread_id in [tid for tid, roots in forest.items() if not roots]:
         del forest[thread_id]
-    return attach_errors
 
 
 def _prune_cpu_only_call_tree_node(node: CallTreeNode) -> bool:
@@ -1509,8 +1534,9 @@ def process_ml_api_trace_output(
     errors: list[MlApiTraceError] = []
     nonempty_unmatched = [frame for frame in unmatched_kernel_frames if not frame.empty]
     if nonempty_unmatched:
-        errors.append(
-            UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True))
+        _record_ml_api_trace_error(
+            errors,
+            UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True)),
         )
     for pair in workload.ml_api_trace_pairs:
         marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()
@@ -1524,7 +1550,7 @@ def process_ml_api_trace_output(
         )
     )
     workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df, errors)
-    errors.extend(attach_unlocated_trees_by_launcher_thread(workload.ml_api_call_trees))
+    attach_unlocated_trees_by_launcher_thread(workload.ml_api_call_trees, errors)
     _validate_all_markers_nested(
         workload.ml_api_trace_df, workload.ml_api_call_trees, errors
     )
