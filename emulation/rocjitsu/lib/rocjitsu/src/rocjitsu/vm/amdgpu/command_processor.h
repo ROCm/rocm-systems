@@ -516,7 +516,6 @@ public:
     runtime_exception_ack_timeout_ = timeout;
   }
 
-
 private:
   friend class CommandProcessorCloseTestAccess;
 

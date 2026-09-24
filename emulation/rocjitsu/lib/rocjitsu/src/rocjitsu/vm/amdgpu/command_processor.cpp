@@ -1242,9 +1242,10 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
                                               uint64_t status, bool publish_interrupt) {
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
-    auto queue = std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
-      return candidate.queue_id == queue_id && candidate.process_id == process_id;
-    });
+    auto queue =
+        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+          return candidate.queue_id == queue_id && candidate.process_id == process_id;
+        });
     if (queue == aql_queues_.end() || queue->exception_status_va == 0)
       return false;
     queue->exception_suspended = true;
@@ -1291,20 +1292,22 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
     interrupt_sink = queue->interrupt_sink;
   }
 
-  const AtomicLoadResult previous = read_gpu_u64(address_space, exception_status_va);
+  const AtomicLoadResult previous =
+      gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
   if (previous.outcome != VmAccessOutcome::Complete)
     return false;
   const uint64_t combined_status = previous.value | status;
-  if (write_gpu_block(address_space, exception_status_va, &combined_status,
-                      sizeof(combined_status)) != VmAccessOutcome::Complete)
+  if (gpu_vm_->atomic_store(address_space, exception_status_va, sizeof(combined_status),
+                            combined_status) != VmAccessOutcome::Complete)
     return false;
   interrupt_sink.deliver(process_id, exception_event_id);
   const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
-  AtomicLoadResult exception_status = read_gpu_u64(address_space, exception_status_va);
+  AtomicLoadResult exception_status =
+      gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
   while (exception_status.outcome == VmAccessOutcome::Complete &&
          exception_status.value == combined_status && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
-    exception_status = read_gpu_u64(address_space, exception_status_va);
+    exception_status = gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
   }
   return exception_status.outcome == VmAccessOutcome::Complete &&
          exception_status.value != combined_status;
@@ -4665,8 +4668,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
       progress = false;
 
       for (AqlQueueRecord &queue : aql_queues_) {
-        if (queue.faulted || queue.suspended() ||
-            queue.publication_retry_pending)
+        if (queue.faulted || queue.suspended() || queue.publication_retry_pending)
           continue;
 
         while (queue.next_dispatch_idx < queue.entries.size()) {
@@ -4795,8 +4797,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     process_refetched_entries = false;
 
     for (AqlQueueRecord &queue : aql_queues_) {
-      if (queue.faulted || queue.suspended() ||
-          queue.publication_retry_pending)
+      if (queue.faulted || queue.suspended() || queue.publication_retry_pending)
         continue;
       while (queue.next_dispatch_idx < queue.entries.size()) {
         DispatchEntry &entry = queue.entries[queue.next_dispatch_idx];

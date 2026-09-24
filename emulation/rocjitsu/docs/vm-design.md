@@ -356,10 +356,13 @@ replicas in XCD order while a later owner is still registered.
 A trap exception has one owner for its complete mask. The send site records
 whether the debugger or ROCr owns it; trap completion preserves that decision.
 Runtime delivery freezes all replicas of the logical queue before publishing
-one shared exception status and interrupt. An unchanged status at the runtime
-acknowledgment deadline is a failed delivery, so the exception remains available
-to a later debugger. A debugger can recover a retained
-fatal stop through a valid CWSR suspend/resume. Successful recovery clears the
+one shared exception status and interrupt. Status publication and acknowledgment
+polling use checked atomic memory accesses. An inaccessible status or an unchanged
+status at the runtime acknowledgment deadline is a failed delivery, so the
+exception remains available to a later debugger. When a debugger was attached at
+the send site, its retained queue status also survives a successful ROCr
+acknowledgment and becomes queryable when a matching exception bit is enabled.
+A debugger can recover a retained fatal stop through a valid CWSR suspend/resume. Successful recovery clears the
 exception gate on every replica, preserves independent runtime and debugger
 suspension reasons, and schedules deferred queue work when all gates open.
 

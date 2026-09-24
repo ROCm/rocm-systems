@@ -3846,8 +3846,13 @@ uint64_t SimulatedKfd::debugger_queue_exception_mask(const std::shared_ptr<KfdPr
     if (queue == proc->queue_snapshot_map_.end())
       return 0;
     queue->second.exception_status |= exception_mask;
-    if (reserve_runtime_if_unclaimed && !debugger_owns)
+    if (reserve_runtime_if_unclaimed && !debugger_owns) {
+      // KFD records the event for an attached debugger before selecting its
+      // delivery owner. A ROCr acknowledgment releases only the runtime claim.
+      if (session != debug_sessions_.end() && session->second.enabled)
+        queue->second.debug_notification_retained_status |= exception_mask;
       queue->second.begin_runtime_exception(exception_mask);
+    }
   }
   // KFD makes one ownership decision for the complete event: any subscribed
   // bit assigns the full decoded mask to the debugger. Splitting a combined

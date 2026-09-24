@@ -1321,7 +1321,16 @@ inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
 }
 inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
                                                                    uint32_t process_id) const {
-  return raw_cu().memory()->fetch32(address, process_id);
+  if (process_id == 0)
+    return raw_cu().memory()->fetch32(address);
+  if (!raw_cu().gpu_vm())
+    return 0;
+  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
+  uint32_t word = 0;
+  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
+             ? word
+             : 0;
 }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
