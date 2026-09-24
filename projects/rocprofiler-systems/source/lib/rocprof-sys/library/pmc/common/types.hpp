@@ -7,9 +7,7 @@
 #include <set>
 #include <string>
 
-namespace rocprofsys
-{
-namespace pmc
+namespace rocprofsys::pmc
 {
 
 /**
@@ -66,5 +64,4 @@ struct nic_device_filter
     std::set<std::string> names;  ///< Device names when mode is SPECIFIC
 };
 
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc
