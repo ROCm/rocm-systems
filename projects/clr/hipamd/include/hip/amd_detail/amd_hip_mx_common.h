@@ -23,6 +23,19 @@
 // the gfx1250 OCP builtins are supported.
 #define HIP_ENABLE_GFX1250_BLOCK16_BUILTINS 0
 #endif
+#if defined(__gfx1250__)
+#define HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS 1
+#else
+// The pk8 scaled unpack converts (fp4, fp8, bf8) are tracked separately from the
+// pk16 ones (fp6, bf6). LLVM currently requires block16-cvt-scale-insts for both,
+// and gfx1250-strict lacks that feature, so they are unavailable there today.
+// LCOMPILER-2841 reports that the pk8 opcodes do exist on MI450-A0 and that only
+// their block16 OP_SEL values are B0-only, which would make this gate unnecessary.
+// Keeping it as its own predicate means that decision can be reverted by editing
+// this one macro rather than the call sites, and without disturbing the pk16
+// gating, which is correct either way.
+#define HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS 0
+#endif
 #if !defined(__gfx950__) && !defined(__gfx1250__) && !defined(__gfx1250_strict__)
 #define HIP_ENABLE_HOST_OCP_CONVERSIONS 1
 #else
