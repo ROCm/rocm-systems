@@ -174,16 +174,6 @@ static void postTuneP2pMarkPreconnectChannels(struct ncclComm* comm, int peer, b
   }
 }
 
-static bool postTuneP2pExecutionPolicy(struct ncclComm* comm, const struct ncclRawTaskSendRecv* raw,
-                                       struct rcclCollectiveExecutionPolicy* policy) {
-  struct ncclTaskP2p task{};
-  task.collAPI = raw->collAPI;
-  task.bytes = raw->bytes;
-  task.inPlace = raw->inPlace;
-  return rcclExecutionPolicyForP2pTask(
-    comm, &task, ncclParamP2pDisable(), policy);
-}
-
 static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const struct ncclRawTaskSendRecv* raw,
                                                 bool* needDefaultPreconnect, bool* needSecondaryPreconnect,
                                                 bool* needShmPreconnect) {
@@ -196,8 +186,12 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const str
   if (comm->rank == peer) return ncclSuccess;
 
   bool firstPeerUse = !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen);
-  struct rcclCollectiveExecutionPolicy policy;
-  bool hasPolicy = postTuneP2pExecutionPolicy(comm, raw, &policy);
+  struct ncclTaskP2p task{};
+  task.collAPI = raw->collAPI;
+  task.bytes = raw->bytes;
+  task.inPlace = raw->inPlace;
+  struct rcclP2pPolicyPreconnect policyPreconnect;
+  bool hasPolicy = rcclPolicyP2pPreconnect(comm, &task, &policyPreconnect);
   if (!firstPeerUse && !hasPolicy) return ncclSuccess;
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
@@ -214,36 +208,13 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const str
     }
   }
 
-  bool policyUsesShm =
-    hasPolicy &&
-    policy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
-  bool useAlternateShm =
-    policyUsesShm &&
-    rcclPolicyP2pConnectorIndex(
-      comm, base, peer, isSendNotRecv,
-      policy.transport) == RCCL_CONN_IDX_P2P_SHM;
-  if (hasPolicy && (policy.nChannels > 0 ||
-                    policy.transferMode != RCCL_P2P_TRANSFER_AUTO ||
-                    policyUsesShm)) {
-    int policyChannels =
-      policy.nChannels > 0 ? std::min(comm->p2pnChannels, policy.nChannels) : comm->p2pnChannels;
-    int policyChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, policyChannels);
-    if (useAlternateShm) {
-      postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
-                                        policyChannelsPerPeer, RCCL_CONN_IDX_P2P_SHM,
-                                        needShmPreconnect);
-    } else {
-      postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
-                                        policyChannelsPerPeer, /*default P2P connIndex=*/1,
-                                        needDefaultPreconnect);
-      if (!policyUsesShm &&
-          policy.transferMode != RCCL_P2P_TRANSFER_AUTO &&
-          !comm->p2pNet) {
-        postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
-                                          policyChannelsPerPeer, RCCL_CONN_IDX_P2P_ALT,
-                                          needSecondaryPreconnect);
-      }
-    }
+  for (int i = 0; i < policyPreconnect.nConnIndices; i++) {
+    int connIndex = policyPreconnect.connIndices[i];
+    bool* needPreconnect = connIndex == RCCL_CONN_IDX_P2P_SHM ? needShmPreconnect
+                           : connIndex == 1                   ? needDefaultPreconnect
+                                                              : needSecondaryPreconnect;
+    postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyPreconnect.nChannels,
+                                      policyPreconnect.nChannelsPerPeer, connIndex, needPreconnect);
   }
   return ncclSuccess;
 }
@@ -284,11 +255,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   bool network;
   bool proxySameProcess;
 
-  struct rcclCollectiveExecutionPolicy policy;
-  if (rcclExecutionPolicyForP2pTask(
-        comm, task, ncclParamP2pDisable(), &policy) &&
-      policy.transport == RCCL_EXECUTION_TRANSPORT_SHM)
-    return ncclSuccess;
+  if (!rcclPolicyP2pTaskAllowsRegistration(comm, task)) return ncclSuccess;
   if (protocol != NCCL_PROTO_SIMPLE) return ncclSuccess;
   if (!task->allowUB || task->bytes == 0 || task->buff == nullptr || peer == comm->rank) return ncclSuccess;
 

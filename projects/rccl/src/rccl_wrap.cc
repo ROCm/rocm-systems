@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
+#include "policy_adapter.h"
 #include <algorithm>
 #include <cstdint>
 #include "debug.h"
@@ -1872,10 +1873,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   const size_t aggregateBytes =
     rankOffset > SIZE_MAX / comm->nRanks ? SIZE_MAX : rankOffset * static_cast<size_t>(comm->nRanks);
   const bool inPlace = rcclBuffersOverlap(sendbuff, aggregateBytes, recvbuff, aggregateBytes);
-  struct rcclCollectiveExecutionPolicy executionPolicy;
-  if (rcclGetCollectiveExecutionPolicy(comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, aggregateBytes,
-                                       ncclParamP2pDisable(), inPlace, &executionPolicy) &&
-      executionPolicy.path == RCCL_P2P_PATH_SENDRECV) {
+  if (rcclPolicyAllToAllUsesSendRecvPath(comm, aggregateBytes, inPlace)) {
     decision->algo = RCCL_DIRECT_ALLTOALL;
     decision->nMaxChannels = comm->p2pnChannels;
     return ncclSuccess;

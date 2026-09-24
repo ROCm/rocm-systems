@@ -54,10 +54,9 @@ bool g_runtimeTransportToggleEligible = false;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
 __attribute__((weak)) int64_t ncclParamP2pDisable() { return g_tuningParamP2pDisable; }
-// Policy seams rccl_wrap.cc reaches in targets without the policy sources.
-__attribute__((weak)) bool rcclGetCollectiveExecutionPolicy(const struct ncclComm*, enum rcclExecutionScope,
-                                                            ncclFunc_t, size_t, bool, bool,
-                                                            struct rcclCollectiveExecutionPolicy*) {
+// Policy seams group.cc and rccl_wrap.cc reach in targets without the policy sources.
+__attribute__((weak)) bool rcclPolicyCanonicalShmEligible(const struct ncclComm*) { return false; }
+__attribute__((weak)) bool rcclPolicyAllToAllUsesSendRecvPath(const struct ncclComm*, size_t, bool) {
   return false;
 }
 __attribute__((weak)) bool rcclBuffersOverlap(const void*, size_t, const void*, size_t) { return false; }
