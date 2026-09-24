@@ -291,13 +291,6 @@ static ncclResult_t ginAnvilCloseListen(void* listenComm) {
 static ncclResult_t ginAnvilCloseColl(void* collComm) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   if (cctx) {
-    // Erase here, not in finalize: ncclGinHostFinalize closeColls then memsets
-    // ginState before ncclGinFinalize, so plugin finalize never runs for a live
-    // GIN backend and a recycled ncclComm* would otherwise skip the gate.
-    if (cctx->comm) {
-      std::lock_guard<std::mutex> lock(pluginMutex);
-      ginAnvilConnCheckedComms.erase(cctx->comm);
-    }
     if (cctx->sdma) gin_anvil_sdma_destroy(cctx->sdma);
     delete cctx;
   }
@@ -305,7 +298,12 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
-  delete (ginAnvilInitCtx*)ctx;
+  ginAnvilInitCtx* ictx = (ginAnvilInitCtx*)ctx;
+  if (ictx && ictx->comm) {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    ginAnvilConnCheckedComms.erase(ictx->comm);
+  }
+  delete ictx;
   return ncclSuccess;
 }
 
