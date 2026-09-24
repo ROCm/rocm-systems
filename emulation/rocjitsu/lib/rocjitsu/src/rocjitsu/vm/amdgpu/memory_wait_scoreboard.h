@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu {
@@ -103,8 +104,8 @@ public:
   void before(const Instruction &inst, rj_code_arch_t arch);
   /// X has one translation group at a time, independent of completion queues.
   void xcnt_group(bool scalar);
-  /// Record the completion position proving this instruction's translation.
-  uint64_t issue_xcnt(WaitCounterKind completion, bool scalar);
+  /// Map translation to this instruction's completion position, if it received one.
+  uint64_t issue_xcnt(std::optional<WaitCounterKind> completion, bool scalar);
   /// A VMEM destination orders translation of older overlapping VMEM sources.
   void xcnt_ordered_write(RegisterRef reg, uint64_t lanes, uint8_t bytes);
   /// Count every operation, including stores without a register destination.

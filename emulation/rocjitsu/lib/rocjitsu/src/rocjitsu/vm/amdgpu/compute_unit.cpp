@@ -1087,15 +1087,18 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, ordered_counter);
     scoreboard.access(d.reg, shared_lanes, d.bytes, true);
   }
+  // FLAT's actual route determines which completion proves translation. Only
+  // map X to a position issued below for this instruction: zero-EXEC operations
+  // may be skipped by an empty completion queue while older X entries remain.
+  const auto xcnt_completion_counter = inst.data() && inst.data()->tag() == LOCAL_MEM
+                                           ? WaitCounterKind::Ds
+                                           : classified.value().front().counter;
+  std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified.value()) {
     const auto counter = event.counter;
     if (counter == WaitCounterKind::X) {
       if (track_xcnt && (xscalar || vector_lanes || scoreboard.outstanding(counter))) {
-        // FLAT's actual route determines which completion proves translation.
-        const auto completion = inst.data() && inst.data()->tag() == LOCAL_MEM
-                                    ? WaitCounterKind::Ds
-                                    : classified.value().front().counter;
-        const auto sequence = scoreboard.issue_xcnt(completion, xscalar);
+        const auto sequence = scoreboard.issue_xcnt(xcnt_completion, xscalar);
         const RegisterAccess registers(wf);
         auto add_source = [&](RegisterRef reg) {
           scoreboard.add({sequence, wf.pc, reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0},
@@ -1134,6 +1137,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     if (event.kind == WaitEventKind::Smem && inst.data() && inst.data()->tag() == SCALAR_MEM)
       units = inst.data_as<ScalarMemState>()->num_dwords > 1 ? 2 : 1;
     const auto sequence = scoreboard.issue(event, config_.arch, units);
+    if (counter == xcnt_completion_counter)
+      xcnt_completion = counter;
     if (event.special_reg && inst.memory_wait_result_written()) {
       scoreboard.access(*event.special_reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask,
                         true);

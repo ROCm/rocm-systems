@@ -97,8 +97,8 @@ uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &ev
       event.kind != WaitEventKind::Gds && event.kind != WaitEventKind::Export &&
       event.kind != WaitEventKind::SqMessage && event.kind != WaitEventKind::SccWrite &&
       event.kind != WaitEventKind::GlobalInv && event.kind != WaitEventKind::Unknown;
-  return issue(event.counter, event.kind == WaitEventKind::Smem || legacy_flat, kind, units,
-               ordered);
+  return issue(event.counter, !ordered || event.kind == WaitEventKind::Smem || legacy_flat, kind,
+               units, ordered);
 }
 
 bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
@@ -250,13 +250,13 @@ void MemoryWaitScoreboard::xcnt_group(bool scalar) {
   xcnt_scalar_ = scalar;
 }
 
-uint64_t MemoryWaitScoreboard::issue_xcnt(WaitCounterKind completion, bool scalar) {
+uint64_t MemoryWaitScoreboard::issue_xcnt(std::optional<WaitCounterKind> completion, bool scalar) {
   const auto sequence = issue(WaitCounterKind::X, scalar);
-  if (!scalar) {
-    const auto i = static_cast<size_t>(completion);
+  if (!scalar && completion) {
+    const auto i = static_cast<size_t>(*completion);
     const auto order = last_order_[i];
-    translations_.push_back(
-        {sequence, issued_[i], completion, order, order == kUnordered ? 0 : orders_[order].issued});
+    translations_.push_back({sequence, issued_[i], *completion, order,
+                             order == kUnordered ? 0 : orders_[order].issued});
   }
   return sequence;
 }

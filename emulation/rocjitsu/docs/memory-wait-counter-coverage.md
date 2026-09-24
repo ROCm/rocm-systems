@@ -43,7 +43,8 @@ leaves at most `C-1` old operations before admission. Younger operations from a
 different completion class cannot prove readiness. Capacities come from the
 target's counter fields (for example, 15 for legacy CDNA LGKM and 63 for VMEM).
 SMEM, GDS, exports, messages and legacy CDNA FLAT do not acquire a FIFO guarantee
-from sharing a counter. CDNA5 async load and store completion classes are separate;
+from sharing a counter; their results require a zero wait, even after a nonzero
+partial wait. CDNA5 async load and store completion classes are separate;
 async barrier arrive orders with async loads. Proven completion also releases the
 associated replay translation prefix.
 
@@ -71,6 +72,10 @@ associated replay translation prefix.
 Zero-EXEC vector producers still contribute positions behind pending requests; an empty
 queue may skip them. Scalar producers do not depend on EXEC. Prefetches that do not
 increment completion counters contribute no entries.
+If a zero-EXEC instruction occupies an X position but no completion position, it
+has no completion-to-X mapping. Waiting on that empty completion counter cannot
+release older replay sources. The X entry remains until an X wait or another
+proven translation drain reaches it.
 
 The checker handles explicit, combined load/store-plus-DS and idle waits, plus
 RDNA3/3.5/4 interpolation's embedded EXP wait. No-wait sentinel fields leave the queue

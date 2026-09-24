@@ -16,6 +16,7 @@
 #include <iterator>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 namespace {
 using namespace rocjitsu;
@@ -112,6 +113,37 @@ TEST_F(MemoryWaitScoreboardTest, CounterOnlyOperationsContributeToPartialWaits) 
   state.wait(WaitCounterKind::Load, 1);
   read(5);
   EXPECT_TRUE(hazards.empty());
+}
+
+TEST_F(MemoryWaitScoreboardTest, UnorderedProducerResultsRequireZeroWait) {
+  using namespace waitcheck_detail;
+  // Synthetic destinations isolate retirement policy for each unordered class.
+  for (const auto &[counter, kind] : {std::pair{WaitCounterKind::Ds, WaitEventKind::Gds},
+                                      {WaitCounterKind::Km, WaitEventKind::SqMessage},
+                                      {WaitCounterKind::Km, WaitEventKind::SccWrite},
+                                      {WaitCounterKind::Exp, WaitEventKind::Export},
+                                      {WaitCounterKind::Load, WaitEventKind::GlobalInv},
+                                      {WaitCounterKind::Ds, WaitEventKind::Unknown}}) {
+    SCOPED_TRACE(static_cast<unsigned>(kind));
+    state.clear();
+    hazards.clear();
+    const ClassifiedEvent event{counter, kind};
+    for (uint16_t reg : {5, 6})
+      state.add({state.issue(event, ROCJITSU_CODE_ARCH_CDNA4),
+                 0x100,
+                 1,
+                 {RegClass::VGPR, reg, 1},
+                 counter,
+                 0xf});
+    state.wait(counter, 1);
+    read(5);
+    ASSERT_EQ(hazards.size(), 1u);
+    EXPECT_EQ(hazards.front().required_wait, 0u);
+    EXPECT_TRUE(shadow.test(6));
+    state.wait(counter, 0);
+    read(6);
+    EXPECT_EQ(hazards.size(), 1u);
+  }
 }
 
 TEST_F(MemoryWaitScoreboardTest, AdmissionAtCapacityReleasesOnlyTheOldestOrderedResult) {
@@ -736,7 +768,7 @@ TEST(MemoryWaitExecutionTest, CounterAdmissionPrecedesTheIncomingInstructionsReg
   }
 }
 
-TEST(MemoryWaitExecutionTest, ReturnMessagesHaveSeparateSendAndReturnCompletions) {
+TEST(MemoryWaitExecutionTest, ReturnMessageResultsRequireZeroWait) {
   for (unsigned threshold : {0u, 1u, 2u, 3u}) {
     SCOPED_TRACE(threshold);
     std::vector<uint32_t> code;
@@ -753,7 +785,9 @@ TEST(MemoryWaitExecutionTest, ReturnMessagesHaveSeparateSendAndReturnCompletions
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
     step_until_halted(*sim.engine, *sim.cu());
-    EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold == 3 ? 1u : 0u);
+    // Each message has send and return units, but neither a younger send nor a
+    // younger return proves that the first message's result has completed.
+    EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
   }
 }
 
@@ -808,10 +842,10 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationCountsWithZeroExecBehindPendingLoad) {
+TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
   using namespace rocr::llvm::amdhsa;
   for (bool zero_exec : {false, true}) {
-    for (unsigned threshold : {1u, 2u}) {
+    for (unsigned threshold : {0u, 1u, 2u}) {
       SCOPED_TRACE(zero_exec);
       SCOPED_TRACE(threshold);
       std::vector<uint32_t> code;
@@ -840,7 +874,9 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationCountsWithZeroExecBehindP
       step_until_halted(*sim.engine, *sim.cu());
       ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
       EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
-      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold == 2 ? 1u : 0u);
+      // Invalidation contributes to LOADcnt even with zero EXEC, but does not
+      // share the load's completion order. Only a zero wait proves it ready.
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
     }
   }
 }
@@ -1562,6 +1598,39 @@ TEST_F(MemoryWaitScoreboardTest, ReplayCompletionWaitsMapMixedCountersToTranslat
   EXPECT_EQ(state.outstanding(WaitCounterKind::X), 0u);
 }
 
+TEST_F(MemoryWaitScoreboardTest, UnmappedReplayEntriesRetainTheirPlaceInTheTranslationQueue) {
+  for (bool wait_for_completion : {false, true}) {
+    state.clear();
+    state.issue(WaitCounterKind::Load);
+    state.add({state.issue_xcnt(WaitCounterKind::Load, false),
+               0x100,
+               1,
+               {RegClass::VGPR, 5, 1},
+               WaitCounterKind::X,
+               0xf});
+    state.add({state.issue_xcnt(std::nullopt, false),
+               0x104,
+               1,
+               {RegClass::EXEC, 0, 1},
+               WaitCounterKind::X,
+               0xf});
+    state.wait(WaitCounterKind::Store, 0);
+    EXPECT_TRUE(shadow.test(5, true));
+    EXPECT_TRUE(shadow.pending({RegClass::EXEC, 0, 1}, true));
+    state.wait(wait_for_completion ? WaitCounterKind::Load : WaitCounterKind::X,
+               wait_for_completion ? 0 : 1);
+    EXPECT_FALSE(shadow.test(5, true));
+    EXPECT_TRUE(shadow.pending({RegClass::EXEC, 0, 1}, true));
+    EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+    // A later mapped instruction's completion proves the remaining X prefix.
+    state.issue(WaitCounterKind::Store);
+    state.issue_xcnt(WaitCounterKind::Store, false);
+    state.wait(WaitCounterKind::Store, 0);
+    EXPECT_FALSE(shadow.pending({RegClass::EXEC, 0, 1}, true));
+    EXPECT_EQ(state.outstanding(WaitCounterKind::X), 0u);
+  }
+}
+
 TEST_F(MemoryWaitScoreboardTest, ArchitecturalDrainsRetireReplayButNotResults) {
   std::vector<std::vector<uint32_t>> encodings;
   auto add = [&](auto words) { encodings.emplace_back(words.begin(), words.end()); };
@@ -1815,6 +1884,37 @@ TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 129, .sdst = 126}));
   EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{0, 0}));
+}
+
+TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySources) {
+  for (bool previous_store : {false, true})
+    for (unsigned wait = 0; wait < 3; ++wait) {
+      SCOPED_TRACE(previous_store);
+      SCOPED_TRACE(wait);
+      std::vector<uint32_t> code;
+      enable_multi_group_replay(code);
+      append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
+      if (previous_store) {
+        append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
+                                                      {.saddr = 0, .vsrc = 0, .vaddr = 0}));
+        append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));
+      }
+      append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                                    {.saddr = 0, .vdst = 2, .vaddr = 0}));
+      // This first overwrite diagnoses EXEC, leaving the address sources pending.
+      append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 126}));
+      append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
+                                                    {.saddr = 0, .vsrc = 0, .vaddr = 0}));
+      append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));
+      if (wait)
+        append_instruction(
+            code, cdna5::build_sopp(wait == 1 ? cdna5::kSWaitXcntSopp : cdna5::kSWaitLoadcntSopp,
+                                    {.simm16 = 0}));
+      // Scalar sources can be overwritten even with EXEC zero. Only a real load
+      // completion or an X wait proves that this older address is safe to change.
+      append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
+      EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{wait ? 1u : 2u, 0}));
+    }
 }
 
 } // namespace
