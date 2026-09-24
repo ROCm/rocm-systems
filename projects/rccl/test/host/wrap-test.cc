@@ -4480,6 +4480,73 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
       });
 }
 
+// Hierarchical CE (branch #3.5) needs none of the hierarchical AllGather
+// sub-communicators, which are only built on 8+ nodes. A 2-node comm has none,
+// and both the report and the live decision must still name CE without touching
+// them. The control proves the decision came from the hierarchical CE branch.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierCeWithoutHierarchicalSubComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierCeWithoutHierarchicalSubComms",
+      []() {
+        g_hierCeAvailable = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        ASSERT_EQ(nullptr, comm->hierarchicalInterComm);
+        ASSERT_EQ(nullptr, comm->hierarchicalIntraComm);
+        for (bool query : {true, false}) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                     /*stream=*/nullptr, query, /*graphCapturingHint=*/false,
+                                                     &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo) << "query=" << query;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol) << "query=" << query;
+          EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
+        }
+
+        g_hierCeAvailable = false;
+        rcclCollDecision control{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &control));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, control.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AlltoAll twin of the test above, for rcclSelectAlltoAll branch (5).
+TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_HierCeWithoutHierarchicalSubComms",
+      []() {
+        g_hierCeAvailable = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        ASSERT_EQ(nullptr, comm->hierarchicalInterComm);
+        ASSERT_EQ(nullptr, comm->hierarchicalIntraComm);
+        for (bool query : {true, false}) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                    /*stream=*/nullptr, query, /*graphCapturingHint=*/false,
+                                                    &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo) << "query=" << query;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol) << "query=" << query;
+          EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
+        }
+
+        g_hierCeAvailable = false;
+        rcclCollDecision control{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &control));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, control.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Complementary proof for AllGather's own CE-registered check (a separate
 // hasSysmemSegment computation from rcclSelectAllReduce's).
 TEST(WrapMicrotestIsolated, SelectAllGather_SysmemSegmentBlocksCeRegistered) {

@@ -1676,17 +1676,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       // Branch #3.5: Hierarchical CE (multi-node, both buffers registered).
       // ceCollTaskAppend routes to ncclHierCeAllGather via ncclHierCeDispatch(comm),
       // so RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
+      // It uses none of the hierarchical AllGather sub-communicators, which need not
+      // exist on this comm, so it is reported like the other CE branches.
       const bool hierCeAvailable =
         !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
       if (hierCeAvailable && !hasSysmemSegment &&
           (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
         decision->algo = RCCL_CE_REGISTERED;
-        if (query) {
-          int a, p, ch;
-          NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
-          decision->protocol = p;
-          decision->nMaxChannels = ch;
-        }
         return ncclSuccess;
       }
     }
@@ -2006,16 +2002,11 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
          (int)ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin));
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
-    // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.
+    // Require CTA_POLICY_ZERO and no sysmem segment, and report it like the other
+    // CE branches, matching the AllGather twin.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
-      if (query) {
-        int a, p, ch;
-        NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAlltoAll, count, datatype, &a, &p, &ch));
-        decision->protocol = p;
-        decision->nMaxChannels = ch;
-      }
       return ncclSuccess;
     }
 
