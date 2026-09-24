@@ -57,6 +57,22 @@ function(rccl_apply_rocshmem_gin_optout _tgt)
   endif()
 endfunction()
 
+# Mark the hipified "oracle" translation units (real argcheck/archinfo/utils, pulled
+# in unhipified-source form) as GENERATED. They are produced by the hipify step
+# (add_dependencies wires the ordering), so they do not exist at configure time --
+# without this a fresh configure errors on the missing sources. Pass the mode's
+# hipify base directory (${PROJECT_BINARY_DIR}/hipify in-build, ${RCCL_HIPIFY_DIR}
+# standalone) and the oracle basenames under src/misc. Source-file properties are
+# DIRECTORY-scoped, but we call this at each target so every block stands alone and
+# does not rely on target ordering within this file.
+function(rccl_mark_oracle_tus_generated _hipify_dir)
+  set(_tus "")
+  foreach(_basename ${ARGN})
+    list(APPEND _tus "${_hipify_dir}/src/misc/${_basename}.cc")
+  endforeach()
+  set_source_files_properties(${_tus} PROPERTIES GENERATED TRUE)
+endfunction()
+
 # Register a micro target with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures
 # do: via RCCL's shared category mechanism (no bare add_test, matching the rest of
 # test/CMakeLists.txt). apply_test_category_labels is defined by
@@ -171,9 +187,7 @@ if(BUILD_TESTS)
   add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
   target_sources(rccl-UnitTestsMicro PRIVATE
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
-  set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
-    PROPERTIES GENERATED TRUE)
+  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify archinfo)
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -294,11 +308,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
     ../common/main_altrsmi.cpp
   )
-  set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
-    PROPERTIES GENERATED TRUE)
+  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
   add_executable(rccl-UnitTestsMicroWarpSpeed ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
   target_include_directories(rccl-UnitTestsMicroWarpSpeed PRIVATE
@@ -382,14 +392,7 @@ if(BUILD_TESTS)
     ../common/main_altrsmi.cpp
     ../common/ProcessIsolatedTestRunner.cpp
   )
-  # The oracle TUs are produced by the hipify step (add_dependencies below), so
-  # they don't exist at configure time -- mark GENERATED so a fresh configure
-  # doesn't error on missing sources.
-  set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
-    PROPERTIES GENERATED TRUE)
+  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
   # Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
   # HIP_UNCACHED_MEMORY and, separately, ENABLE_FAULT_INJECTION at the
@@ -520,15 +523,7 @@ if(BUILD_TESTS)
     ../common/main_altrsmi.cpp
   )
 
-  # The oracle TUs are produced by the hipify step, so they do not exist at
-  # configure time. The init block above marks them GENERATED, but source-file
-  # properties are DIRECTORY-scoped -- relying on that is a hidden dependency on
-  # target ordering within this file. Set it here too so this block stands alone.
-  set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
-    PROPERTIES GENERATED TRUE)
+  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
   add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
   target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
@@ -606,11 +601,7 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
       ../common/main_altrsmi.cpp
     )
-    set_source_files_properties(
-      ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
-      ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
-      ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
-      PROPERTIES GENERATED TRUE)
+    rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
     add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
     target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
@@ -968,12 +959,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 target_sources(rccl-UnitTestsMicro PRIVATE
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
-# Produced by the hipify step, so it does not exist at configure time. Source-file
-# properties are DIRECTORY-scoped, so setting this here rather than relying on
-# another block having done so keeps this target standing alone.
-set_source_files_properties(
-  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
-  PROPERTIES GENERATED TRUE)
+rccl_mark_oracle_tus_generated(${RCCL_HIPIFY_DIR} archinfo)
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
