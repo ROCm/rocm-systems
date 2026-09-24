@@ -292,7 +292,7 @@ private:
         }
       }
 
-      std::sort(sets_.begin(), sets_.begin() + count_);
+      std::ranges::sort(sets_.begin(), sets_.begin() + count_);
       try {
         for (size_t i = 0; i < count_; ++i) {
           mutexes_[sets_[i]].lock();

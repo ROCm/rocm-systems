@@ -69,7 +69,15 @@ static int g_trCollNetDeviceCount = 0;
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before init.cc includes it
 
 // Pulled in ahead of the redirects below so those macros cannot mangle the declarations they redirect.
+#if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
+#else
+static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
+                              unsigned int* __ebx, unsigned int* __ecx,
+                              unsigned int* __edx) {
+  return 0;
+}
+#endif
 
 #include "kernel_config.h"
 #include "os.h"
@@ -7405,6 +7413,7 @@ TEST_F(InitMicrotest, CommInitRankFunc_TransportInitFails_StampsTheArchFieldsAnd
   EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
   EXPECT_EQ(rcclLL128LineElemsFromArch(Rank_kGcnArchName), s.comm()->ll128LineElems);
   EXPECT_EQ(rcclLL128DataElemsFromArch(Rank_kGcnArchName), s.comm()->ll128DataElems);
+  EXPECT_EQ(rcclLL128ShmemElemsPerThreadFromArch(Rank_kGcnArchName), s.comm()->ll128ShmemElemsPerThread);
   EXPECT_EQ(res, s.comm()->initState);
 }
 
