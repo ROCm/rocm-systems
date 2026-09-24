@@ -207,5 +207,3 @@ validation. No exact wheel identity or paired ELF build-ID gate is used.
   `--torch-trace` marker and counter CSVs on a sample workload.
 - `tests/unit/utils/test_utils_analysis.py`: verifies Function parse and
   `Thread_Id` interval nest.
-- `tests/integration/test_analyze_roctx_call_trees.py`: verifies operator
-  list/filter on copied marker/counter pairs.
