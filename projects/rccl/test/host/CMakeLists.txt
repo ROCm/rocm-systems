@@ -270,21 +270,7 @@ if(BUILD_TESTS)
   # unreached by these tests; this drops the unreferenced deep
   # deps rather than pulling in the world, matching rccl-UnitTestsMicroInit's
   # rationale for the same flags.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only -ffunction-sections)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -Wl,--gc-sections)
-
-  target_compile_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicro PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  rccl_apply_host_only_flags(rccl-UnitTestsMicro)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
