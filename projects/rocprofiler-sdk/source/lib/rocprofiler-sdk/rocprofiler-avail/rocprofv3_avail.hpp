@@ -92,4 +92,14 @@ is_counter_set(const uint64_t* counter_handles,
 void
 agent_info(uint64_t agent_handle, const char** agent_info_str) ROCPROFILER_EXPORT;
 
+// Resolves the list-avail output path, returned through filename and owned by
+// the library until the next call. Resolving creates the output directory, so
+// this is not a side-effect free query. Returns INVALID_ARGUMENT for a null
+// out-parameter or an output path that is not a directory, and ERROR if
+// resolving threw; filename is left alone unless SUCCESS is returned.
+rocprofiler_status_t
+list_avail_output_filename(const char*  output_path,
+                           const char*  output_file,
+                           const char** filename) noexcept ROCPROFILER_EXPORT;
+
 ROCPROFILER_EXTERN_C_FINI
