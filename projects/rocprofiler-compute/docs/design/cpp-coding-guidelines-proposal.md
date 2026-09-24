@@ -91,8 +91,16 @@ Dropped:
   - Allowed for process-lifetime state that a host callback API leaves us no
     place to own: rocprofiler-sdk tool callbacks, torch `RecordFunction`
     observers, module init.
-  - It must be a function-local static behind an accessor, never a namespace
-    scope object with a non-trivial constructor.
+  - It must never be a namespace scope object whose destructor runs at
+    shutdown. Two forms satisfy that, and the choice turns on whether the host
+    calls us after our static destructors would have run:
+    - No, or unsure: a function-local static behind an accessor. This is the
+      default.
+    - Yes: a never-destroyed heap object behind a namespace scope reference,
+      because a destructor at all is the bug. `rocprofiler_compute_tool.cpp`
+      needs this, since rocprofiler-sdk calls `tool_fini` from its own
+      `_dl_fini`. Only use it when you can name the teardown path that forces
+      it.
   - It must stay reachable from tests, either resettable or handed to consumers
     by reference.
   - A comment says which host API forces it.
