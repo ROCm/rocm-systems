@@ -18,9 +18,10 @@ from tabulate import tabulate
 
 import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
-from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
+from memory_chart.mem_chart import format_mem_chart_heading, strip_ansi
+from memory_chart.mem_chart import plot_mem_chart as _plot_mem_chart
+from utils import parser, schema
 from utils.logger import console_error, console_log, console_warning
-from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
@@ -833,40 +834,17 @@ def format_table_output(
         else:
             mem_data = raw_chart_values or {}
 
-        if is_gfx115x(gpu_arch):
-            content += (
-                mem_chart_gfx11.plot_mem_chart(
-                    mem_data,
-                    chart_title=format_mem_chart_heading(
-                        args.normal_unit,
-                        panel_id=int(table_config["id"]),
-                    ),
-                )
-                + "\n"
+        content += (
+            _plot_mem_chart(
+                mem_data,
+                chart_title=format_mem_chart_heading(
+                    args.normal_unit,
+                    panel_id=int(table_config["id"]),
+                ),
+                gpu_arch=gpu_arch,
             )
-        elif is_gfx1250(gpu_arch):
-            content += (
-                mem_chart_gfx1250.plot_mem_chart(
-                    mem_data,
-                    chart_title=format_mem_chart_heading(
-                        args.normal_unit,
-                        panel_id=int(table_config["id"]),
-                    ),
-                )
-                + "\n"
-            )
-        else:
-            content += (
-                mem_chart_gfx9.plot_mem_chart(
-                    mem_data,
-                    chart_title=format_mem_chart_heading(
-                        args.normal_unit,
-                        panel_id=int(table_config["id"]),
-                    ),
-                    gpu_arch=gpu_arch,
-                )
-                + "\n"
-            )
+            + "\n"
+        )
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -1168,36 +1146,19 @@ def show_all(
                 args.normal_unit,
                 panel_id=int((panel or {}).get("id", 300)),
             )
-            if is_gfx115x(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx11.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                    )
-                    + "\n"
+            membw_result = getattr(first_run, "membw_result", None)
+            chart_output = _plot_mem_chart(
+                mem_chart_data,
+                chart_title=heading,
+                gpu_arch=gpu_arch,
+                membw=membw_result,
+            )
+            panel_content += chart_output + "\n"
+            if membw_result is not None:
+                panel_content += _render_membw_guidance(
+                    membw_result,
+                    chart_width=_max_line_width(chart_output),
                 )
-            elif is_gfx1250(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx1250.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                    )
-                    + "\n"
-                )
-            else:
-                membw_result = getattr(first_run, "membw_result", None)
-                chart_output = mem_chart_gfx9.plot_mem_chart(
-                    mem_chart_data,
-                    chart_title=heading,
-                    gpu_arch=gpu_arch,
-                    membw=membw_result,
-                )
-                panel_content += chart_output + "\n"
-                if membw_result is not None:
-                    panel_content += _render_membw_guidance(
-                        membw_result,
-                        chart_width=_max_line_width(chart_output),
-                    )
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
