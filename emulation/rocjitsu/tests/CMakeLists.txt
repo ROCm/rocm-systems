@@ -3670,8 +3670,10 @@ if(RJ_ENABLE_HIP_TESTS)
                 -I${CMAKE_CURRENT_SOURCE_DIR}
                 -I${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${HIP_INCLUDE_FLAGS}
-                ${HIP_DEFINITION_FLAGS} -c -o ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
+                ${HIP_DEFINITION_FLAGS} -MMD -MF ${HIP_TEST_OBJ}.d
+                -c -o ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} ${ARG_EXTRA_DEPENDS}
+            DEPFILE ${HIP_TEST_OBJ}.d
             COMMENT
                 "Compiling ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
             VERBATIM
