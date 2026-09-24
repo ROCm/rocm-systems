@@ -29,11 +29,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  const auto delay_words =
-      supercollider_build_delay_words(arch, options, result.errors, "ConSan flat check/trap proof");
-  if (!delay_words)
-    return;
-
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
   // With no shared function containers, an allowlist proves that CFG and
@@ -359,17 +354,29 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       planned.info.dynamic_private_segment_addend =
           candidate.dynamic_stack_spill->dynamic_frame_bytes;
     }
+    const auto delay_words = supercollider_build_delay_words(
+        target, options, candidate.vcc_save_sgpr, result.errors, "ConSan flat check/trap proof");
+    if (!delay_words)
+      return;
     InstructionSequence sequence(planned.words);
     const auto restore_vcc =
         instrumentation::build_s_mov_b64(kAmdGpuVccLo, candidate.vcc_save_sgpr, arch);
-    if (!sequence.emit(
-            instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr, kAmdGpuVccLo, arch)) ||
+    const bool wave_delay = options.supercollider_delay_mode == SuperColliderDelayMode::SleepWave;
+    if ((!wave_delay && !sequence.emit(instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr,
+                                                                        kAmdGpuVccLo, arch))) ||
         !restore_vcc) {
       result.errors.emplace_back("ConSan flat check/trap proof could not preserve VCC");
       return;
     }
     (void)sequence.emit(std::span(original_access).first(access_words));
     planned.words.insert(planned.words.end(), delay_words->begin(), delay_words->end());
+    // FLAT does not change VCC. In wave-delay mode keep the scalar scratch free
+    // until the delay, then save VCC before any instrumentation comparison.
+    if (wave_delay && !sequence.emit(instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr,
+                                                                      kAmdGpuVccLo, arch))) {
+      result.errors.emplace_back("ConSan flat wave delay could not preserve VCC");
+      return;
+    }
     const bool needs_runtime_group_gate =
         target.requires_supercollider_runtime_flat_group_gate &&
         site.flat_address_space_hint == FlatAddressSpaceHint::MaybeGroup;

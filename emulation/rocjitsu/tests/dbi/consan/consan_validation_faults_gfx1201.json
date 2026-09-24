@@ -2741,6 +2741,60 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-initial-tile-publication-sc-wave-15",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine production ELF fnv1a64:0ffc359899105b1d, native-traced fp8_wmma_tiled_kernel<16,8,true,false,Correct,NoopPolicy,8,2,4,4>. Initial A/B LDS stores are VA0x4561ac,0x4561e4,0x456230,0x456268. K=128 and sampled production K=4096 both take the K>=48 multi-group path at0x456280; conditional next-tile global prefetch reconverges with EXEC restored at0x4567f8. Signal .text+0x3f2200 and wait0x3f2260 are the sole synchronization pair before peer ds_load_2addr_b64 at0x3f2270. NoopPolicy adds no bookkeeping barrier. Source pipeline branch confirms initial publication, next-tile prefetch, sync_after_load(0), shared_to_compute_regs. Current-library offline inventory confirms exact identities; pristine ELF, selected disassembly and inventory retained in rdna4-20260923/matmul-debug. Both modes prospectively require at least one detection in eight trials; numerical manifestations recorded independently. Prospective sleep-delay calibration: eight trials at delay=4, requiring 6/8 detections and a clean comparator with identical delay and same-value-write controls. Wave-dependent replay delay, maximum 15: unchanged fault and 6/8 bar with matching clean controls. September 24 qualification detected 7/8; see SC_SENSITIVITY_RDNA4_20260924.md."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|kind=barrier|pc=0x00000000003f2200|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|event=barrier|pc=0x00000000003f2200|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:0ffc359899105b1d|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|event=barrier|pc=0x00000000003f2260|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY_MODE": "sleep_wave",
+                  "RJ_CONSAN_SC_DELAY": "15"
+                }
+              ]
+            }
+          }
         }
       ]
     },

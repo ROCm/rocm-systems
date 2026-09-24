@@ -52,6 +52,8 @@ are required. Flat accesses save VCC after the delay in this mode.
 | --- | --- | --- | --- | --- |
 | Compiled softmax | sleep_wave, max=127; same-value policy | Pass | 1/8 | 0/8 |
 | Compiled softmax | sleep_wave, max=3; same-value policy | Pass | 0/8 | 0/8 |
+| Production FP8 matmul | sleep_wave, max=15 | Pass | **7/8** | 0/8 |
+| Native histogram | sleep_wave, max=15 | Pass | 0/8 | 0/8 |
 
 Longer asymmetric delays can suppress the manifestation instead of exposing it.
 A shorter max=3 experiment was selected next. All named existing controls retain
@@ -62,3 +64,10 @@ unbounded counts.
 
 Wave-delay artifacts and prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-wave-20260924/`.
+
+FP8 matmul reaches green at max=15, compared with the prior uniform sleep=4
+result of 4/8. All eight trials were admitted and reached. Histogram is the next
+prospectively selected workload at the same max=15 setting.
+
+Histogram did not improve at max=15. FP16 matmul is the final selected workload
+at that same setting; this is a bounded search, not an all-row calibration.

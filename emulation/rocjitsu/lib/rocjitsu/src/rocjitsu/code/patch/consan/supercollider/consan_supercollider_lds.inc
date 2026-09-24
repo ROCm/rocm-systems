@@ -5,11 +5,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   const Request &request = options;
   const DebugOverrides &debug = options;
 
-  const auto delay_words =
-      supercollider_build_delay_words(arch, options, result.errors, "ConSan LDS check/trap proof");
-  if (!delay_words)
-    return;
-
   std::unordered_set<uint64_t> admitted_lds_file_offsets =
       supercollider_admitted_access_file_offsets(result.program_inventory, result.coverage_ledger,
                                                  AccessOrigin::NativeLds);
@@ -529,6 +524,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
     const ProgramSite &site = *candidate.site;
+    const auto delay_words = supercollider_build_delay_words(
+        target, options, candidate.vcc_save_sgpr, result.errors, "ConSan LDS check/trap proof");
+    if (!delay_words)
+      return;
     const auto split_two_address =
         split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;

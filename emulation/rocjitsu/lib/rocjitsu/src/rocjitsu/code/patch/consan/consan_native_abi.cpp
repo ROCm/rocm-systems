@@ -51,6 +51,9 @@ bool append_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch, const
     }
     words.push_back(build_s_sleep(static_cast<uint16_t>(plan.count), arch));
     return true;
+  case SuperColliderDelayMode::SleepWave:
+    errors.emplace_back(std::string(context) + " sleep_wave requires SuperCollider replay scratch");
+    return false;
   case SuperColliderDelayMode::SleepVar:
     if (plan.variable_source > std::numeric_limits<uint8_t>::max()) {
       errors.emplace_back(std::string(context) +

@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
+#include <bit>
 #include <climits>
 
 namespace rocjitsu::consan {
@@ -18,8 +19,10 @@ std::optional<uint32_t> supercollider_build_guest_flat_completion_wait(rj_code_a
 }
 
 std::optional<std::vector<uint32_t>>
-supercollider_build_delay_words(rj_code_arch_t arch, const Request &request,
-                                std::vector<std::string> &errors, std::string_view context) {
+supercollider_build_delay_words(const TargetProfile &target, const Request &request,
+                                uint16_t temporary_sgpr, std::vector<std::string> &errors,
+                                std::string_view context) {
+  const rj_code_arch_t arch = target.arch;
   std::vector<uint32_t> words;
   if (request.supercollider_delay_nops == 0)
     return words;
@@ -37,6 +40,35 @@ supercollider_build_delay_words(rj_code_arch_t arch, const Request &request,
     }
     words.push_back(build_s_sleep(static_cast<uint16_t>(request.supercollider_delay_nops), arch));
     return words;
+  case SuperColliderDelayMode::SleepWave: {
+    const uint32_t maximum = request.supercollider_delay_nops;
+    if (arch != ROCJITSU_CODE_ARCH_RDNA4 || maximum > 127u || !std::has_single_bit(maximum + 1u) ||
+        temporary_sgpr >= REGISTER_SET_ALLOCATABLE_SGPRS) {
+      errors.emplace_back(
+          std::string(context) +
+          " sleep_wave requires RDNA4, scalar scratch, and maximum 1/3/7/15/31/63/127");
+      return std::nullopt;
+    }
+    // The VCC-save scratch is not live yet. Read a bounded resident-wave
+    // identity without changing SCC, EXEC or VCC; no extra register allocation.
+    const auto &identity = target.resident_wave_identity;
+    const auto width = static_cast<uint8_t>(std::bit_width(maximum));
+    // Include the SIMD bits at the top of this identity. Neighboring waves
+    // can occupy different SIMDs with the same low resident-wave slot number.
+    const auto offset = static_cast<uint8_t>(identity.bit_offset + identity.bit_width - width);
+    const auto hwreg = build_hwreg_imm(identity.hwreg_id, offset, width);
+    const auto read =
+        hwreg ? instrumentation::build_s_getreg_b32(temporary_sgpr, *hwreg, arch) : std::nullopt;
+    const auto wait = instrumentation::build_salu_dependency_delay(arch);
+    if (!read || !wait) {
+      errors.emplace_back(std::string(context) + " could not encode resident-wave delay");
+      return std::nullopt;
+    }
+    words.push_back(*read);
+    words.push_back(*wait);
+    words.push_back(build_s_sleep_var(temporary_sgpr, arch));
+    return words;
+  }
   case SuperColliderDelayMode::SleepVar:
     if (request.supercollider_delay_var_ssrc > 255) {
       errors.emplace_back(std::string(context) +

@@ -522,9 +522,19 @@ lifetime-sticky and capacity-independent, so status `2` leaves it unchanged.
 | `RJ_CONSAN_SC_REPORT_BUFFER=0xADDR` | unset | Use a caller-owned device-visible 32-bit marker instead of automatic allocation. |
 | `RJ_CONSAN_SC_REPORT_MARKER=N` | `1` | Value written on mismatch. |
 | `RJ_CONSAN_SC_DELAY=N` | `0` | Delay parameter between the guest access and duplicate/read-back. |
-| `RJ_CONSAN_SC_DELAY_MODE=nop\|sleep\|sleep_var` | `nop` | Select `s_nop`, `s_sleep`, or `s_sleep_var` delay lowering. |
+| `RJ_CONSAN_SC_DELAY_MODE=nop\|sleep\|sleep_var\|sleep_wave` | `nop` | Select fixed NOP/sleep, a caller-selected scalar sleep source, or RDNA4 resident-wave-dependent `sleep_wave`. |
 | `RJ_CONSAN_SC_DELAY_VAR_SSRC=N` | `106` | Scalar source encoding used by `sleep_var`. |
 | `RJ_CONSAN_CHECK_TRAP_MODE=all\|lds\|flat` | `all` | Restrict SuperCollider to native DS or admitted flat LDS sites for debugging. |
+
+On RDNA4, `RJ_CONSAN_SC_DELAY_MODE=sleep_wave` varies replay timing by resident
+wave placement, including SIMD identity. Set `RJ_CONSAN_SC_DELAY` to an upper
+bound of 1, 3, 7, 15, 31, 63, or 127 sleep units (64 clocks each); zero disables
+the delay. For example, `RJ_CONSAN_SC_DELAY=15` selects delays of 0, 4, 8, or 12
+units from SIMD placement. This reuses existing scalar scratch, preserves guest
+condition registers, and requires no extra register allocation. It is supported
+only by RDNA4 SuperCollider replay. Delays can expose or suppress a race's value
+change: use matching clean controls and repeated fault trials. See the
+[RDNA4 sensitivity experiments](validation/SC_SENSITIVITY_RDNA4_20260924.md).
 
 The automatic marker reports that at least one duplicated/read-back value
 differed. It does not identify an address, lane, value, or happens-before

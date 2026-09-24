@@ -895,7 +895,7 @@ def _clean_environment(
                 raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY")
             environment["RJ_CONSAN_SC_DELAY"] = delay
         if delay_mode is not None:
-            if delay_mode not in {"nop", "sleep", "sleep_var"}:
+            if delay_mode not in {"nop", "sleep", "sleep_var", "sleep_wave"}:
                 raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY_MODE")
             environment["RJ_CONSAN_SC_DELAY_MODE"] = delay_mode
     same_value = os.environ.get(

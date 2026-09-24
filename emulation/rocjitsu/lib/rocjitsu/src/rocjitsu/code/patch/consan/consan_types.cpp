@@ -35,7 +35,8 @@ constexpr auto kRegisterAllocationSources = make_enum_vocabulary(
 constexpr auto kDelayModes =
     make_enum_vocabulary("unknown", enum_entry(SuperColliderDelayMode::Nop, "nop"),
                          enum_entry(SuperColliderDelayMode::Sleep, "sleep"),
-                         enum_entry(SuperColliderDelayMode::SleepVar, "sleep_var"));
+                         enum_entry(SuperColliderDelayMode::SleepVar, "sleep_var"),
+                         enum_entry(SuperColliderDelayMode::SleepWave, "sleep_wave"));
 
 constexpr auto kBarrierOperandSources = make_enum_vocabulary(
     "unknown", enum_entry(BarrierSite::OperandSource::Unknown, "unknown"),

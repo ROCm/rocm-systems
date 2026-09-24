@@ -342,8 +342,9 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
                         {{"nop", E::Nop},
                          {"sleep", E::Sleep},
                          {"sleep_var", E::SleepVar},
-                         {"sleep-var", E::SleepVar}},
-                        "nop|sleep|sleep_var");
+                         {"sleep-var", E::SleepVar},
+                         {"sleep_wave", E::SleepWave}},
+                        "nop|sleep|sleep_var|sleep_wave");
 }
 
 [[nodiscard]] bool parse_barrier_move_direction_env(BarrierMoveDirection *out) {

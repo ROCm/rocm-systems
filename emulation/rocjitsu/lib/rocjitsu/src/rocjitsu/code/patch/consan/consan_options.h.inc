@@ -86,6 +86,7 @@ enum class SuperColliderDelayMode : uint8_t {
   Nop,
   Sleep,
   SleepVar,
+  SleepWave,
 };
 
 enum class BarrierMoveDirection : uint8_t {

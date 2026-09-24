@@ -109,7 +109,7 @@ For cross-wave conflicts, the predicate requires:
 | `RJ_CONSAN_SC_REPORT_BUFFER` | unset | Use a caller-owned device-visible 32-bit marker address instead of automatic allocation. |
 | `RJ_CONSAN_SC_REPORT_MARKER` | `1` | Value written on mismatch. |
 | `RJ_CONSAN_SC_DELAY` | `0` | Delay parameter between the guest access and duplicate or read-back. |
-| `RJ_CONSAN_SC_DELAY_MODE` | `nop` | Select `s_nop`, `s_sleep`, or `s_sleep_var` delay lowering. |
+| `RJ_CONSAN_SC_DELAY_MODE` | `nop` | Select `nop`, `sleep`, `sleep_var`, or RDNA4 `sleep_wave`. The latter varies by resident-wave placement; `RJ_CONSAN_SC_DELAY` is a maximum of 1/3/7/15/31/63/127 sleep units, or zero to disable. |
 | `RJ_CONSAN_SC_DELAY_VAR_SSRC` | `106` | Scalar source encoding used by `sleep_var`. |
 | `RJ_CONSAN_CHECK_TRAP_MODE` | `all` | Restrict SuperCollider to native DS (`lds`), admitted flat LDS (`flat`), or both (`all`). |
 

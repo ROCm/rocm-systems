@@ -10,6 +10,7 @@
 #include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_report_emission.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -846,6 +847,81 @@ TEST(ConSan, FullWorkgroupPayloadRequirementUsesPatchSemantics) {
   patch.owner_descriptor_file_offsets.clear();
   EXPECT_FALSE(
       detail::patch_requires_full_workgroup_id_payload(mode, ROCJITSU_CODE_ARCH_RDNA4, patch));
+}
+
+TEST(ConSan, SuperColliderWaveDelayVariesByPlacementAndPreservesGuestFlags) {
+  const auto target =
+      std::ranges::find(kTargetProfiles, ROCJITSU_CODE_ARCH_RDNA4, &TargetProfile::arch);
+  ASSERT_NE(target, kTargetProfiles.end());
+  for (uint32_t maximum : {3u, 15u, 127u}) {
+    Request request;
+    request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
+    request.supercollider_delay_nops = maximum;
+    std::vector<std::string> errors;
+    const auto words = supercollider_build_delay_words(*target, request, 20u, errors, "test");
+    ASSERT_TRUE(words);
+    ASSERT_TRUE(errors.empty());
+    amdgpu::GpuMemory memory("wave_delay_memory");
+    amdgpu::L2Cache cache("wave_delay_cache");
+    cache.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = target->arch;
+    config.num_wf_slots = 2;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("wave_delay", config, &memory, &cache);
+    ASSERT_NE(cu, nullptr);
+    std::array<amdgpu::Wavefront *, 2> waves{};
+    for (size_t i = 0; i < words->size(); ++i)
+      memory.write32(i * sizeof(uint32_t), (*words)[i]);
+    for (auto &wave : waves) {
+      wave = cu->dispatch_wf(0, 0, 128, 256);
+      ASSERT_NE(wave, nullptr);
+      wave->pc = 0u;
+      wave->set_exec(0x55u);
+      wave->set_vcc(0xaau);
+      wave->write_scc(true);
+      cu->write_sgpr(wave->sgpr_alloc().base + 21u, 0x12345678u);
+    }
+    std::set<uint32_t> counts;
+    std::array<bool, 2> done{};
+    for (unsigned steps = 0; !done[0] || !done[1]; ++steps) {
+      ASSERT_LT(steps, 10000u);
+      cu->step();
+      for (size_t i = 0; i < waves.size(); ++i) {
+        auto *wave = waves[i];
+        if (done[i] || wave->pc < words->size() * sizeof(uint32_t))
+          continue;
+        const uint32_t count = cu->read_sgpr(wave->sgpr_alloc().base + 20u);
+        counts.insert(count);
+        EXPECT_LE(count, maximum);
+        EXPECT_EQ(wave->exec(), 0x55u);
+        EXPECT_EQ(wave->vcc(), 0xaau);
+        EXPECT_TRUE(wave->read_scc());
+        EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 21u), 0x12345678u);
+        done[i] = true;
+        wave->halt();
+      }
+    }
+    EXPECT_EQ(counts.size(), 2u);
+  }
+}
+
+TEST(ConSan, SuperColliderWaveDelayRejectsUnsupportedTargetsAndUnboundedCounts) {
+  for (const auto &target : kTargetProfiles) {
+    for (uint32_t count : {1u, 2u, 3u, 127u, 128u, 255u}) {
+      Request request;
+      request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
+      request.supercollider_delay_nops = count;
+      std::vector<std::string> errors;
+      const auto words = supercollider_build_delay_words(target, request, 20u, errors, "test");
+      const bool supported =
+          target.arch == ROCJITSU_CODE_ARCH_RDNA4 && (count == 1u || count == 3u || count == 127u);
+      EXPECT_EQ(words.has_value(), supported);
+      EXPECT_EQ(errors.empty(), supported);
+    }
+  }
 }
 
 TEST(ConSan, WindowBanksDoNotSystematicallyAliasWorkgroupsAndWaveOwners) {
