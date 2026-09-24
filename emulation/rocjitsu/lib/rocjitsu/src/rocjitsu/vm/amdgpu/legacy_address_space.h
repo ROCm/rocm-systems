@@ -552,10 +552,20 @@ public:
       const bool readable = has_host_backing(ea, vmid, chunk);
       if (write ? has_writable_host_backing(ea, vmid, chunk) : readable)
         return true;
+      // Daemon clients may own valid memory without a local page-table entry.
+      // Revalidate through the same client conduit used by demand reads rather
+      // than retrying forever for a local mapping that will never be installed.
+      // Remote write permissions remain enforced by the actual client write.
+      if (!has_page_mapping(ea, vmid) && has_client_backing(vmid)) {
+        std::vector<uint8_t> probe(chunk);
+        if (read_client_memory(ea, probe.data(), chunk, vmid))
+          return true;
+        outcome = CopyOutcome::Faulted;
+        return false;
+      }
       // A debugger probe reports absent mappings as faults. A pending memory
       // operation instead retries until its backing becomes available.
-      if (!has_page_mapping(ea, vmid) &&
-          (has_client_backing(vmid) || !passthrough_for_vmid(vmid) || ea < PAGE_SIZE)) {
+      if (!has_page_mapping(ea, vmid) && (!passthrough_for_vmid(vmid) || ea < PAGE_SIZE)) {
         outcome = CopyOutcome::Unavailable;
         return false;
       }

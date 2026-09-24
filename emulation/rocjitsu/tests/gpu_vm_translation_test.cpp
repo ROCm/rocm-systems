@@ -1320,6 +1320,38 @@ TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
 
+TEST(GpuVmTranslation, CacheValidationAcceptsClientMemoryWithoutLocalMappings) {
+  GpuMemory memory("memory");
+  LegacyPageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  RecordingFaultReporter reporter;
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
+  const auto handle = legacy_vm.register_address_space(7, {.page_table = &page_table,
+                                                           .page_table_mutex = &page_table_mutex,
+                                                           .page_table_generation = nullptr,
+                                                           .request_mutex = {},
+                                                           .client_pid = getpid(),
+                                                           .client_mem_fd = -1,
+                                                           .passthrough = false,
+                                                           .fault_reporter = &reporter});
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  uint32_t source = 0x12345678;
+  const auto address = reinterpret_cast<uint64_t>(&source);
+  uint32_t destination = 0;
+  ASSERT_EQ(access->read(address, std::as_writable_bytes(std::span(&destination, 1))),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(destination, source);
+  EXPECT_EQ(access->validate_cache_access(address, sizeof(source), VmAccessKind::Read),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(reporter.addresses.empty());
+  EXPECT_EQ(access->validate_cache_access(0, sizeof(source), VmAccessKind::Read),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0}));
+}
+
 TEST(GpuVmTranslation, StrictLegacyBackingReportsWrappingRange) {
   GpuMemory memory("memory");
   constexpr uint32_t vmid = 7;
