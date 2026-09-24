@@ -3132,6 +3132,11 @@ private:
     if (pid <= 0)
       return false;
     if (pid == getpid()) {
+      if (len == 0)
+        return true;
+      // memcpy's nonnull contract applies before the host fault guard runs.
+      if (addr == 0 || dst == nullptr)
+        return false;
       const bool copied = rocjitsu::with_host_access_guard(
           [&] { std::memcpy(dst, reinterpret_cast<const void *>(addr), len); });
       if (!copied)
@@ -3164,6 +3169,10 @@ private:
     if (pid <= 0)
       return false;
     if (pid == getpid()) {
+      if (len == 0)
+        return true;
+      if (addr == 0 || src == nullptr)
+        return false;
       return rocjitsu::with_host_access_guard(
           [&] { std::memcpy(reinterpret_cast<void *>(addr), src, len); });
     }

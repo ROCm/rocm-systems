@@ -1349,7 +1349,8 @@ TEST(GpuVmTranslation, CacheValidationAcceptsClientMemoryWithoutLocalMappings) {
   EXPECT_TRUE(reporter.addresses.empty());
   EXPECT_EQ(access->validate_cache_access(0, sizeof(source), VmAccessKind::Read),
             VmAccessOutcome::Faulted);
-  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0}));
+  EXPECT_EQ(access->write(0, std::as_bytes(std::span(&source, 1))), VmAccessOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{0, 0}));
 }
 
 TEST(GpuVmTranslation, StrictLegacyBackingReportsWrappingRange) {
