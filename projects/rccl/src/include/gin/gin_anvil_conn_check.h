@@ -9,7 +9,22 @@
 
 #ifdef ENABLE_ROCSHMEM_GIN
 
+#include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
+
 #include <hip/hip_runtime.h>
+
+namespace gin_anvil {
+namespace conn_check {
+
+// HIP blockDim.x must cover nRanks threads (one per peer/source rank).
+constexpr int kMaxConnCheckKernelRanks = 1024;
+// Host-side conn-check is bounded by the IPC peer table, not the kernel block.
+constexpr int kMaxConnCheckHostRanks = NCCL_GIN_ANVIL_IPC_MAX_RANKS;
+static_assert(kMaxConnCheckHostRanks <= kMaxConnCheckKernelRanks,
+              "conn-check host IPC rank cap must fit the device kernel block");
+
+}  // namespace conn_check
+}  // namespace gin_anvil
 
 // [GIN-CONN-CHECK] Device launchers for the LSA signal connectivity self-test.
 // Implemented in gin_anvil_conn_check_device.cc (HIP). Host unit tests stub these
