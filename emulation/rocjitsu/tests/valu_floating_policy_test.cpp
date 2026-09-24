@@ -567,12 +567,14 @@ TEST(ValuFloatingPolicy, PackedBf16MinimumAndMaximumOrderSignedZeros) {
   }
 }
 
-TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesReplicateBothHalves) {
+TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesMatchHardware) {
   InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
   for (uint16_t opcode : {rdna4::kVDot2F32F16Vop3p, rdna4::kVDot2F32Bf16Vop3p}) {
     const std::array<uint32_t, 2> words = rdna4::build_vop3p(
         opcode, {.vdst = 6, .src0 = 242, .src1 = 242, .src2 = 128, .opsel_hi = 3});
-    EXPECT_EQ(machine.run(words, 0), 0x40000000u);
+    // R9700: F16 inline floats occupy the low half; BF16 broadcasts both halves.
+    EXPECT_EQ(machine.run(words, 0),
+              opcode == rdna4::kVDot2F32F16Vop3p ? 0x3f800000u : 0x40000000u);
   }
 }
 } // namespace

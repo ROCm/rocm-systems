@@ -274,6 +274,7 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
+    GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
@@ -321,7 +322,8 @@ if(BUILD_TESTS)
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
+    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
   # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
@@ -384,6 +386,7 @@ if(BUILD_TESTS)
     list(APPEND TEST_FIXTURE_SOURCE_FILES
       gin/GinAnvilIpcTableHost_test.cpp
       ../src/gin/gin_anvil_ipc_table_host.cc
+      device/sdma/anvil_stub_quiet_count.cpp
     )
   endif()
 
@@ -1080,12 +1083,6 @@ if(BUILD_TESTS)
     # the dynamic loader brings in librccl.so.
     if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
        AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
-      set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
-      foreach(_g IN LISTS GPU_TARGETS)
-        if(_g)
-          list(APPEND _ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "--offload-arch=${_g}")
-        endif()
-      endforeach()
       find_library(_ROCSHMEM_FIXTURES_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
       find_library(_ROCSHMEM_FIXTURES_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
       if(NOT _ROCSHMEM_FIXTURES_DRM)
@@ -1098,8 +1095,6 @@ if(BUILD_TESTS)
         ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
         ibverbs hsa-runtime64 hsakmt numa
         ${_ROCSHMEM_FIXTURES_DRM} ${_ROCSHMEM_FIXTURES_DRM_AMDGPU})
-      target_link_options(${test_executable} PRIVATE
-        -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS} -rdynamic)
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
@@ -1116,6 +1111,24 @@ if(BUILD_TESTS)
     endif()
     target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/device)
+    set_source_files_properties(
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
+      PROPERTIES COMPILE_OPTIONS "-fgpu-rdc")
+    # install.sh --rocshmem-gin -t (GIN CI) sets ENABLE_ROCSHMEM_GIN without
+    # GIN_ANVIL_UNIT_TESTS, so the gate at line 372 keeps Suite H out of that
+    # build and only the IPC test and the counter TU compile relocatable there.
+    # The fixtures binary must still device-link here or g_sdmaStubQuietCount
+    # is unresolved.
+    set(_ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    target_link_options(rccl-UnitTestsFixtures PRIVATE
+      -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS} -rdynamic)
     if(TARGET rccl-UnitTestsGinAnvilPlugin)
       target_include_directories(rccl-UnitTestsGinAnvilPlugin BEFORE PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/device)
