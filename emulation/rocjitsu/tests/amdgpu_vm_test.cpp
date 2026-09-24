@@ -264,7 +264,7 @@ TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
   EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
 }
 
-TEST(ComputeUnitConfigTest, DirectFactoryRejectsModelOnlyConcreteTarget) {
+TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   amdgpu::L2Cache l2("l2");
   const amdgpu::ComputeUnitCore::Config config{
@@ -276,8 +276,9 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsModelOnlyConcreteTarget) {
       .lds_size_kb = 64,
   };
 
-  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
-               util::ConfigError);
+  auto compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2);
+  ASSERT_NE(compute_unit, nullptr);
+  EXPECT_EQ(compute_unit->arch(), ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
@@ -1235,15 +1236,14 @@ TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
 
   std::array<uint8_t, kCacheLineSize> cache_line{};
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
-  EXPECT_TRUE(std::equal(allocation.begin(), allocation.end(), cache_line.begin()));
-  EXPECT_TRUE(std::all_of(cache_line.begin() + kAllocationSize, cache_line.end(),
-                          [](uint8_t value) { return value == 0; }));
+  EXPECT_TRUE(std::ranges::equal(allocation, std::span(cache_line).first(allocation.size())));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin() + kAllocationSize, cache_line.end(),
+                                  [](uint8_t value) { return value == 0; }));
 
   std::array<uint8_t, kCacheLineSize> replacement{};
   replacement.fill(0xa5);
   memory.write_block(kBaseVa, std::span<const uint8_t>(replacement), kPid);
-  EXPECT_TRUE(std::all_of(allocation.begin(), allocation.end(),
-                          [](uint8_t value) { return value == 0xa5; }));
+  EXPECT_TRUE(std::ranges::all_of(allocation, [](uint8_t value) { return value == 0xa5; }));
 }
 
 TEST(GpuMemoryTest, SamePageMappingsRemainIndependent) {
@@ -1372,7 +1372,7 @@ TEST(GpuMemoryThreadingTest, SplitMappedAtomicLocksEveryBackingStripe) {
     }
   }
   ASSERT_NE(second_backing, nullptr);
-  std::copy_n(first_backing.begin() + sizeof(uint32_t), sizeof(uint32_t), second_backing);
+  std::ranges::copy_n(first_backing.begin() + sizeof(uint32_t), sizeof(uint32_t), second_backing);
 
   process.map_pages(kAtomicVa, first_backing.data(), sizeof(uint32_t));
   process.map_pages(kAtomicVa + sizeof(uint32_t), second_backing, sizeof(uint32_t));
@@ -1402,10 +1402,10 @@ TEST(GpuMemoryThreadingTest, SplitMappedAtomicLocksEveryBackingStripe) {
 
   EXPECT_TRUE(second_stripe_locked);
   EXPECT_EQ(observed, (std::array<uint8_t, sizeof(uint64_t)>{1, 2, 3, 4, 5, 6, 7, 8}));
-  EXPECT_TRUE(std::equal(replacement.begin(), replacement.begin() + sizeof(uint32_t),
-                         first_backing.begin()));
-  EXPECT_TRUE(
-      std::equal(replacement.begin() + sizeof(uint32_t), replacement.end(), second_backing));
+  EXPECT_TRUE(std::ranges::equal(std::span(replacement).first(sizeof(uint32_t)),
+                                 std::span(first_backing).first(sizeof(uint32_t))));
+  EXPECT_TRUE(std::ranges::equal(std::span(replacement).subspan(sizeof(uint32_t)),
+                                 std::span(second_backing, sizeof(uint32_t))));
 }
 
 TEST(GpuMemoryTest, IdentityMappedEntryStillEnforcesItsExtent) {
@@ -1436,7 +1436,7 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
 
   KfdProcess process(kPid);
   auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
-  std::fill_n(allocation.get(), kAllocationSize, 0x5a);
+  std::ranges::fill_n(allocation.get(), kAllocationSize, 0x5a);
   process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -1499,31 +1499,31 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
   EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x11) << "a refused atomic stored anyway";
   EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x22) << "a refused atomic stored anyway";
 
-  std::fill_n(allocation.get(), kAllocationSize, 0x5a);
+  std::ranges::fill_n(allocation.get(), kAllocationSize, 0x5a);
   std::array<uint8_t, kCacheLineSize> cache_line{};
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
-  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kAllocationSize,
-                          [](uint8_t value) { return value == 0x5a; }));
-  EXPECT_TRUE(std::all_of(cache_line.begin() + kAllocationSize, cache_line.end(),
-                          [](uint8_t value) { return value == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin(), cache_line.begin() + kAllocationSize,
+                                  [](uint8_t value) { return value == 0x5a; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin() + kAllocationSize, cache_line.end(),
+                                  [](uint8_t value) { return value == 0; }));
 
   cache_line.fill(0xa5);
   memory.write_block(kBaseVa, std::span<const uint8_t>(cache_line), kPid);
-  EXPECT_TRUE(std::all_of(allocation.get(), allocation.get() + kAllocationSize,
-                          [](uint8_t value) { return value == 0xa5; }));
+  EXPECT_TRUE(std::ranges::all_of(allocation.get(), allocation.get() + kAllocationSize,
+                                  [](uint8_t value) { return value == 0xa5; }));
 
   constexpr size_t kRemappedAllocationSize = 8;
   auto remapped_allocation = std::make_unique<uint8_t[]>(kRemappedAllocationSize);
-  std::fill_n(remapped_allocation.get(), kRemappedAllocationSize, 0x3c);
+  std::ranges::fill_n(remapped_allocation.get(), kRemappedAllocationSize, 0x3c);
   process.remap_page_host_ptrs(kBaseVa, allocation.get(), remapped_allocation.get(),
                                KfdProcess::kPageSize);
 
   cache_line.fill(0xff);
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
-  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kRemappedAllocationSize,
-                          [](uint8_t value) { return value == 0x3c; }));
-  EXPECT_TRUE(std::all_of(cache_line.begin() + kRemappedAllocationSize, cache_line.end(),
-                          [](uint8_t value) { return value == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin(), cache_line.begin() + kRemappedAllocationSize,
+                                  [](uint8_t value) { return value == 0x3c; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin() + kRemappedAllocationSize, cache_line.end(),
+                                  [](uint8_t value) { return value == 0; }));
 }
 
 TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
@@ -1543,7 +1543,7 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
 
   KfdProcess process(kPid);
   auto allocation = std::make_unique<uint8_t[]>(kAllocationSize);
-  std::fill_n(allocation.get(), kAllocationSize, 0);
+  std::ranges::fill_n(allocation.get(), kAllocationSize, 0);
   process.map_pages(kBaseVa, allocation.get(), kAllocationSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -1724,8 +1724,8 @@ TEST(GpuMemoryTest, SanitizedRetryLimitKeepsMappedAccessOutOfFallback) {
   KfdProcess process(kPid);
   auto first_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
   auto second_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  std::fill_n(first_page.get(), KfdProcess::kPageSize, 0x5a);
-  std::fill_n(second_page.get(), KfdProcess::kPageSize, 0x5a);
+  std::ranges::fill_n(first_page.get(), KfdProcess::kPageSize, 0x5a);
+  std::ranges::fill_n(second_page.get(), KfdProcess::kPageSize, 0x5a);
   process.map_pages(kBaseVa, first_page.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -1765,7 +1765,7 @@ TEST(GpuMemoryTest, SanitizedUnrelatedVmidReplacementDoesNotRetryMappedAccess) {
   KfdProcess process(kPid);
   KfdProcess churn_process(kChurnPid);
   auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  std::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
+  std::ranges::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
   process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -1978,7 +1978,7 @@ TEST(GpuMemoryTest, SanitizedCacheLinePreservesLiveBytesAfterInteriorGap) {
 
   KfdProcess process(kPid);
   auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
-  std::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
+  std::ranges::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
   process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
                           process.page_table_generation());
@@ -1986,21 +1986,21 @@ TEST(GpuMemoryTest, SanitizedCacheLinePreservesLiveBytesAfterInteriorGap) {
   __asan_poison_memory_region(allocation.get() + kGapOffset, kGapSize);
   std::array<uint8_t, kCacheLineSize> cache_line{};
   memory.read_block(kBaseVa, cache_line, kPid);
-  EXPECT_TRUE(std::all_of(cache_line.begin(), cache_line.begin() + kGapOffset,
-                          [](uint8_t value) { return value == 0x5a; }));
-  EXPECT_TRUE(std::all_of(cache_line.begin() + kGapOffset,
-                          cache_line.begin() + kGapOffset + kGapSize,
-                          [](uint8_t value) { return value == 0; }));
-  EXPECT_TRUE(std::all_of(cache_line.begin() + kGapOffset + kGapSize, cache_line.end(),
-                          [](uint8_t value) { return value == 0x5a; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin(), cache_line.begin() + kGapOffset,
+                                  [](uint8_t value) { return value == 0x5a; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin() + kGapOffset,
+                                  cache_line.begin() + kGapOffset + kGapSize,
+                                  [](uint8_t value) { return value == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(cache_line.begin() + kGapOffset + kGapSize, cache_line.end(),
+                                  [](uint8_t value) { return value == 0x5a; }));
 
   cache_line.fill(0xa5);
   memory.write_block(kBaseVa, cache_line, kPid);
-  EXPECT_TRUE(std::all_of(allocation.get(), allocation.get() + kGapOffset,
-                          [](uint8_t value) { return value == 0xa5; }));
-  EXPECT_TRUE(std::all_of(allocation.get() + kGapOffset + kGapSize,
-                          allocation.get() + kCacheLineSize,
-                          [](uint8_t value) { return value == 0xa5; }));
+  EXPECT_TRUE(std::ranges::all_of(allocation.get(), allocation.get() + kGapOffset,
+                                  [](uint8_t value) { return value == 0xa5; }));
+  EXPECT_TRUE(std::ranges::all_of(allocation.get() + kGapOffset + kGapSize,
+                                  allocation.get() + kCacheLineSize,
+                                  [](uint8_t value) { return value == 0xa5; }));
   __asan_unpoison_memory_region(allocation.get() + kGapOffset, kGapSize);
 }
 
@@ -3208,14 +3208,15 @@ TEST(GpuMemoryTest, RegisteredVmidBlockMissUsesClientMemory) {
 
   std::array<uint8_t, kAccessSize> actual{};
   memory.read_block(addr, std::span<uint8_t>(actual), kPid);
-  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), mapping.data + kAccessOffset));
+  EXPECT_TRUE(std::ranges::equal(actual, std::span(mapping.data + kAccessOffset, actual.size())));
 
   std::array<uint8_t, kAccessSize> replacement{};
   for (size_t i = 0; i < replacement.size(); ++i)
     replacement[i] = static_cast<uint8_t>(0xa0 + i);
 
   memory.write_block(addr, std::span<const uint8_t>(replacement), kPid);
-  EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(), mapping.data + kAccessOffset));
+  EXPECT_TRUE(
+      std::ranges::equal(replacement, std::span(mapping.data + kAccessOffset, replacement.size())));
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -7692,7 +7693,7 @@ TEST(Pm4DispatchTest, ScratchUsesTargetRegisterLayout) {
           EXPECT_EQ(wave.scratch_lane_size, wave_bytes / wave_size);
           bases.push_back(wave.scratch_base);
         }
-        std::sort(bases.begin(), bases.end());
+        std::ranges::sort(bases);
         EXPECT_EQ(bases,
                   (std::vector<uint64_t>{scratch, scratch + wave_bytes, scratch + 2 * wave_bytes}));
         f.cp()->unregister_drm_queues(pid);

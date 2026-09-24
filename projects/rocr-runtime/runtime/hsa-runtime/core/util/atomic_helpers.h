@@ -53,17 +53,24 @@
 #include <Windows.h>
 #undef WIN32_NO_STATUS
 
+// A load must not write. InterlockedOr(object, 0) reads the value back
+// unchanged, but it is still a locked read-modify-write: it needs the page
+// writable, and some memory the runtime only ever reads is mapped read-only to
+// the CPU. The WDDM monitored-fence value is one such mapping - documented
+// read-only in d3dukmdt.h:1805 and d3dkmthk.h:5138, and measured PAGE_READONLY
+// on a live adapter - so loading it that way raises 0xC0000005. A naturally
+// aligned integer load is already atomic on the architectures built here, and
+// going through volatile is what stops the compiler reusing a stale value.
+//
+// The interlocked form was incidentally a full barrier, so callers asking for
+// relaxed order have been receiving one. MemoryBarrier() keeps that, and it
+// belongs before the load: of the reorderings a lock prefix suppresses, the
+// only one x86-TSO still allows is an older store passing this load, which a
+// trailing fence would not prevent.
 template <class T>
 void __atomic_load(const T* object, typename std::remove_volatile<T>::type* ret, int arg) {
-  if constexpr (sizeof(T) == 8) {
-    *ret = InterlockedOr64(
-      reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      0);
-  } else {
-    *ret = InterlockedOr(
-      reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      0);
-  }
+  MemoryBarrier();
+  *ret = *reinterpret_cast<const volatile typename std::remove_cv<T>::type*>(object);
 }
 
 template <class T>

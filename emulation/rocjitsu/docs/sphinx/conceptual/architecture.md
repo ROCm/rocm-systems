@@ -92,9 +92,9 @@ amdisa Python codegen pipeline (`lib/python/amdisa/`). The layer contains
 per-architecture subdirectories with decoders, encoding structs, and
 execution bodies, along with hand-written files for address calculation,
 matrix math, and ISA-specific traits. Concrete CDNA5 bindings distinguish
-gfx1250 from gfx1251 for target legality and behavior. gfx1251 is available
-to decode and inspection tooling, but full simulator dispatch remains
-disabled until its execution binding is complete.
+gfx1250 from gfx1251 for target legality and behavior. Both concrete targets
+have full functional-execution bindings; decoder-only consumers select the
+separate model provider, which omits execution callbacks for both targets.
 
 ### VM and hardware model
 

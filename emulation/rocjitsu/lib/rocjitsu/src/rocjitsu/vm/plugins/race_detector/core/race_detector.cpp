@@ -49,10 +49,11 @@ RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                               IntervalSet ldsIntervals,
                               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                              MemoryOrderClass memoryOrder) {
+                              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
   bool hasLds = !ldsIntervals.empty();
-  EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), counterObligations, memoryOrder);
+  EventId eid =
+      events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
+                  std::move(ldsIntervals), counterObligations, memoryOrder, lastRegisterByteMask);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
@@ -177,7 +178,7 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int num
       if (i < 0 || i >= numSourceLines) {
         continue;
       }
-      bool isArrow = std::find(arrowLines.begin(), arrowLines.end(), i) != arrowLines.end();
+      bool isArrow = std::ranges::find(arrowLines, i) != arrowLines.end();
       if (isArrow) {
         oss << i << " --> | " << getSourceLine(i) << "\n";
       } else {
@@ -190,7 +191,7 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int num
   constexpr int nAfter = 1;
 
   auto printCodeBlocks = [&](std::ostringstream &oss, std::vector<uint64_t> eventPcs) {
-    std::sort(eventPcs.begin(), eventPcs.end());
+    std::ranges::sort(eventPcs);
     if (eventPcs.empty()) {
       return;
     }
@@ -262,7 +263,7 @@ RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int num
         {wavePc, e.wave, e.lane},
         {events_.pc(e.conflictingEvent), events_.waveId(e.conflictingEvent).value, -1},
     };
-    std::sort(entries.begin(), entries.end(), [](const PcWaveLane &a, const PcWaveLane &b) {
+    std::ranges::sort(entries, [](const PcWaveLane &a, const PcWaveLane &b) {
       return std::tie(a.pc, a.wave) < std::tie(b.pc, b.wave);
     });
 

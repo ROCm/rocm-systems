@@ -741,7 +741,7 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             output_frame_cnt_++;
         } else {
             // copy the decoded surface info device or host
-            uint8_t *p_dec_frame = nullptr;
+            uint8_t *p_dec_frame_ptr = nullptr;
             {
                 std::lock_guard<std::mutex> lock(mtx_vp_frame_);
                 // if not enough frames in stock, allocate
@@ -755,11 +755,11 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                         // Pinned host memory is used to give better performance for async Device→Host DMA copies.
                         HIP_API_CALL(hipHostMalloc((void **)&dec_frame.frame_ptr, GetFrameSize(), hipHostMallocDefault));
                     }
-                    dec_frame.pts = pDispInfo->pts;
-                    dec_frame.picture_index = pDispInfo->picture_index;
                     vp_frames_.push_back(dec_frame);
                 }
-                p_dec_frame = vp_frames_[output_frame_cnt_ - 1].frame_ptr;
+                vp_frames_[output_frame_cnt_ - 1].pts = pDispInfo->pts;
+                vp_frames_[output_frame_cnt_ - 1].picture_index = pDispInfo->picture_index;
+                p_dec_frame_ptr = vp_frames_[output_frame_cnt_ - 1].frame_ptr;
             }
             // Copy luma data
             int dst_pitch = disp_width_ * byte_per_pixel_;
@@ -767,17 +767,17 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                 if (src_pitch[0] == dst_pitch) {
                     int luma_size = src_pitch[0] * coded_height_;
-                    HIP_API_CALL(hipMemcpyDtoDAsync(p_dec_frame, p_src_ptr_y, luma_size, hip_stream_));
+                    HIP_API_CALL(hipMemcpyDtoDAsync(p_dec_frame_ptr, p_src_ptr_y, luma_size, hip_stream_));
                 } else {
                     // use 2d copy to copy an ROI
-                    HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToDevice, hip_stream_));
+                    HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame_ptr, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToDevice, hip_stream_));
                 }
             } else
-                HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToHost, hip_stream_));
+                HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame_ptr, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToHost, hip_stream_));
 
             // Copy chroma plane ( )
             // rocDec output gives pointer to luma and chroma pointers separated for the decoded frame
-            uint8_t *p_frame_uv = p_dec_frame + dst_pitch * disp_height_;
+            uint8_t *p_frame_uv = p_dec_frame_ptr + dst_pitch * disp_height_;
             uint8_t *p_src_ptr_uv = (num_chroma_planes_ == 1) ? static_cast<uint8_t *>(src_dev_ptr[1]) + ((disp_rect_.top + crop_rect_.top) >> 1) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_ :
             static_cast<uint8_t *>(src_dev_ptr[1]) + (disp_rect_.top + crop_rect_.top) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
@@ -792,7 +792,7 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                 HIP_API_CALL(hipMemcpy2DAsync(p_frame_uv, dst_pitch, p_src_ptr_uv, src_pitch[1], dst_pitch, chroma_height_, hipMemcpyDeviceToHost, hip_stream_));
 
             if (num_chroma_planes_ == 2) {
-                uint8_t *p_frame_v = p_dec_frame + dst_pitch * (disp_height_ + chroma_height_);
+                uint8_t *p_frame_v = p_dec_frame_ptr + dst_pitch * (disp_height_ + chroma_height_);
                 uint8_t *p_src_ptr_v = static_cast<uint8_t *>(src_dev_ptr[2]) + (disp_rect_.top + crop_rect_.top) * src_pitch[2] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
                 if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                     if (src_pitch[2] == dst_pitch) {

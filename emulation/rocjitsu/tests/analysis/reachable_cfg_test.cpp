@@ -469,7 +469,7 @@ TEST_F(ReachableCfg, RepeatsDiscoveryThroughNewlyDecodedCode) {
   auto words = indirect_branch_words();
   words.resize(13, kInvalid);
   const auto second = indirect_branch_words();
-  std::copy(second.begin(), second.end(), words.begin() + 6);
+  std::ranges::copy(second, words.begin() + 6);
   const auto result = build_reachable(words);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 16, 24, 40, 48}));

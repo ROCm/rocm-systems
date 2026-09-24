@@ -219,6 +219,14 @@ def _modern_rdna_dpp_opcode_rule(
     return DppOpcodeRule.ALLOW
 
 
+class FloatDotAccumulation(Enum):
+    """Numerical accumulation policy for F32-output floating DOT2."""
+
+    HOST_F32 = 'HostF32'
+    GFX11 = 'Gfx11'
+    GFX12 = 'Gfx12'
+
+
 class WaveStateLayout(Enum):
     """Architectural layout of wave status, exception, and trap-control state."""
 
@@ -1413,6 +1421,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        """Select the scalar/SIMD arithmetic contract for floating DOT2."""
+        return FloatDotAccumulation.HOST_F32
+
+    @property
     def wave_state_layout(self) -> WaveStateLayout:
         """Layout of shader-visible wave state and the first-level trap ABI."""
         return WaveStateLayout.LEGACY
@@ -2324,6 +2337,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX11
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2613,6 +2630,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX12
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -2998,6 +3019,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:

@@ -83,7 +83,8 @@ public:
       }
       if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
         return amdgpu::VmAccessOutcome::Faulted;
-      std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+      std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
+                          bytes.begin());
       callback = take_hook(read_hook_, address);
     }
     if (callback)
@@ -96,7 +97,7 @@ public:
     std::lock_guard lock(mutex_);
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return amdgpu::VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -194,8 +195,7 @@ public:
   }
   uint32_t atomic_load_attempts_at(uint64_t address) const {
     std::lock_guard lock(mutex_);
-    return static_cast<uint32_t>(
-        std::count(atomic_load_addresses_.begin(), atomic_load_addresses_.end(), address));
+    return static_cast<uint32_t>(std::ranges::count(atomic_load_addresses_, address));
   }
   uint32_t tracked_read_attempts() const {
     std::lock_guard lock(mutex_);
@@ -1357,7 +1357,7 @@ TEST(Gfx1250SdmaTest, ConstFillClippedDestinationRejectsWithoutPartialTransfer) 
   constexpr uint8_t kInitialByte = 0xa5;
   constexpr uint32_t kFillWord = 0x44332211;
   queue.clip_dst_mapping(kMappedBytes);
-  std::fill_n(queue.dst(), kFillBytes, kInitialByte);
+  std::ranges::fill_n(queue.dst(), kFillBytes, kInitialByte);
 
   auto *packet = queue.ring();
   packet[0] = kSdmaOpConstFill | (0x2u << 30); // fillsize=2 (dword granularity).
@@ -1368,8 +1368,8 @@ TEST(Gfx1250SdmaTest, ConstFillClippedDestinationRejectsWithoutPartialTransfer) 
   queue.submit(5);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
   EXPECT_EQ(queue.read_idx(), 0u);
-  EXPECT_TRUE(std::all_of(queue.dst(), queue.dst() + kFillBytes,
-                          [](uint8_t value) { return value == kInitialByte; }));
+  EXPECT_TRUE(std::ranges::all_of(queue.dst(), queue.dst() + kFillBytes,
+                                  [](uint8_t value) { return value == kInitialByte; }));
 }
 
 // A byte count that runs past the end of the address space is a malformed
@@ -2257,8 +2257,8 @@ TEST(Gfx1250SdmaTest, CopyLinearClippedDestinationAdvancesWithoutPartialTransfer
   queue.submit(7);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
   EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t));
-  EXPECT_TRUE(
-      std::all_of(queue.dst(), queue.dst() + kCopyBytes, [](uint8_t value) { return value == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(queue.dst(), queue.dst() + kCopyBytes,
+                                  [](uint8_t value) { return value == 0; }));
 }
 
 TEST(Gfx1250SdmaTest, CopyLinearTransfersMultipleScratchChunks) {
