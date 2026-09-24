@@ -101,26 +101,32 @@ TEST(memory_copy_test, on_memory_copy_forwards_record_fields_to_dependencies)
     constexpr std::uint64_t k_mock_parent_stack_id = 0;
     constexpr std::uint64_t k_mock_address         = 0;
 
-    const auto expected_thread_info =
-        thread_info_data_t{ 0, 0, record.thread_id, 0, 0, "{}" };
+    const auto expected_thread_info = thread_info_data_t{ .parent_process_id = 0,
+                                                          .process_id        = 0,
+                                                          .thread_id = record.thread_id,
+                                                          .start     = 0,
+                                                          .end       = 0,
+                                                          .extdata   = "{}" };
     const auto expected_track =
-        track_data_t{ fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                                  k_mock_logical_node_id, record.thread_id),
-                      record.thread_id, "{}" };
-    const auto expected_sample =
-        memory_copy_sample_data_t{ record.start_timestamp,
-                                   record.end_timestamp,
-                                   record.thread_id,
-                                   record.dst_agent_id.handle,
-                                   record.src_agent_id.handle,
-                                   static_cast<std::int32_t>(record.kind),
-                                   static_cast<std::int32_t>(record.operation),
-                                   record.bytes,
-                                   record.correlation_id.internal,
-                                   k_mock_parent_stack_id,
-                                   k_mock_address,
-                                   k_mock_address,
-                                   k_mock_stream_id };
+        track_data_t{ .track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                                k_mock_logical_node_id, record.thread_id),
+                      .thread_id  = record.thread_id,
+                      .extdata    = "{}" };
+    const auto expected_sample = memory_copy_sample_data_t{
+        .start_timestamp         = record.start_timestamp,
+        .end_timestamp           = record.end_timestamp,
+        .thread_id               = record.thread_id,
+        .dst_agent_id_handle     = record.dst_agent_id.handle,
+        .src_agent_id_handle     = record.src_agent_id.handle,
+        .kind                    = static_cast<std::int32_t>(record.kind),
+        .operation               = static_cast<std::int32_t>(record.operation),
+        .bytes                   = record.bytes,
+        .correlation_id_internal = record.correlation_id.internal,
+        .correlation_id_ancestor = k_mock_parent_stack_id,
+        .dst_address_value       = k_mock_address,
+        .src_address_value       = k_mock_address,
+        .stream_handle           = k_mock_stream_id
+    };
 
     EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
         .Times(1);

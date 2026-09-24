@@ -91,8 +91,8 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_forwards_record_fields_to_dependen
     record.dispatch_info.queue_id.handle      = 666;
     record.dispatch_info.private_segment_size = 7;
     record.dispatch_info.group_segment_size   = 8;
-    record.dispatch_info.workgroup_size       = { 1, 2, 3 };
-    record.dispatch_info.grid_size            = { 4, 5, 6 };
+    record.dispatch_info.workgroup_size       = { .x = 1, .y = 2, .z = 3 };
+    record.dispatch_info.grid_size            = { .x = 4, .y = 5, .z = 6 };
 
     // Every derived value the mocks can't be steered to produce
     // (device_id/stream_id/parent_stack_id) is fixed at 0 by the test doubles: see
@@ -102,31 +102,38 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_forwards_record_fields_to_dependen
     constexpr std::uint64_t k_mock_stream_id       = 0;
     constexpr std::uint64_t k_mock_parent_stack_id = 0;
 
-    const auto expected_thread_info =
-        thread_info_data_t{ 0, 0, record.thread_id, 0, 0, "{}" };
+    const auto expected_thread_info = thread_info_data_t{ .parent_process_id = 0,
+                                                          .process_id        = 0,
+                                                          .thread_id = record.thread_id,
+                                                          .start     = 0,
+                                                          .end       = 0,
+                                                          .extdata   = "{}" };
     const auto expected_track =
-        track_data_t{ fmt::format("GPU Kernel Dispatch [{}] Queue {}", k_mock_device_id,
-                                  record.dispatch_info.queue_id.handle),
-                      record.thread_id, "{}" };
-    const auto expected_sample =
-        kernel_dispatch_sample_data_t{ record.start_timestamp,
-                                       record.end_timestamp,
-                                       record.thread_id,
-                                       record.dispatch_info.agent_id.handle,
-                                       record.dispatch_info.kernel_id,
-                                       record.dispatch_info.dispatch_id,
-                                       record.dispatch_info.queue_id.handle,
-                                       record.correlation_id.internal,
-                                       k_mock_parent_stack_id,
-                                       record.dispatch_info.private_segment_size,
-                                       record.dispatch_info.group_segment_size,
-                                       record.dispatch_info.workgroup_size.x,
-                                       record.dispatch_info.workgroup_size.y,
-                                       record.dispatch_info.workgroup_size.z,
-                                       record.dispatch_info.grid_size.x,
-                                       record.dispatch_info.grid_size.y,
-                                       record.dispatch_info.grid_size.z,
-                                       k_mock_stream_id };
+        track_data_t{ .track_name = fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                                k_mock_device_id,
+                                                record.dispatch_info.queue_id.handle),
+                      .thread_id  = record.thread_id,
+                      .extdata    = "{}" };
+    const auto expected_sample = kernel_dispatch_sample_data_t{
+        .start_timestamp         = record.start_timestamp,
+        .end_timestamp           = record.end_timestamp,
+        .thread_id               = record.thread_id,
+        .agent_id_handle         = record.dispatch_info.agent_id.handle,
+        .kernel_id               = record.dispatch_info.kernel_id,
+        .dispatch_id             = record.dispatch_info.dispatch_id,
+        .queue_id_handle         = record.dispatch_info.queue_id.handle,
+        .correlation_id_internal = record.correlation_id.internal,
+        .correlation_id_ancestor = k_mock_parent_stack_id,
+        .private_segment_size    = record.dispatch_info.private_segment_size,
+        .group_segment_size      = record.dispatch_info.group_segment_size,
+        .workgroup_size_x        = record.dispatch_info.workgroup_size.x,
+        .workgroup_size_y        = record.dispatch_info.workgroup_size.y,
+        .workgroup_size_z        = record.dispatch_info.workgroup_size.z,
+        .grid_size_x             = record.dispatch_info.grid_size.x,
+        .grid_size_y             = record.dispatch_info.grid_size.y,
+        .grid_size_z             = record.dispatch_info.grid_size.z,
+        .stream_handle           = k_mock_stream_id
+    };
 
     EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
         .Times(1);
@@ -156,7 +163,7 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_writes_timemory_bundle_when_enable
 
     // get_kernel_symbol_name/demangle both resolve to "" and
     // get_thread_info_sequent_tid is fixed at 0 in mock_domain_service.hpp.
-    constexpr std::string_view k_mock_name        = "";
+    constexpr std::string_view k_mock_name;
     constexpr std::uint64_t    k_mock_sequent_tid = 0;
     const std::uint64_t        expected_elapsed_ns =
         record.end_timestamp - record.start_timestamp;

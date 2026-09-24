@@ -584,10 +584,7 @@ public:
         {
             return correlation_id.ancestor;
         }
-        else
-        {
-            return 0;
-        }
+        return 0;
     }
 
 #if ROCPROFILER_VERSION >= 700
@@ -605,10 +602,7 @@ public:
         {
             return record.dst_address.value;
         }
-        else
-        {
-            return 0;
-        }
+        return 0;
     }
 
     static std::uint64_t get_memory_copy_src_address(
@@ -618,10 +612,7 @@ public:
         {
             return record.src_address.value;
         }
-        else
-        {
-            return 0;
-        }
+        return 0;
     }
 
 #if ROCPROFILER_VERSION >= 600
@@ -632,10 +623,7 @@ public:
         {
             return record.address.value;
         }
-        else
-        {
-            return static_cast<std::uint64_t>(record.address.handle);
-        }
+        return static_cast<std::uint64_t>(record.address.handle);
     }
 #endif
 
@@ -646,10 +634,8 @@ public:
         {
             return record.allocation_size;
         }
-        else
-        {
-            return 0;
-        }
+
+        return 0;
     }
 };
 
