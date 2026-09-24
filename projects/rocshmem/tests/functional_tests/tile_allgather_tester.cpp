@@ -262,8 +262,8 @@ TileAllgatherTester::TileAllgatherTester(TesterArguments args)
 
   // Derive tile dimensions from max_msg_size if provided.
   // max_msg_size = tile_extent_0 * tile_extent_1 * sizeof(float) (source tile).
-  tile_extent_0 = 8;
-  tile_extent_1 = 8;
+  tile_extent_0 = DEFAULT_TILE_ROWS;
+  tile_extent_1 = DEFAULT_TILE_COLS;
   if (args.max_msg_size_set) {
     int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(float)));
     if (derived >= 1) tile_extent_1 = derived;

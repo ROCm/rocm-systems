@@ -365,8 +365,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   // Derive tile dimensions from max_msg_size if provided.
   // max_msg_size is the total tile payload in bytes: tile_extent_0 * tile_extent_1 * sizeof(float).
   // tile_extent_0 (rows) is fixed at 64; tile_extent_1 (cols) scales with message size.
-  tile_extent_0 = 64;
-  tile_extent_1 = 64;
+  tile_extent_0 = DEFAULT_TILE_ROWS;
+  tile_extent_1 = DEFAULT_TILE_COLS;
   if (args.max_msg_size_set) {
     int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(float)));
     if (derived >= 1) {
@@ -376,8 +376,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   // For the arbitrary-stride layout (row_stride=257, col_stride=3), tile_extent_1
   // columns must fit within the row stride: tile_extent_1 * col_stride <= row_stride.
   if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
-      tile_extent_1 > 85) {
-    tile_extent_1 = 85;  // floor(257 / 3)
+      tile_extent_1 > ARBITRARY_MAX_COLS) {
+    tile_extent_1 = ARBITRARY_MAX_COLS;
   }
 
   // Set the message size sweep bounds.
@@ -391,7 +391,7 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
 
   // Sweep from one column to the full tile for all layouts.
   // Strided layouts (row-major: stride=2*t1, col-major: col_stride=t0,
-  // arbitrary: row_stride=257 fixed with t1 clamped to 85) are all safe
+  // arbitrary: row_stride=257 fixed with t1 clamped to ARBITRARY_MAX_COLS) are all safe
   // because the buffer is allocated for the maximum tile_extent_1 and
   // smaller ke_tile_extent_1 values only access a subset of it.
   this->args.min_msg_size = row_bytes;
@@ -556,8 +556,8 @@ void TileRMATester::resetBuffers(uint64_t size) {
     if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
   }
   if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
-      t1 > 85) {
-    t1 = 85;
+      t1 > ARBITRARY_MAX_COLS) {
+    t1 = ARBITRARY_MAX_COLS;
   }
 
   int src_row_stride, src_col_stride;
@@ -626,8 +626,8 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   }
   // Apply the same arbitrary-stride column clamp
   if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
-      ke_tile_extent_1 > 85) {
-    ke_tile_extent_1 = 85;
+      ke_tile_extent_1 > ARBITRARY_MAX_COLS) {
+    ke_tile_extent_1 = ARBITRARY_MAX_COLS;
   }
 
 #define LAUNCH_TILE_RMA_TEST(SPECIFIC_TYPE)                                    \
@@ -773,8 +773,8 @@ void TileRMATester::verifyResults(uint64_t size) {
       }
     }
     if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
-        t1 > 85) {
-      t1 = 85;
+        t1 > ARBITRARY_MAX_COLS) {
+      t1 = ARBITRARY_MAX_COLS;
     }
 
     int row_stride, col_stride;

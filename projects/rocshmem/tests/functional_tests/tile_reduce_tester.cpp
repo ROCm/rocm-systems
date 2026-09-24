@@ -292,8 +292,8 @@ TileReduceTester<T, Op>::TileReduceTester(
   for (int i = 0; i < num_teams; i++) teams[i] = ROCSHMEM_TEAM_INVALID;
 
   // Derive tile dimensions from max_msg_size if provided.
-  tile_extent_0 = 8;
-  tile_extent_1 = 8;
+  tile_extent_0 = DEFAULT_TILE_ROWS;
+  tile_extent_1 = DEFAULT_TILE_COLS;
   if (args.max_msg_size_set) {
     int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(T)));
     if (derived >= 1) tile_extent_1 = derived;

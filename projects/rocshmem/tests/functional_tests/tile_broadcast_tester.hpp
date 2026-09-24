@@ -72,6 +72,9 @@ class TileBroadcastTester : public Tester {
   rocshmem_team_t *teams;  // Array of teams
   int num_teams;           // Number of teams to create
 
+  static constexpr int DEFAULT_TILE_ROWS = 8;
+  static constexpr int DEFAULT_TILE_COLS = 8;
+
   float *source;           // Source tile data
   float *dest;             // Destination tile data
   int tile_extent_0;       // Tile dimension 0

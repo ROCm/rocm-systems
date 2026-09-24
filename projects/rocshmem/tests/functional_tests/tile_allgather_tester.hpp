@@ -74,6 +74,9 @@ class TileAllgatherTester : public Tester {
 
   float *source;           // Source tile data (one tile per PE)
   float *dest;             // Destination tile data (n_pes tiles per PE)
+  static constexpr int DEFAULT_TILE_ROWS = 8;
+  static constexpr int DEFAULT_TILE_COLS = 8;
+
   int tile_extent_0;       // Tile dimension 0
   int tile_extent_1;       // Tile dimension 1
 

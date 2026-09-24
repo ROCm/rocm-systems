@@ -44,8 +44,11 @@ class TileReduceTester : public Tester {
   virtual void verifyResults(size_t size) override;
 
   // Tile dimensions — set from max_msg_size at construction time.
-  int tile_extent_0 = 8;
-  int tile_extent_1 = 8;
+  static constexpr int DEFAULT_TILE_ROWS = 8;
+  static constexpr int DEFAULT_TILE_COLS = 8;
+
+  int tile_extent_0 = DEFAULT_TILE_ROWS;
+  int tile_extent_1 = DEFAULT_TILE_COLS;
 
   // Symmetric buffers: source tile(s) and result tile(s).
   T *s_buf = nullptr;
