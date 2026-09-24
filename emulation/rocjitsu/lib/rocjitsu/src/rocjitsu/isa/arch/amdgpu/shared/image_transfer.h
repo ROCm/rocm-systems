@@ -115,6 +115,12 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     wrap_y = (s[0] >> 3) & 7;
     mag_filter = (s[2] >> 20) & 3;
     min_filter = (s[2] >> 22) & 3;
+    // Cube sampling uses the major footprint without anisotropic taps.
+    // Retain the sampler's LOD bias and mip performance controls below.
+    if (dim == 3) {
+      mag_filter &= 1;
+      min_filter &= 1;
+    }
     mip_filter = (s[2] >> 26) & 3;
     const uint32_t ratio = (s[0] >> 9) & 7;
     if (ratio > 4)
@@ -266,6 +272,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
         lod = lod_bias;
       } else if (max_level || min_filter != mag_filter || (min_filter & 2) || (mag_filter & 2)) {
         double dxu, dxv, dyu, dyv;
+        std::array<int, 4> gradient_rounding{};
+        std::array<bool, 4> reflected_coordinates{};
         bool unbounded_cube_footprint = false;
         if (derivatives) {
           // G16 stores (dxu, dxv), then (dyu, dyv), low half first.
@@ -281,8 +289,17 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
           dyu = gradient(2);
           dyv = gradient(3);
         } else {
-          // Neighboring quad lanes may select different cube faces. Unfold
-          // their coordinates onto this lane's face before taking derivatives.
+          const uint32_t origin = lane & ~3u;
+          uint32_t derivative_face = face;
+          if (dim == 3) {
+            const double selected = read(coordinate_offset + 2, origin);
+            if (!std::isfinite(selected) || selected < 0 || selected > 5 ||
+                selected != std::trunc(selected))
+              return unsupported();
+            derivative_face = static_cast<uint32_t>(selected);
+          }
+          // Unfold onto the quad origin's face. Choosing each lane's face
+          // introduces different footprints where three cube faces meet.
           const auto unfolded = [&](uint32_t source_lane) -> std::optional<std::array<double, 2>> {
             const double su = read(coordinate_offset, source_lane);
             const double sv = read(coordinate_offset + 1, source_lane);
@@ -293,10 +310,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             const double sf = read(coordinate_offset + 2, source_lane);
             if (!std::isfinite(sf) || sf < 0 || sf > 5 || sf != std::trunc(sf))
               return std::nullopt;
-            if (sf == face)
+            if (sf == derivative_face)
               return std::array{su - 1, sv - 1};
             const uint32_t source_face = static_cast<uint32_t>(sf);
-            if (source_face / 2 == face / 2) {
+            if (source_face / 2 == derivative_face / 2) {
               // Opposite faces select the coarsest available mip.
               unbounded_cube_footprint = true;
               return std::array{u, v};
@@ -306,27 +323,38 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             // perpendicular directions. Physical GFX11/12 derivatives instead
             // retain the distance to the edge in each face's coordinates.
             auto direction = image_cube_direction(source_face, su - 1, sv - 1);
-            const double sign = face & 1 ? -1 : 1;
-            direction[source_face / 2] *= 2 - sign * direction[face / 2];
-            direction[face / 2] = sign;
-            return image_cube_project(face, direction);
+            const double sign = derivative_face & 1 ? -1 : 1;
+            direction[source_face / 2] *= 2 - sign * direction[derivative_face / 2];
+            direction[derivative_face / 2] = sign;
+            const auto policy = image_cube_derivative_policy(derivative_face, source_face);
+            // The right neighbor supplies dx; the bottom neighbor supplies dy.
+            const uint32_t gradient = source_lane == origin + 1 ? 0 : 2;
+            for (uint32_t i = 0; i < 2; ++i) {
+              gradient_rounding[gradient + i] = policy.rounding_directions[i];
+              reflected_coordinates[gradient + i] = policy.reflected_coordinates[i];
+            }
+            return image_cube_project(derivative_face, direction);
           };
           // Implicit sampling uses the top and left edges of the whole quad,
           // even when this lane is on its bottom or right edge.
-          const uint32_t origin = lane & ~3u;
           const auto tl = unfolded(origin), tr = unfolded(origin + 1), bl = unfolded(origin + 2);
           if (!tl || !tr || !bl)
             return unsupported();
-          dxu = (*tr)[0] - (*tl)[0];
-          dxv = (*tr)[1] - (*tl)[1];
-          dyu = (*bl)[0] - (*tl)[0];
-          dyv = (*bl)[1] - (*tl)[1];
+          const auto difference = [&](double neighbor, double origin_value, uint32_t component) {
+            const double value = neighbor - origin_value;
+            return reflected_coordinates[component] ? image_cube_reflected_derivative(value)
+                                                    : value;
+          };
+          dxu = difference((*tr)[0], (*tl)[0], 0);
+          dxv = difference((*tr)[1], (*tl)[1], 1);
+          dyu = difference((*bl)[0], (*tl)[0], 2);
+          dyv = difference((*bl)[1], (*tl)[1], 3);
         }
         if (!std::isfinite(dxu) || !std::isfinite(dxv) || !std::isfinite(dyu) ||
             !std::isfinite(dyv))
           return unsupported();
-        const auto footprint_axes =
-            image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1, normalized ? height : 1);
+        const auto footprint_axes = image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1,
+                                                    normalized ? height : 1, gradient_rounding);
         const auto [major_lod, minor_lod] = footprint_axes.lods;
         if ((min_filter & 2) || (mag_filter & 2)) {
           lod = std::max(minor_lod, major_lod - std::countr_zero(max_anisotropy) * 256) / 256.0;

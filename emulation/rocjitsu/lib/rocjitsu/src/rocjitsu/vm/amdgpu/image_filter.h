@@ -130,6 +130,8 @@ inline ImageReciprocal image_reciprocal(uint32_t value) {
   return {image_norm_reciprocals[index], -static_cast<int>(leading)};
 }
 
+/// GFX11/12 footprint norm from five fixed8 projections, rounded to the nearest
+/// integer with upward ties. A Euclidean norm gives different LOD boundaries.
 inline uint32_t image_polygon_norm(int32_t x, int32_t y) {
   const uint32_t a = std::max(std::abs(x), std::abs(y));
   const uint32_t b = std::min(std::abs(x), std::abs(y));
@@ -191,8 +193,11 @@ struct ImageFootprint {
 /// Align each coordinate's screen derivatives before scaling by the image
 /// extent, then align U/V for the polygonal norms. Preserve multiplication and
 /// norm carry bits through the logarithm. Extents are one for unnormalized input.
+/// Input ties round in the supplied direction (-1 or +1), or away from zero
+/// when it is zero. Unfolded cube derivatives retain the source face's rounding.
 inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv, uint32_t width,
-                                      uint32_t height) {
+                                      uint32_t height,
+                                      std::array<int, 4> rounding_directions = {}) {
   const std::array<double, 4> gradients{xu, xv, yu, yv};
   const std::array largest{std::max(std::abs(xu), std::abs(yu)),
                            std::max(std::abs(xv), std::abs(yv))};
@@ -213,8 +218,11 @@ inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv
     exponents[coordinate] = coordinate_exponent + extent_exponent;
     for (uint32_t i : {coordinate, coordinate + 2}) {
       const double mantissa = std::ldexp(std::abs(gradients[i]), 11 - coordinate_exponent);
-      const double significand = std::min(2047.0, std::floor(mantissa + 0.5));
-      // Input conversion rounds magnitudes; multiplication rounds signed values.
+      const bool toward_zero =
+          rounding_directions[i] != 0 && (rounding_directions[i] < 0) != std::signbit(gradients[i]);
+      const double significand =
+          std::min(2047.0, toward_zero ? std::ceil(mantissa - 0.5) : std::floor(mantissa + 0.5));
+      // Multiplication rounds signed ties upward after input conversion.
       scaled[i] = std::floor(std::copysign(significand, gradients[i]) * extent_mantissa + 0.5);
     }
   }

@@ -44,6 +44,39 @@ image_cube_project(uint32_t face, const std::array<double, 3> &direction) {
   return std::array{s / major + 0.5, t / major + 0.5};
 }
 
+struct ImageCubeDerivativePolicy {
+  std::array<int, 2> rounding_directions{};
+  std::array<bool, 2> reflected_coordinates{};
+};
+
+/// Rounding for derivatives across adjacent cube faces. The edge-crossing
+/// coordinate retains its source orientation; an unchanged parallel coordinate
+/// uses ordinary magnitude rounding. A reflected parallel coordinate first
+/// forms a sum of the ISA-biased coordinates, retaining 24 significant bits.
+inline ImageCubeDerivativePolicy image_cube_derivative_policy(uint32_t face, uint32_t source_face) {
+  // At (1, 1), each non-major direction component is its coordinate's sign.
+  auto direction = image_cube_direction(source_face, 1, 1);
+  const double sign = face & 1 ? -1 : 1;
+  direction[source_face / 2] *= -sign * direction[face / 2];
+  direction[face / 2] = sign;
+  const auto projected = *image_cube_project(face, direction);
+  const std::array axes{face / 2 == 0 ? 2u : 0u, face / 2 == 1 ? 2u : 1u};
+  ImageCubeDerivativePolicy policy;
+  for (uint32_t i = 0; i < 2; ++i) {
+    const int orientation = static_cast<int>(2 * projected[i] - 1);
+    const bool crosses_edge = axes[i] == source_face / 2;
+    policy.rounding_directions[i] = crosses_edge || orientation < 0 ? orientation : 0;
+    policy.reflected_coordinates[i] = !crosses_edge && orientation < 0;
+  }
+  return policy;
+}
+
+/// Biased cube coordinates lie in [1, 2], so their sum retains 22 fractional
+/// bits. After subtracting the face offset, halfway derivatives round away from zero.
+inline double image_cube_reflected_derivative(double value) {
+  return std::copysign(std::floor(std::abs(value) * 0x1p22 + 0.5) * 0x1p-22, value);
+}
+
 /// An integer texel coordinate and its physical cube face.
 struct ImageCubeTexel {
   uint32_t face, x, y;

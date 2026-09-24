@@ -5764,6 +5764,186 @@ TEST_P(GraphicsExportTest, ImplicitCubeSamplingUnfoldsAdjacentFacesAndBoundsOppo
   }
 }
 
+TEST_P(GraphicsExportTest, CubeSamplingMatchesPhysicalFootprints) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const uint16_t colors[] = {0, 0x3c00, 0x4000, 0x4200, 0x4400, 0x4500, 0x4600};
+  const auto setup_cube = [&](uint32_t size) {
+    // Keep the fixtures at separate addresses so previous texture-cache entries
+    // cannot observe the direct backing-memory writes for the next image.
+    const uint64_t image_base = size == 64 ? 0x100000 : 0x200000;
+    for (uint32_t level = 0; level < std::size(colors); ++level) {
+      const auto mip = amdgpu::image_mip_layout(gfx12, 0, 8, size, size, 7, level);
+      ASSERT_TRUE(mip);
+      for (uint32_t face = 0; face < 6; ++face)
+        for (uint32_t y = 0; y < mip->height; ++y)
+          for (uint32_t x = 0; x < mip->width; ++x) {
+            const uint64_t base = image_base + mip->offset + face * mip->slice_size;
+            const auto address = gfx12 ? amdgpu::gfx12_image_address(base, x, y, mip->pitch, 8, 0)
+                                       : amdgpu::gfx11_image_address(base, x, y, mip->pitch, 8, 0);
+            ASSERT_TRUE(address);
+            for (uint32_t c = 0; c < 4; ++c)
+              memory_.write16(*address + 2 * c, colors[level]);
+          }
+    }
+    const std::array<uint32_t, 8> descriptor{
+        static_cast<uint32_t>(image_base >> 8),
+        (57u << (gfx12 ? 17 : 20)) | (((size - 1) & 3u) << 30) | (6u << (gfx12 ? 12 : 16)),
+        ((size - 1) >> 2) | ((size - 1) << 14),
+        (11u << 28) | 0xfac | (6u << (gfx12 ? 15 : 16)),
+        5,
+        4u << 20,
+        0,
+        0};
+    for (uint32_t i = 0; i < descriptor.size(); ++i)
+      wave_->debug_write_sgpr(8 + i, descriptor[i]);
+    wave_->debug_write_sgpr(4, 0x92 | (4u << 9) | (2u << 16) | (4u << 21));
+    wave_->debug_write_sgpr(5, (1536u << (gfx12 ? 13 : 12)) | (gfx12 ? 0 : 10u << 24));
+    wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22) | (2u << 26) | (gfx12 ? 2u << 30 : 0));
+    wave_->debug_write_sgpr(7, gfx12 ? 2 : 0);
+  };
+  setup_cube(64);
+  struct Witness {
+    float dxu, dxv, dyu, dyv;
+    uint32_t expected;
+  };
+  // Both physical cards return these mip colors with 16x anisotropy enabled.
+  // The gradients describe cube directions (1, -v, -u); projected coordinates
+  // scale them by one half. Cover narrow, square, degenerate and rotated quads.
+  const Witness witnesses[] = {
+      {0.5f, 0, 0, 0.03125f, 0x40800000u},
+      {0.25f, 0, 0, 0.0625f, 0x40400000u},
+      {0.0625f, 0, 0, 0.5f, 0x40800000u},
+      {0.0625f, 0, 0, 0.0625f, 0x3f800000u},
+      {0.03125f, 0, 0, 0.03125f, 0x00000000u},
+      {0.5f, 0, 0, 0, 0x40800000u},
+      {0.5f, 0.125f, 0, 0.03125f, 0x40800000u},
+      {0.25f, 0.125f, 0.125f, 0.25f, 0x406b0000u},
+      // The same-face and explicit-gradient controls retain magnitude rounding.
+      {-0x1.3d50000000000p-8f, -0x1.2bb5a00000000p-3f, -0x1.531b800000000p-5f,
+       -0x1.0aa0000000000p-3f, 0x40358000u},
+      {0x1.09cb800000000p-5f, -0x1.93e0000000000p-5f, 0x1.4d64800000000p-5f, -0x1.4ced000000000p-5f,
+       0x3fa50000u},
+  };
+  for (uint32_t opcode : {27u, 28u})
+    for (const auto &witness : witnesses) {
+      SCOPED_TRACE(testing::Message() << opcode << ", " << witness.dxu << ", " << witness.dyv);
+      wave_->set_exec(15);
+      wave_->debug_write_vgpr(12, 31, 0xdeadbeef);
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        const uint32_t offset = opcode == 28 ? 4 : 0;
+        const float gradients[] = {witness.dxu, witness.dxv, witness.dyu, witness.dyv};
+        for (uint32_t i = 0; i < offset; ++i)
+          wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(gradients[i] * 0.5f));
+        const float u = 0.125f + (lane & 1) * witness.dxu + (lane >> 1) * witness.dyu;
+        const float v = 0.25f + (lane & 1) * witness.dxv + (lane >> 1) * witness.dyv;
+        wave_->debug_write_vgpr(offset, lane, std::bit_cast<uint32_t>(1.5f + u * 0.5f));
+        wave_->debug_write_vgpr(offset + 1, lane, std::bit_cast<uint32_t>(1.5f + v * 0.5f));
+        wave_->debug_write_vgpr(offset + 2, lane, 0);
+      }
+      ASSERT_NO_FATAL_FAILURE(sample(opcode, 3));
+      for (uint32_t lane = 0; lane < 4; ++lane)
+        for (uint32_t c = 0; c < 4; ++c)
+          EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witness.expected);
+      EXPECT_EQ(wave_->debug_read_vgpr(12, 31), 0xdeadbeefu);
+    }
+
+  // One quad spans +Y, +X and +Z. Both cards share the origin's footprint
+  // across all lanes; unfolding onto lane 3's face instead gives mip 3.
+  const float corner[4][3] = {{1.9375f, 1.96875f, 2.0f},
+                              {1.90625f, 1.9375f, 2.0f},
+                              {1.0625f, 1.03125f, 0.0f},
+                              {1.9375f, 1.03125f, 4.0f}};
+  wave_->set_exec(15);
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    for (uint32_t c = 0; c < 3; ++c)
+      wave_->debug_write_vgpr(c, lane, std::bit_cast<uint32_t>(corner[lane][c]));
+  ASSERT_NO_FATAL_FAILURE(sample(27, 3));
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), 0x40390000u);
+  // Captured halfway cases distinguish source-face rounding from magnitude
+  // rounding and cover both signs of the unfolded coordinate transform.
+  struct CornerWitness {
+    uint32_t coordinates[4][3];
+    uint32_t expected;
+  };
+  const CornerWitness corner_witnesses[] = {
+      {{{0x3f859aefu, 0x3f82ceeau, 0x00000000u},
+        {0x3ff9713du, 0x3ffab465u, 0x40000000u},
+        {0x3ffa79eau, 0x3ffd0b48u, 0x40000000u},
+        {0x3ffb9eacu, 0x3f856c1fu, 0x40800000u}},
+       0x40350000u},
+      {{{0x3ffd516du, 0x3f82e7cdu, 0x40400000u},
+        {0x3fff6504u, 0x3fffc00du, 0x40800000u},
+        {0x3fffec36u, 0x3f804df3u, 0x40400000u},
+        {0x3fff33d9u, 0x3fff943eu, 0x40800000u}},
+       0x3fa40000u},
+      {{{0x3ffa6511u, 0x3f82ceeau, 0x3f800000u},
+        {0x3f868ec3u, 0x3ffab465u, 0x40000000u},
+        {0x3f858616u, 0x3ffd0b48u, 0x40000000u},
+        {0x3f846154u, 0x3f856c1fu, 0x40800000u}},
+       0x40358000u},
+      {{{0x3f859aefu, 0x3ffd3116u, 0x00000000u},
+        {0x3ff9713du, 0x3f854b9bu, 0x40400000u},
+        {0x3ffa79eau, 0x3f82f4b8u, 0x40400000u},
+        {0x3ffb9eacu, 0x3ffa93e1u, 0x40800000u}},
+       0x40350000u},
+      {{{0x3ffd516du, 0x3ffd1833u, 0x40400000u},
+        {0x3f809afcu, 0x3fffc00du, 0x40a00000u},
+        {0x3fffec36u, 0x3fffb20du, 0x40400000u},
+        {0x3f80cc27u, 0x3fff943eu, 0x40a00000u}},
+       0x3fa40000u},
+      {{{0x3ffa6511u, 0x3ffd3116u, 0x00000000u},
+        {0x3ff9713du, 0x3ffab465u, 0x40400000u},
+        {0x3ffa79eau, 0x3ffd0b48u, 0x40400000u},
+        {0x3f846154u, 0x3ffa93e1u, 0x40a00000u}},
+       0x40350000u},
+  };
+  for (const auto &witness : corner_witnesses) {
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      for (uint32_t c = 0; c < 3; ++c)
+        wave_->debug_write_vgpr(c, lane, witness.coordinates[lane][c]);
+    ASSERT_NO_FATAL_FAILURE(sample(27, 3));
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witness.expected);
+  }
+  // A non-power-of-two extent distinguishes the parallel-coordinate rule and
+  // the 24-bit reflected sum before derivative conversion.
+  setup_cube(127);
+  const CornerWitness non_power_of_two[] = {
+      {{{0x3ffad4f9u, 0x3ffe2842u, 0x40800000u},
+        {0x3ff94b3bu, 0x3ff5b576u, 0x40800000u},
+        {0x3f860d2au, 0x3ff95142u, 0x00000000u},
+        {0x3ff7d038u, 0x3ffd6624u, 0x40800000u}},
+       0x40710000u},
+      {{{0x3ff98d25u, 0x3ff47332u, 0x40400000u},
+        {0x3f897a5au, 0x3ff33712u, 0x40a00000u},
+        {0x3ffa12a5u, 0x3ffe95a0u, 0x00000000u},
+        {0x3f886537u, 0x3ffd4abau, 0x40a00000u}},
+       0x40988000u},
+      {{{0x3fff5614u, 0x3f8042ecu, 0x40400000u},
+        {0x3f80c7d0u, 0x3fffebfau, 0x00000000u},
+        {0x3ffedf04u, 0x3fff3680u, 0x40800000u},
+        {0x3ffe93e6u, 0x3f80aeb5u, 0x40400000u}},
+       0x3ef40000u},
+      {{{0x3f80d7d5u, 0x3fff64bcu, 0x40400000u},
+        {0x3f807792u, 0x3fff4c93u, 0x40400000u},
+        {0x3f802f9bu, 0x3fffbd84u, 0x3f800000u},
+        {0x3fffdf89u, 0x3fffbeddu, 0x40a00000u}},
+       0x3d800000u},
+  };
+  for (const auto &witness : non_power_of_two) {
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      for (uint32_t c = 0; c < 3; ++c)
+        wave_->debug_write_vgpr(c, lane, witness.coordinates[lane][c]);
+    ASSERT_NO_FATAL_FAILURE(sample(27, 3));
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witness.expected);
+  }
+}
+
 TEST_P(GraphicsExportTest, Fp32FilteringMatchesPhysicalRoundingAndSpecialValues) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   struct Witness {
