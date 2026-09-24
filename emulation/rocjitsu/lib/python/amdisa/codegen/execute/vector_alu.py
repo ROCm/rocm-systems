@@ -575,7 +575,7 @@ def gen_vector_binop(
             'max': 'std::fmax(sv0, sv1)',
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
-            'fmac': f'std::fma(sv0, sv1, std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({d}, lane)))',
+            'fmac': f'amdgpu::fp_mode::fma_f32(sv0, sv1, std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({d}, lane)), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())',
             'ldexp': 'std::ldexp(sv0, static_cast<int>(sv1_i))',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
@@ -935,7 +935,7 @@ def gen_vector_ternary(
             L.extend(vop3_src_mod('c', 2, has_abs))
         f_map = {
             'mad': 'a * b + c',
-            'fma': 'std::fma(a, b, c)',
+            'fma': 'amdgpu::fp_mode::fma_f32(a, b, c, wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())',
             'min3': 'std::fmin(std::fmin(a, b), c)',
             'max3': 'std::fmax(std::fmax(a, b), c)',
             'minimum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',

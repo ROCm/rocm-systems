@@ -211,6 +211,39 @@ TEST(GraphicsRasterMathTest, InterpolationMatchesPhysicalRdna4QuadInputs) {
   }
 }
 
+TEST(GraphicsRasterMathTest, AttributeDifferencesMatchPhysicalInterpolation) {
+  // Raw RDNA3/4 outputs from an 8x8 right triangle. Independent controls cover
+  // cancellation, operand alignment and normalization across both signs.
+  struct Case {
+    std::array<float, 3> values;
+    int x, y;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {{{0x1.f2addcp+15f, 0x1.8eee8ep-5f, -0x1.2bd482p+23f}}, 0, 0, 0xc908477fu},
+      {{{0x1.c50a4ap+24f, 0x1.b9c84ep+16f, -0x1.f4596p+2f}}, 0, 1, 0x4ba9f1aau},
+      {{{0x1.1f2552p-24f, -0x1.e7792ap-4f, 0x1.820c08p-38f}}, 0, 0, 0xbbf3bc16u},
+      {{{0x1.b9a9c8p-11f, 0x1.d29e82p-34f, -0x1.b39ab6p+13f}}, 0, 0, 0xc459cd4eu},
+      {{{0x1.2e2b76p+25f, 0x1.e556ap-25f, -0x1.98d974p+33f}}, 0, 0, 0xce442989u},
+      {{{0x1.ff268ep-26f, 0x1.017be2p-25f, 0x1.018d58p-25f}}, 1, 0, 0x33000742u},
+      {{{0x1.0086fcp-31f, 0x1.fd5f6ap-32f, 0x1.ff00c2p-32f}}, 0, 1, 0x30001c26u},
+      {{{-0x1.ffe8fap-1f, -0x1.006c56p+0f, -0x1.01271p+0f}}, 0, 3, 0xbf80410du},
+      {{{0x1.013ecep+62f, 0x1.ffba0ep+61f, 0x1.fe9378p+61f}}, 3, 0, 0x5e80425bu},
+      {{{-0x1.d0093p+103f, 0x1.d0093p+103f, 0x1.d0092ep+103f}}, 3, 0, 0xe6000000u},
+      {{{-0x1.e57b7p-4f, -0x1.e57b7p-28f, 0x1.e57b7p-28f}}, 0, 0, 0xbdd46602u},
+      {{{-0x1.a69a9cp-111f, -0x1.ea8d5ep-106f, 0x1.ea7672p-104f}}, 0, 0, 0x09a0cd18u},
+      {{{-0x1.0121ecp+97f, 0x1.0121ecp+97f, 0x1.0121eap+97f}}, 0, 0, 0xefc0d971u},
+      {{{0x1.eabfp+80f, 0x1.eabfp+56f, -0x1.eabfp+56f}}, 1, 2, 0x67755f80u},
+  };
+  for (const auto &test : cases) {
+    const float p10 = amdgpu::raster::attribute_difference(test.values[1], test.values[0]);
+    const float p20 = amdgpu::raster::attribute_difference(test.values[2], test.values[0]);
+    const float result =
+        std::fma(p20, (test.y + 0.5f) / 8, std::fma(p10, (test.x + 0.5f) / 8, test.values[0]));
+    EXPECT_EQ(std::bit_cast<uint32_t>(result), test.expected);
+  }
+}
+
 TEST(GraphicsRasterMathTest, WeightedGradientsMatchPhysicalInterpolationPlanes) {
   // Gradients recovered from raw pull-model values across rotating cube faces.
   // The last two cases exercise cancellation in the reciprocal-W numerator.
@@ -233,6 +266,269 @@ TEST(GraphicsRasterMathTest, WeightedGradientsMatchPhysicalInterpolationPlanes) 
     EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::raster::plane_gradient(
                   test.edge1, test.edge2, test.delta1, test.delta2, test.inverse_area)),
               test.expected);
+}
+
+TEST(GraphicsRasterMathTest, VertexDifferencesMatchPhysicalReciprocalW) {
+  // Raw pull-model W values captured on both physical RDNA3 and RDNA4.
+  // Unequal vertex W values distinguish FP32 truncation of the differences
+  // from both wide subtraction and rounding to nearest before weighting.
+  // The last two cases straddle the 26-exponent operand cutoff.
+  struct Case {
+    std::array<std::array<float, 3>, 3> positions; // Homogeneous X, Y, W.
+    uint32_t pixel, expected;
+  };
+  const Case cases[] = {
+      {{{{-0x1.e40cp-1f, 0x1.33a78ep-1f, 0x1.841e4p+0f},
+         {-0x1.03b21ap+9f, 0x1.caffdp+7f, 0x1.16f4aep+9f},
+         {-0x1.ea0b2ep-3f, 0x1.9fd112p+0f, 0x1.d14486p-1f}}},
+       12,
+       0x3e9e2303u},
+      {{{{0x1.deb3f4p-1f, -0x1.630bccp-1f, 0x1.03deaap+1f},
+         {-0x1.503afcp-4f, -0x1.f27acep-6f, 0x1.dc85d2p-5f},
+         {-0x1.aaa884p+4f, 0x1.066592p+2f, 0x1.119ebcp+4f}}},
+       4,
+       0x40ca85bcu},
+      {{{{0x1.08077ap+3f, 0x1.871c58p+4f, 0x1.3ed0c2p+4f},
+         {0x1.644c9cp+7f, -0x1.cf06acp+3f, 0x1.9d3fccp+6f},
+         {-0x1.46fbf4p+5f, -0x1.035e62p+5f, 0x1.625e1ap+4f}}},
+       1,
+       0x3cfed2a4u},
+      {{{{-0x1.17d4c4p-11f, 0x1.228112p-6f, 0x1.f1ec8ap-6f},
+         {0x1.d51e56p-8f, 0x1.a18582p-6f, 0x1.c210c8p-7f},
+         {0x1.843394p-12f, -0x1.0bc392p-14f, 0x1.208b8cp-12f}}},
+       14,
+       0x43e43e50u},
+      {{{{-1, -1, 1}, {0x1.8p24f, -0x1.8p24f, 0x1.8p24f}, {-1, 1, 1}}}, 2, 0x3ec00001u},
+      {{{{-1, -1, 1}, {0x1.8p25f, -0x1.8p25f, 0x1.8p25f}, {-1, 1, 1}}}, 2, 0x3ec00000u},
+  };
+  for (const auto &test : cases) {
+    struct Vertex {
+      double x, y;
+      float w, reciprocal_w;
+    };
+    std::array<Vertex, 3> vertices;
+    for (uint32_t i = 0; i < 3; ++i) {
+      const auto &p = test.positions[i];
+      vertices[i] = {amdgpu::raster::viewport_coordinate(p[0], p[2], 2, 2),
+                     amdgpu::raster::viewport_coordinate(p[1], p[2], 2, 2), p[2],
+                     amdgpu::raster::reciprocal(p[2])};
+    }
+    const auto first = std::min_element(vertices.begin(), vertices.end(),
+                                        [](Vertex a, Vertex b) { return a.w < b.w; });
+    std::rotate(vertices.begin(), first, vertices.end());
+    const auto &[a, b, c] = vertices;
+    const double area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const float inverse_area = amdgpu::raster::truncate_float(1.0 / area);
+    const float delta_b = amdgpu::raster::vertex_difference(b.reciprocal_w, a.reciprocal_w);
+    const float delta_c = amdgpu::raster::vertex_difference(c.reciprocal_w, a.reciprocal_w);
+    const amdgpu::raster::Plane plane{
+        amdgpu::raster::plane_gradient(c.y - a.y, a.y - b.y, delta_b, delta_c, inverse_area),
+        amdgpu::raster::plane_gradient(a.x - c.x, b.x - a.x, delta_b, delta_c, inverse_area),
+        a.reciprocal_w};
+    const uint32_t x = test.pixel % 4, y = test.pixel / 4;
+    EXPECT_EQ(std::bit_cast<uint32_t>(plane.at_quad((x & ~1u) + 0.5 - a.x, (y & ~1u) + 0.5 - a.y,
+                                                    (x & 1) + 2 * (y & 1))),
+              test.expected);
+  }
+}
+
+TEST(GraphicsRasterMathTest, DepthTilesMatchPhysicalRdna3AndRdna4) {
+  // Raw gl_FragCoord.z witnesses exercise unequal slopes, tile boundaries,
+  // and negative tile-center depths in otherwise visible triangles. Power-of-two
+  // spans separate evaluation precision from reciprocal-area approximation.
+  struct Case {
+    std::array<float, 3> z;
+    double origin_x, origin_y, span_x, span_y;
+    int x, y;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {{0x1.61f094p-10f, 0x1.80ed3p-6f, 0x1.b1d6fcp-1f}, 0, 0, 8, 8, 0, 0, 0x3d63c5fc},
+      {{0x1.61f094p-10f, 0x1.80ed3p-6f, 0x1.b1d6fcp-1f}, 0, 0, 8, 8, 0, 2, 0x3e88c240},
+      {{0x1.c218d2p-8f, 0x1.30ef8cp-4f, 0x1.f9df8p-1f}, 0, 0, 8, 8, 0, 0, 0x3d944e09},
+      {{0x1.c218d2p-8f, 0x1.30ef8cp-4f, 0x1.f9df8p-1f}, 0, 0, 8, 8, 0, 2, 0x3ea2aa55},
+      {{0x1.a1b06ep-8f, 0x1.1b8234p-6f, 0x1.130d44p-1f}, 0, 0, 8, 8, 0, 0, 0x3d24cc50},
+      {{0x1.a1b06ep-8f, 0x1.1b8234p-6f, 0x1.130d44p-1f}, 0, 0, 8, 8, 0, 2, 0x3e311805},
+      {{0x1.c589bcp-7f, 0x1.5c398cp-6f, 0x1.357a4ep-1f}, 0, 0, 8, 8, 0, 0, 0x3d51c91d},
+      {{0x1.c589bcp-7f, 0x1.5c398cp-6f, 0x1.357a4ep-1f}, 0, 0, 8, 8, 0, 2, 0x3e4ba45a},
+      {{0x1.28e624p-5f, 0x1.611d44p-1f, 0x1.56aff2p-7f}, 0, 0, 8, 8, 0, 0, 0x3d9a9058},
+      {{0x1.28e624p-5f, 0x1.611d44p-1f, 0x1.56aff2p-7f}, 0, 0, 8, 8, 0, 2, 0x3d8d5cb6},
+      {{0x1.efd10ap-5f, 0x1.9178ecp-1f, 0x1.aa8638p-4f}, 0, 0, 8, 8, 0, 0, 0x3dde2826},
+      {{0x1.efd10ap-5f, 0x1.9178ecp-1f, 0x1.aa8638p-4f}, 0, 0, 8, 8, 0, 2, 0x3df47bdd},
+      {{0x1.61f094p-10f, 0x1.80ed3p-6f, 0x1.b1d6fcp-1f}, 0, 0, 256, 256, 7, 7, 0x3cdb69da},
+      {{0x1.61f094p-10f, 0x1.80ed3p-6f, 0x1.b1d6fcp-1f}, 0, 0, 256, 256, 8, 8, 0x3cf731a1},
+      {{0x1.61f094p-10f, 0x1.80ed3p-6f, 0x1.b1d6fcp-1f}, 0, 0, 256, 256, 31, 32, 0x3de44db9},
+      {{0x1.61f094p-10f, 0x1.80ed3p-6f, 0x1.b1d6fcp-1f}, 0, 0, 256, 256, 127, 127, 0x3ede10f3},
+      {{0x1.c218d2p-8f, 0x1.30ef8cp-4f, 0x1.f9df8p-1f}, 0, 0, 256, 256, 7, 7, 0x3d19fafc},
+      {{0x1.c218d2p-8f, 0x1.30ef8cp-4f, 0x1.f9df8p-1f}, 0, 0, 256, 256, 8, 8, 0x3d2ac2a4},
+      {{0x1.c218d2p-8f, 0x1.30ef8cp-4f, 0x1.f9df8p-1f}, 0, 0, 256, 256, 31, 32, 0x3e0f1968},
+      {{0x1.c218d2p-8f, 0x1.30ef8cp-4f, 0x1.f9df8p-1f}, 0, 0, 256, 256, 127, 127, 0x3f07791e},
+      {{0x1.a1b06ep-8f, 0x1.1b8234p-6f, 0x1.130d44p-1f}, 0, 0, 256, 256, 7, 7, 0x3cb63c42},
+      {{0x1.a1b06ep-8f, 0x1.1b8234p-6f, 0x1.130d44p-1f}, 0, 0, 256, 256, 8, 8, 0x3cc7926b},
+      {{0x1.a1b06ep-8f, 0x1.1b8234p-6f, 0x1.130d44p-1f}, 0, 0, 256, 256, 31, 32, 0x3d99d32f},
+      {{0x1.a1b06ep-8f, 0x1.1b8234p-6f, 0x1.130d44p-1f}, 0, 0, 256, 256, 127, 127, 0x3e8d69f8},
+      {{0x1.2a4644p-1f, 0x1.344512p-17f, 0x1.a61d1ep-17f}, 0, -0.75, 1, 8, 0, 0, 0x3e4d1209},
+      {{0x1.908346p-12f, 0x1.d4e288p-12f, 0x1.1a08bcp-16f}, -1.25, 0.25, 8, 1, 0, 0, 0x399fdfb6},
+      {{0x1.4e9ceap-16f, 0x1.81919ep-19f, 0x1.5d1c5p-21f}, -1.25, 1.5, 4, 1, 1, 1, 0x3709b38c},
+  };
+  for (const auto &test : cases) {
+    const amdgpu::raster::DepthPlane plane{
+        amdgpu::raster::vertex_difference(test.z[1], test.z[0]) / test.span_x,
+        amdgpu::raster::vertex_difference(test.z[2], test.z[0]) / test.span_y, test.z[0],
+        test.origin_x, test.origin_y};
+    EXPECT_EQ(std::bit_cast<uint32_t>(plane.at(test.x, test.y)), test.expected);
+  }
+}
+
+TEST(GraphicsRasterMathTest, AreaReciprocalMatchesPhysicalInterpolationBoundaries) {
+  // Each inverse is isolated by all three raw pull-model planes on both cards.
+  // Exact division followed by truncation misses each boundary by one FP32 step.
+  struct Case {
+    double area;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {-0x1.cd58p+2, 0xbe0e0df9u},       {0x1.31b7a8p+5, 0x3cd65e2fu},
+      {-0x1.82db3p+4, 0xbd296818u},      {0x1.bc544p+5, 0x3c937e89u},
+      {0x1.4e50ep+5, 0x3cc407b8u},       {0x1.62182p+3, 0x3db914a7u},
+      {0x1.6bb84p+4, 0x3d342ec5u},       {-0x1.7895cp+3, 0xbdae06f2u},
+      {-0x1.116bp+5, 0xbcefb10fu},       {-0x1.7bd4p+1, 0xbeac8a8bu},
+      {0x1.29620eb378p+25, 0x32dc602fu}, {0x1.29dd006dep+19, 0x35dc0539u},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(
+                  amdgpu::raster::truncate_float(amdgpu::raster::area_reciprocal(test.area))),
+              test.expected);
+}
+
+TEST(GraphicsRasterMathTest, AreaReciprocalMatchesPhysicalDepthGrid) {
+  // Raw gl_FragCoord.z digest from 32768 triangles captured on RDNA3/4.
+  // The numerator is exactly one; the regular area grid spans every seed segment.
+  uint64_t digest = 14695981039346656037ull;
+  for (uint32_t index = 0; index < 32768; ++index) {
+    const double area = (2048 + index / 16.0) * 8;
+    const amdgpu::raster::DepthPlane plane{
+        amdgpu::raster::depth_gradient(1, amdgpu::raster::area_reciprocal(area)), 0, 0, 0, 0};
+    for (int x = 0; x < 128; ++x)
+      digest = (digest ^ std::bit_cast<uint32_t>(plane.at(x, 0))) * 1099511628211ull;
+  }
+  EXPECT_EQ(digest, 0x7854ef00633a3c21ull);
+}
+
+TEST(GraphicsRasterMathTest, AreaReciprocalTruncatesWideInputsBeforeSeed) {
+  // Raw RDNA3/4 depth values from large triangles with numerator exactly one.
+  // The last four areas become seed boundaries after input truncation, so
+  // discarded input bits must not contribute to the seed's sticky bit.
+  struct Case {
+    double area;
+    int x;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {0x1.3a3e5945e8ep+29, 0, 0x30508d37u},   {0x1.c6caa591adp+26, 104, 0x356b4a4au},
+      {0x1.085e7be51d8p+28, 48, 0x343bdbccu},  {0x1.71b5e6b5afep+28, 63, 0x342fe0cdu},
+      {0x1.bbf68001aap+27, 52, 0x34722eb2u},   {0x1.5eca8000e64p+29, 0, 0x303ad2d0u},
+      {0x1.065e00017f38p+29, 65, 0x33ffa448u}, {0x1.17078000d15p+29, 123, 0x34629d3cu},
+  };
+  for (const auto &test : cases) {
+    const amdgpu::raster::DepthPlane plane{
+        amdgpu::raster::depth_gradient(1, amdgpu::raster::area_reciprocal(test.area)), 0, 0, 0, 0};
+    EXPECT_EQ(std::bit_cast<uint32_t>(plane.at(test.x, 0)), test.expected);
+  }
+}
+
+TEST(GraphicsRasterMathTest, DepthGradientMatchesPhysicalSignedAndStickyInputs) {
+  // Raw positive/negative depth captures distinguish seed sticky bits, the
+  // gradient product width, and truncation toward zero from rounding downward.
+  struct Case {
+    double area;
+    float numerator;
+    double base;
+    int x;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {0x1.1b09a00000000p+14, 0x1.0000000000000p+0f, 0x0.0p+0, 57, 0x3b500765u},
+      {0x1.1c03000000000p+14, 0x1.0000000000000p+0f, 0x0.0p+0, 37, 0x3b0734a7u},
+      {0x1.34a3600000000p+14, 0x1.0000000000000p+0f, 0x0.0p+0, 20, 0x3a8807a3u},
+      {0x1.548fa00000000p+14, 0x1.0000000000000p+0f, 0x0.0p+0, 81, 0x3b750df0u},
+      {0x1.680ba00000000p+14, 0x1.0000000000000p+0f, 0x0.0p+0, 3, 0x391f44cfu},
+      {0x1.a04e200000000p+14, 0x1.0000000000000p+0f, 0x0.0p+0, 17, 0x3a2c2e6eu},
+      {0x1.e3bd818000000p+16, 0x1.c93f360000000p+0f, 0x0.0p+0, 21, 0x39a29477u},
+      {0x1.29ef6ec000000p+17, 0x1.5645080000000p-3f, 0x0.0p+0, 34, 0x381e88feu},
+      {0x1.15f0bcc000000p+17, 0x1.3efa920000000p+5f, 0x0.0p+0, 65, 0x3c9657a6u},
+      {0x1.6ecbb6b000000p+17, 0x1.2c06320000000p+5f, 0x0.0p+0, 39, 0x3c013cd6u},
+      {0x1.3bb2c28000000p+16, 0x1.c225160000000p+3f, 0x0.0p+0, 66, 0x3c3da409u},
+      {0x1.f684445000000p+17, 0x1.2053500000000p+5f, 0x0.0p+0, 105, 0x3c7220c1u},
+      {0x1.aa767b8000000p+18, -0x1.0000020000000p+0f, 0x1.0000000000000p-1, 21, 0x3efff98cu},
+      {0x1.9192488000000p+16, -0x1.00000e0000000p+0f, 0x1.0000000000000p-1, 110, 0x3eff731du},
+      {0x1.452dcb0000000p+14, -0x1.0000080000000p+0f, 0x1.0000000000000p-1, 120, 0x3efd0915u},
+      {0x1.800b140000000p+15, -0x1.ffffe20000000p-1f, 0x1.0000000000000p-1, 47, 0x3eff8159u},
+      {0x1.e1d91a8000000p+14, -0x1.0000040000000p+0f, 0x1.0000000000000p-1, 38, 0x3eff5c5du},
+      {0x1.f9d8780000000p+13, -0x1.fffffc0000000p-1f, 0x1.0000000000000p-1, 78, 0x3efd845cu},
+  };
+  for (const auto &test : cases) {
+    const double inverse = amdgpu::raster::area_reciprocal(test.area);
+    const amdgpu::raster::DepthPlane plane{amdgpu::raster::depth_gradient(test.numerator, inverse),
+                                           0, test.base, 0, 0};
+    EXPECT_EQ(std::bit_cast<uint32_t>(plane.at(test.x, 0)), test.expected);
+  }
+}
+
+TEST(GraphicsRasterMathTest, NegativeDepthSlopesMatchPhysicalPacking) {
+  // Raw RDNA3/4 depth captures bracket 27-bit midpoint boundaries and translate
+  // two-slope triangles across tile positions. Keep the original setup slopes
+  // for the center; only negative local slopes round, with ties away from zero.
+  struct Case {
+    amdgpu::raster::DepthPlane plane;
+    int x, y;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {{-0x1.0708105e00000p-5, 0x0.0p+0, 0x1.fea6a80000000p-4, 0x0.0p+0, 0x0.0p+0},
+       0,
+       0,
+       0x3dde7251u},
+      {{-0x1.c03c36de00000p-5, 0x0.0p+0, 0x1.ac19840000000p-3, 0x0.0p+0, 0x0.0p+0},
+       3,
+       0,
+       0x3c8f934fu},
+      {{-0x1.088ea01e00000p-4, 0x0.0p+0, 0x1.dc68d80000000p-3, 0x0.0p+0, 0x0.0p+0},
+       0,
+       0,
+       0x3e4d2297u},
+      {{-0x1.bf5a09a000000p-11, 0x0.0p+0, 0x1.ea9a000000000p-9, 0x0.0p+0, 0x0.0p+0},
+       2,
+       0,
+       0x3ad301bau},
+      {{-0x1.05284ee000000p-5, 0x0.0p+0, 0x1.64cbd20000000p-3, 0x0.0p+0, 0x0.0p+0},
+       3,
+       0,
+       0x3d80488du},
+      {{-0x1.35ead22000000p-2, 0x0.0p+0, 0x1.3bf86a0000000p-1, 0x0.0p+0, 0x0.0p+0},
+       1,
+       0,
+       0x3e271099u},
+      {{-0x1.029a972200000p-8, 0x0.0p+0, 0x1.b0dbc20000000p-7, 0x0.0p+0, 0x0.0p+0},
+       0,
+       0,
+       0x3c381a8eu},
+      {{-0x1.be34b06200000p-6, 0x0.0p+0, 0x1.7f05bc0000000p-4, 0x0.0p+0, 0x0.0p+0},
+       0,
+       0,
+       0x3da39f93u},
+      {{-0x1.276a5a6200000p-9, 0x0.0p+0, 0x1.c5cc200000000p-7, 0x0.0p+0, 0x0.0p+0},
+       1,
+       0,
+       0x3c2b821fu},
+      {{-0x1.03b33c2000000p-3, -0x1.3510a7e400000p-3, 0x1.59b10c0000000p-2, 0x1.2b00000000000p+3,
+        0x1.f600000000000p+0},
+       7,
+       3,
+       0x3eada23au},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(test.plane.at(test.x, test.y)), test.expected);
 }
 
 TEST(GraphicsRasterMathTest, SubpixelQuantizationRoundsMidpointsToEven) {
@@ -289,6 +585,34 @@ TEST(GraphicsRasterMathTest, ViewportScalePrecedesPerspectiveDivision) {
   for (const auto &test : cases)
     EXPECT_EQ(amdgpu::raster::viewport_coordinate(std::bit_cast<float>(test.position),
                                                   std::bit_cast<float>(test.w), 210, 210),
+              test.expected);
+}
+
+TEST(GraphicsRasterMathTest, ViewportDepthMatchesPhysicalRdna3AndRdna4) {
+  // Raw gl_FragCoord.z captures from triangles with constant Z and W isolate
+  // viewport arithmetic from depth interpolation. Include reversed and narrow
+  // depth ranges, which distinguish scaling before division from scaling NDC.
+  struct Case {
+    float z, w, scale, offset;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {0x1.18caaep+24f, 0x1.504b1ap+26f, 1, 0, 0x3e55bffa},
+      {0x1.45e0d2p-5f, 0x1.8489a6p-5f, 1, 0, 0x3f56b701},
+      {0x1.754f2p-7f, 0x1.26cd38p-6f, 1, 0, 0x3f221650},
+      {0x1.18caaep+24f, 0x1.504b1ap+26f, .75f, .125f, 0x3e9027fd},
+      {0x1.45e0d2p-5f, 0x1.8489a6p-5f, .75f, .125f, 0x3f410940},
+      {0x1.36f0f2p+3f, 0x1.45d762p+6f, .75f, .125f, 0x3e5b9c2e},
+      {0x1.45e0d2p-5f, 0x1.8489a6p-5f, -.75f, 1, 0x3ebded80},
+      {0x1.e36a64p+12f, 0x1.a9922cp+13f, -.75f, 1, 0x3f12f392},
+      {0x1.12b2aap-24f, 0x1.4e3484p-23f, -.75f, 1, 0x3f3117e7},
+      {0x1.18caaep+24f, 0x1.504b1ap+26f, 0x1.47aep-8f, .31f, 0x3e9f411e},
+      {0x1.e36a64p+12f, 0x1.a9922cp+13f, 0x1.47aep-8f, .31f, 0x3ea02c89},
+      {0x1.62a5fcp-6f, 0x1.6553e8p-5f, 0x1.47aep-8f, .31f, 0x3e9ffd8a},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(
+                  amdgpu::raster::viewport_transform(test.z, test.w, test.scale, test.offset)),
               test.expected);
 }
 
@@ -360,8 +684,9 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
       expected = 100 + lane;
     else if (lane >= 8 && lane < 11)
       expected = 110 + lane - 8;
-    if (lane % 4 != 3) // The unused fourth coefficient is unspecified.
+    if (lane % 4 != 3) { // The unused fourth coefficient is unspecified.
       EXPECT_EQ(wave_->debug_read_vgpr(3, lane), expected) << lane;
+    }
   }
 }
 
@@ -370,7 +695,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
   enum class Outcome { Draw, Empty, Reject };
   struct FragmentInputWitness {
     uint32_t xy;
-    std::array<uint32_t, 6> values;
+    std::vector<uint32_t> values;
   };
   struct Case {
     const char *name;
@@ -398,6 +723,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     bool wide_window_scissor = false;
     std::optional<std::array<std::array<float, 4>, 3>> positions{};
     std::optional<FragmentInputWitness> fragment_inputs{};
+    float guard = 16382.5f;
   };
   // Additional coverage masks were captured on physical gfx1100/gfx1201.
   const Case cases[] = {
@@ -420,6 +746,64 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
        .fragment_inputs =
            FragmentInputWitness{
                1, {0x3eb9eebfu, 0x3de83a50u, 0x3f4316d8u, 0x3e73aa10u, 0x40064dbau, 0x3ef3fc08u}}},
+      {.name = "first clipped fan plane",
+       .clip_control = 1u << 19,
+       .inputs = 0x8008,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x6660,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0x1.a68p-4f, 0x1.0308p+1f, 0.5f, 1.0f},
+                                                         {-0x1.03p-1f, -0x1.5f4p-1f, 0.5f, 1.0f},
+                                                         {0x1.98ap-1f, -0x1.5f4p-1f, 0.5f, 1.0f}}},
+       .fragment_inputs = FragmentInputWitness{0x20001, {0x3eb0d289u, 0x3f109cb1u, 0x3f800000u}},
+       .guard = 1.0f},
+      {.name = "second clipped fan plane",
+       .clip_control = 1u << 19,
+       .inputs = 0x8008,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x6660,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0x1.a68p-4f, 0x1.0308p+1f, 0.5f, 1.0f},
+                                                         {-0x1.03p-1f, -0x1.5f4p-1f, 0.5f, 1.0f},
+                                                         {0x1.98ap-1f, -0x1.5f4p-1f, 0.5f, 1.0f}}},
+       .fragment_inputs = FragmentInputWitness{0x20002, {0x3ef221ecu, 0x3eb0d28du, 0x3f800000u}},
+       .guard = 1.0f},
+      {.name = "large guard-band plane 77",
+       .clip_control = 1u << 19,
+       .inputs = 0x8008,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0xffff,
+       .positions =
+           std::array<std::array<float, 4>, 3>{
+               {{0x1.4240f8p+12f, -0x1.5bd2d6p+12f, 0x1.9d4a52p-3f, 0x1.9d4a52p-2f},
+                {-0x1.c59decp+3f, 0x1.0e3f8ep+7f, 0x1.01d442p-8f, 0x1.01d442p-7f},
+                {-0x1.2ebf44p+10f, -0x1.5bea08p+10f, 0x1.9a73aap-5f, 0x1.9a73aap-4f}}},
+       .fragment_inputs = FragmentInputWitness{0x0, {0x3f3f445du, 0x4262cbedu, 0x426fdb72u}}},
+      {.name = "large guard-band plane 101",
+       .clip_control = 1u << 19,
+       .inputs = 0x8008,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0xffff,
+       .positions =
+           std::array<std::array<float, 4>, 3>{
+               {{0x1.a14c92p+11f, -0x1.6fd38cp+11f, 0x1.a0f93p-4f, 0x1.a0f93p-3f},
+                {0x1.3f3308p+4f, 0x1.5d5316p+7f, 0x1.674696p-8f, 0x1.674696p-7f},
+                {-0x1.582426p+9f, -0x1.33a608p+9f, 0x1.88e304p-6f, 0x1.88e304p-5f}}},
+       .fragment_inputs = FragmentInputWitness{0x0, {0x40d2b26eu, 0x3f8db90eu, 0x424624b3u}}},
+      {.name = "large guard-band plane 651",
+       .clip_control = 1u << 19,
+       .inputs = 0x8008,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0xffff,
+       .positions =
+           std::array<std::array<float, 4>, 3>{
+               {{-0x1.0e6bd6p+14f, -0x1.fc483p+13f, 0x1.222636p-1f, 0x1.222636p+0f},
+                {0x1.f3d8eap+12f, -0x1.2deb56p+13f, 0x1.1a2406p-2f, 0x1.1a2406p-1f},
+                {0x1.e1057p+6f, 0x1.595754p+9f, 0x1.4c13fep-6f, 0x1.4c13fep-5f}}},
+       .fragment_inputs = FragmentInputWitness{0x0, {0x3ecb9e89u, 0x413d3646u, 0x4147d4b7u}}},
       {.name = "all vertices behind eye",
        .outcome = Outcome::Empty,
        .clip_control = 1u << 19,
@@ -508,6 +892,30 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
        .triangle = true,
        .expected_coverage = 0x777,
        .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 1e-39f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "zero W and Z",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.0f, 0.0f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "subnormal W and Z",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 1e-39f, 1e-39f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "finite small W at zero Z",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x677,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.0f, 1e-10f},
                                                          {0.75f, -0.5f, 0.25f, 1.0f},
                                                          {0.0f, 0.75f, 0.25f, 1.0f}}}},
       {.name = "guard-band horizontal clipping",
@@ -696,7 +1104,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       state.context_registers[0x91] = 0x3fff3fff;
     if (test.positions) {
       state.context_registers[gfx12 ? 0x10b : 0x2fa] =
-          state.context_registers[gfx12 ? 0x10d : 0x2fc] = std::bit_cast<uint32_t>(16382.5f);
+          state.context_registers[gfx12 ? 0x10d : 0x2fc] = std::bit_cast<uint32_t>(test.guard);
     }
     const float extent = test.extent;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
@@ -725,59 +1133,62 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     }
     const auto dispatch = draw->advance(*access_);
     ASSERT_TRUE(dispatch);
-    ASSERT_EQ(dispatch->total_wgs, 1);
-    wave_->set_wg_coord(0, 0, 0);
-    wave_->set_graphics_stage(draw);
-    draw->initialize(*wave_, 0, 0);
-    EXPECT_EQ(std::popcount(wave_->exec()), (test.triangle || test.viewport_scissor)
-                                                ? std::popcount(test.expected_coverage)
-                                                : std::popcount(test.sample_coverage));
     uint32_t covered_index = 0;
     bool witness_seen = false;
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
-      if (!(wave_->exec() & (uint64_t{1} << lane)))
-        continue;
-      if (test.fragment_inputs && wave_->debug_read_vgpr(6, lane) == test.fragment_inputs->xy) {
-        witness_seen = true;
-        for (uint32_t reg = 0; reg < test.fragment_inputs->values.size(); ++reg)
-          EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), test.fragment_inputs->values[reg])
-              << "register=" << reg << " lane=" << lane;
+    for (uint32_t workgroup = 0; workgroup < dispatch->total_wgs; ++workgroup) {
+      wave_->set_wg_coord(workgroup, 0, 0);
+      wave_->set_graphics_stage(draw);
+      draw->initialize(*wave_, workgroup, 0);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+        if (!(wave_->exec() & (uint64_t{1} << lane)))
+          continue;
+        if (test.fragment_inputs && wave_->debug_read_vgpr(test.fragment_inputs->values.size(),
+                                                           lane) == test.fragment_inputs->xy) {
+          witness_seen = true;
+          for (uint32_t reg = 0; reg < test.fragment_inputs->values.size(); ++reg)
+            EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), test.fragment_inputs->values[reg])
+                << "register=" << reg << " lane=" << lane;
+        }
+        if (test.inputs == 0xaf28) {
+          // Pull I/W, J/W, 1/W; linear I/J; position XYZW; packed XY.
+          const uint32_t x = 1 + covered_index % 2, y = 1 + covered_index / 2;
+          // Screen vertices are (0,0), (0,4), (4,0), with W={1,2,4}.
+          // Barycentric and reciprocal-W values below are exactly representable.
+          const float b1 = (y + 0.5f) / 4, b2 = (x + 0.5f) / 4;
+          const float rw = 1 - b1 - b2 + b1 / 2 + b2 / 4;
+          const float expected[] = {b1 / 2, b2 / 4, rw, b1, b2, x + 0.5f, y + 0.5f, 0, 1.0f / rw};
+          for (uint32_t reg = 0; reg < 9; ++reg)
+            EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), std::bit_cast<uint32_t>(expected[reg]))
+                << "register=" << reg << " lane=" << lane;
+          EXPECT_EQ(wave_->debug_read_vgpr(9, lane), 0u);
+          EXPECT_EQ(wave_->debug_read_vgpr(10, lane), x | (y << 16));
+          for (uint32_t c = 0; c < 4; ++c)
+            for (uint32_t k = 0; k < 3; ++k)
+              EXPECT_EQ(
+                  lds_.read32(wave_->lds_base() + (c * 3 + k) * 4),
+                  test.flat
+                      ? (k ? 0u : 0x7fc00000u + ((test.polygon_mode & (1u << 19)) ? 8u : 0u) + c)
+                      : std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
+        } else if (test.inputs == 0x8402) {
+          EXPECT_EQ(wave_->debug_read_vgpr(2, lane), 0u);
+          const uint32_t packed = wave_->debug_read_vgpr(3, lane);
+          EXPECT_GE(packed & 0xffff, 1u);
+          EXPECT_LT(packed & 0xffff, 3u);
+          EXPECT_GE(packed >> 16, 1u);
+          EXPECT_LT(packed >> 16, 3u);
+        }
+        ++covered_index;
       }
-      if (test.inputs == 0xaf28) {
-        // Pull I/W, J/W, 1/W; linear I/J; position XYZW; packed XY.
-        const uint32_t x = 1 + covered_index % 2, y = 1 + covered_index / 2;
-        // Screen vertices are (0,0), (0,4), (4,0), with W={1,2,4}.
-        // Barycentric and reciprocal-W values below are exactly representable.
-        const float b1 = (y + 0.5f) / 4, b2 = (x + 0.5f) / 4;
-        const float rw = 1 - b1 - b2 + b1 / 2 + b2 / 4;
-        const float expected[] = {b1 / 2, b2 / 4, rw, b1, b2, x + 0.5f, y + 0.5f, 0, 1.0f / rw};
-        for (uint32_t reg = 0; reg < 9; ++reg)
-          EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), std::bit_cast<uint32_t>(expected[reg]))
-              << "register=" << reg << " lane=" << lane;
-        EXPECT_EQ(wave_->debug_read_vgpr(9, lane), 0u);
-        EXPECT_EQ(wave_->debug_read_vgpr(10, lane), x | (y << 16));
-        for (uint32_t c = 0; c < 4; ++c)
-          for (uint32_t k = 0; k < 3; ++k)
-            EXPECT_EQ(
-                lds_.read32(wave_->lds_base() + (c * 3 + k) * 4),
-                test.flat
-                    ? (k ? 0u : 0x7fc00000u + ((test.polygon_mode & (1u << 19)) ? 8u : 0u) + c)
-                    : std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
-      } else if (test.inputs == 0x8402) {
-        EXPECT_EQ(wave_->debug_read_vgpr(2, lane), 0u);
-        const uint32_t packed = wave_->debug_read_vgpr(3, lane);
-        EXPECT_GE(packed & 0xffff, 1u);
-        EXPECT_LT(packed & 0xffff, 3u);
-        EXPECT_GE(packed >> 16, 1u);
-        EXPECT_LT(packed >> 16, 3u);
-      }
-      ++covered_index;
+      // Include helper lanes in exports; only covered fragments may write.
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
     }
-    if (test.fragment_inputs)
+    EXPECT_EQ(covered_index, (test.triangle || test.viewport_scissor)
+                                 ? std::popcount(test.expected_coverage)
+                                 : std::popcount(test.sample_coverage));
+    if (test.fragment_inputs) {
       EXPECT_TRUE(witness_seen);
-    // Include helper lanes in exports; only covered fragments may write.
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-      draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
+    }
     EXPECT_FALSE(draw->advance(*access_));
     for (uint32_t y = 0; y < 4; ++y)
       for (uint32_t x = 0; x < 4; ++x) {
@@ -923,7 +1334,7 @@ TEST_P(GraphicsExportTest, PrimitiveRestartResetsStripWindingAndDropsIncompleteS
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   for (bool last_provoking : {false, true})
     for (uint32_t primitive : {4u, 6u}) {
-      for (const auto [index_type, marker] :
+      for (const auto &[index_type, marker] :
            {std::pair{0u, 0xffffu}, {1u, 0xffffffffu}, {2u, 0xffu}}) {
         amdgpu::Pm4QueueState state;
         state.uconfig_registers[0x242] = primitive;
@@ -951,9 +1362,10 @@ TEST_P(GraphicsExportTest, PrimitiveRestartResetsStripWindingAndDropsIncompleteS
         state.uconfig_registers[0x24b] |= 2;
         amdgpu::GraphicsDraw full_match(state, GetParam(), input.size(), input);
         full_match.initialize(*wave_, 0, 0);
-        if (marker != 0xffffffff)
+        if (marker != 0xffffffff) {
           for (uint32_t i = 0; i < input.size(); ++i)
             EXPECT_EQ(wave_->debug_read_vgpr(gfx12 ? 3 : 5, i), input[i]);
+        }
       }
     }
 }
@@ -974,7 +1386,7 @@ TEST_P(GraphicsExportTest, MergedVertexUserCountExcludesSystemRingPair) {
 TEST_P(GraphicsExportTest, TriangleAndRectangleListsKeepTrailingVerticesWithoutCreatingPrimitives) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   for (uint32_t primitive : {4u, 17u})
-    for (const auto [vertices, instances] :
+    for (const auto &[vertices, instances] :
          {std::pair{4u, 2u}, {5u, 2u}, {31u, 2u}, {32u, 2u}, {64u, 2u}, {65u, 2u}, {3u, 8192u}}) {
       SCOPED_TRACE(testing::Message() << "vertices=" << vertices << ", primitive="
                                       << (primitive == 4 ? "triangle list" : "rectangle list"));
@@ -1284,8 +1696,9 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
       ASSERT_NE(instruction->data(), nullptr);
       const auto *transfer = instruction->data_as<amdgpu::VectorMemState>();
       EXPECT_EQ(transfer->lane_mask, c.out_of_bounds ? 0u : 1u);
-      if (!c.out_of_bounds)
+      if (!c.out_of_bounds) {
         EXPECT_EQ(transfer->per_lane_addr[0], base + c.offset);
+      }
       amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
       pipeline.issue(instruction.release(), *wave_);
       for (uint32_t component = 0; component < 4; ++component)
@@ -1373,8 +1786,9 @@ TEST_P(GraphicsExportTest, CompressedImageTransfersMaterializeClearsAndPreserveS
       EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 10, 10, width, 4, 27)),
                 0xff000000u);
       EXPECT_EQ(memory_.read8(tag), 0xff);
-      if (array)
+      if (array) {
         EXPECT_EQ(memory_.read32(preserved), 0x12345678u);
+      }
       // Filtering must also publish dirty texels before materializing metadata.
       const uint32_t updated = 0x66332211;
       cache_.write(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27),
@@ -1415,8 +1829,9 @@ TEST_P(GraphicsExportTest, CompressedImageTransfersMaterializeClearsAndPreserveS
       pipeline.issue(instruction.release(), *wave_);
       for (uint32_t c = 0; c < 4; ++c)
         EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), c == 3 ? 0x3f800000u : 0);
-      if (array)
+      if (array) {
         EXPECT_EQ(memory_.read32(preserved), 0x12345678u);
+      }
     }
 }
 
@@ -3939,12 +4354,12 @@ TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSepa
   for (uint32_t type : {9u, 13u})
     for (bool a16 : {false, true})
       for (bool array : {false, true})
-        for (const auto [opcode, name] : {std::pair{27u, "IMAGE_SAMPLE"},
-                                          {28u, "IMAGE_SAMPLE_D"},
-                                          {57u, "IMAGE_SAMPLE_D_G16"},
-                                          {29u, "IMAGE_SAMPLE_L"},
-                                          {30u, "IMAGE_SAMPLE_B"},
-                                          {31u, "IMAGE_SAMPLE_LZ"}}) {
+        for (const auto &[opcode, name] : {std::pair{27u, "IMAGE_SAMPLE"},
+                                           {28u, "IMAGE_SAMPLE_D"},
+                                           {57u, "IMAGE_SAMPLE_D_G16"},
+                                           {29u, "IMAGE_SAMPLE_L"},
+                                           {30u, "IMAGE_SAMPLE_B"},
+                                           {31u, "IMAGE_SAMPLE_LZ"}}) {
           SCOPED_TRACE(testing::Message() << "type=" << type << ", a16=" << a16
                                           << ", array=" << array << ", opcode=" << name);
           const std::array<uint32_t, 8> descriptor{0x1000,
@@ -4305,6 +4720,37 @@ TEST_P(GraphicsExportTest, ParameterLoadOutOfRangeDestinationClearsExec) {
   EXPECT_FALSE(wave_->instruction_execution_failed());
 }
 
+TEST_P(GraphicsExportTest, InterpolationPreservesHardwareNanPayloads) {
+  wave_->set_exec(15);
+  for (uint32_t ieee : {0u, 1u}) {
+    wave_->set_mode_raw(ieee << 9);
+    wave_->debug_write_vgpr(0, 0, 0xffc01234u);
+    wave_->debug_write_vgpr(0, 1, 0x7f801abcu);
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      wave_->debug_write_vgpr(1, lane, 0x3f800000u);
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+      run(rdna4::build_vinterp(0, {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 256}));
+    else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+      run(rdna3_5::build_vinterp(0, {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 256}));
+    else
+      run(rdna3::build_vinterp(0, {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 256}));
+    const uint32_t expected =
+        ieee || GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x7fc01abcu : 0x7f801abcu;
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      EXPECT_EQ(wave_->debug_read_vgpr(0, lane), expected);
+  }
+}
+
+TEST(GraphicsRasterMathTest, ParameterDifferencesPreserveReferenceNan) {
+  const auto difference = [](uint32_t a, uint32_t b) {
+    return std::bit_cast<uint32_t>(
+        amdgpu::raster::attribute_difference(std::bit_cast<float>(a), std::bit_cast<float>(b)));
+  };
+  EXPECT_EQ(difference(0x7fc01234u, 0xff801abcu), 0xff801abcu);
+  EXPECT_EQ(difference(0x3f800000u, 0x7f801abcu), 0x7f801abcu);
+  EXPECT_EQ(difference(0xff801abcu, 0x3f800000u), 0xff801abcu);
+}
+
 TEST_P(GraphicsExportTest, SecondInterpolationStepUsesP20AndModifiers) {
   wave_->set_exec(15);
   wave_->set_mode_raw(0xf0);
@@ -4602,13 +5048,13 @@ TEST(GraphicsImageMetadataTest, DccClearsPreserveNeighborBlocksAndLaterWrites) {
   const auto access = vm.snapshot(address_space);
   ASSERT_TRUE(access);
   constexpr uint64_t base = 0x200000, metadata = 0x100700;
-  for (const auto [key, expected] : {std::pair{0u, 0u},
-                                     {1u, 0x76543210u},
-                                     {2u, 0xffffffffu},
-                                     {4u, 0x3c003c00u},
-                                     {6u, 0x3f800000u},
-                                     {8u, 0xff000000u},
-                                     {10u, 0x00ffffffu}}) {
+  for (const auto &[key, expected] : {std::pair{0u, 0u},
+                                      {1u, 0x76543210u},
+                                      {2u, 0xffffffffu},
+                                      {4u, 0x3c003c00u},
+                                      {6u, 0x3f800000u},
+                                      {8u, 0xff000000u},
+                                      {10u, 0x00ffffffu}}) {
     const auto tag = amdgpu::gfx11_metadata_address(metadata, 8, 8, 17, 17, 4, 27, false);
     const auto neighbor = amdgpu::gfx11_metadata_address(metadata, 16, 8, 17, 17, 4, 27, false);
     memory.write8(*tag, key);
@@ -4705,7 +5151,7 @@ TEST(GraphicsImageFilterTest, AnisotropicDescriptorControlsMatchPhysicalFilterCo
   };
   constexpr Control controls[] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},  {5, 0},
                                   {6, 0}, {7, 0}, {0, 4}, {2, 4}, {2, 32}, {2, 63}};
-  for (const auto [threshold, bias] : controls)
+  for (const auto &[threshold, bias] : controls)
     for (uint32_t i = 0; i < 4096; ++i) {
       const auto count = amdgpu::image_anisotropic_filter_count(
           amdgpu::image_footprint(1.0 + i / 256.0, 0, 0, 1, 1, 1), 16, threshold, bias, 4);
@@ -5225,7 +5671,8 @@ TEST_P(GraphicsExportTest, CubeSamplingRemapsEdgesCornersAndArrayViewFaces) {
       {65520, {0x3facee23u, 0x3fae39fau, 0x3fafa932u, 0x3fb10c5au}},
       {65535, {0x3f8d244eu, 0x3f8e3680u, 0x3f8f5febu, 0x3f908115u}},
   };
-  for (const auto [opcode, name] : {std::pair{31u, "IMAGE_SAMPLE_LZ"}, {57u, "IMAGE_SAMPLE_D_G16"}})
+  for (const auto &[opcode, name] :
+       {std::pair{31u, "IMAGE_SAMPLE_LZ"}, {57u, "IMAGE_SAMPLE_D_G16"}})
     for (bool a16 : {false, true}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << name << ", a16=" << a16);
       const uint32_t prefix = opcode == 57 ? 2 : 0;

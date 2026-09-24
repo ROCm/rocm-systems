@@ -98,6 +98,10 @@ double ref_src(double x, bool abs, bool neg) {
 }
 
 float ref_dst(float v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
+  // Output scaling preserves the operation's selected NaN payload, including
+  // signaling NaNs passed through with IEEE mode disabled on older targets.
+  if (std::isnan(v))
+    return clamp && clamp_nan_to_zero ? 0.0f : v;
   if (omod == 1)
     v *= 2.0f;
   else if (omod == 2)

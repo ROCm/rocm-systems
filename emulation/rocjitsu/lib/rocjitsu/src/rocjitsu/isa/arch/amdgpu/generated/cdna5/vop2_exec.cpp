@@ -1191,7 +1191,9 @@ void VFmamkF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     float k = std::bit_cast<float>(literal.encoding_value_);
     float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::fma_f32(s0, k, s2, wf.cu().arch(), wf.ieee_mode(),
+                                                         wf.fp_denorm_mode_f32())));
   }
 }
 
@@ -1204,7 +1206,9 @@ void VFmaakF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
     float k = std::bit_cast<float>(literal.encoding_value_);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::fma_f32(s0, s1, k, wf.cu().arch(), wf.ieee_mode(),
+                                                         wf.fp_denorm_mode_f32())));
   }
 }
 

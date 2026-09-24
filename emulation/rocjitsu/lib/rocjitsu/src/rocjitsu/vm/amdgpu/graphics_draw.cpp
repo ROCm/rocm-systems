@@ -362,20 +362,20 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
           addr_calc::buffer_virtual_address(((uint64_t{ctx[0x1e] & 255} << 32) | ctx[5]) << 8);
       depth_clear_ = ctx[0xb];
     }
-    for (const auto [dst, src] : {std::pair{0x1b, 0x203},
-                                  {0x1c, 0x200},
-                                  {0x190, 0x1b6},
-                                  {0x195, 0x1c5},
-                                  {0x197, 0x1b3},
-                                  {0x198, 0x1b4},
-                                  {0x115, 0xb4},
-                                  {0x116, 0xb5},
-                                  {0x205, 0x206},
-                                  {0x207, 0x205},
-                                  {0x206, 0x207},
-                                  {0x214, 0x8e},
-                                  {0x215, 0x8f},
-                                  {0x216, 0x202}})
+    for (const auto &[dst, src] : {std::pair{0x1b, 0x203},
+                                   {0x1c, 0x200},
+                                   {0x190, 0x1b6},
+                                   {0x195, 0x1c5},
+                                   {0x197, 0x1b3},
+                                   {0x198, 0x1b4},
+                                   {0x115, 0xb4},
+                                   {0x116, 0xb5},
+                                   {0x205, 0x206},
+                                   {0x207, 0x205},
+                                   {0x206, 0x207},
+                                   {0x214, 0x8e},
+                                   {0x215, 0x8f},
+                                   {0x216, 0x202}})
       context_[dst] = ctx[src];
     context_[0x19] = (ctx[3] >> 16) & 1; // DISABLE_VIEWPORT_CLAMP
     for (uint32_t i = 0; i < 32; ++i)
@@ -811,6 +811,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   const float ox = std::bit_cast<float>(context_[0x110]);
   const float sy = std::bit_cast<float>(context_[0x111]);
   const float oy = std::bit_cast<float>(context_[0x112]);
+  const float sz = std::bit_cast<float>(context_[0x113]);
+  const float oz = std::bit_cast<float>(context_[0x114]);
   if (context_[0x205] != 0x43f || !std::isfinite(sx) || !std::isfinite(sy) || !std::isfinite(ox) ||
       !std::isfinite(oy))
     throw std::runtime_error("unsupported graphics viewport transform");
@@ -833,6 +835,12 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     return;
   if (right - left > 4096 || bottom - top > 4096)
     throw std::runtime_error("graphics render area exceeds supported dimensions");
+  const float gx = std::bit_cast<float>(context_[gfx12 ? 0x10d : 0x2fc]);
+  const float gy = std::bit_cast<float>(context_[gfx12 ? 0x10b : 0x2fa]);
+  const bool valid_guard = std::isfinite(gx) && std::isfinite(gy) && gx >= 1 && gy >= 1;
+  const auto guard_distance = [](double position, double w, float guard, int sign) {
+    return raster::truncate_float(double(raster::truncate_float(w * guard)) + sign * position);
+  };
   for (uint32_t p = 0; p < primitive_count(); ++p) {
     if (primitives_[p] & (1u << 31))
       continue;
@@ -869,11 +877,15 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       }
       v[k] = w == 0 ? Point{0, 0, w, 0}
                     : Point{raster::viewport_coordinate(x, w, sx, ox),
-                            raster::viewport_coordinate(y, w, sy, oy), w, z / w};
+                            raster::viewport_coordinate(y, w, sy, oy), w,
+                            raster::viewport_transform(z, w, sz, oz)};
       screen[k] = v[k];
       // Finite homogeneous inputs can overflow the initial FP32 projection.
       // Let guard-band clipping produce finite coordinates before validation.
       clip_xy |= w <= 0 || std::abs(v[k].x) > (1 << 20) || std::abs(v[k].y) > (1 << 20);
+      if (valid_guard)
+        for (int sign : {1, -1})
+          clip_xy |= guard_distance(x, w, gx, sign) < 0 || guard_distance(y, w, gy, sign) < 0;
     }
     // Layer selection uses the provoking vertex before interpolation reorders vertices.
     const uint32_t provoking = (context_[0x207] & (1u << 19)) ? 2 : 0;
@@ -891,29 +903,47 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       continue;
     // Clip coverage in homogeneous coordinates and carry the original
     // barycentrics so added vertices do not replace shader-visible parameters.
+    uint32_t clip_origin = 0;
+    if (clip_xy) {
+      // The clipper orders the polygon in homogeneous X, before projection.
+      // If two X coordinates tie, start at the opposite vertex.
+      for (uint32_t k = 1; k < 3; ++k)
+        if (clip_positions[k].x < clip_positions[clip_origin].x ||
+            (clip_positions[k].x == clip_positions[clip_origin].x &&
+             clip_positions[k].w < clip_positions[clip_origin].w))
+          clip_origin = k;
+      for (uint32_t k = 0; k < 3; ++k)
+        if (clip_positions[(k + 1) % 3].x == clip_positions[(k + 2) % 3].x &&
+            clip_positions[k].x != clip_positions[(k + 1) % 3].x)
+          clip_origin = k;
+    }
     std::vector<Point> coverage(v.begin(), v.end());
     if (clip_xy || outside_near || outside_far) {
       if (primitive_type_ == kRectangleList)
         throw std::runtime_error("graphics clipped rectangles are not implemented");
       coverage.assign(clip_positions.begin(), clip_positions.end());
+      std::rotate(coverage.begin(), coverage.begin() + clip_origin, coverage.end());
       const auto clip = [&](const auto &distance) {
         std::vector<Point> output;
         if (coverage.empty())
           return;
         Point previous = coverage.back();
-        double previous_distance = distance(previous);
+        float previous_distance = raster::truncate_float(distance(previous));
         for (const Point &current : coverage) {
-          const double current_distance = distance(current);
+          const float current_distance = raster::truncate_float(distance(current));
           if ((previous_distance < 0 && current_distance > 0) ||
               (previous_distance > 0 && current_distance < 0)) {
-            const double t = previous_distance / (previous_distance - current_distance);
-            output.push_back({std::lerp(previous.x, current.x, t),
-                              std::lerp(previous.y, current.y, t),
-                              std::lerp(previous.w, current.w, t),
-                              std::lerp(previous.z, current.z, t),
-                              {std::lerp(previous.barycentric[0], current.barycentric[0], t),
-                               std::lerp(previous.barycentric[1], current.barycentric[1], t),
-                               std::lerp(previous.barycentric[2], current.barycentric[2], t)}});
+            const auto weights = raster::clip_weights(previous_distance, current_distance);
+            const auto component = [&](double a, double b) {
+              return raster::clip_component(a, b, weights);
+            };
+            output.push_back({component(previous.x, current.x),
+                              component(previous.y, current.y),
+                              component(previous.w, current.w),
+                              component(previous.z, current.z),
+                              {component(previous.barycentric[0], current.barycentric[0]),
+                               component(previous.barycentric[1], current.barycentric[1]),
+                               component(previous.barycentric[2], current.barycentric[2])}});
           }
           if (current_distance >= 0)
             output.push_back(current);
@@ -927,14 +957,12 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       if (outside_far)
         clip([](Point point) { return point.w - point.z; });
       if (clip_xy) {
-        const double gx = std::bit_cast<float>(context_[gfx12 ? 0x10d : 0x2fc]);
-        const double gy = std::bit_cast<float>(context_[gfx12 ? 0x10b : 0x2fa]);
-        if (!std::isfinite(gx) || !std::isfinite(gy) || gx < 1 || gy < 1)
+        if (!valid_guard)
           throw std::runtime_error("unsupported graphics guard band");
-        clip([&](Point point) { return point.w * gx + point.x; });
-        clip([&](Point point) { return point.w * gx - point.x; });
-        clip([&](Point point) { return point.w * gy + point.y; });
-        clip([&](Point point) { return point.w * gy - point.y; });
+        clip([&](Point point) { return guard_distance(point.x, point.w, gx, 1); });
+        clip([&](Point point) { return guard_distance(point.x, point.w, gx, -1); });
+        clip([&](Point point) { return guard_distance(point.y, point.w, gy, 1); });
+        clip([&](Point point) { return guard_distance(point.y, point.w, gy, -1); });
       }
       if (coverage.size() < 3)
         continue;
@@ -945,7 +973,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       for (auto &point : coverage) {
         point.x = raster::viewport_coordinate(point.x, point.w, sx, ox);
         point.y = raster::viewport_coordinate(point.y, point.w, sy, oy);
-        point.z /= point.w;
+        point.z = raster::viewport_transform(point.z, point.w, sz, oz);
       }
       const auto same_position = [](Point a, Point b) { return a.x == b.x && a.y == b.y; };
       coverage.erase(std::unique(coverage.begin(), coverage.end(), same_position), coverage.end());
@@ -968,190 +996,202 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     const bool front = (area < 0) != bool(context_[0x207] & 4);
     if ((front && (context_[0x207] & 1)) || (!front && (context_[0x207] & 2)))
       continue;
-    // Choose the smallest W, then the leftmost vertex. Equal-W axis-aligned
-    // right triangles use the corner joining the two axis-aligned edges.
-    uint32_t origin = 0;
-    for (uint32_t k = 1; k < 3; ++k)
-      if (screen[k].w < screen[origin].w ||
-          (screen[k].w == screen[origin].w &&
-           (screen[k].x < screen[origin].x ||
-            (screen[k].x == screen[origin].x && screen[k].y < screen[origin].y))))
-        origin = k;
-    for (uint32_t k = 0; k < 3; ++k) {
-      const auto &a = screen[k], &b = screen[(k + 1) % 3], &c = screen[(k + 2) % 3];
-      if (a.w == b.w && a.w == c.w && ((a.x == b.x && a.y == c.y) || (a.y == b.y && a.x == c.x)))
-        origin = k;
-    }
-    if (clip_xy) {
-      // Establish planes from finite clipped coordinates instead of projecting
-      // vertices arbitrarily close to W=0. Keep barycentrics in the original
-      // triangle so explicit interpolation and provoking vertices stay intact.
-      origin = 0;
-      uint32_t first = 0;
-      for (uint32_t k = 1; k < coverage.size(); ++k)
-        if (coverage[k].w < coverage[first].w ||
-            (coverage[k].w == coverage[first].w && coverage[k].x < coverage[first].x))
-          first = k;
-      screen[0] = coverage[first];
-      double largest = 0;
-      for (uint32_t k = 1; k + 1 < coverage.size(); ++k) {
-        const auto &a = coverage[(first + k) % coverage.size()];
-        const auto &b = coverage[(first + k + 1) % coverage.size()];
-        const double candidate = std::abs(edge(screen[0], a, b.x, b.y));
-        if (candidate > largest) {
-          largest = candidate;
-          screen[1] = a;
-          screen[2] = b;
-        }
+    const auto polygon = coverage;
+    const auto original_screen = v;
+    const auto original_indices = indices;
+    const uint32_t triangle_count = clip_xy ? polygon.size() - 2 : 1;
+    for (uint32_t triangle = 0; triangle < triangle_count; ++triangle) {
+      indices = original_indices;
+      v = original_screen;
+      screen = original_screen;
+      if (clip_xy) {
+        coverage = {polygon[0], polygon[triangle + 1], polygon[triangle + 2]};
+        std::copy(coverage.begin(), coverage.end(), screen.begin());
+        area = edge(screen[0], screen[1], screen[2].x, screen[2].y);
+        if (area == 0)
+          continue;
       }
-      if (largest == 0)
-        continue;
-    }
-    std::rotate(indices.begin(), indices.begin() + origin, indices.end());
-    std::rotate(v.begin(), v.begin() + origin, v.end());
-    std::rotate(screen.begin(), screen.begin() + origin, screen.end());
-    const double interpolation_area = edge(screen[0], screen[1], screen[2].x, screen[2].y);
-    const float inverse_area = raster::truncate_float(1.0 / interpolation_area);
-    const auto plane = [&](float a, float b, float c) {
-      return raster::Plane{
-          raster::plane_gradient(screen[2].y - screen[0].y, screen[0].y - screen[1].y,
-                                 double(b) - a, double(c) - a, inverse_area),
-          raster::plane_gradient(screen[0].x - screen[2].x, screen[1].x - screen[0].x,
-                                 double(b) - a, double(c) - a, inverse_area),
-          a};
-    };
-    const auto original_weight = [&](uint32_t vertex, uint32_t component) {
-      return clip_xy ? screen[vertex].barycentric[component] : double(vertex == component);
-    };
-    const auto perspective_plane = [&](uint32_t component) {
-      return plane(original_weight(0, component) * raster::reciprocal(screen[0].w),
-                   original_weight(1, component) * raster::reciprocal(screen[1].w),
-                   original_weight(2, component) * raster::reciprocal(screen[2].w));
-    };
-    const raster::Plane plane_iw = perspective_plane(1);
-    const raster::Plane plane_jw = perspective_plane(2);
-    const raster::Plane plane_rw =
-        plane(raster::reciprocal(screen[0].w), raster::reciprocal(screen[1].w),
-              raster::reciprocal(screen[2].w));
-    // Reconstruct clipped noperspective weights in wide precision; these are not
-    // the vertex reciprocal-W values captured from primitive setup.
-    const raster::Plane plane_i = clip_xy ? plane(original_weight(0, 1) * v[1].w / screen[0].w,
-                                                  original_weight(1, 1) * v[1].w / screen[1].w,
-                                                  original_weight(2, 1) * v[1].w / screen[2].w)
-                                          : plane(0, 1, 0);
-    const raster::Plane plane_j = clip_xy ? plane(original_weight(0, 2) * v[2].w / screen[0].w,
-                                                  original_weight(1, 2) * v[2].w / screen[1].w,
-                                                  original_weight(2, 2) * v[2].w / screen[2].w)
-                                          : plane(0, 0, 1);
-    const raster::Plane plane_z = plane(screen[0].z, screen[1].z, screen[2].z);
-    const bool rectangle = primitive_type_ == kRectangleList;
-    const auto [xmin, xmax] = std::minmax_element(coverage.begin(), coverage.end(),
-                                                  [](Point a, Point b) { return a.x < b.x; });
-    const auto [ymin, ymax] = std::minmax_element(coverage.begin(), coverage.end(),
-                                                  [](Point a, Point b) { return a.y < b.y; });
-    // Bound in floating point before narrowing, including triangles that
-    // extend beyond the integer raster coordinate range.
-    const int min_x = int(std::clamp(std::floor(xmin->x), double(left), double(right)));
-    const int min_y = int(std::clamp(std::floor(ymin->y), double(top), double(bottom)));
-    const int max_x = int(std::clamp(std::ceil(xmax->x), double(left), double(right)));
-    const int max_y = int(std::clamp(std::ceil(ymax->y), double(top), double(bottom)));
-    std::vector<uint32_t> parameters(attributes * 12);
-    for (uint32_t a = 0; a < attributes; ++a) {
-      const uint32_t control = context_[0x199 + a];
-      // FLAT_SHADE with OFFSET bit 5 exposes the three raw vertex values.
-      const bool passthrough = (control & 0x420) == 0x420;
-      // Flat inputs retain the provoking vertex's raw bits with zero coefficient deltas.
-      const bool flat = (control & 0x400) && !passthrough;
-      if (control & ~0x100073fu)
-        throw std::runtime_error("unsupported graphics parameter interpolation");
-      for (uint32_t c = 0; c < 4; ++c) {
-        std::array<float, 3> values{};
-        for (uint32_t k = 0; k < 3; ++k) {
-          if ((control & 32) && !passthrough) {
-            values[k] = ((control >> 8) & (c == 3 ? 1u : 2u)) ? 1.0f : 0.0f;
-          } else {
-            const auto address = addr_calc::rdna_buffer_address(ring[1], ring[3], ring_stride, true,
-                                                                flat ? provoking_index : indices[k],
-                                                                (control & 31) * 16 + c * 4, 0, 0);
-            uint32_t bits = 0;
-            if (memory.read(ring_base + address.offset,
-                            {reinterpret_cast<std::byte *>(&bits), sizeof(bits)}) !=
-                VmAccessOutcome::Complete)
-              throw std::runtime_error("graphics attribute read failed");
-            values[k] = std::bit_cast<float>(bits);
-          }
-        }
-        parameters[a * 12 + c * 3] = std::bit_cast<uint32_t>(values[0]);
-        parameters[a * 12 + c * 3 + 1] =
-            flat ? 0 : std::bit_cast<uint32_t>(passthrough ? values[1] : values[1] - values[0]);
-        parameters[a * 12 + c * 3 + 2] =
-            flat ? 0 : std::bit_cast<uint32_t>(passthrough ? values[2] : values[2] - values[0]);
+      // Choose the smallest W, then the leftmost vertex. Equal-W axis-aligned
+      // right triangles use the corner joining the two axis-aligned edges.
+      uint32_t origin = 0;
+      for (uint32_t k = 1; k < 3; ++k)
+        if (screen[k].w < screen[origin].w ||
+            (screen[k].w == screen[origin].w &&
+             (screen[k].x < screen[origin].x ||
+              (screen[k].x == screen[origin].x && screen[k].y < screen[origin].y))))
+          origin = k;
+      for (uint32_t k = 0; k < 3; ++k) {
+        const auto &a = screen[k], &b = screen[(k + 1) % 3], &c = screen[(k + 2) % 3];
+        if (a.w == b.w && a.w == c.w && ((a.x == b.x && a.y == c.y) || (a.y == b.y && a.x == c.x)))
+          origin = k;
       }
-    }
-    FragmentWave batch;
-    batch.relative_layer = relative_layer;
-    batch.parameters = parameters;
-    uint32_t used = 0;
-    for (int y = min_y & ~1; y < max_y; y += 2) {
-      for (int x = min_x & ~1; x < max_x; x += 2) {
-        std::array<Fragment, 4> quad{};
-        bool covered = false;
-        for (int q = 0; q < 4; ++q) {
-          auto &f = quad[q];
-          f.x = x + (q & 1);
-          f.y = y + (q >> 1);
-          const double px = f.x + 0.5, py = f.y + 0.5;
-          const double dx = x + 0.5 - screen[0].x, dy = y + 0.5 - screen[0].y;
-          const double b1 = plane_i.at_quad(dx, dy, q);
-          const double b2 = plane_j.at_quad(dx, dy, q);
-          f.linear_i = b1;
-          f.linear_j = b2;
-          f.pull_model = {plane_iw.at_quad(dx, dy, q), plane_jw.at_quad(dx, dy, q),
-                          plane_rw.at_quad(dx, dy, q)};
-          // Fragment W uses the same reciprocal approximation as vertex setup.
-          const float w = raster::reciprocal(f.pull_model[2]);
-          f.i = raster::multiply_perspective(f.pull_model[0], w);
-          f.j = raster::multiply_perspective(f.pull_model[1], w);
-          f.z = (clip_xy ? double(plane_z.at_quad(dx, dy, q))
-                         : (1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
-                    std::bit_cast<float>(context_[0x113]) +
-                std::bit_cast<float>(context_[0x114]);
-          bool inside = true;
-          if (rectangle) {
-            inside = px >= std::min({v[0].x, v[1].x, v[2].x}) &&
-                     px < std::max({v[0].x, v[1].x, v[2].x}) &&
-                     py >= std::min({v[0].y, v[1].y, v[2].y}) &&
-                     py < std::max({v[0].y, v[1].y, v[2].y});
-          } else {
-            for (uint32_t k = 0; k < coverage.size(); ++k) {
-              Point a = coverage[k], b = coverage[(k + 1) % coverage.size()];
-              if (area < 0)
-                std::swap(a, b);
-              const double e = edge(a, b, px, py);
-              const bool top_left = b.y < a.y || (b.y == a.y && b.x > a.x);
-              inside &= e > 0 || (e == 0 && top_left);
+      const uint32_t parameter_origin = clip_xy ? (clip_origin + origin) % 3 : origin;
+      std::rotate(indices.begin(), indices.begin() + parameter_origin, indices.end());
+      std::rotate(v.begin(), v.begin() + parameter_origin, v.end());
+      std::rotate(screen.begin(), screen.begin() + origin, screen.end());
+      const double interpolation_area = edge(screen[0], screen[1], screen[2].x, screen[2].y);
+      const double depth_inverse_area = raster::area_reciprocal(interpolation_area);
+      const float inverse_area = raster::truncate_float(depth_inverse_area);
+      const auto plane = [&](float a, float b, float c) {
+        const float delta_b = raster::vertex_difference(b, a);
+        const float delta_c = raster::vertex_difference(c, a);
+        return raster::Plane{
+            raster::plane_gradient(screen[2].y - screen[0].y, screen[0].y - screen[1].y, delta_b,
+                                   delta_c, inverse_area),
+            raster::plane_gradient(screen[0].x - screen[2].x, screen[1].x - screen[0].x, delta_b,
+                                   delta_c, inverse_area),
+            a};
+      };
+      const auto original_weight = [&](uint32_t vertex, uint32_t component) {
+        return clip_xy ? screen[vertex].barycentric[(parameter_origin + component) % 3]
+                       : double(vertex == component);
+      };
+      const auto perspective_plane = [&](uint32_t component) {
+        return plane(
+            raster::truncate_float(original_weight(0, component) * raster::reciprocal(screen[0].w)),
+            raster::truncate_float(original_weight(1, component) * raster::reciprocal(screen[1].w)),
+            raster::truncate_float(original_weight(2, component) *
+                                   raster::reciprocal(screen[2].w)));
+      };
+      const raster::Plane plane_iw = perspective_plane(1);
+      const raster::Plane plane_jw = perspective_plane(2);
+      const raster::Plane plane_rw =
+          plane(raster::reciprocal(screen[0].w), raster::reciprocal(screen[1].w),
+                raster::reciprocal(screen[2].w));
+      // Reconstruct clipped noperspective weights in wide precision; these are not
+      // the vertex reciprocal-W values captured from primitive setup.
+      const raster::Plane plane_i = clip_xy ? plane(original_weight(0, 1) * v[1].w / screen[0].w,
+                                                    original_weight(1, 1) * v[1].w / screen[1].w,
+                                                    original_weight(2, 1) * v[1].w / screen[2].w)
+                                            : plane(0, 1, 0);
+      const raster::Plane plane_j = clip_xy ? plane(original_weight(0, 2) * v[2].w / screen[0].w,
+                                                    original_weight(1, 2) * v[2].w / screen[1].w,
+                                                    original_weight(2, 2) * v[2].w / screen[2].w)
+                                            : plane(0, 0, 1);
+      const float depth_b = raster::vertex_difference(screen[1].z, screen[0].z);
+      const float depth_c = raster::vertex_difference(screen[2].z, screen[0].z);
+      const raster::DepthPlane plane_z{
+          raster::depth_gradient(raster::plane_numerator(screen[2].y - screen[0].y,
+                                                         screen[0].y - screen[1].y, depth_b,
+                                                         depth_c),
+                                 depth_inverse_area),
+          raster::depth_gradient(raster::plane_numerator(screen[0].x - screen[2].x,
+                                                         screen[1].x - screen[0].x, depth_b,
+                                                         depth_c),
+                                 depth_inverse_area),
+          screen[0].z, screen[0].x, screen[0].y};
+      const bool rectangle = primitive_type_ == kRectangleList;
+      const auto [xmin, xmax] = std::minmax_element(coverage.begin(), coverage.end(),
+                                                    [](Point a, Point b) { return a.x < b.x; });
+      const auto [ymin, ymax] = std::minmax_element(coverage.begin(), coverage.end(),
+                                                    [](Point a, Point b) { return a.y < b.y; });
+      // Bound in floating point before narrowing, including triangles that
+      // extend beyond the integer raster coordinate range.
+      const int min_x = int(std::clamp(std::floor(xmin->x), double(left), double(right)));
+      const int min_y = int(std::clamp(std::floor(ymin->y), double(top), double(bottom)));
+      const int max_x = int(std::clamp(std::ceil(xmax->x), double(left), double(right)));
+      const int max_y = int(std::clamp(std::ceil(ymax->y), double(top), double(bottom)));
+      std::vector<uint32_t> parameters(attributes * 12);
+      for (uint32_t a = 0; a < attributes; ++a) {
+        const uint32_t control = context_[0x199 + a];
+        // FLAT_SHADE with OFFSET bit 5 exposes the three raw vertex values.
+        const bool passthrough = (control & 0x420) == 0x420;
+        // Flat inputs retain the provoking vertex's raw bits with zero coefficient deltas.
+        const bool flat = (control & 0x400) && !passthrough;
+        if (control & ~0x100073fu)
+          throw std::runtime_error("unsupported graphics parameter interpolation");
+        for (uint32_t c = 0; c < 4; ++c) {
+          std::array<float, 3> values{};
+          for (uint32_t k = 0; k < 3; ++k) {
+            if ((control & 32) && !passthrough) {
+              values[k] = ((control >> 8) & (c == 3 ? 1u : 2u)) ? 1.0f : 0.0f;
+            } else {
+              const auto address = addr_calc::rdna_buffer_address(
+                  ring[1], ring[3], ring_stride, true, flat ? provoking_index : indices[k],
+                  (control & 31) * 16 + c * 4, 0, 0);
+              uint32_t bits = 0;
+              if (memory.read(ring_base + address.offset,
+                              {reinterpret_cast<std::byte *>(&bits), sizeof(bits)}) !=
+                  VmAccessOutcome::Complete)
+                throw std::runtime_error("graphics attribute read failed");
+              values[k] = std::bit_cast<float>(bits);
             }
           }
-          const bool sample_enabled = (context_[0x30e + (f.y & 1)] >> (16 * (f.x & 1))) & 1;
-          f.covered =
-              inside && sample_enabled && f.x >= left && f.x < right && f.y >= top && f.y < bottom;
-          covered |= f.covered;
-        }
-        if (!covered)
-          continue;
-        std::copy(quad.begin(), quad.end(), batch.lanes.begin() + used);
-        used += 4;
-        if (used == fragment_wave_size_) {
-          fragments_.push_back(std::move(batch));
-          batch = FragmentWave{};
-          batch.relative_layer = relative_layer;
-          batch.parameters = parameters;
-          used = 0;
+          parameters[a * 12 + c * 3] = std::bit_cast<uint32_t>(values[0]);
+          parameters[a * 12 + c * 3 + 1] =
+              flat ? 0
+                   : std::bit_cast<uint32_t>(
+                         passthrough ? values[1]
+                                     : raster::attribute_difference(values[1], values[0]));
+          parameters[a * 12 + c * 3 + 2] =
+              flat ? 0
+                   : std::bit_cast<uint32_t>(
+                         passthrough ? values[2]
+                                     : raster::attribute_difference(values[2], values[0]));
         }
       }
+      FragmentWave batch;
+      batch.relative_layer = relative_layer;
+      batch.parameters = parameters;
+      uint32_t used = 0;
+      for (int y = min_y & ~1; y < max_y; y += 2) {
+        for (int x = min_x & ~1; x < max_x; x += 2) {
+          std::array<Fragment, 4> quad{};
+          bool covered = false;
+          for (int q = 0; q < 4; ++q) {
+            auto &f = quad[q];
+            f.x = x + (q & 1);
+            f.y = y + (q >> 1);
+            const double px = f.x + 0.5, py = f.y + 0.5;
+            const double dx = x + 0.5 - screen[0].x, dy = y + 0.5 - screen[0].y;
+            const double b1 = plane_i.at_quad(dx, dy, q);
+            const double b2 = plane_j.at_quad(dx, dy, q);
+            f.linear_i = b1;
+            f.linear_j = b2;
+            f.pull_model = {plane_iw.at_quad(dx, dy, q), plane_jw.at_quad(dx, dy, q),
+                            plane_rw.at_quad(dx, dy, q)};
+            // Fragment W uses the same reciprocal approximation as vertex setup.
+            const float w = raster::reciprocal(f.pull_model[2]);
+            f.i = raster::multiply_perspective(f.pull_model[0], w);
+            f.j = raster::multiply_perspective(f.pull_model[1], w);
+            f.z = plane_z.at(f.x, f.y);
+            bool inside = true;
+            if (rectangle) {
+              inside = px >= std::min({v[0].x, v[1].x, v[2].x}) &&
+                       px < std::max({v[0].x, v[1].x, v[2].x}) &&
+                       py >= std::min({v[0].y, v[1].y, v[2].y}) &&
+                       py < std::max({v[0].y, v[1].y, v[2].y});
+            } else {
+              for (uint32_t k = 0; k < coverage.size(); ++k) {
+                Point a = coverage[k], b = coverage[(k + 1) % coverage.size()];
+                if (area < 0)
+                  std::swap(a, b);
+                const double e = edge(a, b, px, py);
+                const bool top_left = b.y < a.y || (b.y == a.y && b.x > a.x);
+                inside &= e > 0 || (e == 0 && top_left);
+              }
+            }
+            const bool sample_enabled = (context_[0x30e + (f.y & 1)] >> (16 * (f.x & 1))) & 1;
+            f.covered = inside && sample_enabled && f.x >= left && f.x < right && f.y >= top &&
+                        f.y < bottom;
+            covered |= f.covered;
+          }
+          if (!covered)
+            continue;
+          std::copy(quad.begin(), quad.end(), batch.lanes.begin() + used);
+          used += 4;
+          if (used == fragment_wave_size_) {
+            fragments_.push_back(std::move(batch));
+            batch = FragmentWave{};
+            batch.relative_layer = relative_layer;
+            batch.parameters = parameters;
+            used = 0;
+          }
+        }
+      }
+      if (used)
+        fragments_.push_back(std::move(batch));
     }
-    if (used)
-      fragments_.push_back(std::move(batch));
   }
   const bool clamp_depth = !(context_[0x19] & 1);
   const float depth_min = std::bit_cast<float>(context_[0x115]);

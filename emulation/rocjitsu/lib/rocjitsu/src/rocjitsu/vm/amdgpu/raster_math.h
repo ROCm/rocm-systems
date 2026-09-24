@@ -57,12 +57,125 @@ inline float reciprocal(float value) {
   return std::copysign(result, value);
 }
 
+// Setup discards the smaller operand when the exponents differ by at least
+// 26, then truncates the subtraction to FP32. Keeping a tiny operand would
+// incorrectly borrow a low bit from the larger value.
+inline float vertex_difference(float a, float b) {
+  if (a == 0 || b == 0 || !std::isfinite(a) || !std::isfinite(b))
+    return a - b;
+  const int difference = std::ilogb(a) - std::ilogb(b);
+  if (difference >= 26)
+    return a;
+  if (difference <= -26)
+    return -b;
+  return truncate_float(double(a) - b);
+}
+
+// Attribute differences retain the input exponent through cancellation. Align
+// both operands to 25 significant bits, then truncate their difference at 24
+// bits of the shared scale before normalizing the resulting FP32 coefficient.
+inline float attribute_difference(float a, float b) {
+  // Parameter setup preserves the reference attribute's NaN before considering
+  // the other vertex. It neither negates that NaN nor quiets signaling payloads.
+  if ((std::bit_cast<uint32_t>(b) & 0x7fffffffu) > 0x7f800000u)
+    return b;
+  if ((std::bit_cast<uint32_t>(a) & 0x7fffffffu) > 0x7f800000u)
+    return a;
+  const auto flush = [](float value) {
+    return std::abs(value) < 0x1p-126f ? std::copysign(0.0f, value) : value;
+  };
+  a = flush(a);
+  b = flush(b);
+  if (a == 0 || b == 0 || !std::isfinite(a) || !std::isfinite(b))
+    return a - b;
+  const int exponent = std::max(std::ilogb(a), std::ilogb(b));
+  const double unit = std::ldexp(1.0, exponent - 24);
+  const double difference = std::trunc(double(a) / unit) - std::trunc(double(b) / unit);
+  return truncate_float(std::trunc(difference / 2) * (2 * unit));
+}
+
+// Clipping uses independent endpoint weights. Computing one as 1 - the
+// other loses the reciprocal approximation in that endpoint's contribution.
+inline std::array<float, 2> clip_weights(float a_distance, float b_distance) {
+  const float inverse = reciprocal(vertex_difference(a_distance, b_distance));
+  return {truncate_float(-double(b_distance) * inverse),
+          truncate_float(double(a_distance) * inverse)};
+}
+
+// Constant components bypass interpolation. Otherwise each product and the
+// sum truncate to FP32, before viewport transformation and subpixel snapping.
+inline float clip_component(float a, float b, std::array<float, 2> weights) {
+  if (a == b)
+    return a;
+  return truncate_float(double(truncate_float(double(a) * weights[0])) +
+                        truncate_float(double(b) * weights[1]));
+}
+
 // Setup truncates the weighted numerator before scaling by reciprocal area.
 // Weighting already-divided barycentric gradients changes the low bits.
+inline float plane_numerator(double edge1, double edge2, double delta1, double delta2) {
+  return truncate_float(edge1 * delta1 + edge2 * delta2);
+}
+
 inline float plane_gradient(double edge1, double edge2, double delta1, double delta2,
                             float inverse_area) {
-  const float numerator = truncate_float(edge1 * delta1 + edge2 * delta2);
-  return truncate_float(double(numerator) * inverse_area);
+  return truncate_float(double(plane_numerator(edge1, edge2, delta1, delta2)) * inverse_area);
+}
+
+// Primitive setup uses a wider reciprocal than vertex W. Physical RDNA3/4
+// area controls identify 256 linear seed segments, nine fraction bits plus a
+// sticky bit, and a truncated fixed-point Newton step. Truncate the input to
+// 32 significant bits before forming the seed. Retain 32 significant bits for
+// depth; ordinary interpolation truncates this result to FP32.
+inline double area_reciprocal(double value) {
+  if (value == 0 || !std::isfinite(value))
+    return 1.0 / value;
+  int exponent;
+  const double normalized = std::frexp(std::abs(value), &exponent) * 2;
+  const uint32_t significand = (std::bit_cast<uint64_t>(normalized) >> 21) & 0x7fffffffu;
+  static constexpr uint16_t slopes[] = {
+      1019, 1012, 1004, 995, 987, 980, 972, 965, 958, 952, 943, 936, 929, 922, 917, 909, 902, 896,
+      889,  883,  876,  870, 864, 858, 851, 845, 839, 833, 829, 822, 816, 810, 806, 799, 795, 788,
+      783,  779,  772,  767, 762, 758, 752, 748, 743, 737, 732, 727, 722, 718, 713, 708, 705, 699,
+      696,  690,  686,  681, 678, 673, 668, 664, 660, 656, 653, 649, 645, 641, 636, 633, 629, 624,
+      620,  618,  614,  609, 607, 602, 598, 596, 591, 589, 585, 582, 577, 575, 572, 567, 565, 562,
+      557,  554,  551,  548, 546, 543, 540, 537, 534, 531, 528, 525, 522, 519, 515, 512, 509, 506,
+      505,  502,  498,  496, 494, 491, 487, 486, 482, 481, 478, 474, 473, 469, 468, 464, 463, 461,
+      457,  456,  452,  451, 449, 445, 444, 442, 440, 437, 434, 433, 431, 429, 425, 424, 422, 420,
+      418,  416,  414,  412, 410, 408, 406, 404, 402, 400, 398, 396, 394, 392, 389, 387, 386, 385,
+      383,  381,  378,  377, 374, 374, 372, 369, 367, 367, 365, 363, 362, 359, 357, 357, 355, 352,
+      352,  349,  349,  346, 344, 344, 341, 341, 338, 338, 336, 335, 332, 332, 330, 329, 327, 326,
+      324,  322,  322,  319, 319, 316, 316, 315, 313, 312, 311, 308, 308, 307, 304, 304, 303, 300,
+      300,  299,  298,  296, 294, 294, 293, 290, 289, 289, 288, 287, 284, 284, 282, 282, 281, 280,
+      277,  277,  275,  275, 274, 273, 272, 271, 270, 267, 266, 266, 265, 263, 262, 262, 261, 259,
+      258,  257,  256,  256,
+  };
+  const uint32_t index = significand >> 23;
+  const uint32_t base = (1u << 27) / (256 + index);
+  const uint32_t fraction = ((significand >> 13) & 0x3feu) | ((significand & 0x3fffu) != 0);
+  const uint32_t seed = (base * 512 - slopes[index] * fraction) >> 10;
+  // The normalized denominator/seed product retains 32 fractional bits.
+  const uint32_t mantissa = significand | 0x80000000u;
+  const uint64_t product = (uint64_t{mantissa} * seed) >> 17;
+  const uint64_t refined = (uint64_t{seed} * ((1ull << 33) - product)) >> 18;
+  return std::copysign(std::ldexp(double(refined), -31 - exponent), value);
+}
+
+// Depth gradients truncate the FP32 numerator times the 32-bit reciprocal
+// toward zero at 32 significant bits. Keep the full integer product to avoid
+// a host-double rounding carry at a truncation boundary.
+inline double depth_gradient(float numerator, double inverse_area) {
+  if (numerator == 0 || inverse_area == 0 || !std::isfinite(numerator) ||
+      !std::isfinite(inverse_area))
+    return double(numerator) * inverse_area;
+  int numerator_exponent, inverse_exponent;
+  const double n = std::frexp(std::abs(double(numerator)), &numerator_exponent);
+  const double i = std::frexp(std::abs(inverse_area), &inverse_exponent);
+  const uint64_t product = uint64_t(n * 0x1p24) * uint64_t(i * 0x1p32);
+  const unsigned shift = std::bit_width(product) - 32;
+  const double result =
+      std::ldexp(double(product >> shift), numerator_exponent + inverse_exponent + int(shift) - 56);
+  return std::copysign(result, double(numerator) * inverse_area);
 }
 
 // Physical RDNA3/4 perspective interpolation rounds the product using the
@@ -96,6 +209,38 @@ struct Plane {
   float at_quad(double x, double y, uint32_t lane) const {
     const float first = truncate_float(x * dx + y * dy + base);
     return add_quad_offsets(first, lane & 1 ? dx : 0, lane & 2 ? dy : 0);
+  }
+};
+
+// Depth is evaluated around the center of each 8x8 tile. The center value
+// and local slopes share 30 significant bits, with enough exponent range
+// for either slope across a whole tile. Conversion to this signed fixed-point
+// representation rounds downward, including negative slopes and tile depths.
+// Before alignment, negative slopes round to 27 significant bits with ties
+// away from zero. Retain the wider setup gradients for each new tile center.
+struct DepthPlane {
+  double dx, dy, base, origin_x, origin_y;
+
+  float at(int x, int y) const {
+    const double center_x = std::floor(x / 8.0) * 8 + 4;
+    const double center_y = std::floor(y / 8.0) * 8 + 4;
+    const double center = (center_x - origin_x) * dx + (center_y - origin_y) * dy + base;
+    const double largest = std::max({std::abs(center), 8 * std::abs(dx), 8 * std::abs(dy)});
+    if (largest == 0 || !std::isfinite(largest))
+      return static_cast<float>(center);
+    const double unit = std::ldexp(1.0, std::ilogb(largest) - 29);
+    const double tile_base = std::floor(center / unit) * unit;
+    const auto align_slope = [unit](double slope) {
+      if (slope < 0) {
+        const double slope_unit = std::ldexp(1.0, std::ilogb(slope) - 26);
+        slope = -std::floor(-slope / slope_unit + 0.5) * slope_unit;
+      }
+      return std::floor(slope / unit) * unit;
+    };
+    const double tile_dx = align_slope(dx);
+    const double tile_dy = align_slope(dy);
+    return truncate_float(tile_base + (x + 0.5 - center_x) * tile_dx +
+                          (y + 0.5 - center_y) * tile_dy);
   }
 };
 
@@ -254,13 +399,17 @@ inline double blend_products(float a, float af, BlendFactorMode a_mode, float b,
   return std::abs(unscaled) < 0x1p-126 ? std::copysign(0.0f, unscaled) : float(unscaled);
 }
 
-// Projection and translation each truncate to single precision before the
-// fixed-point conversion. Dividing position by W before scaling changes both
-// the order of operations and the precision of the scale product.
-inline double viewport_coordinate(float position, float w, float scale, float offset) {
+// Projection and translation each truncate to single precision. Dividing
+// position by W before scaling changes both the order of operations and the
+// precision of the scale product. Depth uses this result without X/Y snapping.
+inline float viewport_transform(float position, float w, float scale, float offset) {
   const double scaled = multiply_viewport_scale(position, scale);
   const float projected = truncate_float(scaled * reciprocal(w));
-  return round_subpixel(truncate_float(double(projected) + offset));
+  return truncate_float(double(projected) + offset);
+}
+
+inline double viewport_coordinate(float position, float w, float scale, float offset) {
+  return round_subpixel(viewport_transform(position, w, scale, offset));
 }
 
 } // namespace rocjitsu::amdgpu::raster

@@ -585,6 +585,8 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         a = _lower_expr(node.children[0], ctx)
         b = _lower_expr(node.children[1], ctx)
         c = _lower_expr(node.children[2], ctx)
+        if node.ty and node.ty.base == 'F' and node.ty.size == 32:
+            return f'amdgpu::fp_mode::fma_f32({a}, {b}, {c}, wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())'
         return f'std::fma({a}, {b}, {c})'
 
     if kind == SemaNodeKind.BITNEG:
@@ -1989,10 +1991,19 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
             'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod)'
         )
+    fma_f32 = node.ty == SemaType.F32 and any(
+        n.kind == SemaNodeKind.FMA for n in node.children[1].walk()
+    )
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' const uint32_t effective_omod = {omod_expr};'
-        f' if (effective_omod == 1) v *= 2.0{suffix};'
+        + (' if (std::isnan(v)) return v;' if fma_f32 else '')
+        + f' const uint32_t effective_omod = {omod_expr};'
+        + (
+            ' v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);'
+            if fma_f32
+            else ''
+        )
+        + f' if (effective_omod == 1) v *= 2.0{suffix};'
         f' else if (effective_omod == 2) v *= 4.0{suffix};'
         f' else if (effective_omod == 3) v *= 0.5{suffix};'
         f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'

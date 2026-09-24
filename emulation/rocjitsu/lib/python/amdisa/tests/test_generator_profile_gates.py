@@ -7046,9 +7046,12 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     execute_start = exec_cpp.index('uint32_t Vopd::execute_slot')
     fma_start = exec_cpp.index('case kVopdFmaF32', execute_start)
     fma_case = exec_cpp[fma_start : exec_cpp.index('case kVopdSubNcU32:', fma_start)]
-    assert 'std::fma(std::bit_cast<float>(src0),' in fma_case
+    assert 'amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0),' in fma_case
     assert 'std::bit_cast<float>(src1),' in fma_case
-    assert 'std::bit_cast<float>(src2))' in fma_case
+    assert (
+        'std::bit_cast<float>(src2), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())'
+        in fma_case
+    )
     assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
     assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
     assert 'bool Vopd::is_float64_op' in cpp

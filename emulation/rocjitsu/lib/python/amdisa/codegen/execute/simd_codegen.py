@@ -870,9 +870,15 @@ SIMD_VOP2_CARRY.update(
 # performs the fused operation in native<double> chunks and applies the current
 # FP16 MODE controls without an intervening f32 rounding. v_fmac_f64 likewise
 # has a dedicated split-VGPR, MODE-aware path in SIMD_VOP2_FMA_F64.
-_FMA_ACC_F32 = '[](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); }'
-_FMA_ADDK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); }'
-_FMA_MULK_F32 = '[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); }'
+_FMA_ACC_F32 = (
+    '[&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_f32_simd(a, b, d, wf); }'
+)
+_FMA_ADDK_F32 = (
+    '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, b, k, wf); }'
+)
+_FMA_MULK_F32 = (
+    '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, k, b, wf); }'
+)
 _FMA_ACC_F16 = (
     '[](auto a, auto b, auto d, auto) {'
     ' return util::f32_to_f16_simd(util::stdx::fma('
@@ -1253,9 +1259,9 @@ SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {
 }
 
 # pk_fma_f32 — 3-source FMA per half, with independent source-half selection.
-# NaN-input payload divergence accepted.
+# Scalar and SIMD execution share hardware NaN selection.
 SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
-    'v_pk_fma_f32_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_pk_fma_f32_vop3p': '[&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf); }',
 }
 
 # v_pk_mov_b32 — each src is a 64-bit SGPR or VGPR pair. op_sel[0] selects the
@@ -2069,14 +2075,10 @@ SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
 
 # --- VOP3 floating-point ternary (FMA / MAD family) ------------------------
 #
-# v_fma_*: util::stdx::fma (fused multiply-add, single-rounded). v_fmac/v_mac:
-# same body (the scalar generator emits std::fma for both because of dst-
-# accumulate semantics — src2 == vdst). v_mad: non-fused `a * b + c`. NaN-input
-# divergence between stdx::fma and std::fma (gcc-13 packed FMA picks a
-# different NaN operand to quiet) is accepted, same as the existing VOP2
-# ternary FMA slice — the A/B test skips NaN-input lanes.
+# F32 FMA and accumulator forms share scalar NaN policy; finite lanes retain
+# native SIMD arithmetic. MAD retains its non-fused multiply/add semantics.
 SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
-    'v_fma_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_fma_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mad_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     # min3/max3/med3 (f32): the scalar body composes std::fmax/std::fmin
@@ -2087,7 +2089,7 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
     # v_fma_dx9_zero_f32: the scalar body is a plain fused multiply-add (the
     # DX9 zero-multiply special-case is not applied to the FMA form).
-    'v_fma_dx9_zero_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_fma_dx9_zero_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_max3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
     'v_min3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
     'v_med3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
@@ -2170,11 +2172,11 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
 # v_fmac / v_mac per-isa classes only initialize src0+src1+vdst; the third FMA
 # operand IS vdst (no src2 Operand). The accumulate-form glue reads inst.vdst
 # as the third operand and applies abs/neg only to src0/src1 (per scalar body).
-# NaN payload divergence accepted, same as the non-accumulate ternary slice.
+# F32 NaN selection matches the non-accumulate ternary slice.
 SIMD_VOP3_FMAC_FP32: dict[str, str] = {
-    'v_fmac_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-    'v_mac_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-    'v_fmac_dx9_zero_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+    'v_fmac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
+    'v_mac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
+    'v_fmac_dx9_zero_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
 }
 SIMD_VOP3_FMAC_FP16 = {'v_fmac_f16_vop3'}
 SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}

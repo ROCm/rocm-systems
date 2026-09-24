@@ -630,7 +630,7 @@ def gen_pk_binop_f32(
     L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
     for half, result in (('lo', 'rlo'), ('hi', 'rhi')):
         L.append(
-            f'    uint32_t {result} = amdgpu::fp_mode::packed_f32(a_{half}, b_{half}, 0.0f, amdgpu::fp_mode::PackedF32Op::{op.upper()}, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+            f'    uint32_t {result} = amdgpu::fp_mode::packed_f32(a_{half}, b_{half}, 0.0f, amdgpu::fp_mode::PackedF32Op::{op.upper()}, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
         )
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
@@ -686,10 +686,10 @@ def gen_pk_ternary_f32(
     L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
     L.append('    if (inst_.neg_hi & 4) c_hi = -c_hi;')
     L.append(
-        '    uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+        '    uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
     )
     L.append(
-        '    uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+        '    uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
     )
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'

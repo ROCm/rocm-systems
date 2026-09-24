@@ -1087,7 +1087,7 @@ void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS(
       inst_.opsel, inst_.opsel_hi, inst_.opsel_hi_2,
-      [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
+      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1121,10 +1121,12 @@ void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       c_hi = -c_hi;
     uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA,
                                                wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
-                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+                                               wf.cu().arch(), wf.ieee_mode());
     uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA,
                                                wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
-                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+                                               wf.cu().arch(), wf.ieee_mode());
     amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));
   }
@@ -1458,10 +1460,12 @@ void VPkMulF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       b_hi = -b_hi;
     uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, 0.0f, amdgpu::fp_mode::PackedF32Op::MUL,
                                                wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
-                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+                                               wf.cu().arch(), wf.ieee_mode());
     uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, 0.0f, amdgpu::fp_mode::PackedF32Op::MUL,
                                                wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
-                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+                                               wf.cu().arch(), wf.ieee_mode());
     amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));
   }
@@ -1495,10 +1499,12 @@ void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       b_hi = -b_hi;
     uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, 0.0f, amdgpu::fp_mode::PackedF32Op::ADD,
                                                wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
-                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+                                               wf.cu().arch(), wf.ieee_mode());
     uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, 0.0f, amdgpu::fp_mode::PackedF32Op::ADD,
                                                wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
-                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+                                               inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+                                               wf.cu().arch(), wf.ieee_mode());
     amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));
   }

@@ -2033,9 +2033,9 @@ class CodeGenerator:
                     ('VopdFmacF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)));
+                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2044,9 +2044,9 @@ class CodeGenerator:
                     ('VopdFmaakF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(src2));
+                                              std::bit_cast<float>(src2), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2055,9 +2055,9 @@ class CodeGenerator:
                     ('VopdFmamkF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src2),
-                                              std::bit_cast<float>(src1));
+                                              std::bit_cast<float>(src1), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2173,9 +2173,9 @@ class CodeGenerator:
                     ('VopdFmaF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(src2));
+                                              std::bit_cast<float>(src2), wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -7238,7 +7238,7 @@ class CodeGenerator:
                     f'    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::fma_f32(s0, k, s2, wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -7303,7 +7303,7 @@ class CodeGenerator:
                 )
                 L.append(f'    float k = std::bit_cast<float>({k_expr});')
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::fma_f32(s0, s1, k, wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32())));'
                 )
             L.append('  }')
             return '\n'.join(L)

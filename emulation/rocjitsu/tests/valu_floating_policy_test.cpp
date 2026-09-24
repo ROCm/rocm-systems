@@ -274,6 +274,164 @@ std::array<uint32_t, 2> rsq_f16_vop3_words(rj_code_arch_t arch) {
     return {};
   }
 }
+std::array<uint32_t, 2> fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate,
+                                      uint8_t omod, uint8_t clamp) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_vop3(cdna1::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_vop3(cdna2::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_vop3(cdna3::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_vop3(cdna4::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::build_vop3(cdna5::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_vop3(rdna1::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_vop3(rdna2::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_vop3(rdna3::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_vop3(rdna3_5::kVFmaF32Vop3, {.vdst = 6,
+                                                       .abs = absolute,
+                                                       .clamp = clamp,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .src2 = 258,
+                                                       .omod = omod,
+                                                       .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_vop3(rdna4::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  default:
+    throw std::runtime_error("Unsupported FMA test architecture");
+  }
+}
+
+TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
+  // Physical gfx1201: scaling a rounded subnormal by two still yields +0.
+  // Earlier targets disable OMOD when output denormals or IEEE mode are set.
+  for (auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    const auto words = fma_f32_words(arch, 0, 0, 1, 0);
+    for (uint32_t mode : {0xf0u, 0x2f0u})
+      for (uint32_t addend : {0x007fffffu, 0x807fffffu}) {
+        const uint32_t expected =
+            arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : addend;
+        witness("fma_omod_subnormal", arch, machine.run(words, 0, 0, addend, mode), expected);
+      }
+  }
+}
+
+TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
+  // Captured V_FMA_F32 outputs on gfx1100/gfx1201, including both IEEE modes.
+  // Earlier RDNA/CDNA share the MODE.IEEE rule; CDNA5, like RDNA4, always quiets.
+  struct Case {
+    uint32_t a, b, c, flushed, preserved, modified;
+  };
+  const Case cases[] = {
+      {0x7f801abc, 0xff803def, 0x7fc01234, 0x7f801abc, 0x7f801abc, 0xff801abc},
+      {0xff803def, 0x7f801abc, 0x7fc01234, 0xff803def, 0xff803def, 0xff803def},
+      {0x7fc01234, 0xff803def, 0x7f801abc, 0x7fc01234, 0x7fc01234, 0xffc01234},
+      {0x3f800000, 0xff803def, 0x7fc01234, 0xff803def, 0xff803def, 0x7f803def},
+      {0x3f800000, 0x3f800000, 0x7f801abc, 0x7f801abc, 0x7f801abc, 0x7f801abc},
+      {0x3f800000, 0x3f800000, 0xff803def, 0xff803def, 0xff803def, 0x7f803def},
+      {0x00000000, 0x7f800000, 0xff803def, 0xffc00000, 0xffc00000, 0xffc00000},
+      {0x7f800000, 0x80000000, 0x7f801abc, 0xffc00000, 0xffc00000, 0xffc00000},
+      {0x00000001, 0x7f800000, 0xff803def, 0xffc00000, 0xff803def, 0x7f803def},
+      {0x807fffff, 0xff800000, 0x7f801abc, 0xffc00000, 0x7f801abc, 0x7f801abc},
+      {0x7f800000, 0x3f800000, 0xff800000, 0xffc00000, 0xffc00000, 0x7f800000},
+  };
+  for (auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    for (uint32_t ieee : {0u, 1u})
+      for (uint32_t denorm : {0u, 3u})
+        for (unsigned variant = 0; variant < 4; ++variant) {
+          const bool modified = variant == 1, clamped = variant == 3;
+          const auto words = fma_f32_words(arch, modified ? 5 : 0, modified ? 3 : 0,
+                                           variant == 2 ? 1 : 0, clamped);
+          for (const auto &test : cases) {
+            uint32_t expected = denorm ? test.preserved : test.flushed;
+            if (modified && (denorm || test.flushed == test.preserved))
+              expected = test.modified;
+            if ((expected & 0x7fffffffu) > 0x7f800000u &&
+                (ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+              expected |= 0x00400000u;
+            if (clamped && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+              expected = 0;
+            SCOPED_TRACE(::testing::Message() << "arch=" << arch << " IEEE=" << ieee
+                                              << " denorm=" << denorm << " variant=" << variant);
+            EXPECT_EQ(machine.run(words, test.a, test.b, test.c, (ieee << 9) | (denorm << 4)),
+                      expected);
+          }
+        }
+  }
+}
+
 TEST(ValuFloatingPolicy, PackedMinimumPropagatesNaN) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);

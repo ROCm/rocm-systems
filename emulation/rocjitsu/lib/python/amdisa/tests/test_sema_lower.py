@@ -281,7 +281,7 @@ class TestLowerVectorAdd:
         )
         block = SemaBlock('V_FMA_F32', ExecModel.VECTOR, body)
         result = lower_sema_block(block)
-        assert 'std::fma(' in result
+        assert 'amdgpu::fp_mode::fma_f32(' in result
 
     def test_vector_explicit_vcc_dst_uses_wave_mask_helper(self):
         body = SemaNode(
@@ -1019,7 +1019,7 @@ class TestSemaXmlLowering:
 
     def test_v_fma_f32(self, blocks):
         result = lower_sema_block(blocks['V_FMA_F32'])
-        assert 'std::fma(' in result
+        assert 'amdgpu::fp_mode::fma_f32(' in result
 
     def test_s_add_co_u32(self, blocks):
         result = lower_sema_block(blocks['S_ADD_CO_U32'])

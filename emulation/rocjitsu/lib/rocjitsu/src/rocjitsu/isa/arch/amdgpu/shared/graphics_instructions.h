@@ -32,9 +32,10 @@ inline void execute_graphics_interp_f32(Wavefront &wf, uint32_t dst, std::array<
       const uint32_t value = wf.debug_read_vgpr(src[operand], source_lane);
       return std::bit_cast<float>(value ^ (((neg >> operand) & 1u) << 31));
     };
-    result[lane] = fp_mode::packed_f32(
-        read(0, quad + (second ? 2 : 1)), read(1, lane), read(2, second ? lane : quad),
-        fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), clamp, true);
+    result[lane] = fp_mode::packed_f32(read(0, quad + (second ? 2 : 1)), read(1, lane),
+                                       read(2, second ? lane : quad), fp_mode::PackedF32Op::FMA,
+                                       wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), clamp, true,
+                                       wf.cu().arch(), wf.ieee_mode());
   }
   // Snapshot every quad's inputs before writing: destination may alias P0/P10/P20.
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)

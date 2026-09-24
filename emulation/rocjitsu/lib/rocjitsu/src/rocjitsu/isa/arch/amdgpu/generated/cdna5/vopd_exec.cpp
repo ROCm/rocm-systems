@@ -129,19 +129,22 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 
   switch (slot.op) {
   case kVopdFmacF32: {
-    float result =
-        std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                 std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)));
+    float result = amdgpu::fp_mode::fma_f32(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1),
+        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)), wf.cu().arch(),
+        wf.ieee_mode(), wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmaakF32: {
-    float result = std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                            std::bit_cast<float>(src2));
+    float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
+                                            std::bit_cast<float>(src2), wf.cu().arch(),
+                                            wf.ieee_mode(), wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmamkF32: {
-    float result = std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src2),
-                            std::bit_cast<float>(src1));
+    float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0), std::bit_cast<float>(src2),
+                                            std::bit_cast<float>(src1), wf.cu().arch(),
+                                            wf.ieee_mode(), wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMulF32: {
@@ -188,8 +191,9 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdBitop2B32:
     return bitop2(src0, src1, slot.src2_imm);
   case kVopdFmaF32: {
-    float result = std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                            std::bit_cast<float>(src2));
+    float result = amdgpu::fp_mode::fma_f32(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
+                                            std::bit_cast<float>(src2), wf.cu().arch(),
+                                            wf.ieee_mode(), wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubNcU32:

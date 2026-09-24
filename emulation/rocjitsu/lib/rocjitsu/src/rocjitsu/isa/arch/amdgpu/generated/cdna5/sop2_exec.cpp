@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -204,16 +205,20 @@ void SMaxNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f32_sop2(*this, wf); }
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)));
+  float result = amdgpu::fp_mode::fma_f32(
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)), wf.cu().arch(),
+      wf.ieee_mode(), wf.fp_denorm_mode_f32());
   amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  float result = amdgpu::fp_mode::fma_f32(
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(literal)),
+      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)), wf.cu().arch(),
+      wf.ieee_mode(), wf.fp_denorm_mode_f32());
   amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 

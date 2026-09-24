@@ -225,8 +225,8 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
 
 } // namespace detail
 
-/// @brief Whether a floating conversion quiets signaling NaNs on this target.
-inline bool conversion_quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
+/// @brief Whether floating operations with exception support quiet signaling NaNs.
+inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
 }
 
@@ -239,7 +239,7 @@ inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, uint32_t denorm_m
   const uint32_t magnitude = bits & 0x7fffffffu;
   if (!(denorm_mode & 1u) && magnitude < 0x38800000u)
     return bits & 0x80000000u;
-  if (conversion_quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
+  if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
     bits |= 0x00400000u;
   return bits;
 }
@@ -417,10 +417,30 @@ inline uint16_t clamp_bf16(uint16_t value, bool clamp, bool clamp_nan_to_zero) {
   return value > 0x3f80u ? 0x3f80u : value;
 }
 
+/// @brief F32 FMA with architectural NaN selection in the active FP environment.
+inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_mode,
+                     uint32_t denorm_mode) {
+  auto input_bits = [denorm_mode](float value) {
+    const uint32_t bits = std::bit_cast<uint32_t>(value);
+    return !(denorm_mode & 1u) && (bits & 0x7f800000u) == 0 ? bits & 0x80000000u : bits;
+  };
+  const uint32_t a_bits = input_bits(a), b_bits = input_bits(b), c_bits = input_bits(c);
+  const uint32_t a_abs = a_bits & 0x7fffffffu, b_abs = b_bits & 0x7fffffffu;
+  // An invalid product takes precedence even when the addend is a NaN.
+  if ((a_abs == 0 && b_abs == 0x7f800000u) || (b_abs == 0 && a_abs == 0x7f800000u))
+    return std::bit_cast<float>(0xffc00000u);
+  for (const uint32_t bits : {a_bits, b_bits, c_bits})
+    if ((bits & 0x7fffffffu) > 0x7f800000u)
+      return std::bit_cast<float>(bits | (quiets_nan(arch, ieee_mode) ? 0x00400000u : 0u));
+  const float result = std::fma(a, b, c);
+  // Opposite infinities also produce the architectural indefinite value.
+  return std::isnan(result) ? std::bit_cast<float>(0xffc00000u) : result;
+}
+
 /// @brief Packed F32 operations use FP32 MODE, independently of the host environment.
 inline uint32_t packed_f32(float first, float second, float third, PackedF32Op operation,
                            uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero) {
+                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
   detail::ScopedFenv environment(round_mode);
   auto flush = [](float value) {
     const uint32_t bits = std::bit_cast<uint32_t>(value);
@@ -438,7 +458,7 @@ inline uint32_t packed_f32(float first, float second, float third, PackedF32Op o
     result = first_input * second_input;
     break;
   case PackedF32Op::FMA:
-    result = std::fma(first_input, second_input, third_input);
+    result = fma_f32(first_input, second_input, third_input, arch, ieee_mode, denorm_mode);
     break;
   }
   if (clamp) {

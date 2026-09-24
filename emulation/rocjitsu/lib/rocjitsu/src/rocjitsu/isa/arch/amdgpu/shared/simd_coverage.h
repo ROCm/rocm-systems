@@ -340,14 +340,14 @@ template <bool Extended, typename Slot>
       U result;
       switch (slot.op) {
       case 0:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, acc->template load_native<float>(base)));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, acc->template load_native<float>(base), wf));
         break;
       case 1:
       case 19:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, cf));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, cf, wf));
         break;
       case 2:
-        result = std::bit_cast<U>(util::stdx::fma(af, cf, bf));
+        result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
         break;
       case 3:
         result = std::bit_cast<U>(af * bf);

@@ -580,12 +580,20 @@ util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs
 template <typename T>
 util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp,
                                    bool clamp_nan_to_zero) {
+  const auto unscaled = v;
   if (omod == 1)
     v = v * T(2);
   else if (omod == 2)
     v = v * T(4);
   else if (omod == 3)
     v = v * T(0.5);
+  if constexpr (std::is_same_v<T, float>) {
+    using U = util::native<uint32_t>;
+    U bits = std::bit_cast<U>(v);
+    const U original = std::bit_cast<U>(unscaled);
+    util::stdx::where((original & U(0x7fffffffu)) > U(0x7f800000u), bits) = original;
+    v = std::bit_cast<util::native<float>>(bits);
+  }
   if (clamp) {
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if constexpr (std::is_same_v<T, double>) {
@@ -728,6 +736,25 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
     }
   }
   return util::native<uint32_t>(out, util::stdx::vector_aligned);
+}
+
+/// F32 FMA retains native arithmetic for finite lanes and repairs exceptional
+/// lanes using the same source priority and quieting as the scalar executor.
+inline util::native<float> fma_f32_simd(util::native<float> a, util::native<float> b,
+                                        util::native<float> c, const Wavefront &wf,
+                                        uint32_t omod = 0) {
+  using U = util::native<uint32_t>;
+  const auto exceptional = (std::bit_cast<U>(a) & U(0x7fffffffu)) >= U(0x7f800000u) ||
+                           (std::bit_cast<U>(b) & U(0x7fffffffu)) >= U(0x7f800000u) ||
+                           (std::bit_cast<U>(c) & U(0x7fffffffu)) >= U(0x7f800000u);
+  auto result = util::stdx::fma(a, b, c);
+  if (util::stdx::any_of(exceptional))
+    for (std::size_t i = 0; i < U::size(); ++i)
+      if (exceptional[i])
+        result[i] = fp_mode::fma_f32(a[i], b[i], c[i], wf.cu().arch(), wf.ieee_mode(),
+                                     wf.fp_denorm_mode_f32());
+  // FMA's subnormal intermediate is flushed before OMOD can scale it normal.
+  return omod ? util::flush_denorm_f32_simd(result) : result;
 }
 
 /// @brief Execute a MODE-aware native batch of architectural F64 FMAs.
@@ -1102,12 +1129,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 /// try_execute_ternary_vop2_acc_simd below so register observation follows the
 /// instruction-visible read set exactly.
 ///
-/// `util::stdx::fma` is bit-identical to the scalar `std::fma` for all finite
-/// and infinite inputs (including Inf*0 -> NaN). When an *input* is NaN the
-/// packed and scalar FMA may propagate a different NaN operand (a toolchain-
-/// dependent payload, observed on g++-13/AVX-512); that NaN-payload divergence
-/// is accepted — the result is a NaN either way. The finite/Inf bit-exactness
-/// the fast path relies on is guarded by UtilSimd.Fma_VectorMatchesScalar_*.
+/// F32 operations use fma_f32_simd to preserve architectural NaN payloads.
 template <typename T, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop2_simd(Inst &inst, Wavefront &wf,
@@ -1501,7 +1523,7 @@ inline util::native<float> cvt_f32_f16_mode_simd(util::native<uint32_t> raw, con
   const U magnitude = raw & U(0x7fffu);
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
     util::stdx::where(magnitude < U(0x0400u), raw) = raw & U(0x8000u);
-  if (fp_mode::conversion_quiets_nan(wf.cu().arch(), wf.ieee_mode()))
+  if (fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))
     util::stdx::where(magnitude > U(0x7c00u), raw) = raw | U(0x0200u);
   return util::f16_to_f32_simd(raw);
 }
@@ -2620,9 +2642,8 @@ template <typename T, typename Inst, typename TernOp>
 /// VOP3 f32 ternary SIMD fast path (FMA / MAD family). Reads src0/src1/src2 as
 /// `native<float>`, applies the per-source abs/neg VOP3 modifiers, runs
 /// `tern_op(a, b, c)`, applies CLAMP and optionally OMOD. FIXUP handles OMOD
-/// inside its operation using guest rounding. NaN-payload divergence
-/// between stdx::fma and std::fma is the standard accepted carve-out (the A/B
-/// test skips NaN-input lanes), same as the existing VOP2 ternary path.
+/// inside its operation using guest rounding. FMA uses the shared hardware
+/// NaN selection policy in both scalar and SIMD execution.
 template <typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp_simd(Inst &inst, Wavefront &wf, FmaOp tern_op,
@@ -4160,8 +4181,7 @@ template <typename Inst, typename Op>
 /// same per-register native<float> read/write as the binary form. OP_SEL
 /// chooses each source half independently; op_sel_hi_2 selects src2-hi.
 /// neg/neg_hi bits 0/1/2 sign-flip the respective half. MODE and CLAMP match
-/// the scalar helper. NaN-input payload divergence between stdx::fma and
-/// std::fma is accepted, as in the f16 packed ternary and fma_mix helpers.
+/// the scalar helper, including FMA NaN payload selection.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf,

@@ -347,7 +347,7 @@ void VMacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
           float v = [&]() {
-            float v = std::fma(
+            float v = amdgpu::fp_mode::fma_f32(
                 [&]() {
                   float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
                   if (inst_.abs & (1u << 0))
@@ -364,9 +364,13 @@ void VMacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                     sv = -sv;
                   return sv;
                 }(),
-                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)));
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)),
+                wf.cu().arch(), wf.ieee_mode(), wf.fp_denorm_mode_f32());
+            if (std::isnan(v))
+              return v;
             const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
                 wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
             if (effective_omod == 1)
               v *= 2.0f;
             else if (effective_omod == 2)
