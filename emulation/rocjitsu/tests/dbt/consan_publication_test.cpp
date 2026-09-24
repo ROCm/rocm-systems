@@ -91,10 +91,23 @@ TEST(ConSanPublicationTest, ProgramOrderPreventsRetroactivePublication) {
   EXPECT_EQ(publication_orders(point(0, 1), point(1, 9), events, true), Result::Unordered);
 }
 TEST(ConSanPublicationTest, RepeatedValuesAndAbaAreIncomplete) {
-  for (auto events : {std::vector{rmw(0, 10, 0, 1), rmw(1, 10, 1, 1)},
-                      std::vector{rmw(0, 10, 0, 1), rmw(1, 10, 1, 0)},
+  for (auto events : {std::vector{rmw(0, 10, 0, 1), rmw(1, 10, 1, 0)},
                       std::vector{rmw(0, 10, 0, 1), rmw(1, 10, 0, 1)}})
     EXPECT_EQ(publication_orders(point(0, 1), point(1, 20), events, true), Result::Incomplete);
+}
+TEST(ConSanPublicationTest, IdentityRmwAcquiresExistingReleaseButCannotPublishNewWrites) {
+  std::array events{rmw(0, 10, 0, 1, true, false), rmw(1, 20, 1, 1), rmw(2, 30, 1, 2, false, true)};
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 25), events, true), Result::Ordered);
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 40), events, true), Result::Ordered);
+  EXPECT_EQ(publication_orders(point(1, 15), point(2, 40), events, true), Result::Incomplete);
+  events[1].acquire = false;
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 25), events, true), Result::Incomplete);
+  events[1].covers_workgroup = false;
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 40), events, true), Result::Incomplete);
+}
+TEST(ConSanPublicationTest, IdentityRmwOfInitialValueDoesNotAcquireFutureRelease) {
+  std::array events{rmw(0, 10, 0, 1, true, false), rmw(1, 20, 0, 0, false, true)};
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 25), events, true), Result::Unordered);
 }
 TEST(ConSanPublicationTest, MissingEventsAndObservationsAreIncomplete) {
   std::array events{rmw(0, 10, 0, 1), rmw(1, 10, 2, 3)};

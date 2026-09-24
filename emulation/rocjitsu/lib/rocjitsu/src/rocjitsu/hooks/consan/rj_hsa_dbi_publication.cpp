@@ -194,7 +194,7 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
 
   bool incomplete_object = false;
   std::vector<PublicationEvent> usable;
-  for (const auto &[object, events] : objects) {
+  for (auto &[object, events] : objects) {
     const auto [address, bytes] = object;
     bool invalidated = false;
     for (const auto *other : modifications) {
@@ -208,6 +208,19 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
           other->bytes != bytes) {
         invalidated = true;
         break;
+      }
+    }
+    // An observed identity RMW (add 0, OR of already-set bits) preserves
+    // the incoming release sequence. Its acquire half may read that sequence
+    // just like a load. Its own release cannot be placed among other equal-
+    // value operations, so never infer an outgoing release edge from it.
+    // Keep narrow-scope operations conservative rather than eliding them.
+    for (auto &event : events) {
+      if (event.operation == PublicationOperation::Rmw && event.observation_valid &&
+          event.covers_workgroup && event.observed == event.written) {
+        incomplete_object |= event.release;
+        event.operation = PublicationOperation::Read;
+        event.release = false;
       }
     }
     if (invalidated ||
