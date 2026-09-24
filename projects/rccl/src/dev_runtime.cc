@@ -713,15 +713,21 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
       mem->ginHostWins[i] = mem->ginSegmentInfos[0].ginHostWins[i];
     }
   }
-exit:
   return ret;
 fail:
-  for (int i = 0; i < numSegmentsRegistered; i++) {
-    ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
+  for (int i = 0; mem->ginSegmentInfos != nullptr && i <= numSegmentsRegistered && i < mem->numGinSegments; i++) {
+    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
-  goto exit;
+  // Defensive only: mem-level ginHostWins/ginDevWins are populated solely by
+  // the numGinSegments==1 cache copy above, which sits after the last goto fail.
+  // ncclGinRegister writes ginSegmentInfos[seg].ginHostWins instead.
+  for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS; i++) {
+    mem->ginHostWins[i] = nullptr;
+    mem->ginDevWins[i] = nullptr;
+  }
+  return ret;
 }
 
 static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
@@ -730,6 +736,42 @@ static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrM
     NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
   }
   return ncclSuccess;
+}
+
+static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+    }
+  }
+  // rmaHostWins[0] is a reliable witness that register completed (same pattern
+  // as windowRegisterNonSym / ncclCommWindowDeregister). Skip if connect/register
+  // failed partway so deregister does not walk an unbound rmaCommCount.
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1 &&
+      mem->rmaHostWins[0] != nullptr) {
+    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+  }
+}
+
+// Unmap LSA-flat slices created by symMemoryMapLsaTeam. Must run before
+// ncclSpaceFree so a later obtain can remap the same bigOffset, and so
+// ncclDevrFinalize's cuMemAddressFree does not see leftover mappings.
+static void symMemoryUnmapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  if (comm == nullptr || mem == nullptr || mem->lsaNumSegments == nullptr) return;
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->lsaFlatBase == nullptr) return;
+  for (int r = 0; r < devr->lsaSize; r++) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+    uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
+    for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
+      CUdeviceptr tmpBase = nullptr;
+      size_t tmpBaseSize = 0;
+      CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
+      CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
+      addr = addr + tmpBaseSize;
+    }
+  }
 }
 
 // On success we take caller's reference on memHandle.
@@ -851,6 +893,13 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     }
   }
 
+  // Add to the list of mems before GIN/RMA registration. Plugins such as Anvil SDMA resolve the
+  // user VA through ncclDevrGetLsaSelfAddr, which only searches memHead (and the LSA flat range).
+  // Registering after ncclDevCommCreate is legal, so the registered mem must be on the list before
+  // GIN assignment. Unlink on the failure path.
+  mem->next = devr->memHead;
+  devr->memHead = mem;
+
   if (devr->ginEnabled) {
     NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail_mem_space_teams);
   } else {
@@ -866,15 +915,17 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
   }
 
-  // Add to list of mems.
-  mem->next = devr->memHead;
-  devr->memHead = mem;
-
   *outMem = mem;
   free(globalSegmentInfo);
   return ret;
 
 fail_mem_space_teams:
+  symMemoryUnregister(comm, mem);
+  {
+    struct ncclDevrMemory** ptr = &devr->memHead;
+    while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
+    if (*ptr == mem) *ptr = mem->next;
+  }
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
     if (ucBound && t->ucLeId != NCCL_LE_ID_INVALID) {
@@ -885,9 +936,11 @@ fail_mem_space_teams:
     symUnbindTeamLe(comm, mem, t->mcLeId);
   }
 fail_mem_space:
+  symMemoryUnmapLsaTeam(comm, mem);
   ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
 fail_mem:
   if (mem != nullptr) {
+    free(mem->ginSegmentInfos);
     free(mem->memHandles);
     free(mem->segmentSizes);
     free(mem->lsaNumSegments);
@@ -899,49 +952,36 @@ fail_mem:
 }
 
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  if (mem == nullptr) return;
+  if (mem == nullptr) {
+    return;
+  }
   struct ncclDevrState* devr = &comm->devrState;
+  struct ncclDevrMemory** memLink = &devr->memHead;
+  while (*memLink != nullptr && *memLink != mem) {
+    memLink = &(*memLink)->next;
+  }
   // Membership check before any field access: a second call with a stale
   // pointer (error-path fallthrough after symWindowDestroy, or an explicit
   // double destroy) must not walk off memHead or repeat unmap/release/free.
-  struct ncclDevrMemory** ptr = &devr->memHead;
-  while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
-  if (*ptr != mem) return;
+  if (*memLink != mem) {
+    return;
+  }
 
-  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
-    for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-    }
-  }
-  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
-    ncclRmaProxyDeregister(comm, mem->rmaHostWins);
-  }
+  symMemoryUnregister(comm, mem);
   ncclCftLeId leUcSelf = devr->le.baseId == NCCL_LE_ID_INVALID ? NCCL_LE_ID_INVALID : devr->le.baseId + devr->cftSelf;
   symUnbindTeamLe(comm, mem, leUcSelf);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
     symUnbindTeamLe(comm, mem, t->mcLeId);
   }
-  for (int r = 0; r < devr->lsaSize; r++) {
-    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-    uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
-    for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
-      CUdeviceptr tmpBase;
-      size_t tmpBaseSize;
-      CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
-      CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
-      addr = addr + tmpBaseSize;
-    }
-  }
+  symMemoryUnmapLsaTeam(comm, mem);
 
   ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
   for (int segment = 0; segment < mem->numSegments; segment++) {
     CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
   }
 
-  ptr = &devr->memHead;
-  while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
-  if (*ptr == mem) *ptr = mem->next;
+  *memLink = mem->next; // Remove from list.
 
   free(mem->ginSegmentInfos);
   free(mem->lsaNumSegments);

@@ -243,8 +243,9 @@ symMemoryObtain
  ├── Stage 5: symMemoryMapLsaTeam constructs lsaFlatBase VA + maps each peer's physical segment
  ├── Stage 6: backfill primaryAddr (for callers that didn't supply a VA)
  ├── Stage 7: symBindTeamMemory binds NVLS multicast
- ├── Stage 8: symMemoryRegisterGin / symMemoryRegisterRma — cross-node registration
- └── Stage 9: link into devr->memHead, refCount=1, return
+ ├── Stage 8: link into devr->memHead (plugins resolve user VA via memHead)
+ ├── Stage 9: symMemoryRegisterGin / symMemoryRegisterRma — cross-node registration
+ └── return with refCount=1
 ```
 
 On NVLink, the local rank's handle is exported as follows:

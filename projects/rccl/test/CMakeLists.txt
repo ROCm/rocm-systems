@@ -274,6 +274,7 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
+    GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
@@ -321,7 +322,8 @@ if(BUILD_TESTS)
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
+    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
   # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
@@ -490,7 +492,10 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
 
     # No rccl link below, so the implicit ordering after hipify has to be explicit.
-    add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all)
+    add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all copy_nccl_device_headers)
+    if(TARGET copy_rocshmem_headers)
+      add_dependencies(rccl-UnitTestsGinAnvilPlugin copy_rocshmem_headers)
+    endif()
   endif()
   endif()
 
@@ -1098,6 +1103,8 @@ if(BUILD_TESTS)
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
+  # Suite G: prefer RCCL's GDA headers over rocSHMEM's (higher-priority include path).
+  #          GDA test stubs are used by defining GDA_QUEUEPAIR_MOCK.
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
   # Gated on ENABLE_ROCSHMEM_GIN because that is what now turns on NCCL_GIN_ANVIL_SDMA_ENABLE,
   # and these are the only two test targets that define it.
@@ -1108,7 +1115,10 @@ if(BUILD_TESTS)
       target_include_directories(rccl-UnitTestsFixtures PRIVATE ${CMAKE_SOURCE_DIR}/../rocshmem/src)
     endif()
     target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/device)
+      ${CMAKE_CURRENT_SOURCE_DIR}/device
+      ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
+    )
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE GDA_QUEUEPAIR_MOCK)
     set_source_files_properties(
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
@@ -1129,7 +1139,10 @@ if(BUILD_TESTS)
       -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS} -rdynamic)
     if(TARGET rccl-UnitTestsGinAnvilPlugin)
       target_include_directories(rccl-UnitTestsGinAnvilPlugin BEFORE PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/device)
+        ${CMAKE_CURRENT_SOURCE_DIR}/device
+        ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
+      )
+      target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE GDA_QUEUEPAIR_MOCK)
     endif()
   endif()
 

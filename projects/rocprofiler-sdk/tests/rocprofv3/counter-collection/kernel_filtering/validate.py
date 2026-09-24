@@ -24,10 +24,12 @@
 
 import sys
 import pytest
-import numpy as np
 import pandas as pd
 import re
 
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_hw_counter_values_unavailable,
+)
 from collections import defaultdict
 
 
@@ -63,6 +65,7 @@ def validate_csv(df, kernel_list, counter_name):
 
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains(counter_name).all()
+    skip_if_hw_counter_values_unavailable(df["Counter_Value"])
     assert (df["Counter_Value"].astype(int).values > 0).all()
 
 

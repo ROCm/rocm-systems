@@ -973,7 +973,7 @@ TEST_F(KfdIoctlCdna5Test, BusySdmaUpdatePreservesPublishedRingGeometry) {
       UINT32_MAX,
       0u,
   };
-  std::copy(packets.begin(), packets.end(), ring.begin());
+  std::ranges::copy(packets, ring.begin());
 
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna5GpuId;
@@ -1571,8 +1571,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueryRuntimeExceptionInfoClampsAndPopulates) {
   EXPECT_EQ(info.r_debug, runtime.r_debug);
   EXPECT_EQ(info.runtime_state, static_cast<uint32_t>(DEBUG_RUNTIME_STATE_ENABLED));
   EXPECT_EQ(info.ttmp_setup, 1u);
-  EXPECT_TRUE(std::all_of(buffer.begin() + sizeof(info), buffer.end(),
-                          [](uint8_t byte) { return byte == 0xA5; }));
+  EXPECT_TRUE(std::ranges::all_of(buffer.begin() + sizeof(info), buffer.end(),
+                                  [](uint8_t byte) { return byte == 0xA5; }));
 }
 
 // rocdbgapi has to learn that a process's runtime went away. Otherwise it keeps
@@ -2194,7 +2194,7 @@ TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrow
     const auto *inline_ids =
         reinterpret_cast<const uint32_t *>(payload.data() + sizeof(*request) + sizeof(*args));
     ASSERT_EQ(args->n_devices, device_ids.size());
-    EXPECT_TRUE(std::equal(device_ids.begin(), device_ids.end(), inline_ids));
+    EXPECT_TRUE(std::ranges::equal(device_ids, std::span(inline_ids, device_ids.size())));
 
     rocjitsu::RpcHeader response{};
     response.opcode = rocjitsu::RPC_IOCTL;
@@ -2905,8 +2905,8 @@ TEST_F(DbgTrapDaemonTest, DeviceSnapshotDispatchMatchesTheLocalContract) {
     return result;
   };
   auto all_sentinel = [](const std::vector<uint8_t> &bytes, size_t from, size_t to) {
-    return std::all_of(bytes.begin() + from, bytes.begin() + to,
-                       [](uint8_t byte) { return byte == kSentinel; });
+    return std::ranges::all_of(bytes.begin() + from, bytes.begin() + to,
+                               [](uint8_t byte) { return byte == kSentinel; });
   };
 
   // A null buffer is rejected before any output is written, exactly as
@@ -2932,8 +2932,7 @@ TEST_F(DbgTrapDaemonTest, DeviceSnapshotDispatchMatchesTheLocalContract) {
     EXPECT_EQ(probe.rc, 0);
     EXPECT_EQ(probe.args.device_snapshot.num_devices, kDeviceTotal);
     EXPECT_EQ(probe.args.device_snapshot.entry_size, kEntryBytes);
-    EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
-                            [](uint8_t byte) { return byte == kSentinel; }));
+    EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t byte) { return byte == kSentinel; }));
   }
 
   // Zero stride: success, the total reported, entry_size(OUT) zero, no bytes
@@ -2946,8 +2945,7 @@ TEST_F(DbgTrapDaemonTest, DeviceSnapshotDispatchMatchesTheLocalContract) {
     EXPECT_EQ(zero_stride.rc, 0);
     EXPECT_EQ(zero_stride.args.device_snapshot.num_devices, kDeviceTotal);
     EXPECT_EQ(zero_stride.args.device_snapshot.entry_size, 0u);
-    EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
-                            [](uint8_t byte) { return byte == kSentinel; }));
+    EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t byte) { return byte == kSentinel; }));
   }
 
   // One entry at the compact stride the client transmits: the agent lands in
@@ -3053,9 +3051,9 @@ TEST_F(DbgTrapDaemonTest, QueueSnapshotReconstructsInlineBufferAndValidatesError
                     nullptr),
             -EFAULT);
   EXPECT_EQ(null_queue->queue_snapshot.snapshot_buf_ptr, 0u);
-  EXPECT_TRUE(std::all_of(null_queue_payload.begin() + sizeof(kfd_ioctl_dbg_trap_args),
-                          null_queue_payload.end(),
-                          [](uint8_t byte) { return byte == kSentinel; }));
+  EXPECT_TRUE(std::ranges::all_of(null_queue_payload.begin() + sizeof(kfd_ioctl_dbg_trap_args),
+                                  null_queue_payload.end(),
+                                  [](uint8_t byte) { return byte == kSentinel; }));
 
   // The device op reaches the same null the same way, but answers it with
   // -EINVAL: kfd_dbg_trap_device_snapshot() validates the buffer before writing
@@ -3078,9 +3076,9 @@ TEST_F(DbgTrapDaemonTest, QueueSnapshotReconstructsInlineBufferAndValidatesError
   EXPECT_EQ(null_device->device_snapshot.num_devices, 1u)
       << "a rejected request must not report a device total";
   EXPECT_EQ(null_device->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
-  EXPECT_TRUE(std::all_of(null_device_payload.begin() + sizeof(kfd_ioctl_dbg_trap_args),
-                          null_device_payload.end(),
-                          [](uint8_t byte) { return byte == kSentinel; }));
+  EXPECT_TRUE(std::ranges::all_of(null_device_payload.begin() + sizeof(kfd_ioctl_dbg_trap_args),
+                                  null_device_payload.end(),
+                                  [](uint8_t byte) { return byte == kSentinel; }));
 
   // Entries declared with no tail to hold them: the payload is one arg struct
   // short of what num_queues * entry_size demands, so the request is malformed.
@@ -3417,9 +3415,8 @@ TEST(RemoteDriverDbgSnapshotTest, FailedSnapshotLeavesCallerBufferUntouched) {
   snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
 
   EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -ENOSYS);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
-    return b == kSentinel;
-  })) << "failed GET_DEVICE_SNAPSHOT mutated caller memory";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t b) { return b == kSentinel; }))
+      << "failed GET_DEVICE_SNAPSHOT mutated caller memory";
 
   server.join();
 }
@@ -3457,10 +3454,10 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
 
   EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kCap, [](uint8_t b) {
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin(), caller_buf.begin() + kCap, [](uint8_t b) {
     return b == kPoison;
   })) << "successful snapshot did not copy the daemon payload";
-  EXPECT_TRUE(std::all_of(caller_buf.begin() + kCap, caller_buf.end(), [](uint8_t b) {
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin() + kCap, caller_buf.end(), [](uint8_t b) {
     return b == kSentinel;
   })) << "snapshot copy overran the caller's declared capacity";
 
@@ -3553,9 +3550,8 @@ TEST(RemoteDriverDbgSnapshotTest, ZeroStrideSnapshotKeepsTheRequestedDeviceCount
       << "a zero stride was clamped into the count-only probe";
   EXPECT_EQ(snap.device_snapshot.num_devices, kDeviceTotal);
   EXPECT_EQ(snap.device_snapshot.entry_size, 0u);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
-    return b == kSentinel;
-  })) << "a zero-stride snapshot wrote entry bytes";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t b) { return b == kSentinel; }))
+      << "a zero-stride snapshot wrote entry bytes";
 }
 
 // Reply patch modelling a daemon that enumerates fewer GPUs than the caller
@@ -3620,12 +3616,12 @@ TEST(RemoteDriverDbgSnapshotTest, StrideWiderThanThePayloadLimitStillFillsEntrie
   EXPECT_LE(observed_payload.load(), rocjitsu::kMaxPayloadBytes);
 
   EXPECT_EQ(snap.device_snapshot.num_devices, 1u);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t b) {
-    return b == kPoison;
-  })) << "the entry did not reach the caller's buffer";
-  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
-    return b == kSentinel;
-  })) << "copy-back wrote past the one entry the daemon returned";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes,
+                                  [](uint8_t b) { return b == kPoison; }))
+      << "the entry did not reach the caller's buffer";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(),
+                                  [](uint8_t b) { return b == kSentinel; }))
+      << "copy-back wrote past the one entry the daemon returned";
 }
 
 // libhsakmt's hsaKmtDbgGetDeviceDataCtx() asks for UINT32_MAX devices and lets
@@ -3719,12 +3715,12 @@ TEST(RemoteDriverDbgSnapshotTest, OversizedSnapshotRequestIsClampedToPayloadLimi
   EXPECT_GT(observed_num_devices.load(), 1000u);
 
   EXPECT_EQ(snap.device_snapshot.num_devices, kActualDevices) << "true device total not reported";
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t b) {
-    return b == kPoison;
-  })) << "the enumerated entry did not reach the caller";
-  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
-    return b == kSentinel;
-  })) << "copy-back wrote past the entries the daemon returned";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes,
+                                  [](uint8_t b) { return b == kPoison; }))
+      << "the enumerated entry did not reach the caller";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(),
+                                  [](uint8_t b) { return b == kSentinel; }))
+      << "copy-back wrote past the entries the daemon returned";
 }
 
 // num_devices and entry_size are inputs the request rewrites to the compact
@@ -3781,9 +3777,8 @@ TEST(RemoteDriverDbgSnapshotTest, FailedOversizedSnapshotLeavesTheRequestFieldsU
   EXPECT_EQ(snap.device_snapshot.entry_size, kStride)
       << "failed snapshot overwrote entry_size(IN) with the compact wire stride";
   EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, reinterpret_cast<uint64_t>(caller_buf.data()));
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
-    return b == kSentinel;
-  })) << "failed snapshot mutated caller memory";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t b) { return b == kSentinel; }))
+      << "failed snapshot mutated caller memory";
 }
 
 // Daemon mode must reproduce the driver's strided write, not overwrite the
@@ -3840,11 +3835,12 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPadd
     const auto entry = caller_buf.begin() + static_cast<size_t>(i) * kStride;
     const bool filled = i < kReturned;
     const uint8_t want = filled ? entry_byte(i) : kSentinel;
-    EXPECT_TRUE(std::all_of(entry, entry + kEntryBytes, [&](uint8_t b) { return b == want; }))
+    EXPECT_TRUE(
+        std::ranges::all_of(entry, entry + kEntryBytes, [&](uint8_t b) { return b == want; }))
         << "entry " << i
         << (filled ? " holds the wrong entry's bytes" : " was written past the device total");
-    EXPECT_TRUE(
-        std::all_of(entry + kEntryBytes, entry + kStride, [](uint8_t b) { return b == kSentinel; }))
+    EXPECT_TRUE(std::ranges::all_of(entry + kEntryBytes, entry + kStride,
+                                    [](uint8_t b) { return b == kSentinel; }))
         << "entry " << i << " padding was clobbered";
   }
 
@@ -3880,8 +3876,7 @@ TEST(RemoteDriverDbgQueueSnapshotTest, FailedSnapshotLeavesCallerBufferUntouched
   snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
 
   EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -EFAULT);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(),
-                          [](uint8_t byte) { return byte == kSentinel; }));
+  EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t byte) { return byte == kSentinel; }));
   // A failed op leaves the caller's own inputs in place rather than the wire
   // values the request clamp wrote over them.
   EXPECT_EQ(snap.queue_snapshot.num_queues, kRequested);
@@ -3983,12 +3978,12 @@ TEST(RemoteDriverDbgQueueSnapshotTest, SuccessfulSnapshotScattersIntoTheCallerSt
   snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
 
   EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t byte) {
-    return byte == kPoison;
-  })) << "the entry did not reach the caller's buffer";
-  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t byte) {
-    return byte == kSentinel;
-  })) << "copy-back wrote past the one entry the daemon returned";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes,
+                                  [](uint8_t byte) { return byte == kPoison; }))
+      << "the entry did not reach the caller's buffer";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(),
+                                  [](uint8_t byte) { return byte == kSentinel; }))
+      << "copy-back wrote past the one entry the daemon returned";
   server.join();
 }
 
@@ -4038,12 +4033,12 @@ TEST(RemoteDriverDbgQueueSnapshotTest, OversizedRequestIsClampedToPayloadLimit) 
   EXPECT_GT(observed_num_queues.load(), 1000u);
 
   EXPECT_EQ(snap.queue_snapshot.num_queues, kActualQueues) << "true queue total not reported";
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t byte) {
-    return byte == kPoison;
-  })) << "the enumerated entry did not reach the caller";
-  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t byte) {
-    return byte == kSentinel;
-  })) << "copy-back wrote past the entries the daemon returned";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes,
+                                  [](uint8_t byte) { return byte == kPoison; }))
+      << "the enumerated entry did not reach the caller";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(),
+                                  [](uint8_t byte) { return byte == kSentinel; }))
+      << "copy-back wrote past the entries the daemon returned";
 }
 
 // A closed but positive notifier fd cannot be transferred over SCM_RIGHTS:
@@ -4124,9 +4119,8 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
   en.enable.rinfo_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
 
   EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &en), -EBADF);
-  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
-    return b == kSentinel;
-  })) << "failed ENABLE mutated caller runtime-info memory";
+  EXPECT_TRUE(std::ranges::all_of(caller_buf, [](uint8_t b) { return b == kSentinel; }))
+      << "failed ENABLE mutated caller runtime-info memory";
 
   ::close(notifier_fd);
   server.join();
@@ -4516,9 +4510,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &zero_stride), 0);
   EXPECT_EQ(zero_stride.device_snapshot.num_devices, 1u);
   EXPECT_EQ(zero_stride.device_snapshot.entry_size, 0u);
-  EXPECT_TRUE(std::all_of(buffer.begin(), buffer.end(), [](uint8_t byte) {
-    return byte == kSentinel;
-  })) << "zero-stride snapshot wrote into the caller's buffer";
+  EXPECT_TRUE(std::ranges::all_of(buffer, [](uint8_t byte) { return byte == kSentinel; }))
+      << "zero-stride snapshot wrote into the caller's buffer";
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
@@ -4556,8 +4549,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStri
   kfd_dbg_device_info_entry first{};
   std::memcpy(&first, buffer.data(), sizeof(first));
   EXPECT_EQ(first.gpu_id, kGpuId);
-  EXPECT_TRUE(std::all_of(buffer.begin() + sizeof(first), buffer.end(),
-                          [](uint8_t byte) { return byte == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(buffer.begin() + sizeof(first), buffer.end(),
+                                  [](uint8_t byte) { return byte == 0; }));
 
   snapshot.device_snapshot.num_devices = 2;
   snapshot.device_snapshot.entry_size = kEntryStride;
@@ -4637,7 +4630,7 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
     snapshot_two(driver, buf, snapshot);
     EXPECT_EQ(snapshot.device_snapshot.num_devices, 0u);
     EXPECT_EQ(snapshot.device_snapshot.entry_size, kEntryBytes);
-    EXPECT_TRUE(std::all_of(buf.begin(), buf.end(), [](uint8_t byte) { return byte == kSentinel; }))
+    EXPECT_TRUE(std::ranges::all_of(buf, [](uint8_t byte) { return byte == kSentinel; }))
         << "an undescribable device was written out anyway";
     driver.close();
   }
@@ -4661,7 +4654,7 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
     EXPECT_EQ(first.gpu_id, kGpuId);
     EXPECT_NE(first.simd_count, 0u);
     EXPECT_NE(first.array_count, 0u);
-    EXPECT_TRUE(std::all_of(buf.begin() + kEntryBytes, buf.end(), [](uint8_t byte) {
+    EXPECT_TRUE(std::ranges::all_of(buf.begin() + kEntryBytes, buf.end(), [](uint8_t byte) {
       return byte == kSentinel;
     })) << "the undescribed second GPU was enumerated";
     driver.close();
@@ -4886,29 +4879,37 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
 }
 
 TEST_F(KfdIoctlCdna5Test, ScratchScoreboardSlotsRestartOnEachShaderEngine) {
+  constexpr uint32_t kScratchSlotsPerCu = 32;
+  constexpr uint32_t kCusPerShaderEngine = 16;
+  constexpr uint32_t kScratchSlotsPerShaderEngine = kScratchSlotsPerCu * kCusPerShaderEngine;
+
   auto *xcd = soc_->xcd(0);
   ASSERT_NE(xcd, nullptr);
   ASSERT_EQ(xcd->num_shader_engines(), 2u);
   auto *se0 = xcd->shader_engine(0);
   auto *se1 = xcd->shader_engine(1);
-  ASSERT_EQ(se0->num_compute_units(), 16u);
-  ASSERT_EQ(se1->num_compute_units(), 16u);
+  ASSERT_EQ(se0->num_compute_units(), kCusPerShaderEngine);
+  ASSERT_EQ(se1->num_compute_units(), kCusPerShaderEngine);
 
   auto *se0_last_cu = se0->compute_unit(15);
   auto *se1_first_cu = se1->compute_unit(0);
+  ASSERT_EQ(se0_last_cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
+  ASSERT_EQ(se1_first_cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
   auto *se0_last_wave = se0_last_cu->dispatch_wf_at(
-      /*wf_id=*/63, /*wg_id=*/0, /*pc=*/0x600000000ULL, /*sgprs=*/16, /*vgprs=*/4);
+      /*wf_id=*/kScratchSlotsPerCu - 1, /*wg_id=*/0, /*pc=*/0x600000000ULL,
+      /*sgprs=*/16, /*vgprs=*/4);
   auto *se1_first_wave = se1_first_cu->dispatch_wf_at(
       /*wf_id=*/0, /*wg_id=*/1, /*pc=*/0x600001000ULL, /*sgprs=*/16, /*vgprs=*/4);
   ASSERT_NE(se0_last_wave, nullptr);
   ASSERT_NE(se1_first_wave, nullptr);
 
   EXPECT_EQ(se0_last_wave->shader_engine_id(), 0u);
-  EXPECT_EQ(se0_last_wave->scratch_scoreboard_id(), 1023u);
+  EXPECT_EQ(se0_last_wave->scratch_scoreboard_id(), kScratchSlotsPerShaderEngine - 1);
   EXPECT_EQ(se1_first_wave->shader_engine_id(), 1u);
   EXPECT_EQ(se1_first_wave->scratch_scoreboard_id(), 0u);
-  EXPECT_EQ(se1_first_wave->shader_engine_id() * 1024u + se1_first_wave->scratch_scoreboard_id(),
-            1024u);
+  EXPECT_EQ(se1_first_wave->shader_engine_id() * kScratchSlotsPerShaderEngine +
+                se1_first_wave->scratch_scoreboard_id(),
+            kScratchSlotsPerShaderEngine);
 }
 
 TEST_F(KfdIoctlCdna5Test, DbgTrapPublishesAndRestoresSecondQueueAcrossActiveXccAreas) {
@@ -5106,8 +5107,8 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
   EXPECT_EQ(snap.queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
   const auto *partial = reinterpret_cast<const kfd_queue_snapshot_entry *>(partial_buf.data());
   EXPECT_EQ(partial->queue_id, q1.queue_id);
-  EXPECT_TRUE(std::all_of(partial_buf.begin() + sizeof(*partial), partial_buf.end(),
-                          [](uint8_t byte) { return byte == 0xA5; }));
+  EXPECT_TRUE(std::ranges::all_of(partial_buf.begin() + sizeof(*partial), partial_buf.end(),
+                                  [](uint8_t byte) { return byte == 0xA5; }));
 
   // UPDATE_QUEUE changes the live ring geometry reported by the kernel ABI.
   kfd_ioctl_update_queue_args update{};
@@ -5338,11 +5339,10 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
       kCwsrAddress, kCwsrSize, states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
       ROCJITSU_CODE_ARCH_CDNA4));
-  auto stopped = std::find_if(states.begin(), states.end(),
-                              [](const auto &state) { return state.wave_stopped; });
+  auto stopped = std::ranges::find_if(states, [](const auto &state) { return state.wave_stopped; });
   ASSERT_NE(stopped, states.end());
-  auto running = std::find_if(states.begin(), states.end(),
-                              [](const auto &state) { return !state.wave_stopped; });
+  auto running =
+      std::ranges::find_if(states, [](const auto &state) { return !state.wave_stopped; });
   ASSERT_NE(running, states.end());
   EXPECT_FALSE(stopped->saved_status_halt);
   EXPECT_NE(stopped->status & (1u << 13), 0u);
@@ -6050,7 +6050,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
         kCwsrAddress, kCwsrSize, states,
         [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
         ROCJITSU_CODE_ARCH_CDNA4));
-    auto selected = std::find_if(states.begin(), states.end(), [&](const auto &state) {
+    auto selected = std::ranges::find_if(states, [&](const auto &state) {
       return step == 0 ? state.group_ids[0] == 0 && state.wave_in_group == 0
                        : state.wave_id == kSteppingWaveId;
     });
@@ -6095,9 +6095,8 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
           kCwsrAddress, kCwsrSize, states,
           [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
           ROCJITSU_CODE_ARCH_CDNA4));
-      auto stopped_peer = std::find_if(states.begin(), states.end(), [&](const auto &state) {
-        return state.wave_id != kSteppingWaveId;
-      });
+      auto stopped_peer = std::ranges::find_if(
+          states, [&](const auto &state) { return state.wave_id != kSteppingWaveId; });
       ASSERT_NE(stopped_peer, states.end());
       stopped_peer->wave_stopped = true;
       stopped_peer->mode |= kModeDebugEn;

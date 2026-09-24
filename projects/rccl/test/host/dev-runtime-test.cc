@@ -1956,7 +1956,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) 
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 2);
-  EXPECT_EQ(dereg.calls, 1);  // exactly the one that succeeded
+  EXPECT_EQ(dereg.calls, 2);  // first segment plus the part-way failing one
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 }
 
@@ -4132,6 +4132,10 @@ protected:
     g_ncclTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
   }
   void TearDown() override {
+    // g_ncclTeamLsa lives in devcomm_fakes, which ResetDevRuntimeMicroFakes
+    // does not own; without this it stays a 4-rank team for the rest of the
+    // binary and any later test relying on the default spanning the comm fails.
+    ResetDevcommFakes();
     ResetDevRuntimeMicroFakes();
     DevrWorldToLsaRankTest::TearDown();
   }

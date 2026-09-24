@@ -61,7 +61,7 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-project(amd-dbgapi VERSION 0.80.0 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
+project(amd-dbgapi VERSION 0.81.0 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)

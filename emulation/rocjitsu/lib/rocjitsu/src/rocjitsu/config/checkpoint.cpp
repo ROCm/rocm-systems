@@ -44,8 +44,8 @@ serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::Comp
   cu.for_each_raw_vgpr(base, cu.vgpr_allocation_block_size(), [&](std::span<const uint32_t> lanes) {
     if (lanes.size() < lane_count)
       throw std::runtime_error("VGPR storage is narrower than the checkpoint wave");
-    std::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
-                serialized + offset_bytes);
+    std::ranges::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
+                        serialized + offset_bytes);
     offset_bytes += register_bytes;
   });
   return offset;
@@ -118,7 +118,8 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
         builder.ForceDefaults(true);
         fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
                                             cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
-                                            cu_cfg.functional_quantum);
+                                            cu_cfg.functional_quantum,
+                                            se->compute_unit(0)->scratch_slots_per_cu());
         builder.ForceDefaults(false);
       }
     }
@@ -181,6 +182,7 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           // old omitted zero would otherwise be reinterpreted as 1024.
           if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
             cu_cfg.functional_quantum = cu->functional_quantum();
+          vm_config.soc.scratch_slots_per_cu = cu->scratch_slots_per_cu();
         }
       }
     }
@@ -260,11 +262,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto &wg_coord = w->wg_coord();
           auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
 
-          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
-                                              w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
-                                              sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
-                                              w->kernel_wave_size(), w->wf_size());
+          auto wfs = fb::CreateWavefrontState(
+              builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
+              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
+              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
+              w->wf_size(), w->setreg_vgpr_msb_hazard());
           wf_offsets.push_back(wfs);
         }
 
@@ -437,6 +439,9 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_status_raw(wf_state->status());
           wf->set_mode_raw(wf_state->mode());
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
+          if (wf_state->setreg_vgpr_msb_hazard())
+            wf->arm_setreg_vgpr_msb_hazard();
+
           const auto *sgprs = wf_state->sgprs();
           if (sgprs != nullptr) {
             // Dispatch allocated a logically zero block. Skip zero source

@@ -528,9 +528,7 @@ private:
   static void normalize_host_extents(PageTableEntry &page) {
     auto &extents = page.host_extents;
     if (extents.size() > 1)
-      std::sort(extents.begin(), extents.end(), [](const HostExtent &lhs, const HostExtent &rhs) {
-        return lhs.gpu_page_offset < rhs.gpu_page_offset;
-      });
+      std::ranges::sort(extents, {}, &HostExtent::gpu_page_offset);
     size_t out = 0;
     for (const auto &extent : extents) {
       if (extent.host_ptr == nullptr || extent.host_backed_bytes == 0)
