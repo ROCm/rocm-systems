@@ -51,15 +51,15 @@ TEST(KernargExtensionTest, LayoutAndWriteSupportsMultiplePayloads) {
       std::span<uint8_t>(wrapper.data(), wrapper.size()), *layout, original.data(),
       original_pointer, std::span{writes}));
 
-  EXPECT_TRUE(std::equal(original.begin(), original.end(), wrapper.begin()));
+  EXPECT_TRUE(std::ranges::equal(original, std::span(wrapper).first(original.size())));
   uint64_t copied_pointer = 0;
   std::memcpy(&copied_pointer, wrapper.data() + layout->original_kernarg_pointer_offset,
               sizeof(copied_pointer));
   EXPECT_EQ(copied_pointer, original_pointer);
-  EXPECT_TRUE(
-      std::equal(payload0.begin(), payload0.end(), wrapper.begin() + layout->payload_offsets[0]));
-  EXPECT_TRUE(
-      std::equal(payload1.begin(), payload1.end(), wrapper.begin() + layout->payload_offsets[1]));
+  EXPECT_TRUE(std::ranges::equal(
+      payload0, std::span(wrapper).subspan(layout->payload_offsets[0], payload0.size())));
+  EXPECT_TRUE(std::ranges::equal(
+      payload1, std::span(wrapper).subspan(layout->payload_offsets[1], payload1.size())));
 }
 
 TEST(KernargExtensionTest, RejectsInvalidPayloadAlignment) {

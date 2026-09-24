@@ -30,9 +30,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 /// @brief Production environment backend that forwards to the real POSIX
@@ -836,5 +834,4 @@ consolidate_env_entries(std::vector<std::string>& envp)
     envp = std::move(result);
 }
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

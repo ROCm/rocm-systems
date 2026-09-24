@@ -21,7 +21,7 @@
 #include "config/algorithm_registry.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/dev_runtime_fakes.h"
-#include "fakes/enqueue_symbols_fakes.h"
+#include "fakes/enqueue_fakes.h"
 #include "fakes/nccl_stubs.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/sym_kernels_index_fakes.h"
@@ -216,7 +216,7 @@ class SchedulerMicrotest : public ::testing::Test {
     g_symkAvailable = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; };
   }
   void TearDown() override {
-    ResetEnqueueSymbolsFakes();   // this file's own enqueue_symbols_fakes.{h,cc} seams
+    ResetEnqueueFakes();          // this file's own enqueue_fakes.{h,cc} seams
     ResetNcclStubs();             // clears ncclDevFuncNameToId; other tests here use it as a plain global, not a hook
     ResetSymKernelsFakes();      // g_symRegType is a plain global, not a ScopedHook-restorable std::function
     ResetSymKernelsIndexFakes(); // g_symkGetKernelIndex's kernel-table arrays: plain globals, same reason

@@ -23,9 +23,7 @@
 #include <tuple>
 #include <variant>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace procfs = ::tim::procfs;  // NOLINT
 
@@ -38,5 +36,4 @@ struct scope_filter;
 struct symbol;
 struct dwarf_entry;
 struct binary_info;
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

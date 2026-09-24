@@ -18,9 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 struct roctx_client_config
@@ -114,5 +112,4 @@ roctx_client<MarkerWriterPolicy>::roctx_client(std::shared_ptr<control::session>
       m_session, roctx_cfg.selected_trace_regions) }
 {}
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

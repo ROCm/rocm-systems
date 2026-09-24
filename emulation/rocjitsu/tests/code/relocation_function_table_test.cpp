@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "amdgpu_elf_test_support.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -390,6 +391,30 @@ TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   EXPECT_EQ(tables[0].entries[0].target_text_offset, 4u);
   EXPECT_EQ(tables[0].entries[1].slot_vaddr, 0x2010u);
   EXPECT_EQ(tables[0].entries[1].target_text_offset, 12u);
+}
+
+TEST(RelocationFunctionTable, PreservesSizedTextFunctionGaps) {
+  const std::vector<uint32_t> text_words(12, 0xbf800000u);
+  const std::vector<test_support::TestTextFunction> functions = {
+      {.offset_word = 0, .words = 1},
+      {.offset_word = 4, .words = 2},
+      {.offset_word = 9, .words = 1},
+  };
+  const auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+      text_words, /*kernel1_entry_word=*/8, functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto ranges = discover_text_function_symbol_ranges(object);
+  ASSERT_EQ(ranges.size(), functions.size());
+  EXPECT_EQ(ranges[0].start_offset, 0u);
+  EXPECT_EQ(ranges[0].size, 4u);
+  EXPECT_EQ(ranges[1].start_offset, 16u);
+  EXPECT_EQ(ranges[1].size, 8u);
+  EXPECT_EQ(ranges[2].start_offset, 36u);
+  EXPECT_EQ(ranges[2].size, 4u);
+  EXPECT_LT(ranges[0].start_offset + ranges[0].size, ranges[1].start_offset);
+  EXPECT_LT(ranges[1].start_offset + ranges[1].size, ranges[2].start_offset);
 }
 
 TEST(RelocationFunctionTable, IgnoresExplicitNonAllocatedRelocations) {
