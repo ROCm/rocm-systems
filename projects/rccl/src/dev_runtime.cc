@@ -960,9 +960,10 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
   while (*memLink != nullptr && *memLink != mem) {
     memLink = &(*memLink)->next;
   }
-  // Membership check before any field access: a second call with a stale
-  // pointer (error-path fallthrough after symWindowDestroy, or an explicit
-  // double destroy) must not walk off memHead or repeat unmap/release/free.
+  // Membership check before any field access. The caller's error-path
+  // fallthrough passes mem == nullptr, which already returned above. This
+  // guards an explicit second destroy of a stale pointer: do not walk off a
+  // drained memHead or repeat unmap/release/free.
   if (*memLink != mem) {
     return;
   }
@@ -1126,9 +1127,13 @@ static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vi
 
   NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret, remove_winSorted);
 
-  NCCLCHECKGOTO(ncclCommDeregister(comm, winHost->localRegHandle), ret, remove_winSorted);
-
 remove_winSorted:
+  // Every checked call above jumps here, then winHost is freed. Deregister
+  // first so those exits still release the registration the caller handed off.
+  {
+    ncclResult_t deregRet = ncclCommDeregister(comm, winHost->localRegHandle);
+    if (ret == ncclSuccess) ret = deregRet;
+  }
   {
     int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
                               reinterpret_cast<uintptr_t>(winHost->userPtr));
@@ -1505,7 +1510,11 @@ fail_locReg_memHandle_mem_stream_win:
   *outWinDev = nullptr;
   CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
-  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  // Stream create jumps here before assigning stream. Destroying a null
+  // handle is the same call windowRegisterNonSym skips.
+  if (stream != nullptr) {
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  }
   symMemoryDestroy(comm, mem);
 fail_locReg_memHandle:
   for (int idx = 0; idx < numSegments; idx++) {
