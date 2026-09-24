@@ -25,7 +25,7 @@ class TestCpuHsmp(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.TODO_SKIP_FAIL = False
+        self.common.TODO_SKIP_FAIL = not self.common._check_amd_hsmp_driver()
         self.common.TODO_SKIP_NOT_COMPLETE = False
 
     def tearDown(self):
