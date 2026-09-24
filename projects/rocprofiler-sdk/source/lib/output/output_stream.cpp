@@ -27,8 +27,13 @@
 
 #include <fmt/format.h>
 
+#include <unistd.h>
+#include <cerrno>
+#include <fstream>
+#include <mutex>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 namespace rocprofiler
 {
@@ -40,7 +45,107 @@ namespace
 {
 const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
 const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
+
+// Filesystem time when the tool was loaded into this process. Existing output last written after
+// this point was produced during this run by another profiled process.
+const auto tool_load_time = fs::file_time_type::clock::now();
+
+// Output file stream that is built privately and published when closed (see publish_output).
+struct published_ofstream : std::ofstream
+{
+    published_ofstream(std::string        _private_stem,
+                       std::string        _output_stem,
+                       std::string        _suffix,
+                       std::ios::openmode _mode)
+    : std::ofstream{_private_stem + _suffix, _mode}
+    , private_stem{std::move(_private_stem)}
+    , output_stem{std::move(_output_stem)}
+    , suffix{std::move(_suffix)}
+    {}
+
+    std::string private_stem = {};
+    std::string output_stem  = {};
+    std::string suffix       = {};
+};
+
+// Output names this process has published. Publishing one of them again replaces it.
+auto published_names_mutex = std::mutex{};
+auto published_names       = std::unordered_set<std::string>{};
+
+bool
+published_by_this_process(const std::string& name)
+{
+    auto _lk = std::lock_guard<std::mutex>{published_names_mutex};
+    return published_names.count(name) > 0;
+}
+
+void
+mark_published(const std::string& name)
+{
+    auto _lk = std::lock_guard<std::mutex>{published_names_mutex};
+    published_names.emplace(name);
+}
+
+void
+move_output_part(const fs::path& from, const fs::path& to)
+{
+    if(!fs::exists(from)) return;
+    auto ec = std::error_code{};
+    fs::remove_all(to, ec);
+    fs::rename(from, to);
+}
 }  // namespace
+
+std::string
+get_private_output_stem(std::string_view output_stem)
+{
+    auto stem = fs::path{std::string{output_stem}};
+    return (stem.parent_path() / fmt::format(".{}.{}.tmp", stem.filename().string(), getpid()))
+        .string();
+}
+
+std::string
+publish_output(std::string_view                     private_stem,
+               std::string_view                     output_stem,
+               const std::vector<std::string_view>& suffixes)
+{
+    auto _private = std::string{private_stem};
+    auto _stem    = std::string{output_stem};
+    auto _claim   = _stem + std::string{suffixes.front()};
+
+    // link() never replaces an existing file, so exactly one process claims the output name.
+    if(::link((_private + std::string{suffixes.front()}).c_str(), _claim.c_str()) == 0)
+    {
+        fs::remove(_private + std::string{suffixes.front()});
+    }
+    else
+    {
+        auto link_errno = errno;
+        auto ec         = std::error_code{};
+        auto mtime      = fs::last_write_time(_claim, ec);
+        if(link_errno == EEXIST && !ec && mtime >= tool_load_time &&
+           !published_by_this_process(_claim))
+        {
+            auto _unique = fmt::format("{}_{}", _stem, getpid());
+            ROCP_WARNING << fmt::format("{} was written by another process during this run; "
+                                        "writing {} instead. Include %pid% in the output file "
+                                        "name to give each process its own output.",
+                                        _claim,
+                                        _unique + std::string{suffixes.front()});
+            _stem = std::move(_unique);
+        }
+        // Otherwise the output is from an earlier run, or the filesystem has no hard links.
+        move_output_part(_private + std::string{suffixes.front()},
+                         _stem + std::string{suffixes.front()});
+    }
+
+    for(size_t i = 1; i < suffixes.size(); ++i)
+        move_output_part(_private + std::string{suffixes.at(i)},
+                         _stem + std::string{suffixes.at(i)});
+
+    mark_published(_stem + std::string{suffixes.front()});
+    return _stem;
+}
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext)
@@ -101,7 +206,10 @@ get_output_stream(const output_config& cfg,
         return {&std::clog, [](auto*&) {}};
 
     auto  output_file = get_output_filename(cfg, fname, ext);
-    auto* _ofs        = new(std::nothrow) std::ofstream{output_file, mode};
+    auto  output_stem = get_output_filename(cfg, fname, std::string_view{});
+    auto  suffix      = output_file.substr(output_stem.size());
+    auto* _ofs        = new(std::nothrow)
+        published_ofstream{get_private_output_stem(output_stem), output_stem, suffix, mode};
 
     LOG_IF(FATAL, !_ofs) << fmt::format("Failed to allocate ofstream for output file '{}'",
                                         output_file);
@@ -110,7 +218,11 @@ get_output_stream(const output_config& cfg,
     ROCP_ERROR << "Opened result file: " << output_file;
 
     return {_ofs, [](std::ostream*& v) {
-                if(v) dynamic_cast<std::ofstream*>(v)->close();
+                if(auto* _pofs = dynamic_cast<published_ofstream*>(v))
+                {
+                    _pofs->close();
+                    publish_output(_pofs->private_stem, _pofs->output_stem, {_pofs->suffix});
+                }
                 delete v;
                 v = nullptr;
             }};

@@ -182,8 +182,8 @@ add_signal_handler_test(
     VALIDATE_EXPECT clean-exit
     PASS_REGEX "clean exit")
 
-# Processes sharing one output name (no %pid% in -o) must each keep a complete rocpd
-# database instead of unlinking each other's open database file.
+# Processes sharing one output name (no %pid% in -o) must each keep complete output in
+# every format instead of replacing, truncating, or unlinking each other's files.
 set(_shared_name app-shared-output-name-fork)
 set(_shared_outdir ${BASE_OUT_DIR}/shared-output-name-fork)
 
@@ -197,7 +197,8 @@ rocprofiler_add_integration_execute_test(
     ${_shared_name}
     COMMAND
         ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --marker-trace
-        --output-format rocpd --disable-signal-handlers -d ${_shared_outdir} -o shared --
+        --output-format rocpd csv json pftrace otf2 --disable-signal-handlers -d
+        ${_shared_outdir} -o shared --
         $<TARGET_FILE:signal-handler-test> --fork --app-signal-handler
     DEPENDS signal-handler-test
     TIMEOUT ${CTEST_TIMEOUT}

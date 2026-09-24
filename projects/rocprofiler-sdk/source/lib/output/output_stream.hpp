@@ -32,6 +32,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -92,6 +93,20 @@ struct output_stream
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);
+
+// Name under which output ending up at output_stem + suffix is built privately by this process.
+std::string
+get_private_output_stem(std::string_view output_stem);
+
+// Move output built at private_stem + suffix to output_stem + suffix for each suffix, without
+// replacing output that another profiled process wrote during this run (e.g. processes sharing a
+// fixed -o name); that output is kept and this one is published as <output_stem>_<pid> instead.
+// Output from an earlier run, or published earlier by this process, is replaced. The first suffix
+// must name a regular file. Returns the stem the output was published under.
+std::string
+publish_output(std::string_view                     private_stem,
+               std::string_view                     output_stem,
+               const std::vector<std::string_view>& suffixes);
 
 output_stream
 get_output_stream(const output_config& cfg,

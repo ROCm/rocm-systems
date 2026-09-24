@@ -128,6 +128,12 @@ auto       main_tid        = common::get_tid();
 archive_t* archive         = nullptr;
 auto       flush_callbacks = OTF2_FlushCallbacks{pre_flush, post_flush};
 
+// Archive parts (anchor, trace directory, definitions) are built under a private name and
+// published by shutdown() (see publish_output).
+std::string archive_output_stem  = {};
+std::string archive_private_stem = {};
+const auto  archive_suffixes     = std::vector<std::string_view>{".otf2", "", ".def"};
+
 enum rocprofiler_location_type_t
 {
     ROCPROFILER_AGENT_NO_TYPE = 0,
@@ -296,16 +302,15 @@ setup(const output_config& cfg)
 {
     namespace fs = common::filesystem;
 
-    auto _filename = get_output_filename(cfg, "results", std::string_view{});
-    auto _filepath = fs::path{_filename};
+    archive_output_stem  = get_output_filename(cfg, "results", std::string_view{});
+    archive_private_stem = get_private_output_stem(archive_output_stem);
+
+    auto _filepath = fs::path{archive_private_stem};
     auto _name     = _filepath.filename().string();
     auto _path     = _filepath.parent_path().string();
-    auto _anchor   = fs::path{fmt::format("{}.otf2", _filename)};
-    auto _def      = fs::path{fmt::format("{}.def", _filename)};
 
-    if(fs::exists(_filepath)) fs::remove_all(_filepath);
-    if(fs::exists(_anchor)) fs::remove(_anchor);
-    if(fs::exists(_def)) fs::remove(_def);
+    for(auto suffix : archive_suffixes)
+        fs::remove_all(archive_private_stem + std::string{suffix});
 
     constexpr uint64_t evt_chunk_size = 2 * common::units::MB;
     constexpr uint64_t def_chunk_size = 8 * common::units::MB;
@@ -323,7 +328,7 @@ setup(const output_config& cfg)
     OTF2_CHECK(OTF2_Pthread_Archive_SetLockingCallbacks(archive, nullptr));
     OTF2_CHECK(OTF2_Archive_OpenEvtFiles(archive));
 
-    ROCP_ERROR << "Opened result file: " << _filename << ".otf2";
+    ROCP_ERROR << "Opened result file: " << archive_output_stem << ".otf2";
 }
 
 void
@@ -332,6 +337,10 @@ shutdown()
     OTF2_CHECK(OTF2_Archive_Close(archive));
     archive = nullptr;
     reset_archive_state();
+
+    ROCP_ERROR << "Wrote result file: "
+               << publish_output(archive_private_stem, archive_output_stem, archive_suffixes)
+               << ".otf2";
 }
 
 struct event_info
