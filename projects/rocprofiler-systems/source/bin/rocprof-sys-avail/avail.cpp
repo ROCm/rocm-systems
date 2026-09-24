@@ -959,7 +959,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                 {
                     continue;
                 }
-                const bool center = (i > 0) ? false : true;
+                const bool center = i <= 0;
                 _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
@@ -1051,7 +1051,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             {
                 continue;
             }
-            const bool center = (i > 0) ? false : true;
+            const bool center = i <= 0;
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
             {
@@ -1201,7 +1201,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
                                auto iitr = _settings->find(itr.at("environ"));
                                if(iitr != _settings->end())
                                {
-                                   return (iitr->second->get_enabled() == false);
+                                   return (
+                                       !static_cast<bool>(iitr->second->get_enabled()));
                                }
                                return true;
                            }),

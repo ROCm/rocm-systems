@@ -226,7 +226,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     _dirs.pop_back();
 
     std::string _output_dir = ".";
-    if(!_dirs.empty() && !(_dirs.size() == 1 && _dirs.at(0) == "."))
+    if(!_dirs.empty() && (_dirs.size() != 1 || !(_dirs.at(0) == ".")))
     {
         _output_dir = std::string{ (_absolute) ? "/" : "" } + _dirs.front();
         _dirs.erase(_dirs.begin());

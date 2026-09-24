@@ -123,7 +123,7 @@ get_linked_path(const char*        _name,
     }
 
     const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -174,7 +174,7 @@ get_link_map(const std::string& _lib,
             _next = _next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }

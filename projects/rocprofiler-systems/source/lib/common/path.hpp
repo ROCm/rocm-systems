@@ -422,7 +422,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
             next = next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -465,7 +465,7 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
             }
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
