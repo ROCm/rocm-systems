@@ -673,6 +673,32 @@ static __device__ float2 cast_to_f32x2_from_f8x2(__hip_fp8x2_storage_t v,
                        : __amd_floatx2_storage_t{});
   return float2{f2[0], f2[1]};
 }
+
+/* gfx1250 is the first target with direct fp8/bf8 <-> f16 conversion instructions
+   (V_CVT_F16_FP8, V_CVT_PK_F16_FP8, V_CVT_PK_FP8_F16 and the bf8 twins). They implement OCP
+   E4M3/E5M2, so only those two interpretations are routed through them; FNUZ keeps the software
+   path. On the other HIP_FP8_CVT_FAST_PATH targets none of these builtins are invocable and every
+   caller below falls through to the code it used before. */
+
+/* V_CVT_PK_FP8_F16 converts with round-to-nearest-even and does not saturate, exactly like the
+   V_CVT_PK_FP8_F32 form used above, so __HIP_SATFINITE is implemented the same way: clamp to the
+   destination's largest finite value first. NaN and Inf are left alone so they propagate rather
+   than being clamped to the maximum. 448 (E4M3) and 57344 (E5M2) are both exactly representable
+   in f16, so clamping here is equivalent to clamping in f32 as the float path does. */
+static __device__ _Float16 clamp_f16_to_ocp_f8_range(_Float16 v,
+                                                     __hip_fp8_interpretation_t interpret) {
+  union {
+    _Float16 h;
+    unsigned short int u;
+  } bits;
+  bits.h = v;
+  if ((bits.u & 0x7C00) == 0x7C00) return v;  // NaN or Inf
+  const _Float16 lim =
+      interpret == __HIP_E4M3 ? static_cast<_Float16>(448.0f) : static_cast<_Float16>(57344.0f);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3h))
+    return __builtin_amdgcn_fmed3h(v, lim, -lim);
+  return v;
+}
 #endif  // HIP_FP8_CVT_FAST_PATH
 
 /* For fp8 fnuz types, finite and NaN values are supported. Zero is unsigned.
@@ -881,6 +907,22 @@ __hip_cvt_fp8_to_halfraw(const __hip_fp8_storage_t x, const __hip_fp8_interpreta
 __FP8_HOST_STATIC__ __half_raw __hip_cvt_fp8_to_halfraw(const __hip_fp8_storage_t x,
                                                         const __hip_fp8_interpretation_t interp) {
 #endif
+#if HIP_FP8_CVT_FAST_PATH
+  // See clamp_f16_to_ocp_f8_range() for why only the OCP interpretations take this path.
+  if (interp == __HIP_E4M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_f16_fp8)) {
+      __half_raw ret;
+      ret.data = __builtin_amdgcn_cvt_f16_fp8(x, 0);  // byte 0
+      return ret;
+    }
+  } else if (interp == __HIP_E5M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_f16_bf8)) {
+      __half_raw ret;
+      ret.data = __builtin_amdgcn_cvt_f16_bf8(x, 0);  // byte 0
+      return ret;
+    }
+  }
+#endif  // HIP_FP8_CVT_FAST_PATH
   if (interp == __HIP_E4M3_FNUZ || interp == __HIP_E5M2_FNUZ) {
     unsigned int we = interp == __HIP_E4M3_FNUZ ? 4 : 5;
     unsigned int wm = interp == __HIP_E4M3_FNUZ ? 3 : 2;
@@ -910,6 +952,22 @@ __FP8_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp8x2_to_halfraw2(
 __FP8_HOST_STATIC__ __half2_raw __hip_cvt_fp8x2_to_halfraw2(
     const __hip_fp8x2_storage_t x, const __hip_fp8_interpretation_t interp) {
 #endif
+#if HIP_FP8_CVT_FAST_PATH
+  // V_CVT_PK_F16_FP8 puts the low source byte in element 0, matching the packing used below.
+  if (interp == __HIP_E4M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_f16_fp8)) {
+      __half2_raw ret;
+      ret.data = __builtin_amdgcn_cvt_pk_f16_fp8(static_cast<short int>(x));
+      return ret;
+    }
+  } else if (interp == __HIP_E5M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_f16_bf8)) {
+      __half2_raw ret;
+      ret.data = __builtin_amdgcn_cvt_pk_f16_bf8(static_cast<short int>(x));
+      return ret;
+    }
+  }
+#endif  // HIP_FP8_CVT_FAST_PATH
   __half2 ret(static_cast<__half>(
                   __hip_cvt_fp8_to_halfraw(static_cast<__hip_fp8_storage_t>(x & 0xFF), interp)),
               static_cast<__half>(
@@ -936,6 +994,22 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_halfraw_to_fp8(
 __FP8_HOST_STATIC__ __hip_fp8_storage_t __hip_cvt_halfraw_to_fp8(
     const __half_raw x, const __hip_saturation_t sat, const __hip_fp8_interpretation_t interp) {
 #endif
+#if HIP_FP8_CVT_FAST_PATH
+  // There is no scalar f16 -> fp8 instruction, so feed the value to both halves of the packed
+  // form and keep byte 0, exactly as cast_to_f8_from_f32() does with the f32 form.
+  if (interp == __HIP_E4M3 || interp == __HIP_E5M2) {
+    _Float16 h = x.data;
+    if (sat == __HIP_SATFINITE) h = internal::clamp_f16_to_ocp_f8_range(h, interp);
+    const _Float16_2 h2{h, h};
+    if (interp == __HIP_E4M3) {
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f16))
+        return static_cast<__hip_fp8_storage_t>(__builtin_amdgcn_cvt_pk_fp8_f16(h2) & 0xFF);
+    } else {
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f16))
+        return static_cast<__hip_fp8_storage_t>(__builtin_amdgcn_cvt_pk_bf8_f16(h2) & 0xFF);
+    }
+  }
+#endif  // HIP_FP8_CVT_FAST_PATH
   return __hip_cvt_float_to_fp8(__half2float(__half(x)), sat, interp);
 }
 
@@ -958,6 +1032,23 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8x2_storage_t __hip_cvt_halfraw2_to_fp8x2(
 __FP8_HOST_STATIC__ __hip_fp8x2_storage_t __hip_cvt_halfraw2_to_fp8x2(
     const __half2_raw x, const __hip_saturation_t sat, const __hip_fp8_interpretation_t interp) {
 #endif
+#if HIP_FP8_CVT_FAST_PATH
+  // V_CVT_PK_FP8_F16 writes element 0 to the low byte, matching the packing used below.
+  if (interp == __HIP_E4M3 || interp == __HIP_E5M2) {
+    _Float16_2 h2 = x.data;
+    if (sat == __HIP_SATFINITE) {
+      h2.x = internal::clamp_f16_to_ocp_f8_range(h2.x, interp);
+      h2.y = internal::clamp_f16_to_ocp_f8_range(h2.y, interp);
+    }
+    if (interp == __HIP_E4M3) {
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f16))
+        return static_cast<__hip_fp8x2_storage_t>(__builtin_amdgcn_cvt_pk_fp8_f16(h2));
+    } else {
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f16))
+        return static_cast<__hip_fp8x2_storage_t>(__builtin_amdgcn_cvt_pk_bf8_f16(h2));
+    }
+  }
+#endif  // HIP_FP8_CVT_FAST_PATH
   return __hip_cvt_float2_to_fp8x2(__half22float2(__half2(x)), sat, interp);
 }
 
