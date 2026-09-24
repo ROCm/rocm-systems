@@ -298,6 +298,12 @@ public:
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
 
+  using QueueExceptionHandler = std::function<bool(
+      uint32_t queue_id, uint32_t process_id, uint64_t status, bool retain_failure_for_debugger)>;
+  void set_queue_exception_handler(QueueExceptionHandler cb) {
+    queue_exception_handler_ = std::move(cb);
+  }
+
   /// @brief Notify KFD after configured TBA code returns with STATUS.HALT.
   using TrapCompletionHandler = std::function<void(Wavefront &wf)>;
   void set_trap_completion_handler(TrapCompletionHandler cb) {
@@ -437,12 +443,24 @@ public:
   /// @returns Total hardware wavefront slot count.
   uint32_t num_wf_slots() const { return config_.num_wf_slots; }
 
+  /// @brief Limit scratch-backed residency without reducing general wave slots.
+  /// @details Scratch scoreboard IDs are compact within each shader engine even
+  /// when a CU has more execution contexts than scratch slots.
+  void set_scratch_slots_per_cu(uint32_t slots) {
+    scratch_slots_per_cu_ = std::clamp(slots, 1u, config_.num_wf_slots);
+    scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
+  }
+
+  /// @returns Scratch-backed wavefront slots available on this CU.
+  uint32_t scratch_slots_per_cu() const { return scratch_slots_per_cu_; }
+
   /// @brief Record this CU's physical location within its XCC.
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index) {
     shader_engine_id_ = shader_engine_id;
-    scratch_scoreboard_base_ = cu_index * config_.num_wf_slots;
+    shader_engine_cu_index_ = cu_index;
+    scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
   }
 
   /// @brief Return this CU's physical shader-engine index.
@@ -637,6 +655,22 @@ public:
   template <typename F> decltype(auto) with_wave_state_locked(F &&fn) {
     WaveStateGuard lock(*this);
     return std::forward<F>(fn)();
+  }
+
+  /// @brief Pause once after releasing the wave-state lock but before flushing
+  /// command-processor notifications.
+  /// @details Test-only seam for deterministic lock-order regressions. The hook
+  /// is consumed by the next outermost wave-state guard and invoked unlocked.
+  void set_notification_flush_hook_for_testing(std::function<void()> hook) {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    notification_flush_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Queue one runtime exception and drive the normal unlocked flush path.
+  [[nodiscard]] bool defer_queue_exception_for_testing(uint32_t queue_id, uint32_t process_id,
+                                                       uint64_t status) {
+    return with_wave_state_locked(
+        [&] { return defer_queue_exception(nullptr, queue_id, process_id, status); });
   }
 
   bool has_active_wfs_for_process(uint32_t process_id) const {
@@ -984,6 +1018,20 @@ public:
   }
 
 protected:
+  /// @brief Defer a runtime queue exception until the wave-state lock is released.
+  /// @details Instruction callbacks run under @ref wave_state_mutex_. The command
+  /// processor takes its queue lock before this lock, so reporting synchronously
+  /// here would invert that order against queue dispatch and destruction.
+  bool defer_queue_exception(Wavefront *wave, uint32_t queue_id, uint32_t process_id,
+                             uint64_t status, bool clear_debug_stop_on_success = false,
+                             bool retain_failure_for_debugger = true) {
+    if (!cp_ || status == 0)
+      return false;
+    pending_queue_exceptions_.push_back({queue_id, process_id, status, wave,
+                                         clear_debug_stop_on_success, retain_failure_for_debugger});
+    return true;
+  }
+
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                   uint32_t vgpr_allocation_block_size);
@@ -1082,6 +1130,8 @@ protected:
   uint32_t vgpr_storage_lane_count_ = 0;
   uint32_t vgpr_allocation_block_size_ = 0;
   uint32_t shader_engine_id_ = 0;
+  uint32_t shader_engine_cu_index_ = 0;
+  uint32_t scratch_slots_per_cu_ = 1;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   const bool setreg_vgpr_msb_fixup_ = false;
@@ -1095,8 +1145,8 @@ protected:
   /// under this lock must not reach back into the CP and take hw_queue_mutex_ --
   /// a wave hitting s_endpgm on the engine thread would otherwise close an AB-BA
   /// cycle against a concurrent dispatch or DESTROY_QUEUE. release_wf() therefore
-  /// queues its completions instead of sending them, and the outermost guard
-  /// delivers them here, after the lock is dropped and in the same order.
+  /// queues its notifications instead of sending them, and the outermost guard
+  /// delivers them here, after the lock is dropped.
   class WaveStateGuard {
   public:
     explicit WaveStateGuard(ComputeUnitCore &cu) : cu_(cu), lock_(cu.wave_state_mutex_) {
@@ -1106,9 +1156,15 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
-      lock_.unlock();
+      std::function<void()> notification_flush_hook;
       if (outermost)
-        cu_.flush_wg_completions();
+        notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
+      lock_.unlock();
+      if (outermost) {
+        if (notification_flush_hook)
+          notification_flush_hook();
+        cu_.flush_cp_notifications();
+      }
     }
 
   private:
@@ -1116,9 +1172,18 @@ protected:
     std::unique_lock<std::recursive_mutex> lock_;
   };
 
-  /// @brief Send the workgroup completions queued under the wave-state lock.
+  /// @brief Send command-processor notifications queued under the wave-state lock.
   /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
-  void flush_wg_completions();
+  void flush_cp_notifications();
+
+  struct PendingQueueException {
+    uint32_t queue_id;
+    uint32_t process_id;
+    uint64_t status;
+    Wavefront *wave;
+    bool clear_debug_stop_on_success;
+    bool retain_failure_for_debugger;
+  };
 
   /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
@@ -1129,7 +1194,7 @@ protected:
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
   /// @brief Workgroups that finished while the wave-state lock was held.
-  /// @details Drained by @ref flush_wg_completions once the lock is dropped.
+  /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
   struct PendingVmFault {
     uint32_t queue_id = 0;
@@ -1138,6 +1203,11 @@ protected:
     VmAccessOutcome outcome = VmAccessOutcome::Faulted;
   };
   std::vector<PendingVmFault> pending_vm_faults_;
+  /// @brief Runtime queue exceptions raised while the wave-state lock was held.
+  /// @details Drained before workgroup completions so an error cannot race a
+  /// successful completion from a later instruction.
+  std::vector<PendingQueueException> pending_queue_exceptions_;
+  std::function<void()> notification_flush_hook_for_testing_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -1167,6 +1237,7 @@ protected:
   std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
+  QueueExceptionHandler queue_exception_handler_;
   TrapCompletionHandler trap_completion_handler_;
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
@@ -1234,6 +1305,7 @@ protected:
   bool functional_yield_requested_ = false;
 
   friend class CommandProcessor;
+  friend class InstructionComputeUnitView;
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
@@ -1260,6 +1332,19 @@ inline std::string InstructionComputeUnitView::full_path() const { return raw_cu
 inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_cu().id(); }
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
   return raw_cu().engine();
+}
+inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
+                                                                   uint32_t process_id) const {
+  if (process_id == 0)
+    return raw_cu().memory()->fetch32(address);
+  if (!raw_cu().gpu_vm())
+    return 0;
+  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
+  uint32_t word = 0;
+  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
+             ? word
+             : 0;
 }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();

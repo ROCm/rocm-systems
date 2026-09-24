@@ -828,14 +828,38 @@ void CommandProcessor::shutdown() {
 }
 
 void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers) {
+  assert(!peers.empty() && "XCD topology must contain at least this CP");
+  assert(peers.size() <= MAX_NUM_XCC && "XCD topology exceeds the queue ABI capacity");
   assert(rank < peers.size() && "XCD rank must index its own SoC's CP list");
   assert(peers[rank] == this && "XCD rank must be this CP's own position");
   xcd_rank_ = rank;
+  // Fan-out and scratch address the same physical XCD topology. Keeping a
+  // frontend-owned scratch identity lets PCI/MES queues leave every CP at XCC
+  // zero, so corresponding wave slots on different XCDs alias one another.
+  scratch_xcc_id_ = rank;
+  scratch_xcc_count_ = static_cast<uint32_t>(peers.size());
   xcd_peers_ = std::move(peers);
   // Carve this XCD its own dispatch-id space; see allocate_dispatch_id().
   dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
   dispatch_id_base_ = 1 + rank;
   next_dispatch_id_ = dispatch_id_base_;
+}
+
+void CommandProcessor::set_scratch_slots_per_cu(uint32_t slots) {
+  configured_scratch_slots_per_cu_ = std::max(slots, 1u);
+  scratch_waves_per_se_ = 1;
+  for (ComputeUnitCore *cu : cus_) {
+    cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->scratch_slots_per_cu());
+  }
+}
+
+void CommandProcessor::set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count) {
+  assert(xcc_count != 0 && xcc_count <= MAX_NUM_XCC);
+  assert(xcc_id < xcc_count);
+  scratch_xcc_id_ = xcc_id;
+  scratch_xcc_count_ = xcc_count;
 }
 
 AqlQueueRecord *CommandProcessor::find_aql_queue(uint32_t queue_id, uint32_t process_id) {
@@ -1239,11 +1263,45 @@ void CommandProcessor::drain_doorbell_inbox() {
 }
 
 bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                              uint64_t status) {
+                                              uint64_t status, bool publish_interrupt) {
+  {
+    std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
+    auto queue =
+        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+          return candidate.queue_id == queue_id && candidate.process_id == process_id;
+        });
+    if (queue == aql_queues_.end() || queue->exception_status_va == 0)
+      return false;
+    queue->exception_suspended = true;
+  }
+
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave && !wave->is_halted() && wave->process_id() == process_id &&
+            wave->queue_id() == queue_id) {
+          wave->set_fatal_exception_pending(true);
+          wave->set_debug_suspended(true);
+        }
+      }
+    });
+  }
+  if (!publish_interrupt)
+    return true;
+  return publish_queue_exception(queue_id, process_id, status);
+}
+
+bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t process_id,
+                                               uint64_t status) {
+  if (!gpu_vm_)
+    return false;
+
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink;
+  std::chrono::milliseconds ack_timeout;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
     auto queue = std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
@@ -1253,34 +1311,30 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
       return false;
     exception_status_va = queue->exception_status_va;
     exception_event_id = queue->exception_event_id;
+    ack_timeout = runtime_exception_ack_timeout_;
     address_space = queue->address_space;
     interrupt_sink = queue->interrupt_sink;
   }
 
-  if (write_gpu_block(address_space, exception_status_va, &status, sizeof(status)) !=
-      VmAccessOutcome::Complete) {
+  const AtomicLoadResult previous =
+      gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
+  if (previous.outcome != VmAccessOutcome::Complete)
     return false;
-  }
+  const uint64_t combined_status = previous.value | status;
+  if (gpu_vm_->atomic_store(address_space, exception_status_va, sizeof(combined_status),
+                            combined_status) != VmAccessOutcome::Complete)
+    return false;
   interrupt_sink.deliver(process_id, exception_event_id);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-  AtomicLoadResult exception_status = read_gpu_u64(address_space, exception_status_va);
+  const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
+  AtomicLoadResult exception_status =
+      gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
   while (exception_status.outcome == VmAccessOutcome::Complete &&
-         exception_status.value == status && std::chrono::steady_clock::now() < deadline) {
+         exception_status.value == combined_status && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
-    exception_status = read_gpu_u64(address_space, exception_status_va);
+    exception_status = gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
   }
-
-  for (auto *cu : cus_) {
-    cu->with_wave_state_locked([&] {
-      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-        auto *wave = cu->wf(slot);
-        if (wave && !wave->is_halted() && wave->process_id() == process_id &&
-            wave->queue_id() == queue_id)
-          wave->set_debug_suspended(true);
-      }
-    });
-  }
-  return true;
+  return exception_status.outcome == VmAccessOutcome::Complete &&
+         exception_status.value != combined_status;
 }
 
 QueuePrepareCloseStatus
@@ -1320,8 +1374,11 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         return QueuePrepareCloseStatus::Faulted;
       retry_close = queue->read_pointer_journal.publication_pending() ||
                     queue->publication_retry_pending || queue->idle_publication.active() ||
-                    queue->scratch_request.active() || queue->scratch_reclaim.active() ||
-                    !queue->entries.empty();
+                    // After delivery, ROCr owns the scratch request and may suspend the queue
+                    // while allocating backing. Only an unfinished notification publication
+                    // must delay that removal.
+                    queue->scratch_request.publication_pending() ||
+                    queue->scratch_reclaim.active() || !queue->entries.empty();
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
@@ -1450,7 +1507,7 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
         // here while the debugger still holds the gate would leave the later
         // debugger resume with nothing to release, and the already-fetched
         // packets would sit until an unrelated doorbell arrived.
-        if (changed && !suspended && !q.debug_suspended)
+        if (changed && !suspended && !q.debug_suspended && !q.exception_suspended)
           wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
@@ -1489,14 +1546,17 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
 }
 
 void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
-                                                 bool suspended) {
+                                                 bool suspended, bool resolve_exception) {
   bool wake_command_processor = false;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     for (AqlQueueRecord &q : aql_queues_) {
       if (q.queue_id == queue_id && q.process_id == process_id) {
-        if (q.debug_suspended == suspended)
+        const bool exception_resolved = resolve_exception && q.exception_suspended;
+        if (q.debug_suspended == suspended && !exception_resolved)
           continue;
+        if (exception_resolved)
+          q.exception_suspended = false;
         q.debug_suspended = suspended;
         if (suspended) {
           // Existing queue work needs a resume pass only when the gate, rather
@@ -1513,7 +1573,7 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
             q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
           }
-        } else if (!q.runtime_suspended) {
+        } else if (!q.runtime_suspended && !q.exception_suspended) {
           wake_command_processor |= std::exchange(q.debug_work_deferred, false);
         }
       }
@@ -1801,7 +1861,7 @@ AqlQueueRecord *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < aql_queues_.size(); ++i) {
     size_t idx = (start + i) % aql_queues_.size();
     auto &qs = aql_queues_[idx];
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended)
+    if (qs.faulted || qs.suspended())
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       next_queue_idx_ = (idx + 1) % aql_queues_.size();
@@ -2539,7 +2599,7 @@ void CommandProcessor::on_cu_idle() {
   // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (AqlQueueRecord &qs : aql_queues_) {
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended || qs.publication_retry_pending)
+    if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &e = qs.entries[qs.next_dispatch_idx];
@@ -2581,7 +2641,7 @@ void CommandProcessor::on_cu_idle() {
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
   for (AqlQueueRecord &qs : aql_queues_) {
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended || qs.publication_retry_pending)
+    if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
@@ -2634,7 +2694,7 @@ void CommandProcessor::process_queues() {
   if (engine())
     service_drm_queues(engine()->context(partition_id()).current_tick());
   for (AqlQueueRecord &qs : aql_queues_) {
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended || qs.publication_retry_pending)
+    if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
@@ -3735,6 +3795,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint32_t scratch_wave_stride_per_se = 0;
   bool scratch_use_once = false;
   bool scratch_uses_alternate = false;
+  const uint32_t private_segment_fixed_size =
+      std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   if (uses_kfd_queue_abi) {
     queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
     if (AMDHSA_BITS_GET(kd.kernel_code_properties,
@@ -3754,8 +3816,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       launch_metadata.write_dispatch_id = loaded.value;
     }
 
-    const uint32_t private_segment_fixed_size =
-        std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
     if (private_segment_fixed_size > 0) {
       uint32_t queue_caps = 0;
       VmAccessOutcome outcome =
@@ -3913,6 +3973,9 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     }
   }
 
+  if (private_segment_fixed_size > 0 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+    scratch_wave_limit_per_se = std::min(scratch_wave_limit_per_se, scratch_waves_per_se_);
+
   DispatchEntry dp{};
   dp.queue_id = queue.queue_id;
   dp.enabled_cus = queue.enabled_cus;
@@ -3946,7 +4009,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
-  dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
+  dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
   dp.scratch_wave_stride_per_se = scratch_wave_stride_per_se;
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
@@ -4327,7 +4390,7 @@ void CommandProcessor::fetch_from_queue(AqlQueueRecord &queue, simdojo::Tick now
       queue.faulted = true;
     return false;
   };
-  if (queue.debug_suspended || queue.runtime_suspended) {
+  if (queue.suspended()) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
@@ -4635,8 +4698,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
       progress = false;
 
       for (AqlQueueRecord &queue : aql_queues_) {
-        if (queue.faulted || queue.debug_suspended || queue.runtime_suspended ||
-            queue.publication_retry_pending)
+        if (queue.faulted || queue.suspended() || queue.publication_retry_pending)
           continue;
 
         while (queue.next_dispatch_idx < queue.entries.size()) {
@@ -4765,8 +4827,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     process_refetched_entries = false;
 
     for (AqlQueueRecord &queue : aql_queues_) {
-      if (queue.faulted || queue.debug_suspended || queue.runtime_suspended ||
-          queue.publication_retry_pending)
+      if (queue.faulted || queue.suspended() || queue.publication_retry_pending)
         continue;
       while (queue.next_dispatch_idx < queue.entries.size()) {
         DispatchEntry &entry = queue.entries[queue.next_dispatch_idx];

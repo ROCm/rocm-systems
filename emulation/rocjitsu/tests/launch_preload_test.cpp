@@ -98,6 +98,21 @@ TEST(LaunchPreloadTest, EnvpCacheRebuildsAfterSet) {
   EXPECT_NE(rebuilt.end(), std::ranges::find(rebuilt, after));
 }
 
+TEST(LaunchPreloadTest, DbtGuestToolsDisableAutomaticHotswapLoading) {
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set("HSA_HOTSWAP_ENABLE", "1");
+  environment.set("HSA_HOTSWAP_DISABLE", "0");
+  environment.set("HSA_TOOLS_DISABLE_REGISTER", "0");
+  environment.set("HSA_TOOLS_LIB", "/tmp/libother-tool.so");
+
+  rocjitsu::cli::configure_dbt_guest_tool_environment(environment, "/tmp/librocjitsu_hooks.so");
+
+  EXPECT_STREQ("0", environment.get("HSA_HOTSWAP_ENABLE"));
+  EXPECT_STREQ("1", environment.get("HSA_HOTSWAP_DISABLE"));
+  EXPECT_STREQ("1", environment.get("HSA_TOOLS_DISABLE_REGISTER"));
+  EXPECT_STREQ("/tmp/librocjitsu_hooks.so", environment.get("HSA_TOOLS_LIB"));
+}
+
 TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {
 #if defined(RJ_EXPECT_SHARED_ASAN_RUNTIME) || defined(RJ_EXPECT_SHARED_TSAN_RUNTIME)
   GTEST_SKIP() << "shared sanitizer builds exercise sanitizer ordering cases";
