@@ -8,17 +8,17 @@ include_guard(DIRECTORY)
 # SQLITE_ENABLE_JSON1 extension). Everything else profiler-hub calls is far older.
 set(SQLITE3_VERSION "3.38.0" CACHE STRING "Minimum SQLite3 version")
 
+find_package(SQLite3 ${SQLITE3_VERSION})
+
 # Fetching is Off by default: a missing or old package errors out.
-if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
-    find_package(SQLite3 ${SQLITE3_VERSION})
+if(NOT SQLite3_FOUND AND NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    message(
+        FATAL_ERROR
+        "profiler-hub requires SQLite3 ${SQLITE3_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+    )
+endif()
 
-    if(NOT SQLite3_FOUND)
-        message(
-            FATAL_ERROR
-            "profiler-hub requires SQLite3 ${SQLITE3_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
-        )
-    endif()
-
+if(SQLite3_FOUND)
     message(STATUS "Using system SQLite3 (version ${SQLite3_VERSION})")
 
     # SQLite::SQLite3 is the target name both CMake's own FindSQLite3 module and
