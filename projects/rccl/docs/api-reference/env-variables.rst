@@ -454,6 +454,30 @@ in the following table.
       - | Remapping specification string
         | Used with Rome 4P2H topology
 
+    * - | ``NCCL_GIN_PLUGIN``
+        | Selects external GIN (GPU-Initiated Networking) plugins.
+      - | Comma-separated list of paths or short names
+        | A short name is resolved against the ``librccl-gin`` prefix, so
+          ``example`` loads ``librccl-gin-example.so``
+        | A plugin reporting the proxy device type is superseded by the built-in
+          GIN proxy. See :ref:`using-rccl-gin-plugin`
+
+    * - | ``NCCL_GIN_ENABLE``
+        | Controls whether any GIN backend is registered. RCCL-specific.
+      - | ``1``: Register GIN backends (default)
+        | ``0``: Register none, so GIN reports as unsupported
+
+    * - | ``NCCL_GIN_TYPE``
+        | Requires a specific GIN backend type, skipping all others.
+      - | ``-1``: Disables the generic filter, but does not auto-enable
+          the in-tree device backends
+        | ``2``: Proxy
+        | ``3``: GDAKI
+        | ``4``: GPI
+        | ``5``: EFA GDA
+        | ``6``: rocSHMEM GDA (required for that backend to initialize)
+        | ``7``: Anvil SDMA (also accepts unset)
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.
