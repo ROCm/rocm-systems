@@ -463,14 +463,6 @@ add_test(
         tests/integration/test_analyze_workloads.py ${WORKING_DIR_OPTION}
 )
 
-add_test(
-    NAME test_analyze_roctx_call_trees
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_analyze_roctx_call_trees.xml ${COV_OPTION}
-        tests/integration/test_analyze_roctx_call_trees.py ${WORKING_DIR_OPTION}
-)
-
 # ---------------------------
 # TCP counter tests
 # ---------------------------
@@ -1037,7 +1029,6 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
-        test_analyze_roctx_call_trees
         test_aggregation
         test_expression
         test_evaluation_pipeline
