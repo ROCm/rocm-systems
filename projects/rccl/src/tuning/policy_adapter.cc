@@ -7,6 +7,7 @@
 #include "policy_adapter.h"
 
 #include "archinfo.h"
+#include "channel.h"
 #include "comm.h"
 #include "debug.h"
 #include "device.h"
@@ -567,38 +568,136 @@ void rcclPolicyPlanP2pWork(
        (int)policy.transport);
 }
 
-int rcclPolicyP2pWorkConnectorIndex(
-  const ncclComm* comm, const rcclP2pPolicyWorkPlan* plan, int dir,
-  int channelId, int peer, int defaultConnIndex) {
-  if (!plan->matched[dir]) return defaultConnIndex;
-  const rcclCollectiveExecutionPolicy& policy = plan->policy[dir];
-  bool isSendNotRecv = dir != 0;
+namespace {
+
+// Connected connector slot carrying the policy's transport and transfer mode
+// on one channel, or -1 when the channel has none. Policies that constrain
+// neither keep defaultConnIndex.
+int rcclPolicyP2pChannelConnector(
+  const ncclComm* comm, const rcclCollectiveExecutionPolicy& policy,
+  int channelId, int peer, bool isSendNotRecv, int defaultConnIndex) {
+  bool constrainsTransport = policy.transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN;
+  bool constrainsTransfer = policy.transport != RCCL_EXECUTION_TRANSPORT_SHM &&
+                            policy.transferMode != RCCL_P2P_TRANSFER_AUTO;
+  if (!constrainsTransport && !constrainsTransfer) return defaultConnIndex;
+  if (channelId < 0 || channelId >= MAXCHANNELS || peer < 0 || peer >= comm->nRanks)
+    return -1;
+  const ncclChannelPeer* channelPeer = comm->channels[channelId].peers[peer];
+  if (channelPeer == nullptr) return -1;
+  auto connectorAt = [&](int connIndex) -> const ncclConnector& {
+    return isSendNotRecv ? channelPeer->send[connIndex] : channelPeer->recv[connIndex];
+  };
+
   int connIndex = defaultConnIndex;
-  if (policy.transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN) {
-    int transportConnIndex =
-      rcclPolicyP2pConnectorIndex(comm, channelId, peer, isSendNotRecv, policy.transport);
-    if (transportConnIndex >= 0) connIndex = transportConnIndex;
+  if (constrainsTransport) {
+    connIndex = rcclPolicyP2pConnectorIndex(comm, channelId, peer, isSendNotRecv, policy.transport);
+    if (connIndex < 0 ||
+        !rcclConnectorUsesPolicyTransport(connectorAt(connIndex), policy.transport, isSendNotRecv,
+                                          /*requireConnected=*/true))
+      return -1;
   }
-  if (policy.transport == RCCL_EXECUTION_TRANSPORT_SHM ||
-      policy.transferMode == RCCL_P2P_TRANSFER_AUTO)
-    return connIndex;
+  if (!constrainsTransfer) return connIndex;
 
   int requiredFlag =
     policy.transferMode == RCCL_P2P_TRANSFER_READ ? NCCL_P2P_READ : NCCL_P2P_WRITE;
   constexpr int candidateConnIndices[] = {1, RCCL_CONN_IDX_P2P_ALT};
   for (int candidate : candidateConnIndices) {
     if (candidate == RCCL_CONN_IDX_P2P_ALT && comm->p2pNet) continue;
-    const ncclChannelPeer* channelPeer = comm->channels[channelId].peers[peer];
-    const ncclConnector& conn =
-      isSendNotRecv ? channelPeer->send[candidate] : channelPeer->recv[candidate];
-    if (conn.connected && (conn.conn.flags & requiredFlag)) return candidate;
+    const ncclConnector& conn = connectorAt(candidate);
+    if (!conn.connected || !(conn.conn.flags & requiredFlag)) continue;
+    if (constrainsTransport &&
+        !rcclConnectorUsesPolicyTransport(conn, policy.transport, isSendNotRecv,
+                                          /*requireConnected=*/true))
+      continue;
+    return candidate;
+  }
+  return -1;
+}
+
+// One slot must satisfy the policy on every channel, since a work item uses a
+// single connector index for all of its parts.
+int rcclPolicyP2pChannelsConnector(
+  const ncclComm* comm, const rcclCollectiveExecutionPolicy& policy,
+  const int* channelIds, int nChannelIds, int peer, bool isSendNotRecv,
+  int defaultConnIndex, int* failedChannel) {
+  int connIndex = -1;
+  for (int i = 0; i < nChannelIds; i++) {
+    int channelConnIndex = rcclPolicyP2pChannelConnector(
+      comm, policy, channelIds[i], peer, isSendNotRecv, defaultConnIndex);
+    if (channelConnIndex < 0 || (i > 0 && channelConnIndex != connIndex)) {
+      *failedChannel = channelIds[i];
+      return -1;
+    }
+    connIndex = channelConnIndex;
+  }
+  return connIndex < 0 ? defaultConnIndex : connIndex;
+}
+
+} // namespace
+
+int rcclPolicyP2pWorkConnectorIndex(
+  const ncclComm* comm, const rcclP2pPolicyWorkPlan* plan, int dir,
+  const int* channelIds, int nChannelIds, int peer, int defaultConnIndex) {
+  if (!plan->matched[dir]) return defaultConnIndex;
+  int failedChannel = -1;
+  int connIndex = rcclPolicyP2pChannelsConnector(
+    comm, plan->policy[dir], channelIds, nChannelIds, peer, /*isSendNotRecv=*/dir != 0,
+    defaultConnIndex, &failedChannel);
+  if (connIndex >= 0) return connIndex;
+  // Only reachable when a work item's channel pool differs from the pool its
+  // task was validated on (mixed or unevenly capped send/receive pairs).
+  INFO(NCCL_COLL,
+       "RCCL P2P execution policy connector unavailable on channel %d; using default connector "
+       "(dir=%s peer=%d transport=%d transfer=%d)",
+       failedChannel, dir ? "send" : "recv", peer, (int)plan->policy[dir].transport,
+       (int)plan->policy[dir].transferMode);
+  return defaultConnIndex;
+}
+
+void rcclPolicyValidateP2pTask(ncclComm* comm, ncclTaskP2p* task, bool isSendNotRecv) {
+  int peer = task->root;
+  if (!task->executionPolicyMatched || peer < 0 || peer >= comm->nRanks || peer == comm->rank)
+    return;
+  rcclP2pPolicyPreconnect preconnect;
+  rcclPolicyP2pPreconnect(comm, task, &preconnect);
+
+  int round = 0;
+  while (round < comm->nRanks &&
+         peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank
+                                : comm->p2pSchedule[round].recvRank))
+    round++;
+  int failedChannel = -1;
+  if (round < comm->nRanks && preconnect.nChannels > 0) {
+    int base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm)) %
+               preconnect.nChannels;
+    int channelIds[MAXCHANNELS];
+    int nChannelIds = std::min(preconnect.nChannelsPerPeer, MAXCHANNELS);
+    for (int part = 0; part < nChannelIds; part++)
+      channelIds[part] = ncclP2pChannelForPart(preconnect.nChannels, base, part, nChannelIds,
+                                               comm->nNodes, comm->p2pChannelShiftSize);
+    if (rcclPolicyP2pChannelsConnector(comm, task->executionPolicy, channelIds, nChannelIds, peer,
+                                       isSendNotRecv, /*defaultConnIndex=*/1, &failedChannel) >= 0)
+      return;
   }
   INFO(NCCL_COLL,
-       "RCCL P2P execution policy transfer mode unavailable; preserving default connector "
-       "(dir=%s requested=%s)",
-       isSendNotRecv ? "send" : "recv",
-       policy.transferMode == RCCL_P2P_TRANSFER_READ ? "read" : "write");
-  return connIndex;
+       "RCCL P2P execution policy dropped: coll=%d peer=%d dir=%s transport=%d transfer=%d has no "
+       "connected connector on channel %d; task runs without a policy",
+       (int)task->collAPI, peer, isSendNotRecv ? "send" : "recv",
+       (int)task->executionPolicy.transport, (int)task->executionPolicy.transferMode,
+       failedChannel);
+  task->executionPolicyMatched = false;
+  rcclDefaultCollectiveExecutionPolicy(&task->executionPolicy);
+}
+
+void rcclPolicyValidateP2pTasks(ncclComm* comm) {
+  for (int peer = 0; peer < comm->nRanks; peer++) {
+    for (ncclTaskP2p* task = ncclIntruQueueHead(&comm->planner.peers[peer].sendQueue);
+         task != nullptr; task = task->next)
+      rcclPolicyValidateP2pTask(comm, task, /*isSendNotRecv=*/true);
+    for (ncclTaskP2p* task = ncclIntruQueueHead(&comm->planner.peers[peer].recvQueue);
+         task != nullptr; task = task->next)
+      rcclPolicyValidateP2pTask(comm, task, /*isSendNotRecv=*/false);
+  }
 }
 
 int rcclPolicyP2pWorkProtocol(
