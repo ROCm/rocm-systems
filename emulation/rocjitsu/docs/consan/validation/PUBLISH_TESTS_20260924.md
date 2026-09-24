@@ -5,6 +5,43 @@ Clang + UBSan, and Clang + ASan, including ConSan device tests on the emulator
 and the physical gfx1201. It is a regression gate, not a replacement for the
 external-workload qualification tables.
 
+## Final qualification — all failures resolved
+
+The complete sanitizer matrix plus the explicit repair reruns has no outstanding
+failures. Production fixes are committed through `358dc1a81ce`; test timeout
+calibration is in `b5b564868ee` and `368a20819d5`. Nothing was pushed.
+
+| Configuration | Passed | Failed | Runtime skips | ConSan emulator | ConSan physical gfx1201 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Clang + UBSan | 11,424 | 0 | 30 | 2,010 / 2,010 | 447 / 447 |
+| Clang + ASan | 11,435 | 0 | 33 | 2,010 / 2,010 | 447 / 447 |
+
+Each configuration also passed its normally disabled instruction-timing test
+explicitly, in addition to the passes above. No ConSan case was skipped. All
+469 physical GPU tests per configuration, including the 22 outside ConSan,
+passed under the shared lock. CPU/emulator tests ran in parallel.
+
+These are qualification totals after reruns, not a claim that the initial full
+invocation was entirely green. The raw evidence is retained in
+`/home/benoit/workspace/consan-validation/publish-fixes-20260924/`:
+
+- `sanitizers-final.xml`: complete registered matrix.
+- `launcher-rerun.xml`: all 75 cases affected by relinking during the campaign
+  passed after builds finished.
+- `asan-rccl-final.xml`: all five RCCL cases passed with the committed ASan
+  timeout budgets under concurrent suite load.
+- `final-memory.xml`: all 419 final memory/cache/debugger checks passed across
+  GCC (134), UBSan (134), and ASan (151), including the late null-copy fix.
+- `qualification-summary.json`, `qualified-tests.json`, and `qualify.py`:
+  per-test reconciliation, preserving which result establishes each pass.
+
+ASan qualification uses the branch-built ROCr and isolated HIP/RCCL runtime
+overlay described below. Existing test-specific sanitizer settings were
+preserved; no new leak suppressions were introduced. GCC's complete gate and
+subsequent focused verification are recorded below.
+
+## Initial baseline (retained for comparison)
+
 **Initial baseline, before repairs.** All builds passed and the complete registered matrix
 ran against the production sources at `5d45a79720b`. The full test run took
 818 seconds, excluding builds and focused diagnostics. The interrupted first
@@ -182,10 +219,10 @@ that required child startup within 50 ms. It now checks the parent-observed
 PID instead; all 33 VFIO launcher unit tests, 24 concurrent timeout repetitions,
 and its CTest rerun (`gcc-vfio-fixed.xml`) pass. No GCC failure remains.
 
-Sanitizer rebuilds and qualification are now underway, using the GCC repairs.
+The sanitizer repair pass below builds on the qualified GCC repairs.
 The original matrix above remains the pre-repair baseline.
 
-## Sanitizer repair pass — in progress
+## Sanitizer repair pass — chronology
 
 - ASan cache validation must preserve demand-access semantics: missing backing
   remains retryable, and a refused read leaves its destination untouched.
@@ -222,7 +259,7 @@ The uninterrupted rerun is `sanitizers-full2.log`, with 24 CPU workers and all
 physical GPU tests serialized by the shared lock. UBSan has completed with
 11,423 passes, zero failures, 30 runtime skips, and one disabled test. All 2,010
 ConSan emulator and 447 physical gfx1201 cases passed. The disabled instruction
-timing test passed separately in both sanitizer builds. ASan is still running.
+timing test passed separately in both sanitizer builds. ASan was still running at that checkpoint.
 The original baseline above is retained separately from these repair results.
 
 ### Follow-up ASan findings
@@ -251,16 +288,15 @@ on every access.
 RCCL also has its own RPATH selecting the SDK's old ROCr. The isolated ASan
 overlay therefore includes a copy of `librccl.so.1` with RUNPATH, as well as HIP.
 `ldd` confirms that the RCCL client resolves HIP and ROCr through the overlay.
-The final rerun is pending these repairs; the 18 failures are not counted as
-resolved by diagnostic timeout overrides alone.
+The final rerun below qualifies these repairs; diagnostic timeout overrides
+alone were not counted as resolving the 18 failures.
 
 The direct-query change is committed as `3e95f0a7926`. All 149 focused ASan
 memory/cache tests pass, and all five RCCL tests pass concurrently within their
 existing deadlines (81 seconds wall time), with leak checking enabled and the
 corrected runtime overlay. GCC also passes the final 135-test memory/cache/
-scratch selection. A fresh complete ASan/UBSan run is in progress in
-`sanitizers-final.log`; its results supersede earlier repaired attempts only
-once it completes.
+scratch selection. The subsequent complete ASan/UBSan run is retained in
+`sanitizers-final.log`, with final reruns reconciled in the summary above.
 
 During the final run, launching all slow jobs together exceeded RCCL's inner
 150-second rank deadline. `368a20819d5` raises only ASan's rank/test budgets to
@@ -275,3 +311,10 @@ passed in `launcher-rerun.xml`. The full-run XML retains the original failures;
 qualification combines those explicit reruns with the full matrix rather than
 overwriting evidence. Both disabled instruction-timing tests also passed again
 on the final code.
+
+The last new regression exposed undefined behavior when a self-client probe at
+address zero reached `memcpy` before the host fault guard. `358dc1a81ce` rejects
+null nonempty reads and writes before calling it, and treats empty copies as
+no-ops. The regression now verifies both fault paths. All 419 final focused
+checks pass across the three compilers; the reconciled sanitizer totals above
+contain no unresolved failures.
