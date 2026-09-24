@@ -38,6 +38,8 @@ function(rccl_define_micro_source_lists)
     wrap-test.cc
     dev-runtime-test.cc
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
+    # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
@@ -683,34 +685,28 @@ rccl_add_micro_binary(rccl-UnitTestsMicro NO_PIE
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
-  EXTRA_DEFS ${_MICRO_MODE_DEFS}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+    RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
+    TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
+    RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
+    RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
+    # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
+    # rma_ce.cc has no basename collision, so it keeps its own name.
+    RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
+    GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
+    DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
+    DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+    WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+    DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
+    DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
+    # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
+    GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-
-# real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
-target_sources(rccl-UnitTestsMicro PRIVATE
-  ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
-
-target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
-  RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
-  TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
-  RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
-  RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
-  # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
-  # add_file_unique() renames this one. Re-check after any source-list reorder.
-  RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
-  # rma_ce.cc has no basename collision, so it keeps its own name.
-  RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
-  GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
-  DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
-  DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
-  WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
-  RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
-  DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
-  DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
-  # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
-  GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
-)
 
 # sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS
 # in-build / present on disk standalone).
