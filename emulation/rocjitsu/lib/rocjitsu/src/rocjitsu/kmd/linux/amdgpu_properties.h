@@ -52,8 +52,9 @@ constexpr uint32_t make_gc_ip_version(uint32_t major, uint32_t minor, uint32_t r
 /// major.minor.stepping decode would land on the wrong side of the driver's
 /// version thresholds (missing precise-memory support on gfx90a, or the
 /// gfx9.4.3 watch-address-mask values on gfx942). Only the parts whose encoding
-/// diverges from a direct decode are listed here; every other GPU -- all of
-/// gfx10/gfx11 and gfx12.0 -- decodes directly, which is exact for the
+/// diverges from a direct decode are listed here, including Navi10's
+/// gfx1010 -> GC 10.1.10 mapping. The remaining gfx10/gfx11 and gfx12.0
+/// targets decode directly, which is exact for the
 /// thresholds the driver compares against.
 ///
 /// \NPI add a case when a new GPU's gfx_target_version does not decode directly
@@ -67,6 +68,8 @@ constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_vers
     return make_gc_ip_version(9, 4, 3);
   case 90500: // MI350 / gfx950      -> GC 9.5.0
     return make_gc_ip_version(9, 5, 0);
+  case 100100: // Navi10 / gfx1010   -> GC 10.1.10
+    return make_gc_ip_version(10, 1, 10);
   case 120500: // gfx1250            -> GC 12.1.0
     return make_gc_ip_version(12, 1, 0);
   default: {
@@ -116,6 +119,11 @@ inline std::optional<uint32_t> gfx_target_version_from_name(std::string_view nam
 
 constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_target_version,
                                                           uint32_t revision_id) {
+  // Navi10/Navi21 offsets from the amdgpu driver's nv_common_early_init.
+  if (gfx_target_version == 100100)
+    return revision_id + 0x1;
+  if (gfx_target_version == 100300)
+    return revision_id + 0x28;
   auto ip = decode_gfx_target_version(gfx_target_version);
   if (ip.major == 12 && ip.minor == 0) {
     if (ip.stepping == 0)
@@ -173,6 +181,11 @@ constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
 }
 
 constexpr uint32_t gb_addr_config_for_gfx_target_version(uint32_t gfx_target_version) {
+  // Navi10/Navi21 GB_ADDR_CONFIG defaults in gc_10_1_0/gc_10_3_0_default.h.
+  if (gfx_target_version == 100100)
+    return 0x44;
+  if (gfx_target_version == 100300)
+    return 0x444;
   auto ip = decode_gfx_target_version(gfx_target_version);
   if (ip.major == 12 && ip.minor == 0)
     return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4);

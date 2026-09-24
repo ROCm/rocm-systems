@@ -14,9 +14,7 @@
 #include <variant>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace type_traits
@@ -156,5 +154,4 @@ concept sample_processor = requires(T t, TypeIdentifierEnum e, const CacheableTy
 };
 
 }  // namespace type_traits
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache
