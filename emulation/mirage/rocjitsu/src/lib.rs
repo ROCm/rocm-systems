@@ -198,13 +198,36 @@ impl EmulatorBackend for Rocjitsu {
     /// itself reads the file through FlatBuffers, which accepts JSON this
     /// does not, so failing to parse it here says nothing about whether
     /// the run will work — only that mirage cannot describe it.
-    fn reconcile_profile(&self, profile: &mut ProfileDef) -> Result<()> {
+    ///
+    /// The file is read once. Its snapshot in `session_dir` becomes the
+    /// profile's `config`, so [`kmd_config`] injects the bytes the device
+    /// was read from instead of re-reading a file the user may have
+    /// rewritten since.
+    fn reconcile_profile(
+        &self,
+        profile: &mut ProfileDef,
+        session_dir: &std::path::Path,
+    ) -> Result<()> {
         let Some(SimpleValue::String(path)) = profile.emulator.options.get("config") else {
             return Ok(());
         };
+        let original = absolute_supplied_config(PathBuf::from(path));
+        // A file that cannot be read or snapshotted is left for the
+        // injection to report: it fails on the same file with the error the
+        // user needs, and there is no device to name in the meantime.
+        let device = match snapshot_supplied_config(&original, session_dir) {
+            Ok((snapshot, bytes)) => {
+                profile.emulator.options.insert(
+                    "config".to_string(),
+                    SimpleValue::String(snapshot.display().to_string()),
+                );
+                device_of_bytes(&bytes)
+            }
+            Err(_) => None,
+        };
         // A default device is one with no `gfx_target_version`, which is
         // the "mirage cannot name this" answer the doc above promises.
-        let device = device_of_config(std::path::Path::new(path)).unwrap_or_default();
+        let device = device.unwrap_or_default();
         // Both already owned by the contract on the trait method: the
         // caller resolves the profile first. Matching rather than
         // asserting keeps a misuse a no-op instead of a panic, and the
@@ -1104,6 +1127,11 @@ fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> R
 /// Copying costs a few kilobytes in a directory that is already the
 /// session's and removes the whole class.
 ///
+/// In a session the copy already exists: [`Rocjitsu::reconcile_profile`]
+/// took it at session creation, read the device from it, and pointed the
+/// profile at it, so this hands the interposer those same bytes. It copies
+/// here only for a profile that was never reconciled.
+///
 /// The copy is byte for byte apart from one thing: a relative
 /// `dbt_guest.simulator_config` is made absolute against the original's
 /// directory first, because moving the file would otherwise move what
@@ -1121,37 +1149,62 @@ fn supplied_config_with_budget(cfg: &std::path::Path, budget: &SimpleValue) -> R
 /// resolved, the profile asks for more GPUs than rocjitsu will emulate
 /// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be read or written.
 pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<PathBuf> {
-    let bytes = match resolve_sim_config(def)? {
-        SimConfig::Supplied(path) => {
-            let bytes = std::fs::read(&path).map_err(|e| MirageError::io(path.clone(), e))?;
-            match pin_external_references(bytes, &path) {
-                Some(bytes) => bytes,
-                // Owning the document is worth less than the document
-                // still meaning what it says, so the session declines it
-                // and the interposer is handed the user's own file — as
-                // it was before the copy existed. What is given up is
-                // the narrow guarantee the copy buys: an edit to this
-                // file can still retarget the session under itself, and
-                // the ISA captured at bring-up then describes the old
-                // device. A stale warning is the better failure.
-                None => {
-                    // Silent otherwise, and it is the one thing that
-                    // would explain a session behaving as it did before
-                    // the snapshot existed.
-                    tracing::debug!(
-                        config = %path.display(),
-                        "rocjitsu: config not snapshotted into the session; \
-                         mirage cannot pin the references it names"
-                    );
-                    return Ok(path);
-                }
-            }
-        }
-        SimConfig::Synthesised(bytes) => bytes,
-    };
     let cfg = rj_config_path(session_dir);
-    mirage_core::state::write_bytes(&cfg, &bytes)?;
-    Ok(cfg)
+    match resolve_sim_config(def)? {
+        // Already the session's own copy: `reconcile_profile` took it at
+        // session creation and read the device from it. Copying it onto
+        // itself would change nothing, and every exec would rewrite a file
+        // the interposer may be reading.
+        SimConfig::Supplied(path) if path == cfg => Ok(path),
+        SimConfig::Supplied(path) => snapshot_supplied_config(&path, session_dir).map(|(p, _)| p),
+        SimConfig::Synthesised(bytes) => {
+            mirage_core::state::write_bytes(&cfg, &bytes)?;
+            Ok(cfg)
+        }
+    }
+}
+
+/// Copy a drop-in `--config` into `session_dir`, as [`kmd_config`]
+/// describes, and return where the session's config now is along with
+/// the bytes read from the original.
+///
+/// The bytes are the ones the interposer will be handed, so they are what
+/// [`Rocjitsu::reconcile_profile`] reads the device from: one reading of
+/// the user's file serves both.
+///
+/// # Errors
+///
+/// Returns an error when the original cannot be read or the copy cannot
+/// be written.
+fn snapshot_supplied_config(
+    original: &std::path::Path,
+    session_dir: &std::path::Path,
+) -> Result<(PathBuf, Vec<u8>)> {
+    let bytes = std::fs::read(original).map_err(|e| MirageError::io(original.to_path_buf(), e))?;
+    match pin_external_references(bytes.clone(), original) {
+        Some(pinned) => {
+            let cfg = rj_config_path(session_dir);
+            mirage_core::state::write_bytes(&cfg, &pinned)?;
+            Ok((cfg, pinned))
+        }
+        // Owning the document is worth less than the document still
+        // meaning what it says, so the session declines it and the
+        // interposer is handed the user's own file — as it was before the
+        // copy existed. What is given up is the narrow guarantee the copy
+        // buys: an edit to this file can still retarget the session under
+        // itself. The device is not read from it either — mirage could
+        // not parse these bytes — so no warning names the old device.
+        None => {
+            // Silent otherwise, and it is the one thing that would explain
+            // a session behaving as it did before the snapshot existed.
+            tracing::debug!(
+                config = %original.display(),
+                "rocjitsu: config not snapshotted into the session; \
+                 mirage cannot pin the references it names"
+            );
+            Ok((original.to_path_buf(), bytes))
+        }
+    }
 }
 
 /// JSON pointer to the one field in a rocjitsu `SimulationConfig` that
@@ -1177,21 +1230,32 @@ const SIMULATOR_CONFIG_POINTER: &str = "/dbt_guest/simulator_config";
 /// A relative reference is resolved exactly as rocjitsu resolves it:
 /// beside the config that contains it. Empty means the same config and
 /// therefore introduces no dependency.
+///
+/// "Inside the session" is decided on the path the loader will reach, not
+/// on its spelling: `<session>/../host.json` names the session in its
+/// prefix and a file outside it, and so does a symlink out of the session.
 fn container_unreachable_config_path(
     config: &std::path::Path,
     session_dir: &std::path::Path,
 ) -> Result<Option<PathBuf>> {
-    if !config.starts_with(session_dir) {
+    if !lies_within(config, session_dir) {
         return Ok(Some(config.to_path_buf()));
     }
     let bytes = std::fs::read(config).map_err(|e| MirageError::io(config.to_path_buf(), e))?;
-    let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
-        MirageError::Other(format!(
-            "rocjitsu: could not inspect materialised config {} for \
-             container-visible references: {e}",
-            config.display()
-        ))
-    })?;
+    let parsed: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(parsed) => parsed,
+        // A dialect only FlatBuffers reads. [`kmd_config`] copies one into
+        // the session only when it never names `simulator_config`, so it
+        // has no dependency that could be out of reach.
+        Err(_) if !mentions_external_reference(&bytes) => return Ok(None),
+        Err(e) => {
+            return Err(MirageError::Other(format!(
+                "rocjitsu: could not inspect materialised config {} for \
+                 container-visible references: {e}",
+                config.display()
+            )));
+        }
+    };
     let dbt = parsed.pointer("/dbt_guest");
     let enabled = dbt
         .and_then(|dbt| dbt.get("enabled"))
@@ -1220,7 +1284,43 @@ fn container_unreachable_config_path(
             .parent()
             .map_or_else(|| reference.to_path_buf(), |parent| parent.join(reference))
     };
-    Ok((!resolved.starts_with(session_dir)).then_some(resolved))
+    Ok((!lies_within(&resolved, session_dir)).then_some(resolved))
+}
+
+/// Whether `path` is under `directory` as a container that mounts
+/// `directory` at its own spelling would see it.
+///
+/// Both halves have to hold. The mount is made at the directory's
+/// spelling, so the path must be spelled inside it once `..` is settled;
+/// and the container has only what is under the mount, so it must still
+/// be inside once symlinks are followed. A path that does not exist cannot
+/// be followed and is judged on its spelling alone — the interposer fails
+/// to open it on either side of the mount.
+fn lies_within(path: &std::path::Path, directory: &std::path::Path) -> bool {
+    let spelled_inside = lexically_normal(path).starts_with(lexically_normal(directory));
+    let resolved_inside = match (
+        std::fs::canonicalize(path),
+        std::fs::canonicalize(directory),
+    ) {
+        (Ok(path), Ok(directory)) => path.starts_with(directory),
+        _ => true,
+    };
+    spelled_inside && resolved_inside
+}
+
+/// `path` with `.` dropped and each `..` removing the component before it.
+fn lexically_normal(path: &std::path::Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
 }
 
 /// A drop-in `--config`'s external reference, pinned to where it was
@@ -1346,18 +1446,47 @@ fn session_config(session_dir: &std::path::Path) -> Result<PathBuf> {
 /// JSON pointer to the device a rocjitsu `SimulationConfig` describes.
 const VM_DEVICE_POINTER: &str = "/vm/gpu/device";
 
+/// JSON pointer to whether a rocjitsu `SimulationConfig` adds a DBT guest
+/// device.
+const DBT_GUEST_ENABLED_POINTER: &str = "/dbt_guest/enabled";
+
 /// The device a supplied `SimulationConfig` describes, as the workload's
 /// ROCm runtime will see it.
 ///
-/// `None` when the file cannot be read, cannot be parsed, or carries no
-/// recognisable device. Every one of those means the same thing to the
-/// only caller — mirage does not know what this session will present —
-/// and [`Rocjitsu::reconcile_profile`] turns that into an agent with no
+/// `None` when the bytes cannot be parsed, carry no recognisable device,
+/// or describe more than one. Every one of those means the same thing to
+/// the only caller — mirage does not know what this session will present
+/// — and [`Rocjitsu::reconcile_profile`] turns that into an agent with no
 /// target rather than a guess.
-fn device_of_config(config: &std::path::Path) -> Option<KfdDeviceInfo> {
-    let bytes = std::fs::read(config).ok()?;
-    let config: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    serde_json::from_value(config.pointer(VM_DEVICE_POINTER)?.clone()).ok()
+///
+/// Fields `KfdDeviceInfo` does not model are dropped rather than refused.
+/// The type rejects unknown fields so a stored agent stays exactly what
+/// mirage wrote, but a supplied config is rocjitsu's document: its schema
+/// grows independently, and the shipped gfx1250 configs already carry
+/// `revision_id` and `num_sdma_queues_per_engine`. Refusing those would
+/// silence the warning for the very target it exists for.
+///
+/// A config with an enabled DBT guest describes no single device: the
+/// interposer appends the guest to the host's topology, so the session
+/// presents both, and "the workload will see no GPU" would be false.
+fn device_of_bytes(bytes: &[u8]) -> Option<KfdDeviceInfo> {
+    let config: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if config
+        .pointer(DBT_GUEST_ENABLED_POINTER)
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        return None;
+    }
+    let serde_json::Value::Object(mut device) = config.pointer(VM_DEVICE_POINTER)?.clone() else {
+        return None;
+    };
+    let serde_json::Value::Object(known) = serde_json::to_value(KfdDeviceInfo::default()).ok()?
+    else {
+        return None;
+    };
+    device.retain(|field, _| known.contains_key(field));
+    serde_json::from_value(serde_json::Value::Object(device)).ok()
 }
 
 /// Check that `def` describes a machine rocjitsu can stand up, without
@@ -1950,7 +2079,9 @@ mod tests {
         );
 
         let mut profile = profile_for(def);
-        Rocjitsu.reconcile_profile(&mut profile).unwrap();
+        Rocjitsu
+            .reconcile_profile(&mut profile, &tmp.path().join("session"))
+            .unwrap();
         assert_eq!(
             profile.emulated_gfx_target().map(|t| t.to_string()),
             Some("gfx950".to_string())
@@ -1979,19 +2110,142 @@ mod tests {
         .unwrap();
 
         for path in [commented, tmp.path().join("absent.json")] {
+            let session_dir = tmp.path().join(path.file_stem().unwrap());
             let mut def = def_for_target(120500);
             def.options.insert(
                 "config".to_string(),
                 SimpleValue::String(path.display().to_string()),
             );
             let mut profile = profile_for(def);
-            Rocjitsu.reconcile_profile(&mut profile).unwrap();
+            Rocjitsu
+                .reconcile_profile(&mut profile, &session_dir)
+                .unwrap();
             assert_eq!(
                 profile.emulated_gfx_target(),
                 None,
                 "a config mirage cannot read must not leave the agent's own target in place"
             );
         }
+    }
+
+    /// The configs rocjitsu ships are read for their target even though
+    /// they carry device fields mirage does not model.
+    ///
+    /// Both gfx1250 configs set `revision_id` and
+    /// `num_sdma_queues_per_engine`. Decoded strictly they failed, the
+    /// agent was left with no target, and a gfx1250 session on a ROCm
+    /// that cannot see gfx1250 — the case issue #11361 is about — said
+    /// nothing. gfx942 is here so a passing test cannot be one that
+    /// answers gfx1250 to everything.
+    #[test]
+    fn shipped_configs_name_their_target() {
+        let configs =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rocjitsu/configs");
+        let tmp = tempfile::tempdir().unwrap();
+        for (name, isa) in [
+            ("gfx1250_mi455x.json", "gfx1250"),
+            ("gfx1250_mi455x_kmd_4gpu.json", "gfx1250"),
+            ("gfx942_cdna3_kmd.json", "gfx942"),
+        ] {
+            let mut def = def_for_target(90500);
+            def.options.insert(
+                "config".to_string(),
+                SimpleValue::String(configs.join(name).display().to_string()),
+            );
+            let mut profile = profile_for(def);
+            Rocjitsu
+                .reconcile_profile(&mut profile, &tmp.path().join(name))
+                .unwrap();
+            assert_eq!(
+                profile
+                    .emulated_gfx_target()
+                    .map(|t| t.to_string())
+                    .as_deref(),
+                Some(isa),
+                "{name}"
+            );
+        }
+
+        // Tolerance is for rocjitsu's documents only: a stored agent is
+        // still refused for a field mirage did not write.
+        assert!(
+            serde_json::from_value::<KfdDeviceInfo>(serde_json::json!({"revision_id": 1})).is_err()
+        );
+    }
+
+    /// A config with an enabled DBT guest presents the host's devices and
+    /// the guest together, so there is no one target to warn about.
+    #[test]
+    fn a_dbt_guest_config_names_no_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("guest.json");
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&serde_json::json!({
+                "vm": {"gpu": {"device": {"gfx_target_version": 90402}}},
+                "dbt_guest": {"enabled": true, "guest_device": {"gfx_target_version": 90500}},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut def = def_for_target(120500);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+        let mut profile = profile_for(def);
+        Rocjitsu
+            .reconcile_profile(&mut profile, &tmp.path().join("session"))
+            .unwrap();
+        assert_eq!(profile.emulated_gfx_target(), None);
+    }
+
+    /// The device a session reports and the config it injects are one
+    /// reading of the user's file.
+    ///
+    /// `reconcile_profile` used to read the file at session creation and
+    /// `kmd_config` to copy it again at injection, so a rewrite between
+    /// the two left the session reporting gfx942 while injecting gfx1250.
+    /// The snapshot is taken once now, and the profile points at it.
+    #[test]
+    fn the_reported_and_injected_device_are_one_reading() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let config = tmp.path().join("cfg.json");
+        let write_target = |version: u32| {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({
+                    "vm": {"gpu": {"device": {"gfx_target_version": version}}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write_target(90402);
+
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+        let mut ctx = ctx_for(def, tmp.path(), "one-reading");
+        Rocjitsu
+            .reconcile_profile(&mut ctx.profile, &ctx.runtime_dir)
+            .unwrap();
+
+        write_target(120500);
+        Rocjitsu
+            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+            .unwrap();
+
+        let injected = std::fs::read(session_config(&ctx.runtime_dir).unwrap()).unwrap();
+        let injected = device_of_bytes(&injected).and_then(|d| d.gfx_target());
+        assert_eq!(injected, ctx.profile.emulated_gfx_target());
+        assert_eq!(injected.map(|t| t.to_string()).as_deref(), Some("gfx942"));
     }
 
     /// A device with no ISA is not a device to check a runtime against,
@@ -2094,7 +2348,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            device_of_config(&named).and_then(|d| d.gfx_target()),
+            device_of_bytes(&std::fs::read(&named).unwrap()).and_then(|d| d.gfx_target()),
             mirage_core::hardware::GfxTarget::new(90500),
             "a live session must emulate the device it was brought up on"
         );
@@ -2193,7 +2447,7 @@ mod tests {
         );
 
         assert_eq!(
-            device_of_config(&handed).and_then(|d| d.gfx_target()),
+            device_of_bytes(&std::fs::read(&handed).unwrap()).and_then(|d| d.gfx_target()),
             None,
             "the guest config names no `vm.gpu.device` of its own"
         );
@@ -2447,6 +2701,79 @@ mod tests {
                 None
             );
         }
+    }
+
+    /// A reference that climbs out of the session, or a symlink that leads
+    /// out of it, is outside the mount whatever its spelling starts with.
+    #[test]
+    fn a_reference_that_leaves_the_session_is_unreachable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = tmp.path().join("session");
+        std::fs::create_dir_all(&session).unwrap();
+        let host = tmp.path().join("host.json");
+        std::fs::write(&host, b"{}").unwrap();
+        let link = session.join("linked.json");
+        std::os::unix::fs::symlink(&host, &link).unwrap();
+
+        let config = session.join(RJ_CONFIG_NAME);
+        for reference in ["../host.json".to_string(), link.display().to_string()] {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({"dbt_guest": {
+                    "enabled": true,
+                    "execution_backend": "simulator",
+                    "simulator_config": reference,
+                }}))
+                .unwrap(),
+            )
+            .unwrap();
+            assert!(
+                container_unreachable_config_path(&config, &session)
+                    .unwrap()
+                    .is_some(),
+                "{reference} resolves outside the session"
+            );
+        }
+
+        // The mount is made at the session's own spelling. Reached through
+        // an alias, a file named by the real path is the same file on the
+        // host and absent in the container.
+        let alias = tmp.path().join("alias");
+        std::os::unix::fs::symlink(&session, &alias).unwrap();
+        let inside = session.join("sim.json");
+        std::fs::write(&inside, b"{}").unwrap();
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&serde_json::json!({"dbt_guest": {
+                "enabled": true,
+                "execution_backend": "simulator",
+                "simulator_config": inside,
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            container_unreachable_config_path(&alias.join(RJ_CONFIG_NAME), &alias).unwrap(),
+            Some(inside),
+            "a path spelled outside the mount is not in the container"
+        );
+    }
+
+    /// A self-contained config in a dialect only FlatBuffers reads is not
+    /// refused for a container: it names no file that could be missing.
+    #[test]
+    fn a_self_contained_flatbuffers_config_reaches_a_container() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(RJ_CONFIG_NAME);
+        std::fs::write(
+            &config,
+            b"{\n  // FlatBuffers accepts comments and trailing commas\n  max_ticks: 1,\n}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            container_unreachable_config_path(&config, tmp.path()).unwrap(),
+            None
+        );
     }
 
     /// Nothing may read a session's configuration before bring-up has

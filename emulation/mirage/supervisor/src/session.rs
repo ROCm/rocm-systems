@@ -266,7 +266,7 @@ impl Session {
         if let Some(backend) =
             mirage_core::emulator::get_emulator_backend(&profile.emulator.emulator)
         {
-            backend.reconcile_profile(&mut profile)?;
+            backend.reconcile_profile(&mut profile, &runtime_dir)?;
         }
         let node_count = resolve_node_count(&profile)?;
         let ctx = SessionContext {
@@ -2102,6 +2102,73 @@ mod tests {
             after, before,
             "editing an agent retargeted a session that was already running"
         );
+    }
+
+    /// A drop-in `--config` rewritten after session creation changes
+    /// neither what the session reports nor what it injects.
+    ///
+    /// Session creation reads the config's device into the agent, and
+    /// injection hands the interposer a config. When those were two
+    /// readings of the user's file, a rewrite between them left the
+    /// session reporting gfx942 while injecting gfx1250, and the preflight
+    /// warned about a device that was not the one running.
+    #[test]
+    fn a_supplied_configs_reported_device_is_the_one_injected() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = mirage_core::paths::test_env_lock();
+        mirage_core::paths::set_test_root(dir.path());
+
+        let config = dir.path().join("cfg.json");
+        let write_target = |version: u32| {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({
+                    "vm": {"gpu": {"device": {"gfx_target_version": version}}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write_target(90402);
+
+        let mut p = profile(1, 1);
+        p.emulator.options.insert(
+            "config".to_string(),
+            mirage_core::common::SimpleValue::String(config.display().to_string()),
+        );
+        let def = make_def(
+            SessionId::new("supplied").unwrap(),
+            MaybeRef::Owned(p.clone()),
+            "/".to_string(),
+            false,
+        );
+        let session = Session::new(def, p).unwrap();
+        session.set_phase(true, state::READY, None);
+
+        write_target(120500);
+        let interposer = dir.path().join("librocjitsu.so");
+        std::fs::write(&interposer, b"").unwrap();
+        let injection = mirage_rocjitsu::Rocjitsu
+            .injection_def_with(&session.ctx, Some(interposer))
+            .unwrap();
+        mirage_core::paths::clear_test_root();
+
+        let discovery = PathBuf::from(&injection.env["ROCJITSU_RUNTIME_DIR"])
+            .join(mirage_rocjitsu::CONFIG_PATH_NAME);
+        let injected: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(std::fs::read_to_string(discovery).unwrap().trim()).unwrap(),
+        )
+        .unwrap();
+        let reported = session
+            .describe()
+            .unwrap()
+            .profile
+            .and_then(|profile| Some(profile.agent()?.vm.gpu.device.gfx_target_version));
+        assert_eq!(
+            injected.pointer("/vm/gpu/device/gfx_target_version"),
+            Some(&serde_json::json!(90402))
+        );
+        assert_eq!(reported, Some(90402));
     }
 
     #[tokio::test]
