@@ -509,6 +509,7 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (amd_dbgapi_breakpoint_info_t)                                            \
   F (amd_dbgapi_changed_t)                                                    \
   F (amd_dbgapi_client_process_info_t)                                        \
+  F (amd_dbgapi_cluster_id_t)                                                 \
   F (amd_dbgapi_code_object_id_t)                                             \
   F (amd_dbgapi_code_object_info_t)                                           \
   F (amd_dbgapi_core_state_data_t)                                            \
