@@ -875,13 +875,14 @@ TEST(ConSan, SuperColliderWaveDelayVariesByPlacementAndPreservesGuestFlags) {
     std::array<amdgpu::Wavefront *, 2> waves{};
     for (size_t i = 0; i < words->size(); ++i)
       memory.write32(i * sizeof(uint32_t), (*words)[i]);
-    for (auto &wave : waves) {
+    for (size_t i = 0; i < waves.size(); ++i) {
+      auto &wave = waves[i];
       wave = cu->dispatch_wf(0, 0, 128, 256);
       ASSERT_NE(wave, nullptr);
       wave->pc = 0u;
-      wave->set_exec(0x55u);
+      wave->set_exec(i == 0u ? 0u : 0x55u);
       wave->set_vcc(0xaau);
-      wave->write_scc(true);
+      wave->write_scc(i != 0u);
       cu->write_sgpr(wave->sgpr_alloc().base + 21u, 0x12345678u);
     }
     std::set<uint32_t> counts;
@@ -896,9 +897,9 @@ TEST(ConSan, SuperColliderWaveDelayVariesByPlacementAndPreservesGuestFlags) {
         const uint32_t count = cu->read_sgpr(wave->sgpr_alloc().base + 20u);
         counts.insert(count);
         EXPECT_LE(count, maximum);
-        EXPECT_EQ(wave->exec(), 0x55u);
+        EXPECT_EQ(wave->exec(), i == 0u ? 0u : 0x55u);
         EXPECT_EQ(wave->vcc(), 0xaau);
-        EXPECT_TRUE(wave->read_scc());
+        EXPECT_EQ(wave->read_scc(), i != 0u);
         EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 21u), 0x12345678u);
         done[i] = true;
         wave->halt();
