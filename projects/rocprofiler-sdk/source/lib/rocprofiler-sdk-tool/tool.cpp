@@ -4561,7 +4561,7 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
         if(!_children.empty()) std::this_thread::sleep_for(chrono::milliseconds{100});
     }
 
-    if(_children.size() > 0)
+    if(!_children.empty())
     {
         ROCP_WARNING << fmt::format(
             "[PPID={}][PID={}][TID={}][{}] gave up waiting for children [{}]: finalize wait "
