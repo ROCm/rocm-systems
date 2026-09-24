@@ -230,6 +230,7 @@ enum rcclExecutionPolicyValidationError {
   RCCL_EXECUTION_POLICY_VALIDATION_P2P_TRANSFER_UNAVAILABLE,
   RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_UNAVAILABLE,
   RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_REQUEST_CONFLICT,
+  RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_CAPABILITY_UNAVAILABLE,
 };
 
 // Normalized per-resolution constraints. Callers translate environment,
@@ -254,6 +255,13 @@ struct rcclExecutionPolicyValidationContext {
   uint32_t p2pTransferMask;
   bool validateTransport;
   uint32_t transportMask; // rcclExecutionTransport values are bit positions.
+
+  // Execution shapes each concrete transport can run. A candidate naming a
+  // transport is rejected unless that transport supports its completed
+  // collective algorithm/protocol or its P2P transfer mode (AUTO always is).
+  bool validateTransportCapabilities;
+  bool transportAlgoProtoAvailable[RCCL_EXECUTION_TRANSPORT_COUNT][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  uint32_t transportP2pTransferMask[RCCL_EXECUTION_TRANSPORT_COUNT];
 };
 
 struct rcclExecutionPolicyResolution {
