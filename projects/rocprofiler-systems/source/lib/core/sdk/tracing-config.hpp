@@ -11,6 +11,7 @@
 #include "policies/rocprofiler-sdk/tracing_config/externals.hpp"
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -78,8 +79,15 @@ public:
 
     static common::version get_version();
 
-    static std::vector<std::string>            get_domain_choices();
-    static std::string                         get_domain_defaults();
+    static std::vector<std::string> get_domain_choices();
+    static std::string              get_domain_defaults();
+    /// One-line help for a domain or grouping alias (`hip_api`, `roctx`, …).
+    /// Empty when no rocprofiler-systems description is registered; the SDK
+    /// name tables do not provide domain descriptions.
+    static std::string get_domain_description(std::string_view name);
+    /// Canonical domain names a grouping alias expands to (subset of
+    /// get_domain_choices()). Empty for a leaf domain.
+    static std::vector<std::string>            get_domain_members(std::string_view name);
     static std::vector<operation_setting_spec> get_operation_settings();
 
     static std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
@@ -232,6 +240,137 @@ tracing_config<SdkBackend, Externals>::get_domain_defaults()
     }
 
     return defaults;
+}
+
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
+std::string
+tracing_config<SdkBackend, Externals>::get_domain_description(std::string_view name)
+{
+    const auto            requested = utility::string::to_lower(name);
+    static constexpr auto k_descriptions =
+        std::array<std::pair<std::string_view, std::string_view>, 30>{
+            std::pair{ "hip_api", "Alias for HIP runtime and compiler API tracing "
+                                  "(hip_runtime_api,hip_compiler_api)" },
+            std::pair{ "hsa_api", "Alias for all HSA API tracing domains "
+                                  "(hsa_core_api,hsa_amd_ext_api,hsa_image_ext_api,"
+                                  "hsa_finalize_ext_api)" },
+            std::pair{ "marker_api", "ROCTX marker API tracing" },
+            std::pair{ "roctx", "Alias for marker_api (ROCTX markers)" },
+            std::pair{ "kfd_events",
+                       "Alias for KFD page-fault, migrate, queue, unmap, and "
+                       "dropped-event domains (kfd_page_fault,kfd_page_migrate,"
+                       "kfd_queue,kfd_event_page_fault,kfd_event_page_migrate,"
+                       "kfd_event_queue,kfd_event_unmap_from_gpu,"
+                       "kfd_event_dropped_events)" },
+            std::pair{ "hip_runtime_api", "HIP runtime API callbacks" },
+            std::pair{ "hip_compiler_api", "HIP compiler API callbacks" },
+            std::pair{ "hipfile_api", "HIP file API callbacks" },
+            std::pair{ "hsa_core_api", "HSA core API callbacks" },
+            std::pair{ "hsa_amd_ext_api", "HSA AMD extension API callbacks" },
+            std::pair{ "hsa_image_ext_api", "HSA image extension API callbacks" },
+            std::pair{ "hsa_finalize_ext_api", "HSA finalize extension API callbacks" },
+            std::pair{ "kernel_dispatch", "GPU kernel dispatch tracing" },
+            std::pair{ "memory_copy", "Device memory copy tracing" },
+            std::pair{ "scratch_memory", "Scratch memory tracing" },
+            std::pair{ "memory_allocation", "Device memory allocation tracing" },
+            std::pair{ "page_migration", "Page migration tracing" },
+            std::pair{ "ompt", "OpenMP tools (OMPT) callbacks" },
+            std::pair{ "rccl_api", "RCCL collective API tracing" },
+            std::pair{ "rocdecode_api", "rocDecode API tracing" },
+            std::pair{ "rocjpeg_api", "rocJPEG API tracing" },
+            std::pair{ "rocshmem_api", "rocSHMEM API tracing" },
+            std::pair{ "kfd_page_fault", "KFD page-fault tracing" },
+            std::pair{ "kfd_page_migrate", "KFD page-migrate tracing" },
+            std::pair{ "kfd_queue", "KFD queue tracing" },
+            std::pair{ "kfd_event_page_fault", "KFD page-fault event tracing" },
+            std::pair{ "kfd_event_page_migrate", "KFD page-migrate event tracing" },
+            std::pair{ "kfd_event_queue", "KFD queue event tracing" },
+            std::pair{ "kfd_event_unmap_from_gpu", "KFD unmap-from-GPU event tracing" },
+            std::pair{ "kfd_event_dropped_events", "KFD dropped-event tracing" },
+        };
+
+    const auto found =
+        std::ranges::find_if(k_descriptions, [&requested](const auto& entry) {
+            return entry.first == requested;
+        });
+    if(found == k_descriptions.end())
+    {
+        return {};
+    }
+    return std::string{ found->second };
+}
+
+struct domain_member_filter
+{
+    std::vector<std::string>&                   members;
+    std::string_view                            requested;
+    const std::unordered_set<std::string>&      allowed;
+    const std::unordered_set<std::string_view>& skipped;
+};
+
+inline void
+append_unique_domain_member(domain_member_filter& filter, std::string candidate)
+{
+    constexpr std::string_view k_marker_core_api = "marker_core_api";
+    constexpr std::string_view k_marker_api      = "marker_api";
+
+    utility::string::to_lower_in_place(candidate);
+    if(filter.skipped.contains(candidate))
+    {
+        if(candidate != k_marker_core_api)
+        {
+            return;
+        }
+        candidate = std::string{ k_marker_api };
+    }
+    if(candidate == filter.requested || !filter.allowed.contains(candidate))
+    {
+        return;
+    }
+    if(std::ranges::find(filter.members, candidate) == filter.members.end())
+    {
+        filter.members.push_back(std::move(candidate));
+    }
+}
+
+template <typename KindMap, typename NameTable>
+void
+append_mapped_domain_members(domain_member_filter& filter, const KindMap& kind_map,
+                             const NameTable& names)
+{
+    const auto found = kind_map.find(std::string{ filter.requested });
+    if(found == kind_map.end())
+    {
+        return;
+    }
+    for(const auto kind : found->second)
+    {
+        append_unique_domain_member(filter, std::string{ names[kind].name });
+    }
+}
+
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
+std::vector<std::string>
+tracing_config<SdkBackend, Externals>::get_domain_members(std::string_view name)
+{
+    const auto requested = utility::string::to_lower(name);
+    const auto choices   = get_domain_choices();
+    const auto allowed =
+        std::unordered_set<std::string>{ choices.begin(), choices.end() };
+    const auto& skipped = get_domains_to_skip_for_domain_choices();
+
+    std::vector<std::string> members;
+    domain_member_filter     filter{
+            .members = members, .requested = requested, .allowed = allowed, .skipped = skipped
+    };
+    append_mapped_domain_members(filter, get_callback_domain_map(),
+                                 SdkBackend::get_callback_tracing_names());
+    append_mapped_domain_members(filter, get_buffered_domain_map(),
+                                 SdkBackend::get_buffer_tracing_names());
+    std::ranges::sort(members);
+    return members;
 }
 
 template <policies::tracing_config::backend   SdkBackend,

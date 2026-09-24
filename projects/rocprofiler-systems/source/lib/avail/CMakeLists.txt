@@ -12,8 +12,11 @@ target_sources(
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/catalog.cpp
         ${CMAKE_CURRENT_LIST_DIR}/catalog.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/listing_externals.hpp
         ${CMAKE_CURRENT_LIST_DIR}/records.cpp
         ${CMAKE_CURRENT_LIST_DIR}/records.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/traces.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/traces.hpp
 )
 
 target_include_directories(
@@ -27,6 +30,20 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-compile-options
 )
+
+if(TARGET rocprofiler-systems-rocprofiler-sdk-backend)
+    target_compile_definitions(
+        rocprofiler-systems-avail-library
+        PUBLIC ROCPROFSYS_AVAIL_HAS_SDK=1
+    )
+    target_link_libraries(
+        rocprofiler-systems-avail-library
+        PRIVATE
+            rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+            rocprofiler-systems::rocprofiler-systems-common-library
+            rocprofiler-systems-logger
+    )
+endif()
 
 set_target_properties(
     rocprofiler-systems-avail-library

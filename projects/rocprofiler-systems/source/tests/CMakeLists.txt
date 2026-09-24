@@ -68,6 +68,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-common-library
         rocprofiler-systems-core-library
+        rocprofiler-systems::rocprofiler-systems-avail-library
         rocprofiler-systems::rocprofiler-systems-binary
         rocprofiler-systems::rocprofiler-systems-avail-library
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>

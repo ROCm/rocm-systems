@@ -70,6 +70,8 @@ enum backend_tag : int
     operation_settings_marker_core_api_skip     = 107,
     buffered_domains_kfd_below_boundary_version = 108,
     buffered_domains_kfd_at_boundary_version    = 109,
+    domain_description_test                     = 110,
+    domain_members_test                         = 111,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -506,6 +508,45 @@ TEST_F(tracing_config_test, domain_defaults_returns_expected_defaults)
 
     EXPECT_EQ(sut::get_domain_defaults(),
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
+}
+
+TEST_F(tracing_config_test, domain_description_covers_group_aliases_and_leaf_domains)
+{
+    using sut =
+        tracing_config<tagged_backend<domain_description_test>, mock_sdk_externals>;
+
+    EXPECT_THAT(sut::get_domain_description("hip_api"),
+                gtest::HasSubstr("hip_runtime_api"));
+    EXPECT_THAT(sut::get_domain_description("hsa_api"), gtest::HasSubstr("hsa_core_api"));
+    EXPECT_THAT(sut::get_domain_description("ROCTX"), gtest::HasSubstr("marker_api"));
+    EXPECT_THAT(sut::get_domain_description("kfd_events"),
+                gtest::HasSubstr("kfd_event_unmap_from_gpu"));
+    EXPECT_EQ(sut::get_domain_description("kernel_dispatch"),
+              "GPU kernel dispatch tracing");
+    EXPECT_EQ(sut::get_domain_description("kfd_event_page_fault"),
+              "KFD page-fault event tracing");
+    EXPECT_EQ(sut::get_domain_description("kfd_event_page_migrate"),
+              "KFD page-migrate event tracing");
+    EXPECT_EQ(sut::get_domain_description("kfd_event_queue"), "KFD queue event tracing");
+    EXPECT_EQ(sut::get_domain_description("kfd_event_unmap_from_gpu"),
+              "KFD unmap-from-GPU event tracing");
+    EXPECT_TRUE(sut::get_domain_description("not_a_domain").empty());
+    EXPECT_TRUE(sut::get_domain_description("code_object").empty());
+}
+
+TEST_F(tracing_config_test, domain_members_expands_hip_api_to_runtime_and_compiler)
+{
+    using sut = tracing_config<tagged_backend<domain_members_test>, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_THAT(sut::get_domain_members("hip_api"),
+                gtest::UnorderedElementsAre("hip_compiler_api", "hip_runtime_api"));
 }
 
 // ─── operation_settings ───────────────────────────────────────────────────────

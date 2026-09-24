@@ -29,6 +29,7 @@
 #include <fmt/format.h>
 
 #include <cassert>
+#include <dlfcn.h>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
@@ -45,21 +46,21 @@
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
-    if(HANDLE)                                                                           \
+    if((HANDLE))                                                                         \
     {                                                                                    \
-        *(void**) (&VARNAME) = dlsym(HANDLE, FUNCNAME);                                  \
-        if(VARNAME == nullptr && _rocprofsys_dl_verbose >= _warn_verbose)                \
+        *(void**) (&(VARNAME)) = dlsym((HANDLE), (FUNCNAME));                            \
+        if((VARNAME) == nullptr && _rocprofsys_dl_verbose >= _warn_verbose)              \
         {                                                                                \
             ROCPROFSYS_COMMON_LIBRARY_LOG_START                                          \
-            fprintf(stderr, "[rocprof-sys][dl][pid=%i]> %s :: %s\n", getpid(), FUNCNAME, \
-                    dlerror());                                                          \
+            fprintf(stderr, "[rocprof-sys][dl][pid=%i]> %s :: %s\n", getpid(),           \
+                    (FUNCNAME), dlerror());                                              \
             ROCPROFSYS_COMMON_LIBRARY_LOG_END                                            \
         }                                                                                \
         else if(_rocprofsys_dl_verbose > _info_verbose)                                  \
         {                                                                                \
             ROCPROFSYS_COMMON_LIBRARY_LOG_START                                          \
             fprintf(stderr, "[rocprof-sys][dl][pid=%i]> %s :: success\n", getpid(),      \
-                    FUNCNAME);                                                           \
+                    (FUNCNAME));                                                         \
             ROCPROFSYS_COMMON_LIBRARY_LOG_END                                            \
         }                                                                                \
     }
