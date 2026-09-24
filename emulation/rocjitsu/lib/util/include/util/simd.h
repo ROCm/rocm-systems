@@ -7,6 +7,7 @@
 #include "util/bit.h"
 
 #include <bit>
+#include <bitset>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,10 @@
 
 #if __has_include(<experimental/simd>)
 #include <experimental/simd>
+#endif
+
+#if defined(__AVX512F__)
+#include <immintrin.h>
 #endif
 
 // clang + libstdc++ <experimental/simd> on AVX-512 has produced incorrect
@@ -134,6 +139,63 @@ template <class T> using native = stdx::native_simd<T>;
 
 /// Native-SIMD width measured in 32-bit lanes. Convenience constant.
 template <class T> constexpr std::size_t native_width_v = native<T>::size();
+
+/// Pack a SIMD predicate into the low mask.size() bits. Bit i corresponds to
+/// SIMD lane i. libstdc++ exposes a bitset bridge that maps native masks to
+/// movemask-style instructions; retain a lane fallback for other TS
+/// implementations.
+template <class Mask> [[gnu::always_inline]] inline uint64_t simd_mask_to_bits(const Mask &mask) {
+  constexpr std::size_t W = Mask::size();
+  static_assert(W <= 64);
+  constexpr bool broken_native64_width =
+      UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
+  if constexpr (!broken_native64_width && requires { mask.__to_bitset().to_ullong(); }) {
+    return static_cast<uint64_t>(mask.__to_bitset().to_ullong());
+  } else {
+    uint64_t bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (mask[i])
+        bits |= uint64_t{1} << i;
+    return bits;
+  }
+}
+
+/// Expand the low Simd::size() bits into a SIMD predicate. High input bits are
+/// ignored. The libstdc++ bitset bridge lowers to a broadcast, lane-bit test,
+/// and vector compare instead of constructing the predicate lane by lane.
+template <class Simd>
+[[gnu::always_inline]] inline typename Simd::mask_type simd_mask_from_bits(uint64_t bits) {
+  using Mask = typename Simd::mask_type;
+  constexpr std::size_t W = Simd::size();
+  static_assert(W <= 64);
+  constexpr bool broken_native64_width =
+      UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
+  if constexpr (!broken_native64_width && requires { Mask::__from_bitset(std::bitset<W>(bits)); }) {
+    return Mask::__from_bitset(std::bitset<W>(bits));
+  } else {
+    Mask mask(false);
+    for (std::size_t i = 0; i < W; ++i)
+      mask[i] = ((bits >> i) & 1u) != 0;
+    return mask;
+  }
+}
+
+/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
+/// is the numeric form needed by carry-in arithmetic; selection paths should
+/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
+/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
+[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
+  using U = native<uint32_t>;
+  static_assert(U::size() <= 32);
+#if defined(__AVX512F__)
+  static_assert(U::size() == 16);
+  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
+#else
+  const U lane_bits([](auto i) { return uint32_t{1} << i; });
+  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
+  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
+#endif
+}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -147,6 +209,9 @@ template <class T> struct native {
 template <class T> constexpr std::size_t native_width_v = native<T>::size();
 template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
+template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
+template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
+inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
 template <class T> native<T> load64(const uint32_t *, const uint32_t *) { return {}; }
