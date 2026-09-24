@@ -3018,6 +3018,24 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16ScalarUsesFusedMac) {
     wf->halt();
 }
 
+TEST(Gfx1250WmmaTest, Bf16F32FmaHasStableNanPriority) {
+  auto value = [](uint32_t bits) { return std::bit_cast<float>(bits); };
+  auto result_bits = [&](uint32_t a, uint32_t b, uint32_t c) {
+    return std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(value(a), value(b), value(c)));
+  };
+
+  EXPECT_EQ(result_bits(0x7FC10000u, 0x7FC20000u, 0x7FC30000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x7FC20000u, 0x7FC30000u), 0x7FC20000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x3F800000u, 0x7FC30000u), 0x7FC30000u);
+  EXPECT_EQ(result_bits(0x7F810000u, 0x3F800000u, 0x00000000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0xFFC40000u, 0x00000000u), 0xFFC40000u);
+  EXPECT_EQ(result_bits(0x7F800000u, 0x00000000u, 0x3F800000u), 0xFFC00000u);
+  const float early_a_nan = amdgpu::wmma_bf16f32_fma(value(0x7FC10000u), 1.0f, 0.0f);
+  EXPECT_EQ(
+      std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(1.0f, value(0x7FC20000u), early_a_nan)),
+      0x7FC20000u);
+}
+
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   amdgpu::GpuMemory gpu_mem("gfx1250_dpp8_add_f16_mem");
   amdgpu::L2Cache l2("gfx1250_dpp8_add_f16_l2");

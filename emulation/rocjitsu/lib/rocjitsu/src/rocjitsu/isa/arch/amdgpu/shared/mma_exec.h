@@ -2738,6 +2738,29 @@ void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t i
   }
 }
 
+/// FMA step for the mixed BF16/F32 WMMA path with host-independent NaN source
+/// priority. CDNA5 specifies fused arithmetic but leaves NaN payload selection
+/// unspecified, so RocJITsu deterministically selects src0, then src1, then the
+/// accumulator. Host scalar and packed FMA instructions can otherwise select
+/// different payloads after the compiler reorders their physical operands.
+inline float wmma_bf16f32_fma(float src0, float src1, float acc) {
+  const float result = std::fma(src0, src1, acc);
+  if (!std::isnan(result))
+    return result;
+  auto quiet = [](float value) {
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(value) | 0x00400000u);
+  };
+  if (std::isnan(src0))
+    return quiet(src0);
+  if (std::isnan(src1))
+    return quiet(src1);
+  if (std::isnan(acc))
+    return quiet(acc);
+  // Use RocJITsu's deterministic negative canonical NaN for invalid operations
+  // such as Inf*0 and Inf + -Inf, independent of host FMA operand lowering.
+  return std::bit_cast<float>(0xFFC00000u);
+}
+
 inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                             uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                             uint32_t c_modifier = 0) {
@@ -2756,15 +2779,23 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
         auto cout = wmma_output_loc_32(M, N, row, col);
-        float acc =
+        const float initial_acc =
             (const_acc != ACC_FROM_VGPR)
                 ? std::bit_cast<float>(const_acc)
                 : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + cout.reg, cout.lane));
-        acc = apply_wmma_c_modifier(acc, c_modifier);
+        float acc = apply_wmma_c_modifier(initial_acc, c_modifier);
         for (uint32_t k = 0; k < K; ++k) {
           auto al = wmma_input_loc(M, K, row, k, in_bits);
           auto bl = wmma_input_loc(N, K, col, k, in_bits);
           acc = std::fma(extract_bf16(cu, s0, al), extract_bf16(cu, s1, bl), acc);
+        }
+        if (std::isnan(acc)) {
+          acc = apply_wmma_c_modifier(initial_acc, c_modifier);
+          for (uint32_t k = 0; k < K; ++k) {
+            auto al = wmma_input_loc(M, K, row, k, in_bits);
+            auto bl = wmma_input_loc(N, K, col, k, in_bits);
+            acc = wmma_bf16f32_fma(extract_bf16(cu, s0, al), extract_bf16(cu, s1, bl), acc);
+          }
         }
         auto out = wmma_output_loc_16(M, N, row, col);
         results.push_back({out.reg, out.lane, out.sub_element, util::f32_to_bf16(acc)});
@@ -2822,14 +2853,16 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
     convert_bf16_matrix_region(reads.a, A_f32, M * K);
     convert_bf16_matrix_region(reads.b, B_f32, K * N);
 
+    auto initial_acc = [&](uint32_t row, uint32_t col) {
+      auto out = wmma_output_loc_32(M, N, row, col);
+      return apply_wmma_c_modifier((const_acc != ACC_FROM_VGPR)
+                                       ? std::bit_cast<float>(const_acc)
+                                       : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
+                                   c_modifier);
+    };
     for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = wmma_output_loc_32(M, N, row, col);
-        C_buf[row * N + col] = apply_wmma_c_modifier(
-            (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
-                                         : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
-            c_modifier);
-      }
+      for (uint32_t col = 0; col < N; ++col)
+        C_buf[row * N + col] = initial_acc(row, col);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
         auto in = wmma_input_loc(M, K, row, k, in_bits);
@@ -2849,7 +2882,20 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
         b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
         c_row = util::stdx::fma(util::native<float>(A_buf[row * K + k]), b_row, c_row);
       }
+      const uint64_t nan_lanes = util::simd_mask_to_bits(util::stdx::isnan(c_row));
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
+      // A packed host FMA may propagate a different NaN operand than scalar
+      // FMA.  Recompute only exceptional lanes with the shared source-priority
+      // helper; finite rows retain the full-width AVX-512 path.
+      uint64_t pending_nan_lanes = nan_lanes;
+      while (pending_nan_lanes != 0) {
+        const uint32_t col = static_cast<uint32_t>(std::countr_zero(pending_nan_lanes));
+        pending_nan_lanes &= pending_nan_lanes - 1;
+        float acc = initial_acc(row, col);
+        for (uint32_t k = 0; k < K; ++k)
+          acc = wmma_bf16f32_fma(A_buf[row * K + k], B_buf[k * N + col], acc);
+        C_buf[row * N + col] = acc;
+      }
     }
 
     // wmma_output_loc_16 pairs adjacent rows in each destination register.

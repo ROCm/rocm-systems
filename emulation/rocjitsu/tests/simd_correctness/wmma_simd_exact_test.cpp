@@ -187,8 +187,8 @@ TEST(WmmaSimdExact, Bf16F32Mixed) {
 }
 
 // Every read must be snapshotted before the first four-register packed output
-// write.  Cover full and partial destination overlap with each operand, plus a
-// shared A/C source region whose words are interpreted at two widths.
+// write.  Cover full and partial destination overlap with each operand, plus
+// shared A/C and B/C source regions whose words are interpreted at two widths.
 TEST(WmmaSimdExact, Bf16F32MixedOverlap) {
   SKIP_IF_NO_SIMD();
   if (util::native<float>::size() != 16)
@@ -202,9 +202,10 @@ TEST(WmmaSimdExact, Bf16F32MixedOverlap) {
     uint32_t s2;
   };
   constexpr AliasCase cases[] = {
-      {"dst_eq_s0", S0, S0, S1, ACC},        {"dst_partial_s1", S1 + 4, S0, S1, ACC},
+      {"dst_eq_s0", S0, S0, S1, ACC},        {"dst_partial_s0", S0 + 4, S0, S1, ACC},
+      {"dst_eq_s1", S1, S0, S1, ACC},        {"dst_partial_s1", S1 + 4, S0, S1, ACC},
       {"dst_eq_acc", ACC, S0, S1, ACC},      {"dst_partial_acc", ACC + 4, S0, S1, ACC},
-      {"s0_eq_acc", BF16_DST, ACC, S1, ACC},
+      {"s0_eq_acc", BF16_DST, ACC, S1, ACC}, {"s1_eq_acc", BF16_DST, S0, ACC, ACC},
   };
 
   for (const auto &alias : cases)
@@ -229,6 +230,77 @@ TEST(WmmaSimdExact, Bf16F32MixedOverlap) {
       if (testing::Test::HasFatalFailure())
         return;
     }
+}
+
+// Distinct NaN payloads expose host FMA operand-selection differences that a
+// canonical all-NaN corpus cannot detect.  Each mixed FMA step gives priority
+// to its current A, then current B, then the running accumulator, and quiets a
+// selected signaling NaN.
+TEST(WmmaSimdExact, Bf16F32MixedNanPayloadPriority) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+
+  WmmaFixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  auto reseed = [&] {
+    fx.seed(S0, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
+    fx.seed(S1, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
+    fx.seed(ACC, ACC_REGS, Fmt::F32, Mode::Zeros, 0);
+    fx.seed_words(BF16_DST, BF16_DST_REGS, 0x4E414E);
+    auto write_bf16 = [&](uint32_t base, const auto &loc, uint16_t value) {
+      uint32_t word = fx.cu->read_vgpr(fx.vbase + base + loc.vgpr_offset, loc.lane);
+      const uint32_t shift = 16 * loc.sub_element;
+      word = (word & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(value) << shift);
+      fx.cu->write_vgpr(fx.vbase + base + loc.vgpr_offset, loc.lane, word);
+    };
+    auto write_acc = [&](uint32_t row, uint32_t col, uint32_t value) {
+      const auto loc = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      fx.cu->write_vgpr(fx.vbase + ACC + loc.reg, loc.lane, value);
+    };
+
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 0, 0, 16), 0x7FC1u);
+    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 0, 0, 16), 0x7FC2u);
+    write_acc(0, 0, 0x7FC30000u);
+
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 1, 0, 16), 0x3F80u);
+    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 1, 0, 16), 0x7FC2u);
+    write_acc(1, 1, 0x7FC30000u);
+
+    write_acc(2, 2, 0x7FC30000u);
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 3, 1, 16), 0x7F81u);
+    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 3, 1, 16), 0x3F80u);
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 4, 2, 16), 0x3F80u);
+    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 4, 2, 16), 0xFFC4u);
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 5, 3, 16), 0x7F80u);
+
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 6, 0, 16), 0x7FC1u);
+    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 6, 31, 16), 0x3F80u);
+    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 6, 31, 16), 0x7FC2u);
+  };
+  expect_bit_exact(
+      "wmma_bf16f32_nan_payloads", Mode::NaN, fx, reseed,
+      [&] {
+        amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + BF16_DST, fx.vbase + S0,
+                                                fx.vbase + S1, fx.vbase + ACC,
+                                                amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+      },
+      BF16_DST, BF16_DST_REGS);
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+
+  auto expect_output = [&](uint32_t row, uint32_t col, uint16_t expected) {
+    const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+    const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
+    EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), expected)
+        << "row=" << row << " col=" << col;
+  };
+  expect_output(0, 0, 0x7FC1u); // A before B and C.
+  expect_output(1, 1, 0x7FC2u); // B before C.
+  expect_output(2, 2, 0x7FC3u); // C when A and B are numeric.
+  expect_output(3, 3, 0x7FC1u); // Selected signaling A is quieted.
+  expect_output(4, 4, 0xFFC4u); // Sign and payload are preserved.
+  expect_output(5, 5, 0xFFC0u); // Invalid Inf*0 has a stable NaN encoding.
+  expect_output(6, 6, 0x7FC2u); // A later source NaN supersedes the accumulator.
 }
 
 // Zero products isolate the mixed output map and the BF16 truncation contract.
