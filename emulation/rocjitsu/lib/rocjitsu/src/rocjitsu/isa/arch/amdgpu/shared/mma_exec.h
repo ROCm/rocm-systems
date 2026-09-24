@@ -2763,7 +2763,7 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
       for (uint32_t k = 0; k < K; ++k) {
         auto al = wmma_input_loc(M, K, row, k, in_bits);
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
-        acc += extract_bf16(cu, s0, al) * extract_bf16(cu, s1, bl);
+        acc = std::fma(extract_bf16(cu, s0, al), extract_bf16(cu, s1, bl), acc);
       }
       auto out = wmma_output_loc_16(M, N, row, col);
       results.push_back({out.reg, out.lane, out.sub_element, util::f32_to_bf16(acc)});
