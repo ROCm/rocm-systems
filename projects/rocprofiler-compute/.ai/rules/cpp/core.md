@@ -116,8 +116,38 @@ functions that do not modify the object.
 
 If a value or function can be evaluated at compile time, it should be. Constants
 are `static constexpr` members or namespace-scope `constexpr`, as in
-`CsvCountersWriter::kFileSuffix`. See
-[`reference/constexpr.md`](reference/constexpr.md) for the longer treatment.
+`CsvCountersWriter::kFileSuffix`.
+
+A `constexpr` function runs at compile time only when its arguments are
+constants, and silently falls back to runtime otherwise. Assigning the result to
+a `constexpr` variable makes the compiler prove it:
+
+```cpp
+constexpr int square(int x) { return x * x; }
+
+constexpr int a = square(8);   // compile time, or it fails to compile
+int b = square(n);             // runtime, n is not constexpr
+```
+
+That is the C++17 way to get what `consteval` gives in C++20. `consteval` and
+`constinit` are not available.
+
+`if constexpr` branches at compile time, and the branch not taken is not
+compiled at all. Prefer it to tag dispatch or SFINAE. It is only valid inside a
+template.
+
+```cpp
+template <typename T>
+auto process(T val) {
+    if constexpr (std::is_integral_v<T>)            return val * 2;
+    else if constexpr (std::is_floating_point_v<T>) return val * 2.0;
+    else static_assert(always_false<T>, "unsupported type");
+}
+```
+
+A `constexpr` function must stay pure: no I/O, no global state. That also makes
+it testable with `static_assert`, which catches the bug before the binary
+exists.
 
 ## noexcept
 

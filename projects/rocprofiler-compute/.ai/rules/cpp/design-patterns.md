@@ -1,14 +1,34 @@
-# Reference: Design Patterns
+# C++ Design Patterns
 
-Reference material, not a rule. Nothing here is enforced in review. Read it when
-a problem looks like it already has a name.
+Guidance for picking a shape, not a rule a reviewer enforces line by line. Read
+it when a problem looks like it already has a name.
 
 Reference: [Refactoring.Guru, design patterns in
 C++](https://refactoring.guru/design-patterns/cpp).
 
-Before reaching for any of this: simple code beats a clever pattern, and a
-pattern added "just in case" is a cost with no benefit. Add one when the problem
-is actually in front of you.
+Simple code beats a clever pattern, and a pattern added "just in case" is a cost
+with no benefit. Add one when the problem is in front of you.
+
+## Patterns already required elsewhere
+
+Two shapes are not optional here, because another rule depends on them.
+
+**Adapter.** A third-party C API gets wrapped in an interface of ours. This is
+what makes the code testable at all, so [`testability.md`](testability.md)
+requires it. `SdkWrapper` adapts the rocprofiler-sdk, `filesystem_wrapper_t`
+adapts disk access, `EnvironCache` adapts the environment block.
+
+```cpp
+class Adapter : public Target {
+    Adaptee* m_adaptee;
+public:
+    void request() override { m_adaptee->specific_request(); }
+};
+```
+
+**Strategy, lookup table, command map, and `std::visit`.** These are the
+replacements [`core.md`](core.md) names when a branch chain gets too long. The
+rule and the thresholds live there.
 
 ## Creational
 
@@ -18,10 +38,6 @@ is actually in front of you.
 | Abstract Factory | Families of related objects must be used together |
 | Builder | Construction has many optional parameters or several steps |
 | Prototype | You need to copy an object without knowing its concrete type |
-
-Singleton is deliberately absent from this table. Process-lifetime state in this
-project is governed by [`../callback-boundaries.md`](../callback-boundaries.md),
-which is a rule, not a suggestion.
 
 ```cpp
 // Factory Method: replaces `if (type == "A") return new ProductA();`
@@ -35,29 +51,19 @@ public:
 auto car = CarBuilder().set_engine(v8).set_wheels(4).build();
 ```
 
+Singleton is deliberately absent. Process-lifetime state is governed by
+[`callback-boundaries.md`](callback-boundaries.md), which is a rule.
+
 ## Structural
 
 | Pattern | Fits when |
 |---|---|
-| Adapter | An existing interface is the wrong shape |
 | Bridge | Abstraction and implementation must vary independently |
-| Composite | A tree where leaves and nodes should look the same to callers |
+| Composite | A tree where leaves and nodes look the same to callers |
 | Decorator | Behaviour is added at runtime instead of by subclassing |
 | Facade | A complex subsystem needs one simple entry point |
 | Flyweight | Many objects share the same immutable state |
 | Proxy | Access needs controlling: lazy construction, caching, logging |
-
-Adapter is the one that shows up most here. `SdkWrapper` in
-`src/lib/rocprofiler_compute_tool/sdk_wrapper.h` is an adapter over the
-rocprofiler-sdk C API, which is also what makes it mockable.
-
-```cpp
-class Adapter : public Target {
-    Adaptee* m_adaptee;
-public:
-    void request() override { m_adaptee->specific_request(); }
-};
-```
 
 ## Behavioural
 
@@ -70,24 +76,10 @@ public:
 | Memento | State needs saving and restoring |
 | Observer | Something must react when another object changes |
 | State | Behaviour depends on which state the object is in |
-| Strategy | Algorithms are interchangeable at runtime |
 | Template Method | The algorithm shape is fixed, individual steps vary |
 | Visitor | Operations get added without touching the element classes |
 
 ```cpp
-// Strategy
-class Strategy {
-public:
-    virtual ~Strategy() = default;
-    virtual void execute() = 0;
-};
-
-class Context {
-    std::unique_ptr<Strategy> m_strategy;
-public:
-    void set_strategy(std::unique_ptr<Strategy> s) { m_strategy = std::move(s); }
-};
-
 // Template Method
 class AbstractClass {
 public:
@@ -132,4 +124,4 @@ variant holds a `unique_ptr` to an internal `Concept` base with a templated
 | Owning type erasure | The container should own the objects |
 
 `std::function` allocates and dispatches indirectly, so keep type erasure off
-the hot path. See [`../performance.md`](../performance.md).
+the hot path. See [`performance.md`](performance.md).
