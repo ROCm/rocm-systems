@@ -34,6 +34,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
 #include "tuning.h"
+#include "collective_execution_policy.h"
 #include "enqueue/raw_task.h"
 #include "enqueue/task_pretuning.h"
 #include "enqueue/task_classify.h"
@@ -347,6 +348,10 @@ struct ncclTaskP2p {
   uint64_t channelMask;
   // Shared by both tasks of an addP2pToPlan() pair; 0 = unassigned.
   uint16_t p2pPairId;
+  // Execution policy resolved once when the task is created; every later
+  // stage (preconnect, registration, planning) reads this decision.
+  bool executionPolicyMatched;
+  struct rcclCollectiveExecutionPolicy executionPolicy;
 };
 
 struct ncclTaskRma {

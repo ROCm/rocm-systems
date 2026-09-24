@@ -174,7 +174,7 @@ static void postTuneP2pMarkPreconnectChannels(struct ncclComm* comm, int peer, b
   }
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const struct ncclRawTaskSendRecv* raw,
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, struct ncclRawTaskSendRecv* raw,
                                                 bool* needDefaultPreconnect, bool* needSecondaryPreconnect,
                                                 bool* needShmPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
@@ -183,13 +183,17 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const str
   uint8_t base;
 
   if (peer < 0 || peer >= comm->nRanks) return ncclInvalidArgument;
-  if (comm->rank == peer) return ncclSuccess;
 
-  bool firstPeerUse = !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen);
   struct ncclTaskP2p task{};
   task.collAPI = raw->collAPI;
   task.bytes = raw->bytes;
   task.inPlace = raw->inPlace;
+  rcclPolicyResolveP2pTask(comm, &task);
+  raw->executionPolicyMatched = task.executionPolicyMatched;
+  raw->executionPolicy = task.executionPolicy;
+  if (comm->rank == peer) return ncclSuccess;
+
+  bool firstPeerUse = !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen);
   struct rcclP2pPolicyPreconnect policyPreconnect;
   bool hasPolicy = rcclPolicyP2pPreconnect(comm, &task, &policyPreconnect);
   if (!firstPeerUse && !hasPolicy) return ncclSuccess;
@@ -234,6 +238,8 @@ static ncclResult_t fillP2pTaskFromRaw(struct ncclComm* comm, struct ncclTaskTun
   task->root = raw->peer;
   task->bytes = raw->bytes;
   task->inPlace = raw->inPlace;
+  task->executionPolicyMatched = raw->executionPolicyMatched;
+  task->executionPolicy = raw->executionPolicy;
   if (task->collAPI == ncclFuncAlltoAll || task->collAPI == ncclFuncAlltoAllv ||
       task->collAPI == ncclFuncScatter || task->collAPI == ncclFuncGather) {
     task->allowUB = false;
@@ -255,7 +261,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   bool network;
   bool proxySameProcess;
 
-  if (!rcclPolicyP2pTaskAllowsRegistration(comm, task)) return ncclSuccess;
+  if (!rcclPolicyP2pTaskAllowsRegistration(task)) return ncclSuccess;
   if (protocol != NCCL_PROTO_SIMPLE) return ncclSuccess;
   if (!task->allowUB || task->bytes == 0 || task->buff == nullptr || peer == comm->rank) return ncclSuccess;
 

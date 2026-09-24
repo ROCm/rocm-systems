@@ -3704,6 +3704,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   p2p->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
   p2p->p2pApiEventHandle = ncclProfilerApiState.p2pApiEventHandle;
   p2p->profilerTag = info->collConfig.userProfilerTag;
+  rcclPolicyResolveP2pTask(comm, p2p);
   ncclIntruQueueEnqueue(isSendNotRecv ? &planner->peers[peer].sendQueue : &planner->peers[peer].recvQueue, p2p);
   planner->nTasksP2p += 1;
   if (isSendNotRecv) planner->nTasksP2pSend += 1;
