@@ -3,7 +3,7 @@
 #include <variant>
 
 struct ts_db_memory_t {
-    int32_t max_entries_per_gpu{0};
+    int32_t max_entries_per_gpu{-1};
 };
 
 struct ts_db_influx_t {

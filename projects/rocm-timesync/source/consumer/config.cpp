@@ -21,11 +21,8 @@ ts_config_t LoadConfig(const std::string filename)
             if (auto r = q["port"]) db.port = r.as<int>();
             if (auto r = q["database"]) db.database = r.as<std::string>();
         }
-    }
 
-    // default cache size without a db is unlimited
-    if (std::holds_alternative<std::monostate>(cfg.db))
-        cfg.cache.max_entries_per_gpu = -1;
+    }
 
     if (auto q = root["cache"])
     {
