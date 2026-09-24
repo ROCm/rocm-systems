@@ -100,16 +100,22 @@ endif()
 message(STATUS "Device Linker: inherited compile options: ${DL_INHERITED_FLAGS}")
 
 # ---------------------------------------------------------------------------
-# Parse GPU_TARGETS: strip target features, build offload-arch flag list
+# Parse GPU_TARGETS into a bare processor name plus the full target ID.
+#
+# The bare name keys everything that must not carry a feature suffix.
+# The full target ID is what reaches codegen, and is required.
 # ---------------------------------------------------------------------------
 set(DL_GPU_TARGETS "")
+set(DL_TARGET_IDS "")
 set(DL_OFFLOAD_ARCH_FLAGS "")
 foreach(_gpu_raw ${GPU_TARGETS})
   string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
   list(APPEND DL_GPU_TARGETS "${_gpu}")
-  list(APPEND DL_OFFLOAD_ARCH_FLAGS "--offload-arch=${_gpu}")
+  list(APPEND DL_TARGET_IDS "${_gpu_raw}")
+  set(DL_TARGET_ID_${_gpu} "${_gpu_raw}")
+  list(APPEND DL_OFFLOAD_ARCH_FLAGS "--offload-arch=${_gpu_raw}")
 endforeach()
-message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
+message(STATUS "Device Linker: GPU targets = ${DL_TARGET_IDS}")
 
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
@@ -545,6 +551,8 @@ set(DL_BUNDLER_INPUTS "--input=/dev/null")
 set(ALL_IR_FILES "")
 
 foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
+  set(DL_TARGET_ID "${DL_TARGET_ID_${DL_GPU_TARGET}}")
+
   # Sort CDNA targets first for better build scheduling (see original rationale)
   if(DL_GPU_TARGET MATCHES "^gfx9")
     set(DL_ARCH_DIR "${DEVICE_BUILD_DIR}/-${DL_GPU_TARGET}")
@@ -593,6 +601,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
 
   target_compile_options(${_dev_target} PRIVATE
     --arch=${DL_GPU_TARGET}
+    --target-id=${DL_TARGET_ID}
     --clang=${DL_CLANG}
     ${DL_OPT_FLAGS}
     -std=c++17
@@ -652,6 +661,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       COMMAND ${CMAKE_RCCLDEV_COMPILER}
         --emit-device-obj
         --arch=${DL_GPU_TARGET}
+        --target-id=${DL_TARGET_ID}
         --clang=${DL_CLANG}
         ${DL_HIP_COMPILER_FLAGS}
         -DRCCL_DEVICE_LINKER
@@ -703,6 +713,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
       --link
       --arch=${DL_GPU_TARGET}
+      --target-id=${DL_TARGET_ID}
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
@@ -720,7 +731,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   )
 
   list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
-  list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_GPU_TARGET}")
+  list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_TARGET_ID}")
   list(APPEND DL_BUNDLER_INPUTS "--input=${ARCH_DEVICE_ELF}")
 
   # =========================================================================
@@ -751,7 +762,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
         -DRCCL_DEVICE_LINKER
         ${_link_def_flags}
         ${_link_inc_flags}
-        -x hip --offload-device-only --offload-arch=${DL_GPU_TARGET}
+        -x hip --offload-device-only --offload-arch=${DL_TARGET_ID}
         ${DL_HIP_COMPILER_FLAGS}
         -gline-tables-only
         -std=c++17 ${DL_OPT_FLAGS}

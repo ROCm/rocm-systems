@@ -55,6 +55,10 @@ Link mode (--link):
     5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
     6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
+Target selection (--arch / --target-id):
+    --arch is the bare processor name (gfx942).
+    --target-id is the full target ID that drives codegen (gfx942:xnack+).
+
 Tool discovery:
     amdclang++, ld.lld are found relative to --clang=<path> or by searching
     PATH and the directory containing the system C++ compiler.
@@ -519,6 +523,7 @@ def run(cmd, description=""):
 def do_compile(args, forwarded_flags):
     clang, _ = discover_tools(args.clang)
     arch = args.arch
+    target_id = args.target_id
     source = args.source
     output = args.output
     keep_temps = args.keep_temps
@@ -549,7 +554,7 @@ def do_compile(args, forwarded_flags):
             clang,
             '-x', 'hip',
             '--offload-device-only',
-            f'--offload-arch={arch}',
+            f'--offload-arch={target_id}',
             '-gline-tables-only',
             '-w',
         ] + forwarded_flags + [
@@ -580,7 +585,7 @@ def do_compile(args, forwarded_flags):
             clang,
             '-x', 'assembler',
             '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
+            f'-mcpu={target_id}',
             '-c', '-o', output, ext_file,
         ]
         run(assemble_cmd, f"assemble {os.path.basename(source)}")
@@ -622,7 +627,6 @@ def do_emit_device_obj(args, forwarded_flags):
     no LTO, no manual assembly text step needed either.
     """
     clang, _ = discover_tools(args.clang)
-    arch = args.arch
     source = args.source
     output = args.output
 
@@ -630,7 +634,7 @@ def do_emit_device_obj(args, forwarded_flags):
         clang,
         '-x', 'hip',
         '--offload-device-only',
-        f'--offload-arch={arch}',
+        f'--offload-arch={args.target_id}',
         '-fhip-emit-relocatable',
         '-fPIC',
         '-gline-tables-only',
@@ -925,8 +929,11 @@ def do_emit_host_obj(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
-def dispatcher_compile_cmd(clang, arch, forwarded_flags, disp_asm, dispatcher):
+def dispatcher_compile_cmd(clang, target_id, forwarded_flags, disp_asm, dispatcher):
     """Device-only dispatcher compile to assembly.
+
+    Takes the full target ID (gfx942:xnack+), not the bare processor name:
+    this is a codegen invocation, so the feature suffix has to survive.
 
     -gline-tables-only is placed before forwarded_flags so it matches the
     per-kernel compile. Clang takes the last debug-info option, so coverage's
@@ -938,7 +945,7 @@ def dispatcher_compile_cmd(clang, arch, forwarded_flags, disp_asm, dispatcher):
         clang,
         '-x', 'hip',
         '--offload-device-only',
-        f'--offload-arch={arch}',
+        f'--offload-arch={target_id}',
         '-gline-tables-only',
         '-w',
     ] + list(forwarded_flags) + [
@@ -973,6 +980,7 @@ def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
 def do_link(args, forwarded_flags):
     clang, lld = discover_tools(args.clang)
     arch = args.arch
+    target_id = args.target_id
     objects = args.objects
     output = args.output
     dispatcher = args.dispatcher
@@ -1021,7 +1029,7 @@ def do_link(args, forwarded_flags):
     try:
         # Step 2: Compile dispatcher to assembly.
         disp_compile_cmd = dispatcher_compile_cmd(
-            clang, arch, forwarded_flags, disp_asm, dispatcher)
+            clang, target_id, forwarded_flags, disp_asm, dispatcher)
         run(disp_compile_cmd, f"compile dispatcher for {arch}")
 
         # Step 3: Patch dispatcher with aggregated resources
@@ -1036,7 +1044,7 @@ def do_link(args, forwarded_flags):
             clang,
             '-x', 'assembler',
             '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
+            f'-mcpu={target_id}',
             '-c', '-o', disp_obj, disp_patched,
         ]
         run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
@@ -1055,7 +1063,7 @@ def do_link(args, forwarded_flags):
                 bc_compile_cmd = [
                     clang,
                     '-target', 'amdgcn-amd-amdhsa',
-                    f'-mcpu={arch}',
+                    f'-mcpu={target_id}',
                     '-c', '-x', 'ir',
                     '-o', rocshmem_obj, rocshmem_bitcode,
                 ]
@@ -1115,6 +1123,11 @@ def parse_compiler_flags(argv):
         elif arg.startswith('--arch='):
             our_args.append(arg)
         elif arg == '--arch' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--target-id='):
+            our_args.append(arg)
+        elif arg == '--target-id' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
         elif arg.startswith('--fatbin-role='):
@@ -1207,6 +1220,10 @@ def main():
     parser.add_argument('--fatbin-role', default=None, dest='fatbin_role',
                          choices=['owner', 'shared'])
     parser.add_argument('--arch', required=False)
+    # Full target ID for codegen, e.g. gfx950:xnack+. Defaults to --arch.
+    # --arch stays the bare processor name: it keys resource aggregation
+    # (_has_unified_vgpr_agpr matches exact names) and names temp files.
+    parser.add_argument('--target-id', required=False, dest='target_id')
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
@@ -1220,6 +1237,9 @@ def main():
     if args.version:
         print("rccl-device-compile 1.0")
         sys.exit(0)
+
+    if not args.target_id:
+        args.target_id = args.arch
 
     if args.compile:
         if not positional:
