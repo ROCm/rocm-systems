@@ -46,10 +46,10 @@ struct DescriptorResourceDeltaValidation {
   uint32_t normalized_rsrc3 = 0;
 };
 
-[[nodiscard]] EncodedMutationValidation validate_encoded_mutation(rj_code_arch_t arch,
-                                                                  EncodedMutationKind kind,
-                                                                  std::span<const uint8_t> before,
-                                                                  std::span<const uint8_t> after);
+[[nodiscard]] EncodedMutationValidation
+validate_encoded_mutation(rj_code_arch_t arch, EncodedMutationKind kind,
+                          std::span<const uint8_t> before, std::span<const uint8_t> after,
+                          bool allow_atomic_observation = false);
 
 /// Prove any target-specific register-allocation boundary movement and return
 /// the RSRC3 value that common whole-descriptor comparison should use.

@@ -4,6 +4,8 @@
 /// @file consan_validation_rdna4_cdna5_target_ops.cpp
 /// @brief Independent RDNA4/CDNA5 proofs for encoded fault mutations.
 
+#include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
+
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
@@ -58,7 +60,21 @@ namespace {
 
 EncodedMutationValidation validate_rdna4_cdna5_encoded_mutation(EncodedMutationKind kind,
                                                                 std::span<const uint8_t> before,
-                                                                std::span<const uint8_t> after) {
+                                                                std::span<const uint8_t> after,
+                                                                bool allow_atomic_observation) {
+  std::optional<std::array<uint32_t, 3>> observed_before;
+  if (allow_atomic_observation &&
+      (kind == EncodedMutationKind::AtomicAddress || kind == EncodedMutationKind::AtomicScope) &&
+      after.size() == sizeof(rdna4::VflatMachineInst)) {
+    rdna4::VflatMachineInst relocated{};
+    std::memcpy(&relocated, after.data(), sizeof(relocated));
+    if (relocated.th == 1u) {
+      observed_before = detail::build_rdna4_atomic_observation(before, relocated.vdst);
+      if (observed_before)
+        before = {reinterpret_cast<const uint8_t *>(observed_before->data()),
+                  sizeof(*observed_before)};
+    }
+  }
   switch (kind) {
   case EncodedMutationKind::OrdinaryGlobalAddress: {
     if (!same_size(before, after, sizeof(rdna4::VglobalMachineInst)))

@@ -4096,7 +4096,7 @@ function(rj_add_consan_hip_tests)
                 PASS_REGEX "ConSan resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ALSO_PASS_REGEX
                     "kind=trampoline-sync-metadata.*spilled_vgprs=[1-9]"
-                    "visible_sync=[1-9]"
+                    "ConSan publication.*events=[1-9][0-9]*.*dropped=0"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=default"

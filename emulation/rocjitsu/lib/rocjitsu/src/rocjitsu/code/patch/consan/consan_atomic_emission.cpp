@@ -312,7 +312,7 @@ struct AtomicPreludeState {
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     std::span<const uint32_t> leading_guest_words, std::span<const uint32_t> trailing_guest_words,
     uint32_t *emitted_guest_size, std::optional<uint16_t> observation_vgpr = std::nullopt,
-    bool capture_cas_outcome = true) {
+    bool capture_cas_outcome = true, std::optional<uint16_t> data_snapshot_vgpr = std::nullopt) {
   const AtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
   const bool is_cas = capture_cas_outcome && atomic_is_compare_exchange(site);
@@ -349,8 +349,35 @@ struct AtomicPreludeState {
                                leading_guest_words, trailing_guest_words, emitted_guest_size,
                                observation_vgpr);
   };
+  // Returning atomics may overwrite their input operand. Preserve that input
+  // before execution, including when the guest overlaps the spill range.
+  // In that case save the range first and update only the guest destination's
+  // slot afterwards; saving the whole range again would restore our snapshot
+  // into an unrelated live guest register.
+  if (guest_first && data_snapshot_vgpr) {
+    if (!site.data_vgpr || !site.destination_vgpr ||
+        range_overlaps(*data_snapshot_vgpr, 1, lowering_form.address_vgpr,
+                       lowering_form.address_vgpr_count) ||
+        range_overlaps(*data_snapshot_vgpr, 1, *site.data_vgpr,
+                       lowering_form.data_register_count) ||
+        range_overlaps(*data_snapshot_vgpr, 1, *site.destination_vgpr,
+                       lowering_form.destination_register_count))
+      return false;
+    words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+    words.push_back(
+        build_v_mov_b32_e32(*data_snapshot_vgpr, vector_source_vgpr(*site.data_vgpr), arch));
+  }
   if (guest_first && !append_guest())
     return false;
+  if (guest_first && data_snapshot_vgpr) {
+    for (uint16_t i = 0; i < lowering_form.destination_register_count; ++i) {
+      const uint16_t destination = *site.destination_vgpr + i;
+      if (destination >= spill->vgpr_base && destination < spill->vgpr_base + spill->vgpr_count &&
+          !InstructionSequence(words).emit(instrumentation::build_private_store_b32(
+              destination, spill->slot_offsets[destination - spill->vgpr_base], arch)))
+        return false;
+    }
+  }
   // A guest-first polling loop establishes bank zero itself before any spill
   // or instrumentation. Otherwise, select the scratch bank before preserving
   // registers and restore the original entry mode only around the guest span.
@@ -361,8 +388,11 @@ struct AtomicPreludeState {
       return false;
     words.push_back(*select_scratch);
   }
-  if (spill)
+  if (spill && !(guest_first && data_snapshot_vgpr))
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (!guest_first && data_snapshot_vgpr)
+    words.push_back(
+        build_v_mov_b32_e32(*data_snapshot_vgpr, vector_source_vgpr(*site.data_vgpr), arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
@@ -448,9 +478,7 @@ bool publication_observation_supported(const AtomicEvidenceSourceView &source) {
       site.mnemonic == "global_atomic_or_b32" || site.mnemonic == "flat_atomic_or_b32";
   return source.sequence && source.is_rmw() && !source.relocates_polling_loop() && operation &&
          site.width_bits == 32 && site.data_vgpr && site.scope && site.returns_old_value &&
-         (site.returns_old_value.value()
-              ? site.destination_vgpr && *site.data_vgpr != *site.destination_vgpr
-              : site.raw_th == 0u);
+         (site.returns_old_value.value() ? site.destination_vgpr.has_value() : site.raw_th == 0u);
 }
 
 std::optional<std::vector<uint32_t>> build_publication_cave_words(
@@ -489,14 +517,16 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   AtomicPreludeState prelude;
-  if (!append_atomic_prelude(words, bytes, source, lowering_form, owner_descriptor_file_offset,
-                             address_plan, plan, spill, scalar_spill, private_layout, arch, address,
-                             false, prelude, errors, guest_instruction_offset, {}, {},
-                             emitted_guest_size,
-                             opaque || source.site.returns_old_value.value_or(false)
-                                 ? std::nullopt
-                                 : std::optional<uint16_t>{observed},
-                             !opaque))
+  const bool preserve_data = !opaque && source.site.returns_old_value.value_or(false) &&
+                             source.site.destination_vgpr == source.site.data_vgpr;
+  if (!append_atomic_prelude(
+          words, bytes, source, lowering_form, owner_descriptor_file_offset, address_plan, plan,
+          spill, scalar_spill, private_layout, arch, address, false, prelude, errors,
+          guest_instruction_offset, {}, {}, emitted_guest_size,
+          opaque || source.site.returns_old_value.value_or(false)
+              ? std::nullopt
+              : std::optional<uint16_t>{observed},
+          !opaque, preserve_data ? std::optional<uint16_t>{written} : std::nullopt))
     return std::nullopt;
   // The guest has completed, and its operands are still available either in
   // registers or in the post-guest spill. Capture both before scratch reuse.
@@ -510,7 +540,7 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
   sequence
       .require(opaque || !source.site.returns_old_value.value_or(false) ||
                snapshot(observed, *source.site.destination_vgpr))
-      .require(opaque || snapshot(written, *source.site.data_vgpr))
+      .require(opaque || preserve_data || snapshot(written, *source.site.data_vgpr))
       .require(append_atomic_snapshot_wait(words, loaded_private, arch))
       .require(append_save_special_state(words, plan.special_state, arch))
       .append(instrumentation::build_s_mov_b64(saved_exec, kAmdGpuExecLo, arch));

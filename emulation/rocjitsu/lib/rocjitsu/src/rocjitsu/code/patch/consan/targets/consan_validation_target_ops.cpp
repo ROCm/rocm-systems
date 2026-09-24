@@ -12,7 +12,8 @@
 namespace rocjitsu::consan::validation_target_detail {
 [[nodiscard]] EncodedMutationValidation
 validate_rdna4_cdna5_encoded_mutation(EncodedMutationKind kind, std::span<const uint8_t> before,
-                                      std::span<const uint8_t> after);
+                                      std::span<const uint8_t> after,
+                                      bool allow_atomic_observation);
 [[nodiscard]] DescriptorResourceDeltaValidation
 validate_cdna3_cdna4_descriptor_resource_delta(const TargetProfile &target,
                                                const DescriptorResourceDeltaInput &input);
@@ -21,9 +22,11 @@ validate_cdna3_cdna4_descriptor_resource_delta(const TargetProfile &target,
 namespace rocjitsu::consan {
 EncodedMutationValidation validate_encoded_mutation(rj_code_arch_t arch, EncodedMutationKind kind,
                                                     std::span<const uint8_t> before,
-                                                    std::span<const uint8_t> after) {
+                                                    std::span<const uint8_t> after,
+                                                    bool allow_atomic_observation) {
   if (arch_is_rdna4_or_cdna5(arch))
-    return validation_target_detail::validate_rdna4_cdna5_encoded_mutation(kind, before, after);
+    return validation_target_detail::validate_rdna4_cdna5_encoded_mutation(
+        kind, before, after, allow_atomic_observation && arch == ROCJITSU_CODE_ARCH_RDNA4);
   return EncodedMutationValidation::UnsupportedInstructionEncoding;
 }
 

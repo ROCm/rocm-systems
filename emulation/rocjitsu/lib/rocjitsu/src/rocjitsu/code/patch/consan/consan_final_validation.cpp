@@ -939,8 +939,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     const std::span<const uint8_t> before_bytes =
         original_text.subspan(patch.anchor_offset, patch.original_size);
     if (patch.kind == PatchKind::InlineAtomicAddressRewrite) {
-      const auto validation = validate_encoded_mutation(arch, EncodedMutationKind::AtomicAddress,
-                                                        before_bytes, after_bytes);
+      const auto validation = validate_encoded_mutation(
+          arch, EncodedMutationKind::AtomicAddress, before_bytes, after_bytes, staged.has_value());
       if (validation == EncodedMutationValidation::UnexpectedInstructionSize ||
           validation == EncodedMutationValidation::UnsupportedInstructionEncoding) {
         errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
@@ -948,8 +948,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         errors.emplace_back("ConSan mutation proof found the wrong atomic address displacement");
       }
     } else {
-      const auto validation = validate_encoded_mutation(arch, EncodedMutationKind::AtomicScope,
-                                                        before_bytes, after_bytes);
+      const auto validation = validate_encoded_mutation(
+          arch, EncodedMutationKind::AtomicScope, before_bytes, after_bytes, staged.has_value());
       if (validation == EncodedMutationValidation::UnexpectedInstructionSize) {
         errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
         continue;

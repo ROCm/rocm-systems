@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 namespace rocjitsu::consan {
@@ -32,6 +33,23 @@ TEST(ConSan, AtomicObservationReturnRewritePreservesOperationAndAddress) {
         EXPECT_EQ((*result)[1] & ~changed, words[1] & ~changed);
         EXPECT_EQ((*result)[1] & changed, 42u | (1u << 20));
       }
+}
+TEST(ConSan, AtomicFaultValidationAllowsOnlyTheComposedObservationRewrite) {
+  std::array<uint32_t, 3> before{0xee0f400cu, 0x01880000u, 0x00000002u};
+  const auto bytes = [](const auto &words) {
+    return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words));
+  };
+  auto after = detail::build_rdna4_atomic_observation(bytes(before), 42);
+  ASSERT_TRUE(after);
+  (*after)[2] += 4u << 8u;
+  const auto validate = [&](bool composed) {
+    return validate_encoded_mutation(ROCJITSU_CODE_ARCH_RDNA4, EncodedMutationKind::AtomicAddress,
+                                     bytes(before), bytes(*after), composed);
+  };
+  EXPECT_EQ(validate(false), EncodedMutationValidation::InvalidMutation);
+  EXPECT_EQ(validate(true), EncodedMutationValidation::Valid);
+  (*after)[0] ^= 1u; // An unrelated address-register change is still invalid.
+  EXPECT_EQ(validate(true), EncodedMutationValidation::InvalidMutation);
 }
 TEST(ConSan, AtomicObservationReturnRewriteRejectsUnsupportedForms) {
   std::array<uint32_t, 3> words{0xee0f400cu, 0x01980000u, 0x00000002u};
