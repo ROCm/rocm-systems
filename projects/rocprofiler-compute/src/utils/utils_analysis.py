@@ -518,11 +518,14 @@ def _record_ml_api_trace_error(
 def nest_marker_intervals(
     trace_df: pd.DataFrame,
     errors: Optional[list[MlApiTraceError]] = None,
+    skipped_keys: Optional[set[tuple[str, str]]] = None,
 ) -> dict[str, list[CallTreeNode]]:
     """Nest marker intervals per Thread_Id using timestamp containment.
 
     Rows are sorted by thread and start time so parents are visited before
-    children. The input frame is not mutated.
+    children. The input frame is not mutated. Overlapping rows are skipped
+    and recorded in skipped_keys so later nest validation does not report
+    them again.
     """
     forest: dict[str, list[CallTreeNode]] = {}
     if trace_df.empty:
@@ -554,6 +557,8 @@ def nest_marker_intervals(
                         second_end=end,
                     ),
                 )
+                if skipped_keys is not None:
+                    skipped_keys.add((thread_key, str(row.Start_Timestamp)))
                 continue
             node = _call_tree_node_from_marker_row(row, errors)
             if open_ranges:
@@ -711,14 +716,18 @@ def _validate_all_markers_nested(
     trace_df: pd.DataFrame,
     forest: dict[str, list[CallTreeNode]],
     errors: Optional[list[MlApiTraceError]] = None,
+    skipped_keys: Optional[set[tuple[str, str]]] = None,
 ) -> None:
     """Record consolidated marker rows missing from the nested forest."""
     if trace_df.empty:
         return
     nested_keys = _nested_invocation_keys(forest)
+    ignored_keys = skipped_keys or set()
     for row in trace_df.itertuples(index=False):
         thread_id = str(row.Thread_Id)
         start_key = str(row.Start_Timestamp)
+        if (thread_id, start_key) in ignored_keys:
+            continue
         if (thread_id, start_key) not in nested_keys:
             _record_ml_api_trace_error(
                 errors,
@@ -1553,10 +1562,13 @@ def process_ml_api_trace_output(
             errors,
         )
     )
-    workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df, errors)
+    skipped_keys: set[tuple[str, str]] = set()
+    workload.ml_api_call_trees = nest_marker_intervals(
+        workload.ml_api_trace_df, errors, skipped_keys
+    )
     attach_unlocated_trees_by_launcher_thread(workload.ml_api_call_trees, errors)
     _validate_all_markers_nested(
-        workload.ml_api_trace_df, workload.ml_api_call_trees, errors
+        workload.ml_api_trace_df, workload.ml_api_call_trees, errors, skipped_keys
     )
     _prune_cpu_only_call_trees(workload.ml_api_call_trees)
     for roots in workload.ml_api_call_trees.values():
