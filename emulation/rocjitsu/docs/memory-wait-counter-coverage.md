@@ -37,6 +37,12 @@ the resolved routing masks. Mixed global/shared FLAT functional execution still 
 existing first-request-lane routing limitation; the checker does not repair memory
 routing.
 
+Legacy VMEM writeback can avoid an overwrite warning only when the pending result
+and the incoming producer share an ordered completion class. On legacy RDNA,
+ordinary loads, image samples and BVH results share VMcnt but keep separate
+classes. A newer result supersedes a fully covered older dependency only within
+the same ordered class; other classes and unordered results remain tracked.
+
 Before reading an incoming producer's operands, the checker applies the finite
 counter bound to each qualified ordered class in that counter. A capacity of `C`
 leaves at most `C-1` old operations before admission. Younger operations from a

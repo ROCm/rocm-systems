@@ -71,13 +71,19 @@ uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
   return issued_[i];
 }
 
-uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &event,
-                                     rj_code_arch_t arch, uint32_t units) {
+namespace {
+std::optional<uint32_t> completion_order_kind(const waitcheck_detail::ClassifiedEvent &event,
+                                              rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
   const bool legacy_flat =
       model == WaitcntModel::LegacyNoVscnt &&
       (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);
+  if (legacy_flat || event.kind == WaitEventKind::Smem || event.kind == WaitEventKind::Gds ||
+      event.kind == WaitEventKind::Export || event.kind == WaitEventKind::SqMessage ||
+      event.kind == WaitEventKind::SccWrite || event.kind == WaitEventKind::GlobalInv ||
+      event.kind == WaitEventKind::Unknown)
+    return std::nullopt;
   uint32_t kind = 0;
   if (!(model == WaitcntModel::LegacyNoVscnt && event.counter == WaitCounterKind::Load))
     if (auto normalized =
@@ -93,12 +99,25 @@ uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &ev
   if (model == WaitcntModel::LegacyVscnt && event.counter == WaitCounterKind::Load &&
       (event.kind == WaitEventKind::Sample || event.kind == WaitEventKind::Bvh))
     kind = uint32_t{1} << static_cast<unsigned>(event.kind);
-  const bool ordered =
-      event.kind != WaitEventKind::Gds && event.kind != WaitEventKind::Export &&
-      event.kind != WaitEventKind::SqMessage && event.kind != WaitEventKind::SccWrite &&
-      event.kind != WaitEventKind::GlobalInv && event.kind != WaitEventKind::Unknown;
-  return issue(event.counter, !ordered || event.kind == WaitEventKind::Smem || legacy_flat, kind,
-               units, ordered);
+  return kind;
+}
+} // namespace
+
+uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &event,
+                                     rj_code_arch_t arch, uint32_t units) {
+  const auto kind = completion_order_kind(event, arch);
+  return issue(event.counter, !kind, kind.value_or(0), units);
+}
+
+uint16_t MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
+                                                   rj_code_arch_t arch) const {
+  const auto kind = completion_order_kind(event, arch);
+  if (!kind)
+    return kUnordered;
+  const auto it = std::ranges::find_if(orders_, [&](const Order &order) {
+    return order.counter == event.counter && order.kind == *kind;
+  });
+  return it == orders_.end() ? kUnordered : static_cast<uint16_t>(it - orders_.begin());
 }
 
 bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
@@ -146,7 +165,7 @@ void MemoryWaitScoreboard::add(Event event) {
     return;
   stamp_order(event);
   // A newer result covering the entire old destination is the stronger
-  // dependency on an ordered counter. Discard the superseded record rather
+  // dependency within the same FIFO class. Discard the superseded record rather
   // than growing with a loop that repeatedly loads an unused destination.
   bool overlap = false;
   for (unsigned r = 0; r < event.reg.width; ++r) {
@@ -157,7 +176,13 @@ void MemoryWaitScoreboard::add(Event event) {
   }
   if (overlap)
     std::erase_if(events_, [&](const Event &old) {
-      return old.counter == event.counter && old.reg.cls == event.reg.cls &&
+      const bool ordered = event.order != kUnordered && old.order == event.order &&
+                           old.order_sequence <= event.order_sequence;
+      // Scalar replay sources have a different proof: every sufficient wait
+      // drains their entire X group, so its newest covering source is enough.
+      const bool scalar_replay =
+          xcnt_scalar_ && old.counter == WaitCounterKind::X && event.counter == WaitCounterKind::X;
+      return (ordered || scalar_replay) && old.reg.cls == event.reg.cls &&
              event.reg.index <= old.reg.index &&
              event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
              (event.lanes & old.lanes) == old.lanes && (event.bytes & old.bytes) == old.bytes;
@@ -312,13 +337,12 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
 }
 
 void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes,
-                                          bool write, WaitCounterKind ordered_write_counter) {
+                                          bool write, uint16_t ordered_write_order) {
   for (auto &event : events_) {
-    // The writeback shortcut is valid only while this queue remains ordered.
-    // FLAT or mixed event kinds must retain pending overwrite protection.
+    // Sharing a counter does not prove ordered writeback. The old result and
+    // incoming write must belong to the same FIFO class, even in a mixed queue.
     if (event.reported || (!write && event.counter == WaitCounterKind::X) ||
-        (write && event.counter == ordered_write_counter &&
-         !unordered_[static_cast<size_t>(event.counter)]) ||
+        (write && ordered_write_order != kUnordered && event.order == ordered_write_order) ||
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
         reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
       continue;

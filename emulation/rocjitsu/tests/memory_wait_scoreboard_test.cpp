@@ -284,17 +284,18 @@ TEST_F(MemoryWaitScoreboardTest, DiagnosticReportsTheRequiredPartialWaitThreshol
 
 TEST_F(MemoryWaitScoreboardTest, OrderedMemoryWritesStillCheckOtherCounters) {
   load(5);
-  state.access({RegClass::VGPR, 5, 1}, ~uint64_t{0}, 0xf, true, WaitCounterKind::Load);
+  const auto order = state.events().front().order;
+  state.access({RegClass::VGPR, 5, 1}, ~uint64_t{0}, 0xf, true, order);
   EXPECT_TRUE(hazards.empty());
   load(6, WaitCounterKind::Ds);
-  state.access({RegClass::VGPR, 6, 1}, ~uint64_t{0}, 0xf, true, WaitCounterKind::Load);
+  state.access({RegClass::VGPR, 6, 1}, ~uint64_t{0}, 0xf, true, order);
   ASSERT_EQ(hazards.size(), 1u);
   EXPECT_EQ(hazards[0].producer.counter, WaitCounterKind::Ds);
 }
 
 TEST_F(MemoryWaitScoreboardTest, UnorderedQueueStillChecksOverwritesOnTheSameCounter) {
   load(5, WaitCounterKind::Load, 1, 0xf, true);
-  state.access({RegClass::VGPR, 5, 1}, 1, 0xf, true, WaitCounterKind::Load);
+  state.access({RegClass::VGPR, 5, 1}, 1, 0xf, true, state.events().front().order);
   ASSERT_EQ(hazards.size(), 1u);
   EXPECT_TRUE(hazards.front().write);
   EXPECT_EQ(hazards.front().required_wait, 0u);
@@ -302,7 +303,7 @@ TEST_F(MemoryWaitScoreboardTest, UnorderedQueueStillChecksOverwritesOnTheSameCou
   state.wait(WaitCounterKind::Load, 0);
   hazards.clear();
   load(5, WaitCounterKind::Load, 1);
-  state.access({RegClass::VGPR, 5, 1}, 1, 0xf, true, WaitCounterKind::Load);
+  state.access({RegClass::VGPR, 5, 1}, 1, 0xf, true, state.events().front().order);
   EXPECT_TRUE(hazards.empty());
 }
 
@@ -314,6 +315,34 @@ TEST_F(MemoryWaitScoreboardTest, DisjointLanesAndRegisterHalvesAreIndependent) {
   state.access({RegClass::VGPR, 300, 1}, 2, 0xc, true);
   ASSERT_EQ(hazards.size(), 1u);
   EXPECT_TRUE(hazards[0].write);
+}
+
+TEST_F(MemoryWaitScoreboardTest, SupersedingResultsRequiresTheSameOrderedCompletionClass) {
+  using namespace waitcheck_detail;
+  for (auto kind : {WaitEventKind::VmemNoSamplerLoad, WaitEventKind::Sample, WaitEventKind::Bvh,
+                    WaitEventKind::Smem}) {
+    SCOPED_TRACE(static_cast<unsigned>(kind));
+    state.clear();
+    const ClassifiedEvent first{WaitCounterKind::Load, kind == WaitEventKind::Smem
+                                                           ? kind
+                                                           : WaitEventKind::VmemNoSamplerLoad};
+    const ClassifiedEvent second{WaitCounterKind::Load, kind};
+    for (const auto &event : {first, second})
+      state.add({state.issue(event, ROCJITSU_CODE_ARCH_RDNA1),
+                 0x100,
+                 1,
+                 {RegClass::VGPR, 5, 1},
+                 WaitCounterKind::Load,
+                 0xf});
+    const bool same_ordered_class = kind == WaitEventKind::VmemNoSamplerLoad;
+    EXPECT_EQ(state.events().size(), same_ordered_class ? 1u : 2u);
+    // Completing the younger class must not erase the older class's result.
+    state.issue(second, ROCJITSU_CODE_ARCH_RDNA1);
+    state.wait(WaitCounterKind::Load, 1);
+    EXPECT_EQ(shadow.test(5), !same_ordered_class);
+    state.wait(WaitCounterKind::Load, 0);
+    EXPECT_FALSE(shadow.test(5));
+  }
 }
 
 TEST_F(MemoryWaitScoreboardTest, ScopeDoesNotExposeIssuerStateToHelpers) {
@@ -999,6 +1028,58 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
       }
     }
   }
+}
+
+TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionClass) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (const auto &[first, second] : {std::pair{"global_load_dword", "image_sample"},
+                                        {"global_load_dword", "image_bvh_intersect_ray"},
+                                        {"image_sample", "global_load_dword"},
+                                        {"image_sample", "image_bvh_intersect_ray"},
+                                        {"image_sample", "image_sample"},
+                                        {"global_load_dword", "global_load_dword"}})
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(static_cast<unsigned>(arch));
+        SCOPED_TRACE(first);
+        SCOPED_TRACE(second);
+        SCOPED_TRACE(wait);
+        GpuMemory memory("image_overwrite_memory");
+        L2Cache l2("image_overwrite_l2");
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 32;
+        config.lds_size_kb = 64;
+        auto cu = ComputeUnitCore::create("image_overwrite_cu", config, &memory, &l2);
+        auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        // Exercise the runtime tracking path with resolved destinations; this
+        // does not depend on functional support for image sampling or BVH.
+        auto track = [&](std::string_view mnemonic, unsigned reg) {
+          Instruction inst(mnemonic, nullptr);
+          auto data = std::make_unique<VectorMemState>(GLOBAL_MEM);
+          data->is_load = true;
+          data->exec_mask = data->lane_mask = 1;
+          data->elem_size = 4;
+          data->num_elems = 1;
+          data->dst_reg_base = wf->vgpr_alloc().base + reg;
+          inst.set_data(std::move(data));
+          cu->track_memory_wait(inst, *wf);
+          wf->pc += 8;
+        };
+        // An unrelated load makes the image/image control a mixed counter.
+        track("global_load_dword", 3);
+        track(first, 2);
+        if (wait)
+          wf->memory_wait_scoreboard()->wait(WaitCounterKind::Load, 0);
+        track(second, 2);
+        const bool same_class = std::string_view(first) == second;
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || same_class ? 0u : 1u);
+      }
 }
 
 TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {

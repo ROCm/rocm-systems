@@ -113,6 +113,9 @@ public:
                  uint32_t units = 1, bool backpressure_ordered = true);
   uint64_t issue(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch,
                  uint32_t units = 1);
+  /// Find the incoming producer's FIFO class without issuing its completion.
+  uint16_t ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
+                               rj_code_arch_t arch) const;
   /// Admission can force completion before the incoming instruction reads its operands.
   void backpressure(WaitCounterKind counter, uint32_t capacity);
   void add(Event event);
@@ -122,12 +125,12 @@ public:
     return issued_[i] - retired_[i];
   }
   void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-              WaitCounterKind ordered_write_counter = WaitCounterKind::Count) {
+              uint16_t ordered_write_order = kUnordered) {
     if (!lanes || !bytes)
       return;
     if (!pending_.pending(reg, write))
       return;
-    access_pending(reg, lanes, bytes, write, ordered_write_counter);
+    access_pending(reg, lanes, bytes, write, ordered_write_order);
   }
 
   void bind(uint64_t pc, void *context, Reporter reporter) {
@@ -143,7 +146,7 @@ private:
   static size_t index(RegisterRef reg) { return MemoryWaitShadow::index(reg); }
 
   void access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-                      WaitCounterKind ordered_write_counter);
+                      uint16_t ordered_write_order);
   void rebuild_mask();
   void clear_destination(const Event &event);
   void retire_completed();

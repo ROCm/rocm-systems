@@ -1071,20 +1071,18 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
   // destination on two counters; those entries are not writes racing each other.
   const bool flat_result =
       defs != classified.value().end() && defs->kind == WaitEventKind::FlatLoad;
-  const bool unordered_flat_result = flat_result && model.value() == WaitcntModel::LegacyNoVscnt;
+  const auto ordered_write_order =
+      legacy && defs != classified.value().end() && defs->counter == WaitCounterKind::Load
+          ? scoreboard.ordered_write_order(*defs, config_.arch)
+          : MemoryWaitScoreboard::kUnordered;
   for (size_t i = 0; i < num_destinations; ++i) {
     const auto &d = destinations[i];
     if (track_xcnt && !xscalar)
       scoreboard.xcnt_ordered_write(d.reg, d.lanes, d.bytes);
-    // The incoming producer must also support ordered VMEM writeback. In
-    // particular, CDNA FLAT makes a previously ordered queue unordered, and
-    // shared FLAT lanes are written by DS rather than the VMEM pipeline.
-    const auto ordered_counter =
-        legacy && defs->counter == WaitCounterKind::Load && !unordered_flat_result
-            ? WaitCounterKind::Load
-            : WaitCounterKind::Count;
+    // The incoming class determines VMEM writeback ordering before its issue.
+    // Shared FLAT lanes are written by DS rather than the VMEM pipeline.
     const uint64_t shared_lanes = flat_result ? d.lanes & flat_shared_lanes : 0;
-    scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, ordered_counter);
+    scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, ordered_write_order);
     scoreboard.access(d.reg, shared_lanes, d.bytes, true);
   }
   // FLAT's actual route determines which completion proves translation. Only
