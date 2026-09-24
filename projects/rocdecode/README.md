@@ -60,7 +60,7 @@ On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/v
 
 * **FFmpeg** — pre-built libraries or built from source (required for FFmpeg-based samples and the host decoder library)
 
-### FFmpeg (required for samples and tests)
+### FFmpeg (required for samples and extended tests)
 
 [FFmpeg](https://github.com/FFmpeg/FFmpeg) development libraries must be installed separately to build and run samples and extended tests.
 
@@ -174,7 +174,9 @@ cmake --install . --config Release
   ```
 
   > [!IMPORTANT]
-  > Tests require FFmpeg dev libraries to be installed
+  > The default test set runs without FFmpeg. The extended tests demultiplex containers through
+  > FFmpeg, so they need the FFmpeg dev libraries and are off by default; configure the test
+  > project with `-DENABLE_EXTENDED_TESTS=ON` to build and run them as well.
 
   > [!NOTE]
   > To run tests with verbose output, use `ctest -VV` (or `make test ARGS="-VV"` on Linux).
@@ -287,7 +289,7 @@ You can access samples to decode your videos in the
 [samples](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples) directory. Refer to the
 individual folders to build and run the samples.
 
-[FFmpeg](https://ffmpeg.org/about.html) is required for sample applications and `make test`:
+[FFmpeg](https://ffmpeg.org/about.html) is required for the sample applications and the extended tests:
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
