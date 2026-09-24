@@ -65,7 +65,10 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         if(_incr_pos != std::string::npos)
         {
             auto _incr_str = _v.substr(_incr_pos + 1);
-            if(!_incr_str.empty()) _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            if(!_incr_str.empty())
+            {
+                _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            }
             _v = _v.substr(0, _incr_pos);
         }
 

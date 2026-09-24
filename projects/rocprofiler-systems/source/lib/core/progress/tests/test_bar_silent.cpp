@@ -45,7 +45,10 @@ protected:
         m_fp = nullptr;
         struct stat st
         {};
-        if(::stat(m_path.c_str(), &st) != 0) return 0;
+        if(::stat(m_path.c_str(), &st) != 0)
+        {
+            return 0;
+        }
         return static_cast<std::uint64_t>(st.st_size);
     }
 

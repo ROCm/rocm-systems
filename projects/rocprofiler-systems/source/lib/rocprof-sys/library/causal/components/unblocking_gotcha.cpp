@@ -54,7 +54,10 @@ void
 unblocking_gotcha::configure()
 {
     unblocking_gotcha_t::get_initializer() = []() {
-        if(!config::get_use_causal()) return;
+        if(!config::get_use_causal())
+        {
+            return;
+        }
 
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 0, pthread_mutex_unlock);
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 1, pthread_spin_unlock);
@@ -124,7 +127,10 @@ unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
-    if(_active && _pid == process::get_id()) causal::delay::process();
+    if(_active && _pid == process::get_id())
+    {
+        causal::delay::process();
+    }
 
     causal::sampling::block_backtrace_samples();
     auto _ret = (*_func)(_pid, _sig);

@@ -79,7 +79,10 @@ overflow::sample(int _sig)
     auto                            _tid        = _tinfo->index_data->sequent_value;
     auto&                           _perf_event = perf::get_instance(_tid);
 
-    if(!_perf_event) return;
+    if(!_perf_event)
+    {
+        return;
+    }
 
     m_index = causal::experiment::get_index();
 
@@ -94,8 +97,14 @@ overflow::sample(int _sig)
             _data.emplace_back(_sample_ip);
             for(auto ditr : itr.get_callchain())
             {
-                if(ditr != _sample_ip) _data.emplace_back(ditr);
-                if(_data.size() == _data.capacity()) break;
+                if(ditr != _sample_ip)
+                {
+                    _data.emplace_back(ditr);
+                }
+                if(_data.size() == _data.capacity())
+                {
+                    break;
+                }
             }
 
             if(causal::experiment::is_active() && causal::experiment::is_selected(_data))
@@ -115,7 +124,10 @@ overflow::sample(int _sig)
 
     _perf_event->start();
 
-    if(_sig == cputime_signal) causal::delay::process();
+    if(_sig == cputime_signal)
+    {
+        causal::delay::process();
+    }
 }
 
 void
@@ -153,13 +165,19 @@ backtrace::sample(int _sig)
         _select_count = causal::set_current_selection(_stack);
         // if the selection count was reduced, reset select zeros.
         // this typically means that a new experiment was started
-        if(_former_count > _select_count) _select_zeros = 0;
+        if(_former_count > _select_count)
+        {
+            _select_zeros = 0;
+        }
         // if no PCs were selected, increment the select zeros.
         // if the cputime signal has not selected a PC in select_ival iterations,
         // then the realtime signal will start contributing to the current
         // selection. We generally want only the cputime signal to contribute
         // because those PCs are in-use (since the thread CPU clock in increasing)
-        if(_select_count == 0) ++_select_zeros;
+        if(_select_count == 0)
+        {
+            ++_select_zeros;
+        }
     };
 
     // the batch handler timer delivers a signal according to the thread CPU
@@ -168,9 +186,13 @@ backtrace::sample(int _sig)
     if(_sig == cputime_signal)
     {
         if(causal::experiment::is_active())
+        {
             causal::delay::process();
+        }
         else
+        {
             _set_current_selection(m_stack);
+        }
     }
     else if(_sig == realtime_signal)
     {
@@ -191,7 +213,9 @@ backtrace::sample(int _sig)
             // the cputime signals. This is rare but has been observed
             //
             if(_select_count == 0 && _select_zeros >= select_ival)
+            {
                 _set_current_selection(m_stack);
+            }
         }
     }
     else

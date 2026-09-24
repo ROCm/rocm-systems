@@ -266,7 +266,10 @@ struct backend
     {
         if constexpr(Wrapper::compile_time_version >= 10000)
         {
-            if(counter_id == nullptr) return Wrapper::STATUS_ERROR_INVALID_ARGUMENT;
+            if(counter_id == nullptr)
+            {
+                return Wrapper::STATUS_ERROR_INVALID_ARGUMENT;
+            }
             counter_id->handle = record.id;
             return status_success;
         }
@@ -291,7 +294,9 @@ struct backend
             if(Wrapper::query_counter_info(counter_id, Wrapper::COUNTER_INFO_VERSION_1,
                                            &info) != Wrapper::STATUS_SUCCESS ||
                info.name == nullptr)
+            {
                 return {};
+            }
 
             auto result   = std::vector<counter_metadata>{};
             auto name_str = std::string{ info.name };
@@ -323,7 +328,9 @@ struct backend
             if(Wrapper::query_counter_info(counter_id, Wrapper::COUNTER_INFO_VERSION_0,
                                            &info) != Wrapper::STATUS_SUCCESS ||
                info.name == nullptr)
+            {
                 return {};
+            }
 
             return { counter_metadata{ counter_id.handle,
                                        std::string{ info.name },

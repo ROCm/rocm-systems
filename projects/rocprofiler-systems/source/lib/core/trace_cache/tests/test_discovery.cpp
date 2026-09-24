@@ -27,7 +27,9 @@ std::string
 temp_root()
 {
     if(const char* env = std::getenv("TMPDIR"); env != nullptr && env[0] != '\0')
+    {
         return env;
+    }
     return "/tmp";
 }
 
@@ -41,12 +43,18 @@ void
 remove_dir_recursive(const std::string& dir)
 {
     DIR* d = ::opendir(dir.c_str());
-    if(d == nullptr) return;
+    if(d == nullptr)
+    {
+        return;
+    }
 
     while(dirent* entry = ::readdir(d))
     {
         const std::string name = entry->d_name;
-        if(name == "." || name == "..") continue;
+        if(name == "." || name == "..")
+        {
+            continue;
+        }
         ::unlink(fmt::format("{}/{}", dir, name).c_str());  // best effort, files only
     }
     ::closedir(d);

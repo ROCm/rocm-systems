@@ -31,7 +31,9 @@ public:
         if(!m_path.empty())
         {
             for(const auto& f : m_files)
+            {
                 std::remove(f.c_str());
+            }
             ::rmdir(m_path.c_str());
         }
     }

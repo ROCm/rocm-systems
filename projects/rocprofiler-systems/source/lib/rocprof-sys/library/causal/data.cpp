@@ -94,7 +94,10 @@ get_engine()
         auto _seed_v = config::get_setting_value<std::uint64_t>(
                            std::string{ env_vars::CAUSAL_RANDOM_SEED })
                            .value_or(0);
-        if(_seed_v == 0) _seed_v = std::random_device{}();
+        if(_seed_v == 0)
+        {
+            _seed_v = std::random_device{}();
+        }
         return _seed_v;
     }();
 
@@ -120,17 +123,21 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
 
     // exclude internal libraries used by rocprof-sys
     if(_scopes.count(sf::BINARY_FILTER) > 0)
+    {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER,
                                   "lib(rocprof-sys[-\\.]|dyninst|"
                                   "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+    }
 
     // in function mode, it generally doesn't help to experiment on main function since
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
     if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
+    {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
+    }
 
     const bool _use_default_excludes =
         config::get_setting_value<bool>(
@@ -177,25 +184,37 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_include != _current_include)
         {
             if(!_binary_include.empty())
+            {
                 LOG_DEBUG("[causal] binary scope     : {}", _binary_include);
+            }
             if(!_source_include.empty())
+            {
                 LOG_DEBUG("[causal] source scope     : {}", _source_include);
+            }
             if(!_function_include.empty())
+            {
                 LOG_DEBUG("[causal] function scope   : {}", _function_include);
+            }
             _former_include = _current_include;
         }
 
         if(!_binary_include.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::BINARY_FILTER, _binary_include });
+        }
 
         if(!_source_include.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::SOURCE_FILTER, _source_include });
+        }
 
         if(!_function_include.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::FUNCTION_FILTER, _function_include });
+        }
     }
 
     // exclude handling
@@ -212,25 +231,37 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_exclude != _current_exclude)
         {
             if(!_binary_exclude.empty())
+            {
                 LOG_DEBUG("[causal] binary exclude   : {}", _binary_exclude);
+            }
             if(!_source_exclude.empty())
+            {
                 LOG_DEBUG("[causal] source exclude   : {}", _source_exclude);
+            }
             if(!_function_exclude.empty())
+            {
                 LOG_DEBUG("[causal] function exclude : {}", _function_exclude);
+            }
             _former_exclude = _current_exclude;
         }
 
         if(!_binary_exclude.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER, _binary_exclude });
+        }
 
         if(!_source_exclude.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::SOURCE_FILTER, _source_exclude });
+        }
 
         if(!_function_exclude.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, _function_exclude });
+        }
     }
 
     return _filters;
@@ -246,7 +277,9 @@ get_cached_binary_info()
         auto _files    = std::vector<std::string>{};
         _files.reserve(_link_map.size());
         for(const auto& itr : _link_map)
+        {
             _files.emplace_back(itr.real());
+        }
 
         auto _discarded = std::vector<binary::binary_info>{};
         auto _requested = binary::get_binary_info(_files, get_filters());
@@ -354,7 +387,10 @@ save_maps_info_impl(std::ostream& _ofs)
         {
             std::string _line{};
             getline(_ifs, _line);
-            if(!_line.empty()) _maps << "    " << _line << "\n";
+            if(!_line.empty())
+            {
+                _maps << "    " << _line << "\n";
+            }
         }
     }
     _ofs << _maps.str();
@@ -379,9 +415,14 @@ save_line_info_impl(std::ostream&                           _ofs,
             auto _addr_off = itr.address + itr.load_address;
             _ofs << "    " << _addr_off.as_hex() << " [" << _addr.as_hex()
                  << "] :: " << itr.file;
-            if(itr.line > 0) _ofs << ":" << itr.line;
+            if(itr.line > 0)
+            {
+                _ofs << ":" << itr.line;
+            }
             if(!itr.func.empty())
+            {
                 _ofs << " [" << rocprofsys::utility::demangle(itr.func) << "]";
+            }
             _ofs << "\n";
 
             if(std::get<0>(_info))
@@ -390,7 +431,9 @@ save_line_info_impl(std::ostream&                           _ofs,
                 {
                     _ofs << "        " << ditr.file << ":" << ditr.line;
                     if(!ditr.func.empty())
+                    {
                         _ofs << " [" << rocprofsys::utility::demangle(ditr.func) << "]";
+                    }
                     _ofs << "\n";
                 }
             }
@@ -411,7 +454,10 @@ save_line_info_impl(std::ostream&                           _ofs,
         {
             for(const auto& itr : _data.debug_info)
             {
-                if(_emitted_dwarf_addresses.count(itr.address.low) > 0) continue;
+                if(_emitted_dwarf_addresses.count(itr.address.low) > 0)
+                {
+                    continue;
+                }
                 _ofs << "    " << itr.address.as_hex() << " :: " << itr.file << ":"
                      << itr.line;
                 _ofs << "\n";
@@ -422,7 +468,9 @@ save_line_info_impl(std::ostream&                           _ofs,
     };
 
     for(const auto& itr : _binary_data)
+    {
         _write_impl(itr);
+    }
 }
 
 void
@@ -457,14 +505,19 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     }
 
     if(!perform_experiment_impl_completed)
+    {
         perform_experiment_impl_completed = std::make_unique<std::promise<void>>();
+    }
 
     perform_experiment_impl_completed->set_value_at_thread_exit();
 
     compute_eligible_lines();
 
     // notify that thread has started
-    if(_started) _started->set_value();
+    if(_started)
+    {
+        _started->set_value();
+    }
 
     if(!config::get_causal_end_to_end())
     {
@@ -525,7 +578,10 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         {
             if(state::process::get() == state::process::Finalized)
             {
-                if(_impl_no > 0) return;
+                if(_impl_no > 0)
+                {
+                    return;
+                }
 
                 LOG_DEBUG(
                     "[causal] experiment failed to start. Number of PC candidates: {}",
@@ -569,7 +625,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 auto _samples = std::vector<std::pair<uintptr_t, size_t>>{};
                 for(const auto& itr : _samples_map)
+                {
                     _samples.emplace_back(std::make_pair(itr.first, itr.second));
+                }
 
                 // sort by most samples
                 std::sort(_samples.begin(), _samples.end(),
@@ -653,7 +711,10 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
             {
                 std::this_thread::yield();
                 std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
-                if(_exceeded_duration()) return;
+                if(_exceeded_duration())
+                {
+                    return;
+                }
             }
         }
         else
@@ -663,10 +724,16 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
         while(!_experim.stop())
         {
-            if(state::process::get() == state::process::Finalized) return;
+            if(state::process::get() == state::process::Finalized)
+            {
+                return;
+            }
         }
 
-        if(_exceeded_duration()) return;
+        if(_exceeded_duration())
+        {
+            return;
+        }
     }
 }
 
@@ -677,7 +744,9 @@ auto latest_eligible_pc = []() {
     constexpr size_t array_size = unwind_depth;
     auto             _arr = std::array<std::unique_ptr<atomic_uintptr_t>, array_size>{};
     for(auto& itr : _arr)
+    {
         itr = std::make_unique<std::atomic<uintptr_t>>(0);
+    }
     return _arr;
 }();
 }  // namespace
@@ -727,7 +796,10 @@ set_current_selection(unwind_addr_t _stack)
 {
     for(auto itr : _stack)
     {
-        if(itr == 0) continue;
+        if(itr == 0)
+        {
+            continue;
+        }
         ++eligible_pc_candidates;
         if(is_eligible_address(itr))
         {
@@ -744,7 +816,10 @@ set_current_selection(container::c_array<std::uint64_t> _stack)
 {
     for(auto itr : _stack)
     {
-        if(itr == 0) continue;
+        if(itr == 0)
+        {
+            continue;
+        }
         ++eligible_pc_candidates;
         if(is_eligible_address(itr))
         {
@@ -763,7 +838,10 @@ reset_sample_selection()
     eligible_pc_candidates.store(0);
     for(auto& itr : latest_eligible_pc)
     {
-        if(itr) itr->store(0);
+        if(itr)
+        {
+            itr->store(0);
+        }
     }
 }
 
@@ -806,7 +884,10 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             auto linfo = get_line_info(_lookup_addr, false);
 
             // unlikely this will be empty but just in case
-            if(linfo.empty()) continue;
+            if(linfo.empty())
+            {
+                continue;
+            }
 
             if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
@@ -857,13 +938,19 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             }
 
             const uintptr_t _addr = aitr->load();
-            if(_addr > 0) _addresses.emplace_back(_addr);
+            if(_addr > 0)
+            {
+                _addresses.emplace_back(_addr);
+            }
         }
 
         if(!_addresses.empty())
         {
             auto _selection = _select_address(_addresses);
-            if(_selection) return _selection;
+            if(_selection)
+            {
+                return _selection;
+            }
         }
     }
 
@@ -892,12 +979,18 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                                      .contains(_addr);
                              }) != litr.mappings.end();
 
-            if(!_is_mapped) return;
+            if(!_is_mapped)
+            {
+                return;
+            }
 
             for(const auto& ditr : litr.symbols)
             {
                 // skip if load address is greater than address
-                if(_addr < ditr.load_address) continue;
+                if(_addr < ditr.load_address)
+                {
+                    continue;
+                }
                 // compute the symbols ip address range
                 auto _ipaddr = ditr.ipaddr();
                 // if the lower bound of the ip address range is greater than the address,
@@ -905,13 +998,19 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                 // addresses than this symbol (sorted by address)
                 // if(_ipaddr.low > _addr) break;
 
-                if(!_ipaddr.contains(_addr)) continue;
+                if(!_ipaddr.contains(_addr))
+                {
+                    continue;
+                }
 
                 if(_include_discarded ||
                    config::get_causal_mode() == state::process::CausalMode::function)
                 {
                     // check if the primary symbol satisfy the constraints
-                    if(ditr(_filters)) _local_data.emplace_back(ditr);
+                    if(ditr(_filters))
+                    {
+                        _local_data.emplace_back(ditr);
+                    }
 
                     // the primary symbol may not satisfy the constraints but the inlined
                     // functions may
@@ -925,11 +1024,16 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
                     {
                         if(!_ipaddr.contains(itr.ipaddr()))
+                        {
                             throw std::runtime_error(
                                 fmt::format("Error! debug line info ipaddr ({}) is not "
                                                           "contained in symbol ipaddr ({})",
                                                    itr.ipaddr().as_hex(), _ipaddr.as_hex()));
-                        if(itr.ipaddr().contains(_addr)) _debug_data.emplace_back(itr);
+                        }
+                        if(itr.ipaddr().contains(_addr))
+                        {
+                            _debug_data.emplace_back(itr);
+                        }
                     }
                     utility::combine(_local_data, _debug_data);
                 }
@@ -939,15 +1043,22 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
             {
                 // combine and only allow first match
                 utility::combine(_data, _local_data);
-                if(!_include_discarded) break;
+                if(!_include_discarded)
+                {
+                    break;
+                }
             }
         }
     };
 
     if(_include_discarded)
+    {
         _get_line_info(get_cached_binary_info().first, _glob_filters);
+    }
     else
+    {
         _get_line_info(get_cached_binary_info().second, _scope_filters);
+    }
 
     return _data;
 }
@@ -955,7 +1066,10 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
 void
 push_progress_point(std::string_view _name)
 {
-    if(config::get_causal_end_to_end()) return;
+    if(config::get_causal_end_to_end())
+    {
+        return;
+    }
 
     ++num_progress_points;
 
@@ -972,10 +1086,16 @@ push_progress_point(std::string_view _name)
 void
 pop_progress_point(std::string_view _name)
 {
-    if(config::get_causal_end_to_end()) return;
+    if(config::get_causal_end_to_end())
+    {
+        return;
+    }
 
     auto& _data = get_progress_bundles();
-    if(ROCPROFSYS_UNLIKELY(!_data || _data->empty())) return;
+    if(ROCPROFSYS_UNLIKELY(!_data || _data->empty()))
+    {
+        return;
+    }
     if(_name.empty())
     {
         auto* itr = _data->back();
@@ -1003,7 +1123,10 @@ pop_progress_point(std::string_view _name)
 void
 mark_progress_point(std::string_view _name, bool _force)
 {
-    if(config::get_causal_end_to_end() && !_force) return;
+    if(config::get_causal_end_to_end() && !_force)
+    {
+        return;
+    }
 
     ++num_progress_points;
 
@@ -1023,9 +1146,13 @@ std::uint16_t
 sample_virtual_speedup()
 {
     if(speedup_dist.empty())
+    {
         return 0;
+    }
     else if(speedup_dist.size() == 1)
+    {
         return speedup_dist.front();
+    }
     else
     {
         struct virtual_speedup

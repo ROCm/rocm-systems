@@ -84,7 +84,10 @@ terminal_columns()
 {
     struct winsize ws
     {};
-    if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) return ws.ws_col;
+    if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+    {
+        return ws.ws_col;
+    }
     return 0;  // unknown / not a tty
 }
 
@@ -198,7 +201,10 @@ needs_full_parse(int argc, char** argv)
 {
     for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
     {
-        if(argv[arg_idx] == nullptr) continue;
+        if(argv[arg_idx] == nullptr)
+        {
+            continue;
+        }
         auto arg = std::string_view{ argv[arg_idx] };
         if(arg == "--" || arg == "-?" || arg == "-h" || arg == "--help" ||
            arg == "--version" || arg == "--export-config" ||
@@ -215,8 +221,14 @@ bool
 help_requested(const parser_t& parser, int argc, char** argv)
 {
     constexpr std::array<std::string_view, 3> help_args{ "-h", "--help", "-?" };
-    if(parser.exists("help") || argc == 1) return true;
-    if(argc <= 1 || argv[1] == nullptr) return false;
+    if(parser.exists("help") || argc == 1)
+    {
+        return true;
+    }
+    if(argc <= 1 || argv[1] == nullptr)
+    {
+        return false;
+    }
     return std::find(help_args.begin(), help_args.end(), std::string_view{ argv[1] }) !=
            help_args.end();
 }
@@ -301,7 +313,10 @@ void
 tool_runner::update_verbose_from_env()
 {
     const auto* log_level = std::getenv(env_vars::LOG_LEVEL);
-    if(log_level != nullptr) data.out.verbose = env_vars::log_level_to_verbose(log_level);
+    if(log_level != nullptr)
+    {
+        data.out.verbose = env_vars::log_level_to_verbose(log_level);
+    }
 }
 
 void
@@ -319,7 +334,10 @@ tool_runner::get_initial_environment()
     }
 
     auto libexec_path = path::realpath(path::get_internal_script_path());
-    if(!libexec_path.empty()) data.env.set(env_vars::SCRIPT_PATH, libexec_path);
+    if(!libexec_path.empty())
+    {
+        data.env.set(env_vars::SCRIPT_PATH, libexec_path);
+    }
 
     update_verbose_from_env();
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
@@ -347,7 +365,10 @@ tool_runner::get_initial_environment()
 void
 tool_runner::prepare_command(const char* exe)
 {
-    if(data.out.launcher.empty()) return;
+    if(data.out.launcher.empty())
+    {
+        return;
+    }
 
     bool                     injected = false;
     std::vector<std::string> new_argv;
@@ -398,12 +419,19 @@ tool_runner::parse_command_fast_path()
     bool past_separator = false;
     for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
     {
-        if(argv[arg_idx] == nullptr) continue;
+        if(argv[arg_idx] == nullptr)
+        {
+            continue;
+        }
 
         if(past_separator)
+        {
             data.out.command.emplace_back(argv[arg_idx]);
+        }
         else if(std::string_view{ argv[arg_idx] } == "--")
+        {
             past_separator = true;
+        }
     }
 }
 
@@ -421,12 +449,20 @@ tool_runner::configure_parser(parser_t& parser)
                           ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
     if(auto cols = terminal_columns(); cols > parser.get_help_width() + HELP_PADDING)
+    {
         parser.set_description_width(
             std::min<int>(cols - parser.get_help_width() - HELP_PADDING, MAX_DESC_WIDTH));
+    }
 
     data.reg.processed_groups.emplace("causal");
-    if(!config.show_sample_flag) data.reg.processed_environs.emplace("sampling");
-    if(!config.enable_launcher) data.reg.processed_environs.emplace("launcher");
+    if(!config.show_sample_flag)
+    {
+        data.reg.processed_environs.emplace("sampling");
+    }
+    if(!config.enable_launcher)
+    {
+        data.reg.processed_environs.emplace("launcher");
+    }
 
     rocprofsys::argparse::add_core_arguments(parser, data);
     rocprofsys::argparse::add_extended_arguments(parser, data);
@@ -456,12 +492,16 @@ tool_runner::apply_post_parse(parser_t& parser)
     if(config.disable_cputime_on_realtime_only)
     {
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
+        {
             data.env.set(env_vars::SAMPLING_CPUTIME, false);
+        }
     }
 
     if(parser.exists("profile") && parser.exists("flat-profile"))
+    {
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
+    }
 
     if(domain_state.export_config_requested)
     {
@@ -495,10 +535,18 @@ tool_runner::do_full_parse()
     auto parse_err =
         parser.parse_args(static_cast<int>(args.argv_ptrs.size()), args.argv_ptrs.data());
     if(help_requested(parser, argc, argv))
+    {
         return rocprofsys::common_utils::dispatch_help(parser, config.tool_name,
                                                        EXIT_SUCCESS);
-    if(parse_err) throw std::runtime_error(parse_err.what());
-    if(domain_state.early_exit) return domain_state.early_exit;
+    }
+    if(parse_err)
+    {
+        throw std::runtime_error(parse_err.what());
+    }
+    if(domain_state.early_exit)
+    {
+        return domain_state.early_exit;
+    }
 
     monochrome_flag().store(data.out.monochrome, std::memory_order_relaxed);
     // Keep timemory's own logger in sync — its background paths still use its color.
@@ -531,9 +579,15 @@ try
         return EXIT_FAILURE;
     }
 
-    if(auto exit_code = parse_args()) return *exit_code;
+    if(auto exit_code = parse_args())
+    {
+        return *exit_code;
+    }
 
-    if(config.enable_launcher) prepare_command(argv[0]);
+    if(config.enable_launcher)
+    {
+        prepare_command(argv[0]);
+    }
 
     prepare_environment();
 
@@ -546,9 +600,14 @@ try
     update_verbose_from_env();
     const auto verbose = data.out.verbose;
     if(verbose >= 0)
+    {
         utils::print_environment(data.env.current, data.env.updated, verbose >= 1,
                                  config.output_prefix);
-    if(verbose >= 1) utils::print_command(data.out.command, config.output_prefix);
+    }
+    if(verbose >= 1)
+    {
+        utils::print_command(data.out.command, config.output_prefix);
+    }
 
     auto argv_ptrs = utils::to_c_argv(data.out.command);
     auto envp_ptrs = utils::to_c_argv(data.env.current);

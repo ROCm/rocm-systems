@@ -54,19 +54,34 @@ get_perfetto_track_uuids_mutex()
 get_active_process_track()
 {
     const auto pid = get_emitting_pid();
-    if(pid <= 0) return ::perfetto::ProcessTrack::Current();
-    if(pid == static_cast<int>(::getpid())) return ::perfetto::ProcessTrack::Current();
+    if(pid <= 0)
+    {
+        return ::perfetto::ProcessTrack::Current();
+    }
+    if(pid == static_cast<int>(::getpid()))
+    {
+        return ::perfetto::ProcessTrack::Current();
+    }
     return make_synthetic_process_track(pid);
 }
 
 void
 ensure_synthetic_process_track_emitted(int pid)
 {
-    if(pid <= 0) return;
-    if(pid == static_cast<int>(::getpid())) return;
+    if(pid <= 0)
+    {
+        return;
+    }
+    if(pid == static_cast<int>(::getpid()))
+    {
+        return;
+    }
 
     static thread_local std::unordered_set<int> emitted{};
-    if(!emitted.insert(pid).second) return;
+    if(!emitted.insert(pid).second)
+    {
+        return;
+    }
 
     auto track = make_synthetic_process_track(pid);
     auto desc  = track.Serialize();

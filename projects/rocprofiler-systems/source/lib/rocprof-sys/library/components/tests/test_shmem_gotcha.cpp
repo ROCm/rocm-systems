@@ -60,13 +60,19 @@ struct MockedSHMEMGotcha
     static bool is_permitted(const std::string& func_name)
     {
         auto& reject_fn = get_reject_list();
-        if(reject_fn && reject_fn().count(func_name) > 0) return false;
+        if(reject_fn && reject_fn().count(func_name) > 0)
+        {
+            return false;
+        }
 
         auto& permit_fn = get_permit_list();
         if(permit_fn)
         {
             const auto& permit = permit_fn();
-            if(!permit.empty() && permit.count(func_name) == 0) return false;
+            if(!permit.empty() && permit.count(func_name) == 0)
+            {
+                return false;
+            }
         }
         return true;
     }
@@ -74,7 +80,10 @@ struct MockedSHMEMGotcha
     template <int N, typename... Args>
     static void configure(std::string func_name)
     {
-        if(!is_permitted(func_name)) return;
+        if(!is_permitted(func_name))
+        {
+            return;
+        }
         test_globals::g_shmem_gotcha_gmock->configure(std::move(func_name));
     }
     static size_t capacity() { return test_globals::g_shmem_gotcha_gmock->capacity(); }
@@ -364,7 +373,9 @@ TEST_F(shmem_gotcha_test, test_get_category_map)
 
     size_t total = 0;
     for(const auto& kv : m)
+    {
         total += kv.second.size();
+    }
     EXPECT_EQ(total, static_cast<size_t>(NUMBER_OF_FUNCTIONS));
 
     EXPECT_NE(m.at("init").count("shmem_init"), 0u);
@@ -385,13 +396,17 @@ TEST_F(shmem_gotcha_test, test_get_default_permit)
 
     auto atomics = get_category_map().at("atomics");
     for(const auto& api : atomics)
+    {
         EXPECT_EQ(permit.count(api), 0u)
             << "atomics should be excluded from default permit: " << api;
+    }
 
     auto memory = get_category_map().at("memory");
     for(const auto& api : memory)
+    {
         EXPECT_EQ(permit.count(api), 0u)
             << "memory should be excluded from default permit: " << api;
+    }
 }
 
 TEST_F(shmem_gotcha_test, test_expand_tokens_to_apis)
@@ -447,7 +462,9 @@ TEST_F(shmem_gotcha_test, test_configure_function_names)
     for(const auto& kv : rocprofsys::component::shmem_categories::get_category_map())
     {
         for(const auto& name : kv.second)
+        {
             expected_names.insert(name);
+        }
     }
     EXPECT_EQ(expected_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS));
 

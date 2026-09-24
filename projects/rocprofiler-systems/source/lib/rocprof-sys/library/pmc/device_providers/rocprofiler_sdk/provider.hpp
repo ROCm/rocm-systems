@@ -141,7 +141,10 @@ private:
                         std::uint64_t, typename backend_t::counter_config_id_t>*>(
                         user_data);
                     auto iter = configs->find(agent_cb.handle);
-                    if(iter != configs->end()) set_config(ctx, iter->second);
+                    if(iter != configs->end())
+                    {
+                        set_config(ctx, iter->second);
+                    }
                 },
                 &m_profile_configs);
             if(status != backend_t::status_success)
@@ -196,9 +199,14 @@ private:
         for(const auto& counter_id : supported)
         {
             auto details = m_backend_api->query_counter_details(counter_id);
-            if(details.empty()) continue;
-            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            if(details.empty())
+            {
                 continue;
+            }
+            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            {
+                continue;
+            }
             ids.push_back(counter_id);
             meta.insert(meta.end(), std::make_move_iterator(details.begin()),
                         std::make_move_iterator(details.end()));

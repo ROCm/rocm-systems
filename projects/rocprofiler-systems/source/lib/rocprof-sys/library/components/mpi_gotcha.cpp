@@ -84,11 +84,23 @@ struct comm_rank_data
             throw std::runtime_error("Error! Comparing rank data that is not updated");
         }
 
-        if(_lhs.updated() && !_rhs.updated()) return true;
-        if(!_lhs.updated() && _rhs.updated()) return false;
+        if(_lhs.updated() && !_rhs.updated())
+        {
+            return true;
+        }
+        if(!_lhs.updated() && _rhs.updated())
+        {
+            return false;
+        }
 
-        if(_lhs.size != _rhs.size) return _lhs.size > _rhs.size;
-        if(_lhs.rank != _rhs.rank) return _lhs.rank > _rhs.rank;
+        if(_lhs.size != _rhs.size)
+        {
+            return _lhs.size > _rhs.size;
+        }
+        if(_lhs.rank != _rhs.rank)
+        {
+            return _lhs.rank > _rhs.rank;
+        }
 
         // lesser comm is greater
         return _lhs.comm < _rhs.comm;
@@ -165,7 +177,10 @@ mpi_gotcha::configure()
         for(size_t i = 0; i < mpi_gotcha_t::capacity(); ++i)
         {
             auto* itr = mpi_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
+            if(itr)
+            {
+                itr->verbose = -1;
+            }
         }
     }
 
@@ -234,19 +249,29 @@ bool
 mpi_gotcha::update()
 {
     auto_lock_t _lk{ type_mutex<mpi_gotcha>(), std::defer_lock };
-    if(!_lk.owns_lock()) _lk.lock();
+    if(!_lk.owns_lock())
+    {
+        _lk.lock();
+    }
 
     comm_rank_data _rank_data = mproc_comm_record;
     for(const auto& itr : mpi_comm_records)
     {
         // skip null comms
-        if(itr.first == null_comm()) continue;
-        // if currently have null comm, replace
+        if(itr.first == null_comm())
+        {
+            continue;
+            // if currently have null comm, replace
+        }
         else if(_rank_data.comm == null_comm())
+        {
             _rank_data = itr.second;
-        // if
+            // if
+        }
         else if(itr.second > _rank_data)
+        {
             _rank_data = itr.second;
+        }
     }
 
     if(_rank_data.updated() && _rank_data != last_comm_record)
@@ -317,10 +342,14 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
+    {
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
+    }
 
     if(mpip_index != std::numeric_limits<std::uint64_t>::max())
+    {
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
+    }
 
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return false; };
@@ -367,7 +396,10 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
     LOG_DEBUG("{}() returned {}", _data.tool_id, (int) _retval);
 
-    if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
+    if(!settings::use_output_suffix())
+    {
+        settings::use_output_suffix() = true;
+    }
 
     if(_retval == rocprofsys::mpi::success_v &&
        (_data.tool_id.starts_with("MPI_Init") || _data.tool_id.starts_with("PMPI_Init")))
@@ -436,7 +468,10 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 static thread_local int _num_updates = 0;
                 static const int        _disable_after =
                     rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
-                if(_num_updates++ < _disable_after) update();
+                if(_num_updates++ < _disable_after)
+                {
+                    update();
+                }
             }
         }
     }
@@ -482,7 +517,10 @@ mpi_gotcha::populate_rank_and_size()
         mproc_comm_record.comm = _ppid;
         mproc_comm_record.size = m_size = _comm_size;
         _comm_rank                      = mproc::get_process_index(_pid, _ppid);
-        if(_comm_rank >= 0) mproc_comm_record.rank = m_rank = _comm_rank;
+        if(_comm_rank >= 0)
+        {
+            mproc_comm_record.rank = m_rank = _comm_rank;
+        }
     }
 #endif
 }

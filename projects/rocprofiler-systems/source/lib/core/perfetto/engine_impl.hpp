@@ -131,7 +131,10 @@ basic_cached_perfetto_engine<Backend>::stop()
                       "stop() could drain {} source(s); drained bytes discarded",
                       drained.size());
         }
-        if(first_exc) std::rethrow_exception(first_exc);
+        if(first_exc)
+        {
+            std::rethrow_exception(first_exc);
+        }
         return;
     }
 
@@ -144,13 +147,19 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     for(auto& [source_pid, bytes] : drained)
     {
-        if(bytes.empty()) continue;
+        if(bytes.empty())
+        {
+            continue;
+        }
         try
         {
             sink->on_source_drained(source_pid, bytes);
         } catch(...)
         {
-            if(!first_exc) first_exc = std::current_exception();
+            if(!first_exc)
+            {
+                first_exc = std::current_exception();
+            }
         }
     }
 
@@ -159,11 +168,17 @@ basic_cached_perfetto_engine<Backend>::stop()
         sink->finalize();
     } catch(...)
     {
-        if(!first_exc) first_exc = std::current_exception();
+        if(!first_exc)
+        {
+            first_exc = std::current_exception();
+        }
     }
 
     m_session = {};
-    if(first_exc) std::rethrow_exception(first_exc);
+    if(first_exc)
+    {
+        std::rethrow_exception(first_exc);
+    }
 }
 
 template <perfetto_backend Backend>
@@ -201,7 +216,10 @@ void
 basic_cached_perfetto_engine<Backend>::collect_packet_bytes(int pid, const void* data,
                                                             std::size_t size) noexcept
 {
-    if(data == nullptr || size == 0) return;
+    if(data == nullptr || size == 0)
+    {
+        return;
+    }
 
     if(!m_collected_bytes_frozen.load(std::memory_order_acquire))
     {
@@ -249,7 +267,10 @@ basic_cached_perfetto_engine<Backend>::collect_thunk(void* engine, int pid,
                                                      std::size_t size) noexcept
 {
     auto* typed = static_cast<basic_cached_perfetto_engine*>(engine);
-    if(typed == nullptr) return;
+    if(typed == nullptr)
+    {
+        return;
+    }
     typed->collect_packet_bytes(pid, data, size);
 }
 }  // namespace rocprofsys::core

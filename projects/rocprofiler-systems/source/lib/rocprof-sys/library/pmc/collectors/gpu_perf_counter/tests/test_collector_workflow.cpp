@@ -59,7 +59,10 @@ struct test_cache_policy
                              const enabled_metrics&, const metrics& values,
                              std::uint64_t timestamp)
     {
-        if(values.empty()) return;
+        if(values.empty())
+        {
+            return;
+        }
         get_captured_samples().push_back({ device_id, timestamp, values });
     }
 };
@@ -140,7 +143,9 @@ setup_provider_expectations(const std::shared_ptr<MockBackendImpl>& mock,
             std::vector<MockBackend::counter_id_t> ids;
             ids.reserve(counters.size());
             for(auto& c : counters)
+            {
                 ids.push_back(c.id);
+            }
             cb({}, ids.data(), ids.size(), user_data);
             return MockBackend::status_success;
         });

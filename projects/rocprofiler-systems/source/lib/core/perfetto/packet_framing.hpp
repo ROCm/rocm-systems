@@ -57,12 +57,20 @@ read_varint(const char* data, std::size_t size, std::size_t& offset,
     {
         // Reject before OR-ing payload bits so an attacker-controlled 10th
         // byte cannot smuggle bits into the high end of `decoded_value`.
-        if(shift >= VARINT_MAX_SHIFT_BITS) return false;
+        if(shift >= VARINT_MAX_SHIFT_BITS)
+        {
+            return false;
+        }
         auto byte = static_cast<std::uint8_t>(data[offset++]);
         if(shift == VARINT_MAX_SHIFT_BITS - 1 && (byte & VARINT_PAYLOAD_MASK) > 1)
+        {
             return false;
+        }
         decoded_value |= static_cast<std::uint64_t>(byte & VARINT_PAYLOAD_MASK) << shift;
-        if((byte & VARINT_CONTINUATION_BIT) == 0) return true;
+        if((byte & VARINT_CONTINUATION_BIT) == 0)
+        {
+            return true;
+        }
         shift += VARINT_SHIFT_BITS;
     }
     return false;
@@ -130,7 +138,9 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
         const std::size_t field_start = offset;
         std::uint64_t     field_tag   = 0;
         if(!read_varint(packet, size, offset, field_tag))
+        {
             return rewrite_trace_packet_status::malformed_input;
+        }
         const std::uint32_t wire_type = field_tag & WIRE_TYPE_MASK;
 
         std::size_t field_end = offset;
@@ -140,18 +150,27 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
             {
                 std::uint64_t field_value = 0;
                 if(!read_varint(packet, size, offset, field_value))
+                {
                     return rewrite_trace_packet_status::malformed_input;
+                }
                 field_end = offset;
-                if(field_tag == TRUSTED_SEQ_ID_TAG) original_seq_id = field_value;
+                if(field_tag == TRUSTED_SEQ_ID_TAG)
+                {
+                    original_seq_id = field_value;
+                }
                 break;
             }
             case WIRE_TYPE_LENGTH_DELIMITED:
             {
                 std::uint64_t field_length = 0;
                 if(!read_varint(packet, size, offset, field_length))
+                {
                     return rewrite_trace_packet_status::malformed_input;
+                }
                 if(field_length > size - offset)
+                {
                     return rewrite_trace_packet_status::malformed_input;
+                }
                 offset += static_cast<std::size_t>(field_length);
                 field_end = offset;
                 break;
@@ -159,28 +178,40 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
             // Bounds-check before increment so offset cannot wrap.
             case WIRE_TYPE_FIXED64:
                 if(WIRE_TYPE_FIXED64_BYTES > size - offset)
+                {
                     return rewrite_trace_packet_status::malformed_input;
+                }
                 offset += WIRE_TYPE_FIXED64_BYTES;
                 field_end = offset;
                 break;
             // Same bounds-check discipline as fixed64.
             case WIRE_TYPE_FIXED32:
                 if(WIRE_TYPE_FIXED32_BYTES > size - offset)
+                {
                     return rewrite_trace_packet_status::malformed_input;
+                }
                 offset += WIRE_TYPE_FIXED32_BYTES;
                 field_end = offset;
                 break;
             default: return rewrite_trace_packet_status::malformed_input;
         }
-        if(field_end > size) return rewrite_trace_packet_status::malformed_input;
+        if(field_end > size)
+        {
+            return rewrite_trace_packet_status::malformed_input;
+        }
 
-        if(field_tag == TRUSTED_SEQ_ID_TAG) continue;  // re-emitted below
+        if(field_tag == TRUSTED_SEQ_ID_TAG)
+        {
+            continue;  // re-emitted below
+        }
         rewritten_packet.insert(rewritten_packet.end(), packet + field_start,
                                 packet + field_end);
     }
 
     if(seq_id_limit_exclusive > TRUSTED_SEQ_ID_MAX_EXCLUSIVE)
+    {
         seq_id_limit_exclusive = TRUSTED_SEQ_ID_MAX_EXCLUSIVE;
+    }
 
     const auto seq_id_offset64 = static_cast<std::uint64_t>(seq_id_offset);
     if(seq_id_limit_exclusive == 0 || seq_id_offset64 >= seq_id_limit_exclusive ||

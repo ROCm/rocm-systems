@@ -212,7 +212,9 @@ TEST_F(help_system_test, topic_listing_lists_synthetic_and_domain_topics)
     EXPECT_NE(out.find("all"), std::string::npos);
     EXPECT_NE(out.find("Full help output"), std::string::npos);
     for(const auto* domain : { "gpu", "cpu", "rocm", "parallel" })
+    {
         EXPECT_NE(out.find(domain), std::string::npos);
+    }
 }
 
 // ============================================================================
@@ -419,9 +421,11 @@ TEST_F(help_system_test, see_also_references_valid_topics_only)
             << "Source topic '" << topic
             << "' in get_related_topics_map() is not a known topic";
         for(const auto& target : related)
+        {
             EXPECT_TRUE(is_valid_topic(target))
                 << "Related topic '" << target << "' (under '" << topic
                 << "') is not a known topic";
+        }
     }
 }
 

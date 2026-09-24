@@ -200,7 +200,9 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
             for(int i = 0; i < 4; ++i)
+            {
                 out[i] = records[i];
+            }
             *count = 4;
             return MockBackend::status_success;
         });

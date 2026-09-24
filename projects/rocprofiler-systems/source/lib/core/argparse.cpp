@@ -102,7 +102,10 @@ add_ld_library_path(parser_data& _data)
 parser_data&
 add_torch_library_path(parser_data& _data)
 {
-    if(_data.out.command.empty()) return _data;
+    if(_data.out.command.empty())
+    {
+        return _data;
+    }
     rocprofsys::common::add_torch_library_path(
         _data.env.current, _data.out.command.front(), _data.env.updated);
     return _data;
@@ -266,7 +269,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v = p.get<strvec_t>("output");
                 update_env(_data, env_vars::OUTPUT_PATH, _v.at(0));
-                if(_v.size() > 1) update_env(_data, env_vars::OUTPUT_PREFIX, _v.at(1));
+                if(_v.size() > 1)
+                {
+                    update_env(_data, env_vars::OUTPUT_PREFIX, _v.at(1));
+                }
             });
 
         _data.reg.processed_environs.emplace("output");
@@ -365,7 +371,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _d = p.get<bool>("device");
                 update_env(_data, env_vars::USE_PROCESS_SAMPLING, _h || _d);
                 update_env(_data, env_vars::CPU_FREQ_ENABLED, _h);
-                if(_h) update_env(_data, env_vars::USE_AMD_SMI, _d);
+                if(_h)
+                {
+                    update_env(_data, env_vars::USE_AMD_SMI, _d);
+                }
             });
 
         _data.reg.processed_environs.emplace("host");
@@ -385,7 +394,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _d = p.get<bool>("device");
                 update_env(_data, env_vars::USE_PROCESS_SAMPLING, _h || _d);
                 update_env(_data, env_vars::USE_AMD_SMI, _d);
-                if(_d) update_env(_data, env_vars::CPU_FREQ_ENABLED, _h);
+                if(_d)
+                {
+                    update_env(_data, env_vars::CPU_FREQ_ENABLED, _h);
+                }
             });
 
         _data.reg.processed_environs.emplace("device");
@@ -544,7 +556,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v      = p.get<strset_t>("include");
                 auto _update = [&](const auto& _opt, bool _cond) {
-                    if(_cond || _v.count("all") > 0) update_env(_data, _opt, true);
+                    if(_cond || _v.count("all") > 0)
+                    {
+                        update_env(_data, _opt, true);
+                    }
                 };
                 _update(env_vars::USE_KOKKOSP, _v.count("kokkosp") > 0);
                 _update(env_vars::USE_MPIP, _v.count("mpip") > 0);
@@ -556,8 +571,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update(env_vars::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                {
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
                                update_mode::prepend);
+                }
             });
 
         _data.reg.processed_environs.emplace("include");
@@ -573,7 +590,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v      = p.get<strset_t>("exclude");
                 auto _update = [&](const auto& _opt, bool _cond) {
-                    if(_cond || _v.count("all") > 0) update_env(_data, _opt, false);
+                    if(_cond || _v.count("all") > 0)
+                    {
+                        update_env(_data, _opt, false);
+                    }
                 };
                 _update(env_vars::USE_KOKKOSP, _v.count("kokkosp") > 0);
                 _update(env_vars::USE_MPIP, _v.count("mpip") > 0);
@@ -585,7 +605,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update(env_vars::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                {
                     remove_env(_data.env.current, "KOKKOS_TOOLS_LIBS", _data.env.initial);
+                }
             });
 
         _data.reg.processed_environs.emplace("exclude");
@@ -851,7 +873,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _v = p.get<strvec_t>("profile-diff");
                 update_env(_data, env_vars::DIFF_OUTPUT, true);
                 update_env(_data, env_vars::INPUT_PATH, _v.at(0));
-                if(_v.size() > 1) update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
+                if(_v.size() > 1)
+                {
+                    update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
+                }
             });
 
         _data.reg.processed_environs.emplace("profile_diff");
@@ -1114,10 +1139,12 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 {
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
+                    {
                         throw exception<std::runtime_error>(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
+                    }
                     update_env(_data, env_vars::SAMPLING_OVERFLOW_EVENT, _v.front());
                     _v.pop_front();
                 }
@@ -1225,23 +1252,33 @@ parser_data&
 add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_data& _data,
                     bool _add_group)
 {
-    if(!_data.reg.grouping_filter(_group_name, _data)) return _data;
+    if(!_data.reg.grouping_filter(_group_name, _data))
+    {
+        return _data;
+    }
 
     auto _get_name = [](const std::shared_ptr<tim::vsettings>& itr) {
         auto _name = itr->get_name();
         auto _pos  = std::string::npos;
         while((_pos = _name.find('_')) != std::string::npos)
+        {
             _name[_pos] = '-';
+        }
         return _name;
     };
 
     auto _add_option = [&_parser, &_data](const std::string&                     _name,
                                           const std::shared_ptr<tim::vsettings>& itr) {
-        if(!_data.reg.setting_filter(itr.get(), _data)) return false;
+        if(!_data.reg.setting_filter(itr.get(), _data))
+        {
+            return false;
+        }
 
         if(_name.empty())
+        {
             throw exception<std::runtime_error>("Error! empty name for " +
                                                 itr->get_name());
+        }
 
         _data.reg.processed_settings.emplace(itr.get());
 
@@ -1252,11 +1289,19 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         {
             _arg->action([&_data, itr, _name](parser_t& p) {
                 auto _value = fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
-                if(_value.empty()) _value = p.get<std::string>(_name);
-                if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
+                {
+                    _value = p.get<std::string>(_name);
+                }
+                if(_value.empty())
+                {
+                    _value = fmt::format("{}", p.get<bool>(_name));
+                }
+                if(_value.empty())
+                {
                     throw exception<std::runtime_error>(
                         fmt::format("Error! no value for {}", _name));
+                }
                 update_env(_data, itr->get_env_name(), _value);
             });
         }
@@ -1268,8 +1313,10 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                     auto _value =
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
+                    {
                         throw exception<std::runtime_error>(
                             fmt::format("Error! no value for {}", _name));
+                    }
                     update_env(_data, itr->get_env_name(), _value);
                 });
         }
@@ -1279,12 +1326,30 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
     auto _settings = std::vector<std::shared_ptr<tim::vsettings>>{};
     for(auto& itr : *rocprofsys::settings::instance())
     {
-        if(itr.second->get_categories().count("rocprofsys") == 0) continue;
-        if(itr.second->get_categories().count("deprecated") > 0) continue;
-        if(itr.second->get_hidden()) continue;
-        if(!_data.reg.setting_filter(itr.second.get(), _data)) continue;
-        if(!_data.reg.environ_filter(itr.second->get_name(), _data)) continue;
-        if(itr.second->get_categories().count(_group_name) == 0) continue;
+        if(itr.second->get_categories().count("rocprofsys") == 0)
+        {
+            continue;
+        }
+        if(itr.second->get_categories().count("deprecated") > 0)
+        {
+            continue;
+        }
+        if(itr.second->get_hidden())
+        {
+            continue;
+        }
+        if(!_data.reg.setting_filter(itr.second.get(), _data))
+        {
+            continue;
+        }
+        if(!_data.reg.environ_filter(itr.second->get_name(), _data))
+        {
+            continue;
+        }
+        if(itr.second->get_categories().count(_group_name) == 0)
+        {
+            continue;
+        }
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
@@ -1312,7 +1377,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         auto _rhs_v = _rhs->get_name();
         if(_lhs_v.length() > 4 && _rhs_v.length() > 4 &&
            _lhs_v.substr(0, 4) == _rhs_v.substr(0, 4))
+        {
             return _lhs_v < _rhs_v;
+        }
         return _lhs_v.length() < _rhs_v.length();
     });
 
@@ -1326,7 +1393,10 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         _add_option(_get_name(itr), itr);
     }
 
-    if(_add_group) _parser.end_group();
+    if(_add_group)
+    {
+        _parser.end_group();
+    }
 
     return _data;
 }
@@ -1338,11 +1408,26 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
     auto _settings           = std::vector<std::shared_ptr<tim::vsettings>>{};
     for(auto& itr : *rocprofsys::settings::instance())
     {
-        if(itr.second->get_categories().count("rocprofsys") == 0) continue;
-        if(itr.second->get_categories().count("deprecated") > 0) continue;
-        if(itr.second->get_hidden()) continue;
-        if(!_data.reg.setting_filter(itr.second.get(), _data)) continue;
-        if(!_data.reg.environ_filter(itr.second->get_name(), _data)) continue;
+        if(itr.second->get_categories().count("rocprofsys") == 0)
+        {
+            continue;
+        }
+        if(itr.second->get_categories().count("deprecated") > 0)
+        {
+            continue;
+        }
+        if(itr.second->get_hidden())
+        {
+            continue;
+        }
+        if(!_data.reg.setting_filter(itr.second.get(), _data))
+        {
+            continue;
+        }
+        if(!_data.reg.environ_filter(itr.second->get_name(), _data))
+        {
+            continue;
+        }
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
@@ -1368,20 +1453,27 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         {
             if(std::regex_search(citr, std::regex{ "rocprofsys|timemory|^("
                                                    "native|custom|advanced|analysis)$" }))
+            {
                 continue;
+            }
             _category_count_map[citr] += 1;
         }
     }
 
     auto _category_count_vec = strvec_t{};
     for(const auto& itr : _category_count_map)
+    {
         _category_count_vec.emplace_back(itr.first);
+    }
 
     std::sort(_category_count_vec.begin(), _category_count_vec.end(),
               [&_category_count_map](const auto& _lhs, const auto& _rhs) {
                   auto _lhs_v = _category_count_map.at(_lhs);
                   auto _rhs_v = _category_count_map.at(_rhs);
-                  if(_lhs_v == _rhs_v) return _lhs < _rhs;
+                  if(_lhs_v == _rhs_v)
+                  {
+                      return _lhs < _rhs;
+                  }
                   return _lhs_v > _rhs_v;
               });
 
@@ -1392,7 +1484,10 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         _groups[citr] = {};
         for(const auto& itr : _settings)
         {
-            if(itr->get_categories().count(citr) > 0) _groups[citr].emplace_back(itr);
+            if(itr->get_categories().count(citr) > 0)
+            {
+                _groups[citr].emplace_back(itr);
+            }
         }
         _settings.erase(std::remove_if(_settings.begin(), _settings.end(),
                                        [&citr](const auto& itr) {
@@ -1404,7 +1499,10 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
     for(const auto& citr : _category_count_vec)
     {
         auto _group = _groups.at(citr);
-        if(_group.empty()) continue;
+        if(_group.empty())
+        {
+            continue;
+        }
 
         add_group_arguments(_parser, citr, _data, true);
     }

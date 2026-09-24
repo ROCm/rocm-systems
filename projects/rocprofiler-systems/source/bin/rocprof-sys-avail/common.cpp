@@ -49,7 +49,10 @@ get_regex_constants()
 {
     static auto _constants = []() {
         auto _v = regex_const::egrep | regex_const::optimize;
-        if(case_insensitive) _v |= regex_const::icase;
+        if(case_insensitive)
+        {
+            _v |= regex_const::icase;
+        }
         return _v;
     }();
     return _constants;
@@ -62,7 +65,10 @@ get_regex_pattern()
         std::array<std::string, 2> _v{};
         for(const auto& itr : regex_keys)
         {
-            if(itr.empty()) continue;
+            if(itr.empty())
+            {
+                continue;
+            }
             std::string _local_pattern = {};
             if(itr.at(0) == '~')
             {
@@ -77,7 +83,12 @@ get_regex_pattern()
             lerr << "Adding regex key: '" << _local_pattern << "'...\n";
         }
         for(auto& itr : _v)
-            if(!itr.empty()) itr = itr.substr(1);
+        {
+            if(!itr.empty())
+            {
+                itr = itr.substr(1);
+            }
+        }
 
         return _v;
     }();
@@ -98,7 +109,9 @@ bool
 regex_match(const std::string& _line)
 {
     if(get_regex_pattern().at(0).empty() && get_regex_pattern().at(1).empty())
+    {
         return true;
+    }
 
     static size_t lerr_width = 0;
     lerr_width               = std::max<size_t>(lerr_width, _line.length());
@@ -148,9 +161,14 @@ regex_match(const std::string& _line)
 std::string
 regex_replace(const std::string& _line)
 {
-    if(get_regex_pattern().empty()) return _line;
+    if(get_regex_pattern().empty())
+    {
+        return _line;
+    }
     if(regex_match(_line))
+    {
         return std::regex_replace(_line, get_regex().at(0), "\33[01;04;36;40m$&\33[0m");
+    }
     return _line;
 }
 
@@ -161,7 +179,10 @@ get_category_regex_pattern()
         std::array<std::string, 2> _v{};
         for(const auto& itr : category_regex_keys)
         {
-            if(itr.empty()) continue;
+            if(itr.empty())
+            {
+                continue;
+            }
             std::string _local_pattern = {};
             if(itr.at(0) == '~')
             {
@@ -176,7 +197,12 @@ get_category_regex_pattern()
             lerr << "Adding category regex key: '" << _local_pattern << "'...\n";
         }
         for(auto& itr : _v)
-            if(!itr.empty()) itr = itr.substr(1);
+        {
+            if(!itr.empty())
+            {
+                itr = itr.substr(1);
+            }
+        }
 
         return _v;
     }();
@@ -198,7 +224,9 @@ category_regex_match(const std::string& _line)
 {
     if(get_category_regex_pattern().at(0).empty() &&
        get_category_regex_pattern().at(1).empty())
+    {
         return true;
+    }
 
     static size_t lerr_width = 0;
     lerr_width               = std::max<size_t>(lerr_width, _line.length());
@@ -311,7 +339,10 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     auto find_category = [&_category_map](std::string_view input) -> std::string_view {
         auto input_lower = rocprofsys::utility::string::to_lower(input);
         auto it          = _category_map.find(input_lower);
-        if(it != _category_map.end()) return it->second;
+        if(it != _category_map.end())
+        {
+            return it->second;
+        }
         return "";
     };
 
@@ -342,7 +373,9 @@ process_categories(parser_t& p, const str_set_t& _category_options)
         }
     }
     for(auto&& itr : _shorthand_patches)
+    {
         itr();
+    }
 }
 
 //--------------------------------------------------------------------------------------//
@@ -350,9 +383,15 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 bool
 exclude_setting(const std::string& _v)
 {
-    if(settings_exclude.find(_v) != settings_exclude.end()) return true;
+    if(settings_exclude.find(_v) != settings_exclude.end())
+    {
+        return true;
+    }
     auto itr = settings::instance()->find(_v, false);
-    if(itr == settings::instance()->end()) return true;
+    if(itr == settings::instance()->end())
+    {
+        return true;
+    }
     return itr->second->get_hidden();
 }
 
@@ -436,7 +475,10 @@ void
 filter_operations(const std::string& env_var_name, std::vector<std::string>& choices)
 {
     auto _domain = rocm_domain_from_setting_name(env_var_name);
-    if(!_domain) return;
+    if(!_domain)
+    {
+        return;
+    }
 
     // Filter out unsupported operations for the OMPT domain.
     if(*_domain == "ompt")
