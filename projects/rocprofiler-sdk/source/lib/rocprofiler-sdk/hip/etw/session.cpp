@@ -347,7 +347,7 @@ trace_session::stop()
 
     ROCP_INFO << "rocm_hip_tlg consumer: " << stats.records_emitted << " records emitted, "
               << stats.events_decoded << " events decoded, " << stats.events_dropped
-              << " events dropped, " << stats.unpaired_enters << " unpaired enters";
+              << " events dropped";
     ROCP_WARNING_IF(stats.events_dropped > 0)
         << stats.events_dropped << " rocm_hip_tlg events could not be decoded";
 

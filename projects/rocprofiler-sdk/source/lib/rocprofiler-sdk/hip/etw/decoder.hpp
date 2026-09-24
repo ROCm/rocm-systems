@@ -42,7 +42,6 @@ struct decoder_stats
     uint64_t events_decoded  = 0;
     uint64_t events_dropped  = 0;
     uint64_t records_emitted = 0;
-    uint64_t unpaired_enters = 0;
 };
 
 // Restrict decoding to one producer process. The kernel-side EVENT_FILTER_TYPE_PID caps at
@@ -50,14 +49,14 @@ struct decoder_stats
 void
 set_process_filter(uint32_t process_id);
 
-// Decode one delivered event and, on a matching enter/exit pair, emplace a
-// rocprofiler_buffer_tracing_hip_api_record_t into every subscribed buffer. Called only from
-// the thread running ProcessTrace().
+// Decode one delivered event and emplace a rocprofiler_buffer_tracing_hip_api_record_t into
+// every subscribed buffer. The producer emits one event per call carrying the start timestamp,
+// so an event is self-contained and no cross-event state is kept. Called only from the thread
+// running ProcessTrace().
 void
 handle_event(const EVENT_RECORD* event_record);
 
-// Drop all pending state and return the counters accumulated since the last reset. Unpaired
-// enters still in flight are added to unpaired_enters.
+// Return the counters accumulated since the last reset and clear them.
 decoder_stats
 reset_decoder();
 }  // namespace etw

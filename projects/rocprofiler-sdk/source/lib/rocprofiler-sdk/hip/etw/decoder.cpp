@@ -40,9 +40,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <deque>
-#include <functional>
-#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -54,10 +51,6 @@ namespace etw
 {
 namespace
 {
-// A dropped ETW buffer or a thread that dies between enter and exit leaves an entry behind
-// forever, so the pending map is capped and evicts oldest-first.
-constexpr size_t max_pending_records = 1UL << 20U;
-
 // hip::trace::domain_t in clr/hipamd/src/trace/hip_trace_etw.hpp.
 constexpr uint32_t producer_domain_runtime  = 0;
 constexpr uint32_t producer_domain_compiler = 1;
@@ -72,32 +65,11 @@ constexpr uint32_t invalid_operation_id = static_cast<uint32_t>(-1);
 struct event_schema
 {
     bool     valid          = false;
-    bool     is_exit        = false;
     uint32_t domain_offset  = 0;
     uint32_t op_name_offset = 0;
 };
 
-struct pending_key
-{
-    uint32_t process_id     = 0;
-    uint64_t correlation_id = 0;
-
-    bool operator==(const pending_key& rhs) const
-    {
-        return process_id == rhs.process_id && correlation_id == rhs.correlation_id;
-    }
-};
-
-struct pending_key_hash
-{
-    size_t operator()(const pending_key& val) const
-    {
-        return std::hash<uint64_t>{}(val.correlation_id) ^
-               (std::hash<uint32_t>{}(val.process_id) << 1U);
-    }
-};
-
-struct pending_value
+struct record_data
 {
     uint64_t start_timestamp = 0;
     uint64_t thread_id       = 0;
@@ -135,26 +107,12 @@ get_schemas()
     return _v;
 }
 
-auto&
-get_pending()
-{
-    static auto _v = std::unordered_map<pending_key, pending_value, pending_key_hash>{};
-    return _v;
-}
-
-auto&
-get_pending_order()
-{
-    static auto _v = std::deque<pending_key>{};
-    return _v;
-}
-
-// TraceLogging leaves EVENT_DESCRIPTOR zeroed, so hip_api_enter and hip_api_exit are
-// indistinguishable by id/version/opcode. What does distinguish them is the self-describing
-// metadata blob ETW attaches to every event, which is a verbatim copy of a static structure in
-// the provider and therefore identical across all events of one type. Hashing it yields exactly
-// one cache entry per event type. Returns 0 when the event carries no TraceLogging metadata,
-// which read_event_schema then rejects.
+// TraceLogging leaves EVENT_DESCRIPTOR zeroed, so an event type is not identifiable by
+// id/version/opcode. What does identify it is the self-describing metadata blob ETW attaches to
+// every event, which is a verbatim copy of a static structure in the provider and therefore
+// identical across all events of one type. Hashing it yields exactly one cache entry per event
+// type. Returns 0 when the event carries no TraceLogging metadata, which read_event_schema then
+// rejects.
 uint64_t
 get_schema_key(const EVENT_RECORD* event_record)
 {
@@ -189,7 +147,7 @@ read_event_schema(const EVENT_RECORD* event_record)
         std::array<expected_property, 5>{{{L"domain", TDH_INTYPE_UINT32},
                                           {L"op_id", TDH_INTYPE_UINT32},
                                           {L"op_name", TDH_INTYPE_ANSISTRING},
-                                          {L"correlation_id", TDH_INTYPE_UINT64},
+                                          {L"start_qpc", TDH_INTYPE_UINT64},
                                           {L"retval", TDH_INTYPE_INT32}}};
 
     auto  schema         = event_schema{};
@@ -210,14 +168,9 @@ read_event_schema(const EVENT_RECORD* event_record)
     const auto* event_name =
         reinterpret_cast<const wchar_t*>(buffer.data() + info->EventNameOffset);
 
-    if(::wcscmp(event_name, L"hip_api_enter") == 0)
-        schema.is_exit = false;
-    else if(::wcscmp(event_name, L"hip_api_exit") == 0)
-        schema.is_exit = true;
-    else
-        return schema;
+    if(::wcscmp(event_name, L"hip_api") != 0) return schema;
 
-    const auto property_count = schema.is_exit ? 5U : 4U;
+    constexpr auto property_count = 5U;
     if(info->TopLevelPropertyCount != property_count)
     {
         ROCP_WARNING << "rocm_hip_tlg event has " << info->TopLevelPropertyCount
@@ -291,29 +244,7 @@ map_domain(uint32_t producer_domain, domain_mapping& out)
 }
 
 void
-insert_pending(const pending_key& key, const pending_value& value)
-{
-    auto& pending = get_pending();
-    auto& order   = get_pending_order();
-
-    // A paired exit erases from the map but not from the FIFO, so retire those keys here
-    // instead of paying an O(n) deque erase on the hot path.
-    while(!order.empty() && pending.count(order.front()) == 0)
-        order.pop_front();
-
-    while(pending.size() >= max_pending_records && !order.empty())
-    {
-        auto oldest = order.front();
-        order.pop_front();
-        if(pending.erase(oldest) > 0) ++get_stats().unpaired_enters;
-    }
-
-    pending.insert_or_assign(key, value);
-    order.emplace_back(key);
-}
-
-void
-emit_record(const pending_value& value, uint64_t end_timestamp)
+emit_record(const record_data& value, uint64_t end_timestamp)
 {
     auto mapping = domain_mapping{};
     if(!map_domain(value.domain, mapping)) return;
@@ -331,9 +262,9 @@ emit_record(const pending_value& value, uint64_t end_timestamp)
     auto* corr_id = tracing::correlation_service::construct(1);
     if(!corr_id) return;  // finalization has begun
 
-    // The producer's correlation id restarts at 1 in every process, so it is used only for
-    // pairing and a fresh internal id is allocated here. ancestor reflects this consumer
-    // thread's correlation stack rather than the producer's, so it is always 0 today.
+    // The correlation id is allocated here rather than carried in the event: the producer has no
+    // use for one now that a call is a single self-contained event. ancestor reflects this
+    // consumer thread's correlation stack rather than the producer's, so it is always 0 today.
     auto record = common::init_public_api_struct(rocprofiler_buffer_tracing_hip_api_record_t{});
 
     record.start_timestamp = value.start_timestamp;
@@ -377,15 +308,15 @@ handle_event(const EVENT_RECORD* event_record)
     const auto& schema = itr->second;
     if(!schema.valid) return;
 
-    auto domain       = uint32_t{0};
-    auto name_end     = uint32_t{0};
-    auto producer_cid = uint64_t{0};
+    auto domain    = uint32_t{0};
+    auto name_end  = uint32_t{0};
+    auto start_qpc = uint64_t{0};
 
     const char* op_name = nullptr;
 
     if(!read_scalar(event_record, schema.domain_offset, domain) ||
        (op_name = read_ansi_string(event_record, schema.op_name_offset, name_end)) == nullptr ||
-       !read_scalar(event_record, name_end, producer_cid))
+       !read_scalar(event_record, name_end, start_qpc))
     {
         ++get_stats().events_dropped;
         return;
@@ -400,54 +331,33 @@ handle_event(const EVENT_RECORD* event_record)
         return;
     }
 
-    auto pending_id = pending_key{event_record->EventHeader.ProcessId, producer_cid};
-    auto timestamp  = common::qpc_ticks_to_ns(
-        static_cast<uint64_t>(event_record->EventHeader.TimeStamp.QuadPart));
-
-    if(!schema.is_exit)
-    {
-        // Resolving the name here keeps an unknown function out of the pending map entirely.
-        // Feeding an unresolved id into context_filter would index the domain bitset out of
-        // range, so drop and count instead.
-        auto operation = id_by_name_impl(mapping.table, op_name);
-        if(operation == invalid_operation_id)
-        {
-            ++get_stats().events_dropped;
-            return;
-        }
-
-        insert_pending(pending_id,
-                       pending_value{timestamp,
-                                     static_cast<uint64_t>(event_record->EventHeader.ThreadId),
-                                     domain,
-                                     operation});
-        return;
-    }
-
-    auto& pending     = get_pending();
-    auto  pending_itr = pending.find(pending_id);
-
-    if(pending_itr == pending.end())
+    // Feeding an unresolved id into context_filter would index the domain bitset out of range,
+    // so drop and count instead.
+    auto operation = id_by_name_impl(mapping.table, op_name);
+    if(operation == invalid_operation_id)
     {
         ++get_stats().events_dropped;
         return;
     }
 
-    auto value = pending_itr->second;
-    pending.erase(pending_itr);
+    // The producer samples QueryPerformanceCounter on entry and ETW stamps the header on
+    // return, and the session sets Wnode.ClientContext = 1, so both are QPC ticks.
+    auto value = record_data{common::qpc_ticks_to_ns(start_qpc),
+                             static_cast<uint64_t>(event_record->EventHeader.ThreadId),
+                             domain,
+                             operation};
 
-    emit_record(value, timestamp);
+    emit_record(value,
+                common::qpc_ticks_to_ns(
+                    static_cast<uint64_t>(event_record->EventHeader.TimeStamp.QuadPart)));
 }
 
 decoder_stats
 reset_decoder()
 {
     auto ret = get_stats();
-    ret.unpaired_enters += get_pending().size();
 
     get_stats() = decoder_stats{};
-    get_pending().clear();
-    get_pending_order().clear();
     get_schemas().clear();
 
     return ret;
