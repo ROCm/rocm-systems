@@ -1091,11 +1091,25 @@ if(TARGET test-pc-sampling-collector)
 endif()
 
 if(TARGET torch-trace-collector-module AND CMAKE_NM AND CMAKE_READELF)
+    set(_torch_elf_test_options)
+    # Clang adds a RUNPATH for its shared sanitizer runtime. Sanitizer artifacts
+    # are not shipped, so retain every other ELF check and exempt only this tag.
+    if(
+        ENABLE_SANITIZER
+        AND (
+            CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+            OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang"
+        )
+    )
+        list(APPEND _torch_elf_test_options --allow-sanitizer-runpath)
+    endif()
+
     add_test(
         NAME test_torch_trace_collector_elf
         COMMAND
             ${PYTHON_TEST_COMMAND} ${_torch_test_root}/torch_trace_collector_elf_check.py
             ${_torch_collector_test_module} --nm ${CMAKE_NM} --readelf ${CMAKE_READELF}
+            ${_torch_elf_test_options}
     )
 elseif(TARGET torch-trace-collector-module)
     message(

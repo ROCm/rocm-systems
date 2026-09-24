@@ -44,6 +44,7 @@ PYTORCH_MANGLED_NAMESPACE_MARKERS = (
     "NK6caffe2",
 )
 FORBIDDEN_NEEDED_PREFIXES = ("libtorch", "libc10", "libpython")
+CLANG_SANITIZER_RUNTIME_PREFIX = "libclang_rt."
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,6 +53,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("collector", type=Path)
     parser.add_argument("--nm", type=Path, required=True)
     parser.add_argument("--readelf", type=Path, required=True)
+    parser.add_argument(
+        "--allow-sanitizer-runpath",
+        action="store_true",
+        help="Allow compiler-runtime RPATH/RUNPATH in sanitizer builds.",
+    )
     return parser.parse_args()
 
 
@@ -108,6 +114,15 @@ def needed_libraries(section: str) -> List[str]:
     return re.findall(r"\(NEEDED\).*Shared library: \[([^]]+)]", section)
 
 
+def dynamic_search_path_entries(section: str) -> List[str]:
+    """Extract RPATH and RUNPATH entries from readelf output."""
+    return [
+        line.strip()
+        for line in section.splitlines()
+        if "(RPATH)" in line or "(RUNPATH)" in line
+    ]
+
+
 def require_equal(
     actual: FrozenSet[str],
     expected: FrozenSet[str],
@@ -154,20 +169,38 @@ def validate_symbols(nm: Path, collector: Path) -> None:
         raise SystemExit(f"collector has Python C-API imports: {python_imports}")
 
 
-def validate_dynamic_section(readelf: Path, collector: Path) -> None:
+def validate_dynamic_section(
+    readelf: Path,
+    collector: Path,
+    allow_sanitizer_runpath: bool,
+) -> None:
     """Reject linked Torch/Python dependencies and embedded search paths."""
     section = dynamic_section(readelf, collector)
+    libraries = needed_libraries(section)
     forbidden_dependencies = [
         library
-        for library in needed_libraries(section)
+        for library in libraries
         if library.lower().startswith(FORBIDDEN_NEEDED_PREFIXES)
     ]
     if forbidden_dependencies:
         raise SystemExit(
             f"collector has forbidden DT_NEEDED entries: {forbidden_dependencies}"
         )
-    if "(RPATH)" in section or "(RUNPATH)" in section:
-        raise SystemExit("collector must not contain DT_RPATH or DT_RUNPATH")
+    search_path_entries = dynamic_search_path_entries(section)
+    if not search_path_entries:
+        return
+    if not allow_sanitizer_runpath:
+        raise SystemExit(
+            "collector must not contain DT_RPATH or DT_RUNPATH: "
+            + "; ".join(search_path_entries)
+        )
+    if not any(
+        library.startswith(CLANG_SANITIZER_RUNTIME_PREFIX) for library in libraries
+    ):
+        raise SystemExit(
+            "sanitizer RUNPATH allowance requires a shared Clang sanitizer runtime"
+        )
+    print("Allowed Clang sanitizer RPATH/RUNPATH: " + "; ".join(search_path_entries))
 
 
 def main() -> None:
@@ -178,7 +211,11 @@ def main() -> None:
         raise SystemExit(f"unexpected collector filename: {collector.name}")
 
     validate_symbols(args.nm, collector)
-    validate_dynamic_section(args.readelf, collector)
+    validate_dynamic_section(
+        args.readelf,
+        collector,
+        args.allow_sanitizer_runpath,
+    )
 
 
 if __name__ == "__main__":
