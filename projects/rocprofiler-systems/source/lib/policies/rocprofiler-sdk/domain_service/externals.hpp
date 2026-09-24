@@ -4,6 +4,8 @@
 #pragma once
 
 #include "policies/agent_manager_policy.hpp"
+#include "policies/trace_cache/buffer_storage.hpp"
+#include "policies/trace_cache/metadata_registry.hpp"
 
 #include <concepts>
 #include <cstddef>
@@ -11,9 +13,29 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace rocprofsys::policies::domain_service
 {
+
+namespace detail
+{
+// Derived directly from the accessors' actual return types, rather than from the
+// Externals::metadata_registry_t / buffer_storage_t aliases, so the policy check
+// verifies what get_metadata_registry()/get_buffer_storage() really hand back.
+template <typename Externals>
+using metadata_registry_return_t =
+    std::remove_cvref_t<decltype(Externals::get_metadata_registry())>;
+
+template <typename Externals>
+using buffer_storage_return_t =
+    std::remove_cvref_t<decltype(Externals::get_buffer_storage())>;
+
+template <typename Externals>
+using metadata_registry_process_t =
+    decltype(std::declval<metadata_registry_return_t<Externals>&>().get_process_info());
+}  // namespace detail
 
 /// @brief External dependencies required by rocprofsys::domain_service and its
 /// buffered/callback KFD event domains: agent lookup, PMC/thread/track reporting, and
@@ -42,6 +64,20 @@ concept externals =
         requires agent_manager_policy<typename Externals::agent_manager_t,
                                       typename Externals::agent_t,
                                       typename Externals::agent_type_t>;
+        requires trace_cache::metadata_registry_policy<
+            detail::metadata_registry_return_t<Externals>,
+            detail::metadata_registry_process_t<Externals>,
+            typename Externals::pmc_info_t, typename Externals::thread_info_t,
+            typename Externals::track_t, typename Externals::agent_t,
+            typename Externals::agent_type_t>;
+        requires trace_cache::buffer_storage_policy<
+            detail::buffer_storage_return_t<Externals>,
+            decltype(Externals::kfd_sample_t::type_identifier),
+            typename Externals::kfd_sample_t>;
+        requires trace_cache::buffer_storage_policy<
+            detail::buffer_storage_return_t<Externals>,
+            decltype(Externals::kfd_sample_t::type_identifier),
+            typename Externals::region_sample>;
         {
             Externals::k_agent_type_gpu
         } -> std::convertible_to<typename Externals::agent_type_t>;
