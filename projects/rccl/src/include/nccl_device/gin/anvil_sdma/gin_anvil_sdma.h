@@ -173,6 +173,13 @@ NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, boo
   }
 }
 
+// True when fenceBeforeSignal would only duplicate signalPeer's release fence.
+// Clean-queue IPC SignalInc (small A2A) takes this path: skip the extra
+// __threadfence_system, which is ~0.2us per peer (~1.6us on 8-GPU A2A).
+NCCL_DEVICE_INLINE bool skipFenceBeforeSignal(bool needSdmaQuiet, bool hasSignal, bool hasCounter) {
+  return !needSdmaQuiet && hasSignal && !hasCounter;
+}
+
 }  // namespace detail
 }  // namespace anvil
 }  // namespace gin
@@ -194,6 +201,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::gin::anvil::detail::fenceBeforeSignal;
     using nccl::gin::anvil::detail::markSdmaDirty;
     using nccl::gin::anvil::detail::needSdmaQuietBeforeSignal;
+    using nccl::gin::anvil::detail::skipFenceBeforeSignal;
     using nccl::gin::anvil::detail::queueHandle;
     using nccl::gin::anvil::detail::resolveRemotePeerVa;
     using nccl::gin::anvil::detail::signalPeer;
@@ -279,7 +287,9 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
     if ((hasSignal || hasCounter) && !sdmaFusedSignal) {
       bool needSdmaQuiet = needSdmaQuietBeforeSignal(rsCtx, peer, blockId, &handle, issuedSdmaThisCall);
-      fenceBeforeSignal(rsCtx, needSdmaQuiet, handle, hasCounter);
+      if (!skipFenceBeforeSignal(needSdmaQuiet, hasSignal, hasCounter)) {
+        fenceBeforeSignal(rsCtx, needSdmaQuiet, handle, hasCounter);
+      }
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
@@ -307,6 +317,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::gin::anvil::detail::fenceBeforeSignal;
     using nccl::gin::anvil::detail::markSdmaDirty;
     using nccl::gin::anvil::detail::needSdmaQuietBeforeSignal;
+    using nccl::gin::anvil::detail::skipFenceBeforeSignal;
     using nccl::gin::anvil::detail::queueHandle;
     using nccl::gin::anvil::detail::resolveRemotePeerVa;
     using nccl::gin::anvil::detail::signalPeer;
@@ -374,7 +385,9 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
     if (hasSignal && !sdmaFusedSignal) {
       bool needSdmaQuiet = needSdmaQuietBeforeSignal(rsCtx, peer, blockId, &handle, issuedSdmaThisCall);
-      fenceBeforeSignal(rsCtx, needSdmaQuiet, handle, /*hasCounter=*/false);
+      if (!skipFenceBeforeSignal(needSdmaQuiet, /*hasSignal=*/true, /*hasCounter=*/false)) {
+        fenceBeforeSignal(rsCtx, needSdmaQuiet, handle, /*hasCounter=*/false);
+      }
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       signalPeer(rsCtx, peer, signal.indexedSignal.signalId, signalOpArg);
     }

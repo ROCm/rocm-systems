@@ -804,7 +804,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalSkipsQuietWhenClean) {
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
-  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  // fenceBeforeSignal is skipped; signalPeer still system-fences (not via the stub).
+  EXPECT_EQ(readThreadfenceCount(), 0ULL);
 }
 
 TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenClean) {
@@ -837,7 +838,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenCle
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
-  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 0ULL);
   auto got = d_dst.copyTo();
   for (int i = 0; i < kN; ++i) {
     EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
@@ -1014,7 +1015,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalSkipsQuietWh
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
-  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 0ULL);
   auto got = d_dst.copyTo();
   uint64_t landed = 0;
   std::memcpy(&landed, got.data(), sizeof(landed));
