@@ -43,13 +43,13 @@ library:
     tags: [module]
   Unit_hipLibraryGetManaged_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [module, managed_memory]
   Unit_hipLibraryGetManaged_Positive:
     <<: *level_2
-    tags: [module]
+    tags: [module, managed_memory]
   Unit_hipLibraryGetManaged_HipMemcpyInterop:
     <<: *level_2
-    tags: [module]
+    tags: [module, managed_memory]
   Unit_hipLibraryGetKernel_CountAndEnumerate:
     <<: *level_2
     tags: [module]
@@ -67,10 +67,10 @@ library:
     tags: [module]
   Unit_hipLibraryGetManaged_CO_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [module, managed_memory]
   Unit_hipLibraryGetManaged_CO_Values:
     <<: *level_2
-    tags: [module]
+    tags: [module, managed_memory]
   Unit_hipLibraryEnumerateKernels_ZeroMax:
     <<: *level_2
     tags: [module]

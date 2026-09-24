@@ -1098,7 +1098,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocManaged:
     <<: *level_2
-    tags: [node]
+    tags: [node, managed_memory]
   Unit_hipGraphAddKernelNode_Negative:
     <<: *level_2
     tags: [node, P0]
@@ -1309,7 +1309,7 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads:
     <<: *level_2
-    tags: [capture]
+    tags: [capture, managed_memory]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
     tags: [userobj]
@@ -1780,7 +1780,7 @@ graph:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
-    tags: [node]
+    tags: [node, managed_memory]
   Unit_hipDrvGraphAddMemcpyNode_Negative:
     <<: *level_2
     tags: [node]
