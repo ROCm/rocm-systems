@@ -5,6 +5,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -19,14 +22,44 @@ bool Wavefront::uses_separate_trap_ctrl() const {
 
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
 
-void Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
-  assert(has_gpu_memory());
-  cu_.memory()->read_block(addr, dst, process_id_);
+uint64_t Wavefront::realtime_timestamp() const {
+  if (use_system_clock_)
+    return hsa_system_timestamp();
+  auto *engine = cu_.engine();
+  return engine ? engine->global_time() : 0;
 }
 
-void Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
+std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
+  GpuVm *gpu_vm = cu_.gpu_vm();
+  if (gpu_vm == nullptr)
+    return std::nullopt;
+  return address_space_ ? gpu_vm->snapshot(address_space_) : gpu_vm->snapshot_vmid(process_id_);
+}
+
+VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
-  cu_.memory()->write_block(addr, src, process_id_);
+  if (address_space_ || process_id_ != 0) {
+    const std::optional<GpuVmAccess> access = snapshot_vm_access();
+    if (!access)
+      return VmAccessOutcome::Faulted;
+    return access->read(
+        addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
+  }
+  cu_.memory()->read_block(addr, dst);
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
+  assert(has_gpu_memory());
+  if (address_space_ || process_id_ != 0) {
+    const std::optional<GpuVmAccess> access = snapshot_vm_access();
+    if (!access)
+      return VmAccessOutcome::Faulted;
+    return access->write(addr, std::span<const std::byte>(
+                                   reinterpret_cast<const std::byte *>(src.data()), src.size()));
+  }
+  cu_.memory()->write_block(addr, src);
+  return VmAccessOutcome::Complete;
 }
 
 void Wavefront::barrier_init(int32_t barrier_id, uint32_t member_count) {
@@ -46,6 +79,13 @@ uint32_t Wavefront::barrier_state(int32_t barrier_id) const {
 void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barrier_id); }
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
+
+bool Wavefront::fail_pm4_submission() {
+  if (!pm4_failure_)
+    return false;
+  pm4_failure_->fail();
+  return true;
+}
 
 void Wavefront::halt(CpCompletionNotice notice) {
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one

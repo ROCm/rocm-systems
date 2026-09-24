@@ -14,9 +14,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -124,20 +122,20 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(
                 category_enum_id<category::rocm_counter_collection>::value),
-            track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
-            parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
+            track_name, _timing.start, event_metadata, stack_id, parent_stack_id,
+            correlation_id, call_stack, line_info,
             static_cast<std::uint32_t>(agent.device_type_index),
-            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
-            static_cast<double>(value), std::nullopt });
+            static_cast<std::uint8_t>(agent.type), track_name, static_cast<double>(value),
+            std::nullopt });
 
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(
                 category_enum_id<category::rocm_counter_collection>::value),
-            track_name.c_str(), _timing.end, event_metadata.c_str(), stack_id,
-            parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
+            track_name, _timing.end, event_metadata, stack_id, parent_stack_id,
+            correlation_id, call_stack, line_info,
             static_cast<std::uint32_t>(agent.device_type_index),
-            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
-            static_cast<double>(0), std::nullopt });
+            static_cast<std::uint8_t>(agent.type), track_name, static_cast<double>(0),
+            std::nullopt });
     }
 }
 
@@ -181,8 +179,7 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
             ::perfetto::StaticString(track_name.c_str()));
 
         metadata_initialize_counter_category();
-        metadata_initialize_counters_pmc(device_id, track_name.c_str(),
-                                         metric_description);
+        metadata_initialize_counters_pmc(device_id, track_name, metric_description);
         metadata_initialize_counter_track(track_name.c_str());
         track->set_is_incremental(false);
         track->set_unit(_unit);
@@ -210,9 +207,8 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
     // Write zero to cache (for rocpd database)
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
-        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
-        static_cast<std::uint8_t>(agent_type::gpu), track_name.c_str(), 0.0,
-        std::nullopt });
+        track_name, timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
+        static_cast<std::uint8_t>(agent_type::gpu), track_name, 0.0, std::nullopt });
 }
 
 void
@@ -231,5 +227,4 @@ counter_storage::write(counter_storage_type* storage, const std::string& metric_
     counter_data_tracker::description() = metric_description;
     storage->write();
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

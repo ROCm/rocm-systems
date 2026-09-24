@@ -182,16 +182,14 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
         rocprofsys::trace_cache::in_time_sample{
             static_cast<size_t>(rocprofsys::category_enum_id<category::kokkos>::value),
             rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
-            event_metadata.dump().c_str(), stack_id, parent_stack_id, correlation_id,
-            call_stack, line_info });
+            event_metadata.dump(), stack_id, parent_stack_id, correlation_id, call_stack,
+            line_info });
 }
 
 }  // namespace
 //--------------------------------------------------------------------------------------//
 
-namespace rocprofsys
-{
-namespace kokkosp
+namespace rocprofsys::kokkosp
 {
 namespace
 {
@@ -217,8 +215,7 @@ resume()
     _paused.store(false, std::memory_order_relaxed);
 }
 
-}  // namespace kokkosp
-}  // namespace rocprofsys
+}  // namespace rocprofsys::kokkosp
 
 extern "C"
 {

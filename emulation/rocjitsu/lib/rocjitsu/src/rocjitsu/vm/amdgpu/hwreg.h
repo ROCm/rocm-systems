@@ -43,6 +43,13 @@ enum class HwregAccessResult : uint8_t {
   Privileged,
 };
 
+/// @brief Instruction form issuing an HWREG write.
+enum class HwregWriteKind : uint8_t {
+  Generic,
+  Setreg,
+  SetregImm32,
+};
+
 /// @brief Extract the register ID field from an encoded HWREG operand.
 [[nodiscard]] uint32_t hwreg_id(uint16_t hwreg);
 
@@ -63,7 +70,8 @@ enum class HwregAccessResult : uint8_t {
 /// @details Failed writes leave wave state unchanged. Unknown registers report
 /// Unsupported; known read-only or privileged registers report that policy
 /// before checking whether rocjitsu backs the register state.
-[[nodiscard]] HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src);
+[[nodiscard]] HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                                  HwregWriteKind kind = HwregWriteKind::Generic);
 
 } // namespace amdgpu
 } // namespace rocjitsu
