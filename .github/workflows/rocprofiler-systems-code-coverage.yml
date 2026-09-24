@@ -103,6 +103,11 @@ jobs:
       shell: bash
       run: git checkout ${{ env.BASE_SHA }}
 
+    - name: Use PR Version of Coverage Script
+      timeout-minutes: 5
+      shell: bash
+      run: git checkout ${{ env.PR_SHA }} -- projects/rocprofiler-systems/scripts/generate-coverage.py
+
     - name: Configure
       timeout-minutes: 15
       shell: bash

@@ -114,7 +114,9 @@ def changed_files(source_dir: Path, base: Optional[str]) -> set[Path]:
         git(root, "rev-parse", "--verify", "--end-of-options", base + "^{commit}")
     ).strip()
     merge_base = os.fsdecode(git(root, "merge-base", "HEAD", revision)).strip()
-    print(f"Diff scope: merge-base(HEAD, {base}) = {merge_base[:12]} through working tree")
+    print(
+        f"Diff scope: merge-base(HEAD, {base}) = {merge_base[:12]} through working tree"
+    )
     dirty = {
         canonical(os.fsdecode(p), root)
         for p in git(
