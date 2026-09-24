@@ -98,6 +98,25 @@ function(rccl_register_test_categories _tgt _categories_yaml)
   endif()
 endfunction()
 
+# Apply the host-only compile/link flags shared by the in-build micro targets,
+# plus the optional AddressSanitizer wiring.
+function(rccl_apply_host_only_flags _tgt)
+  target_compile_options(${_tgt} PRIVATE
+    --offload-host-only -ffunction-sections
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(${_tgt} PRIVATE
+    -no-hip-rt
+    -fprofile-instr-generate -fcoverage-mapping
+    -Wl,--gc-sections)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(${_tgt} PRIVATE -fsanitize=address)
+    target_link_options(${_tgt} PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(${_tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+endfunction()
+
 # Checked against the original sources because hipify output does not exist yet
 # at configure time. Paths are relative to this file, so the same checks cover
 # the in-build and standalone contexts.
@@ -329,20 +348,7 @@ if(BUILD_TESTS)
   rccl_apply_hip_compile_only(rccl-UnitTestsMicroWarpSpeed)
   target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE ${MICRO_TEST_LINK_LIBS})
   add_dependencies(rccl-UnitTestsMicroWarpSpeed hipify_all copy_nccl_device_headers)
-  target_compile_options(rccl-UnitTestsMicroWarpSpeed PRIVATE
-    --offload-host-only -ffunction-sections
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicroWarpSpeed PRIVATE
-    -no-hip-rt
-    -fprofile-instr-generate -fcoverage-mapping
-    -Wl,--gc-sections)
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicroWarpSpeed PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicroWarpSpeed PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicroWarpSpeed PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  rccl_apply_host_only_flags(rccl-UnitTestsMicroWarpSpeed)
   rocm_install(TARGETS rccl-UnitTestsMicroWarpSpeed COMPONENT tests)
   rccl_register_test_categories(rccl-UnitTestsMicroWarpSpeed
     "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
@@ -438,23 +444,7 @@ if(BUILD_TESTS)
     rccl_apply_hip_compile_only(${_init_tgt})
     target_link_libraries(${_init_tgt} PRIVATE ${MICRO_TEST_LINK_LIBS})
     add_dependencies(${_init_tgt} hipify_all copy_nccl_device_headers)
-    # Host-only (no amdgcn pass, so llvm coverage never reaches the device link) +
-    # -ffunction-sections/--gc-sections so the oracle TUs' unreferenced deep deps
-    # are dropped rather than pulling in the world.
-    target_compile_options(${_init_tgt} PRIVATE
-      --offload-host-only -ffunction-sections
-      -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(${_init_tgt} PRIVATE
-      -no-hip-rt
-      -fprofile-instr-generate -fcoverage-mapping
-      -Wl,--gc-sections)
-    if(BUILD_ADDRESS_SANITIZER)
-      target_compile_options(${_init_tgt} PRIVATE -fsanitize=address)
-      target_link_options(${_init_tgt} PRIVATE -fsanitize=address -shared-libasan)
-      if(DEFINED ASAN_RUNTIME_DIR)
-        target_link_options(${_init_tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-      endif()
-    endif()
+    rccl_apply_host_only_flags(${_init_tgt})
     rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
     rccl_register_test_categories(${_init_tgt}
       "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
@@ -548,20 +538,7 @@ if(BUILD_TESTS)
   rccl_apply_hip_compile_only(rccl-UnitTestsMicroEnqueue)
   target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE ${MICRO_TEST_LINK_LIBS})
   add_dependencies(rccl-UnitTestsMicroEnqueue hipify_all copy_nccl_device_headers)
-  target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
-    --offload-host-only -ffunction-sections
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE
-    -no-hip-rt
-    -fprofile-instr-generate -fcoverage-mapping
-    -Wl,--gc-sections)
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  rccl_apply_host_only_flags(rccl-UnitTestsMicroEnqueue)
   rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
   rccl_register_test_categories(rccl-UnitTestsMicroEnqueue
     "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
@@ -616,20 +593,7 @@ if(BUILD_TESTS)
     rccl_apply_hip_compile_only(rccl-UnitTestsMicroSymKernels)
     target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE ${MICRO_TEST_LINK_LIBS})
     add_dependencies(rccl-UnitTestsMicroSymKernels hipify_all copy_nccl_device_headers)
-    target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE
-      --offload-host-only -ffunction-sections
-      -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE
-      -no-hip-rt
-      -fprofile-instr-generate -fcoverage-mapping
-      -Wl,--gc-sections)
-    if(BUILD_ADDRESS_SANITIZER)
-      target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE -fsanitize=address)
-      target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE -fsanitize=address -shared-libasan)
-      if(DEFINED ASAN_RUNTIME_DIR)
-        target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-      endif()
-    endif()
+    rccl_apply_host_only_flags(rccl-UnitTestsMicroSymKernels)
     rocm_install(TARGETS rccl-UnitTestsMicroSymKernels COMPONENT tests)
     # Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this binary's suites too.
     rccl_register_test_categories(rccl-UnitTestsMicroSymKernels
