@@ -53,13 +53,13 @@
 | `comments-and-docs.md` | umbrella skill | Doxygen on public interfaces, when an inline comment earns its place. |
 | `callback-boundaries.md` | new, ours | See below. |
 | `stl-algorithms.md` | STL skill | Ported as is. |
+| `design-patterns.md` | patterns skill | Trimmed. Calls out Adapter and Strategy, which other rules already depend on. |
 | `cmake.md` | CMake skill | Ported as is. We already follow it. |
 
-Reference material, not rules:
-
-- `reference/design-patterns.md` and `reference/constexpr.md`. Both are
-  catalogues. An agent can read them when the problem calls for it. Neither is
-  something a reviewer enforces.
+One flat set of topic files, no `reference/` subfolder. Each file owns its
+subject. Detail that belongs to an existing rule goes in that rule's file, which
+is why the C++17 constexpr specifics live in `core.md`. A subject nothing else
+owns gets its own file, which is why design patterns do.
 
 Dropped:
 

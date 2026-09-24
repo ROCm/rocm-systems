@@ -8,16 +8,6 @@ The rules are split by topic so that each file is short enough to read in one
 sitting and specific enough to link to from a review comment. This page is the
 only index.
 
-## What these rules apply to
-
-New code and existing code alike. No file is exempt, and there is no list of
-legacy files the rules skip.
-
-That does not mean rewriting code nobody touched. A review flags what the pull
-request introduces or moves, not what it happened to scroll past. If you are
-changing a function, the changed lines follow these rules. The rest of the file
-can wait until someone has a reason to touch it.
-
 ## Rules
 
 | Topic | Rules |
@@ -29,14 +19,8 @@ can wait until someone has a reason to touch it.
 | Type names | [`naming.md`](.ai/rules/cpp/naming.md) |
 | Doxygen blocks and when an inline comment earns its place | [`comments-and-docs.md`](.ai/rules/cpp/comments-and-docs.md) |
 | Algorithms instead of raw loops, picking a container | [`stl-algorithms.md`](.ai/rules/cpp/stl-algorithms.md) |
+| Choosing a pattern, and the two this project requires | [`design-patterns.md`](.ai/rules/cpp/design-patterns.md) |
 | Target-based CMake | [`cmake.md`](.ai/rules/cpp/cmake.md) |
-
-## Reference
-
-Catalogues to consult when a problem calls for them. Not enforced in review.
-
-- [`reference/design-patterns.md`](.ai/rules/cpp/reference/design-patterns.md)
-- [`reference/constexpr.md`](.ai/rules/cpp/reference/constexpr.md)
 
 ## The short version
 
