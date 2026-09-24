@@ -373,16 +373,7 @@ void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
             if (effective_omod == 0)
               return v;
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            if (std::isnan(v))
-              return v;
-            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-            if (effective_omod == 1)
-              v *= 2.0f;
-            else if (effective_omod == 2)
-              v *= 4.0f;
-            else if (effective_omod == 3)
-              v *= 0.5f;
-            return amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
           }();
           if (inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -532,16 +523,7 @@ void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
             if (effective_omod == 0)
               return v;
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            if (std::isnan(v))
-              return v;
-            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-            if (effective_omod == 1)
-              v *= 2.0f;
-            else if (effective_omod == 2)
-              v *= 4.0f;
-            else if (effective_omod == 3)
-              v *= 0.5f;
-            return amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
           }();
           if (inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());

@@ -5909,7 +5909,7 @@ TEST_P(GraphicsExportTest, CubeSamplingMatchesPhysicalFootprints) {
         EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witness.expected);
   }
   // A non-power-of-two extent distinguishes the parallel-coordinate rule and
-  // the 24-bit reflected sum before derivative conversion.
+  // the reflected sum with 22 fractional bits before derivative conversion.
   setup_cube(127);
   const CornerWitness non_power_of_two[] = {
       {{{0x3ffad4f9u, 0x3ffe2842u, 0x40800000u},

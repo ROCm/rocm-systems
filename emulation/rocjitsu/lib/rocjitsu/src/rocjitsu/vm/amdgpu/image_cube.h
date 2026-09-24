@@ -52,7 +52,7 @@ struct ImageCubeDerivativePolicy {
 /// Rounding for derivatives across adjacent cube faces. The edge-crossing
 /// coordinate retains its source orientation; an unchanged parallel coordinate
 /// uses ordinary magnitude rounding. A reflected parallel coordinate first
-/// forms a sum of the ISA-biased coordinates, retaining 24 significant bits.
+/// forms a sum of the ISA-biased coordinates, retaining 22 fractional bits.
 inline ImageCubeDerivativePolicy image_cube_derivative_policy(uint32_t face, uint32_t source_face) {
   // At (1, 1), each non-major direction component is its coordinate's sign.
   auto direction = image_cube_direction(source_face, 1, 1);

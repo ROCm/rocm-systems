@@ -3,7 +3,11 @@
 
 #pragma once
 
+/// @file
+/// Integer SIN/COS reduction and staged approximation from RDNA3/4 captures.
+
 #include "util/big_int.h"
+
 #include <algorithm>
 #include <bit>
 #include <cstdint>
@@ -11,7 +15,10 @@
 namespace util::detail::trig {
 using U128 = uint128_t;
 struct Coefficient {
-  int32_t constant, linear, quadratic, cubic;
+  int32_t constant;
+  int32_t linear;
+  int32_t quadratic;
+  int32_t cubic;
 };
 // Coefficients use units of 2^-26. The first table approximates sine, the
 // second cosine, in sixteen intervals covering the first octant. Staged

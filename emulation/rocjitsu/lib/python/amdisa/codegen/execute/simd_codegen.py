@@ -901,7 +901,11 @@ _FMA_K_READ = 'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)'
 SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # --- f32 dst-accumulate ---
     'v_fmac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
-    'v_fmac_dx9_zero_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
+    'v_fmac_dx9_zero_f32_vop2': (
+        'float32_t',
+        '0u',
+        '[&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_dx9_zero_f32_simd(a, b, d, wf); }',
+    ),
     'v_mac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
     # --- f32 inline literal ---
     'v_fmaak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
@@ -2085,11 +2089,7 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
     # DX9 FMA has zero-product and mandatory flushing rules distinct from FMA.
     'v_fma_dx9_zero_f32_vop3': (
-        '[&wf](auto a, auto b, auto c) {'
-        ' return decltype(a)([&](auto i) {'
-        ' return amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA_DX9_ZERO>('
-        ' static_cast<float>(a[i]), static_cast<float>(b[i]), static_cast<float>(c[i]),'
-        ' wf.fp_round_mode_f32(), 0); }); }'
+        '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); }'
     ),
     'v_max3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
     'v_min3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
@@ -2847,7 +2847,13 @@ def _simd_probe_line(
     # packed FMA quiets a different NaN operand vs scalar std::fma).
     spec3tf32 = SIMD_VOP3_TERNARY_FP32.get(template_name)
     if spec3tf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32({spec3tf32});'
+        # Apply OMOD with mandatory output flushing for DX9 FMA.
+        policy = (
+            ', true /* apply_omod */, true /* force_output_flush */'
+            if template_name == 'v_fma_dx9_zero_f32_vop3'
+            else ''
+        )
+        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32({spec3tf32}{policy});'
     spec3tf16 = SIMD_VOP3_TERNARY_FP16.get(template_name)
     if spec3tf16 is not None:
         macro = (
@@ -2920,7 +2926,12 @@ def _simd_probe_line(
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
     if specfmacf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32({specfmacf32});'
+        policy = (
+            ', true /* force_output_flush */'
+            if template_name == 'v_fmac_dx9_zero_f32_vop3'
+            else ''
+        )
+        return f'  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32({specfmacf32}{policy});'
     if template_name in SIMD_VOP3_FMAC_FP16:
         macro = (
             'ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16'

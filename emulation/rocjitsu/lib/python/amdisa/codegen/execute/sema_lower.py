@@ -206,7 +206,10 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
 
     # Legacy MAD has a distinct intermediate-precision policy.
     ctx.mode_arithmetic = not block.instruction_name.startswith('V_MAD')
-    ctx.dx9_zero_fma = block.instruction_name == 'V_FMA_DX9_ZERO_F32'
+    ctx.dx9_zero_fma = block.instruction_name in (
+        'V_FMA_DX9_ZERO_F32',
+        'V_FMAC_DX9_ZERO_F32',
+    )
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -555,7 +558,7 @@ def _mode_arithmetic(
     arguments += [f'wf.fp_round_mode_{mode}()', f'wf.fp_denorm_mode_{mode}()']
     if operation == 'FMA' and ctx.dx9_zero_fma:
         operation = 'FMA_DX9_ZERO'
-    if width == 32 and operation == 'FMA':
+    if width == 32 and operation in ('FMA', 'FMA_DX9_ZERO'):
         arguments += ['wf.cu().arch()', 'wf.ieee_mode()']
         if ctx.fma_flush_output is not None:
             arguments.append(ctx.fma_flush_output)
@@ -2082,9 +2085,12 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
         )
     else:
+        # DX9 FMA disables output denormals independently of MODE, so those
+        # bits cannot suppress its output modifier.
+        denorm_expr = '0' if ctx.dx9_zero_fma else 'wf.fp_denorm_mode_f32()'
         omod_expr = (
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
-            'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod)'
+            f'{denorm_expr}, wf.ieee_mode(), inst_.omod)'
         )
     fma_f32 = node.ty == SemaType.F32 and any(
         n.kind == SemaNodeKind.FMA for n in node.children[1].walk()
@@ -2105,12 +2111,12 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f' const uint32_t effective_omod = {omod_expr};'
             ' if (effective_omod == 0) return v;'
             f' {environment}'
-            ' if (std::isnan(v)) return v;'
-            ' v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);'
-            ' if (effective_omod == 1) v *= 2.0f;'
-            ' else if (effective_omod == 2) v *= 4.0f;'
-            ' else if (effective_omod == 3) v *= 0.5f;'
-            ' return amdgpu::fp_mode::finalize_omod_f32(v, effective_omod); }()'
+            ' return amdgpu::fp_mode::apply_omod_f32(v, effective_omod); }()'
+        )
+    if node.ty == SemaType.F32:
+        return (
+            f'[&]() {{ {environment}float v = {rhs};'
+            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'

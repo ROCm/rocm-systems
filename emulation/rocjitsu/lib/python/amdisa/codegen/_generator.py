@@ -6464,7 +6464,7 @@ class CodeGenerator:
                         '        src0_bits, src1_bits, src2_bits, inst_.abs & 1u, inst_.abs & 2u,\n'
                         '        inst_.abs & 4u, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u,\n'
                         '        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod,\n'
-                        '        inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));\n'
+                        '        inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));\n'
                         f'{write_result}\n'
                         '  }\n'
                     )
@@ -6583,7 +6583,7 @@ class CodeGenerator:
                         f'        src0_bits, src1_bits, accumulator, {abs0}, {abs1}, false,\n'
                         f'        {neg0}, {neg1}, false, wf.fp_round_mode_f16_f64(),\n'
                         f'        wf.fp_denorm_mode_f16_f64(), omod, {clamp}, wf.fp16_ovfl(),\n'
-                        '        amdgpu::floating_clamp_nan_to_zero(wf));\n'
+                        '        amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));\n'
                         f'{write_result}\n'
                         '  }\n'
                     )
@@ -7200,7 +7200,7 @@ class CodeGenerator:
                         f'    uint16_t s2 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
                     )
                     L.append(
-                        f'    uint16_t result = amdgpu::fp_mode::fma_f16(s0, k, s2, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                        f'    uint16_t result = amdgpu::fp_mode::fma_f16(s0, k, s2, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
                     )
                     L.append(
                         f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
@@ -7265,7 +7265,7 @@ class CodeGenerator:
                     )
                     L.append(f'    uint16_t k = static_cast<uint16_t>({k_expr});')
                     L.append(
-                        '    uint16_t result = amdgpu::fp_mode::fma_f16(s0, s1, k, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                        '    uint16_t result = amdgpu::fp_mode::fma_f16(s0, s1, k, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
                     )
                     L.append(
                         f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'

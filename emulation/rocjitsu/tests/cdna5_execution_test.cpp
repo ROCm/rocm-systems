@@ -928,7 +928,7 @@ TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
 
   const auto fma = [=](uint16_t src0, bool clamp_nan_to_zero) {
     return amdgpu::fp_mode::fma_f16(src0, kOne, kPositiveZero, false, false, false, false, false,
-                                    false, 0, 3, 0, true, false, clamp_nan_to_zero);
+                                    false, 0, 3, 0, true, false, clamp_nan_to_zero, true);
   };
 
   EXPECT_EQ(fma(kQuietNan, false), kQuietNan);

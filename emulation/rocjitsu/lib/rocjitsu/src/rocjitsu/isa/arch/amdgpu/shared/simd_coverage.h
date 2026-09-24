@@ -527,7 +527,8 @@ template <bool Vop3, typename Inst>
       return fma_f16_mode_simd(
           (av >> shift) & U(0xffffu), (bv >> shift) & U(0xffffu), (cv >> shift) & U(0xffffu),
           abs & 1, abs & 2, false, neg & 1, neg & 2, false, wf.fp_round_mode_f16_f64(),
-          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     };
     U low = compute(0), high = compute(16);
     dst.template store_native<uint32_t>(base, low | (high << 16), mask);

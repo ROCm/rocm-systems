@@ -67,7 +67,8 @@ def test_pk_fmac_vop2_reads_old_destination_and_fuses_both_halves():
     assert 'sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>' in cpp
     assert (
         cpp.count(
-            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf))'
+            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
         )
         == 2
     )
@@ -100,7 +101,8 @@ def test_pk_fma_f16_uses_mode_helper_and_clamp_for_both_halves():
     assert 'wf.fp_round_mode_f16_f64()' in cpp
     assert 'wf.fp_denorm_mode_f16_f64()' in cpp
     assert (
-        ', 0, inst_.clamp, wf.fp16_ovfl(), ' 'amdgpu::floating_clamp_nan_to_zero(wf))'
+        ', 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
     ) in cpp
 
 

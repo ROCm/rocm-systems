@@ -235,8 +235,11 @@ class TestLowerVectorAdd:
 
         assert f'amdgpu::fp_mode::{expected_helper}' in result
         assert expected_denorm_mode in result
-        assert 'const uint32_t effective_omod' in result
-        assert 'finalize_omod_' in result
+        if result_type == SemaType.F32:
+            assert 'amdgpu::fp_mode::apply_omod_f32(v, ' in result
+        else:
+            assert 'const uint32_t effective_omod' in result
+            assert 'finalize_omod_' in result
         assert 'if (inst_.omod ==' not in result
         if result_type == SemaType.F16:
             assert 'false, inst_.omod' in result

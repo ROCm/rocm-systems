@@ -13,6 +13,8 @@
 /// V_RCP_F64, V_RSQ_F64, V_SQRT_F64.
 /// F32 reciprocal and F32/F16 reciprocal square root match the captured RDNA3/4 mappings.
 /// F16 RSQ applies the half input-denormal policy after promotion to F32.
+/// F32 SIN/COS use staged integer arithmetic modeled from RDNA3/4 captures;
+/// the documented one-ULP residuals preclude exhaustive bit identity.
 ///
 /// All functions handle special cases (NaN, Inf, denormals, ±0) per the
 /// AMD ISA specification.

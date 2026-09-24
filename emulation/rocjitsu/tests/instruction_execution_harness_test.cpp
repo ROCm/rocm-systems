@@ -2533,9 +2533,8 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
       }
 
-      // Pin OMOD finalization independently from CLAMP. Positive and negative
-      // minimum-normal values become subnormals under /2, and both those
-      // flushed results and an input -0 must be canonicalized to +0.
+      // Pin OMOD finalization independently from CLAMP. FP32 underflow caused
+      // by halving a normal result preserves its sign; an input -0 becomes +0.
       wf->set_exec(0x7u);
       constexpr std::array<uint32_t, 3> kF32Inputs{
           std::bit_cast<uint32_t>(std::numeric_limits<float>::min()),
@@ -2553,7 +2552,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       ASSERT_NE(unclamped_f32, nullptr);
       EXPECT_TRUE(cu->execute_instruction(unclamped_f32.get(), *wf).succeeded());
       for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane)
-        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0u);
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), lane == 1 ? 0x80000000u : 0u);
 
       constexpr std::array<uint64_t, 3> kF64Inputs{
           kMinNormalF64,

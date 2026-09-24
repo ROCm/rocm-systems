@@ -929,30 +929,221 @@ std::vector<ArithmeticCase> ldexp_f16_mode_cases() {
 
 std::vector<ArithmeticCase> dx9_fma_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    for (uint32_t denorm = 0; denorm < 4; ++denorm) {
-      const std::string prefix = "Arch" + std::to_string(arch) + "Denorm" + std::to_string(denorm);
-      const auto add = [&](const char *name, uint32_t a, uint32_t b, uint32_t c,
-                           uint32_t expected) {
-        // v_fma_dx9_zero_f32 v6, v0, v1, v2, assembled with llvm-mc.
-        cases.push_back({prefix + name,
-                         arch,
-                         {0xd6090006u, 0x040a0300u},
-                         {{0, a}, {1, b}, {2, c}},
-                         {{6, expected}},
-                         denorm << 4,
-                         FE_TONEAREST});
-      };
-      add("ZeroInf", 0u, 0x7f800000u, 0x3f800000u, 0x3f800000u);
-      add("NanZero", 0x7fc01234u, 0x80000000u, 0x3f800000u, 0x3f800000u);
-      add("InputFlush", 1u, 0x4b000000u, 0u, 0u);
-      add("OutputFlush", 0x00800000u, 0x3f000000u, 0u, 0u);
-      add("AccumulatorFlush", 0u, 0x7f800000u, 0x80000001u, 0x80000000u);
-      add("NegativeZeroAccumulator", 0u, 0x7f800000u, 0x80000000u, 0x80000000u);
-      add("NormalControl", 0x3f800000u, 0x3f800000u, 0x3f800000u, 0x40000000u);
-    }
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const bool has_accumulator_form =
+        arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+    for (uint32_t form = 0; form < (has_accumulator_form ? 3u : 1u); ++form)
+      for (uint32_t denorm = 0; denorm < 4; ++denorm)
+        for (uint32_t rounding = 0; rounding < 4; ++rounding)
+          for (bool ieee : {false, true}) {
+            const std::string prefix = "Arch" + std::to_string(arch) + "Form" +
+                                       std::to_string(form) + "Denorm" + std::to_string(denorm) +
+                                       "Round" + std::to_string(rounding) + "Ieee" +
+                                       std::to_string(ieee);
+            // v_fma_dx9_zero_f32 v6,v0,v1,v2 and v_fmac_dx9_zero_f32 v6,v0,v1,
+            // assembled with llvm-mc. RDNA4/CDNA5 expose only the three-source form.
+            const std::array<uint32_t, 3> words =
+                form == 0   ? std::array{0xd6090006u, 0x040a0300u, 0u}
+                : form == 1 ? std::array{0x0c0c0300u, 0u, 0u}
+                            : std::array{0xd5060006u, 0x00020300u, 0u};
+            const auto add = [&](const std::string &name, uint32_t a, uint32_t b, uint32_t c,
+                                 uint32_t expected, uint32_t omod = 0) {
+              auto encoding = words;
+              encoding[1] |= omod << 27;
+              cases.push_back({prefix + name,
+                               arch,
+                               encoding,
+                               {{0, a}, {1, b}, {form == 0 ? 2u : 6u, c}},
+                               {{6, expected}},
+                               (uint32_t(ieee) << 9) | (denorm << 4) | rounding,
+                               FE_TONEAREST});
+            };
+            add("ZeroInf", 0u, 0x7f800000u, 0x3f800000u, 0x3f800000u);
+            add("NanZero", 0x7fc01234u, 0x80000000u, 0x3f800000u, 0x3f800000u);
+            add("InputFlush", 1u, 0x4b000000u, 0u, 0u);
+            add("OutputFlush", 0x00800000u, 0x3f000000u, 0u, 0u);
+            const uint32_t zero_sum = rounding == 2 ? 0x80000000u : 0u;
+            add("AccumulatorFlush", 0u, 0x7f800000u, 0x80000001u, zero_sum);
+            add("NegativeZeroAccumulator", 0u, 0x7f800000u, 0x80000000u, zero_sum);
+            add("NegativeZeroProduct", 0x80000000u, 0x3f800000u, 0x80000000u, zero_sum);
+            add("NormalControl", 0x3f800000u, 0x3f800000u, 0x3f800000u, 0x40000000u);
+            // Captured gfx1100/gfx1201 boundary and payload witnesses.
+            add("TinyBeforePacking", 0x80800000u, 0x33800000u, 0x00800000u, 0u);
+            add("NormalSignificand", 0x80800000u, 0x33000000u, 0x00800000u,
+                rounding < 2 ? 0x00800000u : 0u);
+            add("FirstNan", 0x7fc00111u, 0x7fc00222u, 0x7fc00333u, 0x7fc00111u);
+            const uint32_t nan = (ieee || !has_accumulator_form) ? 0x7fc00012u : 0x7f800012u;
+            add("SignalingFirst", 0x7f800012u, 0x3f800000u, 0x3f800000u, nan);
+            add("SignalingSecond", 0x3f800000u, 0x7f800012u, 0x3f800000u, nan);
+            add("SignalingAccumulator", 0x3f800000u, 0x3f800000u, 0x7f800012u, nan);
+            add("ZeroProductSignalingAccumulator", 0u, 0x7f800000u, 0x7f800012u, nan);
+            if (form != 1)
+              for (uint32_t omod = 1; omod < 4; ++omod) {
+                // Mandatory output flushing keeps OMOD enabled regardless of
+                // denormal MODE. RDNA3/3.5 still disable it in IEEE mode.
+                const bool enabled = !has_accumulator_form || !ieee;
+                const uint32_t scaled = !enabled    ? 0x40000000u
+                                        : omod == 1 ? 0x40800000u
+                                        : omod == 2 ? 0x41000000u
+                                                    : 0x3f800000u;
+                add("Omod" + std::to_string(omod), 0x3f800000u, 0x3f800000u, 0x3f800000u, scaled,
+                    omod);
+                add("OmodZero" + std::to_string(omod), 0u, 0x7f800000u, 0x80000000u,
+                    enabled ? 0u : zero_sum, omod);
+                if (omod == 3)
+                  add("OmodUnderflow", 0x80800000u, 0x3f800000u, 0u,
+                      enabled ? 0x80000000u : 0x80800000u, omod);
+              }
+          }
   }
+  return cases;
+}
+
+std::vector<ArithmeticCase> omod_underflow_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (uint32_t op = 0; op < 3; ++op)
+      for (uint32_t denorm = 0; denorm < 4; ++denorm)
+        for (uint32_t rounding = 0; rounding < 4; ++rounding)
+          for (bool ieee : {false, true}) {
+            // FMA, FMAC and ADD with div:2. Physical gfx1100/gfx1201 preserve
+            // the sign when scaling underflows a negative normal result.
+            const std::array<uint32_t, 3> words = op == 0 ? std::array{0xd6130006u, 0x1c0a0300u, 0u}
+                                                  : op == 1
+                                                      ? std::array{0xd52b0006u, 0x18020300u, 0u}
+                                                      : std::array{0xd5030006u, 0x18020300u, 0u};
+            const bool enabled = arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                                 arch == ROCJITSU_CODE_ARCH_CDNA5 || (!ieee && !(denorm & 2u));
+            cases.push_back({"Arch" + std::to_string(arch) + "Op" + std::to_string(op) + "Denorm" +
+                                 std::to_string(denorm) + "Round" + std::to_string(rounding) +
+                                 "Ieee" + std::to_string(ieee),
+                             arch,
+                             words,
+                             {{0, 0x80800000u}, {1, op == 2 ? 0u : 0x3f800000u}, {2, 0u}, {6, 0u}},
+                             {{6, enabled ? 0x80000000u : 0x80800000u}},
+                             (uint32_t(ieee) << 9) | (denorm << 4) | rounding,
+                             FE_TONEAREST});
+            auto boundary = cases.back();
+            boundary.name += "BeforePacking";
+            boundary.sources = {{0, 0x807fffffu},
+                                {1, op == 2 ? 0x80800000u : 0x3f800000u},
+                                {2, 0x80800000u},
+                                {6, 0x80800000u}};
+            boundary.expected = {{6, enabled         ? 0x80000000u
+                                     : (denorm & 1u) ? 0x80ffffffu
+                                                     : 0x80800000u}};
+            cases.push_back(std::move(boundary));
+          }
+  return cases;
+}
+
+std::vector<ArithmeticCase> f16_fma_nan_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool packed : {false, true})
+      for (bool ieee : {false, true})
+        for (bool clamp : {false, true})
+          for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+            const bool modern =
+                arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+            const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
+                                 uint16_t nan) {
+              const uint32_t expected =
+                  clamp && modern ? 0u : nan | ((modern || ieee) ? 0x0200u : 0u);
+              const auto pair = [packed](uint32_t value) {
+                return packed ? value * 0x10001u : value;
+              };
+              cases.push_back({"Arch" + std::to_string(arch) + "Packed" + std::to_string(packed) +
+                                   "Ieee" + std::to_string(ieee) + "Clamp" + std::to_string(clamp) +
+                                   "Denorm" + std::to_string(denorm) + name,
+                               arch,
+                               {(packed ? 0xcc0e4006u : 0xd6480006u) | (clamp ? 0x8000u : 0u),
+                                packed ? 0x1c0a0300u : 0x040a0300u, 0u},
+                               {{0, pair(a)}, {1, pair(b)}, {2, pair(c)}, {6, 0u}},
+                               {{6, pair(expected)}},
+                               (uint32_t(ieee) << 9) | (denorm << 6),
+                               FE_TONEAREST});
+            };
+            // Raw witnesses captured on gfx1100/gfx1201, including the GCC
+            // optimization-dependent payload selection seen in packed FMA.
+            add("FirstPayload", 0x7fc1u, 0xff80u, 0xff80u, 0x7fc1u);
+            add("SignalingFirst", 0x7c01u, 0x3c00u, 0u, 0x7c01u);
+            add("SignalingSecond", 0x3c00u, 0xfc12u, 0x7e01u, 0xfc12u);
+            add("SignalingAddend", 0x3c00u, 0x3c00u, 0x7c01u, 0x7c01u);
+            add("InvalidProductFirst", 0u, 0x7c00u, 0x7e01u, 0xfe00u);
+            add("InvalidFiniteAddend", 0u, 0x7c00u, 0x3c00u, 0xfe00u);
+            add("OppositeInfinities", 0x7c00u, 0x3c00u, 0xfc00u, 0xfe00u);
+            add("FlushedProductFirst", 1u, 0x7c00u, 0x7e01u, denorm & 1u ? 0x7e01u : 0xfe00u);
+          }
+  return cases;
+}
+
+std::vector<ArithmeticCase> f16_fma_omod_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool ieee : {false, true})
+      for (bool overflow : {false, true})
+        for (bool clamp : {false, true})
+          for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+            const bool enabled = arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                                 arch == ROCJITSU_CODE_ARCH_CDNA5 || (!ieee && !(denorm & 2u));
+            const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
+                                 uint32_t omod, uint16_t expected) {
+              cases.push_back(
+                  {"Arch" + std::to_string(arch) + "Ieee" + std::to_string(ieee) + "Overflow" +
+                       std::to_string(overflow) + "Clamp" + std::to_string(clamp) + "Denorm" +
+                       std::to_string(denorm) + name,
+                   arch,
+                   {0xd6480006u | (clamp ? 0x8000u : 0u), 0x040a0300u | (omod << 27), 0u},
+                   {{0, a}, {1, b}, {2, c}, {6, 0u}},
+                   {{6, expected}},
+                   (uint32_t(ieee) << 9) | (uint32_t(overflow) << 23) | (denorm << 6),
+                   FE_UPWARD});
+            };
+            // Both physical cards round the arithmetic before applying OMOD.
+            add("NegativeUnderflow", 0x0400u, 0xbc00u, 0u, 3,
+                clamp     ? 0u
+                : enabled ? 0x8000u
+                          : 0x8400u);
+            add("OverflowBeforeDivision", 0x3c00u, 0x7bffu, 0x7bffu, 3,
+                clamp      ? 0x3c00u
+                : overflow ? (enabled ? 0x77ffu : 0x7bffu)
+                           : 0x7c00u);
+            add("TinyBeforeMultiplication", 0x0400u, 0x3800u, 0u, 2,
+                enabled || !(denorm & 2u) ? 0u : 0x0200u);
+            add("NegativeTinyBeforeMultiplication", 0x0400u, 0xb800u, 0u, 2,
+                enabled || clamp ? 0u
+                : (denorm & 2u)  ? 0x8200u
+                                 : 0x8000u);
+          }
+  // Captured FMA and FMAC agree on both cards for every rounding mode.
+  const uint16_t negative_tiny[] = {0x8000u, 0u, 0x8000u, 0u};
+  const uint16_t positive_overflow[] = {0x77ffu, 0x7c00u, 0x77ffu, 0x77ffu};
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool accumulate : {false, true})
+      for (uint32_t round = 0; round < 4; ++round) {
+        const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
+                             uint16_t expected) {
+          cases.push_back(
+              {"DirectedArch" + std::to_string(arch) + "Accumulate" + std::to_string(accumulate) +
+                   "Round" + std::to_string(round) + name,
+               arch,
+               {accumulate ? 0xd5360006u : 0xd6480006u, accumulate ? 0x1a020300u : 0x1c0a0300u, 0u},
+               {{0, a}, {1, b}, {2, c}, {6, c}},
+               {{6, expected}},
+               0x40u | (round << 2),
+               FE_TOWARDZERO});
+        };
+        // RNE retains a negative normal until div:2 makes it tiny; RTZ first
+        // flushes the arithmetic result, so the modifier receives a signed zero.
+        add("NegativeUnderflow", 1u, 0x3400u, 0x8400u, negative_tiny[round]);
+        add("OverflowBeforeDivision", 0x0400u, 0x0400u, 0x7bffu, positive_overflow[round]);
+      }
   return cases;
 }
 
@@ -962,6 +1153,31 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
   constexpr uint32_t kDazMask = 1u << 6;
   constexpr uint32_t kFtzMask = 1u << 15;
   constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | kFtzMask;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool packed : {false, true})
+      for (bool trap_invalid : {false, true}) {
+        const auto pair = [packed](uint32_t value) { return packed ? value * 0x10001u : value; };
+        const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
+                             uint16_t expected) {
+          cases.push_back(
+              {"F16FmaArch" + std::to_string(arch) + "Packed" + std::to_string(packed) + "Trap" +
+                   std::to_string(trap_invalid) + name,
+               arch,
+               {packed ? 0xcc0e4006u : 0xd6480006u, packed ? 0x1c0a0300u : 0x040a0300u, 0u},
+               {{0, pair(a)}, {1, pair(b)}, {2, pair(c)}},
+               {{6, packed ? pair(expected) : 0xdead0000u | expected}},
+               0xf0u,
+               FE_UPWARD,
+               0xffffu,
+               trap_invalid ? 0x1f00u : 0x1f80u});
+        };
+        // The residual must not expose Inf-Inf to the caller's exception state.
+        add("InfiniteProduct", 0x7c00u, 0x3c00u, 0u, 0x7c00u);
+        add("InfiniteAddend", 0x3c00u, 0x3c00u, 0x7c00u, 0x7c00u);
+        add("InvalidProduct", 0u, 0x7c00u, 0x3c00u, 0xfe00u);
+        add("InvalidSum", 0x7c00u, 0x3c00u, 0xfc00u, 0xfe00u);
+      }
   // Change MXCSR rounding independently of the x87 rounding reported by fegetround().
   for (uint32_t rounding : {_MM_ROUND_UP, _MM_ROUND_DOWN, _MM_ROUND_TOWARD_ZERO}) {
     const bool upward = rounding == _MM_ROUND_UP;
@@ -1249,6 +1465,21 @@ INSTANTIATE_TEST_SUITE_P(Dx9Fma, ValuFpModeTest, testing::ValuesIn(dx9_fma_cases
                            return info.param.name;
                          });
 
+INSTANTIATE_TEST_SUITE_P(OmodUnderflow, ValuFpModeTest, testing::ValuesIn(omod_underflow_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(F16FmaOmod, ValuFpModeTest, testing::ValuesIn(f16_fma_omod_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(F16FmaNan, ValuFpModeTest, testing::ValuesIn(f16_fma_nan_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
 INSTANTIATE_TEST_SUITE_P(HostMxcsr, ValuFpModeTest, testing::ValuesIn(host_mxcsr_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
@@ -1274,6 +1505,30 @@ TEST(ValuFpModeHelpers, RoundingAndSignedZero) {
                   amdgpu::fp_mode::arithmetic<Arithmetic::MUL>(-0.0f, 1.0f, 0.0f, mode, 3)),
               0x80000000u);
   }
+}
+
+TEST(ValuFpModeHelpers, F16FmaRetainsTinyProduct) {
+  // Both physical cards round 65504 + 2^-48 upward to infinity. A host F64
+  // addition alone loses the tiny product and incorrectly returns 65504.
+  for (uint32_t round = 0; round < 4; ++round)
+    for (uint32_t denorm = 0; denorm < 4; ++denorm)
+      for (bool overflow : {false, true}) {
+        const uint16_t expected = round == 1 && (denorm & 1u) && !overflow ? 0x7c00u : 0x7bffu;
+        EXPECT_EQ(amdgpu::fp_mode::fma_f16(1, 1, 0x7bff, false, false, false, false, false, false,
+                                           round, denorm, 0, false, overflow, false, true),
+                  expected);
+      }
+}
+
+TEST(ValuFpModeHelpers, F16FmaFlushesBeforePacking) {
+  // Packing directly to a subnormal half can round these tiny intermediates
+  // to minimum normal; hardware tests the rounded significand first.
+  for (uint32_t round = 0; round < 4; ++round)
+    for (uint16_t sign : {uint16_t{0}, uint16_t{0x8000}})
+      EXPECT_EQ(amdgpu::fp_mode::fma_f16(1, sign | 0x03ff, sign | 0x03ff, false, false, false,
+                                         false, false, false, round, 1, 0, false, false, false,
+                                         true),
+                sign);
 }
 
 TEST(ValuFpModeHelpers, FusedResultAndOutputFlush) {
