@@ -6,10 +6,10 @@
 # rocgdb wave-debugging demo + CI harness for the rocjitsu emulator.
 #
 # Compiles the demo HIP kernel with device debug info, then drives real ROCgdb
-# through `mirage run` to: set a breakpoint on the GPU kernel `add_one`, run,
+# through `rocjitsu run` to: set a breakpoint on the GPU kernel `add_one`, run,
 # stop at the wave, read PC/EXEC and the instruction at PC, single-step, and
 # continue the kernel to completion. It asserts the expected markers so it can
-# double as a CI smoke test for the full mirage + rocjitsu + rocm-dbgapi + ROCgdb
+# double as a CI smoke test for the full rocjitsu + rocjitsu + rocm-dbgapi + ROCgdb
 # stack.
 #
 # Exit codes:
@@ -19,16 +19,16 @@
 #   1   failure (a marker was missing or the run errored)
 #
 # Environment:
-#   MIRAGE_BIN            path to the mirage binary (default: search PATH and the
+#   ROCJITSU_BIN            path to the rocjitsu binary (default: search PATH and the
 #                        repo's target/{debug,release})
-#   ROCJITSU_LIB         path to librocjitsu.so (default: mirage auto-discovers)
-#   MIRAGE_PROFILE       mirage profile / GPU target (default: mi350x = gfx950)
+#   ROCJITSU_LIB         path to librocjitsu.so (default: rocjitsu auto-discovers)
+#   ROCJITSU_PROFILE       rocjitsu profile / GPU target (default: mi350x = gfx950)
 #   OFFLOAD_ARCH         hipcc --offload-arch (default: gfx950, must match profile)
 #   ROCGDB_DEMO_REQUIRE  if set, missing tools fail (exit 1) instead of skipping
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-profile="${MIRAGE_PROFILE:-mi350x}"
+profile="${ROCJITSU_PROFILE:-mi350x}"
 arch="${OFFLOAD_ARCH:-gfx950}"
 if [[ "$arch" == gfx1250 ]]; then
   exec_regex='^exec +0x(00000000)?ffffffff'
@@ -57,35 +57,35 @@ skip() {
 }
 
 # --- Locate tools -----------------------------------------------------------
-# MIRAGE_BIN is authoritative when set, never advisory. ctest points it at the
-# staged <ROCM_HOME>/bin/mirage precisely so mirage resolves *this* build's
+# ROCJITSU_BIN is authoritative when set, never advisory. ctest points it at the
+# staged <ROCM_HOME>/bin/rocjitsu precisely so rocjitsu resolves *this* build's
 # librocjitsu.so; falling through to PATH when the staged copy is missing or not
-# executable would run some other mirage against some other library and report
+# executable would run some other rocjitsu against some other library and report
 # the result as this build's, which is the failure the staging exists to prevent.
-find_mirage() {
-  if [[ -n "${MIRAGE_BIN:-}" ]]; then echo "${MIRAGE_BIN}"; return; fi
-  if command -v mirage >/dev/null 2>&1; then command -v mirage; return; fi
-  for c in "$here/../../../mirage/target/debug/mirage" \
-           "$here/../../../mirage/target/release/mirage"; do
+find_rocjitsu() {
+  if [[ -n "${ROCJITSU_BIN:-}" ]]; then echo "${ROCJITSU_BIN}"; return; fi
+  if command -v rocjitsu >/dev/null 2>&1; then command -v rocjitsu; return; fi
+  for c in "$here/../../../rocjitsu/target/debug/rocjitsu" \
+           "$here/../../../rocjitsu/target/release/rocjitsu"; do
     [[ -x "$c" ]] && { echo "$c"; return; }
   done
 }
 
-# Checked here rather than inside find_mirage: that runs in a command
+# Checked here rather than inside find_rocjitsu: that runs in a command
 # substitution, where `exit` would leave only the subshell and the empty result
 # would be reported as a skip.
-if [[ -n "${MIRAGE_BIN:-}" && ! -x "${MIRAGE_BIN}" ]]; then
-  echo "FAIL: MIRAGE_BIN=${MIRAGE_BIN} is not an executable file" >&2
+if [[ -n "${ROCJITSU_BIN:-}" && ! -x "${ROCJITSU_BIN}" ]]; then
+  echo "FAIL: ROCJITSU_BIN=${ROCJITSU_BIN} is not an executable file" >&2
   exit 1
 fi
-mirage_bin="$(find_mirage)"
-[[ -z "$mirage_bin" ]] && skip "mirage binary not found (set MIRAGE_BIN)"
+rocjitsu_bin="$(find_rocjitsu)"
+[[ -z "$rocjitsu_bin" ]] && skip "rocjitsu binary not found (set ROCJITSU_BIN)"
 command -v hipcc  >/dev/null 2>&1 || skip "hipcc not found"
 command -v rocgdb >/dev/null 2>&1 || skip "rocgdb not found"
 
 # Python ROCm SDK environments keep runtime and development libraries in
 # sibling wheel directories rather than a conventional ROCM_HOME/lib. Pass
-# those directories through Mirage so the HIP workload can resolve
+# those directories through RocJITsu so the HIP workload can resolve
 # libamdhip64 and the HSA runtime without relying on the caller's environment.
 runtime_library_path="${LD_LIBRARY_PATH:-}"
 venv_prefix="$(cd "$(dirname "$(command -v rocgdb)")/.." 2>/dev/null && pwd || true)"
@@ -95,9 +95,9 @@ for sdk_lib in \
   [[ -d "$sdk_lib" ]] || continue
   runtime_library_path="${runtime_library_path:+$runtime_library_path:}$sdk_lib"
 done
-mirage_runtime_args=()
+rocjitsu_runtime_args=()
 if [[ -n "$runtime_library_path" ]]; then
-  mirage_runtime_args+=(--env "LD_LIBRARY_PATH=$runtime_library_path")
+  rocjitsu_runtime_args+=(--env "LD_LIBRARY_PATH=$runtime_library_path")
 fi
 # The nightly gfx1250 HIP/ROCr stack enables its code-object rewrite path by
 # default. A debugger qualification must observe the code object that hipcc
@@ -105,7 +105,7 @@ fi
 # both CLR and ROCr for every scenario below. The first ROCgdb run also prints
 # the inherited value and loaded libraries; the assertions below make this
 # fail closed if the variable is lost or the rewrite library is loaded anyway.
-mirage_runtime_args+=(--env "HSA_HOTSWAP_DISABLE=1")
+rocjitsu_runtime_args+=(--env "HSA_HOTSWAP_DISABLE=1")
 
 # --- Build the demo kernel --------------------------------------------------
 workdir="$(mktemp -d)"
@@ -117,8 +117,8 @@ if ! hipcc --offload-arch="$arch" -g -O0 -o "$app" "$here/add_one.hip" 2>"$workd
   skip "hipcc could not build for $arch"
 fi
 
-# --- Drive ROCgdb through mirage --------------------------------------------
-echo "running rocgdb under: $mirage_bin run --profile $profile"
+# --- Drive ROCgdb through rocjitsu --------------------------------------------
+echo "running rocgdb under: $rocjitsu_bin run --profile $profile"
 # The gating flow exercises the full core: stop at the kernel, inspect wave
 # state, single-step three instructions (asserting the PC advances each time),
 # and continue to a correct result. Single-stepping is also covered
@@ -128,13 +128,13 @@ echo "running rocgdb under: $mirage_bin run --profile $profile"
 # The `print/x $pc` before and after each stepi lets the assertions below verify
 # the wave advanced by real instruction boundaries rather than running away.
 #
-# Output is captured to a file rather than $(...) command substitution: `mirage
+# Output is captured to a file rather than $(...) command substitution: `rocjitsu
 # run` execs under a PTY whose forwarded fds keep a bash command substitution
 # blocked waiting for EOF, so a file redirect is used instead. stdin is taken
 # from /dev/null so the PTY setup does not block when run non-interactively
 # (e.g. under CI); rocgdb --batch needs no input.
 outfile="$workdir/rocgdb.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'show environment HSA_HOTSWAP_DISABLE' \
     -ex 'set breakpoint pending on' \
@@ -174,8 +174,8 @@ fail=0
 # pass silently is the run never producing a whole log, so reject everything from
 # 124 up.
 #
-# The status is mirage's, not rocgdb's: every scenario runs `timeout N mirage run
-# -- rocgdb ...`, and mirage forwards the guest's status masked to 8 bits
+# The status is rocjitsu's, not rocgdb's: every scenario runs `timeout N rocjitsu run
+# -- rocgdb ...`, and rocjitsu forwards the guest's status masked to 8 bits
 # (ctl/src/lib.rs), reporting 128+signo for a signalled guest and 127 when it
 # could not spawn the command at all. On top of that `timeout` uses 124 for a
 # kill and 125 for its own failure, and the shell uses 126/127 for a command it
@@ -252,7 +252,7 @@ store_line="$(grep -nE 'data\[i\] \+= 1' "$here/add_one.hip" | head -1 | cut -d:
 # is missing").
 echo "running rocgdb (interior breakpoint + continue) ..."
 outfile2="$workdir/rocgdb2.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex "break add_one.hip:${store_line}" \
@@ -299,7 +299,7 @@ launch_line="$(grep -nE 'add_one<<<' "$here/add_one.hip" | head -1 | cut -d: -f1
 [[ -z "$launch_line" ]] && launch_line=30
 echo "running rocgdb (GPU address watchpoint, launch line $launch_line) ..."
 outfile3="$workdir/rocgdb3.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex "break add_one.hip:${launch_line}" \
@@ -341,7 +341,7 @@ check3 "add_one .*at .*:${store_line}" 'stopped at the store that wrote the watc
 # INSTRUCTION + TRAPSTS.illegal_inst.
 echo "running rocgdb (illegal instruction) ..."
 outfile4="$workdir/rocgdb4.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
@@ -382,7 +382,7 @@ badapp="$workdir/bad_access"
 if hipcc --offload-arch="$arch" -g -O0 -o "$badapp" "$here/bad_access.hip" 2>"$workdir/badbuild.log"; then
   echo "running rocgdb (memory violation) ..."
   outfile5="$workdir/rocgdb5.out"
-  timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+  timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
     rocgdb --batch \
       -ex 'set breakpoint pending on' \
       -ex 'break bad_access' \
@@ -424,7 +424,7 @@ fi
 # warning "flat_scratch may be corrupted, private memory access is disabled".
 echo "running rocgdb (private/scratch variable reads) ..."
 outfile6="$workdir/rocgdb6.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
@@ -486,7 +486,7 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
   mw_line="$(grep -nE 'data\[i\] = local' "$here/multi_wave.hip" | head -1 | cut -d: -f1)"
   [[ -z "$mw_line" ]] && mw_line=19
   outfile7="$workdir/rocgdb7.out"
-  timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+  timeout 180 "$rocjitsu_bin" run --profile "$profile" "${rocjitsu_runtime_args[@]}" -- \
     rocgdb --batch \
       -ex 'set breakpoint pending on' \
       -ex "break multi_wave.hip:${mw_line}" \

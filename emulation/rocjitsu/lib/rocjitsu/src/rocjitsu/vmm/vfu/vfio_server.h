@@ -4,9 +4,10 @@
 /// @file vfio_server.h
 /// @brief Entry point that serves a PCI function to a VMM until interrupted.
 ///
-/// @details This is the body of the CLI's vfio-user mode, kept out of the CLI so
-/// the front end stays a thin argument parser and so nothing outside this
-/// library links libvfio-user.
+/// @details This is the body of the CLI's vfio-user mode, kept here so the front
+/// end stays a thin argument parser and so nothing outside this library links
+/// libvfio-user. Built only when `ROCJITSU_ENABLE_VFIO` is on, which is also
+/// what puts it into `librocjitsu.so` for the CLI to resolve.
 
 #pragma once
 
@@ -31,6 +32,10 @@ enum class ServerSignalAction {
 [[nodiscard]] ServerSignalAction action_for_signal(int signal);
 
 /// @brief Serve a PCI function on @p socket_path until the process is signalled.
+///
+/// @note Reached from the CLI through `rj_run_vfio_server` in
+/// `rocjitsu/vmm/rj_vfio.h`, which is the C-callable spelling of this: the CLI
+/// is not C++ and cannot name a function taking `std::string`.
 /// @param[in] config_path Simulation config describing the GPU to present.
 /// @param[in] socket_path Filesystem path of the AF_UNIX socket to listen on.
 /// @param[in] ready_fd Optional pipe descriptor notified after the socket is ready.
@@ -47,5 +52,17 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
                                               const std::string &socket_path, int ready_fd,
                                               int exit_code);
+
+/// @brief Make the next @ref run_vfio_server call throw, once.
+/// @details Test-only, and the only way to exercise the exception boundary in
+/// `rj_run_vfio_server`: that boundary exists because the server can throw and
+/// its caller is Rust, which cannot receive an exception, but nothing a test
+/// can pass as an argument reaches a throwing path. Without a seam the boundary
+/// is asserted by reading it, which is how the same guarantee was wrong once
+/// already -- an earlier version of it allocated inside the handler.
+///
+/// Consumed by the call it arms, so a test that arms it and then fails before
+/// calling does not leave the next one poisoned.
+void throw_from_next_vfio_server_for_test();
 
 } // namespace rocjitsu

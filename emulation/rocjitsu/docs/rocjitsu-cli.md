@@ -3,7 +3,7 @@
 ## Overview
 
 The `rocjitsu` CLI is the primary entry point for running applications on
-the simulated GPU. It operates in four modes:
+the simulated GPU. It operates in two modes:
 
 - **Local mode**: Sets `LD_PRELOAD` and `execve`s the target application.
   The simulator runs in-process via the interposer.
@@ -11,10 +11,6 @@ the simulated GPU. It operates in four modes:
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
   is shared using memfds passed via SCM_RIGHTS.
-- **Attach mode**: Launches an application against an already-running daemon.
-- **VFIO-user mode**: Serves one configured PCI function to an external VMM
-  through an AF_UNIX socket. This mode is available only in builds configured
-  with `ROCJITSU_ENABLE_VFIO=ON`.
 
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
@@ -46,44 +42,102 @@ receiving real GPU descriptors over a Unix socket.
 
 ## Command-Line Options
 
+The CLI is a Rust program under `emulation/rocjitsu/cli`, built with the rest
+of rocjitsu. It is subcommand-based, and `rocjitsu run` is the subcommand that
+puts a workload on an emulated machine. `rocjitsu run --help` is the complete
+list of options; what follows is the part of it this page is about.
+
 ```
-Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
-       rocjitsu --config <config.json> --vfio-socket <path>
+Usage: rocjitsu run [OPTIONS] -- <COMMAND> [ARGS]...
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--config <path>` | Path to simulation config JSON (required) |
-| `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
-| `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
-| `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. The VMM must share guest RAM through mmap-able file descriptors. |
-| `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
+| `--config <path>` | Path to a simulation config JSON. Without one, the machine comes from `--profile`. |
+| `--profile <name>` | Emulator preset to use. Defaults to the `mi350x` builtin. |
+| `--daemon` | Host the emulator in a separate process, which several workloads can share. Required for multi-GPU RCCL collectives. Default for `rocjitsu run`. |
+| `--in-process` | Host the emulator inside the workload's own process. Cannot share GPU memory across processes. |
 | `--help`, `-h` | Print usage and exit |
-| `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
+| `--version`, `-V` | Print version, Git revision, commit date, and commit title, then exit |
 | `--` | Separator between rocjitsu options and the target application command line |
 
 ### Usage Examples
 
 ```bash
-# Local mode: in-process simulation
-rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+# In-process, from a config file
+rocjitsu run --in-process --config configs/gfx950_mi355x_kmd.json -- ./app
 
-# Daemon mode: fork daemon + launch app
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
+# Daemon, from a config file
+rocjitsu run --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
 
-# Daemon-only: run server (no app launched)
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
-
-# Attach to running daemon
-rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
-
-# Serve the gfx1250 PCI function to a VMM
-rocjitsu --config configs/gfx1250_mi455x.json \
-  --vfio-socket /tmp/rocjitsu-vfio/vfio-user.sock
+# A session with no workload, held open until stopped. Join it from
+# another terminal with `rocjitsu exec`, and end it with `rocjitsu
+# session stop <id>`.
+rocjitsu run --daemon --config configs/gfx950_mi355x_kmd.json
+rocjitsu exec --session <id> -- ./app
 ```
 
-See [QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract and
-launcher.
+### The older `rocjitsu --config … -- <app>` spelling
+
+The previous C++ front end had no subcommand. That spelling still works: an
+invocation with a `--` and no subcommand in front of it is routed to `run`,
+and it keeps the modes it had, not `run`'s.
+
+| Older invocation | What it does now |
+|---|---|
+| `rocjitsu --config c.json -- ./app` | `rocjitsu run --in-process --config c.json -- ./app`. The old CLI ran in-process unless asked otherwise, and this spelling still does — note that this is the opposite of `rocjitsu run`'s own default. |
+| `rocjitsu --daemon --config c.json -- ./app` | `rocjitsu run --daemon --config c.json -- ./app` |
+| `rocjitsu --daemon --config c.json` | `rocjitsu run --daemon --config c.json` — a session with no workload, as before. |
+| `rocjitsu --attach --config c.json -- ./app` | Refused, with an explanation. See below. |
+
+`--attach` is gone. It joined a daemon that something else had already
+started, at a well-known socket path. rocjitsu has no such daemon: every one
+it starts belongs to the run that started it and is torn down with it, so
+there is nothing to attach to and no socket to look for. To share one emulated
+machine between terminals, start it with `rocjitsu run` and join it with
+`rocjitsu exec --session <id> -- <command>`.
+
+### Serving a GPU to a VMM
+
+Builds configured with `-DROCJITSU_ENABLE_VFIO=ON` can present an emulated GPU
+to a VMM such as QEMU as a real PCI device, over the vfio-user protocol.
+
+```bash
+rocjitsu vfio-serve --config configs/gfx1250_mi455x.json --vfio-socket /tmp/gpu.sock
+```
+
+The older spelling, `rocjitsu --config <cfg> --vfio-socket <path>`, routes to
+the same place. It is a mode of its own and cannot be combined with `--daemon`,
+`--attach` or a workload, exactly as before.
+
+The server blocks until it is signalled: `SIGINT` or `SIGTERM` stops it, and
+`SIGUSR1` delivers an interrupt to the emulated device. Which GPU is presented
+comes from the config, and not every config can be served — the device has to
+have an IP discovery profile for a guest driver to find anything to attach to,
+and the server says so when it does not. On a build without vfio-user support
+the command reports that and exits nonzero.
+
+### Reporting what a config would allocate
+
+`thread-budget-table` prints the execution threads a config resolves to, at its
+own budget and at the ceilings the [configuration
+reference](configuration.md#thread-accounting-and-preferred-allocations)
+tabulates.
+
+```bash
+rocjitsu thread-budget-table --config configs/gfx950_mi355x.json
+```
+
+The older spelling, `rocjitsu --config <cfg> --thread-budget-table`, routes to
+the same place, and like serving a VMM it cannot be combined with `--daemon`,
+`--attach` or a workload.
+
+It builds no GPU and runs nothing: it reads the config and applies the same
+allocation rule the emulator does, which is how it can answer before there is a
+machine. The `Configured` row is the file's own request — what a run will
+actually do — and the numbered rows are ceilings, so the total may sit below one,
+or above it where an explicit `num_threads` or `cpu_dispatch_threads` overrides
+the budget.
 
 ## Architecture
 
@@ -127,7 +181,6 @@ destroys the topology root (VirtualMachine), which destroys the driver.
 | Local | `rocjitsu -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (server) | `rocjitsu --daemon -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (client) | LD_PRELOAD interposer | RemoteDriver (RPC stub) | In daemon process |
-| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` | Guest AMDGPU driver through PCI/VFIO | rocJITsu process |
 
 ## RPC Protocol
 
@@ -323,7 +376,8 @@ kernel 6.12.59+ and 6.15+.
 | `simulated_kfd.h/.cpp` | KFD ioctl dispatch, allocation table, events |
 | `interposer.cpp` | LD_PRELOAD syscall intercepts |
 | `events.h/.cpp` | KFD event subsystem (create, set, wait, destroy) |
-| `tools/rocjitsu/main.cpp` | CLI entry point, RPC dispatch loop (daemon mode) |
+| `cli/src/main.rs` | CLI entry point, and the routing that keeps the older spelling working |
+| `daemon/rj_daemon.h` | C entry points the CLI starts and stops the daemon through |
 | `tests/daemon_test.cpp` | Gtest fixture for daemon end-to-end tests |
 | `virtual_machine.h/.cpp` | VM component owning SoC and driver |
 

@@ -1,0 +1,2033 @@
+//! `rj_backend_rocjitsu` — rocjitsu integration for the rocjitsu binary.
+//!
+//! This crate exposes helpers the rocjitsu binary needs at runtime:
+//!
+//! rocjitsu does **not** build or embed the rocjitsu *library*
+//! (`librocjitsu.so`); it is discovered at runtime from the installed
+//! system (see [`kmd_preload`]).
+//!
+//! Runtime entry points:
+//!
+//! * [`kmd_config`] synthesises a runtime `SimulationConfig` JSON
+//!   from an [`rj_core::emulator::EmulatorDef`] by resolving its
+//!   topology + agent references and wrapping them with rocjitsu's
+//!   required runtime fields.
+
+use std::path::{Path, PathBuf};
+
+use rj_core::agent::AgentDef;
+use rj_core::common::{MaybeRef, SimpleMap, SimpleValue};
+use rj_core::config::OptionDef;
+use rj_core::discovery::{LibSearch, RuntimeLocation};
+use rj_core::emulator::{
+    EmulatorBackend, EmulatorBackendDef, EmulatorDaemon, EmulatorDef, EmulatorDescription,
+    ExecMode, RuntimeStatus, SupportStatus,
+};
+use rj_core::error::{Result, RocJITsuError};
+use rj_core::exec::InjectionDef;
+use rj_core::plugin::PluginsDef;
+use rj_core::profile::ProfileDef;
+use rj_core::session::{SessionContext, SessionHealth, state};
+use rj_core::topology::TopologyDef;
+
+pub mod dbt;
+pub mod guest;
+
+/// Overridable default environment for workloads run under rocjitsu.
+///
+/// These mirror the environment the upstream rocjitsu RCCL collective
+/// tests run with (`rocjitsu/tests/daemon_test.cpp`): RCCL must avoid
+/// the P2P and shared-memory transports the simulated topology does not
+/// model and stay on a single loopback socket, while ROCr must use SDMA
+/// copies and skip scratch reclaim. rocprofiler-register is disabled
+/// since the simulated GPU does not back it. Applied as defaults in
+/// [`Rocjitsu::injection_def`]; the per-exec environment overrides any
+/// of them.
+const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
+    ("HSA_ENABLE_SDMA", "1"),
+    ("ROCPROFILER_REGISTER_ENABLED", "0"),
+    ("HSA_NO_SCRATCH_RECLAIM", "1"),
+    ("NCCL_P2P_DISABLE", "1"),
+    ("NCCL_SHM_DISABLE", "1"),
+    ("NCCL_SOCKET_NTHREADS", "1"),
+    ("NCCL_NSOCKS_PERTHREAD", "1"),
+    ("NCCL_SOCKET_IFNAME", "lo"),
+    ("NCCL_MAX_NCHANNELS", "1"),
+    ("NCCL_MIN_NCHANNELS", "1"),
+    ("NCCL_NET_GDR_LEVEL", "LOC"),
+    ("NCCL_IB_DISABLE", "1"),
+    ("NCCL_CUMEM_ENABLE", "0"),
+];
+
+/// rocjitsu [`EmulatorBackend`] implementation. Bundles the
+/// rocjitsu-specific injection (the KMD `LD_PRELOAD` plus the
+/// `ROCJITSU_RUNTIME_DIR` env var and the `config_path` discovery file
+/// it points at) and profile validation so callers dispatch generically
+/// through [`rj_core::emulator::get_emulator_backend`]. Stateless; a
+/// single shared instance is registered in the emulator registry.
+#[derive(Debug)]
+pub struct Rocjitsu;
+
+impl EmulatorBackend for Rocjitsu {
+    fn description(&self) -> EmulatorDescription {
+        describe()
+    }
+
+    fn boot(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    fn options(&self) -> Vec<OptionDef> {
+        describe().options_schema
+    }
+
+    fn shutdown(&self, _ctx: &SessionContext) {}
+
+    fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
+        // Resolving the kmd config follows the topology + agent
+        // references and applies rocjitsu's own limits; any error here is
+        // precisely what would otherwise surface at run time. No session
+        // exists at validation time, so nothing is written — not into the
+        // session that does not exist yet, and not into a shared temp
+        // directory nobody would ever clean up either.
+        check_config(&def.emulator).map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
+    }
+
+    fn runtime(&self) -> RuntimeStatus {
+        // rocjitsu is installed exactly when its one library is on the
+        // machine, so the search that answers "where?" also answers
+        // "installed?" — see `runtime_location`. Which is why
+        // `installed` is left to the trait: its default reads the flag
+        // out of this, and the override that used to sit here was a
+        // second route to the same search that could only ever agree or
+        // be a bug.
+        RuntimeStatus::from_location(runtime_location())
+    }
+
+    fn supported(&self) -> SupportStatus {
+        // rocjitsu emulates the GPU in software, so it runs on any host
+        // regardless of the physical hardware present.
+        //
+        // Still supported when the located library cannot host a daemon,
+        // and deliberately: `--in-process` emulation goes through the
+        // interposer and needs none of the daemon API, so calling the
+        // host unsupported would refuse a mode that works. What it costs
+        // is multi-process sharing of emulated GPU memory — and that is
+        // reported, but not from here.
+        //
+        // Answering it here would mean `dlopen`ing the interposer to
+        // answer a question about hardware. `registry()` calls this for
+        // every backend, and `registry()` is on the path of every `rocjitsu
+        // run` that carries an override flag, `rocjitsu profile create` and
+        // `rocjitsu emulators` alike — so a probe in this method maps the
+        // KMD interposer into the CLI process of an `--in-process` run
+        // that will never host a daemon, which is the very thing the
+        // `if ctx.daemon` guard in the supervisor exists to avoid. It
+        // would also break the contract this backend's own trait states:
+        // `daemon_capability` must be cheap enough for `health` to ask,
+        // and `supported` must be cheap enough for a listing.
+        //
+        // `rocjitsu emulators -l` asks the capability directly instead, so
+        // the one command whose job is detail is the one that pays for
+        // it. See `emulators_cmd` in `rj_ctl`.
+        SupportStatus::supported("software emulator; no special hardware required")
+    }
+
+    fn discover_plugins(&self) -> Vec<PluginsDef> {
+        // Report the plugins whose shared objects ship next to the
+        // interposer (`librocjitsu_plugin_<name>.so`). Each entry is a
+        // ready-to-use selection — the plugin name mapped to an empty
+        // argument object — that a caller can merge into a profile's
+        // `plugins` to enable it with its schema defaults. Empty when
+        // rocjitsu is not installed or ships no plugins.
+        let Some(preload) = kmd_preload() else {
+            return Vec::new();
+        };
+        discover_plugin_names(&preload)
+            .into_iter()
+            .map(|name| PluginsDef::from([(name, SimpleMap::new())]))
+            .collect()
+    }
+
+    fn health(&self, ctx: &SessionContext) -> SessionHealth {
+        // One problem, decided once, so the snapshot is built in one
+        // place. Built through `SessionHealth::phase` and not a struct
+        // literal: the literal's `..Default::default()` fills `timestamp`
+        // with `DateTime::<Utc>::default()`, which is the Unix epoch, so
+        // every snapshot rocjitsu reported was stamped 1970-01-01 in the
+        // serialized output. `phase` stamps `Utc::now()`.
+        let problem = if is_installed() {
+            // Located is not the same as usable *for this session*. A
+            // library that predates the daemon API emulates a workload
+            // in-process perfectly well and cannot host the daemon a
+            // multi-process session needs, so a session that wants one is
+            // not ready however present the library is.
+            ctx.daemon
+                .then(|| self.daemon_capability().err())
+                .flatten()
+                .map(|e| e.to_string())
+        } else {
+            Some(format!("rocjitsu KMD library ({LIB_NAME}) not found"))
+        };
+        match problem {
+            // Not `state::FAILED`: that one means terminal, and neither of
+            // these is — installing the library or updating it makes the
+            // same session healthy without recreating it.
+            Some(message) => SessionHealth::phase(false, "error", Some(message)),
+            None => SessionHealth::phase(true, state::READY, None),
+        }
+    }
+
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+        let def = ctx.emulator();
+        let config = session_config(ctx)?;
+        // Refuse to run unemulated: if the KMD interposer can't be
+        // located there is nothing to emulate the workload, so fail
+        // loudly rather than silently running on real hardware.
+        let ld_preload = kmd_preload().ok_or_else(|| {
+            // The search itself says where it looked, so this cannot
+            // drift from it the way the hand-written list did.
+            let detail = runtime_location()
+                .explain_missing()
+                .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+            RocJITsuError::Other(format!(
+                "rocjitsu: KMD preload library ({LIB_NAME}) not found; cannot \
+                 emulate workload. Install rocjitsu (see docs/building.md) — \
+                 {detail}"
+            ))
+        })?;
+
+        // The KMD interposer discovers its `SimulationConfig` by reading a
+        // `config_path` file from its per-user runtime directory (resolved
+        // as `$ROCJITSU_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/rocjitsu`, else
+        // `/tmp/rocjitsu-<uid>`); the file's contents are the path to the
+        // config JSON it then loads via `rj_vm_create`. It does *not* read
+        // any configuration environment variable. We therefore point it at
+        // a per-session runtime directory and write that discovery file
+        // ourselves. Without it the interposer finds no config, never
+        // stands up the emulated device, and the workload fails with
+        // "Unable to open /dev/kfd ... No such device".
+        //
+        // `config` is a host path, and the file records it verbatim.
+        // Nothing rewrites file *contents* on the way into a container —
+        // only environment values are remapped onto the in-container
+        // mounts — so the supervisor bind-mounts the session scratch
+        // directory at its host path as well as at
+        // `/mnt/rocjitsu/runtime`, and this path resolves in both views.
+        // See `plan_container` in `rj_supervisor::session`. (Before
+        // the supervisor existed, a per-node `rocjitsu host` process inside
+        // each container re-resolved the whole injection instead.)
+        //
+        // The runtime directory is the session's, whoever wrote the
+        // config: in drop-in `--config` mode `config` is a file of the
+        // user's, and deriving the runtime directory from *its* location
+        // would leave the discovery file and the daemon socket beside it,
+        // outside the session, uncleaned, and shared with any other run
+        // pointed at the same config.
+        // A config carrying an enabled `dbt_guest` block asks for a
+        // synthetic guest GPU on top of the interposer, which needs the
+        // host GPU resolved here and the HSA hook wired in alongside.
+        // See `guest` for why the launcher, not the runtime, resolves it.
+        let containerized = ctx.profile.containerize.is_some();
+        let guest_launch = match guest::load(&config)? {
+            Some(guest) => {
+                // Refuse to run half-emulated: without the hook the
+                // application would discover a guest GPU whose code
+                // objects nothing translates.
+                let hooks = guest::hooks_lib()?;
+                let in_workload = if containerized {
+                    format!("{CONTAINER_LIB_DIR}/{}", dbt::HOOKS_LIB_NAME)
+                } else {
+                    hooks.display().to_string()
+                };
+                let plan = guest::plan(&config, &guest, &in_workload, &dbt::ProcessEnv)?;
+                Some((plan, hooks))
+            }
+            None => None,
+        };
+        let launch = guest_launch.as_ref().map(|(plan, _)| plan);
+
+        let runtime_dir = match launch {
+            // The guest handoff carries a second line naming the
+            // resolved host GPU, and the library's own writer produces
+            // it — see `guest::write_handoff`.
+            Some(launch) => {
+                let runtime_dir = ctx.runtime_dir.join(RUNTIME_SUBDIR);
+                guest::write_handoff(&ld_preload, &runtime_dir, &config, launch.host_gpu_id)?;
+                runtime_dir
+            }
+            None => write_config_discovery(&ctx.runtime_dir, &config)?,
+        };
+
+        let mut env = std::collections::BTreeMap::new();
+        env.insert(
+            "ROCJITSU_RUNTIME_DIR".to_string(),
+            runtime_dir.display().to_string(),
+        );
+        // Name the directory outright as well. The interposer's own
+        // fallback derives it from the reader's PID, which is right for
+        // the workload but wrong for anything it spawns through a
+        // wrapper — a `ctest` or a shell script puts a different PID
+        // between rocjitsu and the process that reads this. Every
+        // descendant inherits the variable, so every descendant looks in
+        // the same place.
+        env.insert(
+            "ROCJITSU_INVOCATION_DIR".to_string(),
+            runtime_dir.display().to_string(),
+        );
+
+        // Default runtime tuning the emulated workload needs to behave
+        // under rocjitsu. These mirror the environment the upstream
+        // rocjitsu RCCL collective tests run with (see
+        // `rocjitsu/tests/daemon_test.cpp`): RCCL must avoid the P2P and
+        // shared-memory transports the simulated topology does not model
+        // and stick to a single loopback socket, and ROCr must use SDMA
+        // copies without scratch reclaim. They are *defaults*: the
+        // per-exec environment (`rocjitsu run --env KEY=VALUE`) is layered
+        // on top in `rocjitsu_host` and overrides any of these, so a user
+        // who needs different RCCL/HSA tuning can still set it.
+        for (key, value) in RCCL_ENV_DEFAULTS {
+            env.insert((*key).to_string(), (*value).to_string());
+        }
+
+        // For a containerised session the workload runs inside a node
+        // container that does *not* share the host filesystem, so the
+        // rocjitsu library (`librocjitsu.so`) must be made available
+        // inside it. We declare it as a `library`; the orchestrator
+        // bind-mounts it into `CONTAINER_LIB_DIR` (`/mnt/rocjitsu/lib`),
+        // preserving its file name, and adds that directory to
+        // `LD_LIBRARY_PATH`. The per-node host *inside* the container
+        // re-resolves this injection against its own environment, where
+        // its discovery also searches `CONTAINER_LIB_DIR`, so the
+        // in-container resolution finds the library there with no extra
+        // configuration. Without it the in-container host fails to locate
+        // the library and the exec can never start.
+        let libraries = if containerized {
+            // Bind-mount the interposer plus the shared object for each
+            // plugin this profile enables so the in-container plugin loader
+            // can resolve it next to the interposer (the loader searches the
+            // interposer's own directory / `LD_LIBRARY_PATH`, both of which
+            // include `CONTAINER_LIB_DIR`). A plugin the interposer build
+            // does not ship is silently skipped here and by the loader at
+            // runtime.
+            let mut libs = vec![ld_preload.display().to_string()];
+            libs.extend(
+                enabled_plugin_libs(&ld_preload, &def.plugins)
+                    .into_iter()
+                    .map(|path| path.display().to_string()),
+            );
+            // Guest mode loads the HSA hook through `HSA_TOOLS_LIB`,
+            // which the plan above already pointed at `CONTAINER_LIB_DIR`;
+            // this is what puts the file there.
+            if let Some((_, hooks)) = &guest_launch {
+                libs.push(hooks.display().to_string());
+            }
+            libs
+        } else {
+            Default::default()
+        };
+
+        // Guest mode's rewritten visibility selectors and hook wiring go
+        // in last so they win over the RCCL defaults above.
+        let host_gpus = guest_launch.is_some_and(|(launch, _)| {
+            env.extend(launch.env);
+            launch.host_gpus
+        });
+
+        Ok(InjectionDef {
+            wrapper: None,
+            ld_preload: Some(ld_preload.display().to_string()),
+            files: Default::default(),
+            env,
+            mounts: Default::default(),
+            libraries,
+            // Guest mode over a real host GPU runs translated code on it,
+            // so a containerised node needs the host GPUs exposed.
+            host_gpus,
+        })
+    }
+
+    fn daemon_capability(&self) -> Result<()> {
+        // Answered once per process; see `located_daemon_capability`.
+        located_daemon_capability()
+            .as_ref()
+            .map_or_else(|e| Err(RocJITsuError::Other(e.to_string())), |()| Ok(()))
+    }
+
+    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        // One rocjitsu daemon per session. If the KMD library cannot be
+        // located there is nothing to host the emulated device with;
+        // return `None` rather than erroring, since the per-exec
+        // `injection_def` already fails loudly in that case.
+        let Some(lib) = kmd_preload() else {
+            tracing::warn!(
+                "rocjitsu: KMD library ({LIB_NAME}) not found; \
+                 not starting daemon"
+            );
+            return Ok(None);
+        };
+        // The daemon is the one load the launcher cannot avoid: it hosts
+        // the emulator in this very process.
+        check_sanitizer_preload()?;
+        let config = session_config(ctx)?;
+        // A guest GPU is synthesised by the interposer inside the
+        // workload's own process, on top of a host the launcher resolved
+        // for that process. A daemon hosts a simulated machine for
+        // several processes to share, which is a different shape
+        // entirely and has no guest overlay in it — so refuse rather
+        // than start a daemon the workload will not use.
+        if guest::load(&config)?.is_some() {
+            return Err(RocJITsuError::Other(
+                "rocjitsu: dbt_guest supports local launch only; run without --daemon".to_string(),
+            ));
+        }
+        // The daemon binds its socket under the same runtime directory the
+        // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
+        // exactly what `injection_def` exports — so the workload connects
+        // to *this* daemon with no extra wiring. Both live in the
+        // session's scratch directory and go away with it.
+        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
+        let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
+            .map_err(|e| RocJITsuError::Other(format!("rocjitsu daemon: {e}")))?;
+        Ok(Some(Box::new(RocjitsuDaemon(daemon))))
+    }
+}
+
+/// Describe the rocjitsu emulator backend for the registry. Owned by
+/// this crate (rather than `rj_core`) so that all rocjitsu-
+/// specific policy lives alongside the rocjitsu runtime integration.
+pub fn describe() -> EmulatorDescription {
+    EmulatorDescription {
+        name: "rocjitsu".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)".to_string(),
+        options_schema: [
+            (
+                "cpu_thread_budget",
+                "Execution-thread ceiling; 0 uses affinity with up to 32 CPU workers plus preset helpers.",
+            ),
+            (
+                "num_threads",
+                "Engine partitions; 0 uses the target default.",
+            ),
+            (
+                "cpu_dispatch_threads",
+                "Inclusive dispatch width per GPU; 0 selects from the target table.",
+            ),
+            (
+                "async_helper_threads",
+                "Shared async MMA helpers; -1 selects the target default, 0 disables.",
+            ),
+        ]
+        .into_iter()
+        .map(|(name, description)| OptionDef {
+            name: name.to_owned(),
+            dtype: rj_core::common::SimpleType::Number,
+            description: description.to_owned(),
+            default: None,
+        })
+        .collect(),
+    }
+}
+
+inventory::submit! {
+    EmulatorBackendDef {
+        kind: "rocjitsu",
+        backend: &Rocjitsu,
+    }
+}
+/// Subdirectory name used to namespace rocjitsu's per-session runtime
+/// directory (the daemon socket + `config_path` discovery file) under
+/// the session dir.
+pub const RUNTIME_SUBDIR: &str = "rocjitsu";
+
+/// In-container directory where the host-side rocjitsu libraries are
+/// bind-mounted for a containerised session. All rocjitsu system mounts
+/// live under `/mnt/rocjitsu`; the in-container KMD discovery searches
+/// this directory (see [`kmd_preload`]).
+pub const CONTAINER_LIB_DIR: &str = "/mnt/rocjitsu/lib";
+
+/// Name used for the rocjitsu library on disk. A single combined
+/// `librocjitsu.so` exports both the KMD interposer (LD_PRELOAD) and the
+/// HSA tools hooks (`HSA_TOOLS_LIB`).
+pub const LIB_NAME: &str = "librocjitsu.so";
+
+/// Filename prefix of a rocjitsu runtime plugin shared object. Together
+/// with [`PLUGIN_LIB_SUFFIX`] it brackets the plugin's `<name>`:
+/// `librocjitsu_plugin_<name>.so`. That `<name>` is the key used to
+/// enable and configure the plugin in the config file.
+pub const PLUGIN_LIB_PREFIX: &str = "librocjitsu_plugin_";
+/// Filename suffix of a rocjitsu runtime plugin shared object (see
+/// [`PLUGIN_LIB_PREFIX`]).
+pub const PLUGIN_LIB_SUFFIX: &str = ".so";
+
+/// Names of the rocjitsu plugins whose shared objects sit next to the
+/// interposer `preload` (the `<name>` in `librocjitsu_plugin_<name>.so`),
+/// sorted and de-duplicated. Empty when the directory cannot be read.
+pub fn discover_plugin_names(preload: &Path) -> Vec<String> {
+    let Some(dir) = preload.parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_str()?;
+            file_name
+                .strip_prefix(PLUGIN_LIB_PREFIX)?
+                .strip_suffix(PLUGIN_LIB_SUFFIX)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Shared-object paths for the plugins `plugins` enables that actually
+/// exist next to the interposer `preload`. Used to bind-mount the plugin
+/// `.so`s into a containerised session alongside the interposer so the
+/// in-container plugin loader resolves them (rocjitsu adds the mount dir to
+/// `LD_LIBRARY_PATH`). A requested plugin with no matching `.so` on disk
+/// is omitted; the loader logs and skips it at runtime.
+pub fn enabled_plugin_libs(preload: &Path, plugins: &PluginsDef) -> Vec<PathBuf> {
+    let Some(dir) = preload.parent() else {
+        return Vec::new();
+    };
+    plugins
+        .keys()
+        .filter_map(|name| {
+            find_lib_in(
+                dir,
+                &format!("{PLUGIN_LIB_PREFIX}{name}{PLUGIN_LIB_SUFFIX}"),
+            )
+        })
+        .collect()
+}
+
+/// Name of the synthesised rocjitsu `SimulationConfig` written into a
+/// session's scratch directory.
+pub const RJ_CONFIG_NAME: &str = "rj_config.json";
+
+/// Path of the synthesised `SimulationConfig` inside a session's scratch
+/// directory.
+#[must_use]
+pub fn rj_config_path(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join(RJ_CONFIG_NAME)
+}
+
+/// Adapter making a [`rocjitsu_sys::daemon::Daemon`] usable as the
+/// emulator-agnostic handle rocjitsu's supervisor holds.
+#[derive(Debug)]
+struct RocjitsuDaemon(rocjitsu_sys::daemon::Daemon);
+
+impl EmulatorDaemon for RocjitsuDaemon {
+    fn stop(self: Box<Self>) {
+        self.0.stop();
+    }
+}
+
+/// Point the KMD interposer at `config` by writing the `config_path`
+/// discovery file it reads from `$ROCJITSU_RUNTIME_DIR`, and return that
+/// runtime directory (to export as `ROCJITSU_RUNTIME_DIR`).
+///
+/// The interposer resolves its `SimulationConfig` by reading a
+/// `config_path` file from its per-user runtime directory; the file's
+/// contents are the path to the config JSON.
+///
+/// The runtime directory is always [`RUNTIME_SUBDIR`] under
+/// `session_dir` — the session's own scratch directory — and never
+/// derived from where `config` happens to live. The daemon socket lands
+/// there too, so both are owned by the session, disappear with it, and
+/// stay distinct between two runs. That matters for the drop-in
+/// `--config` mode in particular, where `config` is a file of the
+/// user's that rocjitsu has no business writing next to and that two
+/// concurrent runs may well share.
+pub fn write_config_discovery(session_dir: &Path, config: &Path) -> Result<PathBuf> {
+    let runtime_dir = session_dir.join(RUNTIME_SUBDIR);
+    let config_path_file = runtime_dir.join("config_path");
+    rj_core::state::write_bytes(
+        &config_path_file,
+        format!("{}\n", config.display()).as_bytes(),
+    )?;
+    Ok(runtime_dir)
+}
+
+/// Environment variable naming the KMD interposer directly, as an
+/// absolute path to the `.so`. The explicit override that wins over
+/// every search location, and the counterpart of the DBT backend's
+/// `ROCJITSU_HOOKS_LIB`.
+pub const LIB_ENV: &str = "ROCJITSU_LIB";
+
+/// Returns the path rocjitsu should pass as `LD_PRELOAD` to an
+/// rocjitsu-emulated workload.
+///
+/// Discovery goes through the shared [`rj_core::discovery`] policy,
+/// so `$ROCJITSU_LIB`, `$LD_LIBRARY_PATH`, `$ROCM_HOME`/`$ROCM_PATH`, the
+/// `rocm-sdk` install root and the standard ROCm/system library
+/// directories all locate rocjitsu exactly as they locate every other
+/// backend's library — see that module for the order. On top of the
+/// shared policy this adds the two locations that are specific to
+/// rocjitsu: an in-tree build beside this checkout
+/// (`in_tree_relative_dirs`) and, last, the in-container mount
+/// directory ([`CONTAINER_LIB_DIR`]).
+pub fn kmd_preload() -> Option<PathBuf> {
+    runtime_location().path().map(Path::to_path_buf)
+}
+
+/// Return the formatted build identity exported by the installed RocJITsu library.
+///
+/// The native RocJITsu CLI prints this exact string, so RocJITsu never maintains
+/// a second repository stamp or output format.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library is absent, predates the version API,
+/// or cannot be loaded.
+pub fn version_string() -> std::result::Result<String, String> {
+    let path = kmd_preload().ok_or_else(|| format!("{LIB_NAME} not found"))?;
+    if let Some(why) = rj_core::discovery::sanitizer_preload_missing() {
+        return Err(why);
+    }
+    rocjitsu_sys::version_string(&path)
+}
+
+/// Where `librocjitsu.so` is on this machine, or — when it is not here —
+/// every location [`kmd_preload`] probed for it and the environment
+/// variables that would change the answer.
+///
+/// This is the same search [`kmd_preload`] performs, reported rather
+/// than reduced to an `Option`, so `rocjitsu emulators -l` can tell a user
+/// whose rocjitsu is not found where rocjitsu looked. Deriving the one
+/// from the other keeps a single definition of the search: a "we looked
+/// here" list assembled separately would be a second thing to keep in
+/// step with the policy in [`rj_core::discovery`].
+#[must_use]
+pub fn runtime_location() -> RuntimeLocation {
+    let located = with_kmd_search(rj_core::discovery::locate_emulator_lib);
+    let RuntimeLocation::Missing {
+        lib_name,
+        mut searched,
+        env,
+    } = located
+    else {
+        return located;
+    };
+    // A containerised node reaches its bind-mounted copy through
+    // `LD_LIBRARY_PATH`; this is the fallback for an in-container
+    // process that did not inherit it. It is part of the search, so it
+    // belongs in the list of places a failed search reports having
+    // looked.
+    let in_container = Path::new(CONTAINER_LIB_DIR).join(LIB_NAME);
+    if in_container.is_file() {
+        return RuntimeLocation::found(in_container);
+    }
+    searched.push(in_container);
+    RuntimeLocation::Missing {
+        lib_name,
+        searched,
+        env,
+    }
+}
+
+/// Call `f` with the search policy for the KMD interposer.
+///
+/// The in-tree build locations are computed rather than listed (see
+/// `in_tree_relative_dirs`), so the [`LibSearch`] borrows them and
+/// cannot be returned; handing it to a callback is what lets the search
+/// and any future "we looked here" guidance share one definition.
+fn with_kmd_search<R>(f: impl FnOnce(&LibSearch<'_>) -> R) -> R {
+    let in_tree = in_tree_relative_dirs();
+    let in_tree: Vec<&str> = in_tree.iter().map(String::as_str).collect();
+    f(&LibSearch {
+        file_env: &[LIB_ENV],
+        dir_env: &[],
+        home_env: &[],
+        lib_name: LIB_NAME,
+        binary_relative_dirs: &in_tree,
+        // rocjitsu is an ordinary ROCm-adjacent shared library: unlike
+        // HotSwap it does not ship patched copies of the ROCm runtime,
+        // so picking it up from `$LD_LIBRARY_PATH` or `/opt/rocm/lib` is
+        // exactly what a user who installed it there expects.
+        system_fallbacks: true,
+    })
+}
+
+/// Sub-paths, relative to a project directory, that a rocjitsu build
+/// leaves `librocjitsu.so` in.
+///
+/// `build/` is a plain in-tree `cmake -B build`; `dist/lib` and
+/// `stage/lib` are what a superproject build stages into. Listing the
+/// shapes rather than one blessed layout is what lets rocjitsu find a
+/// freshly built emulator without being told where it is.
+const ROCJITSU_BUILD_SHAPES: &[&str] = &["build", "dist/lib", "stage/lib", "lib"];
+
+/// Places a rocjitsu *project* could sit relative to an ancestor of the
+/// `rocjitsu` binary.
+///
+/// Both the sibling-checkout shape (`<root>/rocjitsu`, reached when the
+/// ancestor is `emulation/`) and the superproject shape
+/// (`<root>/build/emulation/rocjitsu`, reached when it is the repository
+/// or its parent), because a CMake build directory is conventionally
+/// either inside the checkout or immediately beside it.
+const ROCJITSU_PROJECT_DIRS: &[&str] =
+    &["rocjitsu", "emulation/rocjitsu", "build/emulation/rocjitsu"];
+
+/// Directories, relative to the `rocjitsu` binary's own directory, holding
+/// a rocjitsu build in or beside this checkout.
+///
+/// This is the location that matters day to day, and it is deliberately
+/// generous. A developer who has just built rocjitsu should not then
+/// have to tell rocjitsu where it went — the failure mode when they are
+/// not told is silent and expensive, because every session test skips
+/// and a skipped test still reports `ok`.
+///
+/// Each ancestor of the binary is tried as a possible repository root:
+/// `target/<profile>/rocjitsu` is three levels down, an integration-test
+/// binary in `target/<profile>/deps/` is four, and a superproject build
+/// directory beside the checkout is further still. Walking rather than
+/// counting means none of those has to be enumerated correctly, and a
+/// layout nobody anticipated still works.
+///
+/// Note the limit: this can only find a build that shares an ancestor
+/// with the rocjitsu binary. A build directory somewhere else entirely
+/// still needs `$ROCJITSU_LIB` or `$ROCM_PATH`.
+fn in_tree_relative_dirs() -> Vec<String> {
+    const MAX_ANCESTORS: usize = 8;
+    let mut dirs = Vec::with_capacity(
+        MAX_ANCESTORS * ROCJITSU_PROJECT_DIRS.len() * ROCJITSU_BUILD_SHAPES.len(),
+    );
+    // The relative prefix for the ancestor being tried: empty for the
+    // binary's own directory, then one `..` per level up. Empty rather
+    // than `.` because these paths are shown to a user when discovery
+    // fails, and `<dir>/./rocjitsu/build` reads as a typo.
+    let mut up = String::new();
+    for _ in 0..MAX_ANCESTORS {
+        for project in ROCJITSU_PROJECT_DIRS {
+            for shape in ROCJITSU_BUILD_SHAPES {
+                if up.is_empty() {
+                    dirs.push(format!("{project}/{shape}"));
+                } else {
+                    dirs.push(format!("{up}/{project}/{shape}"));
+                }
+            }
+        }
+        if up.is_empty() {
+            up.push_str("..");
+        } else {
+            up.push_str("/..");
+        }
+    }
+    dirs
+}
+
+/// First existing entry named `name` inside `dir`, if any.
+fn find_lib_in(dir: &Path, name: &str) -> Option<PathBuf> {
+    let candidate = dir.join(name);
+    candidate.is_file().then_some(candidate)
+}
+
+/// Project the profile's plugin selection ([`PluginsDef`]) onto the JSON
+/// object shape the rocjitsu config's `plugins` section expects: a map
+/// from plugin name to its argument object. rocjitsu's [`SimpleValue`] is
+/// an externally-tagged serde enum, so a plugin argument cannot be
+/// serialized verbatim (it would render as `{"Boolean": true}`); map each
+/// value onto the plain JSON scalar the rocjitsu plugin loader parses.
+fn plugins_to_json(plugins: &PluginsDef) -> serde_json::Value {
+    let object = plugins
+        .iter()
+        .map(|(name, args)| {
+            let arg_object = args
+                .iter()
+                .map(|(key, value)| {
+                    let scalar = match value {
+                        SimpleValue::String(s) => serde_json::Value::from(s.clone()),
+                        SimpleValue::Number(n) => serde_json::Value::from(*n),
+                        SimpleValue::Boolean(b) => serde_json::Value::from(*b),
+                    };
+                    (key.clone(), scalar)
+                })
+                .collect::<serde_json::Map<String, serde_json::Value>>();
+            (name.clone(), serde_json::Value::Object(arg_object))
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+    serde_json::Value::Object(object)
+}
+
+/// Largest per-node GPU count rocjitsu will ask rocjitsu to emulate.
+///
+/// Every GPU in `vm.gpu.num_gpus` becomes a whole software device inside
+/// the session — its own KFD node, memory image and queues — built
+/// during bring-up and torn down again at exit, so the cost is linear in
+/// the count. Past a certain size that stops being a bigger emulated
+/// machine and becomes a session that never finishes starting and does
+/// not stop when it is asked to, which is the one thing rocjitsu promises
+/// cannot happen. Eight GPUs is the widest physical AMD node; this
+/// leaves an order of magnitude of headroom above it.
+pub const MAX_GPUS_PER_NODE: u32 = 64;
+
+/// Host tuning owned by this backend, separate from the hardware agent model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionThreadChoice {
+    num_threads: u32,
+    cpu_dispatch_threads: u32,
+    #[serde(default)]
+    async_helper_threads: u32,
+}
+
+include!(concat!(env!("OUT_DIR"), "/thread_allocations.rs"));
+
+// Exact native multi-GPU presets retain their measured opt-in dispatch tables.
+// Other GPU counts divide the single-GPU budget with helpers disabled for RCCL.
+fn target_thread_allocations(gfx_target_version: u32, gpus: u32) -> Vec<ExecutionThreadChoice> {
+    preset_thread_allocations(gfx_target_version, gpus.max(1)).unwrap_or_else(|| {
+        spread_thread_allocations_over_gpus(
+            preset_thread_allocations(gfx_target_version, 1).unwrap_or_default(),
+            gpus,
+        )
+    })
+}
+
+// Preserve each single-GPU granule's total budget while keeping one engine
+// across the VM. Divide its remaining threads among the per-GPU dispatch pools.
+fn spread_thread_allocations_over_gpus(
+    mut choices: Vec<ExecutionThreadChoice>,
+    gpus: u32,
+) -> Vec<ExecutionThreadChoice> {
+    if gpus > 1 {
+        for choice in &mut choices {
+            // Leave invalid entries for the native config validator to reject.
+            if choice.num_threads == 0 || choice.cpu_dispatch_threads == 0 {
+                continue;
+            }
+            let workers = u64::from(choice.num_threads - 1)
+                + u64::from(choice.cpu_dispatch_threads - 1)
+                + u64::from(choice.async_helper_threads);
+            choice.num_threads = 1;
+            choice.async_helper_threads = 0;
+            choice.cpu_dispatch_threads = 1 + (workers / u64::from(gpus)) as u32;
+        }
+        choices.dedup();
+    }
+    choices
+}
+
+/// The rocjitsu `SimulationConfig` a profile resolves to, before any of
+/// it reaches the disk.
+#[derive(Debug)]
+enum SimConfig {
+    /// A config file of the user's own, named by the drop-in `--config`
+    /// option and used verbatim. Already on disk; rocjitsu only reads it.
+    Supplied(PathBuf),
+    /// Config JSON synthesised from the profile's topology + agent,
+    /// still to be written into a session's scratch directory.
+    Synthesised(Vec<u8>),
+}
+
+/// Resolve the rocjitsu `SimulationConfig` `def` asks for, writing
+/// nothing.
+///
+/// The agent JSON under `<ROCJITSU_CLI_CONFIG_DIR>/agent/` only stores the
+/// `vm` + `topology` subset that rocjitsu owns. rocjitsu's KMD shim
+/// expects a full `SimulationConfig` (max_ticks, num_threads,
+/// exec_mode, vm, topology). Unless the profile supplies a config of its
+/// own, this:
+///
+/// 1. Resolves `def.topology` (and its inner `agent`), following
+///    [`MaybeRef`] references against the on-disk
+///    `<ROCJITSU_CLI_CONFIG_DIR>/{topology,agent}/` stores.
+/// 2. Wraps the agent's `vm` + `topology` with rocjitsu runtime
+///    fields (`exec_mode` is taken from `def.exec_mode`; the other
+///    fields use sane defaults).
+///
+/// Every way a profile can fail to describe a runnable machine surfaces
+/// here, which is what lets [`check_config`] validate one without a
+/// session and without leaving a file behind.
+fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
+    // Drop-in `--config <path>`: when an explicit rocjitsu simulation
+    // config is supplied (rocjitsu being used as a `rocjitsu` replacement)
+    // use that file verbatim instead of synthesising one from the
+    // profile's topology. This is the `--config` of the upstream
+    // `rocjitsu` CLI. A containerised session cannot reach an arbitrary
+    // host path, so it gets a copy in its own scratch instead; see
+    // [`session_config`].
+    if let Some(SimpleValue::String(path)) = def.options.get("config") {
+        let cfg = PathBuf::from(path);
+        if !cfg.exists() {
+            return Err(RocJITsuError::Other(format!(
+                "rocjitsu config not found: {path}"
+            )));
+        }
+        return Ok(SimConfig::Supplied(cfg));
+    }
+
+    let topology: TopologyDef = match &def.topology {
+        MaybeRef::Owned(t) => t.clone(),
+        MaybeRef::Ref(name) => rj_core::topology::store::get(name)?,
+    };
+    let agent: AgentDef = match &topology.agent {
+        MaybeRef::Owned(a) => a.clone(),
+        MaybeRef::Ref(name) => rj_core::agent::store::get(name)?,
+    };
+    let exec_mode = match def.exec_mode {
+        ExecMode::Functional => "functional",
+        ExecMode::Clocked => "clocked",
+    };
+    if topology.gpus_per_node > MAX_GPUS_PER_NODE {
+        return Err(RocJITsuError::Other(format!(
+            "gpus-per-node {} is more than rocjitsu can emulate; the limit is \
+             {MAX_GPUS_PER_NODE} per node. Each GPU is emulated as a whole software \
+             device — its own KFD node, memory image and queues — built at bring-up \
+             and torn down at exit, so a count this large produces a session that \
+             never finishes starting and cannot be stopped promptly. The widest \
+             physical AMD node is 8 GPUs. Pass --gpus-per-node {MAX_GPUS_PER_NODE} \
+             or fewer, or spread the GPUs over more nodes with --num-nodes.",
+            topology.gpus_per_node
+        )));
+    }
+    // Honour the profile's per-node GPU count: rocjitsu's config loader
+    // reads `vm.gpu.num_gpus` and synthesises that many KFD devices
+    // (deriving per-GPU identities from the single `device` template).
+    // Each node's host process emulates the GPUs local to that node, so
+    // the per-node `gpus_per_node` is what the config requests.
+    let thread_allocations = target_thread_allocations(
+        agent.vm.gpu.device.gfx_target_version,
+        topology.gpus_per_node,
+    );
+    let mut vm = agent.vm;
+    vm.gpu.num_gpus = topology.gpus_per_node.max(1);
+    let mut sim = serde_json::json!({
+        "max_ticks": 100000u64,
+        "exec_mode": exec_mode,
+        "vm": vm,
+        "topology": agent.topology,
+        "thread_allocations": thread_allocations,
+    });
+    // Multi-partition RCCL collectives currently hang on multi-GPU VMs.
+    // Serial dispatch also avoids the measured small-collective slowdown.
+    // Match the native multi-GPU presets; an explicit option below can override.
+    if topology.gpus_per_node > 1 {
+        sim["num_threads"] = serde_json::Value::from(1);
+        sim["cpu_dispatch_threads"] = serde_json::Value::from(1);
+        sim["async_helper_threads"] = serde_json::Value::from(0);
+    }
+    // Leave allocation to the native target-aware policy unless overridden.
+    for (key, min, max) in [
+        ("cpu_thread_budget", 0, i64::from(u32::MAX)),
+        ("num_threads", 0, i64::from(u32::MAX)),
+        ("cpu_dispatch_threads", 0, i64::from(u32::MAX)),
+        ("async_helper_threads", -1, 128),
+    ] {
+        if let Some(value) = def.options.get(key) {
+            match value {
+                SimpleValue::Number(n) if (min..=max).contains(n) => {
+                    // Zero asks for the default, including the multi-GPU pin.
+                    if topology.gpus_per_node > 1
+                        && ((key == "num_threads" && *n == 0)
+                            || (key == "async_helper_threads" && *n == -1))
+                    {
+                        continue;
+                    }
+                    sim[key] = serde_json::Value::from(*n);
+                }
+                _ => {
+                    return Err(RocJITsuError::Other(format!(
+                        "rocjitsu {key} must be an integer between {min} and {max}"
+                    )));
+                }
+            }
+        }
+    }
+    // Carry the profile's plugin selection into the synthesised rocjitsu
+    // config so the interposer (local path) and the per-node daemon both
+    // enable them through the rocjitsu plugin loader. `def.plugins` maps a
+    // plugin name to its argument object — exactly the shape rocjitsu's
+    // `plugins` config section expects. Only emit the key when a plugin is
+    // actually selected so a plugin-free profile still produces a clean,
+    // minimal config (and the near-zero-overhead no-plugin path).
+    if !def.plugins.is_empty()
+        && let serde_json::Value::Object(map) = &mut sim
+    {
+        map.insert("plugins".to_string(), plugins_to_json(&def.plugins));
+    }
+    let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
+        RocJITsuError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
+    })?;
+    Ok(SimConfig::Synthesised(bytes))
+}
+
+/// Materialise the rocjitsu `SimulationConfig` for `def` in
+/// `session_dir` — the session's scratch directory — and return its
+/// path. That path is what gets recorded in the rocjitsu `config_path`
+/// discovery file so the LD_PRELOAD'd interposer loads it.
+///
+/// One file per session, rewritten on each call so it always reflects
+/// the current profile, and removed with the session. A profile that
+/// supplies its own config (drop-in `--config`) is returned as-is and
+/// nothing is written.
+///
+/// # Errors
+///
+/// Returns an error when the topology or agent references cannot be
+/// resolved, the profile asks for more GPUs than rocjitsu will emulate
+/// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be written.
+pub fn kmd_config(def: &EmulatorDef, session_dir: &Path) -> Result<PathBuf> {
+    match resolve_sim_config(def)? {
+        SimConfig::Supplied(cfg) => Ok(cfg),
+        SimConfig::Synthesised(bytes) => {
+            let cfg = rj_config_path(session_dir);
+            rj_core::state::write_bytes(&cfg, &bytes)?;
+            Ok(cfg)
+        }
+    }
+}
+
+/// [`kmd_config`], with a supplied config brought inside a containerised
+/// session's reach.
+///
+/// A synthesised config is written into session scratch, which the
+/// supervisor bind-mounts at its host path as well as at
+/// `/mnt/rocjitsu/runtime` — so the one absolute path names the same
+/// file in both views and everything downstream can keep recording host
+/// paths verbatim. A `--config` the user supplied has no such
+/// arrangement: it is an arbitrary path on the host, the container plan
+/// does not mount it, and the discovery file the in-container interposer
+/// reads would name a file that is not there. What the workload does
+/// then is worse than failing — with no emulated device, it finds the
+/// real one.
+///
+/// So it is copied in beside the synthesised ones, and the copy is what
+/// gets recorded. A guest config's `simulator_config` sibling comes with
+/// it: that reference is resolved relative to the config, which is what
+/// makes a guest config movable as a unit, and moving one without it
+/// would break the very property being relied on.
+fn session_config(ctx: &SessionContext) -> Result<PathBuf> {
+    let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
+    if ctx.profile.containerize.is_none() || config.starts_with(&ctx.runtime_dir) {
+        return Ok(config);
+    }
+    stage_config(&config, &ctx.runtime_dir)
+}
+
+/// Copy `config`, and anything it names relative to itself, into `dir`.
+fn stage_config(config: &Path, dir: &Path) -> Result<PathBuf> {
+    let copy = |from: &Path, to: &Path| -> Result<()> {
+        std::fs::copy(from, to).map(|_| ()).map_err(|e| {
+            RocJITsuError::Other(format!(
+                "rocjitsu: cannot stage {} for a containerised session: {e}",
+                from.display()
+            ))
+        })
+    };
+
+    let name = config.file_name().ok_or_else(|| {
+        RocJITsuError::Other(format!("rocjitsu: {} has no file name", config.display()))
+    })?;
+    let staged = dir.join(name);
+
+    let Some(guest) = guest::load(config)? else {
+        copy(config, &staged)?;
+        return Ok(staged);
+    };
+    if guest.simulator_config.is_empty() {
+        copy(config, &staged)?;
+        return Ok(staged);
+    }
+
+    let sibling = guest::simulator_config_path(config, &guest.simulator_config);
+    // An absolute `simulator_config` is as unreachable as the config was,
+    // and it is not a reference this can relocate: an absolute path names
+    // a place on the host, and the point of staging is that the container
+    // has no such place. Named in the error instead, where a user can act
+    // on it.
+    if Path::new(&guest.simulator_config).is_absolute() {
+        return Err(RocJITsuError::Other(format!(
+            "rocjitsu: dbt_guest.simulator_config {} is an absolute host path, \
+             which a containerised session cannot reach. Make it relative to {}, \
+             or mount it into the container yourself.",
+            sibling.display(),
+            config.display()
+        )));
+    }
+
+    // Staged flat, under a name of this function's choosing, and the copy
+    // of the config is rewritten to match.
+    //
+    // A relative reference can name a subdirectory -- `hosts/host.json` is
+    // the shape the shipped guest configs use -- and staging flattens it.
+    // Copying the config verbatim then left it pointing at `hosts/host.json`
+    // beside a file called `host.json`, so a session that ran fine with a
+    // direct launch failed under `--image` before a container even started.
+    //
+    // The name is derived from the config's, not from the sibling's, so two
+    // references that end in the same basename cannot collide either: a
+    // guest config called `host.json` next to a `hosts/host.json` was a
+    // second way to lose one of the two files.
+    let staged_sibling_name = format!(
+        "{}.simulator_config.json",
+        Path::new(name)
+            .file_stem()
+            .unwrap_or(name)
+            .to_string_lossy()
+    );
+    copy(&sibling, &dir.join(&staged_sibling_name))?;
+
+    let text = std::fs::read_to_string(config).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot read config {} to stage it: {e}",
+            config.display()
+        ))
+    })?;
+    let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot parse config {} to stage it: {e}",
+            config.display()
+        ))
+    })?;
+    json["dbt_guest"]["simulator_config"] = serde_json::Value::String(staged_sibling_name);
+    let rendered = serde_json::to_string_pretty(&json).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot re-render config {} for staging: {e}",
+            config.display()
+        ))
+    })?;
+    std::fs::write(&staged, rendered).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot stage {} for a containerised session: {e}",
+            config.display()
+        ))
+    })?;
+    Ok(staged)
+}
+
+/// Check that `def` describes a machine rocjitsu can stand up, without
+/// writing anything.
+///
+/// This is what profile validation needs. It runs long before any
+/// session exists — `rocjitsu profile create`, and `rocjitsu run`'s
+/// override handling — so it has nowhere of its own to write and must
+/// leave nothing behind; it therefore does everything [`kmd_config`]
+/// does except the final write.
+///
+/// # Errors
+///
+/// Returns an error when the topology or agent references cannot be
+/// resolved, the supplied drop-in config does not exist, or the profile
+/// asks for more GPUs than rocjitsu will emulate.
+pub fn check_config(def: &EmulatorDef) -> Result<()> {
+    resolve_sim_config(def).map(|_| ())
+}
+
+/// Refuse before a `dlopen` this process would not survive.
+///
+/// Every entry point below loads `librocjitsu.so` into the launcher, and
+/// against a sanitizer build that aborts the process unless the
+/// sanitizer runtime is already in its initial library list. Checked
+/// here, once per entry point, because the abort comes from the runtime
+/// itself: it is not a return value anything can inspect, and its
+/// message mentions neither rocjitsu nor the variable that fixes it.
+fn check_sanitizer_preload() -> Result<()> {
+    match rj_core::discovery::sanitizer_preload_missing() {
+        Some(why) => Err(RocJITsuError::Other(format!("rocjitsu: {why}"))),
+        None => Ok(()),
+    }
+}
+
+/// Serve the GPU `config` describes to a VMM on `socket`, over
+/// vfio-user.
+///
+/// Blocks until the server stops, and handles signals while it does; see
+/// [`rocjitsu_sys::run_vfio_server`], which says which ones and why that
+/// constrains who may call this. Returns the server's exit status.
+///
+/// Here rather than in the binary because everything it needs is here:
+/// the same discovery that finds the interposer finds the library the
+/// server lives in, and a second copy of that search in the CLI would be
+/// a second answer to "where is rocjitsu?".
+///
+/// # Errors
+///
+/// Returns an error when the runtime library cannot be located, or when
+/// it was built without vfio-user support.
+pub fn serve_vfio(config: &Path, socket: &Path, ready_fd: i32) -> Result<i32> {
+    check_sanitizer_preload()?;
+    let lib = kmd_preload().ok_or_else(|| {
+        let detail = runtime_location()
+            .explain_missing()
+            .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+        RocJITsuError::Other(format!(
+            "rocjitsu: the rocjitsu runtime library was not found, and the vfio-user \
+             server is part of it — {detail}"
+        ))
+    })?;
+    rocjitsu_sys::run_vfio_server(&lib, config, socket, ready_fd).map_err(RocJITsuError::Other)
+}
+
+/// Whether the located emulator can serve a GPU over vfio-user.
+///
+/// Answered by asking the library for the entry point, because that is
+/// what [`serve_vfio`] does: a probe that decided this some other way
+/// could say yes to a build the server then refuses.
+///
+/// # Errors
+///
+/// Returns an error when the runtime library cannot be located or
+/// loaded, which is a different answer from a library that loaded and has
+/// no vfio-user support.
+pub fn has_vfio_support() -> Result<bool> {
+    check_sanitizer_preload()?;
+    let lib = kmd_preload().ok_or_else(|| {
+        let detail = runtime_location()
+            .explain_missing()
+            .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+        RocJITsuError::Other(format!(
+            "rocjitsu: the rocjitsu runtime library was not found, and vfio-user support \
+             is a property of it — {detail}"
+        ))
+    })?;
+    rocjitsu_sys::has_vfio_server(&lib).map_err(RocJITsuError::Other)
+}
+
+/// The budgets a thread-allocation table reports on, in the order it
+/// shows them. Zero leads, standing for the budget the config itself
+/// asks for; the rest are the ceilings the shipped tables are indexed by.
+pub const THREAD_BUDGET_TABLE_ROWS: &[u32] = &[0, 1, 2, 4, 8, 12, 16, 24, 32, 34, 36, 40, 48, 64];
+
+/// Resolve what `config` would allocate at each of `budgets`, without
+/// building the GPU it describes.
+///
+/// Returns the host thread width every row was resolved against, and one
+/// allocation per budget. A budget of zero reports the config's own
+/// request, which is what the machine will actually do.
+///
+/// Here rather than in the binary for the same reason as
+/// [`serve_vfio`]: the allocation rule lives in the emulator library, and
+/// restating it in the CLI would be a second answer that can disagree
+/// with the one the machine runs.
+///
+/// # Errors
+///
+/// Returns an error when the runtime library cannot be located, when it
+/// predates the entry point, or when it rejects the config.
+pub fn resolve_thread_budgets(
+    config: &Path,
+    budgets: &[u32],
+) -> Result<(u32, Vec<rocjitsu_sys::ThreadAllocation>)> {
+    check_sanitizer_preload()?;
+    let lib = kmd_preload().ok_or_else(|| {
+        let detail = runtime_location()
+            .explain_missing()
+            .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+        RocJITsuError::Other(format!(
+            "rocjitsu: the rocjitsu runtime library was not found, and the thread allocator \
+             is part of it — {detail}"
+        ))
+    })?;
+    rocjitsu_sys::resolve_execution_threads(&lib, config, budgets).map_err(RocJITsuError::Other)
+}
+
+/// Returns true if rocjitsu is reachable on this machine — i.e. a
+/// system install or sibling build of the KMD library is detected.
+pub fn is_installed() -> bool {
+    kmd_preload().is_some()
+}
+
+/// Whether the rocjitsu library at `lib` can host a daemon.
+///
+/// The daemon entry points are newer than the rest of the C API, so a
+/// perfectly good older `librocjitsu.so` loads, emulates in-process, and
+/// has no `rj_daemon_start`. Nothing found that out until the daemon was
+/// started, which for a containerised session is after the image pull,
+/// the network and every container — so the run failed at its last step
+/// on a fact about a file.
+///
+/// Split out from [`Rocjitsu::daemon_capability`] and taking the path
+/// explicitly so the answer can be tested against a library known to lack
+/// the symbols, with no installed rocjitsu and no environment override to
+/// point the search at one.
+///
+/// # Errors
+///
+/// A reason phrased for a user who has just been refused a run: what is
+/// wrong, what it costs, and the one flag that runs without it — except
+/// for a library that will not load at all, which is told the truth
+/// instead, because no flag runs without a library.
+pub fn daemon_capability_of(lib: &Path) -> Result<()> {
+    rocjitsu_sys::daemon::Daemon::probe(lib).map_err(|e| {
+        // Two failures, opposite advice, and only the loader can tell
+        // them apart. `--in-process` emulation `LD_PRELOAD`s this very
+        // file, so recommending it to somebody whose library does not
+        // load sends them to a second failure with the same cause and a
+        // less obvious message.
+        if e.is_unloadable() {
+            return RocJITsuError::Other(format!(
+                "the rocjitsu library at {} could not be loaded: {e}\n\
+                 This is not a rocjitsu too old for the emulator daemon — \
+                 the file is there and the loader will not take it, which \
+                 usually means a missing dependency or a build for another \
+                 architecture. `--in-process` preloads this same library \
+                 and will fail the same way, so reinstalling rocjitsu (see \
+                 docs/building.md) is the fix.",
+                lib.display()
+            ));
+        }
+        RocJITsuError::Other(format!(
+            "the rocjitsu library at {} cannot host the emulator daemon: {e}\n\
+             The daemon is what lets several processes share emulated GPU \
+             memory, so multi-GPU collectives need it. An installation \
+             predating the daemon API looks exactly like this; updating \
+             rocjitsu (see docs/building.md) is the fix. Pass `--in-process` \
+             to run without it — results from a single process are still \
+             correct.",
+            lib.display()
+        ))
+    })
+}
+
+/// The one-per-process answer to [`daemon_capability_of`] for the located
+/// library.
+///
+/// `health` is asked on every status request and bring-up asks once more,
+/// and the answer costs a `dlopen` of a large shared library whose
+/// initialisers run. It cannot change under a running process — the
+/// search reads the filesystem and the environment, neither of which this
+/// process rewrites — so it is answered once and kept.
+///
+/// A library that is not installed at all is `Ok`: that is a different
+/// problem, already reported by `runtime`, `health` and `injection_def`,
+/// and `start_daemon` answers `Ok(None)` to it rather than failing.
+/// Saying it again here would refuse an in-process run, which does not
+/// need a daemon, for a missing library, with a worse message than the
+/// one it is about to get.
+fn located_daemon_capability() -> &'static Result<()> {
+    static ANSWER: std::sync::OnceLock<Result<()>> = std::sync::OnceLock::new();
+    ANSWER.get_or_init(|| {
+        // Before the probe, which is itself a `dlopen`: this is the
+        // first thing a daemon bring-up loads, so it is where a
+        // sanitizer build ends the process if it is going to.
+        check_sanitizer_preload()?;
+        match kmd_preload() {
+            Some(lib) => daemon_capability_of(&lib),
+            None => Ok(()),
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    /// A supplied config reaches a containerised workload by being
+    /// copied where that workload can see it.
+    ///
+    /// The container plan mounts session scratch, the config store and
+    /// the emulator libraries. An arbitrary `--config` is none of those,
+    /// so the discovery file used to name a path that does not exist
+    /// inside the container — and a workload that cannot find an
+    /// emulated device finds the real one.
+    #[test]
+    fn staging_puts_a_supplied_config_in_the_session_scratch() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let config = src.path().join("machine.json");
+        std::fs::write(&config, r#"{"vm": {}, "topology": {}}"#).unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        assert_eq!(staged, scratch.path().join("machine.json"));
+        assert_eq!(
+            std::fs::read_to_string(&staged).unwrap(),
+            std::fs::read_to_string(&config).unwrap()
+        );
+    }
+
+    /// And the file it names beside itself comes with it.
+    ///
+    /// `simulator_config` is resolved relative to the guest config, so a
+    /// guest config moves as a unit or not at all. Copying only the
+    /// config would leave the reference pointing at a sibling that is
+    /// not there.
+    #[test]
+    fn staging_takes_the_relative_simulator_config_along() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::write(
+            src.path().join("host.json"),
+            r#"{"vm": {}, "topology": {}}"#,
+        )
+        .unwrap();
+        let config = src.path().join("guest.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950",
+                 "host_isa": "gfx942", "simulator_config": "host.json"}}"#,
+        )
+        .unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        assert!(staged.exists(), "the guest config");
+        // Staged under a name this function chose, and the copy points at
+        // it -- see the nested case below for why the original name is
+        // not kept.
+        let reference = staged_simulator_config(&staged);
+        assert!(
+            scratch.path().join(&reference).exists(),
+            "the sibling it names, without which the reference dangles"
+        );
+    }
+
+    /// The reference and the staged file have to agree, including when
+    /// the reference names a subdirectory.
+    ///
+    /// `hosts/host.json` is the shape the shipped guest configs use.
+    /// Staging flattens it, so a config copied verbatim went on naming
+    /// `hosts/host.json` beside a file called `host.json`: the same
+    /// config succeeded with a direct launch and failed under `--image`,
+    /// before a container was ever started.
+    #[test]
+    fn staging_rewrites_a_nested_simulator_config_to_what_it_staged() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::create_dir(src.path().join("hosts")).unwrap();
+        std::fs::write(
+            src.path().join("hosts/host.json"),
+            r#"{"vm": {}, "topology": {}}"#,
+        )
+        .unwrap();
+        let config = src.path().join("guest.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950",
+                 "host_isa": "gfx942", "simulator_config": "hosts/host.json"}}"#,
+        )
+        .unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        let reference = staged_simulator_config(&staged);
+        assert!(
+            !reference.contains('/'),
+            "a staged reference names a sibling, not a path: {reference}"
+        );
+        assert!(
+            scratch.path().join(&reference).exists(),
+            "the config names {reference}, which has to be what was staged"
+        );
+    }
+
+    /// And two files that share a basename both survive.
+    ///
+    /// A guest config called `host.json` next to a `simulator_config` of
+    /// `hosts/host.json` staged both as `host.json`, so one overwrote the
+    /// other. The staged name is derived from the config's rather than
+    /// the sibling's, which is what makes that impossible.
+    #[test]
+    fn staging_keeps_a_sibling_whose_basename_matches_the_config() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::create_dir(src.path().join("hosts")).unwrap();
+        std::fs::write(
+            src.path().join("hosts/host.json"),
+            r#"{"vm": {"marker": "the sibling"}, "topology": {}}"#,
+        )
+        .unwrap();
+        let config = src.path().join("host.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950",
+                 "host_isa": "gfx942", "simulator_config": "hosts/host.json"}}"#,
+        )
+        .unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        let reference = staged_simulator_config(&staged);
+        let sibling = std::fs::read_to_string(scratch.path().join(&reference)).unwrap();
+        assert!(
+            sibling.contains("the sibling"),
+            "the config overwrote the file it references: {sibling}"
+        );
+        assert!(
+            std::fs::read_to_string(&staged)
+                .unwrap()
+                .contains("dbt_guest"),
+            "and the config is still the config"
+        );
+    }
+
+    /// `dbt_guest.simulator_config` as the staged copy records it.
+    fn staged_simulator_config(staged: &Path) -> String {
+        let text = std::fs::read_to_string(staged).expect("the staged config");
+        let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        json["dbt_guest"]["simulator_config"]
+            .as_str()
+            .expect("a staged guest config names its simulator config")
+            .to_string()
+    }
+
+    /// An absolute `simulator_config` is refused rather than staged into
+    /// something that still cannot be reached.
+    #[test]
+    fn staging_refuses_an_absolute_simulator_config() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let host = src.path().join("host.json");
+        std::fs::write(&host, r#"{"vm": {}, "topology": {}}"#).unwrap();
+        let config = src.path().join("guest.json");
+        std::fs::write(
+            &config,
+            format!(
+                r#"{{"dbt_guest": {{"enabled": true, "guest_isa": "gfx950",
+                     "host_isa": "gfx942", "simulator_config": "{}"}}}}"#,
+                host.display()
+            ),
+        )
+        .unwrap();
+
+        let e = stage_config(&config, scratch.path())
+            .expect_err("an absolute sibling cannot be reached from a container")
+            .to_string();
+        assert!(e.contains("absolute host path"), "{e}");
+        assert!(e.contains(&host.display().to_string()), "{e}");
+    }
+
+    #[test]
+    fn the_installed_flag_and_the_located_library_are_one_answer() {
+        // `installed` used to be overridden here with `is_installed()`,
+        // a second route to the same search. It agreed, and that is the
+        // problem with it: two implementations of "is rocjitsu here?"
+        // can only ever agree or be a bug, and the one a caller happens
+        // to reach decides which. The override is gone and the trait's
+        // default reads the flag out of `runtime`, so there is one
+        // search and one verdict.
+        let backend = Rocjitsu;
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        assert_eq!(backend.installed(), is_installed());
+    }
+
+    #[test]
+    fn a_library_without_the_daemon_api_is_refused_before_anything_is_created() {
+        // The regression for the whole point of this check: a library
+        // that is *here* and cannot host a daemon. A rocjitsu predating
+        // the daemon API is exactly that — it loads, it emulates a
+        // workload in-process, and it has no `rj_daemon_start` — and
+        // nothing noticed until `start_daemon`, which for a containerised
+        // session runs after the image pull, the network and every
+        // container.
+        //
+        // The C library stands in for it: present, loadable, and it has
+        // never heard of the rocjitsu C API. Anything with those three
+        // properties would do; a host with no glibc `libc.so.6` to borrow
+        // cannot run this, which is not a failure of the check.
+        let libc = Path::new("libc.so.6");
+
+        // Whether this host *has* a libc to borrow is decided on the typed
+        // error, not by sniffing the rendered message for the loader's
+        // wording. The strings this used to match ("cannot open shared
+        // object", "No such file") are glibc's, not an API: on musl, in
+        // another locale, or after a libloading change the skip would stop
+        // firing and this would fail on a host it was written to tolerate
+        // — or start firing everywhere and pass vacuously.
+        if rocjitsu_sys::daemon::Daemon::probe(libc)
+            .err()
+            .is_some_and(|e| e.is_unloadable())
+        {
+            return;
+        }
+
+        let Err(e) = daemon_capability_of(libc) else {
+            panic!("libc.so.6 hosts a rocjitsu daemon?");
+        };
+        let msg = e.to_string();
+
+        // The message a user gets is the whole value of failing early, so
+        // it has to say which file, what it costs them, and the one flag
+        // that runs without it.
+        assert!(msg.contains("libc.so.6"), "{msg}");
+        assert!(msg.contains("cannot host the emulator daemon"), "{msg}");
+        assert!(msg.contains("--in-process"), "{msg}");
+    }
+
+    #[test]
+    fn a_library_that_will_not_load_is_not_told_to_pass_in_process() {
+        // The other half of the diagnosis, and the one that sent a user
+        // somewhere that fails again: `--in-process` emulation `LD_PRELOAD`s
+        // the very library the loader has just refused, so advising it for
+        // a library that cannot be loaded at all is advice to hit the same
+        // wall from the other side. Only a library that *loads* and lacks
+        // `rj_daemon_start` is an old rocjitsu.
+        let missing = Path::new("/nonexistent/librocjitsu.so");
+        let Err(e) = daemon_capability_of(missing) else {
+            panic!("a library that is not there hosts a daemon?");
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("could not be loaded"), "{msg}");
+        assert!(
+            !msg.contains("predating the daemon API"),
+            "a library the loader refuses is not a rocjitsu that is merely \
+             too old: {msg}"
+        );
+        assert!(
+            !msg.contains("Pass `--in-process`"),
+            "`--in-process` preloads this same file and fails the same way, \
+             so it must not be offered as the way round: {msg}"
+        );
+    }
+
+    /// An [`EmulatorDef`] with an owned topology of `gpus_per_node`
+    /// GPUs on a default agent, resolvable without touching the stores.
+    fn def_with_gpus(gpus_per_node: u32) -> EmulatorDef {
+        EmulatorDef {
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node,
+                agent: MaybeRef::Owned(AgentDef::default()),
+            }),
+        }
+    }
+
+    #[test]
+    fn kmd_config_requires_resolvable_topology() {
+        let _g = rj_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        rj_core::paths::set_test_root(tmp.path());
+        let def = EmulatorDef {
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Ref("does-not-exist".to_string()),
+        };
+        assert!(check_config(&def).is_err());
+        assert!(kmd_config(&def, tmp.path()).is_err());
+    }
+
+    /// Validating a profile must not write anything: it happens before a
+    /// session exists, so whatever it wrote would have no owner and
+    /// nothing would ever remove it. Validation used to leave a ~5 KB
+    /// `sim_<hash>.json` in a fixed, shared, world-writable directory
+    /// under the system temp directory, one per distinct profile,
+    /// forever — so that is where this looks.
+    #[test]
+    fn check_config_writes_nothing() {
+        let _g = rj_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        rj_core::paths::set_test_root(tmp.path());
+
+        let shared = std::env::temp_dir().join(RUNTIME_SUBDIR);
+        let entries = || -> std::collections::BTreeSet<std::ffi::OsString> {
+            std::fs::read_dir(&shared)
+                .map(|dir| dir.flatten().map(|e| e.file_name()).collect())
+                .unwrap_or_default()
+        };
+        let before = entries();
+
+        // A GPU count nothing else here uses, so a file left behind for
+        // this profile cannot be one an earlier run already left.
+        check_config(&def_with_gpus(47)).expect("an owned topology validates");
+
+        assert_eq!(
+            entries(),
+            before,
+            "profile validation must leave nothing behind in {}",
+            shared.display()
+        );
+    }
+
+    /// The counterpart: with a session directory to write into, the
+    /// config lands there and nowhere else.
+    #[test]
+    fn kmd_config_writes_into_the_session_directory() {
+        let _g = rj_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        rj_core::paths::set_test_root(tmp.path());
+        let session = tmp.path().join("session");
+
+        let cfg = kmd_config(&def_with_gpus(2), &session).unwrap();
+
+        assert_eq!(cfg, rj_config_path(&session));
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+        assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+        assert_eq!(json["num_threads"], 1);
+    }
+
+    #[test]
+    fn thread_overrides_are_registered_as_numeric_options() {
+        let description = describe();
+        assert_eq!(Rocjitsu.options(), description.options_schema);
+        for key in [
+            "cpu_thread_budget",
+            "num_threads",
+            "cpu_dispatch_threads",
+            "async_helper_threads",
+        ] {
+            let option = description
+                .options_schema
+                .iter()
+                .find(|option| option.name == key)
+                .unwrap();
+            assert_eq!(option.dtype, rj_core::common::SimpleType::Number);
+            assert_eq!(option.default, None);
+        }
+    }
+
+    #[test]
+    fn generated_config_spreads_target_budget_over_gpus() {
+        let mut def = def_with_gpus(2);
+        if let MaybeRef::Owned(topology) = &mut def.topology {
+            topology.agent = MaybeRef::Owned(rj_builtin::agents::mi350x());
+        }
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json["thread_allocations"],
+            serde_json::json!([
+                {"num_threads":1,"cpu_dispatch_threads":1,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":2,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":4,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":8,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":12,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":16,"async_helper_threads":0}
+            ])
+        );
+        assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+        assert_eq!(json["num_threads"], 1);
+    }
+
+    #[test]
+    fn unknown_target_has_no_implicit_thread_policy() {
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def_with_gpus(1)).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["thread_allocations"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn multi_gpu_granules_match_native_presets() {
+        // `../../configs`, not `../../rocjitsu/configs`: this crate sits
+        // one directory deeper than it did under `emulation/mirage`.
+        let configs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs");
+        for (single, multi, target, gpus) in [
+            (
+                "gfx950_mi355x.json",
+                "gfx950_mi355x_kmd_2gpu.json",
+                90500,
+                2,
+            ),
+            (
+                "gfx1250_mi455x.json",
+                "gfx1250_mi455x_kmd_4gpu.json",
+                120500,
+                4,
+            ),
+        ] {
+            let read = |name| {
+                let json: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(configs.join(name)).unwrap()).unwrap();
+                serde_json::from_value::<Vec<ExecutionThreadChoice>>(
+                    json["thread_allocations"].clone(),
+                )
+                .unwrap()
+            };
+            let choices = read(single);
+            assert_eq!(target_thread_allocations(target, 1), choices);
+            assert_eq!(
+                spread_thread_allocations_over_gpus(choices.clone(), 1),
+                choices
+            );
+            assert_eq!(target_thread_allocations(target, gpus), read(multi));
+        }
+    }
+
+    #[test]
+    fn multi_gpu_engine_pin_can_be_overridden() {
+        for (requested, expected) in [(0, 1), (4, 4)] {
+            let mut def = def_with_gpus(2);
+            def.options
+                .insert("num_threads".into(), SimpleValue::Number(requested));
+            let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                panic!("expected generated config");
+            };
+            let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(json["num_threads"], expected);
+            assert_eq!(json["cpu_dispatch_threads"], 1);
+        }
+    }
+
+    #[test]
+    fn multi_gpu_helpers_default_to_zero_and_accept_explicit_overrides() {
+        for gpus in [2, 4] {
+            for (requested, expected) in [(-1, 0), (0, 0), (4, 4)] {
+                let mut def = def_with_gpus(gpus);
+                def.options.insert(
+                    "async_helper_threads".into(),
+                    SimpleValue::Number(requested),
+                );
+                let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                    panic!("expected generated config");
+                };
+                let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(json["async_helper_threads"], expected);
+            }
+        }
+    }
+
+    #[test]
+    fn helper_options_reject_invalid_values() {
+        for value in [
+            SimpleValue::Number(-2),
+            SimpleValue::Number(129),
+            SimpleValue::Boolean(true),
+        ] {
+            let mut def = def_with_gpus(1);
+            def.options.insert("async_helper_threads".into(), value);
+            assert!(resolve_sim_config(&def).is_err());
+        }
+    }
+
+    #[test]
+    fn multi_gpu_dispatch_pin_can_be_overridden() {
+        for gpus in [2, 4] {
+            for requested in [0, 4] {
+                let mut def = def_with_gpus(gpus);
+                def.options.insert(
+                    "cpu_dispatch_threads".into(),
+                    SimpleValue::Number(requested),
+                );
+                let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                    panic!("expected generated config");
+                };
+                let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(json["num_threads"], 1);
+                assert_eq!(json["cpu_dispatch_threads"], requested);
+            }
+        }
+    }
+
+    #[test]
+    fn generated_config_defers_thread_defaults_and_preserves_overrides() {
+        let mut def = def_with_gpus(1);
+        let decode = |def: &EmulatorDef| {
+            let SimConfig::Synthesised(bytes) = resolve_sim_config(def).unwrap() else {
+                panic!("expected generated config");
+            };
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        };
+        let default = decode(&def);
+        for key in [
+            "num_threads",
+            "cpu_dispatch_threads",
+            "cpu_thread_budget",
+            "async_helper_threads",
+        ] {
+            assert!(default.get(key).is_none());
+        }
+        for (key, value) in [
+            ("cpu_thread_budget", 64),
+            ("num_threads", 8),
+            ("cpu_dispatch_threads", 17),
+            ("async_helper_threads", 8),
+        ] {
+            def.options
+                .insert(key.to_owned(), SimpleValue::Number(value));
+        }
+        let explicit = decode(&def);
+        assert_eq!(explicit["cpu_thread_budget"], 64);
+        assert_eq!(explicit["num_threads"], 8);
+        assert_eq!(explicit["cpu_dispatch_threads"], 17);
+        assert_eq!(explicit["async_helper_threads"], 8);
+        def.options
+            .insert("cpu_dispatch_threads".to_owned(), SimpleValue::Number(-2));
+        assert!(resolve_sim_config(&def).is_err());
+        def.options.insert(
+            "cpu_dispatch_threads".to_owned(),
+            SimpleValue::Boolean(true),
+        );
+        assert!(resolve_sim_config(&def).is_err());
+    }
+
+    /// A drop-in `--config` is used verbatim, but its runtime directory
+    /// belongs to the session: the discovery file (and the daemon socket
+    /// beside it) must never land next to the user's config file, which
+    /// rocjitsu does not own and cannot clean up.
+    #[test]
+    fn discovery_file_lands_in_the_session_not_beside_the_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_dir = tmp.path().join("mine");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let config = user_dir.join("cfg.json");
+        std::fs::write(&config, b"{}").unwrap();
+        let session = tmp.path().join("session");
+
+        let runtime_dir = write_config_discovery(&session, &config).unwrap();
+
+        assert_eq!(runtime_dir, session.join(RUNTIME_SUBDIR));
+        assert_eq!(
+            std::fs::read_to_string(runtime_dir.join("config_path")).unwrap(),
+            format!("{}\n", config.display())
+        );
+        assert_eq!(
+            std::fs::read_dir(&user_dir).unwrap().count(),
+            1,
+            "nothing may be written beside the user's own config file"
+        );
+    }
+
+    #[test]
+    fn a_node_wider_than_the_limit_is_refused_with_the_limit_named() {
+        let _g = rj_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        rj_core::paths::set_test_root(tmp.path());
+
+        // The limit itself is fine; one more is not.
+        check_config(&def_with_gpus(MAX_GPUS_PER_NODE)).expect("the limit itself is allowed");
+        let err = check_config(&def_with_gpus(MAX_GPUS_PER_NODE + 1)).unwrap_err();
+
+        let msg = err.to_string();
+        // A good message names the offending input, the limit, and the
+        // way out.
+        assert!(msg.contains(&(MAX_GPUS_PER_NODE + 1).to_string()), "{msg}");
+        assert!(msg.contains(&MAX_GPUS_PER_NODE.to_string()), "{msg}");
+        assert!(msg.contains("--num-nodes"), "{msg}");
+        // And it must be refused before anything is written for it.
+        assert!(kmd_config(&def_with_gpus(1_000_000), tmp.path()).is_err());
+        assert!(!rj_config_path(tmp.path()).exists());
+    }
+
+    /// rocjitsu's discovery must go through the shared search policy, so
+    /// the documented locations (`$LD_LIBRARY_PATH`, `$ROCM_PATH`, the
+    /// standard ROCm directories) find it like any other backend's
+    /// library.
+    #[test]
+    fn discovery_uses_the_shared_search_policy() {
+        with_kmd_search(|search| {
+            assert_eq!(search.lib_name, LIB_NAME);
+            assert!(search.system_fallbacks, "the ROCm/system locations count");
+            assert!(search.file_env.contains(&LIB_ENV));
+            // The in-tree build shapes are still probed, relative to the
+            // rocjitsu binary, so a fresh sibling build is found untold.
+            let candidates = search.candidate_paths();
+            assert!(
+                candidates
+                    .iter()
+                    .any(|p| p.ends_with("emulation/rocjitsu/build/librocjitsu.so")),
+                "a sibling monorepo build must remain discoverable"
+            );
+            assert!(
+                candidates.contains(&PathBuf::from("/opt/rocm/lib").join(LIB_NAME)),
+                "the standard ROCm library directories must be searched"
+            );
+        });
+    }
+
+    /// What `rocjitsu emulators` reports and what a workload actually
+    /// gets preloaded must be the same file, on whichever kind of host
+    /// this runs: a report that named a different library than the one
+    /// rocjitsu loads would be worse than no report at all.
+    #[test]
+    fn the_reported_location_is_the_library_rocjitsu_preloads() {
+        let location = runtime_location();
+        assert_eq!(location.path(), kmd_preload().as_deref());
+        assert_eq!(location.is_found(), is_installed());
+        if let RuntimeLocation::Missing {
+            lib_name, searched, ..
+        } = &location
+        {
+            assert_eq!(lib_name, LIB_NAME);
+            // Including the in-container mount, which is part of this
+            // backend's search on top of the shared policy and would
+            // otherwise be a location rocjitsu probed without saying so.
+            assert!(
+                searched.contains(&Path::new(CONTAINER_LIB_DIR).join(LIB_NAME)),
+                "the in-container fallback is searched, so it must be reported: {searched:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn plugins_to_json_projects_simple_values_to_plain_json() {
+        let mut args = SimpleMap::new();
+        args.insert("verbose".to_string(), SimpleValue::Boolean(true));
+        args.insert(
+            "path".to_string(),
+            SimpleValue::String("/tmp/x".to_string()),
+        );
+        args.insert("level".to_string(), SimpleValue::Number(3));
+        let plugins = PluginsDef::from([
+            ("race".to_string(), SimpleMap::new()),
+            ("logging".to_string(), args),
+        ]);
+
+        let json = plugins_to_json(&plugins);
+
+        // An empty-arg plugin renders as an empty object, not null.
+        assert_eq!(json["race"], serde_json::json!({}));
+        // SimpleValue must project onto plain JSON scalars, NOT the
+        // externally-tagged enum form ({"Boolean": true}) that a naive
+        // serialization of SimpleValue would otherwise emit — the rocjitsu
+        // plugin loader parses plain values.
+        assert_eq!(
+            json["logging"],
+            serde_json::json!({"verbose": true, "path": "/tmp/x", "level": 3})
+        );
+    }
+
+    #[test]
+    fn discover_plugin_names_lists_plugin_sos_next_to_interposer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let preload = dir.join(LIB_NAME);
+        std::fs::write(&preload, b"").unwrap();
+
+        // No plugin shared objects present yet.
+        assert!(discover_plugin_names(&preload).is_empty());
+
+        // Two real plugins, a non-plugin sibling sharing the `librocjitsu_`
+        // prefix (ignored), and a degenerate empty-name file (ignored).
+        std::fs::write(dir.join("librocjitsu_plugin_race.so"), b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_plugin_logging.so"), b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_hooks.so"), b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_plugin_.so"), b"").unwrap();
+
+        // Sorted + de-duplicated names, prefix/suffix stripped.
+        assert_eq!(
+            discover_plugin_names(&preload),
+            vec!["logging".to_string(), "race".to_string()]
+        );
+    }
+
+    #[test]
+    fn enabled_plugin_libs_returns_only_existing_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let preload = dir.join(LIB_NAME);
+        std::fs::write(&preload, b"").unwrap();
+        std::fs::write(dir.join("librocjitsu_plugin_race.so"), b"").unwrap();
+
+        // Enable race (present on disk) and logging (absent). Only the
+        // present one is returned for bind-mounting; the loader logs and
+        // skips the missing plugin at runtime.
+        let plugins = PluginsDef::from([
+            ("race".to_string(), SimpleMap::new()),
+            ("logging".to_string(), SimpleMap::new()),
+        ]);
+        let libs = enabled_plugin_libs(&preload, &plugins);
+        assert_eq!(libs.len(), 1);
+        assert_eq!(
+            libs[0].file_name().and_then(|n| n.to_str()),
+            Some("librocjitsu_plugin_race.so")
+        );
+    }
+}

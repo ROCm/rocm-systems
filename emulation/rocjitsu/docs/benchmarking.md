@@ -294,7 +294,7 @@ depend on it.
 ```bash
 workload=(/path/to/workload --its --arguments)
 command=(
-  "$build/tools/rocjitsu/rocjitsu"
+  "$(cmake -LA -N "$build" | sed -n 's/^RJ_CLI_BIN:FILEPATH=//p')"
   --config "$out/config.json"
   -- "${workload[@]}"
 )

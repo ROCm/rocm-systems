@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
+#include "rocjitsu/vmm/rj_vfio.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "vfio_user_client.h"
@@ -21,6 +22,7 @@
 // them itself, which makes this nest harmlessly, but releases before it do not,
 // and a consumer building against one of those otherwise has to work around the
 // name mangling from outside the project.
+#include <csignal>
 #include <cstdint>
 
 #include <sys/queue.h>
@@ -1188,4 +1190,112 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   (void)served.host().ask_serving_thread([&ran] { ran = true; });
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_FALSE(ran) << "work ran with no serving thread to run it";
+}
+
+// The C entry point the CLI resolves out of librocjitsu.so. It is the only way
+// in from another language -- run_vfio_server() takes std::string and cannot be
+// named by one -- so its argument handling is its own, and returns before
+// anything is stood up.
+//
+// Not a test of the server: standing one up needs a socket and a config, and
+// VfioDeviceHost above covers what happens after. This covers the boundary.
+TEST(RjRunVfioServer, RefusesAMissingConfigOrSocketWithoutStartingAnything) {
+  EXPECT_NE(rj_run_vfio_server(nullptr, "/tmp/unused.sock", -1), 0);
+  EXPECT_NE(rj_run_vfio_server("", "/tmp/unused.sock", -1), 0);
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", nullptr, -1), 0);
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", "", -1), 0);
+}
+
+namespace {
+
+/// Restores the calling thread's signal mask when it goes out of scope.
+///
+/// The cases below deliberately change the mask before calling in, and an
+/// `ASSERT` that fires between the change and a trailing restore would return
+/// without undoing it -- leaving every later case in this binary running under
+/// a mask it never asked for.
+class RestoredSignalMask {
+public:
+  RestoredSignalMask() { saved_ = pthread_sigmask(SIG_SETMASK, nullptr, &previous_) == 0; }
+
+  RestoredSignalMask(const RestoredSignalMask &) = delete;
+  RestoredSignalMask &operator=(const RestoredSignalMask &) = delete;
+
+  ~RestoredSignalMask() {
+    if (saved_) {
+      pthread_sigmask(SIG_SETMASK, &previous_, nullptr);
+    }
+  }
+
+private:
+  sigset_t previous_{};
+  bool saved_ = false;
+};
+
+/// The calling thread's mask right now.
+sigset_t current_signal_mask() {
+  sigset_t mask;
+  sigemptyset(&mask);
+  pthread_sigmask(SIG_SETMASK, nullptr, &mask);
+  return mask;
+}
+
+} // namespace
+
+// The signal mask belongs to the caller, on every path out of here.
+//
+// The server blocks SIGINT, SIGTERM and SIGUSR1 to consume them synchronously,
+// and has to put back what it found. That restore is a scope guard rather than
+// a call at each exit, because one of the exits is a throw: this is an
+// `extern "C"` boundary, and handing a caller in another language a process
+// with SIGTERM blocked -- and no way to learn why -- is worse than the failure
+// that caused it.
+//
+// Compared against the mask in effect when the call was made, not against the
+// set this case blocked. `SIG_BLOCK` adds to the inherited mask rather than
+// replacing it, so on a runner that already blocks SIGINT the two differ, and
+// a check against the smaller set would fail while the server behaved
+// perfectly. The extra signal is blocked anyway so the assertion is about a
+// mask that is demonstrably not the default one.
+TEST(RjRunVfioServer, LeavesTheCallersSignalMaskAsItFoundIt) {
+  const RestoredSignalMask restore_on_the_way_out;
+
+  sigset_t ours;
+  sigemptyset(&ours);
+  sigaddset(&ours, SIGUSR2);
+  ASSERT_EQ(pthread_sigmask(SIG_BLOCK, &ours, nullptr), 0);
+  const sigset_t effective = current_signal_mask();
+
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", "/tmp/unused.sock", -1), 0);
+
+  const sigset_t after = current_signal_mask();
+  for (const int signal : {SIGINT, SIGTERM, SIGUSR1, SIGUSR2}) {
+    EXPECT_EQ(sigismember(&after, signal), sigismember(&effective, signal))
+        << "signal " << signal << " came back with a different disposition";
+  }
+}
+
+// And a throw is one of those paths.
+//
+// `rj_run_vfio_server` is declared to Rust on a non-unwind ABI, so an exception
+// leaving it terminates the launcher instead of becoming the status the entry
+// point documents. Nothing a caller can pass reaches a throwing path, which is
+// why the server carries a seam for this: without it the guarantee is asserted
+// by reading the code, and reading it is what missed that an earlier version of
+// the handler allocated -- and so could throw while handling a throw.
+TEST(RjRunVfioServer, ConvertsAThrowIntoAStatusInsteadOfUnwinding) {
+  const RestoredSignalMask restore_on_the_way_out;
+  const sigset_t before = current_signal_mask();
+
+  rocjitsu::throw_from_next_vfio_server_for_test();
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", "/tmp/unused.sock", -1), 0);
+
+  // The seam is consumed by the call it armed, so the next one runs normally.
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", "/tmp/unused.sock", -1), 0);
+
+  const sigset_t after = current_signal_mask();
+  for (const int signal : {SIGINT, SIGTERM, SIGUSR1, SIGUSR2}) {
+    EXPECT_EQ(sigismember(&after, signal), sigismember(&before, signal))
+        << "unwinding left signal " << signal << " with a different disposition";
+  }
 }

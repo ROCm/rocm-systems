@@ -3,15 +3,15 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 #
-# Demo: debug a real GPU kernel with one command — `mirage run --gdb`.
+# Demo: debug a real GPU kernel with one command — `rocjitsu run --gdb`.
 # See rocgdb-quickstart.md. Regenerate the .cast with:
-#   emulation/mirage/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-quickstart.sh
+#   emulation/rocjitsu/cli/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-quickstart.sh
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 kernel="$here/../tests/rocgdb/add_one.hip"
-mirage="${MIRAGE_BIN:-mirage}"
+rocjitsu="${ROCJITSU_BIN:-rocjitsu}"
 
 say() { printf '\n\033[1;36m# %s\033[0m\n' "$*"; }
 
@@ -26,7 +26,7 @@ app="$tmp/add_one"
 
 say "Debug the GPU kernel with one command — no GPU required:"
 ( set -x
-  "$mirage" run --profile mi350x --gdb \
+  "$rocjitsu" run --profile mi350x --gdb \
     --gdb-ex 'break add_one' \
     --gdb-ex 'run' \
     --gdb-ex 'info args' \

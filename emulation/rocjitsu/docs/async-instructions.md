@@ -62,7 +62,7 @@ Mirage embeds these native tables in its RocJITsu backend and exposes the helper
 option alongside the engine, dispatch and total-budget options.
 
 ```sh
-rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+rocjitsu thread-budget-table --config configs/gfx950_mi355x.json
 ```
 
 ## Execution and ownership

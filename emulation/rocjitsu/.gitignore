@@ -54,3 +54,10 @@ __pycache__
 /website/test-results/
 /website/**/*.local
 /website/**/.DS_Store
+
+# cargo (cli/)
+target
+debug
+**/*.rs.bk
+**/mutants.out*/
+rustc-ice-*.txt
