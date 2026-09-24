@@ -76,6 +76,13 @@ jobs:
           ccache --max-size=1G
           ccache --zero-stats
 
+      - name: Pin cmake to the project's minimum
+        run: |
+          python3 -m pip install 'cmake==3.25'
+          # The runner image ships its own cmake in /usr/local/bin; prepend the
+          # pinned one so it wins regardless of the image's PATH order.
+          python3 -c 'import cmake; print(cmake.CMAKE_BIN_DIR)' >> "$GITHUB_PATH"
+
       # A library compiled without -fsanitize is invisible to ASan, and its
       # synchronisation is missing from TSan's happens-before model, producing
       # both missed races and spurious ones.
