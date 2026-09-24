@@ -1131,13 +1131,13 @@ private:
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
-  uint64_t exec_ = ~0ULL;               ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vgpr_write_mask_ = ~0ULL;    ///< Execution-local architectural and plugin write mask.
-  uint64_t vcc_ = 0;                    ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                     ///< M0 special register (misc addressing).
-  uint32_t status_raw_ = 0;             ///< STATUS register state.
-  uint32_t mode_raw_ = 0;               ///< MODE register state.
-  bool mode_has_gpr_idx_en_ = false;    ///< True when MODE[27] is GPR_IDX_EN.
+  uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vgpr_write_mask_ = ~0ULL; ///< Execution-local architectural and plugin write mask.
+  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  uint32_t status_raw_ = 0;          ///< STATUS register state.
+  uint32_t mode_raw_ = 0;            ///< MODE register state.
+  bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
   // Immutable across wave reuse and helper execution. Disabled accesses skip
   // register indexing and shadow loads before consulting diagnostic state.
   const bool memory_wait_checks_enabled_;

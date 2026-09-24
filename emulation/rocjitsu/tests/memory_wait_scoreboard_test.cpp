@@ -4,6 +4,9 @@
 #include "cdna5_sim_test_common.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -519,6 +522,132 @@ TEST_F(MemoryWaitScoreboardTest, MixedHardwareEventKindsRequireAZeroWait) {
   state.wait(WaitCounterKind::Exp, 1);
   read(6);
   EXPECT_EQ(hazards.size(), 1u); // Zero wait reset the mixed-kind state.
+}
+
+TEST(MemoryWaitExecutionTest, FormattedLoadsTrackRegisterLayoutInsteadOfMemoryFootprint) {
+  GpuMemory memory("format_wait_memory");
+  L2Cache l2("format_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  auto cu = ComputeUnitCore::create("format_wait_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  auto decoder = Decoder::create(config.arch);
+  struct Case {
+    uint16_t opcode;
+    std::array<uint8_t, 4> bytes;
+  };
+  const Case cases[] = {
+      {rdna4::kBufferLoadFormatXVbuffer, {0xf, 0, 0, 0}},
+      {rdna4::kBufferLoadFormatXyzwVbuffer, {0xf, 0xf, 0xf, 0xf}},
+      {rdna4::kTbufferLoadFormatXyzwVbuffer, {0xf, 0xf, 0xf, 0xf}},
+      {rdna4::kBufferLoadD16FormatXVbuffer, {0x3, 0, 0, 0}},
+      {rdna4::kBufferLoadD16HiFormatXVbuffer, {0xc, 0, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyVbuffer, {0xf, 0, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyzVbuffer, {0xf, 0x3, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyzwVbuffer, {0xf, 0xf, 0, 0}},
+  };
+  for (const auto &test : cases) {
+    // The two formats read four and sixteen bytes, independently of the VGPR count.
+    for (uint32_t format : {46u, 62u}) {
+      for (uint8_t destination : {8, 31}) {
+        SCOPED_TRACE(test.opcode);
+        SCOPED_TRACE(format);
+        SCOPED_TRACE(destination);
+        const uint32_t scalar = wf->sgpr_alloc().base;
+        cu->write_sgpr(scalar + 4, 0x1000);
+        cu->write_sgpr(scalar + 5, 0);
+        cu->write_sgpr(scalar + 6, 64);
+        cu->write_sgpr(scalar + 7,
+                       4 | (5 << 3) | (6 << 6) | (7 << 9) | (format << 12) | (1u << 28));
+        const auto words =
+            rdna4::build_vbuffer(test.opcode, {.soffset = rdna4::OPR_SREG_M0_NULL,
+                                               .vdata = destination,
+                                               .rsrc = 4,
+                                               .format = static_cast<uint8_t>(format)});
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        auto &inst = *decoded.value();
+        inst.execute(inst, wf);
+        ASSERT_NE(inst.data(), nullptr);
+        const bool valid = destination == 8 || test.bytes[1] == 0;
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        for (unsigned offset = 0; offset < test.bytes.size(); ++offset) {
+          for (uint8_t bytes : {0x3, 0xc}) {
+            for (bool waited : {false, true}) {
+              for (bool write : {false, true}) {
+                SCOPED_TRACE(offset);
+                SCOPED_TRACE(bytes);
+                SCOPED_TRACE(waited);
+                SCOPED_TRACE(write);
+                state.clear();
+                cu->track_memory_wait(inst, *wf);
+                unsigned reports = 0;
+                state.bind(0x200, &reports,
+                           [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+                if (waited)
+                  state.wait(WaitCounterKind::Load, 0);
+                const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(destination + offset),
+                                      1};
+                state.access(reg, 2, bytes, write); // Inactive lane never needs a wait.
+                EXPECT_EQ(reports, 0u);
+                state.access(reg, 1, bytes, write);
+                EXPECT_EQ(reports, valid && !waited && (test.bytes[offset] & bytes) ? 1u : 0u);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, LdsStackTracksOnePointerWordAlongsideTwoPoppedNodes) {
+  GpuMemory memory("stack_wait_memory");
+  L2Cache l2("stack_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = ComputeUnitCore::create("stack_wait_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  auto decoder = Decoder::create(config.arch);
+  for (uint8_t pointer : {16, 31}) {
+    const auto words =
+        rdna4::build_vds(rdna4::kDsBvhStackPush8Pop2RtnB64Vds,
+                         {.offset0 = 16, .addr = pointer, .data0 = 0, .data1 = 4, .vdst = 12});
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    auto &inst = *decoded.value();
+    inst.execute(inst, wf);
+    ASSERT_NE(inst.data(), nullptr);
+    for (uint16_t reg : {12, 13, 14, 16, 17, 31, 32}) {
+      for (bool waited : {false, true}) {
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.clear();
+        cu->track_memory_wait(inst, *wf);
+        unsigned reports = 0;
+        state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+        if (waited)
+          state.wait(WaitCounterKind::Ds, 0);
+        state.access({RegClass::VGPR, reg, 1}, 1, 0xf, false);
+        EXPECT_EQ(reports, !waited && (reg == 12 || reg == 13 || reg == pointer) ? 1u : 0u)
+            << "pointer=" << unsigned(pointer) << " register=" << reg;
+      }
+    }
+  }
 }
 
 TEST(MemoryWaitExecutionTest, ZeroExecTransposeResultsRequireDsWait) {

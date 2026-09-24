@@ -1028,21 +1028,34 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
                (inst.data()->tag() == GLOBAL_MEM || inst.data()->tag() == LOCAL_MEM)) {
       const auto &d = *inst.data_as<VectorMemState>();
       if (d.is_load && !d.lds_dst) {
-        const unsigned count = std::max(
-            1u,
-            ((d.atomic_op != AtomicOp::NONE ? d.elem_size : d.num_elems * d.elem_size) + 3) / 4);
+        const unsigned count = d.destination_vgpr_count();
+        const unsigned second_count = d.ds2_active ? d.ds2_destination_vgpr_count() : 0;
         const uint8_t bytes = !sram_ecc() && d.d16_hi   ? 0xc
                               : !sram_ecc() && d.d16_lo ? 0x3
                                                         : MemoryWaitScoreboard::kFullDwordByteMask;
-        auto add_vector = [&](uint32_t base) {
-          if (owns_vgpr_range(wf, base, count))
+        auto add_vector = [&](uint32_t base, uint32_t width, uint8_t byte_mask) {
+          if (width)
             append({RegClass::VGPR, static_cast<uint16_t>(base - wf.vgpr_alloc().base),
-                    static_cast<uint8_t>(count)},
-                   d.exec_mask, bytes);
+                    static_cast<uint8_t>(width)},
+                   d.exec_mask, byte_mask);
         };
-        add_vector(d.dst_reg_base);
-        if (d.ds2_active)
-          add_vector(d.ds2_dst_reg_base);
+        // Match completion's all-or-nothing destination validation, including
+        // the independent pointer result of LDS stack operations.
+        if (owns_vgpr_range(wf, d.dst_reg_base, count) &&
+            (!d.ds2_active || owns_vgpr_range(wf, d.ds2_dst_reg_base, second_count))) {
+          if (d.buffer_components && d.buffer_d16 && !sram_ecc() && !d.d16_hi) {
+            // Packed D16 results fill pairs of components, with only the low
+            // half written in the last register for an odd component count.
+            const unsigned full = d.buffer_components / 2;
+            add_vector(d.dst_reg_base, full, MemoryWaitScoreboard::kFullDwordByteMask);
+            if (d.buffer_components % 2)
+              add_vector(d.dst_reg_base + full, 1, 0x3);
+          } else {
+            add_vector(d.dst_reg_base, count, bytes);
+          }
+          if (d.ds2_active)
+            add_vector(d.ds2_dst_reg_base, second_count, bytes);
+        }
       }
     } else {
       // Inline producers have already populated their result; resolve the same
