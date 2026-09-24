@@ -494,22 +494,36 @@ class RunVfioGuestTest(unittest.TestCase):
             probe = root / "probe"
             write_file(
                 probe,
-                (
-                    "#!/usr/bin/env python3\n"
-                    "import os\n"
-                    "from pathlib import Path\n"
-                    "import signal\n"
-                    "Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))\n"
-                    "signal.pause()\n"
-                ).encode(),
+                b"#!/usr/bin/env python3\nimport signal\nsignal.pause()\n",
                 0o755,
             )
+            real_popen = subprocess.Popen
+            spawned: subprocess.Popen[str] | None = None
 
-            with self.assertRaisesRegex(
-                RUNNER.GuestRunError, "test probe did not complete within 0.05 seconds"
-            ):
-                RUNNER.run_capability_probe([str(probe)], "test probe", 0.05)
-            self.assert_fake_process_reaped(root, "probe")
+            def record_child(
+                command: list[str], *popen_args: object, **popen_kwargs: object
+            ) -> subprocess.Popen[str]:
+                nonlocal spawned
+                spawned = real_popen(command, *popen_args, **popen_kwargs)
+                return spawned
+
+            # The deadline may expire before the child interpreter starts.
+            # Observe its PID from the parent instead of requiring child I/O.
+            try:
+                with mock.patch.object(
+                    RUNNER.subprocess, "Popen", side_effect=record_child
+                ), self.assertRaisesRegex(
+                    RUNNER.GuestRunError, "test probe did not complete within 0.05 seconds"
+                ):
+                    RUNNER.run_capability_probe([str(probe)], "test probe", 0.05)
+                self.assertIsNotNone(spawned)
+                self.assertEqual(spawned.returncode, -signal.SIGKILL)
+                with self.assertRaises(ChildProcessError):
+                    os.waitpid(spawned.pid, os.WNOHANG)
+            finally:
+                if spawned is not None and spawned.returncode is None:
+                    spawned.kill()
+                    spawned.wait()
 
     def test_sigterm_in_capability_probe_spawn_window_reaps_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
