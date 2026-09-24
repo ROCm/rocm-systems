@@ -28,11 +28,19 @@ constexpr size_t kSrc1 = 1;
 constexpr size_t kSrc2 = 2;
 constexpr size_t kDst = 3;
 
+enum class AdjacentSetVgprMsbHazard : uint8_t { Clear, Armed, Maybe };
+
 /// @brief Abstract state immediately before or after an instruction.
 struct VgprMsbState {
   bool reachable = false;
   // nullopt is the top value: more than one bank can reach this point.
   amdgpu::VgprMsbBanks banks{};
+  AdjacentSetVgprMsbHazard hazard = AdjacentSetVgprMsbHazard::Clear;
+  // Banks on only the paths where the adjacency hazard is armed. Keeping this
+  // path-sensitive component lets a Maybe S_SET_VGPR_MSB join its dropped
+  // outcome with the executed outcome without also folding in clear paths'
+  // pre-instruction banks.
+  amdgpu::VgprMsbBanks armed_banks{};
 
   bool operator==(const VgprMsbState &) const = default;
 };
@@ -67,6 +75,21 @@ struct VgprMsbState {
   return std::nullopt;
 }
 
+/// @brief Join per-role banks, where nullopt is the top value.
+[[nodiscard]] bool merge_banks(amdgpu::VgprMsbBanks &destination,
+                               const amdgpu::VgprMsbBanks &incoming) {
+  bool changed = false;
+  for (size_t i = 0; i < destination.size(); ++i) {
+    if (destination[i] == incoming[i])
+      continue;
+    if (destination[i].has_value()) {
+      destination[i] = std::nullopt;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /// @brief Join @p incoming into @p destination.
 [[nodiscard]] bool merge_state(VgprMsbState &destination, const VgprMsbState &incoming) {
   if (!incoming.reachable)
@@ -76,14 +99,22 @@ struct VgprMsbState {
     return true;
   }
 
-  bool changed = false;
-  for (size_t i = 0; i < destination.banks.size(); ++i) {
-    if (destination.banks[i] == incoming.banks[i])
-      continue;
-    if (destination.banks[i].has_value()) {
-      destination.banks[i] = std::nullopt;
+  const bool destination_has_armed_path = destination.hazard != AdjacentSetVgprMsbHazard::Clear;
+  const bool incoming_has_armed_path = incoming.hazard != AdjacentSetVgprMsbHazard::Clear;
+
+  bool changed = merge_banks(destination.banks, incoming.banks);
+  if (incoming_has_armed_path) {
+    if (destination_has_armed_path) {
+      changed |= merge_banks(destination.armed_banks, incoming.armed_banks);
+    } else {
+      destination.armed_banks = incoming.armed_banks;
       changed = true;
     }
+  }
+  if (destination.hazard != incoming.hazard &&
+      destination.hazard != AdjacentSetVgprMsbHazard::Maybe) {
+    destination.hazard = AdjacentSetVgprMsbHazard::Maybe;
+    changed = true;
   }
   return changed;
 }
@@ -99,18 +130,30 @@ struct VgprMsbState {
 }
 
 void transfer_instruction(VgprMsbState &state, const Instruction &inst,
-                          std::span<const uint8_t> text) {
+                          std::span<const uint8_t> text, bool setreg_vgpr_msb_fixup) {
+  const AdjacentSetVgprMsbHazard incoming_hazard = state.hazard;
+  const amdgpu::VgprMsbBanks incoming_armed_banks = state.armed_banks;
+  state.hazard = AdjacentSetVgprMsbHazard::Clear;
+  state.armed_banks.fill(std::nullopt);
   if (inst.opcode() == cdna5::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
+    if (setreg_vgpr_msb_fixup && incoming_hazard == AdjacentSetVgprMsbHazard::Armed) {
+      state.banks = incoming_armed_banks;
+      return;
+    }
     const Operand *immediate = inst.src_operand(0);
     if (immediate == nullptr) {
       state.banks.fill(std::nullopt);
       return;
     }
     const uint8_t value = static_cast<uint8_t>(immediate->encoding_value() & 0xff);
-    state.banks[kSrc0] = value & 0x3u;
-    state.banks[kSrc1] = (value >> 2) & 0x3u;
-    state.banks[kSrc2] = (value >> 4) & 0x3u;
-    state.banks[kDst] = (value >> 6) & 0x3u;
+    if (setreg_vgpr_msb_fixup && incoming_hazard == AdjacentSetVgprMsbHazard::Maybe) {
+      // The instruction is dropped only on armed predecessor paths. Join that
+      // path-correlated state with the value installed on clear paths.
+      state.banks = incoming_armed_banks;
+      (void)merge_banks(state.banks, amdgpu::unpack_vgpr_msb_banks(value));
+    } else {
+      state.banks = amdgpu::unpack_vgpr_msb_banks(value);
+    }
     return;
   }
 
@@ -120,6 +163,25 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   if (hwreg_operand == nullptr)
     return;
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
+  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+
+  if (setreg_vgpr_msb_fixup && writes_mode) {
+    if (inst.mnemonic() == "s_setreg_b32") {
+      state.banks.fill(std::nullopt);
+      return;
+    }
+    const std::optional<uint32_t> literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
+    if (!literal || inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
+      state.banks.fill(std::nullopt);
+    } else {
+      const uint8_t mode_layout = static_cast<uint8_t>((*literal & amdgpu::VGPR_MSB_MODE_MASK) >>
+                                                       amdgpu::VGPR_MSB_MODE_SHIFT);
+      state.banks = amdgpu::unpack_vgpr_msb_banks(amdgpu::mode_layout_to_set_vgpr_msb(mode_layout));
+    }
+    state.hazard = AdjacentSetVgprMsbHazard::Armed;
+    state.armed_banks = state.banks;
+    return;
+  }
 
   if (inst.mnemonic() == "s_setreg_b32") {
     // The source SGPR is runtime data. Only bank fields intersecting the write
@@ -144,8 +206,9 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
 class Gfx1250VgprMsbAnalysis::Impl {
 public:
   Impl(KernelBlockScope blocks, BasicBlock *entry, std::span<const ScopedCfgEdge> extra_edges,
-       std::span<const uint8_t> text, std::span<BasicBlock *const> additional_entries)
-      : text_(text) {
+       std::span<const uint8_t> text, std::span<BasicBlock *const> additional_entries,
+       bool setreg_vgpr_msb_fixup)
+      : text_(text), setreg_vgpr_msb_fixup_(setreg_vgpr_msb_fixup) {
     analyze(blocks, entry, extra_edges, additional_entries);
   }
 
@@ -229,7 +292,7 @@ private:
 
       VgprMsbState state = in[index];
       for (const Instruction &inst : block->instructions())
-        transfer_instruction(state, inst, text_);
+        transfer_instruction(state, inst, text_, setreg_vgpr_msb_fixup_);
       if (state == out[index])
         continue;
       out[index] = state;
@@ -248,20 +311,23 @@ private:
       VgprMsbState state = in[index];
       for (const Instruction &inst : block->instructions()) {
         before_.emplace(&inst, state);
-        transfer_instruction(state, inst, text_);
+        transfer_instruction(state, inst, text_, setreg_vgpr_msb_fixup_);
       }
     }
   }
 
   std::span<const uint8_t> text_;
+  bool setreg_vgpr_msb_fixup_ = true;
   std::unordered_map<const Instruction *, VgprMsbState> before_;
 };
 
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
                                                std::span<const ScopedCfgEdge> extra_edges,
                                                std::span<const uint8_t> text,
-                                               std::span<BasicBlock *const> additional_entries)
-    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges, text, additional_entries)) {}
+                                               std::span<BasicBlock *const> additional_entries,
+                                               bool setreg_vgpr_msb_fixup)
+    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges, text, additional_entries,
+                                   setreg_vgpr_msb_fixup)) {}
 
 Gfx1250VgprMsbAnalysis::~Gfx1250VgprMsbAnalysis() = default;
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(Gfx1250VgprMsbAnalysis &&) noexcept = default;

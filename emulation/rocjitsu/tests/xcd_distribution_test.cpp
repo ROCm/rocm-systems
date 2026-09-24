@@ -179,8 +179,8 @@ public:
     std::vector<uint32_t> ids;
     for (const auto &[id, step] : first_dispatched_)
       ids.push_back(id);
-    std::sort(ids.begin(), ids.end(),
-              [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
+    std::ranges::sort(
+        ids, [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
     return ids;
   }
 

@@ -58,8 +58,7 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
     return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
            std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);
   };
-  return std::lexicographical_compare(lhs_regs.begin(), lhs_regs.end(), rhs_regs.begin(),
-                                      rhs_regs.end(), less);
+  return std::ranges::lexicographical_compare(lhs_regs, rhs_regs, less);
 }
 
 bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
@@ -236,14 +235,12 @@ template <typename Predicate>
 void WaitcheckStateOps::retire_events(PendingState &state, std::vector<PendingEvent> &events,
                                       Predicate should_retire) {
   std::vector<PendingEvent> retired_events;
-  const auto retained =
-      std::remove_if(events.begin(), events.end(), [&](const PendingEvent &event) {
-        if (!should_retire(event))
-          return false;
-        retired_events.push_back(event);
-        return true;
-      });
-  events.erase(retained, events.end());
+  std::erase_if(events, [&](const PendingEvent &event) {
+    if (!should_retire(event))
+      return false;
+    retired_events.push_back(event);
+    return true;
+  });
   make_retired_generations_ready(state, retired_events);
 }
 

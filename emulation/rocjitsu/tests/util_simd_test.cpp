@@ -25,6 +25,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -51,6 +52,21 @@ inline int sweep_iters() {
   }
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
+
+struct FallbackMask {
+  static constexpr std::size_t kSize = 5;
+  explicit FallbackMask(bool value) { lanes.fill(value); }
+  static constexpr std::size_t size() { return kSize; }
+  bool operator[](std::size_t i) const { return lanes[i]; }
+  bool &operator[](std::size_t i) { return lanes[i]; }
+
+  std::array<bool, kSize> lanes{};
+};
+
+struct FallbackSimd {
+  using mask_type = FallbackMask;
+  static constexpr std::size_t size() { return mask_type::size(); }
+};
 
 TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
   SKIP_IF_NO_SIMD();
@@ -140,6 +156,65 @@ TEST(UtilSimd, Broadcast_F32) {
   auto v = util::broadcast<float>(bits);
   for (std::size_t i = 0; i < kW; ++i)
     EXPECT_EQ(v[i], kVal) << "lane " << i;
+}
+
+TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const auto check = []<typename Simd>() {
+    constexpr std::size_t W = Simd::size();
+    ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+    const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+    for (uint64_t bits = 0; bits <= full; ++bits) {
+      const auto mask = util::simd_mask_from_bits<Simd>(bits);
+      for (std::size_t i = 0; i < W; ++i)
+        ASSERT_EQ(static_cast<bool>(mask[i]), ((bits >> i) & 1u) != 0)
+            << "width " << W << ", bits " << bits << ", lane " << i;
+      ASSERT_EQ(util::simd_mask_to_bits(mask), bits) << "width " << W << ", bits " << bits;
+    }
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~uint64_t{0})), full)
+        << "input bits above the SIMD width must be ignored";
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~full)), 0u)
+        << "high-only input bits must not set SIMD lanes";
+  };
+
+  check.template operator()<util::native<uint32_t>>();
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  check.template operator()<util::native<uint64_t>>();
+  check.template operator()<util::narrow32<uint32_t>>();
+#endif
+#endif
+}
+
+TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
+    for (std::size_t i = 0; i < FallbackSimd::size(); ++i)
+      ASSERT_EQ(mask[i], ((bits >> i) & 1u) != 0) << "bits " << bits << ", lane " << i;
+    ASSERT_EQ(util::simd_mask_to_bits(mask), bits);
+  }
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~uint64_t{0})), full);
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~full)), 0u);
+#endif
+}
+
+TEST(UtilSimd, MaskBitsExpandToOrderedZeroOneLanes) {
+  SKIP_IF_NO_SIMD();
+  constexpr std::size_t W = util::native<uint32_t>::size();
+  ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+  const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto lanes = util::simd_u32_lanes_from_bits(bits);
+    for (std::size_t i = 0; i < W; ++i)
+      ASSERT_EQ(lanes[i], static_cast<uint32_t>((bits >> i) & 1u))
+          << "bits " << bits << ", lane " << i;
+  }
+  const auto high_bits = util::simd_u32_lanes_from_bits(~uint64_t{0});
+  for (std::size_t i = 0; i < W; ++i)
+    EXPECT_EQ(high_bits[i], 1u) << "lane " << i;
 }
 
 TEST(UtilSimd, MaskedStore_FullMask) {
@@ -977,6 +1052,75 @@ TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
       EXPECT_EQ(result[lane], 32768.0f);
   }
   EXPECT_EQ(std::fesetround(original_mode), 0);
+}
+
+template <typename Float> void check_rndne_host_independence() {
+  using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  using V = util::native<Float>;
+  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
+  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
+  constexpr Bits kInfinity = Bits(2 * kBias + 1) << kFraction;
+  constexpr Bits kQuiet = Bits(1) << (kFraction - 1);
+  std::vector<Bits> inputs;
+  for (Float value : {Float(0), Float(0.5), Float(1.5), Float(2.5), Float(3.5), Float(0.1),
+                      Float(0.9), Float(0x1p23), Float(0x1p52)}) {
+    inputs.push_back(std::bit_cast<Bits>(value));
+    if (value != 0) {
+      inputs.push_back(std::bit_cast<Bits>(value) - 1);
+      inputs.push_back(std::bit_cast<Bits>(value) + 1);
+    }
+  }
+  for (Bits bits : {Bits(1), kInfinity, kInfinity | Bits(0x123), kInfinity | kQuiet | Bits(0x456)})
+    inputs.push_back(bits);
+  const size_t positives = inputs.size();
+  for (size_t i = 0; i < positives; ++i)
+    inputs.push_back(inputs[i] | (Bits(1) << (sizeof(Bits) * 8 - 1)));
+  // Include broad exponent/fraction coverage in addition to exact boundaries.
+  std::mt19937_64 rng(0x11939);
+  for (unsigned i = 0; i < 2048; ++i)
+    inputs.push_back(static_cast<Bits>(rng()));
+  struct RestoreEnvironment {
+    std::fenv_t saved;
+    RestoreEnvironment() { std::fegetenv(&saved); }
+    ~RestoreEnvironment() { std::fesetenv(&saved); }
+  } restore_environment;
+  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+  std::vector<Bits> expected;
+  for (Bits bits : inputs) {
+    const Bits magnitude = bits & ~(Bits(1) << (sizeof(Bits) * 8 - 1));
+    expected.push_back(magnitude > kInfinity
+                           ? bits | kQuiet
+                           : std::bit_cast<Bits>(std::nearbyint(std::bit_cast<Float>(bits))));
+  }
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    SCOPED_TRACE(mode);
+    for (size_t base = 0; base < inputs.size(); base += V::size()) {
+      V values(
+          [&](auto lane) { return std::bit_cast<Float>(inputs[(base + lane) % inputs.size()]); });
+      std::feclearexcept(FE_ALL_EXCEPT);
+      std::feraiseexcept(FE_DIVBYZERO);
+      const auto actual = util::rndne_simd(values);
+      for (size_t lane = 0; lane < V::size(); ++lane) {
+        const size_t index = (base + lane) % inputs.size();
+        EXPECT_EQ(std::bit_cast<Bits>(Float(actual[lane])), expected[index]);
+        EXPECT_EQ(std::bit_cast<Bits>(util::rndne_scalar(std::bit_cast<Float>(inputs[index]))),
+                  expected[index]);
+      }
+      EXPECT_EQ(std::fegetround(), mode);
+      EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_DIVBYZERO);
+    }
+  }
+}
+
+TEST(UtilSimd, RndneF32IgnoresHostRoundingAndPreservesEnvironment) {
+  SKIP_IF_NO_SIMD();
+  check_rndne_host_independence<float>();
+}
+
+TEST(UtilSimd, RndneF64IgnoresHostRoundingAndPreservesEnvironment) {
+  SKIP_IF_NO_SIMD();
+  check_rndne_host_independence<double>();
 }
 
 TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {

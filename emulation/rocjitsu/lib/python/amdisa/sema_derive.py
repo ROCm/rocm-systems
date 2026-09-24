@@ -33,6 +33,7 @@ from amdisa.sema_ast import (
 )
 from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
+from amdisa.semantics import F32_TO_INTEGER_DTYPES
 
 if TYPE_CHECKING:
     from amdisa.semantics import InstructionSemantics
@@ -359,7 +360,7 @@ class _ScalarUnary(_ScalarDeriver):
             }
             k = kind_map[op]
             if k == SemaNodeKind.CALL:
-                fn = 'std::ceil' if op == 'ceil' else 'std::nearbyint'
+                fn = 'std::ceil' if op == 'ceil' else 'util::rndne_scalar'
                 result = SemaNode(
                     SemaNodeKind.CALL,
                     ty=ty,
@@ -1043,6 +1044,17 @@ class _VectorUnary(_ScalarDeriver):
         op = sem.operation
         dtype = sem.data_type
 
+        if op == 'frexp_exp_f32' and dtype == 'f32':
+            src0 = _cast(_src(0, SemaType.F32), SemaType.F32)
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.U32,
+                call_name='frexp_exp_f32',
+                children=(_id('frexp_exp_f32'), src0),
+            )
+            body = _assign(_cast(_dst(0), SemaType.U32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         if op == 'frexp_exp_f32' and dtype == 'f64':
             src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             result = SemaNode(
@@ -1081,6 +1093,47 @@ class _VectorUnary(_ScalarDeriver):
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
+            if dtype in F32_TO_INTEGER_DTYPES:
+                # Expose the floating source to VOP3 modifier enrichment, then
+                # pass register bits to the conversion helper.
+                src0 = SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B32,
+                    call_name='std::bit_cast<uint32_t>',
+                    children=(
+                        _id('std::bit_cast<uint32_t>'),
+                        _cast(_src(0, SemaType.F32), SemaType.F32),
+                    ),
+                )
+            if dtype in (
+                'f32_i32',
+                'f32_u32',
+                'f32_ubyte0',
+                'f32_ubyte1',
+                'f32_ubyte2',
+                'f32_ubyte3',
+            ):
+                # The conversion helper returns register bits. Expose the
+                # floating result so VOP3 output modifiers operate on its value.
+                result = SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B32,
+                    call_name=call_name,
+                    children=(_id(call_name), src0),
+                )
+                return SemaBlock(
+                    sem.name,
+                    ExecModel.VECTOR,
+                    _assign(
+                        _cast(_dst(0), SemaType.F32),
+                        SemaNode(
+                            SemaNodeKind.CALL,
+                            ty=SemaType.F32,
+                            call_name='std::bit_cast<float>',
+                            children=(_id('std::bit_cast<float>'), result),
+                        ),
+                    ),
+                )
             body = _assign(
                 _cast(_dst(0), SemaType.B32),
                 SemaNode(

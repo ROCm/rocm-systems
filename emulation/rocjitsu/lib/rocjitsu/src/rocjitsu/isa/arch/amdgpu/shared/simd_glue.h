@@ -14,6 +14,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -942,6 +943,7 @@ inline auto simd_mask_as(const Mask &m) {
 template <typename T, typename CmpOp>
   requires(util::has_stdx_simd)
 inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
   constexpr std::size_t W = util::native_width64;
   alignas(64) T abuf[W];
   alignas(64) T bbuf[W];
@@ -954,19 +956,22 @@ inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
       const One av(&abuf[i], util::stdx::element_aligned);
       const One bv(&bbuf[i], util::stdx::element_aligned);
       if (cmp_op(av, bv)[0])
-        bits |= (1ULL << i);
-    } else {
-      if (cmp_op(abuf[i], bbuf[i]))
-        bits |= (1ULL << i);
+        bits |= uint64_t{1} << i;
+    } else if (cmp_op(abuf[i], bbuf[i])) {
+      bits |= uint64_t{1} << i;
     }
   }
   return bits;
+#else
+  return util::simd_mask_to_bits(cmp_op(a, b));
+#endif
 }
 
 template <typename CmpOp>
   requires(util::has_stdx_simd)
 inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
                                    CmpOp cmp_op) {
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
   constexpr std::size_t W = util::native_width64;
   alignas(64) uint64_t sbuf[W];
   alignas(64) uint32_t mbuf[W];
@@ -979,9 +984,12 @@ inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint
     const One64 sv(&sbuf[i], util::stdx::element_aligned);
     const One32 mv(&mbuf[i], util::stdx::element_aligned);
     if (cmp_op(sv, mv)[0])
-      bits |= (1ULL << i);
+      bits |= uint64_t{1} << i;
   }
   return bits;
+#else
+  return util::simd_mask_to_bits(cmp_op(s, mask));
+#endif
 }
 
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`
@@ -1072,18 +1080,12 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto b = src1.template load_native<T>(base);
     // Expand the incoming VCC bits for this chunk to a 0/1-per-lane vector.
     const uint64_t cin_bits = (vcc_in >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t cinbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
-    const auto cin = util::load<T>(cinbuf);
+    const auto cin = util::simd_u32_lanes_from_bits(cin_bits);
     const auto r = carry_op(a, b, cin);
     dst.template store_native<T>(base, r.value, chunk);
     // Pack the per-lane carry mask into the low W bits, then merge into VCC for
     // active lanes only (clear active bits, set from carry; preserve the rest).
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     vcc_out = (vcc_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(vcc_out);
@@ -1561,11 +1563,8 @@ template <typename Inst>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const uint64_t sel_bits = (vcc >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t selbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
-    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -1607,11 +1606,8 @@ template <typename Inst>
     const auto b = apply_vop3_b32_src_mod(src1.template load_native<T>(base), inst.inst_.abs,
                                           inst.inst_.neg, 1);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t selbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
-    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -1649,11 +1645,8 @@ template <typename Inst>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t selbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
-    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
     r = r & util::native<T>(0xFFFFu);
     dst.template store_native<T>(base, r, chunk);
   }
@@ -1698,11 +1691,7 @@ template <typename T, typename Inst, typename CmpOp, typename WriteResult>
       continue;
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(vcc);
@@ -1854,11 +1843,7 @@ template <bool True16, typename Inst, typename CmpOp, typename WriteResult>
       a = a & ~sm;
     if (do_neg)
       a = a ^ sm;
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(vcc);
@@ -2130,11 +2115,7 @@ template <typename T, bool True16 = false, typename Inst, typename CmpOp, typena
       a = select_vop3_true16_src(a, vop3_opsel(inst.inst_), 0);
       b = select_vop3_true16_src(b, vop3_opsel(inst.inst_), 1);
     }
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(dst);
@@ -2214,11 +2195,7 @@ template <typename Inst, typename CmpOp, typename WriteResult>
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(src1.template load_native<T>(base), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(dst);
@@ -2267,11 +2244,7 @@ template <bool True16, typename Inst, typename CmpOp, typename WriteResult>
     }
     const auto a = apply_vop3_src_mod_f32<0>(util::f16_to_f32_simd(a_raw), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(dst);
@@ -2659,7 +2632,8 @@ template <typename Inst, typename FmaOp>
 template <bool True16, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &inst, Wavefront &wf,
-                                                             FmaOp tern_op) {
+                                                             FmaOp tern_op,
+                                                             bool preserve_nan_payload = false) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
@@ -2672,6 +2646,13 @@ template <bool True16, typename Inst, typename FmaOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto narrow = [&](util::native<float> value) {
+    if (!preserve_nan_payload)
+      return util::f32_to_f16_mode_simd(value, wf.fp16_ovfl());
+    return util::native<uint32_t>([&](auto index) {
+      return narrow_div_fixup_f16(static_cast<float>(value[index]), wf.fp16_ovfl());
+    });
+  };
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -2695,8 +2676,7 @@ template <bool True16, typename Inst, typename FmaOp>
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto r =
           apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-      const auto out_half =
-          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod);
+      const auto out_half = finalize_omod_f16_bits_simd(narrow(r), omod);
       auto prev = dst.template load_native<T>(base);
       auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
@@ -2718,9 +2698,7 @@ template <bool True16, typename Inst, typename FmaOp>
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto r =
           apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-      const auto out =
-          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
-          util::broadcast<T>(0xffffu);
+      const auto out = finalize_omod_f16_bits_simd(narrow(r), omod) & util::broadcast<T>(0xffffu);
       dst.template store_native<T>(base, out, chunk);
     }
   }
@@ -2728,7 +2706,7 @@ template <bool True16, typename Inst, typename FmaOp>
 }
 
 template <bool True16, typename Inst, typename FmaOp>
-[[nodiscard]] bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp, bool = false) {
   return false;
 }
 
@@ -3131,18 +3109,18 @@ template <typename Inst>
   return false;
 }
 
-/// VOP3 mixed-width ldexp fast path (f32 = std::ldexp(f32 src0, int32 src1)).
+/// VOP3 mixed-width LDEXP fast path with explicit guest FP controls.
 /// Reads src0 as native<float>, applies src0 abs/neg in f32, reads src1 as
-/// native<int32_t> (per-lane exponent), runs `op(a, e)` (stdx::ldexp), applies
+/// native<int32_t> (per-lane exponent), runs `op(a, e)`, applies
 /// result omod/clamp, then stores through a RegisterAccess write view.
-/// stdx::ldexp is bit-exact to std::ldexp for every input incl. NaN (proven via
-/// the VOP2 v_ldexp_f16 path).
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &inst, Wavefront &wf, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
+  // The final floating clamp must not inherit host DAZ/FTZ or exception state.
+  fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
@@ -3161,7 +3139,11 @@ template <typename Inst, typename Op>
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
     const auto e = exp_src.template load_native<int32_t>(base);
-    const auto r = apply_vop3_dst_mod_f32(op(a, e), omod, clamp, floating_clamp_nan_to_zero(wf));
+    const util::native<float> values = op(a, e);
+    const util::native<float> scaled([&](auto index) {
+      return div_apply_omod(static_cast<float>(values[index]), wf.fp_round_mode_f32(), omod);
+    });
+    const auto r = apply_vop3_dst_mod_f32(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -3172,7 +3154,7 @@ template <typename Inst, typename Op>
   return false;
 }
 
-/// VOP3 mixed-width ldexp fast path (f64 = std::ldexp(f64 src0, int32 src1)).
+/// VOP3 mixed-width F64 LDEXP fast path with explicit guest FP controls.
 /// Reads src0 as native<double> via a 64-bit RegisterAccess operand view,
 /// applies src0 abs/neg in f64,
 /// reads src1 as narrow32<int32_t> (native_width64-wide), runs `op(a, e)`,
@@ -3184,6 +3166,8 @@ template <typename Inst, typename Op>
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
+  // Keep the final clamp in the same guest environment as the scalar path.
+  fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f16_f64());
   using T = double;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
@@ -3202,7 +3186,11 @@ template <typename Inst, typename Op>
       continue;
     const auto a = apply_vop3_src_mod_f64<0>(src0.template load_native<T>(base), abs, neg);
     const auto e = exp_src.template load_narrow<int32_t>(base);
-    const auto r = apply_vop3_dst_mod_f64(op(a, e), omod, clamp, floating_clamp_nan_to_zero(wf));
+    const util::native<double> values = op(a, e);
+    const util::native<double> scaled([&](auto index) {
+      return div_apply_omod(static_cast<double>(values[index]), wf.fp_round_mode_f16_f64(), omod);
+    });
+    const auto r = apply_vop3_dst_mod_f64(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -3252,31 +3240,16 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
   return false;
 }
 
-/// @brief Existing F16 fixup cascade evaluated in the promoted F32 lane domain.
-inline util::native<float> div_fixup_f16_promoted_simd(util::native<float> p, util::native<float> b,
-                                                       util::native<float> c) {
-  using F = util::native<float>;
-  using U = util::native<uint32_t>;
-  const auto bxc = std::bit_cast<F>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
-  const auto inf_val = util::stdx::copysign(F(std::numeric_limits<float>::infinity()), bxc);
-  const auto zero_val = util::stdx::copysign(F(0.0f), bxc);
-  const auto qnan = F(std::numeric_limits<float>::quiet_NaN());
-  const auto b_nan = util::stdx::isnan(b);
-  const auto c_nan = util::stdx::isnan(c);
-  const auto b_inf = util::stdx::isinf(b);
-  const auto c_inf = util::stdx::isinf(c);
-  const auto b_zero = (b == F(0.0f));
-  const auto c_zero = (c == F(0.0f));
-  F r = p;
-  util::stdx::where(b_inf, r) = zero_val;
-  util::stdx::where(c_inf, r) = inf_val;
-  util::stdx::where(c_zero, r) = zero_val;
-  util::stdx::where(b_zero, r) = inf_val;
-  util::stdx::where(b_inf && c_inf, r) = qnan;
-  util::stdx::where(b_zero && c_zero, r) = qnan;
-  util::stdx::where(b_nan, r) = b;
-  util::stdx::where(c_nan, r) = c;
-  return r;
+/// @brief Apply the F16 special cases before the shared modifier/writeback path.
+inline util::native<float> div_fixup_f16_promoted_simd(util::native<float> quotient,
+                                                       util::native<float> denominator,
+                                                       util::native<float> numerator,
+                                                       uint32_t rounding, uint32_t denorm) {
+  return util::native<float>([&](auto index) {
+    return div_fixup_f16(static_cast<float>(quotient[index]),
+                         static_cast<float>(denominator[index]),
+                         static_cast<float>(numerator[index]), rounding, denorm);
+  });
 }
 
 /// @brief Batch operand access through the shared FIXUP and guest OMOD helpers.
@@ -3485,10 +3458,7 @@ template <typename Inst, typename MadOp, typename WriteResult>
     const auto c = src2.template load_native<uint64_t>(base);
     const auto r = mad_op(a, b, c);
     dst.template store_native<uint64_t>(base, r.value, chunk);
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(carry_out);
@@ -3541,10 +3511,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto b = src1.template load_native<T>(base);
     const auto r = carry_op(a, b, zero_cin);
     dst.template store_native<T>(base, r.value, chunk);
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(carry_out);
@@ -3593,16 +3560,10 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const uint64_t cin_bits = (cin_all >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t cinbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
-    const auto cin = util::load<T>(cinbuf);
+    const auto cin = util::simd_u32_lanes_from_bits(cin_bits);
     const auto r = carry_op(a, b, cin);
     dst.template store_native<T>(base, r.value, chunk);
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(carry_out);
@@ -4382,6 +4343,9 @@ enum class Vop3pDotHalfFormat { F16, BF16 };
 template <Vop3pDotHalfFormat Fmt, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &inst, Wavefront &wf) {
+  // Route integer accumulation policies through the exact scalar instruction body.
+  if (isa_properties(wf.cu().arch()).float_dot_accumulation != FloatDotAccumulation::HostF32)
+    return false;
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
@@ -4594,6 +4558,8 @@ template <int ElemBits, bool Vop3, typename Inst>
 template <bool Vop3, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_dotc_f16_simd(Inst &inst, Wavefront &wf) {
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return false;
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
