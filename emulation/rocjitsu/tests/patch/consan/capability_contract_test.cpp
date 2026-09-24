@@ -319,7 +319,8 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {
             .requires_even_vgpr_tuples = false,
             .flat_compare_swap_data_pair_alignment = 1,
             .requires_split_two_address_lds_relocation = false,
-            .semantic_form_mask = kCommonSemanticFormMask,
+            .semantic_form_mask = kCommonSemanticFormMask |
+                                  capability_form_bit(CapabilityForm::RelaxedLdsAtomicAccess),
             .requires_supercollider_runtime_flat_group_gate = false,
             .requires_raw_memory_order_qualifier = true,
         },

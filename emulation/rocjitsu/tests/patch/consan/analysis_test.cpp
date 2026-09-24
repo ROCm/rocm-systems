@@ -1751,10 +1751,10 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.destination_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.address_vgpr, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[2].kind, LdsAccessKind::Atomic);
-  EXPECT_TRUE(result.program_inventory.access_sites()[2].lowering.replay_guest_access.available());
+  EXPECT_FALSE(result.program_inventory.access_sites()[2].lowering.replay_guest_access.available());
   EXPECT_FALSE(
       result.program_inventory.access_sites()[2].lowering.compare_observed_value.available());
-  EXPECT_EQ(result.program_inventory.access_sites()[2].mnemonic_view(), "ds_add_u32");
+  EXPECT_EQ(result.program_inventory.access_sites()[2].mnemonic_view(), "ds_sub_u32");
   EXPECT_EQ(result.program_inventory.access_sites()[2].physical_id.original_text_offset, 16u);
   EXPECT_EQ(result.program_inventory.access_sites()[2].decoded_file_offset(), 0x110u);
   EXPECT_EQ(result.program_inventory.access_sites()[2].size(), 8u);
@@ -1781,7 +1781,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_EQ(atomic_sites.size(), 1u);
   const AtomicSite &atomic = atomic_sites.front();
   EXPECT_EQ(atomic.address_space_hint, AtomicAddressSpaceHint::Lds);
-  EXPECT_EQ(atomic.mnemonic, "ds_add_u32");
+  EXPECT_EQ(atomic.mnemonic, "ds_sub_u32");
   EXPECT_EQ(atomic.text_offset, 16u);
   EXPECT_EQ(atomic.file_offset, 0x110u);
   EXPECT_EQ(atomic.size, 8u);
@@ -1795,7 +1795,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(atomic.raw_data0);
   ASSERT_TRUE(atomic.raw_data1);
   ASSERT_TRUE(atomic.raw_vdst);
-  EXPECT_EQ(*atomic.raw_op, 0u);
+  EXPECT_EQ(*atomic.raw_op, 1u);
   EXPECT_EQ(*atomic.raw_addr, 0u);
   EXPECT_EQ(*atomic.raw_data0, 0u);
   EXPECT_EQ(*atomic.raw_data1, 0u);

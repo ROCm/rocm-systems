@@ -25,7 +25,7 @@ a mode-specific lowering gap for a form admitted by the target family.
 | `gfx1100` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
 | `gfx1100` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
 | `gfx1201` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
-| `gfx1201` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
+| `gfx1201` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 | `gfx1250` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only)<br>cluster (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only)<br>ordered LDS (mutation only) | addressed ordinary (mutation only) |
 | `gfx1250` | ConSan | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 <!-- END GENERATED CONSAN CAPABILITY CONTRACT -->

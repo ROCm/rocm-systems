@@ -1706,6 +1706,49 @@ TEST(ConSan, Cdna4HistogramLdsAtomicsAreAccessesButNotSynchronization) {
   EXPECT_TRUE(shadow_kind_conflicts(ShadowAccessKind::Atomic, ShadowAccessKind::Write));
 }
 
+TEST(ConSan, Rdna4HistogramLdsAtomicsAreAccessesButNotSynchronization) {
+  constexpr auto add_u32 =
+      rdna4::build_vds(rdna4::kDsAddU32Vds, {.offset0 = 4, .addr = 3, .data0 = 7});
+  constexpr auto add_u64 =
+      rdna4::build_vds(rdna4::kDsAddU64Vds, {.offset0 = 8, .addr = 5, .data0 = 8});
+  constexpr auto add_f32 =
+      rdna4::build_vds(rdna4::kDsAddF32Vds, {.offset0 = 12, .addr = 7, .data0 = 3});
+  constexpr auto cmpst =
+      rdna4::build_vds(rdna4::kDsCmpstoreRtnB32Vds,
+                       {.offset0 = 20, .addr = 12, .data0 = 11, .data1 = 13, .vdst = 13});
+  const std::array<uint32_t, 9> text_words = {
+      add_u32[0], add_u32[1], add_u64[0],
+      add_u64[1], add_f32[0], add_f32[1],
+      cmpst[0],   cmpst[1],   build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "rdna4_histogram_lds_atomics");
+  TestOptions options = test_options();
+  options.max_patches = 4;
+  options.track_barriers = false;
+  options.track_atomics = true;
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(8);
+
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 4u);
+  EXPECT_TRUE(std::ranges::all_of(test_admitted_accesses(result), [](const auto &candidate) {
+    return candidate.kind == LdsAccessKind::Atomic;
+  }));
+  EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 4u);
+  EXPECT_EQ(access_lowering_count(result, LoweringOutcomeKind::Instrumented), 4u);
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::TrampolineSyncMetadata;
+  }));
+
+  EXPECT_FALSE(shadow_kind_conflicts(ShadowAccessKind::Atomic, ShadowAccessKind::Atomic));
+  EXPECT_TRUE(shadow_kind_conflicts(ShadowAccessKind::Atomic, ShadowAccessKind::Read));
+  EXPECT_TRUE(shadow_kind_conflicts(ShadowAccessKind::Atomic, ShadowAccessKind::Write));
+}
+
 TEST(ConSan, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
   const std::array<uint32_t, 3> text_words = {
       0xF4042000u,

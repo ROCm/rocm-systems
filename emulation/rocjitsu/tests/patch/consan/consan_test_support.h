@@ -2355,14 +2355,15 @@ std::vector<uint8_t> make_rdna4_supported_lds_code_object() {
 }
 
 std::vector<uint8_t> make_rdna4_unsupported_lds_code_object() {
+  constexpr auto excluded_atomic = rdna4::build_vds(rdna4::kDsSubU32Vds);
   const std::array<uint32_t, 11> text_words = {
-      0xD8340000u, 0x00000000u, // ds_store_b32
-      0xD8D80000u, 0x00000000u, // ds_load_b32
-      0xD8000000u, 0x00000000u, // ds_add_u32
-      0xBF940000u,              // s_barrier_wait
-      0xBFC60000u,              // s_wait_dscnt
-      0xF4042000u, 0x00000000u, // s_dcache_inv
-      0xBFB00000u,              // s_endpgm
+      0xD8340000u,        0x00000000u,        // ds_store_b32
+      0xD8D80000u,        0x00000000u,        // ds_load_b32
+      excluded_atomic[0], excluded_atomic[1], // ds_sub_u32 remains excluded
+      0xBF940000u,                            // s_barrier_wait
+      0xBFC60000u,                            // s_wait_dscnt
+      0xF4042000u,        0x00000000u,        // s_dcache_inv
+      0xBFB00000u,                            // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);
 }
