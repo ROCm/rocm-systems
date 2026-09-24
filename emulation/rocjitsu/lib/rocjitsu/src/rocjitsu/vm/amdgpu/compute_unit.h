@@ -347,6 +347,8 @@ public:
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
   void set_gpu_vm(GpuVm *gpu_vm) {
+    instruction_vm_access_.reset();
+    inst_cache_.invalidate_all();
     gpu_vm_ = gpu_vm;
     l1_vector_.set_gpu_vm(gpu_vm);
     l1_scalar_.set_gpu_vm(gpu_vm);
@@ -1173,6 +1175,10 @@ protected:
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
+  // Keep the fetch snapshot across instructions, including ones that release their wavefront.
+  std::optional<GpuVmAccess> instruction_vm_access_;
+  AddressSpaceHandle instruction_address_space_;
+  uint32_t instruction_vmid_ = 0;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 

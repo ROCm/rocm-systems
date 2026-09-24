@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <span>
@@ -51,6 +52,11 @@ public:
       : bytes_(size, static_cast<std::byte>(value)) {}
 
   void fill(uint8_t value) { std::ranges::fill(bytes_, static_cast<std::byte>(value)); }
+
+  void write_program(std::span<const uint32_t> words) {
+    ASSERT_LE(words.size_bytes(), bytes_.size());
+    std::memcpy(bytes_.data(), words.data(), words.size_bytes());
+  }
 
   amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                         amdgpu::VmAccessKind access) const override {
@@ -350,6 +356,135 @@ private:
   amdgpu::ComputeUnitCore::Config config_{};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu_;
 };
+
+// A warm instruction-cache line must not hide revocation of the VM snapshot
+// retained by the CU. Exercise both explicit handles and the VMID fallback.
+TEST(InstructionCacheCuTest, VmInvalidationRefreshesAnAlreadyCachedInstruction) {
+  for (const bool explicit_handle : {false, true}) {
+    SCOPED_TRACE(explicit_handle);
+    GpuVm gpu_vm;
+    CuFixture fixture("vm_invalidation_cu");
+    auto backing = std::make_shared<ExecutableAddressSpace>(0);
+    backing->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+    const auto handle = gpu_vm.register_translated(7, backing, backing);
+    ASSERT_TRUE(handle);
+    fixture.cu()->set_gpu_vm(&gpu_vm);
+    auto *wf = fixture.launch(1, 0);
+    ASSERT_NE(wf, nullptr);
+    wf->set_process_id(7);
+    if (explicit_handle)
+      wf->set_address_space(handle);
+    fixture.cu()->step();
+    ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+    backing->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+    ASSERT_TRUE(gpu_vm.invalidate(handle));
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), 2u);
+  }
+}
+
+TEST(InstructionCacheCuTest, RootReplacementRefreshesAnAlreadyCachedInstruction) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_replacement_cu");
+  auto first = std::make_shared<ExecutableAddressSpace>(0);
+  first->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+  const auto handle = gpu_vm.register_translated(7, first, first);
+  ASSERT_TRUE(handle);
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+  auto replacement = std::make_shared<ExecutableAddressSpace>(0);
+  replacement->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
+
+TEST(InstructionCacheCuTest, ReusedVmidCannotReviveAStaleExplicitHandle) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_stale_handle_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+  const auto handle = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(handle);
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  const auto replacement = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(replacement);
+  EXPECT_NE(handle, replacement);
+  fixture.cu()->step();
+  EXPECT_TRUE(wf->is_halted());
+  EXPECT_FALSE(fixture.cu()->has_active_wfs())
+      << "the stale address space must abort the dispatch before executing cached code";
+}
+
+TEST(InstructionCacheCuTest, ChangingAddressSpaceSelectsItsOwnInstruction) {
+  for (const bool explicit_handle : {false, true}) {
+    SCOPED_TRACE(explicit_handle);
+    GpuVm gpu_vm;
+    CuFixture fixture("vm_switch_cu");
+    auto first = std::make_shared<ExecutableAddressSpace>(0);
+    first->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+    const auto first_handle = gpu_vm.register_translated(7, first, first);
+    auto second = std::make_shared<ExecutableAddressSpace>(0);
+    second->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+    const auto second_handle = gpu_vm.register_translated(8, second, second);
+    ASSERT_TRUE(first_handle);
+    ASSERT_TRUE(second_handle);
+    fixture.cu()->set_gpu_vm(&gpu_vm);
+    auto *wf = fixture.launch(1, 0);
+    ASSERT_NE(wf, nullptr);
+    wf->set_process_id(7);
+    if (explicit_handle)
+      wf->set_address_space(first_handle);
+    fixture.cu()->step();
+    ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+    wf->set_process_id(8);
+    if (explicit_handle)
+      wf->set_address_space(second_handle);
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), 2u);
+  }
+}
+
+TEST(InstructionCacheCuTest, SwitchingVmServicesDropsTheRetainedAccess) {
+  GpuVm first_vm;
+  GpuVm second_vm;
+  CuFixture fixture("vm_service_switch_cu");
+  auto first = std::make_shared<ExecutableAddressSpace>(0);
+  first->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(1), kSEndpgm});
+  const auto first_handle = first_vm.register_translated(7, first, first);
+  auto second = std::make_shared<ExecutableAddressSpace>(0);
+  second->write_program(std::array<uint32_t, 3>{kSNop, s_mov_b32_s0_imm(2), kSEndpgm});
+  const auto second_handle = second_vm.register_translated(7, second, second);
+  ASSERT_TRUE(first_handle);
+  ASSERT_EQ(first_handle, second_handle) << "exercise matching keys in different VM services";
+  fixture.cu()->set_gpu_vm(&first_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(7);
+  wf->set_address_space(first_handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+
+  fixture.cu()->set_gpu_vm(&second_vm);
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
 
 // Self-modifying code: the rewritten instruction only becomes visible to the
 // fetcher when the wave retires s_icache_inv. This runs the generated

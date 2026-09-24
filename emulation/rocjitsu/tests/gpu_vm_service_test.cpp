@@ -950,6 +950,7 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
 
   const std::optional<GpuVmAccess> old_access = gpu_vm.snapshot(address_space);
   ASSERT_TRUE(old_access);
+  EXPECT_TRUE(old_access->is_current());
   const VmCacheNamespace old_namespace = old_access->cache_namespace();
   EXPECT_EQ(old_namespace.address_space, address_space);
 
@@ -957,6 +958,8 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
   const std::optional<GpuVmAccess> new_access = gpu_vm.snapshot(address_space);
   ASSERT_TRUE(new_access);
+  EXPECT_FALSE(old_access->is_current());
+  EXPECT_TRUE(new_access->is_current());
   EXPECT_NE(new_access->cache_namespace(), old_namespace);
   EXPECT_EQ(new_access->cache_namespace().address_space, address_space);
 
@@ -968,10 +971,32 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
 
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
   EXPECT_FALSE(gpu_vm.snapshot(address_space));
+  EXPECT_FALSE(new_access->is_current());
   value[0] = std::byte{0x5a};
   EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Unavailable);
+}
+
+TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
+  GpuVm gpu_vm;
+  const auto handle = register_byte_address_space(gpu_vm, 7, 0x11);
+  ASSERT_TRUE(handle);
+  const auto old_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(old_access);
+  ASSERT_TRUE(old_access->is_current());
+
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  EXPECT_FALSE(old_access->is_current());
+  const auto refreshed = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(refreshed);
+  EXPECT_TRUE(refreshed->is_current());
+  EXPECT_NE(old_access->cache_namespace(), refreshed->cache_namespace());
+  std::array<std::byte, 1> value{std::byte{0x5a}};
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(value[0], std::byte{0x5a});
+  EXPECT_EQ(refreshed->read(0, value), VmAccessOutcome::Complete);
+  EXPECT_EQ(value[0], std::byte{0x11});
 }
 
 TEST(GpuVmService, ClearingGartPreservesItsIdentityAndUnrelatedAddressSpaces) {
