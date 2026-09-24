@@ -1129,12 +1129,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     // Zero-EXEC instructions still occupy positions behind pending requests.
     if (!scalar && !vector_lanes && !scoreboard.outstanding(counter))
       continue;
-    // Message returns have separate send and return completions. Larger SMEM
-    // accesses use two units, but unordered SMEM results always need zero.
-    uint32_t units = inst.mnemonic().starts_with("s_sendmsg_rtn_") ? 2 : 1;
-    if (event.kind == WaitEventKind::Smem && inst.data() && inst.data()->tag() == SCALAR_MEM)
-      units = inst.data_as<ScalarMemState>()->num_dwords > 1 ? 2 : 1;
-    const auto sequence = scoreboard.issue(event, config_.arch, units);
+    const auto sequence =
+        scoreboard.issue(event, config_.arch, scoreboard.issue_units(inst, event, config_.arch));
     if (counter == xcnt_completion_counter)
       xcnt_completion = counter;
     if (event.special_reg && inst.memory_wait_result_written()) {

@@ -22,13 +22,14 @@ Each ordered counter has monotonically increasing issue and retirement positions
 `Q` issued entries, a wait with threshold `N` proves completion through `max(0, Q-N)`. A
 later, weaker wait cannot undo completion. Instructions without register results occupy
 positions too. An instruction contributing to two counters contributes to both
-independently, and a register result on both remains pending until both dependencies
-have been satisfied.
+independently. Counter occupancy and the readiness of individual returned lanes are
+separate: each register dependency follows the pipeline that writes those lanes.
 
 Scalar memory is unordered: nonzero waits do not prove individual results ready. This
 includes cache operations; their bank-level counter increments are not simulated. Routed
-SMEM transfers larger than a DWORD account for two units, but readiness still requires
-zero. Mixed hardware event types sharing a counter retain separate ordered-class
+SMEM transfers use the decoded `MemoryCounterObligation::counter_increment()` for
+both admission and issue accounting (two units for transfers larger than a DWORD),
+but readiness still requires zero. Mixed hardware event types sharing a counter retain separate ordered-class
 positions: a nonzero wait proves an ordered result complete only when at least that
 many younger operations in its own class follow it. Generic FLAT on older CDNA is treated
 conservatively as unordered. Zero waits reset this ordering state. FLAT keeps both queue
@@ -45,7 +46,8 @@ the same ordered class; other classes and unordered results remain tracked.
 
 Before reading an incoming producer's operands, the checker applies the finite
 counter bound to each qualified ordered class in that counter. A capacity of `C`
-leaves at most `C-1` old operations before admission. Younger operations from a
+and an incoming increment of `U` leave at most `C-U` old counter units before
+admission, including when the incoming producer itself is unordered. Younger operations from a
 different completion class cannot prove readiness. Capacities come from the
 target's counter fields (for example, 15 for legacy CDNA LGKM and 63 for VMEM).
 SMEM, GDS, exports, messages and legacy CDNA FLAT do not acquire a FIFO guarantee
@@ -53,6 +55,37 @@ from sharing a counter; their results require a zero wait, even after a nonzero
 partial wait. CDNA5 async load and store completion classes are separate;
 async barrier arrive orders with async loads. Proven completion also releases the
 associated replay translation prefix.
+
+## FLAT register readiness
+
+FLAT contributes to both VMEM and DS counters even when every active lane selects
+one address space. Its global/scratch and LDS portions can complete independently;
+RDNA4 ISA section 5.7.1.3 describes complementary lane masks for these portions.
+The checker uses the resolved address of each lane, rather than the functional
+pipeline's first-lane route, to associate a returned VGPR lane with its counter.
+For example, if lane 0 loads from LDS and lane 1 loads from global memory, a zero
+DS wait releases lane 0's register dependency while lane 1 still needs a VMEM wait.
+A consumer reading both lanes needs both; a consumer reading only lane 0 does not.
+
+This distinction also appears in LLVM's AMDGPU wait insertion:
+[`mayAccessVMEMThroughFlat` and `mayAccessLDSThroughFlat`](https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp#L4769)
+exclude the irrelevant address space when it is known from the memory operand.
+[`getEventsFor`](https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUHWEvents.cpp#L110)
+then adds only the relevant completion events. Unknown FLAT pointers require both;
+the runtime checker has per-lane routing information unavailable to static codegen.
+Requiring both waits for every returned lane would warn about accesses that this
+policy accepts. Avoiding such false positives takes priority over diagnosing an
+unproven additional whole-instruction requirement. This does not treat a successful
+run without a wait as proof of an architectural completion guarantee.
+
+A hardware probe on gfx1100 and gfx1201 used inline assembly to load LDS in even
+lanes and global memory in odd lanes, then immediately add to the returned value.
+With only the DS wait, all 1,048,576 global-lane observations per device were wrong
+and all LDS-lane observations were correct. Waiting for both produced no errors;
+omitting both broke both lane groups. VMEM-only waits happened to leave both groups
+ready in this probe, which does not establish a guarantee for the LDS lanes.
+These observations support keeping the lanes separate; they do not establish
+wait requirements on untested architectures or under all schedules.
 
 ## Producer accounting
 

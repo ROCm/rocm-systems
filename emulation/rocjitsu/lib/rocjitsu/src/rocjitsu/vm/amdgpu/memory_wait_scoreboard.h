@@ -113,11 +113,14 @@ public:
                  uint32_t units = 1, bool backpressure_ordered = true);
   uint64_t issue(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch,
                  uint32_t units = 1);
+  /// Use the same decoded counter units for admission and issue accounting.
+  static uint32_t issue_units(const Instruction &inst,
+                              const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch);
   /// Find the incoming producer's FIFO class without issuing its completion.
   uint16_t ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
                                rj_code_arch_t arch) const;
   /// Admission can force completion before the incoming instruction reads its operands.
-  void backpressure(WaitCounterKind counter, uint32_t capacity);
+  void backpressure(WaitCounterKind counter, uint32_t capacity, uint32_t incoming_units = 1);
   void add(Event event);
   void wait(WaitCounterKind counter, uint32_t threshold);
   uint64_t outstanding(WaitCounterKind counter) const {

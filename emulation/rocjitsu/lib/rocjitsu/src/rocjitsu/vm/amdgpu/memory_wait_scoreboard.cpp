@@ -109,6 +109,47 @@ uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &ev
   return issue(event.counter, !kind, kind.value_or(0), units);
 }
 
+uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
+                                           const waitcheck_detail::ClassifiedEvent &event,
+                                           rj_code_arch_t arch) {
+  using namespace waitcheck_detail;
+  const auto model = waitcnt_model(arch).value();
+  const auto counter_kind = [model](WaitCounterType counter) {
+    switch (counter) {
+    case WaitCounterType::VMCNT:
+    case WaitCounterType::LOADCNT:
+      return WaitCounterKind::Load;
+    case WaitCounterType::VSCNT:
+    case WaitCounterType::STORECNT:
+      return vmem_store_wait_counter(model);
+    case WaitCounterType::LGKMCNT:
+    case WaitCounterType::DSCNT:
+      return WaitCounterKind::Ds;
+    case WaitCounterType::KMCNT:
+      return smem_wait_counter(model);
+    case WaitCounterType::EXPCNT:
+      return WaitCounterKind::Exp;
+    case WaitCounterType::ASYNCCNT:
+      return WaitCounterKind::Async;
+    case WaitCounterType::TENSORCNT:
+      return WaitCounterKind::Tensor;
+    }
+    return WaitCounterKind::Count;
+  };
+  if (const auto *info = inst.amdgpu_memory_issue_info())
+    for (const auto &obligation : info->counter_obligations())
+      if (counter_kind(obligation.wait_counter_type()) == event.counter)
+        return obligation.counter_increment();
+  // Inline message returns are outside the memory-pipeline metadata: one
+  // completion acknowledges the send, the other the returned register value.
+  if (event.kind == WaitEventKind::SqMessage && inst.mnemonic().starts_with("s_sendmsg_rtn_"))
+    return 2;
+  // Synthetic producers may supply a resolved payload without decoder metadata.
+  if (event.kind == WaitEventKind::Smem && inst.data() && inst.data()->tag() == SCALAR_MEM)
+    return inst.data_as<ScalarMemState>()->num_dwords > 1 ? 2 : 1;
+  return 1;
+}
+
 uint16_t MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
                                                    rj_code_arch_t arch) const {
   const auto kind = completion_order_kind(event, arch);
@@ -126,16 +167,18 @@ bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence,
          (order != kUnordered && order_sequence <= orders_[order].retired);
 }
 
-void MemoryWaitScoreboard::backpressure(WaitCounterKind counter, uint32_t capacity) {
-  assert(capacity != 0);
+void MemoryWaitScoreboard::backpressure(WaitCounterKind counter, uint32_t capacity,
+                                        uint32_t incoming_units) {
+  assert(incoming_units != 0 && incoming_units <= capacity);
+  const auto remaining = capacity - incoming_units;
   bool changed = false;
   for (auto &order : orders_) {
-    if (order.counter != counter || order.issued < capacity)
+    if (order.counter != counter || order.issued <= remaining)
       continue;
-    // Even an unordered incoming operation needs one counter slot. If an old
-    // result still had capacity-1 younger operations in its own ordered class,
-    // none could have completed and that slot could not be available.
-    const auto through = order.issued - (capacity - 1);
+    // Even an unordered incoming operation must reserve all its counter units.
+    // At most remaining units from any old ordered class can still be pending
+    // when the incoming instruction is admitted to read its operands.
+    const auto through = order.issued - remaining;
     changed |= through > order.retired;
     order.retired = std::max(order.retired, through);
   }
@@ -307,7 +350,9 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
   const bool full =
       inst.is_memory_wait_producer() && std::ranges::any_of(orders_, [&](const Order &order) {
         const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, order.counter);
-        return maximum.succeeded() && order.issued - order.retired > maximum.value();
+        return maximum.succeeded() &&
+               order.issued - order.retired + MemoryCounterObligation::MAX_COUNTER_INCREMENT >
+                   maximum.value() + 1;
       });
   if (full) {
     const auto events = WaitcheckTarget::classify_events(inst, arch);
@@ -318,7 +363,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
           continue;
         const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, event.counter);
         if (maximum.succeeded())
-          backpressure(event.counter, maximum.value() + 1);
+          backpressure(event.counter, maximum.value() + 1, issue_units(inst, event, arch));
       }
   }
   if (arch == ROCJITSU_CODE_ARCH_CDNA5 && outstanding(WaitCounterKind::X) &&

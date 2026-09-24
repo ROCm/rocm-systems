@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
@@ -164,6 +167,47 @@ TEST_F(MemoryWaitScoreboardTest, AdmissionAtCapacityReleasesOnlyTheOldestOrdered
     EXPECT_TRUE(shadow.test(6));
     read(5);
     EXPECT_TRUE(hazards.empty());
+  }
+}
+
+TEST_F(MemoryWaitScoreboardTest, AdmissionReservesEveryIncomingCounterUnit) {
+  for (bool message : {false, true}) {
+    const auto arch = message ? ROCJITSU_CODE_ARCH_RDNA3 : ROCJITSU_CODE_ARCH_CDNA4;
+    const uint32_t capacity = message ? 63 : 15;
+    auto decoder = Decoder::create(arch);
+    for (bool wide : {false, true}) {
+      std::vector<uint32_t> words;
+      if (message && wide)
+        append_instruction(
+            words, rdna3::build_sop1(rdna3::kSSendmsgRtnB32Sop1, {.ssrc0 = 128, .sdst = 4}));
+      else if (message)
+        append_instruction(words, rdna3::build_sopp(rdna3::kSSendmsgSopp, {.simm16 = 1}));
+      else
+        append_instruction(
+            words, cdna4::build_smem(wide ? cdna4::kSLoadDwordx2Smem : cdna4::kSLoadDwordSmem,
+                                     {.sbase = 0, .sdata = 4, .imm = 1}));
+      util::StringDiagnostic error;
+      auto decoded = decoder->decode_window(words, 0, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      const auto &inst = *decoded.value();
+      for (uint32_t outstanding : {capacity - 2, capacity - 1, capacity}) {
+        SCOPED_TRACE(inst.mnemonic());
+        SCOPED_TRACE(outstanding);
+        state.clear();
+        load(5, WaitCounterKind::Ds);
+        load(6, WaitCounterKind::Ds);
+        load(7, WaitCounterKind::Ds, 1, 0xf, true);
+        for (uint32_t i = 2; i < outstanding; ++i)
+          state.issue(WaitCounterKind::Ds);
+        state.before(inst, arch);
+        const uint32_t retired =
+            outstanding + (wide ? 2 : 1) > capacity ? outstanding + (wide ? 2 : 1) - capacity : 0;
+        EXPECT_EQ(shadow.test(5), retired < 1);
+        EXPECT_EQ(shadow.test(6), retired < 2);
+        // Admission cannot establish the unordered result's readiness.
+        EXPECT_TRUE(shadow.test(7));
+      }
+    }
   }
 }
 
@@ -939,52 +983,61 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndKeepBothQueueE
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u}) {
-      SCOPED_TRACE(static_cast<unsigned>(arch));
-      SCOPED_TRACE(shared_lanes);
-      GpuMemory memory("flat_memory");
-      L2Cache l2("flat_l2");
-      ComputeUnitCore::Config config{};
-      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-      config.arch = arch;
-      config.num_wf_slots = 1;
-      config.sgprs_per_wf = 128;
-      config.vgprs_per_wf = 32;
-      config.lds_size_kb = 64;
-      auto cu = ComputeUnitCore::create("flat_cu", config, &memory, &l2);
-      ASSERT_NE(cu, nullptr);
-      auto *wf = cu->dispatch_wf(0, 0x100, config.sgprs_per_wf, config.vgprs_per_wf);
-      ASSERT_NE(wf, nullptr);
-      wf->set_exec(0b1111);
-      auto data = std::make_unique<VectorMemState>(GLOBAL_MEM);
-      data->is_load = true;
-      data->exec_mask = 0b1111;
-      data->lane_mask = 0b1111;
-      data->elem_size = 4;
-      data->num_elems = 1;
-      data->dst_reg_base = wf->vgpr_alloc().base + 2;
-      Instruction inst("flat_load_b32", nullptr);
-      inst.set_data(std::move(data));
-      cu->track_memory_wait(inst, *wf, shared_lanes);
-      auto &state = *wf->memory_wait_scoreboard();
-      EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
-      EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
-      std::vector<MemoryWaitScoreboard::Hazard> hazards;
-      state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
-        static_cast<decltype(hazards) *>(p)->push_back(hazard);
-      });
-      const RegisterRef result{RegClass::VGPR, 2, 1};
-      state.wait(WaitCounterKind::Load, 0);
-      state.access(result, 0b1111 & ~shared_lanes, 0xf, false);
-      EXPECT_TRUE(hazards.empty());
-      EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
-      state.access(result, shared_lanes, 0xf, false);
-      ASSERT_EQ(hazards.size(), shared_lanes ? 1u : 0u);
-      if (shared_lanes) {
-        EXPECT_EQ(hazards.front().producer.counter, WaitCounterKind::Ds);
+      for (auto waited : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
+        SCOPED_TRACE(static_cast<unsigned>(waited));
+        SCOPED_TRACE(static_cast<unsigned>(arch));
+        SCOPED_TRACE(shared_lanes);
+        GpuMemory memory("flat_memory");
+        L2Cache l2("flat_l2");
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 32;
+        config.lds_size_kb = 64;
+        auto cu = ComputeUnitCore::create("flat_cu", config, &memory, &l2);
+        ASSERT_NE(cu, nullptr);
+        auto *wf = cu->dispatch_wf(0, 0x100, config.sgprs_per_wf, config.vgprs_per_wf);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(0b1111);
+        auto data = std::make_unique<VectorMemState>(GLOBAL_MEM);
+        data->is_load = true;
+        data->exec_mask = 0b1111;
+        data->lane_mask = 0b1111;
+        data->elem_size = 4;
+        data->num_elems = 1;
+        data->dst_reg_base = wf->vgpr_alloc().base + 2;
+        Instruction inst("flat_load_b32", nullptr);
+        inst.set_data(std::move(data));
+        cu->track_memory_wait(inst, *wf, shared_lanes);
+        auto &state = *wf->memory_wait_scoreboard();
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+        std::vector<MemoryWaitScoreboard::Hazard> hazards;
+        state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
+          static_cast<decltype(hazards) *>(p)->push_back(hazard);
+        });
+        const RegisterRef result{RegClass::VGPR, 2, 1};
+        const auto pending =
+            waited == WaitCounterKind::Load ? WaitCounterKind::Ds : WaitCounterKind::Load;
+        const uint64_t ready_lanes =
+            waited == WaitCounterKind::Ds ? shared_lanes : 0b1111 & ~shared_lanes;
+        const uint64_t pending_lanes = 0b1111 & ~ready_lanes;
+        state.wait(waited, 0);
+        state.access(result, ready_lanes, 0xf, false);
+        EXPECT_TRUE(hazards.empty());
+        EXPECT_EQ(state.outstanding(pending), 1u);
+        state.access(result, pending_lanes, 0xf, false);
+        ASSERT_EQ(hazards.size(), pending_lanes ? 1u : 0u);
+        if (pending_lanes) {
+          EXPECT_EQ(hazards.front().producer.counter, pending);
+          EXPECT_EQ(hazards.front().producer.lanes, pending_lanes);
+        }
+        state.wait(pending, 0);
+        EXPECT_EQ(state.outstanding(pending), 0u);
+        EXPECT_TRUE(state.empty());
       }
-      state.wait(WaitCounterKind::Ds, 0);
-      EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 0u);
-      EXPECT_TRUE(state.empty());
     }
   }
 }
