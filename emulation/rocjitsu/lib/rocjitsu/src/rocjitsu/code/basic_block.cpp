@@ -1013,14 +1013,15 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return emit_error.emit() << "invalid text section for reachable CFG";
 
-  std::vector<CodeRange> ranges(permitted_ranges.begin(), permitted_ranges.end());
-  for (const CodeRange &range : ranges) {
+  for (const CodeRange &range : permitted_ranges) {
     if (range.start_offset % sizeof(uint32_t) || range.size % sizeof(uint32_t) || range.size == 0 ||
         range.start_offset >= section_end || range.size > section_end - range.start_offset)
       return emit_error.emit() << "invalid reachable CFG code range at byte " << range.start_offset;
   }
-  if (ranges.empty())
-    ranges.push_back({0, section_end});
+  std::vector<CodeRange> ranges =
+      permitted_ranges.empty()
+          ? std::vector<CodeRange>{{0, section_end}}
+          : std::vector<CodeRange>(permitted_ranges.begin(), permitted_ranges.end());
   std::ranges::sort(ranges, {}, &CodeRange::start_offset);
   std::vector<CodeRange> merged_ranges;
   for (const CodeRange &range : ranges) {
