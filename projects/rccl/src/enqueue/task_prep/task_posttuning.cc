@@ -960,6 +960,7 @@ static ncclResult_t postTuneP2pTasks(
     NCCLCHECK(fillP2pTaskFromRaw(comm, tInfo, task));
 
     bool isSendNotRecv = task->func == ncclFuncSend;
+    rcclPolicyValidateP2pTask(comm, task, isSendNotRecv);
 
     NCCLCHECK(postTuneP2pRegisterBuffer(comm, task, isSendNotRecv, tInfo->tuningOut.proto));
 

@@ -1368,10 +1368,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // have no per-operation size.
   uint8_t base =
     ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm)) % activeP2pChannels;
-  int policyConnectorChannel =
-    ncclP2pChannelForPart(
-      activeP2pChannels, base, 0, activeP2pChannelsPerPeer,
-      comm->nNodes, comm->p2pChannelShiftSize);
+  int partChannels[MAXCHANNELS];
+  for (int part = 0; part < nChannelsMax; part++) {
+    partChannels[part] = ncclP2pChannelForPart(activeP2pChannels, base, part, activeP2pChannelsPerPeer,
+                                               comm->nNodes, comm->p2pChannelShiftSize);
+  }
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
@@ -1406,15 +1407,14 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   }
   if (!selfSend) {
     for (int dir = 0; dir <= 1; dir++) {
-      connIndex[dir] = rcclPolicyP2pWorkConnectorIndex(comm, &policyPlan, dir, policyConnectorChannel,
+      connIndex[dir] = rcclPolicyP2pWorkConnectorIndex(comm, &policyPlan, dir, partChannels, nChannelsMax,
                                                        dir ? sendRank : recvRank, connIndex[dir]);
     }
   }
 
   if (!selfSend) {
     for (int part = 0; part < nChannelsMax; part++) {
-      int channelId = ncclP2pChannelForPart(activeP2pChannels, base, part, activeP2pChannelsPerPeer, comm->nNodes,
-                                            comm->p2pChannelShiftSize);
+      int channelId = partChannels[part];
       struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
       for (int dir = 0; dir <= 1; dir++) {
         int peerRank = dir ? sendRank : recvRank;
@@ -2235,6 +2235,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
   // For p2p ops, we further guarantee that ops from different epochs will not be batched together (to avoid hangs).
   // The p2pEpoch value is incremented in scheduleP2pTasksToPlan and its value is carried over from one plan to another (even if not strictly required)
   int nPlans = 0, p2pEpoch = 0, p2pRound = 0;
+
+  if (planner->nTasksP2p != 0) rcclPolicyValidateP2pTasks(comm);
 
   if (planner->nTasksColl + planner->nTasksP2p + planner->nTasksBcast != 0 ||
       !ncclIntruQueueEmpty(&planner->collSymTaskQueue) || !ncclIntruQueueEmpty(&planner->collCeTaskQueue) ||

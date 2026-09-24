@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <array>
 #include <vector>
 
 #include "../common/LogCapture.hpp"
@@ -1789,6 +1790,89 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot
   EXPECT_FALSE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
   EXPECT_EQ(0, preconnect.nConnIndices);
   EXPECT_TRUE(rcclPolicyP2pTaskAllowsRegistration(&gather));
+}
+
+TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UnconnectedPolicyChannelDropsWholePolicy) {
+  constexpr int kRanks = 8;
+  constexpr int kChannels = 32;
+  constexpr int kPeer = 1;
+  ncclComm comm{};
+  char arch[] = "gfx1201";
+  comm.archName = arch;
+  comm.rank = 0;
+  comm.nNodes = 1;
+  comm.nRanks = kRanks;
+  comm.p2pnChannels = kChannels;
+  comm.p2pnChannelsPerPeer = 4;
+  ncclComm::P2pSchedulePair schedule[kRanks];
+  for (int round = 0; round < kRanks; round++) {
+    schedule[round].sendRank = round;
+    schedule[round].recvRank = (kRanks - round) % kRanks;
+  }
+  comm.p2pSchedule = schedule;
+  std::vector<ncclChannelPeer> channelPeers(kChannels);
+  std::vector<std::array<ncclChannelPeer*, kRanks>> peerTables(kChannels);
+  auto connectShm = [&](int channelId, int connected) {
+    ncclConnector& send = channelPeers[channelId].send[RCCL_CONN_IDX_P2P_SHM];
+    send.connected = connected;
+    send.transportComm = &shmTransport.send;
+  };
+  for (int c = 0; c < kChannels; c++) {
+    peerTables[c].fill(nullptr);
+    peerTables[c][kPeer] = &channelPeers[c];
+    comm.channels[c].peers = peerTables[c].data();
+    connectShm(c, 1);
+  }
+
+  SetMicroEnv("NCCL_P2P_DISABLE", "1");
+  g_tuningParamP2pDisable = 1;
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  auto resolveAndValidate = [&]() {
+    ncclTaskP2p gather{};
+    gather.func = ncclFuncSend;
+    gather.collAPI = ncclFuncGather;
+    gather.bytes = 1ULL << 20;
+    gather.root = kPeer;
+    rcclPolicyResolveP2pTask(&comm, &gather);
+    EXPECT_TRUE(gather.executionPolicyMatched);
+    EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, gather.executionPolicy.transport);
+    rcclPolicyValidateP2pTask(&comm, &gather, /*isSendNotRecv=*/true);
+    return gather;
+  };
+
+  ncclTaskP2p gather = resolveAndValidate();
+  EXPECT_TRUE(gather.executionPolicyMatched);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, gather.executionPolicy.transport);
+
+  // Exactly the peer's channels in the policy pool are preconditions; one
+  // missing connector drops the whole policy back to stock behavior.
+  int droppingChannels = 0;
+  for (int c = 0; c < kChannels; c++) {
+    connectShm(c, 0);
+    ncclTaskP2p dropped = resolveAndValidate();
+    if (!dropped.executionPolicyMatched) {
+      droppingChannels++;
+      rcclCollectiveExecutionPolicy stock;
+      rcclDefaultCollectiveExecutionPolicy(&stock);
+      EXPECT_EQ(stock.transport, dropped.executionPolicy.transport);
+      EXPECT_EQ(stock.nChannels, dropped.executionPolicy.nChannels);
+      EXPECT_TRUE(rcclPolicyP2pTaskAllowsRegistration(&dropped));
+      rcclP2pPolicyPreconnect preconnect;
+      EXPECT_FALSE(rcclPolicyP2pPreconnect(&comm, &dropped, &preconnect));
+    }
+    connectShm(c, 1);
+  }
+  EXPECT_EQ(comm.p2pnChannelsPerPeer, droppingChannels);
+
+  // Work planning keeps the default connector when any part lacks the slot.
+  ncclTaskP2p* tasks[2] = {nullptr, &gather};
+  rcclP2pPolicyWorkPlan plan;
+  rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
+  int parts[2] = {0, 1};
+  EXPECT_EQ(RCCL_CONN_IDX_P2P_SHM,
+            rcclPolicyP2pWorkConnectorIndex(&comm, &plan, /*dir=*/1, parts, 2, kPeer, 1));
+  connectShm(1, 0);
+  EXPECT_EQ(1, rcclPolicyP2pWorkConnectorIndex(&comm, &plan, /*dir=*/1, parts, 2, kPeer, 1));
 }
 
 TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportIntentConstrainsCandidates) {
