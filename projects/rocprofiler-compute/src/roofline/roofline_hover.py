@@ -37,17 +37,13 @@ def wrap_hover_name(name: str) -> str:
 
 
 class KernelDispatchStats(NamedTuple):
-    """Per-kernel and total dispatch counts for the tooltip's count ratio."""
-
     kernel: Optional[float]
     total: Optional[float]
 
 
 class KernelDurationStats(NamedTuple):
-    """Per-kernel duration, its share of total runtime, and the time unit."""
-
     kernel: Optional[float]
-    pct_runtime: Optional[float]
+    total: Optional[float]
     unit: str
 
 
@@ -61,8 +57,8 @@ def build_kernel_hover_template(
 ) -> str:
     """Kernel hover template; per-point values come from customdata."""
     unit = f"G{ops_flops}s/s"
-    total_app_time = _invert_percent(duration.kernel, duration.pct_runtime)
     pct_dispatches = _percent_of(dispatches.kernel, dispatches.total)
+    pct_runtime = _percent_of(duration.kernel, duration.total)
     return _hover(
         name_html,
         [
@@ -75,9 +71,9 @@ def build_kernel_hover_template(
             "%{customdata[2]}",
             f"Dispatch Count: {format_hover_number(pct_dispatches, ',.2f')}% "
             f"({_format_integer(dispatches.kernel)} / {_format_integer(dispatches.total)})",
-            f"Duration: {format_hover_number(duration.pct_runtime, ',.2f')}% "
+            f"Duration: {format_hover_number(pct_runtime, ',.2f')}% "
             f"({format_hover_number(duration.kernel, ',.0f')} / "
-            f"{format_hover_number(total_app_time, ',.0f')} {duration.unit})",
+            f"{format_hover_number(duration.total, ',.0f')} {duration.unit})",
         ],
     )
 
@@ -143,13 +139,6 @@ def _percent_of(part: Optional[float], whole: Optional[float]) -> Optional[float
     if part is None or not whole:
         return None
     return 100.0 * part / whole
-
-
-def _invert_percent(value: Optional[float], pct: Optional[float]) -> Optional[float]:
-    """The whole that `value` is `pct` percent of, or None if not computable."""
-    if value is None or not pct:
-        return None
-    return value * 100.0 / pct
 
 
 def _hover(header: str, rows: list[str]) -> str:
