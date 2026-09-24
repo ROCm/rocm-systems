@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Configure-time drift-guard helper (rccl_assert_source_line).
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclAssertSourceLine.cmake")
-# Shared per-target helpers (rccl_apply_hip_compile_only,
-# rccl_apply_rocshmem_gin_optout, rccl_mark_oracle_tus_generated,
-# rccl_register_test_categories, rccl_apply_host_only_flags).
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclTargetHelpers.cmake")
 
 # Checked against the original sources because hipify output does not exist yet
@@ -27,49 +23,42 @@ unset(_rccl_src_root)
 
 set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
-  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
-  gin-plugin-init-test.cc              # src/plugin/gin.cc init/devices leak (NVIDIA/nccl#2179)
-  rma-test.cc                          # RMA launch dispatch + plan scheduling coverage
-  rma-ce-test.cc                       # RMA CE init/finalize + put/wait launch coverage
-  ras-test.cc                          # src/ras/ras.cc: complete host-side line coverage
-  tuning-general-test.cc               # src/tuning/tuning_general.cc
-  ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
+  rma-proxy-progress-test.cc
+  gin-plugin-init-test.cc
+  rma-test.cc
+  rma-ce-test.cc
+  ras-test.cc
+  tuning-general-test.cc
+  ras-client-test.cc
   group-test.cc
   devcomm-test.cc
-  wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
-  dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
+  wrap-test.cc
+  dev-runtime-test.cc
   # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
-  fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
-  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-  fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
-  fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
-  fakes/rma_fakes.cc                   # rma proxy/CE externals (circular-buf, destroy, launchers)
-  fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
-  fakes/recorder_fakes.cc              # src/recorder.cc
-  fakes/utils_fakes.cc                 # src/misc/utils.cc (targets without the real utils.cc)
-  fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
+  fakes/dev_runtime_micro_fakes.cc
+  fakes/nccl_fakes.cc
+  fakes/libc_fakes.cc
+  fakes/ras_param_fakes.cc
+  fakes/rma_fakes.cc
+  fakes/comm_fakes.cc
+  fakes/recorder_fakes.cc
+  fakes/utils_fakes.cc
+  fakes/collective_stubs.cc
   fakes/devcomm_fakes.cc
-  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
-  fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-  fakes/ce_fakes.cc                    # src/ce_coll.cc availability + batch-ops seams
-  fakes/collectives_fakes.cc           # src/collectives.cc name helpers
-  fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
-  fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
-  fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
-  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc: query/init/finalize seams (kernel-index symbols are real here)
-  fakes/transport_stubs.cc             # transport/PXN/AINIC seams
-  fakes/tuning_fakes.cc                # graph tuning/channel params
-  fakes/wrap_fakes.cc                  # remaining uncategorized dependency seams
-  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
+  fakes/hip_fakes.cc
+  fakes/env_fakes.cc
+  fakes/ce_fakes.cc
+  fakes/collectives_fakes.cc
+  fakes/dda_fakes.cc
+  fakes/rccl_arch_thresholds_fakes.cc
+  fakes/strongstream_stubs.cc
+  fakes/sym_kernels_fakes.cc
+  fakes/transport_stubs.cc
+  fakes/tuning_fakes.cc
+  fakes/wrap_fakes.cc
+  ../common/main_altrsmi.cpp
   ../common/ProcessIsolatedTestRunner.cpp
 )
-# archinfo.cc (real IsArchMatch, for wrap-test.cc) is NOT in the list above:
-# its path is build-directory-relative, and this file is evaluated before
-# either the in-build or standalone project() context resolves that
-# directory -- PROJECT_BINARY_DIR is empty here in the standalone path
-# (project() hasn't run yet) and RCCL_HIPIFY_DIR doesn't exist yet either.
-# Added via target_sources() in each block below instead, once the right
-# path variable for that context is actually in scope.
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
 function(rccl_define_micro_source_lists)
@@ -206,23 +195,6 @@ endfunction()
 #                   added (init strips the three preprocessor-gated macros it sets
 #                   per variant so they are never inherited from the common set)
 #   NO_PIE          add -no-pie to the link (standalone only; see rccl-HostUnitTests)
-# Everything below keyed on BUILD_TESTS reproduces, verbatim, what each block
-# used to hand-roll per target:
-#   in-build   -> RCCL_COMMON_INCLUDE_DIRS/DEFS, rccl_apply_rocshmem_gin_optout,
-#                 rccl_apply_hip_compile_only, MICRO_TEST_LINK_LIBS, the hipify
-#                 dependency, rccl_apply_host_only_flags (coverage included),
-#                 rocm_install, and CTest category registration.
-#   standalone -> the -Wno-unused* + -ffunction-sections warning/codegen opts,
-#                 RCCL_INCLUDE_DIRS + the __HIP_PLATFORM_AMD__/NCCL_OS_LINUX/
-#                 ROCM_VERSION define baseline, the -no-hip-rt[/-no-pie]/
-#                 --gc-sections link options, and GTest/Threads/fmt. It also
-#                 registers the target in HOST_TEST_BINARIES so the trailing
-#                 HOST_TEST_COVERAGE loop instruments it (matching
-#                 add_test_executable()); coverage is applied there, not here.
-# The define/include *baselines* are supplied here per mode, but each caller
-# still passes its own EXTRA_DEFS/EXTRA_INCLUDES so the deliberate per-target,
-# per-mode differences (fabric/telemetry/USE_AMDSMI, extra include dirs) are
-# preserved exactly.
 function(rccl_add_micro_binary _name)
   cmake_parse_arguments(_ramb "NO_PIE" "CATEGORIES_YAML"
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
@@ -287,32 +259,17 @@ if(BUILD_TESTS)
   set(RCCL_HOST_HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
   rccl_define_micro_source_lists()
 
-  # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
-  # the test binary. This lets us use preprocessor and link-time substitution
-  # to provide test doubles for anything that would require a GPU or other
-  # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
-  # so any un-shimmed HIP call surfaces as a link error rather than binding
-  # libamdhip64.so (HIP compile requirements are applied below without linking).
-  # All the per-mode boilerplate (include dirs, RCCL_COMMON_COMPILE_DEFS, HIP
-  # compile-only, MICRO_TEST_LINK_LIBS, rocshmem-gin opt-out, the hipify
-  # dependency, host-only + coverage flags, install and CTest category
-  # registration) is applied by rccl_add_micro_binary, exactly as for the other
-  # micro binaries; only this target's own specifics are set after the call.
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicro
+  # ---------------------------------------------------------------------------
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify archinfo)
   rccl_add_micro_binary(rccl-UnitTestsMicro
     SOURCES ${RCCL_MICRO_TEST_SOURCES}
-    EXTRA_INCLUDES ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
+    EXTRA_INCLUDES ${PROJECT_BINARY_DIR}/hipify/src/devcomm
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-
-  # real IsArchMatch, for wrap-test.cc. Added via target_sources() after the
-  # helper because its path is build-directory-relative (see the note by
-  # RCCL_MICRO_TEST_SOURCES).
   target_sources(rccl-UnitTestsMicro PRIVATE
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)
 
-  # Pass the absolute path of hipified source files through as string
-  # literals so the #include in the test translation unit stays independent of
-  # the build directory layout.
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/ras.cc"
@@ -342,20 +299,10 @@ if(BUILD_TESTS)
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc")
   endif()
 
-  # The hipify dependency, host-only + coverage flags (--offload-host-only so
-  # llvm coverage never reaches the device pass; -ffunction-sections/--gc-sections
-  # to drop wrap_fakes.cc's unreached dependency floor), install and CTest
-  # category registration for this target are all applied by
-  # rccl_add_micro_binary above -- see rccl_apply_host_only_flags for the flag
-  # rationale it shares with rccl-UnitTestsMicroInit.
-
-  # rccl-UnitTestsMicroWarpSpeed: ENABLE_WARP_SPEED needs ncclComm laid out for it binary-wide, so anything
-  # requiring that layout (currently just src/scheduler/*.cc) gets its own binary instead of leaking the
-  # define into the ~8 unrelated TUs in rccl-UnitTestsMicro. Fakes ncclDevrInitOnce/ncclDevrFindWindow
-  # (fakes/dev_runtime_fakes.cc) instead of compiling real dev_runtime.cc.
-  # Source list: TEST_MICRO_SCHEDULER_SOURCE_FILES (rccl_define_micro_source_lists).
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
+  # ---------------------------------------------------------------------------
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
-
   rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
     SOURCES ${TEST_MICRO_SCHEDULER_SOURCE_FILES}
     EXTRA_DEFS
@@ -368,44 +315,11 @@ if(BUILD_TESTS)
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
 
   # ---------------------------------------------------------------------------
-  # rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for src/init.cc
-  # (AICOMRCCL-1685). Dedicated executables (NOT shared with rccl-UnitTestsMicro)
-  # so init.cc's symbols and std::once_flag state stay isolated. They also compile
-  # the real host-only oracle TUs (argcheck/archinfo/utils) from the hipified
-  # snapshot; --gc-sections drops their unreferenced deep deps. A
-  # HIP_*_UNCACHED_MEMORY variant and an ENABLE_FAULT_INJECTION variant exercise
-  # the second arm of each macro; tests self-select via #ifdef and coverage is
-  # merged across the three binaries.
+  # rccl-UnitTestsMicroInit and variants
   # ---------------------------------------------------------------------------
-  # Source list: TEST_MICRO_INIT_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
-
-  # Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
-  # HIP_UNCACHED_MEMORY and, separately, ENABLE_FAULT_INJECTION at the
-  # *preprocessor* (#if defined / #ifndef / #ifdef, e.g. the gfx950 corruption
-  # guard, the uncached-vs-finegrained malloc, and the commAlloc/devCommSetup
-  # fault-mask blocks). Each arm's code is absent from the object unless its
-  # macro is set, so a single compile of init.cc can only ever reach one side --
-  # covering both requires compiling it twice with different -D. The two macro
-  # pairs are lexically disjoint in init.cc (no uncached block contains a
-  # fault-injection block or vice versa), so they need no 2x2 cross product:
-  # base + -uncached + -faultinj reaches every arm of both. Coverage merges
-  # across the three .profraw files.
-  #
-  # None of the three variant macros is inherited here. FAULT_INJECTION defaults
-  # ON and HIP_*_UNCACHED_MEMORY are set from a HIP capability probe that passes
-  # on any current ROCm, so the rccl target defines all three and
-  # RCCL_COMMON_COMPILE_DEFS carries them in-tree, while the standalone project
-  # below has no rccl target to read: every variant collapsed to the same
-  # single arm in CI (the opposite arm from the one it selects locally) and the
-  # matrix silently tested one side twice. Strip them from the inherited list and
-  # set them per variant instead, so both build paths produce the identical
-  # three-way matrix by construction.
   foreach(_variant "" "-uncached" "-faultinj")
     set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
-    # src/init.cc is the first of the duplicate basenames (vs transport/net_ib/
-    # init.cc), so hipify keeps its name -- no _tmp suffix. REMOVE_DEFS strips the
-    # three per-variant macros so none is inherited from RCCL_COMMON_COMPILE_DEFS.
     rccl_add_micro_binary(${_init_tgt}
       SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
       REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
@@ -419,41 +333,9 @@ if(BUILD_TESTS)
   endforeach()
 
   # ---------------------------------------------------------------------------
-  # rccl-UnitTestsMicroEnqueue -- host-only microtests for src/enqueue.cc.
-  #
-  # Its own binary, not shared with the init/p2p ones: #include-ing a second
-  # production .cc into an existing TU would collide on file-scope state
-  # (enqueue.cc has 41 statics and 16 NCCL_PARAM/RCCL_PARAM globals).
-  #
-  # Two symbols must be omitted from the shared nccl_stubs.cc for this target:
-  # enqueue.cc defines ncclInitKernelsForDevice and ncclParamGraphStreamOrdering
-  # itself. Each is omitted by its OWN RCCL_STUBS_OMIT_<symbol> macro rather than
-  # one target-wide switch, so the exclusion names exactly what it drops. (These
-  # are still target-wide definitions -- a source added here later sees both --
-  # but each names a single symbol.) An omit macro is only ever for a symbol the
-  # UNIT UNDER TEST defines; a target that needs a real value where the floor
-  # aborts gets a seam in the owning TU's fakes file instead.
+  # rccl-UnitTestsMicroEnqueue
   # ---------------------------------------------------------------------------
-  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves a few dozen
-  # undefined symbols: ordinary externals of enqueue.cc that nothing in fakes/
-  # defines at all -- among them hipFuncGetAttributes, netTransport and most of
-  # the ncclProfiler* set -- plus ncclOsStrSep, an external of the hipified
-  # utils.cc oracle TU below. The control globals that used to make up most of
-  # this list are gone: each now lives in the per-production-TU fakes file that
-  # references it, so no *_stubs.cc leaves one dangling. Every one that remains
-  # needs a fake written. So a new test reaching one of those paths fails at LINK
-  # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:90)
-  # needs a hipFuncGetAttributes fake before it can be called at all. A symbol
-  # that gc-sections stops dropping (enqueue.cc grew a reference from retained
-  # code) is the same signal: write the fake in its owning TU's fakes file.
-  # To recount: take this target's CMakeFiles/.../link.txt, swap --gc-sections for
-  # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
-  # Source list: TEST_MICRO_ENQUEUE_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
-
-  # Hipify preserves the src/enqueue/ directory, so the staged file is
-  # hipify/src/enqueue/enqueue.cc (not hipify/src/enqueue.cc). Contrast
-  # transport/p2p.cc -> p2p_tmp.cc, which is a basename collision.
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue
     SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
     EXTRA_INCLUDES
@@ -468,20 +350,7 @@ if(BUILD_TESTS)
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
   # ---------------------------------------------------------------------------
-  # rccl-UnitTestsMicroSymKernels -- host-only microtests for the REAL src/sym_kernels.cc
-  # (ncclSymkMaxChunkElts, ncclSymkMask), compiled together with the GENERATED
-  # sym_kernels_host.cc it depends on for ncclSymkGetKernelIndex + the kernel arrays.
-  #
-  # Its own binary, not shared with rccl-UnitTestsMicro: fakes/sym_kernels_fakes.cc (needed
-  # there by dev_runtime.cc/wrap-test.cc callers) fakes the exact symbols (ncclSymkAvailable,
-  # ncclSymkInitOnce, ncclSymkFinalize, ncclGetSymRegType, rcclSymkKernelIdIsLL) the real
-  # sym_kernels.cc also defines -- a duplicate-symbol error if compiled into the same binary.
-  #
-  # getRequirements_gin pulls in a large tuning/GIN dependency surface this suite never calls;
-  # -ffunction-sections + --gc-sections drop that unreached code so it needs no fake
-  # (same technique as rccl-UnitTestsMicroEnqueue).
-  #
-  # Gated on GENERATE_SYM_KERNELS: it #includes the generated sym_kernels_host.cc, ON-only.
+  # rccl-UnitTestsMicroSymKernels
   # ---------------------------------------------------------------------------
   if(GENERATE_SYM_KERNELS)
     # Source list: TEST_MICRO_SYM_KERNELS_SOURCE_FILES (rccl_define_micro_source_lists).
