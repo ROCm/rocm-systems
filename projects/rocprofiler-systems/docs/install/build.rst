@@ -46,8 +46,7 @@ Build ROCm Systems Profiler from source
 =======================================
 
 ROCm Systems Profiler needs a GCC compiler with full support for C++20 and CMake v3.25 or higher.
-The Clang compiler may be used instead of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
-is already installed.
+The Clang compiler may be used.
 
 Build requirements
 ------------------
@@ -59,7 +58,7 @@ Build requirements
     ``<latch>``/``<barrier>``/``<semaphore>``, and is no longer tested.
   * On RHEL 8, the system GCC is too old; use ``gcc-toolset-11`` or later
   * Older GCC compilers may still work but are not tested and are not supported
-  * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
+  * Clang compilers are also supported for ROCm Systems Profiler
 
 * `CMake <https://cmake.org/>`_ v3.25 or later
 
@@ -111,7 +110,7 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "OpenMP", "4.x", "Dyninst", ""
 
 The CMake presets described later on this page turn on in-tree Dyninst, TBB, Elfutils, and
-LibIberty even though the CMake defaults for those options are ``OFF``.
+LibIberty builds even though the CMake defaults for those options are ``OFF``.
 
 ROCm dependencies
 -----------------
@@ -196,10 +195,8 @@ binary directory from the table below.
    "``release``", "``build/release``", "Official Release build"
    "``debug``", "``build/debug``", "Debug build with tests and examples"
    "``debug-optimized``", "``build/debug-optimized``", "RelWithDebInfo build with tests and examples"
-   "``ci``", "``build/ci``", "Official CI Release build with tests, gtest, examples, and ``ROCPROFSYS_MAX_THREADS=64``"
    "``release-mpi``", "``build/release-mpi``", "``release`` plus full MPI (``ROCPROFSYS_USE_MPI=ON``)"
    "``debug-mpi``", "``build/debug-mpi``", "``debug`` plus full MPI (``ROCPROFSYS_USE_MPI=ON``)"
-   "``coverage``", "``build/coverage``", "GCC coverage instrumentation; installs to ``/opt/rocprofiler-systems-dev``; uses system TBB, Elfutils, and LibIberty; enables MPI"
 
 To override a cache variable from a preset, pass extra ``-D`` options after
 ``--preset``. For example, build Python support for more than one interpreter:
@@ -219,23 +216,6 @@ Additional CMake options
 ROCm support is always enabled. You can still pass extra ``-D`` flags with a
 preset, including OpenMP-Tools (``ROCPROFSYS_USE_OMPT``) and hardware counters via
 PAPI (``ROCPROFSYS_USE_PAPI``).
-
-Many ``ROCPROFSYS_USE_<VAL>`` options also set the matching ``TIMEMORY_USE_<VAL>``
-option, so Timemory data for that feature is forwarded to Perfetto and shown in
-`the Perfetto UI <https://ui.perfetto.dev>`_ when you open the ``.pftrace`` file.
-See the Timemory `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_
-for related flags.
-
-.. _mpi-support-rocprof-sys:
-
-Full MPI (``ROCPROFSYS_USE_MPI=ON``, as in the ``*-mpi`` presets) can combine
-Timemory and, optionally, Perfetto output across ranks. Header-only MPI
-(``ROCPROFSYS_USE_MPI_HEADERS=ON``) wraps MPI C calls and labels output by
-``MPI_COMM_WORLD`` rank without linking a specific MPI library. Prefer the
-OpenMPI headers for header-only builds: ``MPI_COMM_WORLD`` is a pointer in
-OpenMPI and an ``int`` in MPICH, so wrapping with MPICH headers and running
-against OpenMPI can crash. For full MPI, build ROCm Systems Profiler against the
-same MPI distribution as the target application.
 
 Python profiling is enabled by the presets (``ROCPROFSYS_USE_PYTHON=ON``).
 Use ``ROCPROFSYS_PYTHON_VERSIONS`` and, for multiple versions,
