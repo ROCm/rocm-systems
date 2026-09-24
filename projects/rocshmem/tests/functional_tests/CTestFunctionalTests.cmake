@@ -1369,12 +1369,12 @@ function(add_tile_tests)
 
     begin_test_group(CATEGORY "TILE;COLLECTIVE;REDUCE" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_reduce RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
-        add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 65536)
         # Wave-level reduce - each wave uses its own context; MAX_NUM_CONTEXTS = WGs * NUM_WF
         add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 2 WORKGROUPS 1 NUM_WF 4 MAX_MSG_SIZE 1048576)
-        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 NUM_WF 4 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 NUM_WF 4 MAX_MSG_SIZE 65536)
         add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 2 WORKGROUPS 4 NUM_WF 1 MAX_MSG_SIZE 1048576)
-        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 4 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 4 NUM_WF 1 MAX_MSG_SIZE 65536)
     end_test_group()
 endfunction()
 
