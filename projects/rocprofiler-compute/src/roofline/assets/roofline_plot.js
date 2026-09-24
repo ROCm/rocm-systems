@@ -1420,7 +1420,7 @@
     label.className = opts.labelClass || "roofline-panel-name";
     label.textContent = opts.label;
     if (opts.title) {
-      window.RooflineKernelListTooltip.attach(label, action, opts.title);
+      RooflineKernelListTooltip.attach(label, action, opts.title);
     }
 
     action.appendChild(swatch);
@@ -1430,7 +1430,7 @@
     });
     action.addEventListener("click", function (event) {
       if (opts.title) {
-        window.RooflineKernelListTooltip.hide();
+        RooflineKernelListTooltip.hide();
       }
       opts.onClick(event);
     });

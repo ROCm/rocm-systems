@@ -1,15 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-// A native `title` attribute gets dismissed by a kernel row's click-to-filter
-// handler and won't reappear until the pointer leaves and re-enters, so the
-// kernel list uses this mouse-following tooltip to show the full kernel name
-// instead.
+// Kernel's list "click-to-filter" action prevents a default tooltip being shown.
+// Therefore custom tooltip is added to overcome this.
 (function () {
   "use strict";
 
-  var NAME_TOOLTIP_OFFSET = 14;
-  var NAME_TOOLTIP_DELAY_MS = 2000;
+  var nameTooltipOffset = 14;
+  var nameTooltipDelayMs = 2000;
 
   var nameTooltip = null;
   var nameTooltipTimer = null;
@@ -35,8 +33,8 @@
     }
     var maxLeft = Math.max(4, window.innerWidth - tooltip.offsetWidth - 4);
     var maxTop = Math.max(4, window.innerHeight - tooltip.offsetHeight - 4);
-    tooltip.style.left = clamp(x + NAME_TOOLTIP_OFFSET, 4, maxLeft) + "px";
-    tooltip.style.top = clamp(y + NAME_TOOLTIP_OFFSET, 4, maxTop) + "px";
+    tooltip.style.left = clamp(x + nameTooltipOffset, 4, maxLeft) + "px";
+    tooltip.style.top = clamp(y + nameTooltipOffset, 4, maxTop) + "px";
   }
 
   function showNameTooltip(text, x, y) {
@@ -51,7 +49,7 @@
     nameTooltipTimer = setTimeout(function () {
       var position = getPosition();
       showNameTooltip(text, position.x, position.y);
-    }, NAME_TOOLTIP_DELAY_MS);
+    }, nameTooltipDelayMs);
   }
 
   function hideNameTooltip() {
