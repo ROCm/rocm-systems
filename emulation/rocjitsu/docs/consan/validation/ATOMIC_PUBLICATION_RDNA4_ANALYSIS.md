@@ -199,9 +199,26 @@ localization control, not a proposed workload repair. Changing the workloads to
 add a barrier would remove the atomic-publication behavior that these tests
 are intended to exercise.
 
-No production detector fix is implemented in this investigation. The change is
-larger than a preset adjustment or a host-side conflict filter; the plan above
-identifies its required representation, proof obligations, and acceptance tests.
+## Implementation progress
+
+The host publication proof is implemented in
+`hooks/consan/rj_hsa_dbi_publication.{h,cpp}` (commit `33c59de6606`). It resolves
+observed RMW transitions independently of physical record order, propagates
+release sequences across producers and publication through multiple objects,
+and checks per-owner dynamic access order. Missing observations, duplicate
+values/ABA, disconnected modification chains, overlapping object identities,
+and inconsistent execution order return explicit incomplete evidence.
+
+Sixteen focused tests cover that contract; all 261 hook unit tests pass. The
+build and test evidence is in `implementation-build.log` and
+`host-publication-tests.log` in the artifact directory below.
+
+This component is not yet connected to device reports and does not change the
+current red cells. Remaining work is to emit and validate atomic observation
+records and access sequence identities, improve completion recognition, connect
+the proof to conflict analysis, and run the clean/fault qualification matrix
+above. The device capture must establish the complete-transition precondition;
+setting that flag on the existing address/role metadata would be unsound.
 
 ## Reproducing the minimal probe
 
