@@ -104,16 +104,16 @@ struct AtomicScratchLayout {
 // Initial observation forms: 32-bit add/OR with preserved operands. Non-returning
 // RDNA4 forms require a planned scratch destination and pre-guest preservation.
 // Other forms must not be counted as complete publication coverage.
+enum class PublicationCapture { Transition, OpaqueModification };
 [[nodiscard]] bool publication_observation_supported(const AtomicEvidenceSourceView &source);
-[[nodiscard]] std::optional<std::vector<uint32_t>>
-build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,
-                             const AtomicLoweringForm &lowering_form,
-                             uint64_t owner_descriptor_file_offset,
-                             const AtomicAddressPlan &address_plan, const SyncEmissionPlan &plan,
-                             const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-                             const PrivateStateLayout *private_layout, rj_code_arch_t arch,
-                             const ReportBufferLayout &layout, std::vector<std::string> &errors,
-                             uint32_t *guest_instruction_offset, uint32_t *emitted_guest_size);
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_publication_cave_words(
+    std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,
+    const AtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,
+    const AtomicAddressPlan &address_plan, const SyncEmissionPlan &plan,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const PrivateStateLayout *private_layout, rj_code_arch_t arch, const ReportBufferLayout &layout,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    uint32_t *emitted_guest_size, PublicationCapture capture = PublicationCapture::Transition);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,

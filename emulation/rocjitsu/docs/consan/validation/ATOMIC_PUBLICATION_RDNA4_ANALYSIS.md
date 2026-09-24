@@ -309,6 +309,28 @@ could break release sequences, completeness and cross-domain
 checks, and the original clean/fault qualification matrix. Setting the complete
 flag before these conditions hold would be unsound.
 
+## Modification-footprint implementation checkpoint
+
+The journal now represents unsupported transitions as opaque address-range
+modifications. The host rejects a publication object if any such modification
+overlaps it, or if another workgroup/dispatch modifies that object. Unrelated
+bookkeeping objects do not invalidate an independently observed publication
+chain. Tests cover overlapping writes, unrelated writes, transitive publication,
+and foreign-domain interference.
+
+The device path emits these records for admitted RMWs whose old/new transitions
+are not modeled. With `-DCOUNT=1 -DBOOKKEEPING=1`, the HIP probe executes two
+64-bit bookkeeping additions alongside the 32-bit publication counter. Native
+and instrumented executions both pass the numerical checks (including the
+bookkeeping return values). The journal contains two eight-byte opaque records
+and the counter transitions `0→1→2`, at distinct addresses. No records are dropped.
+
+Verification: 273 host tests and 103 selected atomic/publication/report-layout
+patcher tests pass. Logs are `opaque-host-tests.log`, `opaque-patch-tests.log`,
+and `journal-opaque-{native,inspect}.log` in the artifact directory.
+**The trace remains incomplete:** ordinary stores and unqualified RMWs still
+need coverage before enabling suppression and rerunning the original cells.
+
 ## Reproducing the minimal probe
 
 Use the current ROCm environment, an artifact directory outside the source tree,
@@ -340,6 +362,7 @@ sources, binaries, `run.py`, strict `results.json`, inspection
 workload logs, and `audit_pairs.py` / `pair-audit.json`. GPU `rocminfo` and the HIP
 smoke test pass after the experiments.
 
-The hook SHA-256 remains
+The hook SHA-256 for the initial diagnostic measurements was
 `69566b53a48b3d65aa1835b2ae206c4f3cc5799952dcdb34560dfc5fe328e803`.
-No detector behavior was changed for these measurements.
+No detector behavior was changed for those initial measurements; the implementation
+checkpoints above use subsequent local builds.

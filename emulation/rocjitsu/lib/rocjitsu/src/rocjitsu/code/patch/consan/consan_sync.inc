@@ -988,7 +988,7 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
       arch == ROCJITSU_CODE_ARCH_RDNA4 && layout.publication_event_capacity != 0u &&
       rmw_count == candidates.size() && static_patch_budget == candidates.size() &&
       std::ranges::all_of(candidates, [](const Candidate &candidate) {
-        return publication_observation_supported(candidate.source);
+        return candidate.source.is_rmw();
       });
   if (!publication_trace) {
     struct Window {
@@ -1408,7 +1408,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == RegisterAllocationSource::SpillRequired &&
         atomic_guest_preserves_address(candidate.atomic.lowering_form) &&
-        !(publication_trace && !candidate.source.site.returns_old_value.value_or(false));
+        !(publication_trace && publication_observation_supported(candidate.source) &&
+          !candidate.source.site.returns_old_value.value_or(false));
     const AtomicAddressPlan address_plan =
         plan_atomic_address(candidate.atomic.lowering_form, resources->base, resources->count,
                             resources->source, allow_post_guest_spill_operand_overlap);
@@ -1482,7 +1483,9 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
                            *emission_plan, planned.spill ? &*planned.spill : nullptr,
                            planned.scalar_spill ? &*planned.scalar_spill : nullptr,
                            planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                           layout, result.errors, &guest_instruction_offset, &emitted_guest_size)
+                           layout, result.errors, &guest_instruction_offset, &emitted_guest_size,
+                           publication_observation_supported(planned.candidate.source)
+                               ? PublicationCapture::Transition : PublicationCapture::OpaqueModification)
                  : planned.candidate.deferred_acquire
                      ? build_pending_acquire_cave_words(
                            bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,

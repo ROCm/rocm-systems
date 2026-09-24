@@ -29,24 +29,27 @@ DecodedPublications decode_publications(const ReportHeader &header,
   std::vector<uint64_t> sequences;
   for (uint32_t i = 0; i < header.publication_event_count; ++i) {
     const auto &record = records[i];
+    const bool opaque = record.operation == PublicationRecordOperation::OpaqueModification;
     if (record.state != kPublicationReady)
       return {.status = Status::Incomplete};
     if (record.generation != header.generation || !record.dispatch_id || !record.sequence ||
         record.sequence > header.publication_clock || record.owner_id >= 32 ||
-        record.lane_id >= 64 || !record.byte_count || record.byte_count > 8 ||
-        (record.byte_count & (record.byte_count - 1)) ||
+        record.lane_id >= 64 || !record.byte_count || record.byte_count > (opaque ? 128u : 8u) ||
+        (!opaque && (record.byte_count & (record.byte_count - 1))) ||
         record.address > std::numeric_limits<uint64_t>::max() - record.byte_count ||
-        record.scope == 0 || record.scope > 5 ||
+        (!opaque && record.scope == 0) || record.scope > 5 ||
         (record.roles & ~(kPublicationRelease | kPublicationAcquire | kPublicationObserved)) ||
         (record.operation != PublicationRecordOperation::Read &&
-         record.operation != PublicationRecordOperation::Rmw) ||
+         record.operation != PublicationRecordOperation::Rmw && !opaque) ||
         (record.operation == PublicationRecordOperation::Read &&
          (record.roles & kPublicationRelease)))
       return {.status = Status::Malformed};
-    if (!(record.roles & kPublicationObserved))
+    if (opaque && (record.roles || record.observed || record.written))
+      return {.status = Status::Malformed};
+    if (!opaque && !(record.roles & kPublicationObserved))
       return {.status = Status::Incomplete};
     const uint64_t mask =
-        record.byte_count == 8 ? ~uint64_t{0} : (uint64_t{1} << (record.byte_count * 8)) - 1;
+        record.byte_count >= 8 ? ~uint64_t{0} : (uint64_t{1} << (record.byte_count * 8)) - 1;
     if ((record.observed & ~mask) || (record.written & ~mask))
       return {.status = Status::Malformed};
     sequences.push_back(record.sequence);
@@ -63,13 +66,14 @@ DecodedPublications decode_publications(const ReportHeader &header,
                              .bytes = record.byte_count,
                              .observed = record.observed,
                              .written = record.written,
-                             .operation = record.operation == PublicationRecordOperation::Read
+                             .operation = opaque ? PublicationOperation::OpaqueModification
+                                          : record.operation == PublicationRecordOperation::Read
                                               ? PublicationOperation::Read
                                               : PublicationOperation::Rmw,
                              .release = (record.roles & kPublicationRelease) != 0,
                              .acquire = (record.roles & kPublicationAcquire) != 0,
                              .covers_workgroup = record.scope >= 2,
-                             .observation_valid = true});
+                             .observation_valid = !opaque});
   }
   std::ranges::sort(sequences);
   if (std::adjacent_find(sequences.begin(), sequences.end()) != sequences.end())

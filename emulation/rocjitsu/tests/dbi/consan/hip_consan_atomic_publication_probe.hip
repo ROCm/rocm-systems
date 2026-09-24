@@ -3,9 +3,12 @@
 // Manual gfx1201 diagnostic for the known atomic-publication false positive.
 // See docs/consan/validation/ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md.
 // COUNT, BARRIER, RELAXED, EXTRA_FENCE, ACTIVE_LANES, OR_COUNTER, and
-// ATOMIC_REPEATS select comparison and journal-capacity arms.
+// ATOMIC_REPEATS and BOOKKEEPING select comparison and journal-capacity arms.
 #include <cstdio>
 #include <hip/hip_runtime.h>
+#ifndef BOOKKEEPING
+#define BOOKKEEPING 0
+#endif
 #ifndef EXTRA_FENCE
 #define EXTRA_FENCE 0
 #endif
@@ -38,6 +41,14 @@ __global__ void publication(int *counter, int *output) {
 #pragma unroll
     for (int i = 0; i < COUNT; ++i)
       partials[wave][lane][i] = 10 + wave + i;
+#if BOOKKEEPING
+    if (lane == 0) {
+      auto *bookkeeping =
+          reinterpret_cast<unsigned long long *>(counter + ((ACTIVE_LANES + 1) & ~1));
+      output[ACTIVE_LANES * COUNT + wave] =
+          __hip_atomic_fetch_add(bookkeeping, 1ull, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
+    }
+#endif
     if (EXTRA_FENCE)
       __threadfence();
 #pragma unroll 1
@@ -71,10 +82,10 @@ __global__ void publication(int *counter, int *output) {
   } while (0)
 int main() {
   int *counter, *output;
-  int host[ACTIVE_LANES * COUNT];
-  HIP(hipMalloc(&counter, ACTIVE_LANES * sizeof(int)));
+  int host[ACTIVE_LANES * COUNT + 2 * BOOKKEEPING];
+  HIP(hipMalloc(&counter, (ACTIVE_LANES + 4 * BOOKKEEPING) * sizeof(int)));
   HIP(hipMalloc(&output, sizeof(host)));
-  HIP(hipMemset(counter, 0, ACTIVE_LANES * sizeof(int)));
+  HIP(hipMemset(counter, 0, (ACTIVE_LANES + 4 * BOOKKEEPING) * sizeof(int)));
   HIP(hipMemset(output, 0, sizeof(host)));
   publication<<<1, 64>>>(counter, output);
   HIP(hipDeviceSynchronize());
@@ -83,6 +94,13 @@ int main() {
     for (int i = 0; i < COUNT; ++i)
       if (host[lane * COUNT + i] != 21 + 2 * i)
         return 3;
+#if BOOKKEEPING
+  unsigned long long bookkeeping;
+  HIP(hipMemcpy(&bookkeeping, counter + ((ACTIVE_LANES + 1) & ~1), sizeof(bookkeeping),
+                hipMemcpyDeviceToHost));
+  if (bookkeeping != 2 || host[ACTIVE_LANES * COUNT] + host[ACTIVE_LANES * COUNT + 1] != 1)
+    return 4;
+#endif
   HIP(hipFree(counter));
   HIP(hipFree(output));
   std::puts("NUMERICAL PASS");

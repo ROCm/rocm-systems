@@ -46,11 +46,12 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
     const auto &event = decoded.publications.events[i];
     append(ReportDiagnosticKind::Detail,
            "ConSan publication event reader=%llu index=%zu sequence=%llu owner=%u lane=%u "
-           "address=0x%llx bytes=%u observed=%llu written=%llu release=%s acquire=%s complete=%s",
+           "address=0x%llx bytes=%u operation=%u observed=%llu written=%llu release=%s acquire=%s "
+           "complete=%s",
            static_cast<unsigned long long>(input.reader), i,
            static_cast<unsigned long long>(event.point.sequence), event.point.owner,
            event.point.lane, static_cast<unsigned long long>(event.address), event.bytes,
-           static_cast<unsigned long long>(event.observed),
+           static_cast<unsigned>(event.operation), static_cast<unsigned long long>(event.observed),
            static_cast<unsigned long long>(event.written), event.release ? "true" : "false",
            event.acquire ? "true" : "false",
            decoded.publications.status == PublicationDecodeStatus::Complete ? "true" : "false");

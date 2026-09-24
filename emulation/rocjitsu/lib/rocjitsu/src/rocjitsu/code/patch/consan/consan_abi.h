@@ -114,7 +114,13 @@ inline constexpr uint32_t kPublicationAcquire = 2u;
 inline constexpr uint32_t kPublicationObserved = 4u;
 inline constexpr uint32_t kPublicationTraceEnabled = 1u;
 inline constexpr uint32_t kPublicationTraceComplete = 2u;
-enum class PublicationRecordOperation : uint32_t { Read = 1, Rmw = 2 };
+enum class PublicationRecordOperation : uint32_t {
+  Read = 1,
+  Rmw = 2,
+  // Address/range witness only. May modify an atomic object without a usable
+  // old/new observation; it can invalidate a proof but never establish one.
+  OpaqueModification = 3,
+};
 struct alignas(8) PublicationRecord {
   uint64_t generation = 0;
   uint64_t dispatch_id = 0;

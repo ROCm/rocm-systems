@@ -452,26 +452,29 @@ bool publication_observation_supported(const AtomicEvidenceSourceView &source) {
               : site.raw_th == 0u);
 }
 
-std::optional<std::vector<uint32_t>>
-build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,
-                             const AtomicLoweringForm &lowering_form,
-                             uint64_t owner_descriptor_file_offset,
-                             const AtomicAddressPlan &address_plan, const SyncEmissionPlan &plan,
-                             const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
-                             const PrivateStateLayout *private_layout, rj_code_arch_t arch,
-                             const ReportBufferLayout &layout, std::vector<std::string> &errors,
-                             uint32_t *guest_instruction_offset, uint32_t *emitted_guest_size) {
+std::optional<std::vector<uint32_t>> build_publication_cave_words(
+    std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,
+    const AtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,
+    const AtomicAddressPlan &address_plan, const SyncEmissionPlan &plan,
+    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+    const PrivateStateLayout *private_layout, rj_code_arch_t arch, const ReportBufferLayout &layout,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    uint32_t *emitted_guest_size, PublicationCapture capture) {
+  const bool opaque = capture == PublicationCapture::OpaqueModification;
+  const bool supported = opaque ? source.is_rmw() && source.site.width_bits != 0u &&
+                                      source.site.width_bits <= 1024u &&
+                                      source.site.width_bits % 8u == 0u
+                                : publication_observation_supported(source);
   const auto *target = target_profile(arch);
-  if (!publication_observation_supported(source) || !target || !plan.exec_save_sgpr ||
-      !plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch ||
-      !layout.publication_event_capacity ||
+  if (!supported || !target || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
+      !plan.owner_epoch_vgprs.epoch || !layout.publication_event_capacity ||
       layout.publication_event_capacity >
           std::numeric_limits<uint32_t>::max() / sizeof(PublicationRecord) ||
       static_cast<uint32_t>(plan.scratch_vgpr) + atomic_scratch_count() > kMaxVgprs ||
       !address_plan.supported() || source.site.file_offset > bytes.size() ||
       source.site.size > bytes.size() - source.site.file_offset)
     return std::nullopt;
-  const auto scope = sync_scope(*source.site.scope);
+  const auto scope = opaque ? std::optional{SyncScope::None} : sync_scope(*source.site.scope);
   if (!scope)
     return std::nullopt;
   const uint16_t base = plan.scratch_vgpr;
@@ -486,12 +489,13 @@ build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenc
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   AtomicPreludeState prelude;
-  if (!append_atomic_prelude(
-          words, bytes, source, lowering_form, owner_descriptor_file_offset, address_plan, plan,
-          spill, scalar_spill, private_layout, arch, address, false, prelude, errors,
-          guest_instruction_offset, {}, {}, emitted_guest_size,
-          source.site.returns_old_value.value_or(false) ? std::nullopt
-                                                        : std::optional<uint16_t>{observed}))
+  if (!append_atomic_prelude(words, bytes, source, lowering_form, owner_descriptor_file_offset,
+                             address_plan, plan, spill, scalar_spill, private_layout, arch, address,
+                             false, prelude, errors, guest_instruction_offset, {}, {},
+                             emitted_guest_size,
+                             opaque || source.site.returns_old_value.value_or(false)
+                                 ? std::nullopt
+                                 : std::optional<uint16_t>{observed}))
     return std::nullopt;
   // The guest has completed, and its operands are still available either in
   // registers or in the post-guest spill. Capture both before scratch reuse.
@@ -503,16 +507,16 @@ build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenc
     return true;
   };
   sequence
-      .require(!source.site.returns_old_value.value_or(false) ||
+      .require(opaque || !source.site.returns_old_value.value_or(false) ||
                snapshot(observed, *source.site.destination_vgpr))
-      .require(snapshot(written, *source.site.data_vgpr))
+      .require(opaque || snapshot(written, *source.site.data_vgpr))
       .require(append_atomic_snapshot_wait(words, loaded_private, arch))
       .require(append_save_special_state(words, plan.special_state, arch))
       .append(instrumentation::build_s_mov_b64(saved_exec, kAmdGpuExecLo, arch));
-  if (source.site.mnemonic.find("_add_") != std::string::npos)
+  if (!opaque && source.site.mnemonic.find("_add_") != std::string::npos)
     sequence.append(
         instrumentation::build_v_add_u32(written, vector_source_vgpr(observed), written, arch));
-  else {
+  else if (!opaque) {
     // a | b = ~(~a & ~b), using the shared target-normalized VALU builders.
     sequence.append(
         instrumentation::build_v_xor_b32(ticket, kScalarInlineNegativeOneOperand, observed, arch),
@@ -542,8 +546,10 @@ build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenc
   RecordEmitter record(words, base, ticket, arch);
   sequence.require(record.store_vgpr(offsetof(PublicationRecord, sequence), ticket))
       .require(record.store_vgpr(offsetof(PublicationRecord, sequence) + 4u, ticket + 1u))
-      .require(record.store_vgpr(offsetof(PublicationRecord, observed), observed))
-      .require(record.store_vgpr(offsetof(PublicationRecord, written), written))
+      .require(opaque ? record.store_literal(offsetof(PublicationRecord, observed), 0u)
+                      : record.store_vgpr(offsetof(PublicationRecord, observed), observed))
+      .require(opaque ? record.store_literal(offsetof(PublicationRecord, written), 0u)
+                      : record.store_vgpr(offsetof(PublicationRecord, written), written))
       .require(record.store_vgpr(offsetof(PublicationRecord, address), address))
       .require(record.store_vgpr(offsetof(PublicationRecord, address) + 4u, address + 1u))
       .require(record.store_literal(offsetof(PublicationRecord, observed) + 4u, 0u))
@@ -569,19 +575,24 @@ build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenc
       .require(
           record.store_vgpr(offsetof(PublicationRecord, owner_id), *plan.owner_epoch_vgprs.owner))
       .require(record.store_vgpr(offsetof(PublicationRecord, epoch), *plan.owner_epoch_vgprs.epoch))
-      .require(record.store_literal(offsetof(PublicationRecord, byte_count), 4u));
+      .require(record.store_literal(offsetof(PublicationRecord, byte_count),
+                                    source.site.width_bits / 8u));
   const auto memory_role = source.sequence->memory_role;
   const bool release = source.sequence->lds_release_wait_text_offset.has_value();
   const bool acquire =
       memory_role == SyncMemoryRole::Acquire || memory_role == SyncMemoryRole::AcquireRelease;
   sequence
       .require(record.store_literal(offsetof(PublicationRecord, roles),
-                                    kPublicationObserved | (release ? kPublicationRelease : 0u) |
-                                        (acquire ? kPublicationAcquire : 0u)))
+                                    opaque ? 0u
+                                           : kPublicationObserved |
+                                                 (release ? kPublicationRelease : 0u) |
+                                                 (acquire ? kPublicationAcquire : 0u)))
       .require(
           record.store_literal(offsetof(PublicationRecord, scope), static_cast<uint32_t>(*scope)))
-      .require(record.store_literal(offsetof(PublicationRecord, operation),
-                                    static_cast<uint32_t>(PublicationRecordOperation::Rmw)))
+      .require(record.store_literal(
+          offsetof(PublicationRecord, operation),
+          static_cast<uint32_t>(opaque ? PublicationRecordOperation::OpaqueModification
+                                       : PublicationRecordOperation::Rmw)))
       .append(instrumentation::build_v_mbcnt_lo_u32_b32(ticket, 0xc1u,
                                                         scalar_positive_inline_u32(0u), arch),
               instrumentation::build_v_mbcnt_hi_u32_b32(ticket, 0xc1u, vector_source_vgpr(ticket),

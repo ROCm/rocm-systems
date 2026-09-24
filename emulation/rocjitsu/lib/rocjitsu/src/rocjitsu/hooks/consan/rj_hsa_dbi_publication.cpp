@@ -4,12 +4,15 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <vector>
 
 namespace rocjitsu::consan::hook {
-PublicationOrdering publication_orders(const PublicationPoint &before,
-                                       const PublicationPoint &after,
-                                       std::span<const PublicationEvent> input, bool complete) {
+namespace {
+PublicationOrdering publication_orders_validated(const PublicationPoint &before,
+                                                 const PublicationPoint &after,
+                                                 std::span<const PublicationEvent> input,
+                                                 bool complete) {
   using Result = PublicationOrdering;
   if (!(before.domain == after.domain))
     return Result::Unordered;
@@ -156,5 +159,67 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
       }
   }
   return reached[sink] ? Result::Ordered : Result::Unordered;
+}
+} // namespace
+
+PublicationOrdering publication_orders(const PublicationPoint &before,
+                                       const PublicationPoint &after,
+                                       std::span<const PublicationEvent> input, bool complete) {
+  using Result = PublicationOrdering;
+  if (!(before.domain == after.domain))
+    return Result::Unordered;
+  if (!complete || !before.sequence || !after.sequence || before.lane >= 64 || after.lane >= 64)
+    return Result::Incomplete;
+
+  // A usable object must have an unambiguous observed modification chain.
+  // Preserve independent good objects, including transitive publication across
+  // them, even when unrelated bookkeeping objects have opaque modifications.
+  using Object = std::pair<uint64_t, uint32_t>;
+  std::map<Object, std::vector<PublicationEvent>> objects;
+  std::vector<const PublicationEvent *> modifications;
+  for (const auto &event : input) {
+    if (event.point.domain.generation != before.domain.generation)
+      continue;
+    const bool opaque = event.operation == PublicationOperation::OpaqueModification;
+    if (!event.point.sequence || event.point.lane >= 64 || !event.bytes ||
+        event.bytes > (opaque ? 128u : 8u) || (!opaque && (event.bytes & (event.bytes - 1))) ||
+        event.address > std::numeric_limits<uint64_t>::max() - event.bytes ||
+        (opaque && (event.observation_valid || event.observed || event.written || event.release ||
+                    event.acquire)))
+      return Result::Incomplete;
+    modifications.push_back(&event);
+    if (!opaque && event.point.domain == before.domain)
+      objects[{event.address, event.bytes}].push_back(event);
+  }
+
+  bool incomplete_object = false;
+  std::vector<PublicationEvent> usable;
+  for (const auto &[object, events] : objects) {
+    const auto [address, bytes] = object;
+    bool invalidated = false;
+    for (const auto *other : modifications) {
+      if (address >= other->address + other->bytes || other->address >= address + bytes)
+        continue;
+      // Foreign workgroup/dispatch transitions must not disappear when the
+      // workgroup-local proof filters its events. In particular, that would
+      // hide an ABA or a modification breaking the release sequence.
+      if (other->operation == PublicationOperation::OpaqueModification ||
+          !(other->point.domain == before.domain) || other->address != address ||
+          other->bytes != bytes) {
+        invalidated = true;
+        break;
+      }
+    }
+    if (invalidated ||
+        publication_orders_validated(before, after, events, true) == Result::Incomplete) {
+      incomplete_object = true;
+      continue;
+    }
+    usable.insert(usable.end(), events.begin(), events.end());
+  }
+  const auto result = publication_orders_validated(before, after, usable, true);
+  if (result == Result::Ordered)
+    return result; // This path uses only independently validated objects.
+  return incomplete_object ? Result::Incomplete : result;
 }
 } // namespace rocjitsu::consan::hook

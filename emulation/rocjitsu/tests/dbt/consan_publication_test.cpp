@@ -123,6 +123,43 @@ TEST(ConSanPublicationTest, UnknownReadValueIsIncomplete) {
   std::array events{rmw(0, 10, 0, 1), read};
   EXPECT_EQ(publication_orders(point(0, 1), point(1, 20), events, true), Result::Incomplete);
 }
+PublicationEvent opaque_write(uint64_t address, uint32_t bytes = 4) {
+  return {.point = point(4, 15),
+          .address = address,
+          .bytes = bytes,
+          .operation = PublicationOperation::OpaqueModification};
+}
+TEST(ConSanPublicationTest, OpaqueModificationBreaksOnlyOverlappingObjects) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 2), opaque_write(0x1000)};
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Incomplete);
+  events[2] = opaque_write(0xffc, 16);
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Incomplete);
+  events[2] = opaque_write(0x2000, 16);
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Ordered);
+  events[0].release = false;
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Unordered);
+}
+TEST(ConSanPublicationTest, UnrelatedAmbiguousObjectDoesNotInvalidateProvenPath) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 2), rmw(3, 15, 1, 1, false, false, 0x2000)};
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Ordered);
+}
+TEST(ConSanPublicationTest, OpaqueModificationCannotSupplyTransitivePublication) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 2), rmw(1, 30, 0, 1, true, false, 0x2000),
+                    rmw(2, 40, 1, 2, false, true, 0x2000), opaque_write(0x3000)};
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 50), events, true), Result::Ordered);
+  events[4] = opaque_write(0x2000);
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 50), events, true), Result::Incomplete);
+}
+TEST(ConSanPublicationTest, ForeignWorkgroupOrDispatchModificationCannotBeFilteredAway) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 2), rmw(2, 15, 1, 0)};
+  ++events[2].point.domain.workgroup_x;
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Incomplete);
+  events[2].point.domain.workgroup_x = 0;
+  ++events[2].point.domain.dispatch;
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Incomplete);
+  events[2].address = 0x2000;
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), events, true), Result::Ordered);
+}
 TEST(ConSanPublicationTest, DomainsDoNotJoin) {
   std::array events{rmw(0, 10, 0, 1), rmw(1, 10, 1, 2)};
   const auto before = point(0, 1);
@@ -263,6 +300,32 @@ TEST(ConSanPublicationTest, RuntimeDispatchIsIndependentOfReportAllocationIdenti
   EXPECT_EQ(decoded.events.size(), 2); // Diagnostics only; no ordering proof.
   EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), decoded.events, false),
             Result::Incomplete);
+}
+TEST(ConSanPublicationTest, DecodeOpaqueModificationRetainsRangeWithoutInventingObservation) {
+  std::array records{record(0, 10, 0, 1), record(1, 20, 0, 0)};
+  records[1].operation = PublicationRecordOperation::OpaqueModification;
+  records[1].roles = 0;
+  records[1].scope = 0;
+  records[1].byte_count = 16;
+  auto decoded = decode_publications(publication_header(), records);
+  ASSERT_EQ(decoded.status, PublicationDecodeStatus::Complete);
+  ASSERT_EQ(decoded.events.size(), 2);
+  EXPECT_EQ(decoded.events[1].operation, PublicationOperation::OpaqueModification);
+  EXPECT_EQ(decoded.events[1].bytes, 16);
+  EXPECT_FALSE(decoded.events[1].observation_valid);
+  for (unsigned defect = 0; defect < 4; ++defect) {
+    auto bad = records;
+    if (defect == 0)
+      bad[1].roles = kPublicationObserved;
+    if (defect == 1)
+      bad[1].written = 1;
+    if (defect == 2)
+      bad[1].byte_count = 129;
+    if (defect == 3)
+      bad[1].byte_count = 0;
+    EXPECT_EQ(decode_publications(publication_header(), bad).status,
+              PublicationDecodeStatus::Malformed);
+  }
 }
 TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
   for (unsigned defect = 0; defect < 12; ++defect) {
