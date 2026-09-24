@@ -997,8 +997,7 @@ amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) 
       data_kind = AMD_COMGR_DATA_KIND_BC;
       break;
     case hipJitInputLLVMBundledBitcode:
-      data_kind =
-          HIPRTC_USE_RUNTIME_UNBUNDLER ? AMD_COMGR_DATA_KIND_BC : AMD_COMGR_DATA_KIND_BC_BUNDLE;
+      data_kind = AMD_COMGR_DATA_KIND_BC_BUNDLE;
       break;
     case hipJitInputLLVMArchivesOfBundledBitcode:
       data_kind = AMD_COMGR_DATA_KIND_AR_BUNDLE;
@@ -1021,7 +1020,7 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
   is_bundled_ = helpers::CheckIfBundled(link_data);
 
   std::string_view llvm_code_object_view = link_data;
-  if (HIPRTC_USE_RUNTIME_UNBUNDLER && input_type == hipJitInputLLVMBundledBitcode) {
+  if (input_type == hipJitInputLLVMBundledBitcode) {
     if (!findIsa()) {
       return false;
     }
