@@ -22,6 +22,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added Python 3.14 support.
 
+* Added an analyze-only install path. `pip install "rocm-profiler[compute-analyze]"` into a virtual environment installs the analysis dependencies for you.
+
+* Added `rocprof-compute analyze --verify-deps`, which reports any missing analysis dependencies.
+
+* Added Memory Bandwidth Analysis for gfx950 under `--experimental --membw-analysis`. Profile with the flag to collect block 30 counters; analyze detects the data automatically and annotates active GL1/GL2/EA stall bottlenecks on the memory chart with a guidance panel.
+
 ### Changed
 
 * Dispatch IDs now start at 1 instead of 0.
@@ -42,6 +48,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
   * gfx908–gfx942: added HBM and remote traffic percentages.
   * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
+
+* Analyze mode now auto-detects memory bandwidth analysis data from the profiling output. The `--membw-analysis` analyze option has been removed; use `--membw-analysis` only at profile time.
 
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" across all architectures. The panel now shows resource allocation stats (Wave Occupancy, vGPRs, sGPRs, Scratch, LDS Allocation, Workgroups).
 
@@ -78,6 +86,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
 * Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
+
+* Fixed `profile -b 3 --experimental --membw-analysis` not collecting memory bandwidth analysis counters.
 
 ### Upcoming changes
 

@@ -21,10 +21,15 @@
 #include <memory>
 #include <new>
 #include <string>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+#include <sys/resource.h>
 #include <utility>
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -180,6 +185,26 @@ class DeleteWatch {
 #else
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
 #endif
+
+// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
+// shuffled death test can inherit a large address space from an earlier test. Dumping that address
+// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
+// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
+// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
+// parent-process crashes remain dumpable.
+static void DisableCoreDumpsForExpectedCrash() {
+#if defined(__linux__)
+  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
+    std::perror("prctl(PR_SET_DUMPABLE) failed");
+    _exit(1);
+  }
+#endif
+  const struct rlimit noCore = {0, 0};
+  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
+    std::perror("setrlimit(RLIMIT_CORE) failed");
+    _exit(1);
+  }
+}
 
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -819,7 +844,12 @@ TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
   // Pin the signal: EXPECT_DEATH("") would also accept ::abort(), _exit(1) or a null deref at the same spot.
-  EXPECT_EXIT(ncclP2pSchedule(c.get()), ::testing::KilledBySignal(SIGFPE), "");
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        (void)ncclP2pSchedule(c.get());
+      },
+      ::testing::KilledBySignal(SIGFPE), "");
 }
 
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
@@ -1226,9 +1256,13 @@ TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
   ReadyComm rc;
   int exclude[1] = {0};
   // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
-  EXPECT_EXIT(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                  /*config=*/nullptr, /*shrinkFlags=*/0),
-              DEATH_BY_SEGV, "newcomm argument is NULL");
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+                                  /*config=*/nullptr, /*shrinkFlags=*/0);
+      },
+      DEATH_BY_SEGV, "newcomm argument is NULL");
 }
 
 // Full strings, not substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped "(run with)" hint.
@@ -1340,6 +1374,10 @@ void FillParentConfig(ncclConfig_t& c) {
   c.numRmaCtx = 4;
   c.maxP2pPeers = 13;
   c.graphStreamOrdering = 1;
+  c.launchOrderImplicit = 1;
+  c.numRmaSig = 6;
+  c.rmaEagerInit = 1;
+  c.hostCftMode = ncclHostCftEnable;
 }
 
 void FillChildConfig(ncclConfig_t& c) {
@@ -1364,11 +1402,15 @@ void FillChildConfig(ncclConfig_t& c) {
   c.numRmaCtx = 5;
   c.maxP2pPeers = 14;
   c.graphStreamOrdering = 0;
+  c.launchOrderImplicit = 0;
+  c.numRmaSig = 7;
+  c.rmaEagerInit = 0;
+  c.hostCftMode = ncclHostCftFallback;
 }
 
 // TRIPWIRE: a new ncclConfig_t field must be added to both fills and to ExpectConfigFieldsEqual, or a
 // memcpy truncated just before it would go unnoticed. Update all four sites together.
-static_assert(sizeof(ncclConfig_t) == 96, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
+static_assert(sizeof(ncclConfig_t) == 112, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
 
 // Field-by-field so a failure names the field. netName by content: envConfigOverride re-mallocs it.
 void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) {
@@ -1394,6 +1436,10 @@ void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) 
   EXPECT_EQ(want.numRmaCtx, got.numRmaCtx);
   EXPECT_EQ(want.maxP2pPeers, got.maxP2pPeers);
   EXPECT_EQ(want.graphStreamOrdering, got.graphStreamOrdering);
+  EXPECT_EQ(want.launchOrderImplicit, got.launchOrderImplicit);
+  EXPECT_EQ(want.numRmaSig, got.numRmaSig);
+  EXPECT_EQ(want.rmaEagerInit, got.rmaEagerInit);
+  EXPECT_EQ(want.hostCftMode, got.hostCftMode);
 }
 
 // envConfigOverride always replaces config.netName with a fresh malloc; free it so the copy tests do not leak.
@@ -1530,10 +1576,12 @@ TEST_F(InitMicrotest, GetAsyncError_GinError_ReturnsRemoteError) {
 TEST_F(InitMicrotest, GetAsyncError_GinNotConnected_SkipsTheGinQuery) {
   ReadyComm rc;
   auto sr = std::make_unique<ncclSharedResources>();
-  // A loaded-but-unconnected plugin: ncclGin is what the pre-2.29.7 guard
-  // keyed on, so it must be non-null for this to pin the connected check.
-  // Never dereferenced here, since the guard skips the block.
-  sr->ginState.ncclGin = reinterpret_cast<ncclGin_t*>(0x1);
+  // A loaded-but-unconnected plugin: 2.31 moved the per-plugin ncclGin pointer
+  // into the per-backend records, so a loaded plugin is one active backend
+  // holding it. It must be non-null for this to pin the connected check, and
+  // is never dereferenced here since the guard skips the block.
+  sr->ginState.numActiveBackends = 1;
+  sr->ginState.backends[0].ncclGin = reinterpret_cast<ncclGin_t*>(0x1);
   sr->ginState.connected = false;
   rc.get()->sharedRes = sr.get();
   g_ginHasError = true;  // would surface as ncclRemoteError if queried
@@ -2040,6 +2088,66 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
+// See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
+TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  // Stands in for comm->profiler.workStarted/workCompleted/workPhases: a
+  // host-pinned allocation released by the destructor loop, exactly as
+  // ncclCommPushCudaHostFree does for the real ones.
+  int pinnedProfilerBuffer = 0;
+  ncclCommPushCudaHostFree(comm, &pinnedProfilerBuffer);
+
+  std::vector<std::string> order;
+  ScopedHook threadDestroy(g_ncclProfilerThreadDestroy, [&](struct ncclComm*) {
+    order.push_back("profilerThreadDestroy");
+    return ncclSuccess;
+  });
+  ScopedHook hostFree(g_hipHostFree, [&](void* p) {
+    if (p == &pinnedProfilerBuffer) order.push_back("freePinnedProfilerBuffer");
+    return hipSuccess;
+  });
+  ScopedHook pluginFinalize(g_ncclProfilerPluginFinalize, [&](struct ncclComm*) {
+    order.push_back("profilerPluginFinalize");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, abortRef);
+
+  // Each step has to have happened at all -- an ordering assertion over a
+  // missing step would pass vacuously.
+  ASSERT_EQ(1, threadDestroy.calls) << "commFree never stopped the profiler thread";
+  ASSERT_EQ(1, pluginFinalize.calls) << "commFree never finalized the profiler plugin";
+  auto indexOf = [&](const std::string& name) -> std::ptrdiff_t {
+    auto it = std::find(order.begin(), order.end(), name);
+    return it == order.end() ? -1 : std::distance(order.begin(), it);
+  };
+  ASSERT_NE(-1, indexOf("freePinnedProfilerBuffer"))
+      << "the destructor loop never released the pinned buffer; this test is no longer "
+         "exercising the window it exists to guard";
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("freePinnedProfilerBuffer"))
+      << "commFree freed the host-pinned profiler buffers while the profiler thread was "
+         "still polling them. The thread must be stopped and joined BEFORE the "
+         "comm->destructorHead loop runs, or profilerProgressOps() dereferences an "
+         "unmapped mapping and the process takes SIGSEGV. Observed order: "
+      << ::testing::PrintToString(order);
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("profilerPluginFinalize"))
+      << "ncclProfilerThreadDestroy must precede ncclProfilerPluginFinalize: it purges this "
+         "comm's queued ops, and the plugin's profilerContext is gone after finalize. "
+         "Observed order: "
+      << ::testing::PrintToString(order);
+}
+
 // ===========================================================================
 // commCleanup (init.cc:3696). Pure ordering + error propagation: set the device,
 // optionally finalize-then-unload the tuner, then commFree. Every assertion below
@@ -2518,6 +2626,20 @@ TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// HIP fillInfo stamps mloPart=0 on every physical function-0 GPU as a topo overlay
+// hint (not a real MLO partition). busId defaults to 0 in the scripted AllGather,
+// so fn==0. That combination must not set hasMloPart or multi-node GIN/CE dies.
+TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartUnset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].mloPart = 0;
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(c.get()->hasMloPart);
+}
+#endif
+
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
 // as covered) but nothing here can observe them, and deleting any of the four leaves the suite green.
@@ -2581,20 +2703,18 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuid_MultiRankGpuEnabled_Co
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);
 }
 
-// --- hasMultiRankNvml (init.cc:1482) ---
-// PINS CURRENT BEHAVIOUR, WHICH LOOKS ODD: the assignment is `=`, not `|=`, inside the (i,j) double
-// loop, so only the FINAL pair survives and an earlier collision is erased. On AMD this is write-only
-// dead state, not a live wrong answer: the sole reader (src/transport/nvls.cc:252) sits inside
-// `#if CUDART_VERSION >= 12010`, and CUDART_VERSION is not defined under hipcc. These two tests
-// document what ships today so a `|=` change has to update a test rather than pass silently.
+// --- hasMultiRankNvml (init.cc) ---
+// NCCL 2.31 switched the (i,j) update from `=` to `|=`, so an early collision is
+// sticky. The last-pair test still covers the final (3,2) write.
+
 TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_EarlyCollisionOverwrittenByLastPair) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
-  specs[1].nvmlDev = 7;  // ranks 1 and 2 really do share a device on the same host...
+  specs[1].nvmlDev = 7;  // ranks 1 and 2 share a device on the same host
   specs[2].nvmlDev = 7;
   InstallPeerInfoAllGather(c, specs);
   EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
-  EXPECT_FALSE(c.get()->hasMultiRankNvml);  // ...but the last pair (3,2) does not, and it wins
+  EXPECT_TRUE(c.get()->hasMultiRankNvml);  // |= keeps the early collision
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_LastPairCollision_IsTheOnlyOneObserved) {
@@ -3466,6 +3586,34 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_ZeroInitChannelsIsTreatedAsUnse
   EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
 }
 
+TEST_F(InitMicrotest, InitTransportsRank_Gfx110xP2pDisabledUses56RingChannels) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1100");
+  SetParams({{"P2P_DISABLE", 1}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(56, ring.nChannels);
+  EXPECT_EQ(56, ring.maxChannels);
+  EXPECT_EQ(56, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx120xP2pDisabledHonorsExplicitChannelCount) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1201");
+  SetParams({{"P2P_DISABLE", 1}, {"RCCL_INIT_CHANNELS", 12}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(12, ring.nChannels);
+  EXPECT_EQ(12, ring.maxChannels);
+  EXPECT_EQ(12, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1151_KeepsTheComputedRingChannelCount) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();  // gcn stays empty, so IsArchMatch is false
@@ -3661,6 +3809,7 @@ TEST_F(InitMicrotest, SetCommAbortFlags_LargePositiveValue_StoredVerbatim) {
 TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDevUnderNonNullChildFlag_DiesOnNullDeref) {
   EXPECT_EXIT(
       {
+        DisableCoreDumpsForExpectedCrash();
         AbortFlagsComm c;
         c.get()->childAbortFlagDev = nullptr;
         fprintf(stderr, "setCommAbortFlags-reached-with-null-childAbortFlagDev\n");
@@ -4126,7 +4275,7 @@ class Dtor_GinComm {
  public:
   explicit Dtor_GinComm(bool needsProxyProgress) : sr_(new ncclSharedResources{}) {
     sr_->ginState.connected = true;
-    sr_->ginState.needsProxyProgress = needsProxyProgress;
+    sr_->ginState.proxyThreadsCreated = needsProxyProgress;
     rc_.get()->sharedRes = sr_.get();
   }
   ncclComm* get() { return rc_.get(); }
@@ -4415,7 +4564,7 @@ TEST_F(InitMicrotest, ParseCommConfig_BadNvlinkCentricSched_RejectsAndNamesTheFi
 }
 TEST_F(InitMicrotest, ParseCommConfig_GraphUsageModeAboveTwo_RejectsAndNamesTheField) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.graphUsageMode = 3; },
-                          "Invalig config graphUsageMode attribute value 3");
+                          "Invalid config graphUsageMode attribute value 3");
 }
 TEST_F(InitMicrotest, ParseCommConfig_NegativeNumRmaCtx_RejectsAndNamesTheField) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.numRmaCtx = -11; },
@@ -4706,7 +4855,7 @@ TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithGraphMixing_WarnsAnd
   s.config().graphStreamOrdering = 0;
   s.config().graphUsageMode = 2;
   ncclResult_t res = ncclInternalError;
-  const std::string log = RcclUnitTesting::CaptureLog([&] { res = s.Run(); });
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, s.result_config().graphStreamOrdering);
   EXPECT_EQ(2, s.result_config().graphUsageMode);
@@ -5117,6 +5266,12 @@ class Teardown_LifecycleComm {
     comm_->cudaDev = cudaDev;
     comm_->rank = rank;
     comm_->nRanks = 2;
+    comm_->localRank = 0;
+    comm_->localRanks = 1;
+    localRankToRank_[0] = rank;
+    comm_->localRankToRank = localRankToRank_;
+    peerInfo_[rank].hostHash = 1;
+    comm_->peerInfo = peerInfo_;
     comm_->busId = 0x1000 + rank;
     comm_->config.blocking = 1;
     comm_->initState = ncclSuccess;
@@ -5133,6 +5288,8 @@ class Teardown_LifecycleComm {
   uint32_t abortFlagDev_ = 0;
   uint32_t childAbortFlag_ = 0;
   uint32_t childAbortFlagDev_ = 0;
+  int localRankToRank_[1] = {};
+  ncclPeerInfo peerInfo_[2] = {};
   std::unique_ptr<ncclComm> comm_;
   std::unique_ptr<ncclSharedResources> sharedRes_;
 };
@@ -5264,7 +5421,7 @@ TEST_F(InitMicrotest, CommDestroySync_StreamSyncFails_WarnsAndStillStopsProxy) {
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
   g_ncclStrongStreamResult = ncclSystemError;
 
-  const std::string log = RcclUnitTesting::CaptureLog([&] { Teardown_RunDestroySync(c.get()); });
+  const std::string log = CaptureInfoLog([&] { Teardown_RunDestroySync(c.get()); });
   EXPECT_TRUE(LogHas(log, "commDestroySync: comm")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "sync hostStream error")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "sync deviceStream error")) << "actual log:\n" << log;
@@ -5278,9 +5435,9 @@ TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclInternalError; });
 
   ncclResult_t ret = ncclSuccess;
-  const std::string log = RcclUnitTesting::CaptureLog([&] { ret = Teardown_RunDestroySync(c.get()); });
+  const std::string log = CaptureInfoLog([&] { ret = Teardown_RunDestroySync(c.get()); });
   EXPECT_EQ(ncclInternalError, ret);
-  EXPECT_TRUE(LogHas(log, "ncclProxyStop: comm")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "commDestroySync: comm")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallbacksClearThem) {
@@ -5333,7 +5490,7 @@ TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsR
   ncclIntruQueueEnqueue(&c.get()->legacyRegCleanupQueue, &cbs[1].base);
 
   const std::string log =
-      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get())); });
+      CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get())); });
   EXPECT_EQ(2, ran);
   EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed comm")) << "actual log:\n" << log;
   EXPECT_TRUE(ncclIntruQueueEmpty(&c.get()->legacyRegCleanupQueue));
@@ -5380,6 +5537,12 @@ void BuildCommChain(Teardown_ChainMember* members, int n) {
     ASSERT_NO_FATAL_FAILURE(
         Teardown_MakeFreeableComm(&members[i].comm, &members[i].abortFlag, &members[i].abortRefCount));
     members[i].comm->rank = i;
+    members[i].comm->localRank = 0;
+    members[i].comm->localRanks = 1;
+    ASSERT_EQ(ncclSuccess, ncclCalloc(&members[i].comm->localRankToRank, 1));
+    members[i].comm->localRankToRank[0] = i;
+    ASSERT_EQ(ncclSuccess, ncclCalloc(&members[i].comm->peerInfo, n));
+    members[i].comm->peerInfo[i].hostHash = 1;
     members[i].comm->intraRanks = n;
     members[i].comm->intraComm0 = members[0].comm;
     Teardown_AttachTuner(members[i].comm, &members[i].tuner, &members[i].rec);
@@ -5441,7 +5604,7 @@ TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) 
   ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclInternalError; });
 
   const std::string log =
-      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
+      CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
   EXPECT_TRUE(LogHas(log, "commReclaim: comm")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "in commDestroySync, error")) << "actual log:\n" << log;
   for (int i = 0; i < kChainLength; ++i) EXPECT_EQ(1, members[i].rec.finalizeCalls);
@@ -5923,7 +6086,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = true;
   ncclComm* finalized = nullptr;
-  ScopedHook symk(g_ncclSymkFinalize, [&](ncclComm* c) {
+  ScopedHook symk(g_symkFinalize, [&](ncclComm* c) {
     finalized = c;
     return ncclSuccess;
   });
@@ -5939,7 +6102,7 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = false;
-  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook symk(g_symkFinalize, [](ncclComm*) { return ncclSuccess; });
 
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(0, symk.calls);
@@ -5951,7 +6114,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = true;
-  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclInternalError; });
+  ScopedHook symk(g_symkFinalize, [](ncclComm*) { return ncclInternalError; });
 
   EXPECT_EQ(ncclInternalError, commFree(comm));
   EXPECT_EQ(1, symk.calls);
@@ -6081,7 +6244,7 @@ TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfT
                     [firstComm](ncclComm* c) { return c == firstComm ? ncclSystemError : ncclSuccess; });
 
   const std::string log =
-      RcclUnitTesting::CaptureLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
+      CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
   EXPECT_TRUE(LogHas(log, "commReclaim: cleanup comm")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "failed in destroy/abort, error")) << "actual log:\n" << log;
   EXPECT_EQ(1, members[1].rec.finalizeCalls);
@@ -6411,7 +6574,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesA
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=6")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_P2P_MAX_PEERS=6")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
@@ -6419,7 +6582,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
@@ -6427,7 +6590,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTo
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {
@@ -8650,7 +8813,8 @@ struct Tr_AllGatherInfo {
   int p2pMaxPeers;
   float minNetBw;
   int localNetDeviceCount;
-  int localNetDeviceBw;
+  int localNetCountByBw;
+  float localNetBw;
   int localCollNetCount;
   int isAllNvlink;
   bool nicFused;
@@ -8736,15 +8900,13 @@ constexpr ncclResult_t kTrPostsetReached = ncclInvalidUsage;
 
 // --- The clique probe (init.cc:1786-1836) ---
 
-TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_WarnsAndProbesNoPeerLinks) {
+TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_ProbesNoPeerLinks) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;  // :1801 needs getBusId to answer, or every pair is -1
   const auto gathers = Tr_InstallGathers(c);
   ScopedHook devCount(g_hipGetDeviceCount, [](int*) { return hipErrorInvalidValue; });
-  const std::string log = RcclUnitTesting::CaptureLog(
-      [&] { EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers())); });
-  EXPECT_TRUE(LogHas(log, "treating all peers as non-accessible")) << "actual log:\n" << log;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, devCount.calls);
   EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // localDevCount 0 fails :1817 for every pair
 }
@@ -9872,14 +10034,14 @@ TEST_F(InitMicrotest, CommAlloc_LaunchOrderImplicit_TracksTheCudaContext) {
   EXPECT_EQ(1, g_ncclCudaContextTrackCalls);
 }
 
-TEST_F(InitMicrotest, CommAlloc_LaunchOrderNotImplicit_SkipsContextTracking) {
+TEST_F(InitMicrotest, CommAlloc_LaunchOrderNotImplicit_StillTracksCudaContext) {
   InstallCommAllocSuccess();
   auto comm = FreshComm();
   const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
   });
-  EXPECT_FALSE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
-  EXPECT_EQ(0, g_ncclCudaContextTrackCalls);
+  EXPECT_TRUE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclCudaContextTrackCalls);
   EXPECT_TRUE(LogHas(log, "Using network")) << "commAlloc never got that far\n" << log;
 }
 
@@ -9964,18 +10126,18 @@ TEST_F(InitMicrotest, DevCommSetup_CollNetRankMapPresent_CopiesItToTheDevice) {
   for (int r = 0; r < kNRanks; r++) {
     denseToUser[r] = kNRanks - 1 - r;
   }
-  comm->collNetDenseToUserRank = denseToUser.data();
+  comm->denseToUserRank = denseToUser.data();
   g_hipMemcpyAsyncCalls = 0;
   EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
   EXPECT_EQ(3, g_hipMemcpyAsyncCalls);      // one more than the baseline below: the :976 copy
-  comm->collNetDenseToUserRank = nullptr;   // stack-owned, so it must not outlive this test
+  comm->denseToUserRank = nullptr;   // stack-owned, so it must not outlive this test
 }
 
 TEST_F(InitMicrotest, DevCommSetup_NoCollNetRankMap_SkipsTheDeviceCopy) {
   InstallDevCommSetupSuccess();
   std::unique_ptr<ncclComm> comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
-  EXPECT_EQ(nullptr, comm->collNetDenseToUserRank);
+  EXPECT_EQ(nullptr, comm->denseToUserRank);
   g_hipMemcpyAsyncCalls = 0;
   EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
   EXPECT_EQ(2, g_hipMemcpyAsyncCalls);  // the baseline: the :976 rank-map copy is skipped

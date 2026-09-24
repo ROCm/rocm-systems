@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -218,14 +219,14 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
         ),
         pytest.param(
             ["2", "21"],
-            {"torch_trace": True},
+            {"torch_trace": True, "pc_sampling": True, "experimental": True},
             False,
             {"torch"},
             id="mixed_torch_trace_preserved",
         ),
         pytest.param(
             ["21"],
-            {},
+            {"pc_sampling": True, "experimental": True},
             False,
             set(),
             id="pc_only_no_trace_flag",
@@ -574,7 +575,7 @@ def _make_rpc_args(
     experimental=False,
     mode="profile",
 ) -> argparse.Namespace:
-    """Build a minimal Namespace for RocProfCompute.sanitize() unit tests."""
+    """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
@@ -595,6 +596,15 @@ def _make_rpc_args(
         no_roof=False,
         name="unit-test",
         output_directory="/tmp/unit-test",
+        no_native_tool=False,
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        torch_trace=False,
+        triton_trace=False,
+        ml_api_trace=False,
+        kernel_iteration_range=None,
+        remaining=["--", "./myapp"],
     )
 
 
@@ -604,6 +614,14 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
     # Name-mangled private attributes consumed by sanitize().
     instance._RocProfCompute__args = args
     instance._RocProfCompute__mode = args.mode
+    return instance
+
+
+def _make_profiler_with_args(args: argparse.Namespace) -> RocProfCompute_Base:
+    """Construct a RocProfCompute_Base without invoking __init__."""
+    instance = RocProfCompute_Base.__new__(RocProfCompute_Base)
+    # Name-mangled private attribute consumed by sanitize().
+    instance._RocProfCompute_Base__args = args
     return instance
 
 
@@ -671,15 +689,59 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
         ),
     ],
 )
-def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_blocks):
+def test_sanitize_block_experimental_gating(
+    args, expect_error, expected_filter_blocks, monkeypatch
+):
     """Unit test: block 21 and block 30 require their experimental flags."""
-    instance = _make_rpc_with_args(args)
+    # sanitize() resolves the workload binary; the gating runs before that.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
+    instance = _make_profiler_with_args(args)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.sanitize()
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "args, expected_filter_blocks",
+    [
+        pytest.param(
+            _make_rpc_args(membw_analysis=True, experimental=True, filter_blocks=[]),
+            [],
+            id="membw_analysis_empty_filter_stays_empty",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["3"], membw_analysis=True, experimental=True),
+            ["3", "30"],
+            id="membw_analysis_with_existing_blocks_appends_30",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["3.1"], membw_analysis=True, experimental=True
+            ),
+            ["3.1", "30"],
+            id="membw_analysis_with_sub_block_appends_30",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["30.13"], membw_analysis=True, experimental=True
+            ),
+            ["30.13"],
+            id="membw_analysis_with_block_30_sub_no_duplicate",
+        ),
+    ],
+)
+def test_sanitize_membw_analysis_injects_block_30(
+    args, expected_filter_blocks, monkeypatch
+):
+    """Block 30 is injected into filter_blocks when --membw-analysis is set."""
+    # sanitize() resolves the workload binary; the injection runs before that.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
+    instance = _make_profiler_with_args(args)
+    instance.sanitize()
+    assert args.filter_blocks == expected_filter_blocks
 
 
 # ---------------------------------------------------------------------------

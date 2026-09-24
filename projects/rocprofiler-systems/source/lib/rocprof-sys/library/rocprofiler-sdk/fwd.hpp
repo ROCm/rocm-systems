@@ -25,9 +25,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -254,13 +252,12 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
         });
 }
 
-inline constexpr client_data*
+constexpr client_data*
 as_client_data(void* _ptr)
 {
     return static_cast<client_data*>(_ptr);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 #if !defined(ROCPROFILER_CALL)
 #    define ROCPROFILER_CALL(result)                                                     \

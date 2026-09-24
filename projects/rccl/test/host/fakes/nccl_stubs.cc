@@ -34,8 +34,14 @@
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
+#include "profiler.h"
 
 #include "nccl_stubs.h"
+
+#include "signature-drift.h"
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -62,21 +68,22 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
-// ncclCudaContextTrack and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
+// ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
 // under test defines this itself (enqueue.cc:90).
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
@@ -97,22 +104,34 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // The src/os/*.cc entry points (ncclOsCpuCount, ncclOsGetAffinity, ncclOsSetAffinity,
 // ncclOsTopoGetStrFromSys) and their seams: os_fakes.cc.
-ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerPluginFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
+ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return g_ncclProfilerPluginFinalize(comm); }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerThreadDestroy(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclProfilerThreadDestroy(comm); }
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
-bool ncclProfilerPluginLoaded(void) { return false; }
+static bool DefaultProfilerPluginLoaded() { return false; }
+std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnosticsActive(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
+ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRmaCeInit(struct ncclComm* comm) { return ncclSuccess; }
+bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
+ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
-static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
-ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
+// ncclSymkFinalize: fakes/sym_kernels_fakes.cc, alongside the rest of src/sym_kernels.cc's fakes.
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 // Recording the comm matters: commCleanup forwards its own argument, so passing anything else would be invisible.
 // TRAP: the recording must live here, not in the functor's default -- the default is reachable from the
@@ -148,6 +167,14 @@ std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsy
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
                              void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), struct ncclComm* comm) {
   return g_ncclAsyncLaunch(job, func, undo, destructor, comm);
+}
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
+                                 struct ncclComm*) {
+  return ncclSuccess;
+}
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
+  if (gpuCftSupport) *gpuCftSupport = 0;
+  return ncclSuccess;
 }
 // Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the
 // unit under test emits this via NCCL_PARAM (enqueue.cc:1986). Reads the env
@@ -207,17 +234,16 @@ ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
 ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
-ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
-
 void ResetNcclStubs() {
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
   g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
   g_ncclMemFree = DefaultNcclMemFree;
-  g_ncclSymkFinalize = DefaultNcclSymkFinalize;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+  g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
   g_initChannelResult = ncclSuccess;
   g_initChannelLastId = -1;
@@ -230,4 +256,6 @@ void ResetNcclStubs() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  ncclDevFuncNameToId.clear();
 }

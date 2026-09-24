@@ -131,7 +131,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v3)
+### Archive Format (v5)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -141,6 +141,8 @@ capture.hrr/
     writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
     blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
     code_objects/      .hsaco ELFs (unused in current fat-binary path)
+    regions/*.hrrr     external region annotations (optional; written by producers
+                       outside the runtime, never by capture — see below)
 ```
 All handle values (stream, event, module, graph, device pointer) are stored as raw `uint64_t` pointer casts. Sequence IDs are a global atomic counter providing causal ordering across threads.
 
@@ -233,8 +235,16 @@ projects/hrr/                     — standalone HRR project (portable layer)
   include/hrr/
     hrr_api_args.h                — AUTO-GENERATED: format constants, hrr_event_header,
                                     one hrr_args_* struct per HIP API, hrr_api_id_t enum
+    hrr_regions.h                 — external region annotations: the 32-byte
+                                    hrr_region_rec and the sidecar stream layout.
+                                    Not used by capture — it is the format an
+                                    out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v3 format
+    hrr_reader.h/.cpp             — archive loader; record framing
+                                    (read_raw_record / open_record_stream) shared
+                                    with the region sidecars
+    hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
+                                    SEGMENT materialisation, classify()
     hip_playback.h                — PlaybackContext (11 handle maps + host_reg_bufs), PlaybackFn typedef
     hip_playback.cpp              — 56 manual playback shims (all graph APIs, malloc/free variants,
                                     stream/event create/destroy, hipModuleGetFunction,
@@ -243,6 +253,11 @@ projects/hrr/                     — standalone HRR project (portable layer)
     hip_playback_generated.cpp    — AUTO-GENERATED: ~201 playback shims + dispatch table
     hrr_playback.cpp              — hrr-playback tool (replay + D2H validation + --info)
     CMakeLists.txt                — hrr_reader lib + hrr-playback exe
+  producers/
+    README.md                     — the region format contract, for anyone writing
+                                    a producer (no HRR symbol or header required)
+    pytorch/hrr_torch_regions.py  — reference producer: PyTorch caching-allocator
+                                    block layout, via _snapshot() polling
   tests/                          — HRR CPU unit + GPU capture/replay integration tests
   CMakeLists.txt                  — top-level HRR project (interface header, playback, tests)
 
@@ -303,20 +318,43 @@ The generator classifies each API:
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 
-## Archive Format (v3)
+## Archive Format (v5)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 3
+HRR_VERSION = 5
 ```
+
+Version history, so an archive written by an older runtime can be placed:
+
+- **v4** widened `hrr_event_header::payload_length` from `uint16_t` to `uint32_t`,
+  so a kernel launch serialising to more than 65535 bytes is recorded instead of
+  dropped. See Wire-Format Size Limits below.
+- **v5** assigns `hrr_api_id_t` from `HipDispatchTable` member order followed by
+  `HipCompilerDispatchTable` member order, rather than typedef declaration order.
+  This renumbered 496 of the 552 IDs once. Every event stores its ID, so a pre-v5
+  archive names the wrong API when decoded against the current table, and reading
+  one back needs an ID translation.
+
+  Which additions are safe after v5 follows from that order. Runtime IDs run
+  0..543 and the nine compiler IDs occupy the tail, 544..552, so appending a
+  `HipCompilerDispatchTable` member moves no existing ID, while appending a
+  `HipDispatchTable` member takes 544 and shifts every compiler ID up by one.
+  Compiler APIs do write events: `__hipRegisterFatBinary` and
+  `__hipUnregisterFatBinary` are in practically every archive, and
+  `__hipPushCallConfiguration` in any archive that launches a kernel through the
+  `<<<>>>` path. A runtime-table addition therefore still needs a version bump,
+  or a reader that translates the tail. Both cases assume the dispatch tables
+  only ever grow at the end; an insertion anywhere else moves the IDs after it.
+  A retired dispatch-table slot (nulled `void*`) still occupies an ID.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 3)
+                      events.bin HRR_VERSION = 5)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -324,6 +362,7 @@ HRR_VERSION = 3
     events.bin         8-byte hrr_file_header, then repeated records
     blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
     code_objects/      .hsaco ELFs keyed by hash
+    regions/*.hrrr     external region annotations (optional)
 ```
 
 ### `events.bin` Layout
@@ -332,7 +371,7 @@ HRR_VERSION = 3
 [0..7]    hrr_file_header  { magic:u32, version:u16, reserved:u16 }
 [8..]     records, back-to-back, no padding:
             hrr_event_header (32 bytes, pack(1)):
-              event_type     u16   hrr_api_id_t (0..528)
+              event_type     u16   hrr_api_id_t (0..552)
               sequence_id    u64   monotonically increasing (atomic)
               timestamp_ns   u64   MONOTONIC wall clock
               thread_id      u64   OS thread ID (cached per-thread)
@@ -680,6 +719,183 @@ One CPU thread is spawned per captured thread (keyed by OS thread ID stored in e
 event header). Each thread replays its own event slice in sequence-ID order. GPU-side
 parallelism is preserved through stream handles exactly as during capture. CPU-side
 synchronisation between threads is not replicated — see Limitations section.
+
+## External Region Annotations
+
+### The gap
+
+Interposing the HIP dispatch table means HRR observes exactly the memory that
+crosses a HIP API. Two consequences, usually treated as unrelated problems, are
+the same missing fact — *a device VA range that existed at capture time and that
+HRR could not see*:
+
+- **Bounds are lost.** PyTorch's `HIPCachingAllocator` issues one `hipMalloc` per
+  segment and carves per-tensor blocks out of it with host pointer arithmetic.
+  `translate_ptr` (`playback/hip_playback.h`) recovers a block pointer's
+  *address* by range search over `alloc_map`, but nothing recovers its *bounds*.
+  An intra-segment overrun therefore lands in a live neighbour at replay exactly
+  as it did at capture, and the replay reproduces the bug without exposing it.
+- **The allocation is lost entirely.** Memory that reaches the device without a
+  HIP call — `hsa_amd_memory_pool_allocate` called directly, a framework's own
+  VMM pool, imported external memory — produces kernel-argument pointers that
+  resolve in no map at all. Those reach the GPU as null, so the kernel faults on
+  first use rather than reading whatever the replay process happens to have at
+  the recorded address.
+
+One record type covers both. `--warn-untranslated-args` is the measurement that
+says which one a given capture is suffering from.
+
+### Transport: the format is the contract, not an ABI
+
+Annotations arrive as **sidecar event streams**: `pid-<pid>/regions/*.hrrr`,
+written by a producer outside `libamdhip64`. Nothing is exported for this, no
+capture-side code runs, and a producer needs neither `dlopen` nor a symbol.
+`HIP_HRR_CAPTURE_OUTPUT` is a plain environment variable and the writer's layout
+is `$HIP_HRR_CAPTURE_OUTPUT/pid-<getpid()>/`, so a producer computes the path
+itself; "is capture active" reduces to whether that directory exists.
+
+A sidecar is an ordinary HRR record stream — `hrr_file_header` + repeated
+`hrr_event_header` + payload — carrying its own magic (`HRR_REGION_MAGIC`,
+"HRRR") so it cannot be confused with `events.bin`. Three things follow at no
+cost: the existing reader parses it, including its torn-tail recovery
+(`read_raw_record`); record timestamps are in the same `CLOCK_MONOTONIC` clock as
+event headers (`amd::Os::timeNanos`); and the payload is transport-independent,
+so a future in-tree producer — an HSA allocation hook is the obvious candidate —
+can emit the identical bytes through `write_event_raw` into `events.bin` with no
+format change, needing only `HRR_REGION_EVENT` added to `is_special()`.
+
+Crash durability is structural rather than delegated: records are fixed-size and
+self-delimiting, a producer writes one batch per `write()`, so the only damage a
+crash can do is tear the final batch, which the reader discards.
+
+### Wire format
+
+`hrr_regions.h` defines a single 32-byte record:
+
+```c
+typedef struct {
+  uint8_t  op, kind, device, flags;
+  uint32_t tag;      /* producer-defined: pool id, stream id, ... */
+  uint64_t base;     /* capture-time device VA */
+  uint64_t size;
+  int64_t  mono_ns;  /* CLOCK_MONOTONIC; 0 == "live since before the stream" */
+} hrr_region_rec;
+```
+
+Two properties do most of the work:
+
+- **`mono_ns == 0` means "already live"**, so declaring the state that existed
+  before a producer started watching is just a run of ordinary `ADD` records.
+  There is no separate snapshot format and no baseline special case.
+- **`kind` distinguishes bounds-only from materialise**, so the sub-allocation
+  case and the HIP-bypass case share one ingest path. A producer declares
+  segments uniformly and does not need to know which of its allocations crossed a
+  HIP API: playback checks whether the base already resolves and materialises
+  only what is genuinely missing.
+
+### Replay ingest
+
+`playback/hrr_region_map.{h,cpp}` merges every sidecar, stable-sorts by
+`mono_ns`, and holds a cursor. `dispatch_event` advances it once per event to
+that event's `timestamp_ns`, which is deliberately coarser-grained than the
+kernel-launch path: memcpys and every other handler then see the same view, and a
+`SEGMENT` materialisation happens at the point in the stream where the recorded
+program created the allocation.
+
+- `BLOCK` `ADD`/`DEL` maintain a live set keyed by recorded base.
+- `SEGMENT` `ADD` records the bounds and allocates nothing. Materialisation is
+  **lazy**, driven from the moment a pointer fails to translate: the map then
+  allocates a buffer of the recorded size and registers it with `record_alloc`,
+  which is the entire HIP-bypass fix — it reuses `alloc_map` and therefore leaves
+  `translate_ptr` unchanged. Contents are unknown to the archive and get
+  `HIP_HRR_REPLAY_FILL_BYTE`.
+
+  "Fails to translate" means at any point of use, not only a kernel argument. A
+  copy can be the first thing that touches a bypassed allocation, so the memcpy
+  handlers go through `translate_or_materialize` rather than `translate_ptr`;
+  without that the handler gave up before the sidecar was consulted, which
+  contradicted the shared timeline advance described above.
+
+  Laziness is not an optimisation, it is what makes the answer correct. A
+  segment's `ADD` generally arrives *before* replay has reached the `hipMalloc`
+  that created it — and every baseline record arrives before any of them — so
+  asking at that moment whether the base already resolves reports "no" for
+  captured and bypassed segments alike. Waiting until a pointer has actually
+  failed to translate removes the ambiguity: by then every allocation the archive
+  knows about has been replayed, so a failure is proof that HIP was bypassed.
+- `classify(addr)` answers `NONE` / `IN_BLOCK` / `IN_SEGMENT_NO_BLOCK`, the last
+  being the intra-segment out-of-bounds or stale-pointer signal.
+
+`decode_kernel_args` calls one shared hook (`hrr_region_check_ptr`) from all
+three translation sites — the whole-pointer argument, the pointer embedded in a
+by-value struct, and the two joined scalar halves — so a tensor address gets the
+same treatment however the kernel's metadata happens to describe it.
+
+Region tracking assumes a totally ordered event stream and is used only in
+single-threaded replay, which is the default; under `--multi-thread` the records
+are loaded, reported, and ignored.
+
+### Fidelity: default versus guard mode
+
+**Default is purely observational.** With annotations present and no `--guard-*`
+flag, replay's memory layout is byte-for-byte what it would have been without
+them. Fidelity strictly increases, because a `SEGMENT` that HIP never saw now
+resolves instead of reaching a kernel as a foreign address. Intra-segment
+out-of-bounds findings are counted and reported; they describe the recorded
+program rather than a failure of the replay to reproduce it, so they only affect
+the exit code under `--regions-strict`.
+
+**`--guard-blocks` trades layout for a fault, transiently.** For the duration of
+one launch, each argument resolving into a live block is handed a VMM-backed copy
+of that block placed against an unmapped span; results are copied back and the
+relocation released before the next event. The divergence window is exactly one
+launch and all state is restored. Persistent per-block shadows would be cheaper
+and would cover more APIs, but they leave the contiguous segment copy permanently
+stale — precisely the fidelity loss this design exists to avoid.
+
+Relocation **preserves the recorded pointer's alignment**. A block is
+right-aligned to its own alignment (the largest power of two dividing its
+recorded base, capped at the allocation granularity) rather than to a fixed
+boundary, because hipBLASLt tile selection and vectorised load paths branch on
+how aligned their operands are: handing a kernel a differently-aligned copy can
+change what it executes, producing either a spurious divergence or a spurious
+fault. The residual blind spot — bytes between the block's end and the guard — is
+reported rather than configured. `--guard-exact-align` reproduces the pointer's
+offset within a granule bit for bit instead, at the cost of a blind spot of up to
+one granule.
+
+Selection is driven by size (`--guard-min-bytes` / `--guard-max-bytes`) and a
+per-launch budget (`--guard-budget-mb`), since VMM shadows round up to
+`hipMemGetAllocationGranularity` (2 MiB typically) and a launch with a hundred
+pointer arguments would otherwise exhaust VRAM before the kernel runs. Narrowing
+by kernel reuses `--kernel-filter`.
+
+**`--guard-segments`** is independent and needs no annotations: it VMM-backs
+every device allocation and leaves an unmapped span after it, catching a run off
+the end of a whole segment while leaving the layout inside the segment untouched.
+
+### Producers
+
+`producers/` holds the written contract and the reference implementation, so
+another framework or a customer can emit the format without touching HRR.
+
+- `producers/README.md` — the format, the path convention, the durability rule,
+  and the capture-active check.
+- `producers/pytorch/hrr_torch_regions.py` — the reference producer, polling
+  `torch.cuda.memory._snapshot()` after `_record_memory_history()`. A synchronous
+  hook would require reaching into `libc10_hip`, and substituting a
+  `CUDAPluggableAllocator` would replace the caching allocator outright and
+  destroy the very layout being reproduced. It converts PyTorch's `time_us`
+  (`CLOCK_REALTIME`) to `CLOCK_MONOTONIC` and restarts itself via
+  `os.register_at_fork`, because the polling thread does not survive a fork while
+  the capture writer happily reopens under the child's pid.
+
+Known producer-quality limits, none of which are format limits: a block allocated
+and freed between two polls is missed if PyTorch's trace ring overflows between
+them, and a producer stamping the wrong clock produces plausible-looking nonsense
+— the replayer warns when region timestamps fall outside the archive's own event
+span, but merely *skewed* timestamps only show up as blocks classified live at
+the wrong instant.
 
 ## Build System
 
@@ -1099,7 +1315,8 @@ The event wire format (finding H5):
   was widened from `uint16_t` to `uint32_t` (the 32-byte header size is preserved by
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
-  normally instead of being dropped at 65535 bytes. `HRR_VERSION` was bumped to 4; the
+  normally instead of being dropped at 65535 bytes. This is the change that bumped
+  `HRR_VERSION` to 4; the current version is 5, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
