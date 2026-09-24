@@ -33,7 +33,7 @@ For information about using the FFMpeg decoder, see :doc:`Understanding the rocD
 
   On Linux: ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
 
-  On Windows: use pre-built FFmpeg libraries or build from source, and pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to CMake when configuring.
+  On Windows: use pre-built FFmpeg libraries or build from source. CMake finds them automatically when they are on ``PATH`` or installed in a common location (Chocolatey, scoop, ``%ProgramFiles%\ffmpeg``, or ``C:\ffmpeg``). Pass ``-DFFMPEG_ROOT="<path-to-ffmpeg>"`` when configuring only if they live somewhere else, or to pin a specific build.
 
 .. |ffmpeg| replace:: ``utils/ffmpegvideodecode/ffmpeg_video_dec.h``
 .. _ffmpeg: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/ffmpegvideodecode/ffmpeg_video_dec.h
