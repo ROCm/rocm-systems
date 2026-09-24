@@ -10,9 +10,7 @@
 // Split out of core/gpu.hpp so that callers correlating devices against runtime
 // visibility do not have to pull in <amd_smi/amdsmi.h>.
 
-namespace rocprofsys
-{
-namespace gpu
+namespace rocprofsys::gpu
 {
 /**
  * @brief PCIe BDFs of the GPUs the ROCm runtime exposes.
@@ -30,5 +28,4 @@ namespace gpu
  */
 std::optional<std::set<std::string>>
 get_visible_gpu_bdfs();
-}  // namespace gpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::gpu

@@ -28,7 +28,7 @@ namespace transcendental {
 ///
 /// @details AMD transcendental micro-ops always operate in FTZ mode
 /// regardless of the shader's denorm mode.  This helper reproduces
-/// that behaviour for rcp, rsq, exp, and log.
+/// that behaviour for rcp, rsq, sqrt, exp, and log.
 inline float flush_denorm_f32(float x) {
   uint32_t bits = std::bit_cast<uint32_t>(x);
   if ((bits & 0x7F800000u) == 0 && (bits & 0x007FFFFFu) != 0)
@@ -40,7 +40,7 @@ inline float flush_denorm_f32(float x) {
 inline float rcp_f32(float x) {
   x = flush_denorm_f32(x);
   if (std::isnan(x))
-    return x;
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   if (x == 0.0f)
     return std::copysign(std::numeric_limits<float>::infinity(), x);
   if (std::isinf(x))
@@ -52,7 +52,7 @@ inline float rcp_f32(float x) {
 inline float rsq_f32(float x) {
   x = flush_denorm_f32(x);
   if (std::isnan(x))
-    return x;
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   if (x == 0.0f)
     return std::copysign(std::numeric_limits<float>::infinity(), x);
   if (x < 0.0f)
@@ -64,8 +64,9 @@ inline float rsq_f32(float x) {
 
 /// @brief sqrt(x) (single-precision square root, correctly-rounded).
 inline float sqrt_f32(float x) {
+  x = flush_denorm_f32(x);
   if (std::isnan(x))
-    return x;
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   if (x < 0.0f)
     return std::numeric_limits<float>::quiet_NaN();
   return std::sqrt(x);
@@ -75,7 +76,7 @@ inline float sqrt_f32(float x) {
 inline float log_f32(float x) {
   x = flush_denorm_f32(x);
   if (std::isnan(x))
-    return x;
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   if (x == 0.0f)
     return -std::numeric_limits<float>::infinity();
   if (x < 0.0f)
@@ -89,7 +90,7 @@ inline float log_f32(float x) {
 inline float exp_f32(float x) {
   x = flush_denorm_f32(x);
   if (std::isnan(x))
-    return x;
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   if (x == -std::numeric_limits<float>::infinity())
     return 0.0f;
   if (x == std::numeric_limits<float>::infinity())
@@ -122,7 +123,7 @@ inline float cos_f32(float x) {
 /// @brief Hyperbolic tangent (single-precision, correctly-rounded libm reference).
 inline float tanh_f32(float x) {
   if (std::isnan(x))
-    return x;
+    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   return std::tanh(x);
 }
 

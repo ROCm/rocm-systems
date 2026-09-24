@@ -17,8 +17,8 @@ static int agvChannelCount(struct ncclComm* comm, int tunedChannels) {
 #ifdef ENABLE_WARP_SPEED
   if (comm->warpSpeedChannelMultiplier > 1) {
     int channels = std::max(1, tunedChannels / comm->warpSpeedChannelMultiplier);
-    INFO(NCCL_COLL, "AllGatherV: WarpSpeed not supported; channels %d -> %d (multiplier %d)",
-         tunedChannels, channels, comm->warpSpeedChannelMultiplier);
+    INFO(NCCL_COLL, "AllGatherV: WarpSpeed not supported; channels %d -> %d (multiplier %d)", tunedChannels, channels,
+         comm->warpSpeedChannelMultiplier);
     return channels;
   }
 #endif
@@ -82,7 +82,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     nChannels = agvChannelCount(comm, tcoll.nMaxChannels);
     chunkSize = chunkSize / grainSize * grainSize;
 
-
     // Determine thread count per block
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int threadPerBlock = tcoll.nWarps * comm->WarpSize;
@@ -94,6 +93,10 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
 
     // Choose kernel for plan. Based on proto, algo=ring
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0, 0, NCCL_ALGO_RING, proto);
+    if (funcIndex < 0) {
+      WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
+      return ncclInvalidUsage;
+    }
     if (!plan->kernelSpecialized) {
       // RCCL doesn't expose the upstream ncclDevKernelForFunc[] lookup. The
       // unroll-indexed ncclKerns table (file-local in enqueue.cc) is the

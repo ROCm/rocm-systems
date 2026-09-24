@@ -46,9 +46,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using interval_data_instances = thread_data<std::vector<bool>>;
 using hash_value_t            = core::perfetto::hash_value_t;
@@ -76,7 +74,6 @@ using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
 //
 extern ROCPROFSYS_HIDDEN_API bool debug_push;
 extern ROCPROFSYS_HIDDEN_API bool debug_pop;
-extern ROCPROFSYS_HIDDEN_API bool debug_user;
 extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
 void
@@ -628,5 +625,4 @@ get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
     }
     return (_diff / _n);
 }
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing

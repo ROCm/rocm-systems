@@ -16,9 +16,7 @@
         ar(::tim::cereal::make_nvp(#MEMBER_VARIABLE, MEMBER_VARIABLE))
 #endif
 
-namespace rocprofsys
-{
-namespace coverage
+namespace rocprofsys::coverage
 {
 #if !defined(ROCPROFSYS_PYBIND11_SOURCE) || ROCPROFSYS_PYBIND11_SOURCE == 0
 void
@@ -150,5 +148,4 @@ coverage_data::serialize(ArchiveT& ar, const unsigned version)
     (void) version;
 }
 //
-}  // namespace coverage
-}  // namespace rocprofsys
+}  // namespace rocprofsys::coverage

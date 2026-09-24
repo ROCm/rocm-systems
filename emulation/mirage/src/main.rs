@@ -95,7 +95,17 @@ fn main() -> ExitCode {
             return ExitCode::from(USAGE_EXIT);
         }
     };
-    let cli = Cli::parse_from(argv);
+    let cli = match Cli::try_parse_from(argv) {
+        Ok(cli) => cli,
+        Err(error) if error.kind() == clap::error::ErrorKind::DisplayVersion => {
+            return print_version();
+        }
+        Err(error) => {
+            let exit_code = u8::try_from(error.exit_code()).unwrap_or(1);
+            let _ = error.print();
+            return ExitCode::from(exit_code);
+        }
+    };
     mirage_ctl::init_logging(cli.verbose);
     match dispatch(cli) {
         Ok(code) => code,
@@ -104,6 +114,19 @@ fn main() -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// Print Mirage's package version and RocJITsu's shared build identity.
+fn print_version() -> ExitCode {
+    println!("mirage {}", env!("CARGO_PKG_VERSION"));
+    #[cfg(feature = "rocjitsu")]
+    match mirage_rocjitsu::version_string() {
+        Ok(version) => println!("{version}"),
+        Err(error) => println!("rocjitsu build identity unavailable: {error}"),
+    }
+    #[cfg(not(feature = "rocjitsu"))]
+    println!("rocjitsu build identity unavailable: backend not built");
+    ExitCode::SUCCESS
 }
 
 /// The `mirage` command tree, built once.

@@ -26,7 +26,7 @@ namespace simdojo {
 
 /// @brief Backing-store layout for a physical register file.
 enum class RegisterFileStorage {
-  CONTIGUOUS,    ///< Contiguous storage used by the small scalar register file.
+  CONTIGUOUS,    ///< Contiguous, eagerly initialized register storage.
   SOFTWARE_LAZY, ///< Portable chunk storage allocated on first mutable access.
 };
 
@@ -37,7 +37,7 @@ public:
   void init(uint32_t count) { data_.assign(count, RegType{}); }
 
   void reset(uint32_t base, uint32_t count) {
-    std::fill(data_.begin() + base, data_.begin() + base + count, RegType{});
+    std::ranges::fill(data_.begin() + base, data_.begin() + base + count, RegType{});
   }
 
   RegType &operator[](uint32_t idx) { return data_[idx]; }
@@ -84,9 +84,11 @@ private:
 /// allocating. Mutable access materializes and zero-initializes the containing
 /// chunk. The storage retains CU-global register indices but deliberately does
 /// not expose a single contiguous pointer spanning multiple chunks.
+///
+/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage,
+/// or zero to size the chunk table at initialization.
 template <typename RegType, size_t MaxRegisters> class SoftwareLazyRegisterStorage {
 public:
-  static_assert(MaxRegisters > 0);
   static_assert(std::is_trivially_copyable_v<RegType>);
   static_assert(std::is_trivially_destructible_v<RegType>);
 
@@ -98,9 +100,13 @@ public:
 
   void init(uint32_t count) {
     assert(total_regs_ == 0 && "SoftwareLazyRegisterStorage already initialized");
-    assert(count <= MaxRegisters && "register count exceeds lazy storage capacity");
-    if (count > MaxRegisters)
-      std::abort();
+    if constexpr (MaxRegisters == 0) {
+      chunks_.resize((static_cast<size_t>(count) + REGS_PER_CHUNK - 1) / REGS_PER_CHUNK);
+    } else {
+      assert(count <= MaxRegisters && "register count exceeds lazy storage capacity");
+      if (count > MaxRegisters)
+        std::abort();
+    }
     total_regs_ = count;
   }
 
@@ -125,9 +131,9 @@ public:
       if (clear_begin == chunk_base && clear_end == valid_chunk_end) {
         chunk.reset();
       } else {
-        std::fill(chunk->registers.begin() + static_cast<ptrdiff_t>(clear_begin - chunk_base),
-                  chunk->registers.begin() + static_cast<ptrdiff_t>(clear_end - chunk_base),
-                  RegType{});
+        std::ranges::fill(
+            chunk->registers.begin() + static_cast<ptrdiff_t>(clear_begin - chunk_base),
+            chunk->registers.begin() + static_cast<ptrdiff_t>(clear_end - chunk_base), RegType{});
       }
     }
   }
@@ -141,8 +147,8 @@ public:
   /// @brief Count chunks with materialized register storage.
   /// @returns Number of currently materialized chunks.
   [[nodiscard]] size_t materialized_chunk_count() const noexcept {
-    return static_cast<size_t>(std::count_if(chunks_.begin(), chunks_.end(),
-                                             [](const auto &chunk) { return chunk != nullptr; }));
+    return static_cast<size_t>(
+        std::ranges::count_if(chunks_, [](const auto &chunk) { return chunk != nullptr; }));
   }
 
   RegType &operator[](uint32_t idx) {
@@ -235,8 +241,7 @@ public:
         base, source.size(),
         [&](size_t chunk_idx, size_t chunk_offset, size_t run_size, size_t source_offset) {
           const auto run = source.subspan(source_offset, run_size);
-          if (std::all_of(run.begin(), run.end(),
-                          [](std::byte value) { return value == std::byte{}; }))
+          if (std::ranges::all_of(run, [](std::byte value) { return value == std::byte{}; }))
             return;
           auto &chunk = chunks_[chunk_idx];
           if (!chunk)
@@ -272,7 +277,9 @@ private:
   }
 
   inline static const RegType zero_register_{};
-  std::array<std::unique_ptr<Chunk>, MAX_CHUNKS> chunks_{};
+  std::conditional_t<MaxRegisters == 0, std::vector<std::unique_ptr<Chunk>>,
+                     std::array<std::unique_ptr<Chunk>, MAX_CHUNKS>>
+      chunks_{};
   uint32_t total_regs_ = 0;
 };
 
@@ -302,7 +309,8 @@ using RegisterStorage = std::conditional_t<Storage == RegisterFileStorage::CONTI
 ///
 /// @tparam RegType Register element type (default: uint32_t).
 /// @tparam Storage Backing-store layout (default: contiguous storage).
-/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage.
+/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage,
+/// or zero to size the backing storage at initialization.
 template <typename RegType = uint32_t,
           RegisterFileStorage Storage = RegisterFileStorage::CONTIGUOUS, size_t MaxRegisters = 0>
 class RegisterFile : public Component {
@@ -362,8 +370,8 @@ public:
       // whole-file reset so their boundary chunks can also be released.
       const bool independently_reclaimable = data_.can_reclaim_independently(regs_per_block_);
       const bool all_blocks_free =
-          !independently_reclaimable && std::all_of(free_blocks_.begin(), free_blocks_.end(),
-                                                    [](bool is_free) { return is_free; });
+          !independently_reclaimable &&
+          std::ranges::all_of(free_blocks_, [](bool is_free) { return is_free; });
       if (all_blocks_free) {
         data_.reset(0, total_regs_);
       } else {

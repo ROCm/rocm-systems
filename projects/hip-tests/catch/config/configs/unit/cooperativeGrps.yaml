@@ -208,6 +208,27 @@ cooperativeGrps:
   Unit_coop_thread_block_split_barrier:
     <<: *level_2
     tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_Multiple:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_EquivalentToSync:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_ProducerConsumer:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_grids_split_barrier_Multiple:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_Sanity:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_ImbalancedWorkload:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_TokenLifetime:
+    <<: *level_2
+    tags: [cooperative, ops]
   Unit_Thread_Block_Coalesced_Reduce_arithmetic: *level_2
   Unit_Thread_Block_Tile_Reduce_Basic: *level_2
   Unit_Thread_Block_Tile_Reduce_Custom_Op: *level_2

@@ -84,8 +84,9 @@ This can happen in three different ways:
   MPI, NUMA, RCCL, etc. to act as progress points
 * Users can leverage the :doc:`runtime instrumentation capabilities <./instrumenting-rewriting-binary-application>`
   to insert progress points
-* Users can leverage :doc:`User APIs <../how-to/using-rocprof-sys-api>`,
-  such as ``ROCPROFSYS_CAUSAL_PROGRESS``
+* Users can leverage the ``ROCPROFSYS_CAUSAL_PROGRESS``, ``ROCPROFSYS_CAUSAL_BEGIN``,
+  and ``ROCPROFSYS_CAUSAL_END`` macros (``rocprofiler-systems/causal.h``) to mark
+  progress points directly in their code
 
 .. note::
 

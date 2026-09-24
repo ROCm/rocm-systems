@@ -8,6 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace rocprofsys::backends::rocprofiler_sdk::testing
 {
@@ -27,6 +30,7 @@ static constexpr status_t k_status_error                  = -1;
 static constexpr status_t k_status_buffer_busy            = -2;
 static constexpr status_t k_status_hsa_not_loaded         = -3;
 static constexpr status_t k_status_error_invalid_argument = -4;
+static constexpr status_t k_status_error_not_implemented  = -5;
 
 struct context_id
 {
@@ -75,6 +79,11 @@ struct timestamp
 {
     std::uint64_t value{};
     bool          operator==(const timestamp&) const = default;
+};
+struct correlation_id
+{
+    std::uint64_t ancestor{};
+    bool          operator==(const correlation_id&) const = default;
 };
 
 using counter_flag_t   = std::uint32_t;
@@ -134,9 +143,120 @@ using device_counting_agent_cb_t = void*;
 using device_counting_svc_cb_t   = void*;
 using dispatch_counting_svc_cb   = void*;
 using dispatch_counting_rec_cb   = void*;
+using callback_phase             = int;
 
 struct callback_tracing_record_t
+{
+    callback_phase phase = 0;
+};
+
+// record_header_t mirrors rocprofiler_record_header_t: buffered_callback_dispatcher
+// dereferences ->payload on every element of the header array it iterates.
+struct record_header_t
+{
+    std::uint32_t category = 0;
+    std::uint32_t kind     = 0;
+    void*         payload  = nullptr;
+};
+
+// The kfd_*_record stubs below each mirror one rocprofiler_buffer_tracing_kfd_*_record_t
+// type. backend<Sdk> only re-exports them as type aliases; no field is read here.
+struct kfd_page_fault_record
 {};
+struct kfd_page_migrate_record
+{};
+struct kfd_queue_record
+{};
+struct kfd_event_queue_record
+{};
+struct kfd_event_unmap_record
+{};
+struct kfd_event_dropped_record
+{};
+struct kfd_event_page_migrate_record
+{};
+struct kfd_event_page_fault_record
+{};
+
+// ─── Tracing-name table stub ────────────────────────────────────────────────
+//
+// Minimal stand-in for rocprofiler::sdk::utility::name_info. callback/buffer
+// tracing_kind are both plain `int` here, so one template covers both.
+
+template <typename ValueT = std::string_view>
+struct name_info_impl
+{
+    struct support_type
+    {
+        ValueT operator()(const char* str) const
+        {
+            return str ? ValueT{ str } : ValueT{};
+        }
+        static ValueT default_value() { return {}; }
+    };
+
+    using item_array_t = std::vector<std::pair<int, const ValueT*>>;
+
+    ValueT              name{};
+    int                 value{};
+    std::vector<ValueT> operations{};
+
+    [[nodiscard]] item_array_t items() const
+    {
+        auto ret = item_array_t{};
+        ret.reserve(operations.size());
+        int idx = 0;
+        for(const auto& itr : operations)
+        {
+            ret.emplace_back(idx++, &itr);
+        }
+        return ret;
+    }
+};
+
+template <typename ValueT = std::string_view>
+struct name_info
+{
+    using value_type   = name_info_impl<ValueT>;
+    using support_type = value_type::support_type;
+
+    void emplace(int idx, const char* name)
+    {
+        auto& entry = (*this)[static_cast<std::size_t>(idx)];
+        entry.value = idx;
+        entry.name  = support_type{}(name);
+    }
+    void emplace(int idx, int opidx, const char* name)
+    {
+        auto& entry = (*this)[static_cast<std::size_t>(idx)];
+        if(static_cast<std::size_t>(opidx) >= entry.operations.size())
+        {
+            entry.operations.resize(opidx + 1, support_type::default_value());
+        }
+        entry.operations.at(opidx) = support_type{}(name);
+    }
+
+    [[nodiscard]] decltype(auto) size() const { return impl.size(); }
+    [[nodiscard]] decltype(auto) begin() const { return impl.begin(); }
+    [[nodiscard]] decltype(auto) end() const { return impl.end(); }
+
+    value_type& operator[](std::size_t idx)
+    {
+        if(idx >= impl.size())
+        {
+            impl.resize(idx + 1);
+        }
+        return impl[idx];
+    }
+    const value_type& operator[](std::size_t idx) const
+    {
+        static const value_type default_entry{};
+        return idx < impl.size() ? impl[idx] : default_entry;
+    }
+
+private:
+    std::vector<value_type> impl{};
+};
 
 // ─── gmock_sdk ────────────────────────────────────────────────────────────────
 //
@@ -225,6 +345,9 @@ public:
                 (std::uint32_t * major, std::uint32_t* minor, std::uint32_t* patch));
     MOCK_METHOD(status_t, get_timestamp, (timestamp * ts));
     MOCK_METHOD(const char*, get_status_string, (status_t s));
+
+    MOCK_METHOD(name_info<>, get_callback_tracing_names, ());
+    MOCK_METHOD(name_info<>, get_buffer_tracing_names, ());
 };
 
 // Global singleton — GMock objects are non-copyable, so they live on the heap.
@@ -255,6 +378,7 @@ struct mock_sdk
     using counter_flag_t                       = testing::counter_flag_t;
     using user_data_t                          = testing::user_data;
     using timestamp_t                          = testing::timestamp;
+    using correlation_id_t                     = testing::correlation_id;
     using available_counters_cb_t              = testing::available_counters_cb_t;
     using device_counting_agent_cb_t           = testing::device_counting_agent_cb_t;
     using device_counting_service_cb_t         = testing::device_counting_svc_cb_t;
@@ -270,6 +394,7 @@ struct mock_sdk
     using external_correlation_id_request_cb_t = testing::ext_correlation_req_cb_t;
     using internal_thread_library_cb_t         = testing::internal_thread_cb_t;
     using callback_tracing_record              = testing::callback_tracing_record_t;
+    using callback_phase_t                     = testing::callback_phase;
     using callback_tracing_operation_args_cb_t = testing::tracing_op_args_cb_t;
     using available_dimensions_cb_t            = testing::available_dimensions_cb_t;
     using counter_info_version_id_t            = testing::counter_info_ver;
@@ -277,6 +402,17 @@ struct mock_sdk
     using counter_info_v1_t                    = testing::counter_info_v1_t;
     using dispatch_counting_service_cb         = testing::dispatch_counting_svc_cb;
     using dispatch_counting_record_cb          = testing::dispatch_counting_rec_cb;
+    using callback_name_info_t                 = testing::name_info<>;
+    using buffer_name_info_t                   = testing::name_info<>;
+    using record_header_t                      = testing::record_header_t;
+    using kfd_page_fault_record                = testing::kfd_page_fault_record;
+    using kfd_page_migrate_record              = testing::kfd_page_migrate_record;
+    using kfd_queue_record                     = testing::kfd_queue_record;
+    using kfd_event_queue_record               = testing::kfd_event_queue_record;
+    using kfd_event_unmap_record               = testing::kfd_event_unmap_record;
+    using kfd_event_dropped_record             = testing::kfd_event_dropped_record;
+    using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
+    using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
@@ -288,11 +424,45 @@ struct mock_sdk
     static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED = k_status_hsa_not_loaded;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         k_status_error_invalid_argument;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        k_status_error_not_implemented;
 
     // ── Counter constants ─────────────────────────────────────────────────────
     static constexpr counter_flag_t            COUNTER_FLAG_NONE      = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_0 = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 = 1;
+
+    // ── Callback phase constants ──────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER = 0;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = 1;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = 2;
+
+    // ── Callback/buffer tracing kind constants ────────────────────────────────
+    // Only backend<Sdk>'s unconditional constants — ROCPROFILER_VERSION is
+    // undefined in this TU, so its #if-gated ones are never declared here.
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_CORE_API         = 1;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_AMD_EXT_API      = 2;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_IMAGE_EXT_API    = 3;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_FINALIZE_EXT_API = 4;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_RUNTIME_API      = 5;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_COMPILER_API     = 6;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_CODE_OBJECT          = 7;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CORE_API      = 8;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_RCCL_API             = 9;
+
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API    = 3;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_FINALIZE_EXT_API = 4;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_RUNTIME_API      = 5;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_COMPILER_API     = 6;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_MARKER_CORE_API      = 7;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KERNEL_DISPATCH      = 8;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_MEMORY_COPY          = 9;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_SCRATCH_MEMORY       = 10;
 
     // ── Static forwarding stubs ───────────────────────────────────────────────
 
@@ -465,6 +635,16 @@ struct mock_sdk
     static const char* get_status_string(status_t s) noexcept
     {
         return g_mock_sdk->get_status_string(s);
+    }
+
+    static callback_name_info_t get_callback_tracing_names()
+    {
+        return g_mock_sdk->get_callback_tracing_names();
+    }
+
+    static buffer_name_info_t get_buffer_tracing_names()
+    {
+        return g_mock_sdk->get_buffer_tracing_names();
     }
 };
 

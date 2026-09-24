@@ -16,9 +16,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace
@@ -891,5 +889,4 @@ metadata_registry::load_from_file(const std::string&                   filepath,
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

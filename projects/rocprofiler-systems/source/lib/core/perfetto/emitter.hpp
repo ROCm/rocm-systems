@@ -20,9 +20,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace core::perfetto
+namespace rocprofsys::core::perfetto
 {
 using hash_value_t = std::uint64_t;
 
@@ -225,5 +223,4 @@ pop_perfetto(CategoryT, const char* name, ::perfetto::Track track,
 {
     pop_perfetto_track(CategoryT{}, name, track, timestamp, std::forward<Args>(args)...);
 }
-}  // namespace core::perfetto
-}  // namespace rocprofsys
+}  // namespace rocprofsys::core::perfetto

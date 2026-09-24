@@ -11,7 +11,7 @@
 # iterations = 10000 dispatches; a regression hangs (TIMEOUT) or drops
 # dispatches (validate fails on the expected count).
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-counter-collection-queue-overflow

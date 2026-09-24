@@ -70,7 +70,7 @@ HIP_TEST_CASE(Contract_FuncAttributes_HipFuncGetAttributes_NullAttr_IsRejected) 
 }
 
 // @asserts: hipFuncGetAttribute - scalar max-threads-per-block query agrees with the struct query for the same function
-HIP_TEST_CASE(Contract_FuncAttributes_HipFuncGetAttribute_s_MatchesScalarGetAttribute) {
+HIP_TEST_CASE(Contract_FuncAttributes_HipFuncGetAttribute_Scalar_MatchesScalarGetAttribute) {
   RequireDevice();
 
   hipFuncAttributes attributes{};

@@ -292,6 +292,18 @@ struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e5m2, false> {
 // software type used on non-fp8 arches (e.g. gfx908) has no __half conversion, so
 // fp8 accumulates in float (which casts cleanly on every arch).
 template <>
+struct ncclSymkAccumType<FuncSum, hip_bfloat16, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, rccl_float8, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, rccl_bfloat8, false> {
+  using Type = float;
+};
+template <>
 struct ncclSymkAccumType<FuncSumPostDiv, hip_bfloat16, false> {
   using Type = float;
 };
@@ -404,8 +416,8 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
 #endif
 
   if (alignment % 16 == 0) {
-    constexpr int BytePerPack = 16, UnrollPacks = 8;
-    constexpr int BytePerChunk = UnrollPacks * WARP_SIZE * BytePerPack;
+    constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkDeepUnrollPacks;
+    constexpr int BytePerChunk = ncclSymkMultimemDeepBytePerChunk;
     uintptr_t cursor = nPreBytes;
     uint32_t nChunks = (nBytes - cursor) / BytePerChunk;
     uintptr_t cursorAfter = cursor + uintptr_t(nChunks) * BytePerChunk;

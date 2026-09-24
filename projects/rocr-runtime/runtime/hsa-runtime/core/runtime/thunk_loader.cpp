@@ -44,10 +44,16 @@
 #include "core/inc/runtime.h"
 
 #include <core/util/os.h>
+#include <hsakmt/rocdxg_version.h>
 #include <iostream>
 #if defined(__linux__)
 #include <fcntl.h>
 #endif
+
+#define ROCR_ROCDXG_STR2(v) #v
+#define ROCR_ROCDXG_STR(v) ROCR_ROCDXG_STR2(v)
+#define ROCR_ROCDXG_LIBNAME_VERSIONED "librocdxg.so." ROCR_ROCDXG_STR(ROCDXG_LIB_VERSION_MAJOR)
+#define ROCR_ROCDXG_LIBNAME_UNVERSIONED "librocdxg.so"
 
 namespace rocr {
 namespace core {
@@ -78,7 +84,7 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       if (fd >= 0) {
         close(fd);
         is_wsl_dxg_ = true;
-        return "librocdxg.so";
+        return ROCR_ROCDXG_LIBNAME_VERSIONED;
       }
     }
 #else
@@ -103,11 +109,26 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
           thunk_handle = rocr::os::LoadLib(relative_path.c_str());
           if (thunk_handle != nullptr) loaded_path = relative_path;
         }
+      }
+      if (thunk_handle == nullptr && is_wsl_dxg_) {
+        library_name = ROCR_ROCDXG_LIBNAME_UNVERSIONED;
+        rocr::os::DlError();
+        thunk_handle = rocr::os::LoadLib(library_name.c_str());
         if (thunk_handle == nullptr) {
-          const char* error = rocr::os::DlError();
-          fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(),
-            error == nullptr ? "unknown error" : error);
+          const std::string relative_path = GetAdjacentThunkLibraryPath(library_name);
+          if (!relative_path.empty()) {
+            rocr::os::DlError();
+            thunk_handle = rocr::os::LoadLib(relative_path.c_str());
+            if (thunk_handle != nullptr) loaded_path = relative_path;
+          }
+        } else {
+          loaded_path = library_name;
         }
+      }
+      if (thunk_handle == nullptr) {
+        const char* error = rocr::os::DlError();
+        fprintf(stderr, "Cannot load %s, failed:%s\n", library_name.c_str(),
+          error == nullptr ? "unknown error" : error);
       }
       if (thunk_handle != nullptr) {
         debug_print("Load %s successfully!\n", loaded_path.c_str());

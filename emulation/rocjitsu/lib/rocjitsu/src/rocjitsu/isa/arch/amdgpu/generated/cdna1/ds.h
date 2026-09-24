@@ -1211,6 +1211,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand dsmem;
+  Operand dsmem_in;
   Operand m0;
 };
 

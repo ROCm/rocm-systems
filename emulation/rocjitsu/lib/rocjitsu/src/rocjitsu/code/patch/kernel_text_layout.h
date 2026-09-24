@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {

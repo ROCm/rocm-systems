@@ -8,9 +8,7 @@
 #include <limits>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace core
+namespace rocprofsys::core
 {
 // Trace.packets framing wire tag: field 1, wire type 2 (length-delimited).
 inline constexpr std::uint8_t TRACE_PACKETS_TAG = 0x0A;
@@ -208,5 +206,4 @@ rewrite_trace_packet(std::vector<char>& output, const char* packet, std::size_t 
                                         TRUSTED_SEQ_ID_MAX_EXCLUSIVE) ==
            rewrite_trace_packet_status::success;
 }
-}  // namespace core
-}  // namespace rocprofsys
+}  // namespace rocprofsys::core

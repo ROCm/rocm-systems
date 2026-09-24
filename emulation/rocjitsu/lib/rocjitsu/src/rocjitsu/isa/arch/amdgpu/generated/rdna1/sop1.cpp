@@ -619,16 +619,15 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSextI32I8Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      ssrc0(16, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
+      ssrc0(8, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+    ssrc0 = Operand(
+        8, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
 namespace detail {

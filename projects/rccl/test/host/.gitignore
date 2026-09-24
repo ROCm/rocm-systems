@@ -1,0 +1,3 @@
+# run_host_tests.sh run artifacts (console log + per-binary JUnit XML)
+host_tests.log
+host_tests*.xml

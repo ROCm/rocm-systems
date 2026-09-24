@@ -3,15 +3,14 @@
 
 #pragma once
 
-#include "core/timemory.hpp"
-#include "rocprofiler-sdk/trace_control.hpp"
-
 #include <memory>
+
+#include "core/control/session.hpp"
+#include "core/timemory.hpp"
+
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -42,13 +41,15 @@ pause();
 void
 resume();
 
-std::shared_ptr<control::trace_control>
-get_trace_controller();
+void
+set_session(std::shared_ptr<control::session> sess);
+
+void
+create_roctx_client();
 
 void
 reset_sdk_session_guards();
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

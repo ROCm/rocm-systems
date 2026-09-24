@@ -8,11 +8,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace rocprofsys
-{
-inline namespace common
-{
-namespace traits
+namespace rocprofsys::inline common::traits
 {
 template <typename T>
 concept string_literal =
@@ -37,6 +33,4 @@ struct is_optional<std::optional<T>> : std::true_type
 
 template <typename T>
 inline constexpr bool is_optional_v = is_optional<T>::value;
-}  // namespace traits
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common::traits

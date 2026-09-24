@@ -208,7 +208,7 @@ requests==2.34.2
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference,llms]==1.38.0
+rocm-docs-core[api-reference,llms]==1.40.0
     # via -r requirements.in
 roman-numerals==4.1.0
     # via sphinx
@@ -275,7 +275,7 @@ tabulate==0.10.0
     # via
     #   jupyter-cache
     #   sphinx-markdown-builder
-tornado==6.5.7
+tornado==6.5.8
     # via
     #   ipykernel
     #   jupyter-client

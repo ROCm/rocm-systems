@@ -77,15 +77,6 @@ function(resolve_sanitizer)
         )
     endif()
 
-    # Nuitka onefile is incompatible with sanitizers (it execs a stripped binary
-    # from a temp dir; the sanitizer runtime cannot be located).
-    if(ENABLE_SANITIZER AND STANDALONEBINARY)
-        message(
-            FATAL_ERROR
-            "ENABLE_SANITIZER=${ENABLE_SANITIZER} cannot be combined with STANDALONEBINARY=ON"
-        )
-    endif()
-
     if(ENABLE_SANITIZER)
         message(STATUS "Sanitizer: ${ENABLE_SANITIZER} (from ${sanitizer_provenance})")
     else()
@@ -129,6 +120,7 @@ function(enable_sanitizer)
 
     # clang defaults to static sanitizer linkage; gcc defaults to shared.
     # Force shared on clang only.
+    # clang records the runtime path in the binaries, so no LD_LIBRARY_PATH.
     add_link_options(
         $<$<LINK_LANGUAGE:C,CXX>:-fsanitize=${_flag}>
         $<$<AND:$<LINK_LANGUAGE:C,CXX>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:-shared-libsan>

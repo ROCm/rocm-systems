@@ -15,9 +15,7 @@
 
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 template <typename T>
@@ -213,7 +211,7 @@ struct processor_view_t
 
 private:
     template <typename T>
-    static inline const vtable_t& get_vtable_for_type() noexcept
+    static const vtable_t& get_vtable_for_type() noexcept
     {
         static const vtable_t vtable{
             +[](void* obj, const kernel_dispatch_sample& sample) noexcept {
@@ -355,5 +353,4 @@ private:
     std::vector<processor_view_t> m_processor_view_list;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

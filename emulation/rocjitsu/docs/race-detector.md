@@ -83,7 +83,7 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 You should see output:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -148,8 +148,10 @@ races. Some examples:
 - **VGPR races**: a vector register is read or overwritten by an instruction
   before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
   `s_waitcnt lgkmcnt` insufficient).
-- **SGPR races**: a scalar register is read before a pending scalar load has
-  completed (`s_waitcnt lgkmcnt` insufficient).
+- **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
+  pending scalar-memory load has completed. A later scalar load to the same
+  destination is also checked because scalar-memory results can complete out
+  of order.
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
@@ -170,22 +172,35 @@ following lifecycle:
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
    wait for `vmcnt` before reading the destination bytes.
-1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
-   This means the event is no longer in flight from the perspective of the wave
-   that issued the operation, but is still in flight from the perspective of
-   other waves in the same workgroup.
+1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
+   event. This means the event is no longer in flight from the perspective of
+   the wave that issued the operation, but is still in flight from the
+   perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
+
+Generic `FLAT_*` instructions have two independent completion obligations:
+the vector-memory counter and the LDS counter. A wait on only one domain does
+not complete the race-detector event; both domains must be satisfied. The
+resolved route still determines whether the event accesses global memory or
+LDS. This currently assumes that all active lanes select the same memory space;
+mixed LDS/global lanes are tracked separately in #11456.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
 RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-For VGPRs, the detector also flags WAW when an instruction write can be
-clobbered by a pending asynchronous load. Similar logic applies for VGPR and
-SGPR reads.
+For VGPRs and scalar registers, the detector also flags WAW when an instruction
+write can be clobbered by a pending asynchronous load. The detector also reports
+WAW between scalar loads targeting the same SGPR or TTMP.
+
+On architectures where scalar-memory and data-share operations use a combined
+`lgkmcnt`, a nonzero partial wait cannot identify which scalar destination has
+completed. Those scalar destinations remain pending until `lgkmcnt(0)`. The
+same partial wait can still retire older data-share operations that are provably
+complete from their in-order completion rule.
 
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
@@ -298,8 +313,10 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   races, races between dispatches, or host-device synchronization issues.
 
 - **Limited WAW detection**: VGPR WAW is limited to synchronous instruction
-  writes that overlap a pending asynchronous load. WAW between two asynchronous
-  VGPR writers and LDS WAW are not currently reported.
+  writes that overlap a pending asynchronous load. Scalar-register WAW covers
+  instruction writes and scalar loads that overlap pending scalar-memory
+  destinations. WAW between two asynchronous VGPR writers and LDS WAW are not
+  currently reported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

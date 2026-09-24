@@ -1955,6 +1955,13 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   syncFlags.skipEntire_ = cmd.isEntireMemory();
   amd::Coord3D size = cmd.size();
 
+  if (!p2pAllowed) {
+    // Force-drain this vGPU's compute engine so data is valid before the staged cross-device read.
+    GpuEvent drainEvt;
+    drainEvt.id_ = queue(MainEngine).submit(/*forceFlush=*/true);
+    drainEvt.engineId_ = MainEngine;
+    waitForEvent(&drainEvt);
+  }
   bool result = false;
   switch (cmd.type()) {
     case CL_COMMAND_COPY_BUFFER: {

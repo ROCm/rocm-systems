@@ -439,7 +439,7 @@ typedef struct
  */
 typedef struct
 {
-    hsa_agent_t                       agent;
+    aqlprofile_agent_handle_t         agent;
     const aqlprofile_att_parameter_t* parameters;
     uint32_t                          parameter_count;
 } aqlprofile_att_profile_t;
@@ -701,12 +701,12 @@ aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
 
 typedef struct
 {
-    uint64_t    id;
-    uint64_t    addr;
-    uint64_t    size;
-    hsa_agent_t agent;
-    uint32_t    isUnload  : 1;
-    uint32_t    fromStart : 1;
+    uint64_t                  id;
+    uint64_t                  addr;
+    uint64_t                  size;
+    aqlprofile_agent_handle_t agent;
+    uint32_t                  isUnload  : 1;
+    uint32_t                  fromStart : 1;
 } aqlprofile_att_codeobj_data_t;
 
 /**

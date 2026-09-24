@@ -47,10 +47,11 @@ namespace RcclUnitTesting
     return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos;
   }
 
-  // Scan the NCCL_DEBUG=INFO log files matching globPattern for the per-op protocol line emitted by
-  // the P2P send/recv enqueue path ("RCCL P2P SendRecv protocol=<proto>"), returning true if any
-  // line reports the given protocol ("LL128" or "Simple"). Used to assert that LL128 (or SIMPLE) was
-  // actually selected rather than relying on data correctness alone, which both protocols satisfy.
+  // Scan the NCCL_DEBUG_SUBSYS=COLL log files matching globPattern for the per-op protocol line
+  // emitted by the P2P send/recv enqueue path ("RCCL P2P SendRecv protocol=<proto>"), returning
+  // true if any line reports the given protocol ("LL128" or "Simple"). Used to assert that LL128
+  // (or SIMPLE) was actually selected rather than relying on data correctness alone, which both
+  // protocols satisfy.
   static bool DebugLogsContainProtocol(const std::string& globPattern, const char* protocol)
   {
     // Trailing space so "LL" does not also match the "LL128" log line (the enqueue log prints
@@ -81,6 +82,85 @@ namespace RcclUnitTesting
     if (glob(globPattern.c_str(), 0, nullptr, &g) == 0)
       for (size_t i = 0; i < g.gl_pathc; ++i) remove(g.gl_pathv[i]);
     globfree(&g);
+  }
+
+  // Force a lightweight NET loopback for P2P+SHM-disabled tests. IB-CAST on this path treats
+  // each GPU as its own node and ibv_create_qp fails (EAGAIN); GIN still opens IB QPs even when
+  // NCCL_NET=Socket. Socket + GIN off still goes through net.cc staging-buffer allocation.
+  struct NetLoopbackEnvBackup {
+    bool        hadNet           = false;
+    bool        hadGinEnable     = false;
+    bool        hadMinNchannels  = false;
+    bool        hadMaxNchannels  = false;
+    std::string net;
+    std::string ginEnable;
+    std::string minNchannels;
+    std::string maxNchannels;
+  };
+
+  static NetLoopbackEnvBackup netLoopbackEnvBackup;
+
+  static void PinNetLoopbackTransport()
+  {
+    if (const char* v = ::getenv("NCCL_NET")) {
+      netLoopbackEnvBackup.hadNet = true;
+      netLoopbackEnvBackup.net    = v;
+    } else {
+      netLoopbackEnvBackup.hadNet = false;
+      netLoopbackEnvBackup.net.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_GIN_ENABLE")) {
+      netLoopbackEnvBackup.hadGinEnable = true;
+      netLoopbackEnvBackup.ginEnable    = v;
+    } else {
+      netLoopbackEnvBackup.hadGinEnable = false;
+      netLoopbackEnvBackup.ginEnable.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_MIN_NCHANNELS")) {
+      netLoopbackEnvBackup.hadMinNchannels = true;
+      netLoopbackEnvBackup.minNchannels    = v;
+    } else {
+      netLoopbackEnvBackup.hadMinNchannels = false;
+      netLoopbackEnvBackup.minNchannels.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_MAX_NCHANNELS")) {
+      netLoopbackEnvBackup.hadMaxNchannels = true;
+      netLoopbackEnvBackup.maxNchannels    = v;
+    } else {
+      netLoopbackEnvBackup.hadMaxNchannels = false;
+      netLoopbackEnvBackup.maxNchannels.clear();
+    }
+
+    ::setenv("NCCL_NET", "Socket", 1);
+    ::setenv("NCCL_GIN_ENABLE", "0", 1);
+    ::setenv("NCCL_MIN_NCHANNELS", "1", 1);
+    ::setenv("NCCL_MAX_NCHANNELS", "2", 1);
+  }
+
+  static void UnpinNetLoopbackTransport()
+  {
+    if (netLoopbackEnvBackup.hadMaxNchannels)
+      ::setenv("NCCL_MAX_NCHANNELS", netLoopbackEnvBackup.maxNchannels.c_str(), 1);
+    else
+      ::unsetenv("NCCL_MAX_NCHANNELS");
+
+    if (netLoopbackEnvBackup.hadMinNchannels)
+      ::setenv("NCCL_MIN_NCHANNELS", netLoopbackEnvBackup.minNchannels.c_str(), 1);
+    else
+      ::unsetenv("NCCL_MIN_NCHANNELS");
+
+    if (netLoopbackEnvBackup.hadGinEnable)
+      ::setenv("NCCL_GIN_ENABLE", netLoopbackEnvBackup.ginEnable.c_str(), 1);
+    else
+      ::unsetenv("NCCL_GIN_ENABLE");
+
+    if (netLoopbackEnvBackup.hadNet)
+      ::setenv("NCCL_NET", netLoopbackEnvBackup.net.c_str(), 1);
+    else
+      ::unsetenv("NCCL_NET");
   }
 
   TEST(SendRecv, SinglePairs)
@@ -203,7 +283,7 @@ namespace RcclUnitTesting
   // buffer allocation for correctness.
   //
   // Protocol selection is asserted (not just data correctness, which SIMPLE also satisfies) by
-  // scraping the NCCL_DEBUG=INFO protocol line. Protocol is chosen per channel (payload <=
+  // scraping the NCCL_DEBUG_SUBSYS=COLL protocol line. Protocol is chosen per channel (payload <=
   // nChannels * <threshold>), so the caller pins NCCL_MAX_P2P_NCHANNELS=1 (single channel) and pins
   // the relevant threshold env var (NCCL_P2P_LL128_THRESHOLD or NCCL_P2P_LL_THRESHOLD) to 16384 so
   // the 16 KiB boundary the element counts below straddle is deterministic and independent of the
@@ -271,6 +351,7 @@ namespace RcclUnitTesting
                         {1,2}, //two group, second group sendrecv to self, has 2 coll
                         testBed.GetNumStreamsPerGroup(1,2),
                         2);
+      if (::testing::Test::HasFatalFailure()) return;
 
       for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
       for (int numIdx = 0; numIdx < numElements.size() && isCorrect; ++numIdx)
@@ -423,7 +504,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -446,6 +527,7 @@ namespace RcclUnitTesting
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    PinNetLoopbackTransport();
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // disabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs when the LL128 path is off
@@ -453,7 +535,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -466,6 +548,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
   }
@@ -480,6 +563,7 @@ namespace RcclUnitTesting
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
@@ -488,7 +572,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -509,6 +593,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
+    UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
   }
@@ -528,7 +613,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -561,7 +646,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -596,6 +681,7 @@ namespace RcclUnitTesting
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
@@ -604,7 +690,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
@@ -623,6 +709,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
+    UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
   }
@@ -640,7 +727,7 @@ namespace RcclUnitTesting
     std::string const debugGlob = "/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;

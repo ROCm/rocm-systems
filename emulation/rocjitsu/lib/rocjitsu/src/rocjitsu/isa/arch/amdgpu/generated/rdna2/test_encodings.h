@@ -604,9 +604,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_frexp_mant_f32", {0xD5C00000U, 0x00000000U}},
     {"v_clrexcp", {0xD5C10000U, 0x00000000U}},
     {"v_movreld_b32", {0xD5C20000U, 0x00000000U}},
-    {"v_movrels_b32", {0xD5C30000U, 0x00000000U}},
-    {"v_movrelsd_b32", {0xD5C40000U, 0x00000000U}},
-    {"v_movrelsd_2_b32", {0xD5C80000U, 0x00000000U}},
     {"v_cvt_f16_u16", {0xD5D00000U, 0x00000000U}},
     {"v_cvt_f16_i16", {0xD5D10000U, 0x00000000U}},
     {"v_cvt_u16_f16", {0xD5D20000U, 0x00000000U}},
@@ -1391,7 +1388,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_fmax_x2", {0xDD800000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1370;
+inline constexpr size_t NUM_ENCODINGS = 1367;
 
 } // namespace rocjitsu::rdna2::test_data
 

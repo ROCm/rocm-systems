@@ -6,9 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace gpu
+namespace rocprofsys::gpu
 {
 /// GPU metrics data structure for VCN, JPEG, XGMI, and PCIe metrics
 struct gpu_metrics_t
@@ -125,5 +123,4 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
                         gpu_metrics_capabilities_t& capabilities);
 
-}  // namespace gpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::gpu

@@ -1244,12 +1244,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"buffer_store_d16_hi_format_x", {0xE09C0000U, 0x00000000U}},
     {"buffer_gl0_inv", {0xE0AC0000U, 0x00000000U}},
     {"buffer_gl1_inv", {0xE0B00000U, 0x00000000U}},
-    {"buffer_load_lds_u8", {0xE0B40000U, 0x00000000U}},
-    {"buffer_load_lds_i8", {0xE0B80000U, 0x00000000U}},
-    {"buffer_load_lds_u16", {0xE0BC0000U, 0x00000000U}},
-    {"buffer_load_lds_i16", {0xE0C00000U, 0x00000000U}},
-    {"buffer_load_lds_b32", {0xE0C40000U, 0x00000000U}},
-    {"buffer_load_lds_format_x", {0xE0C80000U, 0x00000000U}},
     {"buffer_atomic_swap_b32", {0xE0CC0000U, 0x00000000U}},
     {"buffer_atomic_cmpswap_b32", {0xE0D00000U, 0x00000000U}},
     {"buffer_atomic_add_u32", {0xE0D40000U, 0x00000000U}},
@@ -1435,7 +1429,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_add_f32", {0xDD580000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1414;
+inline constexpr size_t NUM_ENCODINGS = 1408;
 
 } // namespace rocjitsu::rdna3_5::test_data
 

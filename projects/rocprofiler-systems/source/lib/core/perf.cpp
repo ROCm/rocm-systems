@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-#include "common/units.hpp"
-
 #include "logger/debug.hpp"
 
+#include <chrono>
 #include <cstdint>
+#include <linux/perf_event.h>
 
-namespace rocprofsys
-{
-namespace perf
+using namespace std::chrono_literals;
+
+namespace rocprofsys::perf
 {
 
 event_type
@@ -153,27 +153,28 @@ get_hw_cache_config(std::string_view _v)
 }
 
 void
-config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
-                         double _freq)
+config_overflow_sampling(struct perf_event_attr& perf_event_att, std::string_view event,
+                         double freq)
 {
-    auto _period = (1.0 / _freq) * units::sec;
+    const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ 1.0 / freq });
 
-    _pe.type = static_cast<int>(perf::get_event_type(_event));
-    switch(_pe.type)
+    perf_event_att.type = static_cast<int>(perf::get_event_type(event));
+    switch(perf_event_att.type)
     {
         case PERF_TYPE_HARDWARE:
         {
-            _pe.config = static_cast<int>(perf::get_hw_config(_event));
+            perf_event_att.config = static_cast<int>(perf::get_hw_config(event));
             break;
         }
         case PERF_TYPE_SOFTWARE:
         {
-            _pe.config = static_cast<int>(perf::get_sw_config(_event));
+            perf_event_att.config = static_cast<int>(perf::get_sw_config(event));
             break;
         }
         case PERF_TYPE_HW_CACHE:
         {
-            _pe.config = static_cast<int>(perf::get_hw_cache_config(_event));
+            perf_event_att.config = static_cast<int>(perf::get_hw_cache_config(event));
             break;
         }
         case PERF_TYPE_BREAKPOINT:
@@ -186,15 +187,15 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         }
     };
 
-    if(_pe.type == PERF_TYPE_SOFTWARE &&
-       (_pe.config == PERF_COUNT_SW_CPU_CLOCK || _pe.config == PERF_COUNT_SW_TASK_CLOCK))
+    if(perf_event_att.type == PERF_TYPE_SOFTWARE &&
+       (perf_event_att.config == PERF_COUNT_SW_CPU_CLOCK ||
+        perf_event_att.config == PERF_COUNT_SW_TASK_CLOCK))
     {
-        _pe.sample_period = static_cast<std::uint64_t>(_period);
+        perf_event_att.sample_period = static_cast<std::uint64_t>(period.count());
     }
     else
     {
-        _pe.sample_period = static_cast<std::uint64_t>(_freq);
+        perf_event_att.sample_period = static_cast<std::uint64_t>(freq);
     }
 }
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf

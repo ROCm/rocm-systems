@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace rocjitsu {
@@ -67,6 +68,17 @@ public:
   DecodeResult decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                       const DecodeErrorEmitter &emit_error = {});
 
+  /// @brief Decode from a bounded instruction stream and record its source offset.
+  ///
+  /// @details Uses the original stream when it contains the decoder's maximum
+  /// lookahead. At the tail, pads a temporary window with zeros and rejects any
+  /// instruction whose encoded size exceeds the remaining input or the declared
+  /// bound. Input-backed raw encodings retain the original stream's lifetime;
+  /// callers must keep that stream alive while using the decoded instruction.
+  /// @returns A decoded instruction, or failure with an optional diagnostic.
+  DecodeResult decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc = 0,
+                             const DecodeErrorEmitter &emit_error = {});
+
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
 
@@ -76,6 +88,10 @@ public:
 
   /// @brief Create a decoder from a built-in architecture in a scoped registry.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry, rj_code_arch_t arch);
+
+  /// @brief Create a decoder for a concrete public GPU target.
+  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
+                                         rj_code_target_id_t target);
 
   /// @brief Enable pool allocation for decoded instructions.
   ///
@@ -107,8 +123,9 @@ template <typename Isa> class IsaDecoder final : public Decoder {
 public:
   using Decoder::decode;
 
-  explicit IsaDecoder(const IsaExecutionBackend *execution_backend = nullptr)
-      : execution_backend_(execution_backend) {}
+  explicit IsaDecoder(const IsaExecutionBackend *execution_backend = nullptr,
+                      uint64_t isa_features = 0)
+      : execution_backend_(execution_backend), isa_features_(isa_features) {}
 
   DecodeResult decode(const rj_code_binary_inst_t *inst,
                       const DecodeErrorEmitter &emit_error) override {
@@ -116,6 +133,10 @@ public:
     DecodeResult result = Isa::Decoder::decode(inst, emit_error);
     if (result.failed()) [[unlikely]]
       return Result::failure();
+    const uint64_t missing_features = result.value()->required_isa_features() & ~isa_features_;
+    if (missing_features != 0) [[unlikely]]
+      return emit_error.emit() << "instruction requires unavailable target ISA features (mask "
+                               << missing_features << ")";
     if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]]
       return Result::failure();
     return result;
@@ -125,6 +146,7 @@ public:
 
 private:
   const IsaExecutionBackend *execution_backend_;
+  const uint64_t isa_features_;
 };
 
 } // namespace rocjitsu

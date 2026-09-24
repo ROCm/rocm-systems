@@ -245,10 +245,14 @@ union PipelineCreateFlags
                                                  ///  alive during pipeline creation and execution.
                                                  ///  This is useful for clients who want to manage the lifetime of the
                                                  ///  code objects separately from the pipelines.
-        uint32 reserved              : 29; ///< Reserved for future use.
 #else
-        uint32 reserved              : 30; ///< Reserved for future use.
+        uint32 reserved1             :  1; ///< Reserved for future use.
 #endif
+        uint32 disableAutoVrsFlatShadingOpt :  1; ///< If set, PAL must not auto-enable its internal VRS flat-shading
+                                                  ///  optimization for this pipeline. When not set, PAL may, at its
+                                                  ///  discretion, force a lower detail shading rate on eligible
+                                                  ///  pipelines without any app opt-in.
+        uint32 reserved              : 28; ///< Reserved for future use.
     };
     uint32 u32All;                         ///< Flags packed as 32-bit uint.
 };

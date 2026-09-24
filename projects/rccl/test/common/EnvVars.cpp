@@ -5,135 +5,268 @@
  ************************************************************************/
 
 #include "EnvVars.hpp"
-#include "CollectiveArgs.hpp"
-#include "ProcessIsolatedTestRunner.hpp"
-#include <cstdlib>
-#include <unistd.h>
+
 #include <sys/wait.h>
+#include <unistd.h>
+
 #include <algorithm>
-#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "CollectiveArgs.hpp"
+#include "ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
   int const UT_SINGLE_PROCESS = (1<<0);
   int const UT_MULTI_PROCESS  = (1<<1);
 
-  int getArchInfo(bool *isRightArch,  const char *gfx)
+  // Upper bound on GPUs the unit tests enumerate/sweep over.
+  static constexpr int kMaxDetectedGpus = 16;
+  // A device reports one of these CU counts only when running in CPX (compute-partition) mode.
+  static constexpr int kCpxDeviceCuCounts[] = {20, 38};
+
+  // Forward declaration; defined below. Used by the GPU-probe child.
+  ncclResult_t busIdToInt64(const char* busId, int64_t* id);
+
+  // Entrypoint for the GPU-probe child re-exec'd by DetectGpuInfo(). When
+  // RCCL_UT_GPU_PROBE_FD is set, enumerate the GPUs here (in this fresh execv()'d
+  // image), write the results back over that pipe fd, and _exit(). Running the HIP
+  // calls after execv() -- instead of directly in a bare fork() child -- is what
+  // makes detection safe under rocprofv3 --hip-trace: rocprofiler-sdk cannot be
+  // used across a fork(), so a forked child that calls HIP deadlocks, whereas a
+  // fresh exec'd image re-initializes the tracer cleanly. In every non-probe
+  // process this returns immediately.
+  void EnvVars::RunGpuProbeChildIfRequested()
   {
-    // Prepare parent->child pipe
-    int pipefd[2];
-    if (pipe(pipefd) == -1) {
-      TEST_ERROR("Unable to create parent->child pipe for getting number of devices");
-      return TEST_FAIL;
+    char const* fdStr = getenv("RCCL_UT_GPU_PROBE_FD");
+    if (fdStr == nullptr)
+    {
+      return;
     }
-    pid_t pid = fork();
-    if (0 == pid) {
-      ErrCode result = [&]() -> ErrCode {
-        bool isGfxTest = false;
-        int dev;
-        CHECK_HIP(hipGetDeviceCount(&dev));
-        for (int deviceId = 0; deviceId < dev; deviceId++) {
-          char gcn[256];
-          hipDeviceProp_t devProp;
-          CHECK_HIP(hipGetDeviceProperties(&devProp, deviceId));
-          char *gcnArchNameToken = strtok(devProp.gcnArchName, ":");
-          strcpy(gcn, gcnArchNameToken);
-          if(std::strncmp(gfx, gcn, 5) == 0) {
-            isGfxTest = true;
-          } else {
-            isGfxTest = false;
-            break;
-          }
+    int const fd = atoi(fdStr);
+
+    int numGpus = 0;
+    if (hipGetDeviceCount(&numGpus) != hipSuccess)
+    {
+      numGpus = 0;
+    }
+    if (numGpus > kMaxDetectedGpus)
+    {
+      numGpus = kMaxDetectedGpus;  // matches the cap the caller applies to numDetectedGpus
+    }
+
+    // Arch flags: true only if EVERY visible device matches the 5-char prefix.
+    int isGfx94 = (numGpus > 0);
+    int isGfx95 = (numGpus > 0);
+    int isGfx12 = (numGpus > 0);
+    int isGfx90 = (numGpus > 0);
+    for (int dev = 0; dev < numGpus; ++dev)
+    {
+      hipDeviceProp_t devProp;
+      if (hipGetDeviceProperties(&devProp, dev) != hipSuccess)
+      {
+        isGfx94 = isGfx95 = isGfx12 = isGfx90 = 0;
+        break;
+      }
+      char const* tok  = strtok(devProp.gcnArchName, ":");
+      char const* arch = (tok != nullptr) ? tok : "";
+      isGfx94 &= (std::strncmp("gfx94", arch, 5) == 0);
+      isGfx95 &= (std::strncmp("gfx95", arch, 5) == 0);
+      isGfx12 &= (std::strncmp("gfx12", arch, 5) == 0);
+      isGfx90 &= (std::strncmp("gfx90", arch, 5) == 0);
+    }
+
+    // CPX mode: inferred from the reduced CU count on device 0 (matches the old
+    // getDeviceMode()).
+    int isCpx = 0;
+    int numDeviceCUs = 0;
+    if (hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, 0) == hipSuccess)
+    {
+      for (int cuCount : kCpxDeviceCuCounts)
+      {
+        if (numDeviceCUs == cuCount)
+        {
+          isCpx = 1;
+          break;
         }
-        if (write(pipefd[1], &isGfxTest, sizeof(isGfxTest)) != sizeof(isGfxTest)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
-      close(pipefd[0]);
-      close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
+      }
     }
-    else {
-      int status;
-      if (read(pipefd[0], isRightArch, sizeof(*isRightArch)) != sizeof(*isRightArch)) return TEST_FAIL;
-      waitpid(pid, &status, 0);
-      assert(!status);
-      close(pipefd[0]);
-      close(pipefd[1]);
+
+    // GPU priority order: group devices by physical PCI bus id, largest group
+    // first (matches the old getDevicePriority()). Falls back to identity order on
+    // any error.
+    std::vector<int> priority;
+    std::unordered_map<int64_t, std::vector<int>> uniqueIdToGpuIndexes;
+    bool priorityOk = true;
+    for (int dev = 0; dev < numGpus; ++dev)
+    {
+      char busIdStr[] = "00000000:00:00.0";
+      if (hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), dev) != hipSuccess)
+      {
+        priorityOk = false;
+        break;
+      }
+      int64_t busId = 0;
+      busIdToInt64(busIdStr, &busId);
+      uniqueIdToGpuIndexes[busId].push_back(dev);
     }
-    return TEST_SUCCESS;
+    if (priorityOk)
+    {
+      std::vector<std::pair<int64_t, std::vector<int>>> sortedIds(
+          uniqueIdToGpuIndexes.begin(), uniqueIdToGpuIndexes.end());
+      std::sort(sortedIds.begin(), sortedIds.end(),
+                [](const auto& a, const auto& b) { return a.second.size() > b.second.size(); });
+      for (const auto& entry : sortedIds)
+      {
+        priority.insert(priority.end(), entry.second.begin(), entry.second.end());
+      }
+    }
+    if ((int)priority.size() != numGpus)
+    {
+      priority.resize(numGpus);
+      for (int i = 0; i < numGpus; ++i)
+      {
+        priority[i] = i;
+      }
+    }
+
+    // Serialize: numGpus, 4 arch flags, cpx flag, then numGpus priority ints.
+    auto writeAll = [fd](void const* buf, size_t len)
+    {
+      size_t off = 0;
+      while (off < len)
+      {
+        ssize_t n = write(fd, static_cast<char const*>(buf) + off, len - off);
+        if (n <= 0)
+        {
+          break;
+        }
+        off += (size_t)n;
+      }
+    };
+    writeAll(&numGpus, sizeof(numGpus));
+    writeAll(&isGfx94, sizeof(isGfx94));
+    writeAll(&isGfx95, sizeof(isGfx95));
+    writeAll(&isGfx12, sizeof(isGfx12));
+    writeAll(&isGfx90, sizeof(isGfx90));
+    writeAll(&isCpx,   sizeof(isCpx));
+    if (numGpus > 0)
+    {
+      writeAll(priority.data(), (size_t)numGpus * sizeof(int));
+    }
+
+    close(fd);
+    fflush(nullptr);
+    _exit(EXIT_SUCCESS);
   }
 
-  int getDeviceCount(int *devices)
+  // Enumerate GPUs (count / arch / CPX / priority) by fork()+execv()'ing a fresh
+  // copy of this test binary as a probe child (RunGpuProbeChildIfRequested), so all
+  // HIP calls run in a fresh process image -- safe under rocprofv3 --hip-trace,
+  // which deadlocks if HIP is used in a bare fork() child. Results come back over a
+  // pipe; on any failure the members keep their caller-initialized defaults.
+  void EnvVars::DetectGpuInfo(bool* isCpxOut, std::vector<int>* priorityOut)
   {
-    // Prepare parent->child pipe
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-      TEST_ERROR("Unable to create parent->child pipe for getting number of devices");
-      return TEST_FAIL;
+      TEST_ERROR("Unable to create pipe for GPU detection");
+      return;
     }
+
+    fflush(nullptr);
     pid_t pid = fork();
     if (0 == pid)
     {
-      ErrCode result = [&]() -> ErrCode {
-        int dev;
-        CHECK_HIP(hipGetDeviceCount(&dev));
-        if (write(pipefd[1], &dev, sizeof(dev)) != sizeof(dev)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
+      // Child: hand the write-end fd to the re-exec'd probe via the environment,
+      // then replace this image so the HIP calls run in a fresh (fork-free)
+      // process. Best-effort: drop the profiler tool hooks so the tiny probe is
+      // not itself traced.
       close(pipefd[0]);
-      close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
+      char fdStr[16];
+      snprintf(fdStr, sizeof(fdStr), "%d", pipefd[1]);
+      setenv("RCCL_UT_GPU_PROBE_FD", fdStr, 1);
+      unsetenv("ROCP_TOOL_LIBRARIES");
+      unsetenv("HSA_TOOLS_LIB");
+
+      char  self[] = "/proc/self/exe";
+      char* argv[] = { self, nullptr };
+      execv(self, argv);
+      // execv() only returns on failure.
+      _exit(EXIT_FAILURE);
     }
-    else
+    else if (pid < 0)
     {
-      int status;
-      if (read(pipefd[0], devices, sizeof(*devices)) != sizeof(*devices)) return TEST_FAIL;
-      waitpid(pid, &status, 0);
-      assert(!status);
       close(pipefd[0]);
       close(pipefd[1]);
+      TEST_ERROR("Unable to fork GPU-probe child");
+      return;
     }
-    return TEST_SUCCESS;
+
+    // Parent: read the serialized probe results.
+    close(pipefd[1]);
+    auto readAll = [&](void* buf, size_t len) -> bool
+    {
+      size_t off = 0;
+      while (off < len)
+      {
+        ssize_t n = read(pipefd[0], static_cast<char*>(buf) + off, len - off);
+        if (n <= 0)
+        {
+          return false;
+        }
+        off += (size_t)n;
+      }
+      return true;
+    };
+
+    int numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g90 = 0, cpx = 0;
+    bool ok = readAll(&numGpus, sizeof(numGpus)) && readAll(&g94, sizeof(g94))
+              && readAll(&g95, sizeof(g95)) && readAll(&g12, sizeof(g12))
+              && readAll(&g90, sizeof(g90)) && readAll(&cpx, sizeof(cpx));
+    std::vector<int> priority;
+    if (ok && numGpus > 0)
+    {
+      priority.resize(numGpus);
+      ok = readAll(priority.data(), (size_t)numGpus * sizeof(int));
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    close(pipefd[0]);
+
+    if (!ok)
+    {
+      TEST_ERROR("GPU-probe child did not return valid device info");
+      return;
+    }
+
+    numDetectedGpus = numGpus;
+    isGfx94 = (g94 != 0);
+    isGfx95 = (g95 != 0);
+    isGfx12 = (g12 != 0);
+    isGfx90 = (g90 != 0);
+    if (isCpxOut != nullptr)
+    {
+      *isCpxOut = (cpx != 0);
+    }
+    if (priorityOut != nullptr)
+    {
+      *priorityOut = priority;
+    }
   }
 
-  int getDeviceMode (bool *cpxMode){
-    // Prepare parent->child pipe
-    int pipefd[2];
-    if (pipe(pipefd) == -1)
-    {
-      TEST_ERROR("Unable to create parent->child pipe for getting the device mode");
-      return TEST_FAIL;
-    }
-    pid_t pid = fork();
-    if (0 == pid)
-    {
-      ErrCode result = [&]() -> ErrCode {
-        bool isCpxMode = false;
-        int numDeviceCUs;
-        int deviceIdx = 0;
-        CHECK_HIP(hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, deviceIdx));
-        if(numDeviceCUs == 20 || numDeviceCUs == 38) isCpxMode = true;
-        if (write(pipefd[1], &isCpxMode, sizeof(isCpxMode)) != sizeof(isCpxMode)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
-      close(pipefd[0]);
-      close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
-    }
-    else {
-      int status;
-      if (read(pipefd[0], cpxMode, sizeof(*cpxMode)) != sizeof(*cpxMode)) return TEST_FAIL;
-      waitpid(pid, &status, 0);
-      assert(!status);
-      close(pipefd[0]);
-      close(pipefd[1]);
-    }
-    return TEST_SUCCESS;
-    return 0;
-  }
+  // NOTE: getDeviceCount(), getDeviceMode() and getDevicePriority() were removed.
+  // Their bare fork()+HIP probes deadlock under rocprofv3 --hip-trace (the forked
+  // child inherits rocprofiler-sdk state that cannot survive a fork()). GPU
+  // enumeration is now performed by the fork()+execv() probe above
+  // (DetectGpuInfo / RunGpuProbeChildIfRequested).
 
   ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
     char hexStr[17];  // Longest possible int64 hex string + null terminator.
@@ -153,77 +286,40 @@ namespace RcclUnitTesting
     return ncclSuccess;
   }
 
-  int getDevicePriority (std::vector<int> *gpuPriorityOrder){
-    // Prepare parent->child pipe
-    int pipefd[2];
-    if (pipe(pipefd) == -1) {
-      TEST_ERROR("Unable to create parent->child pipe for getting the device priority vector.");
-      return TEST_FAIL;
-    }
-    pid_t pid = fork();
-    if (0 == pid) {
-      ErrCode result = [&]() -> ErrCode {
-        std::vector<int> result;
-        try {
-          int numDev;
-          CHECK_HIP(hipGetDeviceCount(&numDev));
-          std::unordered_map<int64_t, std::vector<int>> uniqueIdToGpuIndexes;
-          for(int dev=0;dev<numDev;dev++){
-            char busIdStr[] = "00000000:00:00.0";
-            int64_t busId;
-            CHECK_HIP(hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), dev));
-            CHECK_NCCL(busIdToInt64(busIdStr, &busId));
-            uniqueIdToGpuIndexes[busId].push_back(dev);
-          }
-          std::vector<std::pair<int64_t, std::vector<int>>> sortedIds(uniqueIdToGpuIndexes.begin(), uniqueIdToGpuIndexes.end());
-          std::sort(sortedIds.begin(), sortedIds.end(), [](const auto& a, const auto& b) {
-              return a.second.size() > b.second.size();
-          });
-          for (const auto& pair : sortedIds) {
-              result.insert(result.end(), pair.second.begin(), pair.second.end());
-          }
-        } catch (const std::exception& e) {
-          std::cerr << "Error: " << e.what() << std::endl;
-          return TEST_FAIL;
-        }
-        if (write(pipefd[1], result.data(), gpuPriorityOrder->size() * sizeof(int)) != gpuPriorityOrder->size() * sizeof(int)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
-      close(pipefd[0]);
-      close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
-    }
-    else {
-      int status;
-      if (read(pipefd[0], gpuPriorityOrder->data(), gpuPriorityOrder->size() * sizeof(int)) != gpuPriorityOrder->size() * sizeof(int)) return TEST_FAIL;
-      waitpid(pid, &status, 0);
-      assert(!status);
-      close(pipefd[0]);
-      close(pipefd[1]);
-    }
-    return TEST_SUCCESS;
-  }
-
-
   EnvVars::EnvVars()
   {
+    // If this process is the GPU-probe child re-exec'd by DetectGpuInfo(), do the
+    // enumeration, report it over the pipe, and _exit() -- this never returns here.
+    RunGpuProbeChildIfRequested();
+
     // Skip fork+HIP calls in re-exec'd children: GPU enumeration is irrelevant
     // there and concurrent hipGetDeviceCount forks cause KFD contention.
     const bool isIsolatedChild = (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr);
 
-    // Collect number of GPUs available
-    // NOTE: Cannot use HIP call prior to launching unless it is inside another child process
+    // Collect GPU info (count / arch / CPX / priority). All HIP calls run inside a
+    // fork()+execv()'d probe child (DetectGpuInfo), so this is safe under
+    // rocprofv3 --hip-trace; a bare fork()+HIP child deadlocks the tracer.
+    // NOTE: HIP must not be used in this parent before the tests launch their own
+    // child processes, hence the isolated probe.
     numDetectedGpus = 0;
-    if(!isIsolatedChild) getDeviceCount(&numDetectedGpus);
-    numDetectedGpus = min(numDetectedGpus, 16);
-    isGfx94 = false;
-    if(!isIsolatedChild) getArchInfo(&isGfx94, "gfx94");
-    isGfx95 = false;
-    if(!isIsolatedChild) getArchInfo(&isGfx95, "gfx95");
-    isGfx12 = false;
-    if(!isIsolatedChild) getArchInfo(&isGfx12, "gfx12");
-    isGfx90 = false;
-    if(!isIsolatedChild) getArchInfo(&isGfx90, "gfx90");
+    isGfx94 = isGfx95 = isGfx12 = isGfx90 = false;
+    bool             isCpxMode = false;
+    std::vector<int> detectedPriority;
+    if (!isIsolatedChild)
+    {
+      DetectGpuInfo(&isCpxMode, &detectedPriority);
+    }
+    numDetectedGpus = min(numDetectedGpus, kMaxDetectedGpus);
+    // A non-isolated test process detecting zero GPUs means the probe failed (e.g. execv
+    // or HIP error). Proceeding would silently run zero sweep cases and still exit 0, so
+    // fail loudly instead of masking a broken run as green.
+    if (!isIsolatedChild && numDetectedGpus == 0)
+    {
+      TEST_ERROR("GPU detection found 0 devices; aborting to avoid a silently-empty test run");
+      exit(EXIT_FAILURE);
+    }
+    // CPX only applies on gfx94 (matches the original getDeviceMode() gating).
+    isCpxMode = isCpxMode && isGfx94;
 
     debugPause     = GetEnvVar("UT_DEBUG_PAUSE" , 0);
     showNames      = GetEnvVar("UT_SHOW_NAMES"  , 1);
@@ -237,20 +333,20 @@ namespace RcclUnitTesting
     useInteractive = GetEnvVar("UT_INTERACTIVE",  0);
     timeoutUs      = GetEnvVar("UT_TIMEOUT_US" ,  5000000);
     useMultithreading = GetEnvVar("UT_MULTITHREAD", false);
+    commPool          = GetEnvVar("UT_COMM_POOL", true);
 
     // Total number of reduction ops
     int numOps = ncclNumOps;
 
     gpuPriorityOrder.resize(numDetectedGpus);
-    for(int i=0;i<numDetectedGpus;i++){
+    for (int i = 0; i < numDetectedGpus; i++)
+    {
       gpuPriorityOrder[i] = i;
     }
-    bool isCpxMode = false;
-    if(isGfx94 && !isIsolatedChild) {
-      getDeviceMode(&isCpxMode);
-      if(isCpxMode) {
-        getDevicePriority(&gpuPriorityOrder);
-      }
+    // Apply the CPX priority ordering gathered by DetectGpuInfo() (gfx94 + CPX only).
+    if (isCpxMode && (int)detectedPriority.size() == numDetectedGpus)
+    {
+      gpuPriorityOrder = detectedPriority;
     }
 
     // Test only pow2 number of GPUs for cpx mode to reduce the runtime for UT
@@ -386,6 +482,10 @@ namespace RcclUnitTesting
         std::make_tuple("UT_INTERACTIVE"      , useInteractive, "Run in interactive mode"),
         std::make_tuple("UT_TIMEOUT_US"       , timeoutUs     , "Timeout limit for collective calls in us"),
         std::make_tuple("UT_MULTITHREAD"      , useMultithreading, "Multi-thread single-process ranks"),
+        std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
+        std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),
+        std::make_tuple("UT_DEVICE_DATA_MIN_ELEMS", -1        , "Min elements for the device-data path (default 1Mi)"),
+        std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected element (default off)"),
       };
 
     printf("================================================================================\n");

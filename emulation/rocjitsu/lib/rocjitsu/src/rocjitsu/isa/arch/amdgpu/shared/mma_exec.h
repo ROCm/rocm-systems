@@ -24,6 +24,9 @@
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
@@ -32,6 +35,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -258,7 +262,7 @@ inline void require_gfx12_wmma_wave_size(uint32_t wave_size) {
     throw util::ConfigError("gfx12 WMMA requires wave32 or wave64");
 }
 
-// gfx1250 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
+// CDNA5 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
 // dimension across the two lane groups in two register blocks.
 inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
                                uint32_t data_bits) {
@@ -270,8 +274,10 @@ inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
 
   if (dim == 16 && K >= 32) {
     uint32_t block_elems = elems_per_group / 2;
-    if (data_bits == 8)
-      block_elems = 8;
+    // CDNA5 K=128 dense WMMA uses 16-element K blocks. Do not change the
+    // pre-existing K=64 family, which uses the default 16-element blocks too.
+    if (data_bits == 8 && K == 128)
+      block_elems = 16;
     if (data_bits == 4 && K == 128)
       block_elems = 16;
     if (block_elems != 0) {
@@ -315,37 +321,16 @@ inline InputLoc wmma_packed_input_loc(uint32_t lane, uint32_t slot, uint32_t dat
 
 /// Compute an input element location for CDNA4 block-scale F8F6F4 MFMA.
 ///
-/// The sub-byte physical layout depends on whether the other operand is an
-/// eight-bit or sub-byte format. The supported scaled MFMA shapes both use one
-/// matrix block distributed across a wave64.
+/// Scaled MFMA uses the same dense operand layout as the corresponding
+/// unscaled F8F6F4 operation. The supported shapes both use one matrix block
+/// distributed across a wave64.
 inline InputLoc mfma_scale_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
-                                            uint32_t data_bits, uint32_t other_data_bits) {
+                                            uint32_t data_bits) {
   if (!((dim == 16 && K == 128) || (dim == 32 && K == 64)))
     throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input shape");
-  if (data_bits == 8)
-    return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
-  if ((data_bits != 4 && data_bits != 6) ||
-      (other_data_bits != 4 && other_data_bits != 6 && other_data_bits != 8))
+  if (data_bits != 4 && data_bits != 6 && data_bits != 8)
     throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input format");
-
-  uint32_t lane;
-  uint32_t slot;
-  if (other_data_bits == 8) {
-    if (dim == 16) {
-      lane = 16u * (k / 32u) + index;
-      slot = 16u * ((k / 16u) & 1u) + (k & 15u);
-    } else {
-      lane = 32u * (k / 32u) + index;
-      slot = k & 31u;
-    }
-  } else if (dim == 16) {
-    lane = 16u * ((k % 64u) / 16u) + index;
-    slot = 16u * (k / 64u) + (k & 15u);
-  } else {
-    lane = 32u * ((k % 32u) / 16u) + index;
-    slot = 16u * (k / 32u) + (k & 15u);
-  }
-  return wmma_packed_input_loc(lane, slot, data_bits);
+  return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
 }
 
 inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t K, uint32_t i,
@@ -408,6 +393,34 @@ inline InputLoc wmma_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t 
   return wmma_f8f6f4_input_loc(N, K, col, k, b_bits, b_bits < 8 && a_bits == 8);
 }
 
+/// Compute the CDNA5 block-scaled WMMA input layout. Unlike the ordinary
+/// F8F6F4 WMMA layout, each operand format stores contiguous K ranges in each
+/// lane group: 16 values for 8-bit inputs and 32 values for 4/6-bit inputs.
+inline InputLoc wmma_block_scaled_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
+                                            uint32_t data_bits) {
+  if (dim != 16 || K != 128 || (data_bits != 4 && data_bits != 6 && data_bits != 8))
+    throw util::UnimplementedInst("unsupported CDNA5 block-scaled WMMA input shape");
+  const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
+  const uint32_t lane = index + 16u * ((k / block_elems) & 1u);
+  const uint32_t local = (k / (2u * block_elems)) * block_elems + (k % block_elems);
+  return wmma_packed_input_loc(lane, local, data_bits);
+}
+
+inline InputLoc wmma_block_scaled_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t k,
+                                              uint32_t a_bits) {
+  if (M == 32 && K == 128 && a_bits == 4) {
+    auto loc = wmma_block_scaled_input_loc(16, K, row % 16, k, a_bits);
+    loc.vgpr_offset += 8u * (row / 16u);
+    return loc;
+  }
+  return wmma_block_scaled_input_loc(M, K, row, k, a_bits);
+}
+
+inline InputLoc wmma_block_scaled_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t k,
+                                              uint32_t b_bits) {
+  return wmma_block_scaled_input_loc(N, K, col, k, b_bits);
+}
+
 inline InputLoc gfx12_wmma_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, uint32_t row,
                                        uint32_t k, uint32_t a_bits, uint32_t b_bits) {
   if (wave_size == WMMA_WAVE32)
@@ -433,6 +446,17 @@ inline OutputLoc wmma_output_loc_32(uint32_t M, uint32_t N, uint32_t row, uint32
   uint32_t lane = (row / elems_per_lane) * N + col;
   uint32_t reg = row % elems_per_lane;
   return {reg, lane};
+}
+
+/// Map one logical F64 CDNA5 WMMA output to its pair of consecutive VGPRs.
+///
+/// The public CDNA5 ISA reference, section 7.12.2, maps the eight logical
+/// 16x16 C/D components per lane with the same row/lane ordering represented
+/// by wmma_output_loc_32(). The checked-in FMT_WMMA_DC_16X16_F64 data format
+/// then maps each logical F64 component to two consecutive 32-bit VGPRs.
+inline OutputLoc wmma_output_loc_64(uint32_t M, uint32_t N, uint32_t row, uint32_t col) {
+  const auto logical = wmma_output_loc_32(M, N, row, col);
+  return {2u * logical.reg, logical.lane};
 }
 
 inline OutputLoc gfx12_wmma_output_loc_32(uint32_t wave_size, uint32_t M, uint32_t N, uint32_t row,
@@ -525,14 +549,6 @@ struct SwmmacIndexLoc {
 
 inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bits, uint32_t row,
                                        uint32_t compressed_k, uint32_t index_entries) {
-  // CDNA5 K=128 8-bit sparse A follows the ordinary 16x64 8-bit layout.
-  // Its index fields occupy the same physical lane/slot as the corresponding
-  // compressed A element.
-  if (M == 16 && K == 128 && elem_bits == 8 && index_entries == 32) {
-    const uint32_t lane = row + 16u * ((compressed_k >> 3) & 1u);
-    const uint32_t slot = (compressed_k & 7u) + 8u * (compressed_k >> 4);
-    return {lane, slot};
-  }
   // RDNA4 K=32 SWMMAC uses the gfx12 builtin layout: each row's 16 sparse
   // 2-bit entries are split across two lanes. f16/bf16 split by pairs of
   // K-groups; fp8/bf8/iu8 split linearly by the low/high K=16 block.
@@ -544,6 +560,12 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bit
     }
     return {row + 16u * ((group / 2u) & 1u), 2u * (group & 1u) + 4u * (group / 4u) + slot};
   }
+  // This generic routing is also intentional for gfx1250 K=128 8-bit
+  // SWMMAC. Hardware-reference Tensile kernels require contiguous 32-entry
+  // selector blocks even though sparse A changes lane halves every 16 packed
+  // K elements. That differs from the association described by the public
+  // CDNA5 ISA Sections 7.12.3 and 7.12.5; retain the validated behavior
+  // pending specification clarification.
   return {row + (compressed_k / index_entries) * M, compressed_k % index_entries};
 }
 
@@ -565,11 +587,6 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
 
 inline InputLoc swmmac_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t compressed_k,
                                    uint32_t elem_bits) {
-  if (M == 16 && K == 128 && elem_bits == 8) {
-    const uint32_t lane = row + 16u * ((compressed_k >> 3) & 1u);
-    const uint32_t slot = (compressed_k & 7u) + 8u * (compressed_k >> 4);
-    return wmma_packed_input_loc(lane, slot, elem_bits);
-  }
   if (M == 16 && K == 32) {
     const uint32_t group = compressed_k / 2u;
     const uint32_t slot = compressed_k & 1u;
@@ -606,8 +623,12 @@ inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, u
 inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t dense_k,
                                    uint32_t elem_bits) {
   if (N == 16 && K == 128 && elem_bits == 8) {
-    const uint32_t lane = col + 16u * ((dense_k >> 4) & 1u);
-    const uint32_t slot = (dense_k & 15u) + 16u * (dense_k >> 5);
+    // Hardware-reference gfx1250 Tensile kernels require this 32-element
+    // SWMMAC B ordering. It differs from both dense K=128 WMMA and the public
+    // CDNA5 ISA Section 7.12.5; retain the validated instruction-specific
+    // layout pending specification clarification.
+    const uint32_t lane = col + 16u * ((dense_k >> 5) & 1u);
+    const uint32_t slot = (dense_k & 31u) + 32u * (dense_k >> 6);
     return wmma_packed_input_loc(lane, slot, elem_bits);
   }
   if (N == 16 && K == 32) {
@@ -902,6 +923,10 @@ inline uint32_t wmma_f8f6f4_scale_byte(uint32_t k, uint32_t data_bits, bool mixe
   return 2u * (k >> 6) + ((k >> 2) & 1u);
 }
 
+inline uint32_t wmma_block_scale_byte(uint32_t k, bool scale16) {
+  return k / (scale16 ? 16u : 32u);
+}
+
 template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b_fmt, Run run) {
   switch (a_fmt) {
   case 0:
@@ -1101,6 +1126,10 @@ inline PackedOutputLoc physicalize_packed_out(const PackedOutputLoc &loc, uint32
 
 inline uint64_t mfma_full_lane_mask(uint32_t wf_size) {
   return wf_size >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf_size) - 1);
+}
+
+inline bool is_gfx1251_wmma_execution_state_valid(uint32_t wf_size, uint64_t exec_mask) {
+  return wf_size == WMMA_WAVE32 && exec_mask == mfma_full_lane_mask(WMMA_WAVE32);
 }
 
 inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bits,
@@ -1339,10 +1368,51 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
+  constexpr size_t MAX_BSTRIDE = 4096; // max K*stride over all MFMA shapes
+  constexpr size_t MAX_C = 1024;       // max M*stride over all MFMA shapes
+  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
+                "MFMA staging buffers exceed the 48 KiB stack budget");
+
+  auto stage_operands = [&](uint32_t block, uint32_t b_stride, float *a_values, float *b_values) {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = input_loc(M, K, B, row, k, block, a_bits);
+        if (cbsz != 0)
+          al.lane = permute_a_lane(al.lane, cbsz, abid);
+        a_values[static_cast<size_t>(row) * K + k] = ea(cu, s0, physicalize_loc(al, wf));
+      }
+    }
+    for (uint32_t k = 0; k < K; ++k) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = input_loc(N, K, B, col, k, block, b_bits);
+        if (blgp != 0)
+          bl.lane = permute_b_lane(bl.lane, blgp);
+        b_values[static_cast<size_t>(k) * b_stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
+      }
+    }
+  };
+
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
   // per output in K order (non-fused multiply-add).
   auto run_scalar = [&]() {
+    const size_t a_count = static_cast<size_t>(M) * K;
+    const size_t b_count = static_cast<size_t>(K) * N;
+    // Real ISA shapes use bounded per-block stack storage. Preserve support
+    // for direct callers with larger dimensions through one overflow buffer.
+    alignas(64) float a_stack[MAX_AB];
+    alignas(64) float b_stack[MAX_BSTRIDE];
+    std::vector<float> overflow;
+    float *a_values = a_stack;
+    float *b_values = b_stack;
+    if (a_count > MAX_AB || b_count > MAX_BSTRIDE) {
+      overflow.resize(a_count + b_count);
+      a_values = overflow.data();
+      b_values = overflow.data() + a_count;
+    }
+
     for (uint32_t b = 0; b < B; ++b) {
+      stage_operands(b, N, a_values, b_values);
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           // AMD convention: i=row (register dimension), j=col (lane dimension).
@@ -1352,17 +1422,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                   ? std::bit_cast<float>(const_acc)
                   : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            // Apply cbsz/abid lane permutation to A input.
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            // Apply blgp lane permutation to B input.
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            float a_val = ea(cu, s0, physicalize_loc(al, wf));
-            float b_val = eb(cu, s1, physicalize_loc(bl, wf));
-            acc += a_val * b_val;
+            acc += a_values[static_cast<size_t>(row) * K + k] *
+                   b_values[static_cast<size_t>(k) * N + col];
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
@@ -1385,13 +1446,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     // (no per-call heap allocation). MAX_* bound every real MFMA shape;
     // anything larger (or a forced-scalar run) falls back to the scalar path.
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
-    constexpr size_t MAX_BSTRIDE = 4096; // max K*stride
-    constexpr size_t MAX_C = 1024;       // max M*stride
-    // Combined stack frame for the three staging buffers below (currently 28
-    // KiB); tripwire so an added/larger shape can't silently blow the stack.
-    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
@@ -1404,6 +1458,7 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
       alignas(64) float Bbuf[MAX_BSTRIDE] = {};
       alignas(64) float Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
+        stage_operands(b, stride, Abuf, Bbuf);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
@@ -1411,20 +1466,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                 (const_acc != ACC_FROM_VGPR)
                     ? std::bit_cast<float>(const_acc)
                     : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
-          }
-        for (uint32_t row = 0; row < M; ++row)
-          for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            Abuf[row * K + k] = ea(cu, s0, physicalize_loc(al, wf));
-          }
-        for (uint32_t k = 0; k < K; ++k)
-          for (uint32_t col = 0; col < N; ++col) {
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            Bbuf[k * stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
           }
         wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t row = 0; row < M; ++row)
@@ -1747,6 +1788,114 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
     writes.set_lane(r.reg, r.lane, r.val);
 }
 
+// GFX11 F16/BF16 WMMA executes adjacent K pairs as DOT2, starting at K=0.
+// Packed outputs narrow after every pair. Preserve raw NaN bits and stage all
+// outputs before writes, including D overlap with A, B or C.
+template <bool Bf16, bool Packed = false>
+void exec_gfx11_wmma_dot2(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
+                          uint32_t neg_hi, uint32_t opsel = 0, bool fp16_ovfl = false) {
+  require_gfx11_wmma_wave_size(wave_size);
+  std::array<uint32_t, 256> results;
+  RegisterAccess regs(cu);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx11_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      const uint32_t lane_group = out.lane / 16;
+      uint32_t acc = const_acc ? *const_acc : regs.read_vgpr(s2 + out.reg, out.lane);
+      if constexpr (Packed)
+        acc = (acc >> (16 * opsel)) & 0xffff;
+      if (neg_hi & 4)
+        acc &= Packed ? 0x7fffu : 0x7fffffffu;
+      if (neg & 4)
+        acc ^= Packed ? 0x8000u : 0x80000000u;
+      for (uint32_t k = 0; k < 16; k += 2) {
+        const auto al = gfx11_wmma_input_loc(16, 16, row, k, 16, lane_group);
+        const auto bl = gfx11_wmma_input_loc(16, 16, col, k, 16, lane_group);
+        uint32_t a = regs.read_vgpr(s0 + al.vgpr_offset, al.lane);
+        uint32_t b = regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane);
+        a ^= ((neg & 1) << 15) | ((neg_hi & 1) << 31);
+        b ^= ((neg & 2) << 14) | ((neg_hi & 2) << 30);
+        if constexpr (Packed)
+          acc = gfx11_dot2_packed16<Bf16>(uint16_t(a), uint16_t(b), uint16_t(a >> 16),
+                                          uint16_t(b >> 16), uint16_t(acc), fp16_ovfl);
+        else
+          acc = gfx11_dot2_f32<Bf16>(uint16_t(a), uint16_t(b), uint16_t(a >> 16), uint16_t(b >> 16),
+                                     acc);
+      }
+      results[row * 16 + col] = acc;
+    }
+  }
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx11_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      uint32_t value = results[row * 16 + col];
+      if constexpr (Packed) {
+        const unsigned shift = 16 * opsel;
+        value = (regs.read_vgpr(dst + out.reg, out.lane) & ~(0xffffu << shift)) | (value << shift);
+      }
+      regs.write_vgpr(dst + out.reg, out.lane, value);
+    }
+}
+
+// GFX12 F16/BF16 WMMA rounds after each group of four products; packed outputs
+// narrow at each group as well.
+// In wave32, documented K bits 2 and 3 occupy the lane and register selectors,
+// respectively; gfx12_wmma_input_loc uses contiguous per-lane K chunks.
+template <bool Bf16, bool Packed = false>
+void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
+                          uint32_t neg_hi, bool fp16_ovfl = false) {
+  require_gfx12_wmma_wave_size(wave_size);
+  std::array<uint32_t, 256> results;
+  RegisterAccess regs(cu);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      uint32_t acc =
+          const_acc ? *const_acc : regs.read_vgpr(s2 + (Packed ? out.reg / 2 : out.reg), out.lane);
+      if constexpr (Packed)
+        acc = (acc >> (16 * (out.reg % 2))) & 0xffff;
+      if (neg_hi & 4)
+        acc &= Packed ? 0x7fffu : 0x7fffffffu;
+      if (neg & 4)
+        acc ^= Packed ? 0x8000u : 0x80000000u;
+      for (uint32_t k = 0; k < 16; k += 4) {
+        std::array<uint16_t, 4> a, b;
+        for (uint32_t j = 0; j < 4; ++j) {
+          const uint32_t logical_k = k + j;
+          const uint32_t physical_k =
+              wave_size == 32 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
+                              : logical_k;
+          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 16);
+          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 16);
+          a[j] = uint16_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> (16 * al.sub_element));
+          b[j] = uint16_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> (16 * bl.sub_element));
+          if ((al.sub_element ? neg_hi : neg) & 1)
+            a[j] ^= 0x8000u;
+          if ((bl.sub_element ? neg_hi : neg) & 2)
+            b[j] ^= 0x8000u;
+        }
+        if constexpr (Packed)
+          acc = gfx12_dot4_packed16<Bf16>(a, b, uint16_t(acc), fp16_ovfl);
+        else
+          acc = gfx12_dot_f32<Bf16>(a, b, acc);
+      }
+      results[row * 16 + col] = acc;
+    }
+  }
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      if constexpr (Packed) {
+        if (row % 2 == 0)
+          regs.write_vgpr(dst + out.reg / 2, out.lane,
+                          results[row * 16 + col] | (results[(row + 1) * 16 + col] << 16));
+      } else
+        regs.write_vgpr(dst + out.reg, out.lane, results[row * 16 + col]);
+    }
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_gfx11_wmma_f32_mixed(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
                                uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
@@ -1895,9 +2044,6 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
   };
   std::vector<Result> results;
   results.reserve(M * N);
-  const bool mixed_subbyte_a = a_bits < 8 && b_bits == 8;
-  const bool mixed_subbyte_b = b_bits < 8 && a_bits == 8;
-  const bool mixed_pair = mixed_subbyte_a || mixed_subbyte_b;
   const uint32_t num_scale_blocks = scale16 ? 8u : 4u;
 
   auto scale_for = [](uint64_t scale_word, uint32_t scale_byte, uint32_t scale_fmt) -> float {
@@ -1920,10 +2066,10 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
         for (uint32_t block = 0; block < num_scale_blocks; ++block) {
           float block_sum = 0.0f;
           for (uint32_t k = 0; k < K; ++k) {
-            if (wmma_f8f6f4_scale_byte(k, a_bits, mixed_pair, scale16) != block)
+            if (wmma_block_scale_byte(k, scale16) != block)
               continue;
-            auto al = wmma_a_input_loc(M, K, row, k, a_bits, b_bits);
-            auto bl = wmma_b_input_loc(N, K, col, k, a_bits, b_bits);
+            auto al = wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
+            auto bl = wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
             block_sum = std::fma(ea(cu, s0, al), eb(cu, s1, bl), block_sum);
           }
           block_sum *= scale_for(a_scale_word, block, matrix_a_scale_fmt);
@@ -1961,13 +2107,13 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
         }
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t k = 0; k < K; ++k) {
-          auto al = wmma_a_input_loc(M, K, row, k, a_bits, b_bits);
+          auto al = wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
           Abuf[row * K + k] = ea(reads.a, s0, al);
         }
       }
       for (uint32_t col = 0; col < N; ++col) {
         for (uint32_t k = 0; k < K; ++k) {
-          auto bl = wmma_b_input_loc(N, K, col, k, a_bits, b_bits);
+          auto bl = wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
           Bbuf[k * stride + col] = eb(reads.b, s1, bl);
         }
       }
@@ -1980,7 +2126,7 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
           for (; col + W <= N; col += W) {
             util::native<float> block_sum(0.0f);
             for (uint32_t k = 0; k < K; ++k) {
-              if (wmma_f8f6f4_scale_byte(k, a_bits, mixed_pair, scale16) != block)
+              if (wmma_block_scale_byte(k, scale16) != block)
                 continue;
               util::native<float> a(Abuf[row * K + k]);
               util::native<float> bv;
@@ -1998,7 +2144,7 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
           for (; col < N; ++col) {
             float block_sum = 0.0f;
             for (uint32_t k = 0; k < K; ++k) {
-              if (wmma_f8f6f4_scale_byte(k, a_bits, mixed_pair, scale16) == block)
+              if (wmma_block_scale_byte(k, scale16) == block)
                 block_sum = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], block_sum);
             }
             block_sum *= scale_for(a_scale_word, block, matrix_a_scale_fmt);
@@ -2315,29 +2461,36 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   }
 }
 
+/// Return whether an f32-accumulating matrix output row divides into complete
+/// native SIMD chunks.
+constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
+  return width > 1 && n % width == 0;
+}
+
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
 /// F16C convert — the hoist reads each operand word straight through observed
-/// register-access regions.
-/// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
-/// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
-/// under force-scalar.
+/// register-access regions. Compile-time M/N/K fully unroll the matmul, looped
+/// over N in native-width chunks. The specialization is bypassed when host SIMD
+/// is unavailable, the native width is one or does not evenly divide N, or
+/// force-scalar is enabled. The generic exec_wmma_f32 path may still use
+/// native-width SIMD with a scalar tail when SIMD is available but N is not
+/// divisible by the native width.
 template <uint32_t M, uint32_t N, uint32_t K>
 void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 WMMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || !mma_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                     const_acc, c_modifier);
       return;
     }
     require_wmma_wave32(cu);
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
@@ -3147,8 +3300,8 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
             uint32_t k_start = blk * BLOCK_K;
             uint32_t k_end = std::min(k_start + BLOCK_K, K);
             for (uint32_t k = k_start; k < k_end; ++k) {
-              auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits, b_bits);
-              auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits, a_bits);
+              auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
+              auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
               const float a = ea(cu, s0, physicalize_loc(al, wf));
               const float b_val = eb(cu, s1, physicalize_loc(bl, wf));
               block_sum = std::fma(a, b_val, block_sum);
@@ -3192,12 +3345,12 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits, b_bits);
+            auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
             Abuf[row * K + k] = ea(reads.a, s0, physicalize_loc(al, wf));
           }
         for (uint32_t k = 0; k < K; ++k)
           for (uint32_t col = 0; col < N; ++col) {
-            auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits, a_bits);
+            auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
             Bbuf[k * stride + col] = eb(reads.b, s1, physicalize_loc(bl, wf));
           }
         for (uint32_t row = 0; row < M; ++row)
@@ -3718,6 +3871,91 @@ inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uin
                                uint32_t const_acc = ACC_FROM_VGPR) {
   exec_swmmac_i32(cu, M, N, K, 8, dst, s0, s1, acc_base, index_base, index_entries, index_key,
                   extract_i8, extract_i8, false, const_acc);
+}
+
+/// Execute gfx1251 wave32 V_WMMA_F64_16X16X4_F64.
+///
+/// Public evidence for the logical matrix operation, vector widths, modifiers,
+/// and register tuple sizes comes from LLVM's F64_F64X4_WMMA_w32 profile and
+/// gfx1251_asm_wmma_w32.s. The physical mapping combines section 7.12.2 of the
+/// public CDNA5 ISA reference with the checked-in FMT_WMMA_AB_16X4_F64 and
+/// FMT_WMMA_DC_16X16_F64 component layouts:
+///   A[row][k] / B[col][k]: lane = row-or-col + 16*(k/2), VGPR = 2*(k%2)
+///   C/D[row][col]: lane = col + 16*(row/8), VGPR = 2*(row%8)
+///
+/// Matrix reuse bits are scheduling hints and therefore do not enter this
+/// functional helper. All source and accumulator values are staged before any
+/// destination write so overlapping C/D and A/B tuples preserve read-before-
+/// write behavior. CDNA5 also requires EXEC to contain all 32 wave lanes.
+inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                                      uint64_t const_acc, uint32_t neg, uint32_t neg_hi,
+                                      [[maybe_unused]] uint64_t exec_mask) {
+  // LLVM marks GFX12 WMMA as ReadsModeReg=0. Until physical gfx1251 validation
+  // establishes a more specific fixed arithmetic policy, use the IEEE baseline:
+  // round-to-nearest-even and preserve input/output denormals.
+  constexpr uint32_t kRoundNearestEven = 0;
+  constexpr uint32_t kPreserveInputOutputDenormals = 3;
+  // TODO(hanchung): Validate gfx1251 F64 WMMA lane/register mapping and fixed
+  // arithmetic behavior against a physical gfx1251 KFD/ROCm execution capture.
+  constexpr uint32_t M = 16;
+  constexpr uint32_t N = 16;
+  constexpr uint32_t K = 4;
+  const uint64_t kFullExec = mfma_full_lane_mask(WMMA_WAVE32);
+  assert(is_gfx1251_wmma_execution_state_valid(cu.wf_size(), exec_mask) &&
+         "gfx1251 F64 WMMA requires wave32 with EXEC set to all ones");
+
+  auto toggle_sign = [](uint64_t value, bool toggle) {
+    return toggle ? value ^ (uint64_t{1} << 63) : value;
+  };
+  auto modify_acc = [](uint64_t value, uint32_t modifier) {
+    if (modifier & 0x2u)
+      value &= ~(uint64_t{1} << 63);
+    if (modifier & 0x1u)
+      value ^= uint64_t{1} << 63;
+    return value;
+  };
+
+  std::array<uint64_t, M * K> a{};
+  std::array<uint64_t, K * N> b{};
+  std::array<uint64_t, M * N> result{};
+  {
+    auto reads =
+        read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, /*data_bits=*/64, /*acc_bits=*/64,
+                                    const_acc == ACC_FROM_VGPR ? ACC_FROM_VGPR : 0u, WMMA_WAVE32);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        const auto loc = wmma_input_loc(M, K, row, k, /*data_bits=*/64);
+        a[row * K + k] = toggle_sign(reads.a.lane64(loc.vgpr_offset, loc.lane), (neg & 0x1u) != 0);
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        const auto loc = wmma_input_loc(N, K, col, k, /*data_bits=*/64);
+        b[k * N + col] = toggle_sign(reads.b.lane64(loc.vgpr_offset, loc.lane), (neg & 0x2u) != 0);
+      }
+
+    const uint32_t c_modifier = wmma_c_modifier(neg, neg_hi);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        const auto out = wmma_output_loc_64(M, N, row, col);
+        uint64_t acc =
+            const_acc == ACC_FROM_VGPR ? reads.acc->lane64(out.reg, out.lane) : const_acc;
+        acc = modify_acc(acc, c_modifier);
+        for (uint32_t k = 0; k < K; ++k)
+          acc = fp_mode::fma_f64(a[row * K + k], b[k * N + col], acc, kRoundNearestEven,
+                                 kPreserveInputOutputDenormals);
+        result[row * N + col] = acc;
+      }
+  }
+
+  RegisterAccess regs(cu);
+  auto writes = regs.write_vgpr_region(dst, /*reg_count=*/16, kFullExec);
+  for (uint32_t row = 0; row < M; ++row)
+    for (uint32_t col = 0; col < N; ++col) {
+      const auto out = wmma_output_loc_64(M, N, row, col);
+      const uint64_t value = result[row * N + col];
+      writes.set_lane(out.reg, out.lane, static_cast<uint32_t>(value));
+      writes.set_lane(out.reg + 1, out.lane, static_cast<uint32_t>(value >> 32));
+    }
 }
 
 /// MFMA execute for f64 output with f64 input: D = C + A x B.
@@ -4243,47 +4481,30 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
-/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
-/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
-/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
-/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
-/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
-/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
-/// stage every result on the stack and publish only after all operand reads,
-/// preserving destructive-overlap semantics without a heap-backed Result
-/// vector. VGPR access is batched through observed register-access regions
-/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
-/// back to the generic exec_f32 when:
-///   - <experimental/simd> is unavailable
-///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
-///   - cbsz/blgp lane permutation is non-default
-///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
 /// the hoist reads each operand word straight through observed register-access
-/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
-/// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
-/// so the 4x4 shape stays on the generic path). Falls back to the generic
-/// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
+/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time
+/// M/N/K/BATCH fully unroll the matmul; it loops over N in native-width chunks.
+/// Falls back to the generic exec_f32 without host SIMD, when the native width
+/// is one or does not divide N, for non-wave64 execution, under force-scalar,
+/// or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
 void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
                amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads =
         read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
@@ -4352,23 +4573,34 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
   }
 }
 
+/// Fast path for the f16-input f32 MFMA shapes. The original target,
+/// v_mfma_f32_16x16x32_f16, accounts for 488k invocations and about 4B
+/// internal MACs per OPT-125M fp16 eager forward. Compile-time M/N/K/B let the
+/// compiler fully unroll the inner matmul into straight-line native SIMD FMAs;
+/// a runtime-dimension loop is materially slower on this hot path. The path
+/// snapshots packed f16 inputs through observed register-access regions,
+/// bulk-converts them into dense f32 buffers, and publishes staged results only
+/// after every operand read. It falls back to the generic exec_f32 when:
+///   - <experimental/simd> is unavailable
+///   - host native_simd<float> has no usable width for the output columns
+///   - cbsz/blgp lane permutation is non-default
+///   - RJ_FORCE_SCALAR is set
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
-  static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -4408,7 +4640,7 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
-      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
@@ -4445,25 +4677,24 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
 
 /// Fast path for the bf16-input MFMA shapes (v_mfma_f32_*_bf16). Identical to
 /// the f16 specialization except the bulk input convert is the bf16 zero-extend
-/// (no F16C needed). Falls back to the generic exec_f32 without AVX-512 / under
-/// force-scalar / with cbsz|blgp.
+/// (no F16C needed). Falls back to the generic exec_f32 without usable host
+/// SIMD, under force-scalar, or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                              uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
-  static_assert(N % 16 == 0, "specialized bf16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
                const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -4501,7 +4732,7 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
-      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;

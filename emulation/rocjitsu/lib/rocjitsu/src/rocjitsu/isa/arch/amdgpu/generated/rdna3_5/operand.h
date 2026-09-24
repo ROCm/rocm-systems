@@ -16,9 +16,10 @@
 namespace rocjitsu {
 namespace rdna3_5 {
 
-class Operand : public IsaOperand<Isa> {
+class Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
+  static constexpr bool kStaticRegisterAccess = true;
   Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
           bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
@@ -31,6 +32,7 @@ public:
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  std::optional<RegClass> to_special_reg_class() const override;
   /// @brief Return the immutable full-simulator operand table.
   static const void *full_execution_backend();
   /// @brief Validate that every full-simulator operand callback is present.
@@ -38,6 +40,7 @@ public:
   bool simd_capable() const override;
 
 private:
+  friend class amdgpu::RegisterAccess;
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
   void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,

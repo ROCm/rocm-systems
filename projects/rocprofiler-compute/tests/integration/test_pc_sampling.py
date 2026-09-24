@@ -1,9 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import sqlite3
 from pathlib import Path
+from typing import Mapping, Set
 
 import common
+import pandas as pd
 import pytest
 
 from tests.integration import common as integration_common
@@ -11,39 +14,61 @@ from tests.integration import common as integration_common
 config = {}
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
+config["app_conjugate_gradient"] = ["./tests/conjugate_gradient/conjugate_gradient"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 
 num_devices = 1
 
+CG_KERNEL_NAMES = frozenset({"kernel_spmv_csr", "kernel_cg_update_reduce"})
+CODE_OBJECT_INFO_SUFFIX = "_code_obj_info.json"
+PC_SAMPLING_RESULTS_SUFFIX = "_ps_file_results.json"
 
-def _assert_pc_sampling_files(file_dict):
+
+def pc_sampling_file_pids(file_names: Set[str], suffix: str) -> Set[int]:
+    """Return the numeric PID prefixes of the files ending in ``suffix``."""
+    prefixes = [
+        file_name[: -len(suffix)]
+        for file_name in file_names
+        if file_name.endswith(suffix)
+    ]
+    assert all(prefix.isdigit() for prefix in prefixes), (
+        f"expected numeric PID prefixes on *{suffix}, got {prefixes}"
+    )
+    process_ids = {int(prefix) for prefix in prefixes}
+    assert len(process_ids) == len(prefixes), f"expected unique PIDs, got {prefixes}"
+    return process_ids
+
+
+def _assert_pc_sampling_files(
+    file_dict: Mapping[str, object], expected_count: int = 1
+) -> None:
     """Assert PID-prefixed PC sampling and code-object output files."""
-    file_names = file_dict.keys()
-    code_obj = [
+    file_names = set(file_dict)
+    code_object_files = [
         file_name
         for file_name in file_names
-        if file_name.endswith("_code_obj_info.json")
+        if file_name.endswith(CODE_OBJECT_INFO_SUFFIX)
     ]
-    assert len(code_obj) == 1, (
-        f"expected exactly one *_code_obj_info.json, got {code_obj}"
+    assert len(code_object_files) == expected_count, (
+        f"expected {expected_count} *{CODE_OBJECT_INFO_SUFFIX}, got {code_object_files}"
     )
     pc_sampling_results = [
         file_name
         for file_name in file_names
-        if file_name.endswith("_ps_file_results.json")
+        if file_name.endswith(PC_SAMPLING_RESULTS_SUFFIX)
     ]
-    assert len(pc_sampling_results) == 1, (
-        f"expected exactly one *_ps_file_results.json, got {pc_sampling_results}"
+    assert len(pc_sampling_results) == expected_count, (
+        f"expected {expected_count} *{PC_SAMPLING_RESULTS_SUFFIX}, "
+        f"got {pc_sampling_results}"
     )
 
-    code_obj_pid = code_obj[0].split("_", maxsplit=1)[0]
-    pc_sampling_pid = pc_sampling_results[0].split("_", maxsplit=1)[0]
-    assert pc_sampling_pid.isdigit()
-    assert pc_sampling_pid == code_obj_pid
+    assert pc_sampling_file_pids(
+        file_names, PC_SAMPLING_RESULTS_SUFFIX
+    ) == pc_sampling_file_pids(file_names, CODE_OBJECT_INFO_SUFFIX)
 
-    dynamic_files = {*code_obj, *pc_sampling_results}
+    dynamic_files = {*code_object_files, *pc_sampling_results}
     remaining = file_names - dynamic_files
     assert remaining == {"sysinfo.csv"}
 
@@ -144,6 +169,96 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
     _assert_pc_sampling_files(file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize("sampling_method", ["host_trap", "stochastic"])
+def test_multiprocess_pc_sampling_distinct_code_objects(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    monkeypatch,
+    sampling_method,
+):
+    """Assert each process keeps its own code-object ID for the same kernel.
+
+    The workload runs both kernels in two processes, in opposite order. HIP
+    assigns code-object IDs on first launch, so a kernel gets a different ID in
+    each process and one ID names a different kernel in each. Analyze has to key
+    on (pid, code object) throughout, never on the ID alone, or it would both
+    split one kernel and merge two.
+    """
+    integration_common.require_pc_sampling_gpu(
+        is_stochastic=sampling_method == "stochastic"
+    )
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
+
+    options = [
+        "--experimental",
+        "--pc-sampling",
+        "--pc-sampling-method",
+        sampling_method,
+    ]
+    workload_dir = common.get_output_dir(param_id=sampling_method)
+
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=False,
+        capture_output=True,
+        stream=True,
+        roof=False,
+        app_name="app_conjugate_gradient",
+    )
+
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
+    file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
+    _assert_pc_sampling_files(file_dict, expected_count=2)
+
+    # --output-name forbids path separators, so the db lands in the cwd; run
+    # from the workload dir to keep it there for clean_output_dir to remove.
+    workload_path = Path(workload_dir).resolve()
+    database_name = f"cg_code_objects_{sampling_method}"
+    monkeypatch.chdir(workload_path)
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_path),
+        "--output-format",
+        "db",
+        "--output-name",
+        database_name,
+    ])
+    assert code == 0
+
+    database_path = workload_path / f"{database_name}.db"
+    assert database_path.is_file()
+    connection = sqlite3.connect(str(database_path))
+    try:
+        samples = pd.read_sql_query(
+            "SELECT DISTINCT pid, code_object_id, kernel_name "
+            "FROM compute_pc_sampling_summary_view",
+            connection,
+        )
+    finally:
+        connection.close()
+
+    # The HIP runtime's own code object is sampled too; only the CG kernels are
+    # the subject here.
+    cg_samples = samples[samples["kernel_name"].isin(CG_KERNEL_NAMES)]
+    assert set(cg_samples["kernel_name"]) == CG_KERNEL_NAMES
+
+    per_kernel = cg_samples.groupby("kernel_name").agg(
+        processes=("pid", "nunique"), code_objects=("code_object_id", "nunique")
+    )
+    assert (per_kernel["processes"] == 2).all()
+    assert (per_kernel["code_objects"] == 2).all()
+
+    # The reverse hazard: each ID names a different kernel in the two processes.
+    assert (cg_samples.groupby("code_object_id")["kernel_name"].nunique() == 2).all()
+
+    common.clean_output_dir(config["cleanup"], str(workload_path))
 
 
 def test_multi_rank_pc_sampling_only(

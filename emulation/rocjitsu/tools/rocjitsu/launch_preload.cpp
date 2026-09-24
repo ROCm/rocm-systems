@@ -47,14 +47,14 @@ bool env_name_matches(std::string_view entry, const std::string &name) {
 
 std::vector<std::string>::iterator find_env_entry(std::vector<std::string> &entries,
                                                   const std::string &name) {
-  return std::find_if(entries.begin(), entries.end(),
-                      [&](const std::string &entry) { return env_name_matches(entry, name); });
+  return std::ranges::find_if(
+      entries, [&](const std::string &entry) { return env_name_matches(entry, name); });
 }
 
 std::vector<std::string>::const_iterator find_env_entry(const std::vector<std::string> &entries,
                                                         const std::string &name) {
-  return std::find_if(entries.begin(), entries.end(),
-                      [&](const std::string &entry) { return env_name_matches(entry, name); });
+  return std::ranges::find_if(
+      entries, [&](const std::string &entry) { return env_name_matches(entry, name); });
 }
 
 #if defined(RJ_BUILT_WITH_ASAN) || defined(RJ_BUILT_WITH_TSAN)

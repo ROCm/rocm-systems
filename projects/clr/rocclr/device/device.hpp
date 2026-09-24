@@ -115,6 +115,11 @@ enum MemRangeAttribute : uint32_t {
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
 };
 
+// DMA-BUF mapping-type flags for GetHandleForAddressRange
+enum MemRangeDmaBufMappingType : uint64_t {
+  MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
+};
+
 //! Maps hipFuncCache_t to group memory carveout percentage.
 //! PreferL1 maps to 1% (not 0%) because 0 means "no preference" in the
 //! AQL packet's group_mem_carveout field; 1% is the minimum value that
@@ -676,6 +681,10 @@ struct Info : public amd::EmbeddedObject {
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
+  //! SGPR allocation granularity. Zero if the backend does not report it.
+  uint32_t sgprAllocGranularity_;
+  //! Per-wave SGPRs reserved by the trap handler. Zero if absent or unreported.
+  uint32_t sgprTrapHandlerReserve_;
 
   uint32_t numSDMAengines_;  //!< Number of available SDMA engines
 
@@ -984,7 +993,8 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                 unsigned long long flags) {
     return false;
   }
 
@@ -2257,12 +2267,6 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
-    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
-    // graph layer resolves it to the actual stream's vGPU index into queue_index.
-    int segment_id = -1;
-    // vGPU (queue) index resolved at launch from segment_id. Read by
-    // ApplyHwEventPatches to attribute the signal to its execution stream.
-    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
@@ -2440,7 +2444,8 @@ class Device : public RuntimeObject {
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
+  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);

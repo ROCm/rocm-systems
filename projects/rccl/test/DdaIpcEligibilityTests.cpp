@@ -7,11 +7,11 @@
 #include "common/DdaAlltoAllTestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
 
-#include "dda_all_gather.h"
-#include "dda_alltoall.h"
-#include "dda_reduce_scatter.h"
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "gtest/gtest.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 
 namespace RcclUnitTesting
 {
@@ -144,7 +144,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
         kAlltoAllFloat32CountAt4MbThreshold,
         mockComm_.comm.nRanks,
         sizeof(float));
-    EXPECT_EQ(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_EQ(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_LE(stagingBytes, mockComm_.comm.ddaScratchBytes);
 }
 
@@ -154,7 +154,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEli
     const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 4;
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
         count, mockComm_.comm.nRanks, sizeof(float));
-    EXPECT_GT(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);
+    EXPECT_GT(stagingBytes, rcclGetArchThresholds("gfx950")->ddaVmmMax[ncclFuncAlltoAll]);
     EXPECT_TRUE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32));
 }

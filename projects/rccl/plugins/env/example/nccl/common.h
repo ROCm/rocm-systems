@@ -2,19 +2,24 @@
  * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
 #ifndef COMMON_H_
 #define COMMON_H_
 
+// NCCL_LOG_ERROR shifts every later level by one; keep in sync with
+// src/include/nccl_common.h.
 typedef enum {
   NCCL_LOG_NONE=0,
-  NCCL_LOG_VERSION=1,
-  NCCL_LOG_WARN=2,
-  NCCL_LOG_INFO=3,
-  NCCL_LOG_ABORT=4,
-  NCCL_LOG_TRACE=5
+  NCCL_LOG_ERROR=1,
+  NCCL_LOG_VERSION=2,
+  NCCL_LOG_WARN=3,
+  NCCL_LOG_INFO=4,
+  NCCL_LOG_ABORT=5,
+  NCCL_LOG_TRACE=6
 } ncclDebugLogLevel;
 
 typedef enum {

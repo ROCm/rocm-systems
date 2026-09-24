@@ -79,11 +79,12 @@ if(CMAKE_HIP_PLATFORM STREQUAL "amd")
     set(_rocm_major "${CMAKE_MATCH_1}")
     set(_rocm_minor "${CMAKE_MATCH_2}")
     if(_rocm_major GREATER 7 OR (_rocm_major EQUAL 7 AND _rocm_minor GREATER_EQUAL 11))
-        # 7.11+ ships runtime + dev as a single amdrocm-runtime-dev<MAJOR>.<MINOR>
-        # meta-package on repo.amd.com; rocm-core, hip-runtime-amd, and hip-dev
-        # do not exist there, so suppress rocm-cmake's auto-added rocm-core dep.
+        # rocm-core is a meta-package all legacy ROCm packages depend on. It does not
+        # exist in the current ROCm package repository.
+        # Suppress rocm-cmake's auto-added rocm-core dependency.
         set(ROCM_DEP_ROCMCORE OFF CACHE BOOL "" FORCE)
         rocm_package_add_deb_dependencies(DEPENDS "amdrocm-runtime-dev${_rocm_major}.${_rocm_minor}")
+        rocm_package_add_rpm_dependencies(DEPENDS "amdrocm-runtime-devel${_rocm_major}.${_rocm_minor}")
     else()
         rocm_package_add_dependencies(DEPENDS hip-runtime-amd) # Need minimum version
         rocm_package_add_deb_dependencies(DEPENDS hip-dev) # Need minimum version
@@ -147,6 +148,32 @@ set(CPACK_RPM_PACKAGE_AUTOPROV ON)
 set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
 # Alternatively, we could set CPACK_RPM_PACKAGE_PROVIDES,
 # but then we would have to maintain it...
+
+# Do not claim ownership of the directories ROCm provides.
+#
+# CPack auto-generates a %dir entry for every parent directory of an installed
+# file. As such, installing into ROCm's prefix declares this package as a
+# co-owner. RPM permits co-ownership only when mode, owner, and group match
+# exactly, otherwise RPM declares a file conflict and aborts the install. ROCm
+# is a hard dependency, so these parent directories must exist; hipfile does not
+# need to co-own them.
+#
+# ROCm 7.14+ changed the ownership permissions by setting the `setgid` bit for
+# ROCm's directories (nightly releases currently do not have this property).
+# We cannot fine tune the permissions ourselves as CPack does not support
+# configuring `setgid`. By explicitly excluding co-ownership of any parent
+# directories, we can avoid this conflict cleanly.
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    "/opt"
+    "/opt/rocm"
+    "${CMAKE_INSTALL_PREFIX}"
+    "${CMAKE_INSTALL_PREFIX}/bin"
+    "${CMAKE_INSTALL_PREFIX}/include"
+    "${CMAKE_INSTALL_PREFIX}/lib"
+    "${CMAKE_INSTALL_PREFIX}/lib/cmake"
+    "${CMAKE_INSTALL_PREFIX}/share"
+    "${CMAKE_INSTALL_PREFIX}/share/doc"
+)
 
 # Set DEB/RPM Release Information
 # rocm_create_package checks if following variables are defined in the environment:

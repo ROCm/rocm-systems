@@ -15,7 +15,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class ComputeUnitCore;
-struct VectorMemState;
+class VectorMemState;
 class Wavefront;
 
 struct ClusterLdsTarget {

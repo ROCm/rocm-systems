@@ -117,6 +117,8 @@ int hipMemGetAddressRange(void**, size_t*, void*) { return 0; }
 int hipDeviceSynchronize() { return 0; }
 int hipMemcpy(void*, const void*, size_t, int) { return 0; }
 int hipGetDevice(int* d) { if (d) *d = 0; return 0; }
+// hipGetDevicePropertiesR0600 lives in hip_prop_r0600_stub.cpp so this TU can
+// keep int-returning HIP stubs without including hip_runtime.h.
 int hipSetDevice(int) { return 0; }
 int hipMalloc(void**, size_t) { return 0; }
 int hipFree(void*) { return 0; }
@@ -152,3 +154,7 @@ ncclResult_t ncclProxyClientGetFdBlocking(ncclComm*, int, void*, int*) { return 
 int ncclCuMemEnable() { return 0; }
 int ncclCuMemHandleType = 0;
 ncclResult_t getBusId(int, int64_t* busId) { if (busId) *busId = 0; return ncclSuccess; }
+
+// Return type is int64_t (no ncclResult_t), so this can live here. ncclMgmtTaskEnqueue
+// uses the real ncclResult_t enum and is defined in init_stubs.cpp.
+int64_t ncclParamEnqueueRearchEnable() { return 0; }

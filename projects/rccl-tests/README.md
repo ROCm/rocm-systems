@@ -125,6 +125,21 @@ For MPI (using MPICH), you need to use a command similar to the following:
 mpirun.mpich -np 8 -env NCCL_DEBUG=VERSION -env HSA_NO_SCRATCH_RECLAIM=1 ./build/all_reduce_perf -b 8M -e 128M -i 8388608 -g 1 -d bfloat16
 ```
 
+#### Grouped-broadcast (AllGatherV) mode
+
+`RCCL_TESTS_ALLGATHERV_ENABLE=1` makes `broadcast_perf` issue `nranks` broadcasts with distinct
+roots inside one `ncclGroupStart`/`ncclGroupEnd`, which RCCL fuses into a single AllGatherV ring
+kernel when `NCCL_ALLGATHERV_ENABLE=1` is also set. Each rank contributes `count/nranks` elements,
+receives the full `count`, and every receiver is validated.
+
+AllGatherV fusion requires RCCL 2.30.7 or newer; on older versions the grouped broadcasts simply
+run as individual broadcasts.
+
+```shell
+mpirun -np 8 -x RCCL_TESTS_ALLGATHERV_ENABLE=1 -x NCCL_ALLGATHERV_ENABLE=1 \
+  ./build/broadcast_perf -b 16K -e 1G -f 2
+```
+
 ### Arguments
 
 All tests support the same set of arguments :

@@ -7,9 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 namespace
 {
@@ -97,5 +95,4 @@ delimit(const std::string& line, std::string_view delimiters)
     return _result;
 }
 }  // namespace
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

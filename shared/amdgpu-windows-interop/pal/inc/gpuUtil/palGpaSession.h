@@ -966,13 +966,14 @@ private:
     Pal::IDevice*const            m_pDevice;                    // Device associated with this GpaSession.
     Pal::DeviceProperties         m_deviceProps;
     Pal::SetClockModeOutput       m_peakClockFrequency;         // Output of query for stable peak, values in Mhz
-    Pal::PerfExperimentProperties m_perfExperimentProps;
     Pal::uint32                   m_timestampAlignment;         // Pre-calculated timestamp data alignment.
     ApiType                       m_apiType;                    // API type, e.g. Vulkan, used in RGP dumps.
     Pal::uint16                   m_apiMajorVer;                // API major version, used in RGP dumps.
     Pal::uint16                   m_apiMinorVer;                // API minor version, used in RGP dumps.
     Pal::uint16                   m_instrumentationSpecVersion; // Spec version of RGP instrumetation.
     Pal::uint16                   m_instrumentationApiVersion;  // Api version of RGP instrumetation.
+
+    const Pal::PerfExperimentProperties* m_pPerfExpProps;
 
     Pal::IGpuEvent*               m_pGpuEvent;
     GpaSessionState               m_sessionState;

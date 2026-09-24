@@ -51,9 +51,7 @@
 #include <pthread.h>
 #include <signal.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 bool
 callchain::record::operator<(const record& rhs) const
@@ -190,7 +188,6 @@ callchain::sample(int signo)
 
     _perf_event->start();
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::callchain)

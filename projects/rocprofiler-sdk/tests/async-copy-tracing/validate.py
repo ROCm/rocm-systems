@@ -22,8 +22,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
 import sys
 import pytest
+
+# WSL/DXG does not expose /dev/kfd, so async (GPU) timestamps are converted from a
+# host-scheduled clock domain whose skew is far larger than on real KFD hardware.
+KFD_AVAILABLE = os.path.exists("/dev/kfd")
 
 test_api_traces = [
     "hsa_api_traces",
@@ -396,7 +401,6 @@ def test_ancestor_ids(input_data):
     This test ensures that each memcpy can be traced back to
     a hipMemcpyAsync through ancestor IDs
     """
-    from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
@@ -425,10 +429,9 @@ def test_ancestor_ids(input_data):
         accounted_for_hip_ids.append(parent_hip_call.correlation_id.internal)
 
     # Ensure we looked through all HIP entries
-    assert (
-        set(accounted_for_hip_ids) == set(hip_memcopies.keys()),
-        "Expected to account for all HIP memcpy calls through ancestor ID lookup",
-    )
+    assert set(accounted_for_hip_ids) == set(
+        hip_memcopies.keys()
+    ), "Expected to account for all HIP memcpy calls through ancestor ID lookup"
 
 
 def test_retired_correlation_ids(input_data):
@@ -509,6 +512,9 @@ def test_retired_correlation_ids(input_data):
     # always be >= end_ts
     usec = 1000
     supported_fuzzing = 10 * usec
+    if not KFD_AVAILABLE:
+        # WSL/DXG GPU->CPU clock-domain skew is much larger than on real KFD HW
+        supported_fuzzing = 10 * 1000 * usec  # 10 ms
 
     for cid, itr in async_corr_ids.items():
         assert cid in retired_corr_ids.keys()

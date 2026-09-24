@@ -8,6 +8,7 @@
 #define ROCJITSU_CONFIG_CONFIG_COMMON_H_
 
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
@@ -16,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace rocjitsu {
@@ -43,7 +45,11 @@ template <typename Callback>
 decltype(auto)
 with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
                                    Callback &&callback, bool skip_unexpected_fields = true) {
-  flatbuffers::Parser parser;
+  flatbuffers::IDLOptions options;
+  // Preserve an explicit scalar default (notably cpu_dispatch_threads=1),
+  // whose meaning differs from an omitted automatic setting in JSON.
+  options.force_defaults = true;
+  flatbuffers::Parser parser(options);
   parser.opts.skip_unexpected_fields_in_json = skip_unexpected_fields;
   if (!parser.Parse(schema_text.c_str()))
     throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
@@ -54,12 +60,32 @@ with_parsed_simulation_config_json(const std::string &json, const std::string &s
   return std::forward<Callback>(callback)(config);
 }
 
+/// @brief Convert a FlatBuffers PCI bus table into the runtime config form.
+///
+/// @details A config that says nothing about the bus gets the defaults, which
+/// describe a compute GPU with apertures big enough for the driver to work with.
+inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
+  PciDeviceConfig config;
+  if (pci == nullptr)
+    return config;
+
+  config.class_code = pci->class_code();
+  config.subsystem_vendor_id = pci->subsystem_vendor_id();
+  config.subsystem_id = pci->subsystem_id();
+  config.vram_aperture_bytes = pci->vram_aperture_bytes();
+  config.doorbell_aperture_bytes = pci->doorbell_aperture_bytes();
+  config.register_aperture_bytes = pci->register_aperture_bytes();
+  return config;
+}
+
 /// @brief Convert a FlatBuffers KFD identity table into the runtime config form.
 ///
 /// @details This copies only scalar/string topology values. The resulting
 /// config owns its marketing-name string so it is safe after the FlatBuffers
 /// parser storage goes out of scope.
-inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
+/// @param json_path JSON path of @p device, used in validation diagnostics.
+inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
+                                          std::string_view json_path) {
   KfdDeviceConfig config;
   if (device == nullptr)
     return config;
@@ -77,16 +103,37 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
   config.revision_id = device->revision_id();
   config.pci_revision_id = device->pci_revision_id();
   config.simd_count = device->simd_count();
-  config.max_waves_per_simd = device->max_waves_per_simd();
-  config.num_shader_engines = device->num_shader_engines();
-  config.num_shader_arrays_per_engine = device->num_shader_arrays_per_engine();
-  config.num_cu_per_sh = device->num_cu_per_sh();
+  if (const auto value = device->max_waves_per_simd()) {
+    config.max_waves_per_simd = *value;
+    config.discovery_overrides.max_waves_per_simd = *value;
+  }
+  if (const auto value = device->num_shader_engines()) {
+    config.num_shader_engines = *value;
+    config.discovery_overrides.num_shader_engines = *value;
+  }
+  if (const auto value = device->num_shader_arrays_per_engine()) {
+    config.num_shader_arrays_per_engine = *value;
+    config.discovery_overrides.num_shader_arrays_per_engine = *value;
+  }
+  if (const auto value = device->num_cu_per_sh()) {
+    config.num_cu_per_sh = *value;
+    config.discovery_overrides.num_cu_per_sh = *value;
+  }
   config.simd_per_cu = device->simd_per_cu();
-  config.wave_front_size = device->wave_front_size();
-  config.max_slots_scratch_cu = device->max_slots_scratch_cu();
+  if (const auto value = device->wave_front_size()) {
+    config.wave_front_size = *value;
+    config.discovery_overrides.wave_front_size = *value;
+  }
+  if (const auto value = device->max_slots_scratch_cu()) {
+    config.max_slots_scratch_cu = *value;
+    config.discovery_overrides.max_slots_scratch_cu = *value;
+  }
   config.local_mem_size = device->local_mem_size();
   config.vram_type = device->vram_type();
-  config.lds_size_kb = device->lds_size_kb();
+  if (const auto value = device->lds_size_kb()) {
+    config.lds_size_kb = *value;
+    config.discovery_overrides.lds_size_kb = *value;
+  }
   config.mem_width = device->mem_width();
   config.mem_clk_max = device->mem_clk_max();
   config.l1_size_kb = device->l1_size_kb();
@@ -98,6 +145,10 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
   config.num_sdma_engines = device->num_sdma_engines();
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
   config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
+  if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
+    throw std::runtime_error(std::string(json_path) +
+                             ".num_sdma_queues_per_engine must be nonzero when " +
+                             std::string(json_path) + ".num_sdma_engines is nonzero");
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();

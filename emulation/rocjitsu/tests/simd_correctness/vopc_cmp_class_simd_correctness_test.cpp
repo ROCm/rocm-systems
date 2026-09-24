@@ -197,7 +197,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, Kind k, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(k, rot, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };

@@ -9,10 +9,10 @@ target_sources(amdhip64 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_generated.cpp
 )
 
-# hrr_api_args.h and all capture headers live here.
+# Capture headers live here; the shared HRR archive wire format now lives in
+# projects/hrr/include and is included as "hrr/hrr_api_args.h".
+# Playback tools (hrr-playback, hrr_reader) now live in projects/hrr.
 target_include_directories(amdhip64 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hrr/include
 )
-
-# Playback tools (hrr-playback, hrr_reader/hrr_playback libs)
-add_subdirectory(playback)

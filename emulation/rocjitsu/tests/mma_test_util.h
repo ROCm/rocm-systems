@@ -43,6 +43,15 @@ make_cdna4_mfma_scale_words(uint32_t op, uint32_t abid, uint32_t scale_a, uint32
               ((blgp & 0x7u) << 29)};
 }
 
+constexpr std::array<uint32_t, 4>
+make_cdna5_wmma_scale_words(uint32_t format_a, uint32_t format_b, uint32_t scale_a,
+                            uint32_t scale_b, uint32_t vdst = 64, uint32_t src0 = 256,
+                            uint32_t src1 = 288, uint32_t src2 = 320) {
+  return {0xCC350000u, (scale_a & 0x1ffu) | ((scale_b & 0x1ffu) << 9) | (256u << 18),
+          0xCC330000u | vdst | (format_a << 11) | ((format_b >> 2) << 14),
+          src0 | (src1 << 9) | (src2 << 18) | ((format_b & 3u) << 27)};
+}
+
 // Small finite generator: values in roughly [-1, 1], deterministic per call.
 struct SmallGen {
   std::mt19937 rng;

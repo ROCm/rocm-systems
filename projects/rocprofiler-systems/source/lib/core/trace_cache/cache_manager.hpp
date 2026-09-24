@@ -13,9 +13,7 @@
 #include <memory>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 using buffer_storage_t = buffer_storage<flush_worker_factory_t, type_identifier_t>;
@@ -53,5 +51,4 @@ get_buffer_storage()
     return cache_manager::get_instance().get_buffer_storage();
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

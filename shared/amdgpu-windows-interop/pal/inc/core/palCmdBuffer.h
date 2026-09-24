@@ -1848,6 +1848,17 @@ struct BindStreamOutTargetParams
     } target[MaxStreamOutTargets];  ///< Describes the stream-output target for each buffer slot.
 };
 
+/// Each stream-out target tracks how much has been written using a buffer-filled-size counter. These counts can be
+/// written to memory and later loaded back from memory when the stream-out target bindings are changed. This struct
+/// stores the GPU VA of each target's save/load scratch space. See @ref CmdSaveBufferFilledSizes or
+/// @ref CmdLoadBufferFilledSizes.
+struct BufferFilledSizeGpuVas
+{
+    /// Array of GPU VAs for the save/load. Any of these can be zero, indicating that the corresponding target's
+    /// counter is not saved/loaded. Any non-zero value must correspond to a DWORD-aligned 32-bit storage location.
+    gpusize target[MaxStreamOutTargets];
+};
+
 /// Specifies the different types of predication ops available.
 enum class PredicateType : uint32
 {
@@ -4205,7 +4216,20 @@ public:
     /// @param [in] gpuVirtAddr Array of GPU virtual addresses to load each counter from.  If any of these are zero,
     ///                         the corresponding filled-size counter is not loaded.
     virtual void CmdLoadBufferFilledSizes(
-        const gpusize (&gpuVirtAddr)[MaxStreamOutTargets]) = 0;
+        const BufferFilledSizeGpuVas& gpuVas) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    void CmdLoadBufferFilledSizes(
+        const gpusize (&gpuVirtAddr)[MaxStreamOutTargets])
+    {
+        BufferFilledSizeGpuVas gpuVas;
+        for (uint32 idx = 0; idx < MaxStreamOutTargets; ++idx)
+        {
+            gpuVas.target[idx] = gpuVirtAddr[idx];
+        }
+        CmdLoadBufferFilledSizes(gpuVas);
+    }
+#endif
 
     /// Saves the current stream-out buffer-filled-sizes into GPU memory.
     ///
@@ -4217,7 +4241,20 @@ public:
     /// @param [in] gpuVirtAddr Array of GPU virtual addresses to save each counter into.  If any of these are zero,
     ///                         the corresponding filled-size counter is not saved.
     virtual void CmdSaveBufferFilledSizes(
-        const gpusize (&gpuVirtAddr)[MaxStreamOutTargets]) = 0;
+        const BufferFilledSizeGpuVas& gpuVas) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    void CmdSaveBufferFilledSizes(
+        const gpusize (&gpuVirtAddr)[MaxStreamOutTargets])
+    {
+        BufferFilledSizeGpuVas gpuVas;
+        for (uint32 idx = 0; idx < MaxStreamOutTargets; ++idx)
+        {
+            gpuVas.target[idx] = gpuVirtAddr[idx];
+        }
+        CmdSaveBufferFilledSizes(gpuVas);
+    }
+#endif
 
     /// Set the offset to buffer-filled-size for a stream-out target.
     ///

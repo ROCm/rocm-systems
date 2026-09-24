@@ -17,6 +17,7 @@
 #endif
 #include "archinfo.h"
 #include "os.h"
+#include "topo.h"
 #if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -27,6 +28,33 @@
 
 // Arbitrarily large number for constructing virtual topology string
 #define NCCL_MAX_XML_DEPTH 1024
+
+static int ncclTopoPciClassIsGpu(const char* deviceClass) {
+  if (deviceClass == NULL || deviceClass[0] == '\0') return 0;
+  if (strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0) return 1;
+  if (strncmp(deviceClass, "0x03", 4) == 0) return 1;
+  return 0;
+}
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// XGMI peers come from accelerator enumeration, so do not infer their class
+// from a HIP alias BDF that may be missing or identify another PCI function.
+static ncclResult_t ncclTopoXmlAddXgmiPeerGpu(struct ncclXml* xml, struct ncclXmlNode* gpuNode, const char* target,
+                                              int count, struct ncclXmlNode** nodeOut, int* createdOut = NULL) {
+  struct ncclXmlNode* node = NULL;
+  NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &node, "target", target));
+  int created = node == NULL;
+  if (created) {
+    NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &node));
+    NCCLCHECK(xmlSetAttr(node, "target", target));
+    NCCLCHECK(xmlSetAttrInt(node, "count", count));
+    NCCLCHECK(xmlSetAttr(node, "tclass", PCI_ACCELERATOR_CLASS));
+  }
+  if (nodeOut) *nodeOut = node;
+  if (createdOut) *createdOut = created;
+  return ncclSuccess;
+}
+#endif
 
 /*******************/
 /* XML File Parser */
@@ -366,7 +394,7 @@ ncclResult_t ncclTopoXmlLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlN
 #else
   struct xmlHandler handlers[] = {{"nvlink", ncclTopoXmlLoadNvlink}, {"c2c", ncclTopoXmlLoadC2c}};
 #endif
-  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 2));
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, sizeof(handlers) / sizeof(handlers[0])));
   return ncclSuccess;
 }
 
@@ -564,8 +592,10 @@ ncclResult_t ncclTopoGetXmlFromCpu(struct ncclXmlNode* cpuNode, struct ncclXml* 
     __cpuid(cpuInfo, 1);
     cpuid1.val = cpuInfo[0];  // EAX contains the processor info
 #endif
-    int familyId = cpuid1.familyId + (cpuid1.extFamilyId << 4);
-    int modelId = cpuid1.modelId + (cpuid1.extModelId << 4);
+    int familyId = cpuid1.familyId;
+    int modelId = cpuid1.modelId;
+    if (familyId == 15 || familyId == 6) modelId += cpuid1.extModelId << 4;
+    if (familyId == 15) familyId += cpuid1.extFamilyId;
     NCCLCHECK(xmlSetAttrInt(cpuNode, "familyid", familyId));
     NCCLCHECK(xmlSetAttrInt(cpuNode, "modelid", modelId));
   }
@@ -684,7 +714,7 @@ ncclResult_t ncclTopoGetXmlFromSys(struct ncclXmlNode* pciNode, struct ncclXml* 
           NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", speeds[linkGen]), ret, exit);
         }
       } else {
-        NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", "16.0 GT/s"), ret, exit);
+        NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", "16.0 GT/s PCIe"), ret, exit);
       }
     }
 #if NCCL_OS_LINUX
@@ -705,7 +735,7 @@ ncclResult_t ncclTopoGetXmlFromSys(struct ncclXmlNode* pciNode, struct ncclXml* 
 #if NCCL_OS_LINUX
       NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", ""), ret, exit);
 #elif NCCL_OS_WINDOWS
-      NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", "16.0 GT/s"), ret, exit);
+      NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", "16.0 GT/s PCIe"), ret, exit);
 #endif
     }
   }
@@ -905,10 +935,48 @@ exit:
   return ret;
 }
 
-ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev, struct ncclXml* xml,
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// HIP may expose logical GPUs at function .1-.7 of the same device while sysfs
+// at that BDF is missing or a different function. Link those HIP siblings with
+// 1-hop XGMI even when SMI only enumerates the physical GPU.
+static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct ncclXmlNode* gpuNode,
+                                                   struct ncclXmlNode* pciNode, uint32_t xmlDev) {
+  const char* pciBusId = NULL;
+  NCCLCHECK(xmlGetAttr(pciNode, "busid", &pciBusId));
+  if (pciBusId == NULL) return ncclSuccess;
+  int64_t physId = 0;
+  NCCLCHECK(busIdToInt64(pciBusId, &physId));
+  physId &= ~0xfLL;
+  int nHip = 0;
+  if (hipGetDeviceCount(&nHip) != hipSuccess) return ncclSuccess;
+  for (int h = 0; h < nHip; h++) {
+    if (h == (int)xmlDev) continue;
+    char peerBus[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+    if (hipDeviceGetPCIBusId(peerBus, sizeof(peerBus), h) != hipSuccess) continue;
+    int64_t peerId = 0;
+    if (busIdToInt64(peerBus, &peerId) != ncclSuccess) continue;
+    if ((peerId & ~0xfLL) != physId) continue;
+    char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+    for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+      lowerId[c] = tolower(peerBus[c]);
+      if (peerBus[c] == 0) break;
+    }
+    struct ncclXmlNode* nvl = NULL;
+    NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvl));
+    if (nvl) {
+      int idx;
+      NCCLCHECK(xmlGetAttrIndex(nvl, "fabric_supported", &idx));
+      if (idx == -1) NCCLCHECK(xmlSetAttrInt(nvl, "fabric_supported", 0));
+    }
+  }
+  return ncclSuccess;
+}
+#endif
+
+ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev, uint32_t smiDev, struct ncclXml* xml,
                                    struct ncclXmlNode** gpuNodeRet) {
   struct ncclXmlNode* gpuNode = NULL;
-  NCCLCHECK(xmlGetSub(pciNode, "gpu", &gpuNode));
+  NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)xmlDev));
   if (gpuNode == NULL) NCCLCHECK(xmlAddNode(xml, pciNode, "gpu", &gpuNode));
 
   int index = -1;
@@ -916,7 +984,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
   int dev = -1;
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "dev", &index));
   if (index == -1) {
-    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", rocmDev));
+    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", xmlDev));
   }
   NCCLCHECK(xmlGetAttrInt(gpuNode, "dev", &dev));
   if (dev == -1) {
@@ -927,7 +995,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "sm", &index));
   if (index == -1) {
     cudaDeviceProp devProp;
-    CUDACHECK(cudaGetDeviceProperties(&devProp, 0));
+    CUDACHECK(cudaGetDeviceProperties(&devProp, (int)xmlDev));
     NCCLCHECK(xmlSetAttrInt(gpuNode, "sm", devProp.multiProcessorCount));
   }
   int sm;
@@ -938,7 +1006,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "gcn", &index));
   if (index == -1) {
     hipDeviceProp_t devProp;
-    CUDACHECK(hipGetDeviceProperties(&devProp, 0));
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
     // extract only the releveant info from the gcnArchName attribute
     // e.g.: convert "gfx908:sramecc+:xnack-" to "gfx908"
     char gcnArchNameSubstr[128];
@@ -956,7 +1024,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "arch", &index));
   if (index == -1) {
     hipDeviceProp_t devProp;
-    CUDACHECK(hipGetDeviceProperties(&devProp, 0));
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
     memcpy(&arch.arch, &devProp.arch, sizeof(hipDeviceArch_t));
     NCCLCHECK(xmlSetAttrInt(gpuNode, "arch", arch.value));
   }
@@ -976,14 +1044,14 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
 #ifdef USE_AMDSMI
     NCCLCHECK(amd_smi_getNumDevice(&deviceCnt));
     for (int i = 0; i < deviceCnt; i++) {
-      if (i != dev) {
+      if (i != smiDev) {
         amdsmi_link_type_t amdsmi_type;
         // Based on amd-smi team, there will be a new UALoE link type
         // First, we will check if UALoE is supported, if not we will check for XGMI links
         bool canUseUALoE = false;
         amdsmiFabricDeviceInfo fabInfo_dev;
         amdsmiFabricDeviceInfo fabInfo;
-        if (amd_smi_getFabricDeviceInfo(dev, &fabInfo_dev) == ncclSuccess &&
+        if (amd_smi_getFabricDeviceInfo(smiDev, &fabInfo_dev) == ncclSuccess &&
             amd_smi_getFabricDeviceInfo(i, &fabInfo) == ncclSuccess) {
           if (fabInfo_dev.fabricSupported && fabInfo.fabricSupported && fabInfo_dev.cliqueId == fabInfo.cliqueId &&
               (memcmp(fabInfo_dev.clusterUuid, fabInfo.clusterUuid, UALOE_GPU_FABRIC_UUID_LEN) == 0)) {
@@ -998,10 +1066,16 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
             lowerId[c] = tolower(busIdStr[c]);
             if (busIdStr[c] == 0) break;
           }
-          NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-          if (nvlNode == NULL) {
-            NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-            NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+          // UALoE when both peers report a usable fabric (ready/active, same clique).
+          // Unconfigured ualink is a node setup issue, not a missing interconnect:
+          // fabricSupported is false and discovery falls through to 1-hop XGMI.
+          // Either path stamps accelerator tclass: HIP bus IDs need not exist on
+          // the physical PCI bus, so sysfs class at that BDF is not the peer GPU.
+          int created;
+          // count=1: amd-smi does not yet report UALoE link count.
+          // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE.
+          NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode, &created));
+          if (created) {
             uint64_t uuidHigh = 0;
             uint64_t uuidLow = 0;
             memcpy(&uuidHigh, fabInfo.clusterUuid, sizeof(uuidHigh));
@@ -1015,15 +1089,10 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
             NCCLCHECK(xmlSetAttrInt(nvlNode, "ppod_size", fabInfo.ppodSize));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_id", fabInfo.cliqueId));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_size", fabInfo.vpodSize));
-            // We don't have a way to get the number of links between two devices when using UALoE, so we will set it to 1 to avoid breaking topology construction.
-            // This is not ideal, but it will allow us to use UALoE without having to wait for a new version of amd-smi that returns the number of links.
-            // We can update this later when we have that information available.
-            // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE and update this code accordingly.
-            NCCLCHECK(xmlSetAttrInt(nvlNode, "count", 1));
           }
         } else {
           int hops, count;
-          if (amd_smi_getLinkInfo(dev, i, &amdsmi_type, &hops, &count) == ncclSuccess) {
+          if (amd_smi_getLinkInfo(smiDev, i, &amdsmi_type, &hops, &count) == ncclSuccess) {
             if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI && hops == 1) {
               char busIdStr[] = "00000000:00:00.0";
               NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
@@ -1032,11 +1101,9 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
                 lowerId[c] = tolower(busIdStr[c]);
                 if (busIdStr[c] == 0) break;
               }
-              NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-              if (nvlNode == NULL) {
-                NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-                NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
-                NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+              int created;
+              NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode, &created));
+              if (created) {
                 NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 0));
               }
             }
@@ -1047,10 +1114,10 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
 #else
     NCCLCHECK(rocm_smi_getNumDevice(&deviceCnt));
     for (int i = 0; i < deviceCnt; i++) {
-      if (i != dev) {
+      if (i != smiDev) {
         RSMI_IO_LINK_TYPE rsmi_type;
         int hops, count;
-        if (rocm_smi_getLinkInfo(dev, i, &rsmi_type, &hops, &count) == ncclSuccess) {
+        if (rocm_smi_getLinkInfo(smiDev, i, &rsmi_type, &hops, &count) == ncclSuccess) {
           if (rsmi_type == RSMI_IOLINK_TYPE_XGMI && hops == 1) {
             char busIdStr[] = "00000000:00:00.0";
             NCCLCHECK(rocm_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
@@ -1059,12 +1126,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
               lowerId[c] = tolower(busIdStr[c]);
               if (busIdStr[c] == 0) break;
             }
-            NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-            if (nvlNode == NULL) {
-              NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-              NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
-              NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
-            }
+            NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode));
           }
         }
       }
@@ -1105,32 +1167,51 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
       if (isActive != NVML_FEATURE_ENABLED) continue;
 
       // Try to figure out what's on the other side of the NVLink
-      nvmlPciInfo_t remoteProc = {};
-      if (ncclNvmlDeviceGetNvLinkRemotePciInfo(nvmlDev, l, &remoteProc) != ncclSuccess) continue;
-
-      // Make a lower case copy of the bus ID for calling ncclDeviceType
-      // PCI system path is in lower case.
-      // NVML may return empty or non-printable busId for non-visible
-      // remote devices (e.g. NVSwitch on Windows). Use sentinel instead.
-      char* p = remoteProc.busId;
-      char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-      if (p[0] == '\0') {
-        strncpy(lowerId, "fffffff:ffff:ff", NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE);
-      } else {
-        for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
-          if (p[c] && !isprint((unsigned char)p[c])) {
-            strncpy(lowerId, "fffffff:ffff:ff", NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE);
-            break;
-          }
-          lowerId[c] = tolower(p[c]);
-          if (p[c] == 0) break;
+      char tclass[MAX_STR_LEN] = "", lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE] = "";
+      nvmlIntNvLinkDeviceType_t remoteDeviceType;
+      if (ncclNvmlDeviceGetNvLinkRemoteDeviceType(nvmlDev, l, &remoteDeviceType) != ncclSuccess) {
+        INFO(NCCL_INIT | NCCL_GRAPH, "Unable to get RemoteDeviceType for NVLink %d, igoring.", l);
+        continue;
+      }
+      switch (remoteDeviceType) {
+      case NVML_NVLINK_DEVICE_TYPE_SWITCH:
+        {
+          strncpy(lowerId, "fffffff:ffff:ff", NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE);
+          strncpy(tclass, PCI_NVSWITCH_CLASS, MAX_STR_LEN);
         }
+        break;
+      case NVML_NVLINK_DEVICE_TYPE_GPU:
+      case NVML_NVLINK_DEVICE_TYPE_IBMNPU: // similar to an NVLink endpoint
+        {
+          nvmlPciInfo_t remoteProc = {};
+          if (ncclNvmlDeviceGetNvLinkRemotePciInfo(nvmlDev, l, &remoteProc) != ncclSuccess ||
+              remoteProc.busIdLegacy[0] == '\0') {
+            INFO(NCCL_INIT | NCCL_GRAPH, "Unable to get RemotePciInfo for NVLink %d, igoring.", l);
+            continue;
+          }
+          // small cap the device PCI bus id
+          char* p = remoteProc.busIdLegacy;
+          for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+            lowerId[c] = tolower(p[c]);
+            if (p[c] == 0) break;
+          }
+          // if the OS doesn't recognize the class, use the device type information
+          if (ncclOsGetPciDeviceClassByBusId(lowerId, tclass, sizeof(tclass)) != ncclSuccess || tclass[0] != '\0') {
+            strncpy(tclass, (remoteDeviceType == NVML_NVLINK_DEVICE_TYPE_GPU) ? PCI_GPU_CLASS : PCI_IBMNPU_CLASS,
+                    sizeof(tclass));
+          }
+        }
+        break;
+      default:
+        INFO(NCCL_GRAPH, "Unknown NVLink remote device type %d for dev %d link %d, skipping", remoteDeviceType, dev, l);
+        continue;
       }
 
       NCCLCHECK(xmlGetSubKv(gpuNode, "nvlink", &nvlNode, "target", lowerId));
       if (nvlNode == NULL) {
         NCCLCHECK(xmlAddNode(xml, gpuNode, "nvlink", &nvlNode));
         NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+        NCCLCHECK(xmlSetAttr(nvlNode, "tclass", tclass));
         NCCLCHECK(xmlSetAttrInt(nvlNode, "count", 1));
       } else {
         int count;
@@ -1140,6 +1221,9 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
     }
 #endif
   }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  NCCLCHECK(ncclTopoXmlAddHipPartitionXgmi(xml, gpuNode, pciNode, xmlDev));
+#endif
 #if CUDART_VERSION >= 11080
   struct ncclXmlNode* c2cNode = NULL;
   NCCLCHECK(xmlGetSub(gpuNode, "c2c", &c2cNode));
@@ -1173,14 +1257,14 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
     }
   }
 #endif
-  // Fill target classes
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // Sysfs class is only meaningful for a physical PCI function. HIP can name a
+  // logical GPU at a BDF that is not on the bus (e.g. function .1); ualink
+  // configured or not does not change that. Trust only GPU/accelerator classes.
+  // Fill target classes of the XGMI links (the NVLink path sets "tclass" while creating the nodes above)
   for (int s = 0; s < gpuNode->nSubs; s++) {
     struct ncclXmlNode* sub = gpuNode->subs[s];
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (strcmp(sub->name, "xgmi") != 0) continue;
-#else
-    if (strcmp(sub->name, "nvlink") != 0) continue;
-#endif
     int index;
     NCCLCHECK(xmlGetAttrIndex(sub, "tclass", &index));
     if (index == -1) {
@@ -1195,40 +1279,84 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
         deviceClass[0] = '\0';
         if (ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass)) == ncclSuccess &&
             deviceClass[0] != '\0') {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+          int isGpu = ncclTopoPciClassIsGpu(deviceClass);
+          if (!isGpu) {
+            INFO(NCCL_GRAPH,
+                 "XGMI target %s sysfs class %s is not a GPU (HIP logical BDF?); using accelerator tclass",
+                 busId, deviceClass);
+            NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
+          } else {
+            NCCLCHECK(xmlSetAttr(sub, "tclass", deviceClass));
+            TRACE(NCCL_GRAPH, "Read NVLink target class: tclass=%s for busId=%s", deviceClass, busId);
+          }
+#else
           NCCLCHECK(xmlSetAttr(sub, "tclass", deviceClass));
           TRACE(NCCL_GRAPH, "Read NVLink target class: tclass=%s for busId=%s", deviceClass, busId);
+#endif
         } else {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+          INFO(NCCL_GRAPH, "No sysfs PCI class for XGMI target %s; using accelerator tclass", busId);
+          NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
+#else
           INFO(NCCL_GRAPH, "Could not get device class for NVLink target %s, assuming NVSwitch", busId);
           NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_NVSWITCH_CLASS));
+#endif
         }
       }
     }
   }
+#endif
   *gpuNodeRet = gpuNode;
   return ncclSuccess;
 }
 
 ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct ncclXmlNode** gpuNode) {
   struct ncclXmlNode* node;
-  NCCLCHECK(ncclTopoGetPciNode(xml, busId, &node));
+  const char* pciBusId = busId;
+  char physBusId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP logical GPUs can sit at a BDF that is not the GPU's PCI function (DPX
+  // function .1 is often a NIC in sysfs; CPX .1-.7 are missing from sysfs).
+  // Attach the <gpu> under the physical function-0 PCI node; mlopart is filled
+  // from the fake function in fillInfo.
+  int64_t hipId = 0;
+  NCCLCHECK(busIdToInt64(busId, &hipId));
+  int fn = (int)(hipId & 0xf);
+  if (fn > 0 && fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+    char deviceClass[MAX_STR_LEN];
+    deviceClass[0] = '\0';
+    (void)ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass));
+    if (!ncclTopoPciClassIsGpu(deviceClass)) {
+      NCCLCHECK(int64ToBusId(hipId & ~0xfLL, physBusId));
+      pciBusId = physBusId;
+      INFO(NCCL_GRAPH,
+           "HIP logical GPU at %s is not a physical GPU PCI function (class %s); attaching under %s", busId,
+           deviceClass[0] ? deviceClass : "missing", pciBusId);
+    }
+  }
+#endif
+  NCCLCHECK(ncclTopoGetPciNode(xml, pciBusId, &node));
   NCCLCHECK(xmlSetAttrIfUnset(node, "class", "0x03"));
   NCCLCHECK(ncclTopoGetXmlFromSys(node, xml));
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  uint32_t devIndex = 0;
+  uint32_t smiIndex = 0;
 #ifdef USE_AMDSMI
   static int amdsmiInit = 0;
   if (amdsmiInit == 0) {
     NCCLCHECK(amd_smi_init());
   }
-  NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, &devIndex));
+  NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
 #else
   static int rocmsmiInit = 0;
   if (rocmsmiInit == 0) {
     NCCLCHECK(rocm_smi_init());
   }
-  NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &devIndex));
+  NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
 #endif
-  NCCLCHECK(ncclTopoGetXmlFromGpu(node, devIndex, xml, gpuNode));
+  int hipDev = -1;
+  if (hipDeviceGetByPCIBusId(&hipDev, busId) != hipSuccess || hipDev < 0) hipDev = (int)smiIndex;
+  NCCLCHECK(ncclTopoGetXmlFromGpu(node, (uint32_t)hipDev, smiIndex, xml, gpuNode));
 #else
   nvmlDevice_t nvmlDev;
   NCCLCHECK(ncclNvmlDeviceGetHandleByPciBusId(busId, &nvmlDev));

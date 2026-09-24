@@ -32,9 +32,7 @@ template <typename Policy>
 concept HasUcxGotcha = requires { typename Policy::ucx_gotcha_t; };
 }  // namespace rocprofsys::component::ucx_concepts
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 template <typename UCXPolicy>
 struct ucx_gotcha : tim::component::base<ucx_gotcha<UCXPolicy>, void>
@@ -48,7 +46,7 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha<UCXPolicy>, void>
 
     static constexpr size_t gotcha_capacity = 100;
 
-    using gotcha_data = typename UCXPolicy::gotcha_data;
+    using gotcha_data = UCXPolicy::gotcha_data;
 
     ucx_gotcha()                                 = default;
     ucx_gotcha(const ucx_gotcha&)                = default;
@@ -144,8 +142,8 @@ ucx_gotcha<UCXPolicy>::configure()
     static_assert(ucx_concepts::HasUcxGotcha<UCXPolicy>,
                   "UCXPolicy must have a ucx_gotcha_t type");
 
-    using ucx_gotcha_t  = typename UCXPolicy::ucx_gotcha_t;
-    using gotcha_data_t = typename UCXPolicy::gotcha_data;
+    using ucx_gotcha_t  = UCXPolicy::ucx_gotcha_t;
+    using gotcha_data_t = UCXPolicy::gotcha_data;
 
     for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
     {
@@ -353,7 +351,7 @@ template <typename UCXPolicy>
 void
 ucx_gotcha<UCXPolicy>::shutdown()
 {
-    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
+    using ucx_gotcha_t = UCXPolicy::ucx_gotcha_t;
     ucx_gotcha_t::disable();
 }
 
@@ -361,7 +359,7 @@ template <typename UCXPolicy>
 void
 ucx_gotcha<UCXPolicy>::start()
 {
-    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
+    using ucx_gotcha_t = UCXPolicy::ucx_gotcha_t;
 
     if(!detail::get_ucx_gotcha<UCXPolicy>()
             .template get<ucx_gotcha_t>()
@@ -387,7 +385,7 @@ void
 ucx_gotcha<UCXPolicy>::pause()
 {
     std::scoped_lock<std::mutex> _lk{ s_mutex };
-    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
+    using ucx_gotcha_t = UCXPolicy::ucx_gotcha_t;
     ucx_gotcha_t::set_ready(false);
 }
 
@@ -396,7 +394,7 @@ void
 ucx_gotcha<UCXPolicy>::resume()
 {
     std::scoped_lock<std::mutex> _lk{ s_mutex };
-    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
+    using ucx_gotcha_t = UCXPolicy::ucx_gotcha_t;
     ucx_gotcha_t::set_ready(true);
 }
 
@@ -540,5 +538,4 @@ ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, lon
     UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

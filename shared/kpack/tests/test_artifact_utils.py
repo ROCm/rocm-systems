@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from elf_test_utils import patch_hip_fatbin_to_nobits
 from rocm_kpack.artifact_utils import (
     read_artifact_manifest,
     write_artifact_manifest,
@@ -315,6 +316,28 @@ class TestIsFatBinary:
         assert (
             is_fat_binary(host_only, toolchain) is False
         ), f"Expected host-only binary: {host_only}"
+
+    def test_is_fat_binary_nobits_hip_fatbin(
+        self, test_assets_dir, tmp_path, toolchain
+    ):
+        """A separated debug file is not a fat binary.
+
+        `objcopy --only-keep-debug` keeps the .hip_fatbin section header but
+        converts it to SHT_NOBITS. There is no device code left in the file and
+        `objcopy --dump-section` produces no output for it, so is_fat_binary()
+        must return False.
+        """
+        source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+        assert source.exists(), f"Test asset not found: {source}"
+        assert is_fat_binary(source, toolchain) is True
+
+        debug_copy = patch_hip_fatbin_to_nobits(
+            source, tmp_path / "test_kernel_single.exe.debug"
+        )
+
+        assert (
+            is_fat_binary(debug_copy, toolchain) is False
+        ), "SHT_NOBITS .hip_fatbin must not be treated as device code"
 
 
 class TestExtractArchitectureFromTarget:

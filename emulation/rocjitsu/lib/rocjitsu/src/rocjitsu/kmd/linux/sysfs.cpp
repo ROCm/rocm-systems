@@ -164,11 +164,6 @@ void Sysfs::cleanup() {
   }
 }
 
-void Sysfs::release_after_fork() {
-  topology_dir_.clear();
-  drm_dir_.clear();
-}
-
 void Sysfs::setup_environment() {}
 
 void Sysfs::write_generation_id() { write_file(topology_dir_ + "/generation_id", "1\n"); }
@@ -191,6 +186,8 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   write_file(node_dir + "/gpu_id", "0\n");
+  // KFD publishes a name file for every topology node.
+  write_file(node_dir + "/name", "\n");
 
   long nproc = sysconf(_SC_NPROCESSORS_ONLN);
   if (nproc < 1)

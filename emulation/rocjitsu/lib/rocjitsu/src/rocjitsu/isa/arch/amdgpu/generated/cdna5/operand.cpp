@@ -161,7 +161,7 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
@@ -900,6 +900,8 @@ std::string Operand::name() const {
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ == 192u)
+      return "64";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
@@ -1045,6 +1047,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
@@ -1076,6 +1110,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     break;
   }
   case OperandType::OPR_SMEM_OFFSET_NOK: {
@@ -1085,6 +1151,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -1093,6 +1191,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
@@ -1111,6 +1241,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNoinline::OPR_SRC_NOINLINE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrcNoinline::OPR_SRC_NOINLINE_EXEC_HI)
@@ -1130,6 +1292,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
@@ -1166,6 +1360,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     break;
   }
   case OperandType::OPR_SREG_M0: {
@@ -1174,6 +1400,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSregM0::OPR_SREG_M0_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -1182,6 +1440,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
@@ -1198,6 +1488,38 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP0)
+      return RegisterRef{RegClass::TTMP, 0, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP1)
+      return RegisterRef{RegClass::TTMP, 1, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP2)
+      return RegisterRef{RegClass::TTMP, 2, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP3)
+      return RegisterRef{RegClass::TTMP, 3, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP4)
+      return RegisterRef{RegClass::TTMP, 4, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP5)
+      return RegisterRef{RegClass::TTMP, 5, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP6)
+      return RegisterRef{RegClass::TTMP, 6, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP7)
+      return RegisterRef{RegClass::TTMP, 7, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP8)
+      return RegisterRef{RegClass::TTMP, 8, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP9)
+      return RegisterRef{RegClass::TTMP, 9, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP10)
+      return RegisterRef{RegClass::TTMP, 10, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP11)
+      return RegisterRef{RegClass::TTMP, 11, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP12)
+      return RegisterRef{RegClass::TTMP, 12, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP13)
+      return RegisterRef{RegClass::TTMP, 13, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP14)
+      return RegisterRef{RegClass::TTMP, 14, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP15)
+      return RegisterRef{RegClass::TTMP, 15, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
@@ -1214,6 +1536,26 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
                          reg_width};
     break;
   }
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
   default:
     break;
   }

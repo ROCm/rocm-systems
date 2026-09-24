@@ -37,17 +37,6 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-/// Performs a blocking async copy while honoring the supplied signal dependency.
-void
-copy_data_sync(void*         dst,
-               const void*   src,
-               hsa_agent_t   dst_agent,
-               hsa_agent_t   src_agent,
-               size_t        size,
-               hsa_signal_t* dependency);
-
-typedef decltype(copy_data_sync) copy_data_t;
-
 /// Shared state coordinating the single producer and N worker threads.
 ///
 /// Each slot is owned by exactly one consumer thread; the producer hands
@@ -115,22 +104,22 @@ struct triple_buffer_consumer_data_t
 /// Parameters passed into the producer worker thread.
 struct triple_buffer_producer_data_t
 {
-    copy_data_t*                                 copy_data_fn{};
+    decltype(att_queue_copy)*                    copy_data_fn{};
     std::shared_ptr<std::atomic<int>>            producer_running{};
-    std::shared_ptr<hsa_signal_t>                start_pkt_signal{};
+    signal_ptr_t                                 submit_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
-    int64_t                                      shader_engine_id{0};
+
+    std::function<bool(std::unique_ptr<hsa::TraceControlAQLPacket>&)> restart_trace{};
 };
 
-// Worker flags have three states: stop (either stopped or stopping), running and (global)destructor
+// The destructor state is terminal and prevents a stopped trace from being re-enabled.
 enum worker_flag_status_t
 {
     WORKER_FLAG_STOP = 0,
     WORKER_FLAG_RUNNING,
-    WORKER_FLAG_DESTRUCTOR,
-    WORKER_FLAG_ERROR
+    WORKER_FLAG_DESTRUCTOR
 };
 
 void

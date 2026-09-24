@@ -4,6 +4,12 @@ run-name: Run clang-tidy analysis on hipFile
 env:
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
+  # LLVM major version of the upstream clang-tidy used for linting. Keep this in
+  # sync with the LLVM major version of the ROCm toolchain in the CI image
+  # (ROCm 7.14 and 10.0 are both LLVM 23).
+  AIS_CLANG_TIDY_VERSION: 23
+  # Ubuntu codename for the apt.llvm.org repository, matching the CI image.
+  AIS_CLANG_TIDY_DISTRO: noble
 
 on:
   workflow_call:
@@ -63,11 +69,43 @@ jobs:
               cp -R /mnt/ais /ais
               mkdir -p /ais/build/hipfile
             '
+      - name: Install upstream clang-tidy
+        # Installed here rather than baked into the CI image because this is the
+        # only job that needs it -- no other CI job uses this clang toolchain.
+        #
+        # The ROCm LLVM toolchain is built with CLANG_TIDY_ENABLE_STATIC_ANALYZER=OFF
+        # (ROCm/TheRock compiler/CMakeLists.txt), so its clang-tidy has zero
+        # clang-analyzer-* checks compiled in and errors out with
+        # "no checks enabled". An upstream build is used for linting instead; the
+        # compiler under test is still ROCm's amdclang++.
+        #
+        # AIS_CLANG_TIDY_VERSION must track the LLVM major version of the ROCm
+        # toolchain (ROCm 7.14 and 10.0 are both LLVM 23). Mismatched clang-tidy
+        # versions report conflicting diagnostics.
+        run: |
+          docker exec \
+            -t \
+            -e AIS_CLANG_TIDY_DISTRO \
+            -e AIS_CLANG_TIDY_VERSION \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              set -e
+              apt-get update
+              apt-get install -y --no-install-recommends ca-certificates curl gnupg
+              curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+                -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}-${AIS_CLANG_TIDY_VERSION} main" \
+                > /etc/apt/sources.list.d/llvm.list
+              apt-get update
+              apt-get install -y --no-install-recommends clang-tidy-${AIS_CLANG_TIDY_VERSION}
+              clang-tidy-${AIS_CLANG_TIDY_VERSION} --version
+            '
       - name: Generate build files for hipFile with clang-tidy enabled
         run: |
           docker exec \
             -t \
             -w /ais/build/hipfile \
+            -e AIS_CLANG_TIDY_VERSION \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               cmake \
@@ -76,6 +114,7 @@ jobs:
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \
                 -DAIS_USE_CLANG_TIDY=ON \
+                -DAIS_CLANG_TIDY_EXECUTABLE=clang-tidy-${AIS_CLANG_TIDY_VERSION} \
                 ../../rocm-systems/projects/hipfile
             '
       - name: Compile hipFile with clang-tidy

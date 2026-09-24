@@ -4,9 +4,7 @@
 #   1. Standalone:   cmake -S . -B build && cmake --build build
 #   2. As part of the main RCCL build via add_subdirectory(plugins/profiler/inspector)
 #
-# The legacy Makefile in this directory remains for CUDA-only standalone builds.
-# This target additionally supports ROCm: inspector_gpu_compat.h maps the CUDA
-# spellings used by the sources onto their HIP equivalents.
+# The Makefile in this directory is a third, ROCm standalone path (ROCM_PATH + hipify).
 
 # Detect standalone vs. in-tree configuration.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -22,7 +20,14 @@ option(NCCL_INSPECTOR_ENABLE_WARN "Emit inspector messages at WARN level (defaul
 # hip::host supplies the HIP headers, libamdhip64 and __HIP_PLATFORM_AMD__.
 # The main RCCL build already ran find_package(hip); resolve it for standalone.
 if(NOT TARGET hip::host)
-    find_package(hip QUIET)
+    find_package(hip QUIET CONFIG
+        HINTS
+            ${ROCM_PATH}
+            ${ROCM_PATH}/lib/cmake/hip
+    )
+endif()
+if(NOT TARGET hip::host)
+    message(FATAL_ERROR "HIP not found; set ROCM_PATH to the ROCm installation")
 endif()
 
 # version.cc is generated rather than checked in, matching the Makefile.

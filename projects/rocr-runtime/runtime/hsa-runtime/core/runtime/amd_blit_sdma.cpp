@@ -218,8 +218,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   }
 
   // Allocate queue buffer.
-  queue_start_addr_ =
-      (char*)agent_->system_allocator()(kQueueSize, 0x1000, core::MemoryRegion::AllocateExecutable);
+  // NonPaged: queue buffer, resolved via amdgpu_vm_bo_lookup_mapping().
+  queue_start_addr_ = (char*)agent_->system_allocator()(
+      kQueueSize, 0x1000,
+      core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateNonPaged);
 
   if (queue_start_addr_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;

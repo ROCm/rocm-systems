@@ -9,14 +9,15 @@
 #include "hip/hip_runtime.h"
 #include "hip_internal.hpp"
 #include "hip_code_object.hpp"
+#include "hip_platform.hpp"
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
 
-const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
+HIP_PUBLIC_API const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
-const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
+HIP_PUBLIC_API const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
 
-size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
+HIP_PUBLIC_API size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
 
 #ifdef __HIP_ENABLE_PCH
 extern const char __hip_pch_wave32[];
@@ -52,6 +53,7 @@ Function::Function(const std::string& name, FatBinaryInfo** modules)
 Function::~Function() {
   for (auto& kernel : dFunc_) {
     if (kernel != nullptr) {
+      PlatformState::Instance().UnregisterFuncHandle(asHipFunction(kernel));
       kernel->release();
     }
   }
@@ -62,7 +64,9 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   const amd::Symbol* symbol = program->findSymbol(name_.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name_.c_str());
-  return new amd::Kernel(*program, *symbol, name_);
+  auto* kernel = new amd::Kernel(*program, *symbol, name_);
+  PlatformState::Instance().RegisterFuncHandle(asHipFunction(kernel));
+  return kernel;
 }
 
 // ================================================================================================
@@ -74,11 +78,6 @@ hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
   }
   *hfunc = asHipFunction(dFunc_[dev]);
   return hipSuccess;
-}
-
-// ================================================================================================
-bool Function::IsValidDynFunc(const void* hfunc) {
-  return (hfunc == asHipFunction(dFunc_[ihipGetDevice()]));
 }
 
 // ================================================================================================

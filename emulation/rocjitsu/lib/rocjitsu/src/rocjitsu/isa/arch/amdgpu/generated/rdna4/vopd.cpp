@@ -197,6 +197,8 @@ void Vopd::init_operands() {
   const auto add_slot_sources = [&](const Slot &slot) {
     switch (slot.op) {
     case kVopdFmacF32:
+    case kVopdDot2AccF32F16:
+    case kVopdDot2AccF32Bf16:
       add_src(slot.dst);
       add_src(slot.src0);
       add_src(slot.src1);

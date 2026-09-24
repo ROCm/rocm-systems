@@ -238,6 +238,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsPkAddBf16Ds : public Ds {
@@ -246,6 +248,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsWriteAddtidB32Ds : public Ds {
@@ -1225,6 +1229,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsPkAddRtnBf16Ds : public Ds {
@@ -1234,6 +1240,8 @@ public:
   Operand vdst;
   Operand addr;
   Operand data0;
+  Operand dsmem;
+  Operand dsmem_in;
 };
 
 class DsConsumeDs : public Ds {

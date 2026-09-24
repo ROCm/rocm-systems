@@ -43,11 +43,20 @@ public:
 
     /**
      * Check if a top-level section (e.g., "tracing", "profiling") is enabled in a preset.
-     * Returns the default_value if the preset or section is not found.
+     * Returns default_value (false) if the preset or section is not found.
+     * Sections default to disabled because both ROCPROFSYS_TRACE and
+     * ROCPROFSYS_PROFILE default to false.
      */
     [[nodiscard]] bool is_section_enabled(std::string_view preset_name,
                                           std::string_view section,
-                                          bool             default_value = true) const;
+                                          bool             default_value = false) const;
+
+    /**
+     * Check if rocpd output is enabled in a preset (output.rocpd_output.enabled).
+     * Defaults to true since rocpd is the default output format.
+     */
+    [[nodiscard]] bool is_rocpd_output_enabled(std::string_view preset_name,
+                                               bool default_value = true) const;
 
     /**
      * Translate a legacy preset flag (e.g., "--balanced") to new syntax

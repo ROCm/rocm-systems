@@ -16,7 +16,10 @@
 #include <vector>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
-using MockBackend = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend;
+// NOLINTBEGIN(readability-identifier-naming)
+using MockBackend     = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend;
+using MockBackendImpl = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend_impl;
+// NOLINTEND(readability-identifier-naming)
 using MockBackendFactory =
     rocprofsys::backends::rocprofiler_sdk::testing::mock_backend_factory;
 using MockProvider =
@@ -102,7 +105,7 @@ static std::shared_ptr<rocprofsys::agent>
 make_agent(std::uint64_t handle, size_t device_type_index, const std::string& name)
 {
     auto a               = std::make_shared<rocprofsys::agent>();
-    a->type              = agent_type::GPU;
+    a->type              = agent_type::gpu;
     a->handle            = handle;
     a->device_id         = device_type_index;
     a->device_type_index = device_type_index;
@@ -123,10 +126,10 @@ struct counter_setup
 };
 
 static void
-setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
-                            std::uint64_t                 agent_handle,
-                            std::vector<counter_setup>&   counters,
-                            std::uint32_t                 context_handle_out)
+setup_provider_expectations(const std::shared_ptr<MockBackendImpl>& mock,
+                            std::uint64_t                           agent_handle,
+                            std::vector<counter_setup>&             counters,
+                            std::uint32_t                           context_handle_out)
 {
     EXPECT_CALL(
         *mock,
@@ -166,7 +169,6 @@ setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
     EXPECT_CALL(*mock, create_context(_))
         .WillOnce([context_handle_out](MockBackend::context_id_t* ctx) {
             ctx->handle = context_handle_out;
-            return MockBackend::status_success;
         });
 
     EXPECT_CALL(*mock, configure_device_counting_service(
@@ -177,11 +179,11 @@ setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
 
     EXPECT_CALL(*mock, start_context(::testing::Field(&MockBackend::context_id_t::handle,
                                                       context_handle_out)))
-        .WillOnce(Return(MockBackend::status_success));
+        .WillOnce(Return());
 
     EXPECT_CALL(*mock, stop_context(::testing::Field(&MockBackend::context_id_t::handle,
                                                      context_handle_out)))
-        .WillOnce(Return(MockBackend::status_success));
+        .WillOnce(Return());
 }
 
 // ============================================================================
@@ -191,21 +193,21 @@ setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
 class SdkPmcCollectorWorkflowTest : public ::testing::Test
 {
 protected:
-    std::shared_ptr<MockBackend> mock;
+    std::shared_ptr<MockBackendImpl> m_mock;
 
     void SetUp() override
     {
         get_captured_samples().clear();
-        mock = std::make_shared<MockBackend>();
-        MockBackendFactory::set_mock(mock);
+        m_mock = std::make_shared<MockBackendImpl>();
+        MockBackendFactory::set_mock(m_mock);
 
-        ON_CALL(*mock, query_record_counter_id(_, _))
+        ON_CALL(*m_mock, query_record_counter_id(_, _))
             .WillByDefault([](MockBackend::counter_record_t record,
                               MockBackend::counter_id_t*    counter_id) {
                 counter_id->handle = record.id;
                 return MockBackend::status_success;
             });
-        EXPECT_CALL(*mock, query_record_counter_id(_, _)).Times(::testing::AnyNumber());
+        EXPECT_CALL(*m_mock, query_record_counter_id(_, _)).Times(::testing::AnyNumber());
     }
 
     void TearDown() override
@@ -221,19 +223,22 @@ protected:
 
 TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
 {
-    auto agent = make_agent(42, 0, "GPU 0");
+    constexpr std::uint64_t k_agent_handle   = 42;
+    constexpr std::uint32_t k_context_handle = 100;
+
+    auto agent = make_agent(k_agent_handle, 0, "GPU 0");
 
     std::vector<counter_setup> counters = {
         { MockBackend::counter_id_t{ 10 }, "SQ_WAVES" },
         { MockBackend::counter_id_t{ 20 }, "SQ_BUSY_CYCLES" },
     };
 
-    setup_provider_expectations(mock, 42, counters, /*context=*/100);
+    setup_provider_expectations(m_mock, k_agent_handle, counters, k_context_handle);
 
     auto sample_call_count = std::make_shared<int>(0);
-    EXPECT_CALL(*mock, sample_device_counting_service(
-                           ::testing::Field(&MockBackend::context_id_t::handle, 100u), _,
-                           _, _, _))
+    EXPECT_CALL(*m_mock, sample_device_counting_service(
+                             ::testing::Field(&MockBackend::context_id_t::handle, 100u),
+                             _, _, _, _))
         .WillRepeatedly(
             [sample_call_count](MockBackend::context_id_t, MockBackend::user_data_t,
                                 MockBackend::counter_flag_t,
@@ -291,8 +296,9 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
     };
 
     // Agent 0
-    EXPECT_CALL(*mock, iterate_agent_supported_counters(
-                           ::testing::Field(&MockBackend::agent_id_t::handle, 10u), _, _))
+    EXPECT_CALL(*m_mock,
+                iterate_agent_supported_counters(
+                    ::testing::Field(&MockBackend::agent_id_t::handle, 10u), _, _))
         .WillOnce([&](MockBackend::agent_id_t, MockBackend::available_counters_cb_t cb,
                       void* ud) {
             MockBackend::counter_id_t id = { 100 };
@@ -301,8 +307,9 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         });
 
     // Agent 1
-    EXPECT_CALL(*mock, iterate_agent_supported_counters(
-                           ::testing::Field(&MockBackend::agent_id_t::handle, 11u), _, _))
+    EXPECT_CALL(*m_mock,
+                iterate_agent_supported_counters(
+                    ::testing::Field(&MockBackend::agent_id_t::handle, 11u), _, _))
         .WillOnce([&](MockBackend::agent_id_t, MockBackend::available_counters_cb_t cb,
                       void* ud) {
             MockBackend::counter_id_t id = { 200 };
@@ -310,23 +317,23 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock, query_counter_details(
-                           ::testing::Field(&MockBackend::counter_id_t::handle, 100u)))
+    EXPECT_CALL(*m_mock, query_counter_details(
+                             ::testing::Field(&MockBackend::counter_id_t::handle, 100u)))
         .WillRepeatedly([](MockBackend::counter_id_t) {
             return std::vector<counter_metadata>{
                 { 100, "SQ_WAVES", "", "", "", false, false, {} }
             };
         });
 
-    EXPECT_CALL(*mock, query_counter_details(
-                           ::testing::Field(&MockBackend::counter_id_t::handle, 200u)))
+    EXPECT_CALL(*m_mock, query_counter_details(
+                             ::testing::Field(&MockBackend::counter_id_t::handle, 200u)))
         .WillRepeatedly([](MockBackend::counter_id_t) {
             return std::vector<counter_metadata>{
                 { 200, "SQ_WAVES", "", "", "", false, false, {} }
             };
         });
 
-    EXPECT_CALL(*mock, create_counter_config(_, _, _, _))
+    EXPECT_CALL(*m_mock, create_counter_config(_, _, _, _))
         .Times(2)
         .WillRepeatedly([](MockBackend::agent_id_t, MockBackend::counter_id_t*, size_t,
                            MockBackend::counter_config_id_t* config_id) {
@@ -334,30 +341,27 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock, create_context(_))
-        .WillOnce([](MockBackend::context_id_t* ctx) {
-            ctx->handle = 50;
-            return MockBackend::status_success;
+    constexpr std::uint64_t k_context_handle_agent0 = 50;
+    constexpr std::uint64_t k_context_handle_agent1 = 51;
+    EXPECT_CALL(*m_mock, create_context(_))
+        .WillOnce([=](MockBackend::context_id_t* ctx) {
+            ctx->handle = k_context_handle_agent0;
         })
-        .WillOnce([](MockBackend::context_id_t* ctx) {
-            ctx->handle = 51;
-            return MockBackend::status_success;
+        .WillOnce([=](MockBackend::context_id_t* ctx) {
+            ctx->handle = k_context_handle_agent1;
         });
 
-    EXPECT_CALL(*mock, configure_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock, configure_device_counting_service(_, _, _, _, _))
         .Times(2)
         .WillRepeatedly(Return(MockBackend::status_success));
 
-    EXPECT_CALL(*mock, start_context(_))
-        .Times(2)
-        .WillRepeatedly(Return(MockBackend::status_success));
-    EXPECT_CALL(*mock, stop_context(_))
-        .Times(2)
-        .WillRepeatedly(Return(MockBackend::status_success));
+    EXPECT_CALL(*m_mock, start_context(_)).Times(2).WillRepeatedly(Return());
+    EXPECT_CALL(*m_mock, stop_context(_)).Times(2).WillRepeatedly(Return());
 
-    EXPECT_CALL(
-        *mock, sample_device_counting_service(
-                   ::testing::Field(&MockBackend::context_id_t::handle, 50u), _, _, _, _))
+    EXPECT_CALL(*m_mock, sample_device_counting_service(
+                             ::testing::Field(&MockBackend::context_id_t::handle,
+                                              k_context_handle_agent0),
+                             _, _, _, _))
         .WillRepeatedly([](MockBackend::context_id_t, MockBackend::user_data_t,
                            MockBackend::counter_flag_t,
                            MockBackend::counter_record_t* out, size_t* count) {
@@ -366,9 +370,10 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
             *count               = 1;
             return MockBackend::status_success;
         });
-    EXPECT_CALL(
-        *mock, sample_device_counting_service(
-                   ::testing::Field(&MockBackend::context_id_t::handle, 51u), _, _, _, _))
+    EXPECT_CALL(*m_mock, sample_device_counting_service(
+                             ::testing::Field(&MockBackend::context_id_t::handle,
+                                              k_context_handle_agent1),
+                             _, _, _, _))
         .WillRepeatedly([](MockBackend::context_id_t, MockBackend::user_data_t,
                            MockBackend::counter_flag_t,
                            MockBackend::counter_record_t* out, size_t* count) {
@@ -413,15 +418,18 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
 
 TEST_F(SdkPmcCollectorWorkflowTest, SampleFailureProducesEmptyMetrics)
 {
-    auto agent = make_agent(42, 0, "GPU 0");
+    constexpr std::uint64_t k_agent_handle   = 42;
+    constexpr std::uint32_t k_context_handle = 100;
+
+    auto agent = make_agent(k_agent_handle, 0, "GPU 0");
 
     std::vector<counter_setup> counters = {
         { MockBackend::counter_id_t{ 10 }, "SQ_WAVES" },
     };
 
-    setup_provider_expectations(mock, 42, counters, /*context=*/100);
+    setup_provider_expectations(m_mock, k_agent_handle, counters, k_context_handle);
 
-    EXPECT_CALL(*mock, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*m_mock, sample_device_counting_service(_, _, _, _, _))
         .WillRepeatedly(Return(MockBackend::status_error));
 
     auto provider = std::make_shared<MockProvider>(

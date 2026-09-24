@@ -16,6 +16,9 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
+[build-dependencies]
+serde_json = { workspace = true }
+
 [dev-dependencies]
 mirage_builtin = { workspace = true }
 tempfile = { workspace = true }

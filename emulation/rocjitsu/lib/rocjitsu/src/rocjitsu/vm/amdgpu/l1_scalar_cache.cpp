@@ -3,9 +3,9 @@
 
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 
-#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 
 #include <algorithm>
 #include <cassert>
@@ -15,25 +15,35 @@ namespace rocjitsu {
 namespace amdgpu {
 
 L1ScalarCache::L1ScalarCache(L2Cache *l2)
-    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_epoch()) {}
+    : l2_(l2), coherence_epoch_(l2_ ? l2_->coherence_domain()->current_epoch() : 0) {}
 
 L1ScalarCache::~L1ScalarCache() = default;
 
 void L1ScalarCache::set_l2(L2Cache *l2) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  invalidate_all_lines();
   l2_ = l2;
+  coherence_epoch_ = l2_ ? l2_->coherence_domain()->current_epoch() : 0;
 }
 
-void L1ScalarCache::set_memory(GpuMemory *mem) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
-  memory_ = mem;
+void L1ScalarCache::set_gpu_vm(GpuVm *gpu_vm) {
+  invalidate_all_lines();
+  gpu_vm_ = gpu_vm;
 }
 
-void L1ScalarCache::ensure_line_locked(uint64_t addr, uint32_t vmid) {
-  if (cache_.lookup(addr, nullptr, vmid))
-    return;
+VmAccessOutcome L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
+  simdojo::CacheTag *resident = nullptr;
+  if (cache_.lookup(addr, &resident, vmid)) {
+    if (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, CacheStore::LINE_SIZE))
+      return VmAccessOutcome::Complete;
+
+    uint8_t line_buf[CacheStore::LINE_SIZE];
+    const VmAccessOutcome outcome =
+        l2_->read(CacheStore::line_address(addr), line_buf, CacheStore::LINE_SIZE, Mtype::RW, vmid);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    cache_.fill_missing_bytes(addr, line_buf, vmid);
+    return VmAccessOutcome::Complete;
+  }
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
@@ -41,14 +51,41 @@ void L1ScalarCache::ensure_line_locked(uint64_t addr, uint32_t vmid) {
 
   assert(!evicted.dirty && "L1 K$ is write-through; lines should never be dirty");
 
+  if (!fetch_on_miss) {
+    simdojo::CacheTag *allocated = nullptr;
+    cache_.lookup(addr, &allocated, vmid);
+    assert(allocated != nullptr);
+    CacheStore::clear_valid_bytes(*allocated);
+    return VmAccessOutcome::Complete;
+  }
+
   uint8_t line_buf[CacheStore::LINE_SIZE];
-  l2_->read(line_addr, line_buf, CacheStore::LINE_SIZE, Mtype::RW, vmid);
+  const VmAccessOutcome outcome =
+      l2_->read(line_addr, line_buf, CacheStore::LINE_SIZE, Mtype::RW, vmid);
+  if (outcome != VmAccessOutcome::Complete) {
+    cache_.invalidate(addr, vmid);
+    return outcome;
+  }
   cache_.fill_line(addr, line_buf, vmid);
+  return VmAccessOutcome::Complete;
 }
 
-void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+void L1ScalarCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
+                                        uint32_t vmid) {
+  simdojo::CacheTag *tag = nullptr;
+  if (!cache_.lookup(addr, &tag, vmid)) {
+    simdojo::CacheTag evicted;
+    tag = cache_.allocate(addr, vmid, &evicted);
+    assert(!evicted.dirty && "L1 K$ is write-through; lines should never be dirty");
+    CacheStore::clear_valid_bytes(*tag);
+  }
+  cache_.write_line(addr, src, CacheStore::line_offset(addr), size, vmid);
+}
+
+VmAccessOutcome L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src,
+                                     uint32_t vmid) {
+  synchronize_epoch();
+  RequestMtypeResolver mtypes(gpu_vm_, vmid);
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4];
@@ -60,36 +97,47 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
       const uint32_t chunk =
           std::min<uint32_t>(sizeof(buf) - copied, CacheStore::LINE_SIZE - line_offset);
 
-      Mtype mtype = Mtype::RW;
-      if (memory_)
-        mtype = memory_->pte_mtype(chunk_addr, vmid);
+      const Mtype mtype = mtypes.at(chunk_addr);
 
       if (mtype == Mtype::UC) {
-        flush_line_locked(chunk_addr, vmid);
-        l2_->write(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+        flush_line(chunk_addr, vmid);
+        const VmAccessOutcome outcome =
+            l2_->write(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
         copied += chunk;
         continue;
       }
 
       if (mtype == Mtype::CC) {
-        flush_line_locked(chunk_addr, vmid);
-        l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        flush_line(chunk_addr, vmid);
+        const VmAccessOutcome outcome =
+            l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
         copied += chunk;
         continue;
       }
 
-      ensure_line_locked(chunk_addr, vmid); // read-allocate on miss
+      const VmAccessOutcome fill_outcome = ensure_line(chunk_addr, vmid, /*fetch_on_miss=*/false);
+      if (fill_outcome != VmAccessOutcome::Complete)
+        return fill_outcome;
+
+      const VmAccessOutcome write_outcome =
+          l2_->write(chunk_addr, buf + copied, chunk, mtype, vmid);
+      if (write_outcome != VmAccessOutcome::Complete)
+        return write_outcome;
 
       simdojo::CacheTag *tag = nullptr;
       cache_.lookup(chunk_addr, &tag, vmid);
-      assert(tag != nullptr && "ensure_line_locked must guarantee hit");
+      assert(tag != nullptr && "ensure_line must guarantee hit");
 
       cache_.write_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
-      l2_->write(chunk_addr, buf + copied, chunk, mtype, vmid);
       tag->dirty = false;
       copied += chunk;
     }
   }
+  return VmAccessOutcome::Complete;
 }
 
 void L1ScalarCache::writeback_all(uint32_t vmid) {
@@ -98,22 +146,22 @@ void L1ScalarCache::writeback_all(uint32_t vmid) {
 }
 
 void L1ScalarCache::invalidate_all() {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
-  invalidate_all_locked();
+  synchronize_epoch();
+  invalidate_all_lines();
 }
 
-void L1ScalarCache::invalidate_all_locked() { cache_.invalidate_all(); }
+void L1ScalarCache::invalidate_all_lines() { cache_.invalidate_all(); }
 
-void L1ScalarCache::synchronize_epoch_locked() {
-  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+void L1ScalarCache::synchronize_epoch() {
+  assert(l2_ != nullptr && "L1 scalar cache requires an L2 cache");
+  const uint64_t current_epoch = l2_->coherence_domain()->current_epoch();
   if (coherence_epoch_ == current_epoch)
     return;
-  invalidate_all_locked();
+  invalidate_all_lines();
   coherence_epoch_ = current_epoch;
 }
 
-void L1ScalarCache::flush_line_locked(uint64_t addr, uint32_t vmid) {
+void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
   simdojo::CacheTag *tag = nullptr;
   if (!cache_.lookup(addr, &tag, vmid))
     return;
@@ -122,9 +170,10 @@ void L1ScalarCache::flush_line_locked(uint64_t addr, uint32_t vmid) {
   cache_.invalidate(addr, vmid);
 }
 
-void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst,
+                                    uint32_t vmid) {
+  synchronize_epoch();
+  RequestMtypeResolver mtypes(gpu_vm_, vmid);
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4]{};
@@ -135,51 +184,89 @@ void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint
       const uint32_t chunk =
           std::min<uint32_t>(sizeof(buf) - copied, CacheStore::LINE_SIZE - line_offset);
 
-      Mtype mtype = Mtype::RW;
-      if (memory_)
-        mtype = memory_->pte_mtype(chunk_addr, vmid);
+      const Mtype mtype = mtypes.at(chunk_addr);
 
       if (mtype == Mtype::UC) {
-        flush_line_locked(chunk_addr, vmid);
-        l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+        flush_line(chunk_addr, vmid);
+        const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
       } else if (mtype == Mtype::CC) {
-        flush_line_locked(chunk_addr, vmid);
-        l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        flush_line(chunk_addr, vmid);
+        const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
       } else {
-        ensure_line_locked(chunk_addr, vmid);
-        cache_.read_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
+        simdojo::CacheTag *resident = nullptr;
+        if (cache_.lookup(chunk_addr, &resident, vmid) &&
+            CacheStore::bytes_valid(*resident, line_offset, chunk)) {
+          cache_.read_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
+        } else if (!l2_->can_fetch_range(CacheStore::line_address(chunk_addr),
+                                         CacheStore::LINE_SIZE, vmid)) {
+          const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, mtype, vmid);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+          cache_partial_bytes(chunk_addr, buf + copied, chunk, vmid);
+          copied += chunk;
+          continue;
+        } else {
+          const VmAccessOutcome outcome = ensure_line(chunk_addr, vmid);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+          cache_.read_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
+        }
       }
       copied += chunk;
     }
     std::memcpy(&dst[i], buf, 4);
   }
+  return VmAccessOutcome::Complete;
 }
 
-void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst,
+                                          uint32_t vmid) {
+  synchronize_epoch();
+  RequestMtypeResolver mtypes(gpu_vm_, vmid);
   uint32_t copied = 0;
   while (copied < num_bytes) {
     uint64_t ea = addr + copied;
     uint32_t line_offset = CacheStore::line_offset(ea);
     uint32_t chunk = std::min(num_bytes - copied, CacheStore::LINE_SIZE - line_offset);
 
-    Mtype mtype = Mtype::RW;
-    if (memory_)
-      mtype = memory_->pte_mtype(ea, vmid);
+    const Mtype mtype = mtypes.at(ea);
 
     if (mtype == Mtype::UC) {
-      flush_line_locked(ea, vmid);
-      l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
+      flush_line(ea, vmid);
+      const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
     } else if (mtype == Mtype::CC) {
-      flush_line_locked(ea, vmid);
-      l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
+      flush_line(ea, vmid);
+      const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
     } else {
-      ensure_line_locked(ea, vmid);
-      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+      simdojo::CacheTag *resident = nullptr;
+      if (cache_.lookup(ea, &resident, vmid) &&
+          CacheStore::bytes_valid(*resident, line_offset, chunk)) {
+        cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+      } else if (!l2_->can_fetch_range(CacheStore::line_address(ea), CacheStore::LINE_SIZE, vmid)) {
+        const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, mtype, vmid);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+        cache_partial_bytes(ea, dst + copied, chunk, vmid);
+        copied += chunk;
+        continue;
+      } else {
+        const VmAccessOutcome outcome = ensure_line(ea, vmid);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+        cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+      }
     }
     copied += chunk;
   }
+  return VmAccessOutcome::Complete;
 }
 
 } // namespace amdgpu

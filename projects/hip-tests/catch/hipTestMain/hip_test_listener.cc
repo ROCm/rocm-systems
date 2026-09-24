@@ -104,7 +104,7 @@ public:
      * @brief Called once when the test run begins
      * Initializes TestParameterStore and detects level filter
      */
-    void testRunStarting(Catch::TestRunInfo const& testRunInfo) override {
+    void testRunStarting(Catch::TestRunInfo const&) override {
         TestParameterStore::instance().initialize();
         
         // Detect level filter from environment or command-line
@@ -178,7 +178,7 @@ public:
      * @brief Called when test run ends
      * Cleanup resources
      */
-    void testRunEnded(Catch::TestRunStats const& testRunStats) override {
+    void testRunEnded(Catch::TestRunStats const&) override {
         TestParameterStore::instance().clear();
     }
 };

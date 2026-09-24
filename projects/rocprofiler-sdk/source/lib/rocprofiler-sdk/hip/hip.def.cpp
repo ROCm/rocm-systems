@@ -723,6 +723,9 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipInitDevice, hipInitDevice, hipInitDevice_fn, device, deviceFlags, flags);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleEnumerateFunctions, hipModuleEnumerateFunctions, hipModuleEnumerateFunctions_fn, functions, numFunctions, mod);
+#endif
 // clang-format on
 
 #else

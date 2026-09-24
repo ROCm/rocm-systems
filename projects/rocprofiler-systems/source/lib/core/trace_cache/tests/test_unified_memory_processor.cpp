@@ -5,7 +5,6 @@
 // recording output sink.
 
 #include "common/env_vars.hpp"
-#include "common/tests/filesystem.hpp"
 #include "core/categories.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
@@ -19,6 +18,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -154,7 +154,7 @@ protected:
         if(!tmp_dir.empty())
         {
             std::error_code ec;
-            test_common::fs::remove_all(tmp_dir, ec);
+            std::filesystem::remove_all(tmp_dir, ec);
         }
     }
 
@@ -318,9 +318,9 @@ TEST_F(UnifiedMemoryProcessorTest,
        HostToDeviceMigrationsBucketByDestinationGpuUnderProducerSemantics)
 {
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/kCpu0,
-                                                   agent_type::CPU));
+                                                   agent_type::cpu));
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu2, 2048, 200, /*dev=*/kCpu0,
-                                                   agent_type::CPU));
+                                                   agent_type::cpu));
 
     processor->finalize_processing();
 
@@ -396,7 +396,7 @@ TEST_F(UnifiedMemoryProcessorTest, AgentLookupThrowFallsBackSafely)
 {
     auto sample =
         make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
-                                     /*duration=*/100, /*device_id=*/42, agent_type::CPU);
+                                     /*duration=*/100, /*device_id=*/42, agent_type::cpu);
     EXPECT_NO_THROW(processor->handle(sample));
 
     processor->finalize_processing();
@@ -438,7 +438,7 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
 TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath)
 {
     auto explicit_dir = tmp_dir + "/ump-explicit";
-    ASSERT_FALSE(test_common::fs::exists(explicit_dir));
+    ASSERT_FALSE(std::filesystem::exists(explicit_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, explicit_dir };
     rebuild_processor();
 
@@ -450,7 +450,7 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath
     for(const auto& e : registered_files())
     {
         EXPECT_THAT(e.path, ::testing::HasSubstr(explicit_dir));
-        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
         if(e.format == output_format::text) saw_txt = true;
         if(e.format == output_format::json) saw_json = true;
     }
@@ -463,10 +463,10 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
     const auto  relative_dir = std::string{ "ump-relative" };
     const auto* pwd          = getenv("PWD");
     const auto  base_dir =
-        (pwd != nullptr) ? test_common::fs::path{ pwd } : test_common::fs::current_path();
+        (pwd != nullptr) ? std::filesystem::path{ pwd } : std::filesystem::current_path();
     const auto expected_dir = (base_dir / relative_dir).string();
-    test_common::fs::remove_all(expected_dir);
-    ASSERT_FALSE(test_common::fs::exists(expected_dir));
+    std::filesystem::remove_all(expected_dir);
+    ASSERT_FALSE(std::filesystem::exists(expected_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, relative_dir };
     rebuild_processor();
 
@@ -478,34 +478,34 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
     for(const auto& e : registered_files())
     {
         EXPECT_THAT(e.path, ::testing::HasSubstr(expected_dir));
-        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
         if(e.format == output_format::text) saw_txt = true;
         if(e.format == output_format::json) saw_json = true;
     }
     EXPECT_TRUE(saw_txt) << "text file not registered";
     EXPECT_TRUE(saw_json) << "json file not registered";
 
-    test_common::fs::remove_all(expected_dir);
+    std::filesystem::remove_all(expected_dir);
 }
 
 TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
 {
     auto nested_dir = tmp_dir + "/ump-nested/a/b/c";
-    ASSERT_FALSE(test_common::fs::exists(nested_dir));
+    ASSERT_FALSE(std::filesystem::exists(nested_dir));
     const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, nested_dir };
     rebuild_processor();
 
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
     processor->finalize_processing();
 
-    EXPECT_TRUE(test_common::fs::exists(nested_dir)) << "nested dir not created";
+    EXPECT_TRUE(std::filesystem::exists(nested_dir)) << "nested dir not created";
 
     bool saw_txt  = false;
     bool saw_json = false;
     for(const auto& e : registered_files())
     {
         EXPECT_THAT(e.path, ::testing::HasSubstr(nested_dir));
-        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
         if(e.format == output_format::text) saw_txt = true;
         if(e.format == output_format::json) saw_json = true;
     }
@@ -528,7 +528,7 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
     bool saw_json = false;
     for(const auto& e : files)
     {
-        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
         if(e.format == output_format::text) saw_txt = true;
         if(e.format == output_format::json) saw_json = true;
     }
@@ -575,7 +575,7 @@ TEST_F(UnifiedMemoryProcessorTest, TriggerTableCoversAllKfdNames)
         const char* name = (row.kfd_name != nullptr) ? row.kfd_name : kSentinelFedName;
         processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
                                                        /*duration=*/100, /*device_id=*/0,
-                                                       agent_type::CPU, name));
+                                                       agent_type::cpu, name));
     }
 
     processor->finalize_processing();

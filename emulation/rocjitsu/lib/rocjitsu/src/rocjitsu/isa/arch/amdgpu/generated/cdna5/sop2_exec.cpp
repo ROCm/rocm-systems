@@ -218,19 +218,11 @@ void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SFmacF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(sdst)));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
+  amdgpu::execute_s_fmac_f32_sop2(*this, wf);
 }
 
 void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar(
-      sdst, (static_cast<uint32_t>(util::f32_to_f16_rtz(
-                 std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)))) |
-             (static_cast<uint32_t>(util::f32_to_f16_rtz(
-                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))
-              << 16)));
+  amdgpu::execute_s_cvt_pk_rtz_f16_f32_sop2(*this, wf);
 }
 
 void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
@@ -248,11 +240,7 @@ void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
 void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(sdst))));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
+  amdgpu::execute_s_fmac_f16_sop2(*this, wf);
 }
 
 void SMinimumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {

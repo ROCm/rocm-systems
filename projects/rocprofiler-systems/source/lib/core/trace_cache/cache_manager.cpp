@@ -18,9 +18,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 cache_manager&
 cache_manager::get_instance()
@@ -117,5 +115,4 @@ cache_manager::shutdown()
     LOG_TRACE("Cache manager storage shutdown complete");
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

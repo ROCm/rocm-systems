@@ -82,9 +82,10 @@ hipMemGenericAllocationHandle_t GetPhysicalMemory(hipDevice_t device, size_t siz
  *  - 2) With size as 0
  *  - 3) With Invalid hipMemRangeHandleType
  *  - 4) With Invalid Flags
- *  - 5) With device pointer as already freed memory
- *  - 6) With Host Memory
- *  - 7) With Unmapped Virtual memory
+ *  - 5) With the valid PCIe flag OR'd with an undefined bit
+ *  - 6) With device pointer as already freed memory
+ *  - 7) With Host Memory
+ *  - 8) With Unmapped Virtual memory
  * Test source
  * ------------------------
  *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
@@ -132,6 +133,14 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
                     hipErrorInvalidValue);
   }
 
+  SECTION("Valid Flag Combined With Undefined Bit") {
+    HIP_CHECK_ERROR(hipMemGetHandleForAddressRange(&handle,
+                    reinterpret_cast<hipDeviceptr_t>(dptr), sizeBytes,
+                    hipMemRangeHandleTypeDmaBufFd,
+                    hipMemRangeFlagDmaBufMappingTypePcie | (1u << 16)),
+                    hipErrorInvalidValue);
+  }
+
   SECTION("With Freed Memory") {
     int* devMem = nullptr;
     HIP_CHECK(hipMalloc(&devMem, sizeBytes));
@@ -168,7 +177,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
     HIP_CHECK_ERROR(
         hipMemGetHandleForAddressRange(&handle, ptrA, size_mem, hipMemRangeHandleTypeDmaBufFd, 0),
         hipErrorInvalidValue);
-    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+    HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptrA), size_mem));
   }
 
   HIP_CHECK(hipFree(dptr));
@@ -399,6 +408,54 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory) {
 /**
  * Test Description
  * ------------------------
+ *  - This testcase checks the hipMemRangeFlagDmaBufMappingTypePcie flag,
+ *  - 1) Create the device memory
+ *  - 2) Get a DMA-BUF handle requesting the PCIe BAR1 mapping via
+ *       hipMemRangeFlagDmaBufMappingTypePcie
+ *  - 3) Validate the handle by doing Read and Write operations
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory_PcieFlag) {
+  constexpr int size = 1024;
+  constexpr int sizeBytes = size * sizeof(int);
+  CTX_CREATE();
+
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  void* srcDevMem = createDeviceMemoryAndFillData(size);
+  REQUIRE(srcDevMem != nullptr);
+
+  int handle = -1;
+  const hipError_t status = hipMemGetHandleForAddressRange(
+      &handle, reinterpret_cast<hipDeviceptr_t>(srcDevMem), sizeBytes,
+      hipMemRangeHandleTypeDmaBufFd, hipMemRangeFlagDmaBufMappingTypePcie);
+
+  if (status == hipSuccess) {
+    REQUIRE(handle > 0);
+    REQUIRE(validateHandle(handle, size) == true);
+  }
+
+  HIP_CHECK(hipFree(srcDevMem));
+  CTX_DESTROY();
+  
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("DMA-BUF PCIe mapping type not supported on this device.");
+  }
+  HIP_CHECK(status);
+}
+
+/**
+ * Test Description
+ * ------------------------
  *  - This testcase checks following scenario
  *  - 1) Create the Virtual memory
  *  - 2) Get handle from hipMemGetHandleForAddressRange
@@ -437,6 +494,57 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM) {
   HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptrA), reservedAddrSize));
   CTX_DESTROY();
   ReleaseMemHandles();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This testcase checks the hipMemRangeFlagDmaBufMappingTypePcie flag,
+ *  - 1) Create the Virtual memory
+ *  - 2) Get a DMA-BUF handle requesting the PCIe BAR1 mapping via
+ *       hipMemRangeFlagDmaBufMappingTypePcie
+ *  - 3) Validate the handle by doing Read and Write operations
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM_PcieFlag) {
+  CTX_CREATE();
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  constexpr int size = 1024;
+  constexpr int sizeBytes = size * sizeof(int);
+
+  hipDeviceptr_t ptrA;
+  int reservedAddrSize;
+  ptrA = createVirtualMemoryAndFillData(size, &reservedAddrSize);
+  REQUIRE(reinterpret_cast<void*>(ptrA) != nullptr);
+
+  int handle = -1;
+  const hipError_t status = hipMemGetHandleForAddressRange(
+      &handle, ptrA, sizeBytes, hipMemRangeHandleTypeDmaBufFd, hipMemRangeFlagDmaBufMappingTypePcie);
+
+  if (status == hipSuccess) {
+    REQUIRE(handle > 0);
+    REQUIRE(validateHandle(handle, size) == true);
+  }
+
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptrA), reservedAddrSize));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptrA), reservedAddrSize));
+  CTX_DESTROY();
+  ReleaseMemHandles();
+  
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("DMA-BUF PCIe mapping type not supported on this device.");
+  }
+  HIP_CHECK(status);
 }
 
 /**
@@ -884,4 +992,73 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DifferentOffsets) {
   }
 
   HIP_CHECK(hipFree(dptr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Regression test for a leak in hipMemGetHandleForAddressRange(): exporting a DMA-BUF
+ *  - handle for a VMM address range retained an internal HSA allocation reference that was
+ *  - never released. Closing the returned fd, unmapping the address, and releasing the
+ *  - hipMemCreate() handle therefore did not reclaim the physical allocation.
+ *  - This test creates one VMM allocation, exports and closes its DMA-BUF handle, releases
+ *  - the allocation, and checks via hipMemGetInfo() that the memory is actually reclaimed.
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_NoLeakOnRelease) {
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  size_t granularity = GetGranularity(kDeviceId);
+  REQUIRE(granularity > 0);
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = kDeviceId;
+
+  hipMemGenericAllocationHandle_t memHandle;
+  HIP_CHECK(hipMemCreate(&memHandle, granularity, &prop, 0));
+
+  hipDeviceptr_t ptr;
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptr), granularity, granularity, 0, 0));
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(ptr), granularity, 0, memHandle, 0));
+
+  hipMemAccessDesc accessDesc{};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = kDeviceId;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(ptr), granularity, &accessDesc, 1));
+
+  HIP_CHECK(hipDeviceSynchronize());
+  size_t freeBefore = 0, total = 0;
+  HIP_CHECK(hipMemGetInfo(&freeBefore, &total));
+
+  int dmaBufFd = -1;
+  HIP_CHECK(hipMemGetHandleForAddressRange(&dmaBufFd, ptr, granularity,
+                                           hipMemRangeHandleTypeDmaBufFd, 0));
+  REQUIRE(dmaBufFd > 0);
+  REQUIRE(close(dmaBufFd) == 0);
+
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptr), granularity));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptr), granularity));
+  HIP_CHECK(hipMemRelease(memHandle));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  size_t freeAfter = 0;
+  HIP_CHECK(hipMemGetInfo(&freeAfter, &total));
+
+  // Once the fd, VA and allocation handle are all released, the physical allocation must be
+  // reclaimed. Before the fix, the retained-but-never-released HSA handle kept it resident,
+  // so freeAfter stayed pinned at freeBefore.
+  size_t reclaimed = (freeAfter > freeBefore) ? (freeAfter - freeBefore) : 0;
+  REQUIRE(reclaimed >= granularity / 2);
 }

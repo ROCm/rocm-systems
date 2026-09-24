@@ -120,7 +120,7 @@ if(GIT_FOUND)
 
   # get date information based on UTC
   # use the last two digits of year + week number + day in the week as HIP_VERSION_GITDATE
-  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import time; print(time.strftime('%y%W%w', time.gmtime(${HIP_VERSION_UNIXDATE})))"
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import time; print(time.strftime('%y%U%w', time.gmtime(${HIP_VERSION_UNIXDATE})))"
     RESULT_VARIABLE git_result
     OUTPUT_VARIABLE git_output
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

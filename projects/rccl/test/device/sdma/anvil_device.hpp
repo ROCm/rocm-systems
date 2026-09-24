@@ -3,8 +3,13 @@
 
 #include "sdma_opcodes.h"
 
-namespace gin_anvil {
-namespace sdma {
+namespace sdma_anvil {
+
+// Declared here; the single definition lives in anvil_stub_quiet_count.cpp
+// because every TU that includes gin_anvil_sdma.h would otherwise emit one.
+// test/CMakeLists.txt compiles IPC, Suite H and that TU -fgpu-rdc and
+// device-links rccl-UnitTestsFixtures whenever ENABLE_ROCSHMEM_GIN is on.
+extern __device__ unsigned long long g_sdmaStubQuietCount;
 
 struct SdmaQueueDeviceHandle {
   int tag;
@@ -33,7 +38,9 @@ __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* d
   memcpyDevice(dst, src, size);
 }
 
-__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) { (void)handle; }
+__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
+  (void)handle;
+  atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+}
 
-}  // namespace sdma
-}  // namespace gin_anvil
+}  // namespace sdma_anvil

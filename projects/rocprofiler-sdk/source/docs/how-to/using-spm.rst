@@ -6,7 +6,9 @@
 
 ==================
 Using SPM
-==================
+*****************************
+Using SPM
+*****************************
 
 SPM (Streaming Performance Monitor) sampling service for GPU profiling is a profiling technique to periodically sample performance counters with GPU timestamp.
 
@@ -17,6 +19,8 @@ Here are the benefits of using SPM to sample counters:
 - fine-grained, time-resolved performance data.
 
 To try out the SPM, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library.
+
+SPM is one of three hardware counter collection mechanisms in ROCprofiler-SDK, alongside dispatch PMC and device counter collection. For a comparison of granularity, timing, and use cases, see :ref:`How SPM differs from other counter services <glance-spm-comparison>` in the SDK overview.
 
 SPM availability and configuration
 ===========================================
@@ -69,36 +73,43 @@ Use the following command to use SPM:
 The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
 This generates a JSON results file prefixed with the process ID.
 
-.. code-block:: bash
+.. _spm-cli-options:
 
- rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  -- <application_path>
-
-The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
-This generates a rocpd results file prefixed with the process ID.
-
-SPM is emitted directly only to the JSON and ``rocpd`` (default) output formats. Only CSV output is supported from the rocpd database via ``rocpd convert``.
-
-Input parameters
+CLI options
 ===================
 
-Here are the input parameters used to configure SPM
+Use the following options to enable and configure SPM collection with ``rocprofv3``, or query SPM support per agent with ``rocprofv3-avail``.
 
-  - ``Metrics List``:  The list of counters that you want to sample with SPM.  Currently, basic counters are supported.
-  - ``SPM Sample Interval``:  Specifies the sampling interval for SPM counter collection. It is used with spm-sample-interval-unit to define how frequently counters are sampled.
-  - ``SPM Sample Interval Unit``: Specifies the unit for the SPM sample interval. Used with --spm-sample-interval to define the sampling interval. Currently, sclk_cycles unit is supported and the sample interval used with this unit is rounded to nearest multiple of 32.
+.. list-table::
+   :header-rows: 1
 
+   * - Tool
+     - Option
+     - Description
+     - Example
+   * - ``rocprofv3``
+     - ``--spm-beta-enabled``
+     - Required to enable SPM collection
+     - ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES -- ./my_app``
+   * -
+     - ``--spm <COUNTERS>``
+     - Counters to collect; all must fit in a single hardware pass
+     - ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES,SQ_BUSY_CYCLES -- ./my_app``
+   * -
+     - ``--spm-sample-interval <N>``
+     - Sampling interval in ``sclk_cycles``
+     - ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval 500 -- ./my_app``
+   * -
+     - ``--spm-sample-interval-unit <UNIT>``
+     - Interval unit; currently accepts ``sclk_cycles`` only
+     - ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles -- ./my_app``
+   * - ``rocprofv3-avail``
+     - ``list --spm``
+     - Lists SPM-capable counters per agent
+     - ``rocprofv3-avail list --spm``
+   * -
+     - ``list --spm-config``
+     - Lists agents with SPM configuration support, including minimum and maximum sampling intervals
+     - ``rocprofv3-avail list --spm-config``
 
-.. code-block:: bash
-
-  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
-  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200 -- <application_path>
-
-CSV format conversion
-=====================
-
-.. code-block:: bash
-
-  rocpd convert -i <input-file>.db --output-format csv
-
-The CSV conversion process generates a output file ``rocpd-output-data/out_spm_counter_collection_trace.csv`` path relative to the current working directory.
-
+``rocprofv3-avail`` is a companion tool that queries which counters support SPM, and which agents support SPM configuration, without collecting a trace. See :ref:`using-rocprofv3-avail` for full usage details.
