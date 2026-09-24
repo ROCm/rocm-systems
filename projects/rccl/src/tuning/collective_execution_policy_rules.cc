@@ -56,59 +56,45 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
   {{P2P, "gfx110", ALL_TO_ALL, kAnyBytes, kAnyInt, kAnyInt, kAnyInt, IPC, ANY_BOOL},
    {CHANNELS(1), KEEP, AUTO, AUTO_PATH, AUTO_XFER}},
 
+  // Direct Send/Recv remains on IPC below the measured 2 MiB per-peer
+  // crossover. P2P policy facts are rank-aggregate bytes, hence 16 MiB here
+  // for the eight-rank gfx120x tuning topology. Keep the ordinary Send/Recv
+  // work shape automatic; this row selects only its transport.
+  {{P2P, "gfx120", ncclFuncSend, {0, (16ULL << 20) - 1}, EQ(1), EQ(8),
+    kAnyInt, IPC, ANY_BOOL},
+   {AUTO, KEEP, AUTO, AUTO_PATH, AUTO_XFER}},
+  {{P2P, "gfx120", ncclFuncRecv, {0, (16ULL << 20) - 1}, EQ(1), EQ(8),
+    kAnyInt, IPC, ANY_BOOL},
+   {AUTO, KEEP, AUTO, AUTO_PATH, AUTO_XFER}},
+
   // Runtime IPC/SHM crossover candidates for P2P-backed collectives. Each
   // endpoint resolves the same per-link byte count and placement, so the
-  // selected connector index remains symmetric. Bands use the measured
-  // crossovers from the current-policy transport A/B sweep.
-  {{P2P, "gfx1201", GATHER, {1ULL << 20, (3ULL << 20) - 1}, EQ(1), EQ(8),
+  // selected connector index remains symmetric. Bands require a >=3% win in
+  // both placements at two or more adjacent sizes in the September 24 sweep.
+  // Placement-specific rows are used only where the measurements diverge.
+  {{P2P, "gfx1201", GATHER, {1ULL << 20, (1536ULL << 10) - 1}, EQ(1), EQ(8),
+    kAnyInt, SHM, BOOL_FALSE},
+   {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
+  {{P2P, "gfx1201", GATHER, {1536ULL << 10, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
 
   {{P2P, "gfx1201", SCATTER, {48ULL << 10, (768ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
-  {{P2P, "gfx1201", SCATTER, {24ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
+  {{P2P, "gfx1201", SCATTER, {96ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
 
-  {{P2P, "gfx1201", ALL_TO_ALL, {48ULL << 10, (96ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, BOOL_FALSE},
-   {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
-  {{P2P, "gfx1201", ALL_TO_ALL, {96ULL << 10, (1536ULL << 10) - 1}, EQ(1), EQ(8),
+  {{P2P, "gfx1201", ALL_TO_ALL, {48ULL << 10, (768ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
-  {{P2P, "gfx1201", ALL_TO_ALL, {6ULL << 20, (96ULL << 20) - 1}, EQ(1), EQ(8),
+  {{P2P, "gfx1201", ALL_TO_ALL, {12ULL << 20, (96ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
   {{P2P, "gfx1201", ALL_TO_ALL, {384ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, BOOL_FALSE},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}},
-
-  // AllToAllV can pair differently sized send and receive tasks in one work
-  // item. Every transport band therefore carries the same complete channel,
-  // protocol, and transfer shape as its fallback profile so preconnect and
-  // runtime channel namespaces cannot diverge on a mixed-band item.
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {24ULL << 10, (48ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {48ULL << 10, (96ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, BOOL_TRUE},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {96ULL << 10, (192ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {192ULL << 10, (384ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, BOOL_FALSE},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {384ULL << 10, (768ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {768ULL << 10, (1536ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, BOOL_FALSE},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
-  {{P2P, "gfx1201", ALL_TO_ALL_V, {1536ULL << 10, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
 
   // Large out-of-place AllToAll is stable on one channel; two channels produce
   // severe long-tail stalls while in-place execution remains stable.
@@ -144,28 +130,16 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
     ANY_BOOL},
    {CHANNELS(8), KEEP, SIMPLE, SENDRECV, READ}},
 
-  // Runtime IPC/SHM crossover candidates. SHM is ranked ahead of the broader
-  // IPC candidates only in these measured winning bands. The candidate is
-  // considered only when SHM survives availability and user-intent filtering:
-  //   AllReduce: IPC at 16/256 MiB, SHM at 32/64/128 MiB.
-  //   Reduce:    IPC at 8 MiB/1 GiB, SHM at 16 MiB through 512 MiB.
-  //   Broadcast: IPC at 8 MiB/1 GiB, SHM at 16 MiB through 512 MiB.
-  //
+  // Runtime IPC/SHM crossover candidates from the September 24 forced-path
+  // sweep. SHM is ranked ahead of the broader IPC candidates only where it won
+  // by >=3% in both placements at two or more adjacent measured sizes.
   // Arithmetic midpoints provide smooth handoffs between measured sizes.
-  {{COLL, "gfx1201", ALL_REDUCE, {24ULL << 20, (192ULL << 20) - 1}, EQ(1), EQ(8),
+  {{COLL, "gfx1201", REDUCE, {24ULL << 20, (1536ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}},
-  {{COLL, "gfx1201", REDUCE, {12ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), RING, SIMPLE, AUTO_PATH, KEEP}},
-  {{COLL, "gfx1201", REDUCE, {16ULL << 20, (768ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}},
-  {{COLL, "gfx1201", BROADCAST, {12ULL << 20, (768ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), RING, SIMPLE, AUTO_PATH, KEEP}},
-  // AllGather and ReduceScatter have no measured SHM-winning crossover, so
-  // they intentionally fall through to their IPC profiles below.
+  // AllReduce, AllGather, and ReduceScatter have no stable SHM-winning
+  // crossover. Broadcast also remains IPC below 16 MiB; all four intentionally
+  // fall through to their IPC profiles.
 
   // Eight-rank, single-node gfx1201 P2P/IPC matrix. Ring/protocol ranges use
   // both placements; channel overrides require a >=3% gain in each placement
