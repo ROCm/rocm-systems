@@ -69,8 +69,8 @@ bool CompileLibrarySource(std::vector<char>& code) {
   return true;
 }
 
-// Compile to a temp file: installed test directories may be read-only.
-// Returns the path; the caller must remove the file.
+// Compile to a temp file: an installed test tree may be read-only.
+// Caller removes the returned path.
 std::string WriteCodeObjectFile(const char* suffix) {
   std::vector<char> code;
   if (!CompileLibrarySource(code)) {

@@ -18,7 +18,7 @@
 namespace {
 constexpr size_t kByteCount = 64;
 
-// Use the temp directory because installed test directories may be read-only.
+// Temp dir: an installed test tree may be read-only.
 std::string DotPath() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
