@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
+#include <array>
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <vector>
@@ -177,6 +179,80 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
   HIP_CHECK(hipFree(dstPtr1));
   HIP_CHECK(hipFree(dstPtr2));
   HIP_CHECK(hipStreamDestroy(stream));
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Verify that pointer operands in the middle of pinned-host and device allocations retain
+ *   their allocation-relative byte offsets on the batched pointer fast path.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrInteriorOffsets) {
+  constexpr size_t kAllocationBytes = 1024;
+  constexpr size_t kCopyBytes = 64;
+  constexpr size_t kNumOps = 2;
+  constexpr unsigned char kHostGuard = 0xee;
+  constexpr unsigned char kDeviceGuard = 0xcc;
+  constexpr std::array<size_t, kNumOps> kSrcOffsets = {64, 320};
+  constexpr std::array<size_t, kNumOps> kDstOffsets = {128, 384};
+  constexpr std::array<unsigned char, kNumOps> kValues = {0x31, 0x72};
+
+  hipStream_t stream = nullptr;
+  void* hostAllocation = nullptr;
+  void* deviceAllocation = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipHostMalloc(&hostAllocation, kAllocationBytes));
+  HIP_CHECK(hipMalloc(&deviceAllocation, kAllocationBytes));
+
+  auto* hostBytes = static_cast<unsigned char*>(hostAllocation);
+  auto* deviceBytes = static_cast<unsigned char*>(deviceAllocation);
+  std::fill_n(hostBytes, kAllocationBytes, kHostGuard);
+  for (size_t i = 0; i < kNumOps; ++i) {
+    std::fill_n(hostBytes + kSrcOffsets[i], kCopyBytes, kValues[i]);
+  }
+  HIP_CHECK(hipMemsetAsync(deviceAllocation, kDeviceGuard, kAllocationBytes, stream));
+
+  std::array<hipMemcpy3DBatchOp, kNumOps> operations{};
+  for (size_t i = 0; i < kNumOps; ++i) {
+    operations[i].src.type = hipMemcpyOperandTypePointer;
+    operations[i].src.op.ptr.ptr = hostBytes + kSrcOffsets[i];
+    operations[i].src.op.ptr.rowLength = kCopyBytes;
+    operations[i].src.op.ptr.layerHeight = 1;
+    operations[i].src.op.ptr.locHint.type = hipMemLocationTypeHost;
+    operations[i].src.op.ptr.locHint.id = 0;
+    operations[i].dst.type = hipMemcpyOperandTypePointer;
+    operations[i].dst.op.ptr.ptr = deviceBytes + kDstOffsets[i];
+    operations[i].dst.op.ptr.rowLength = kCopyBytes;
+    operations[i].dst.op.ptr.layerHeight = 1;
+    operations[i].dst.op.ptr.locHint.type = hipMemLocationTypeDevice;
+    operations[i].dst.op.ptr.locHint.id = 0;
+    operations[i].extent = make_hipExtent(kCopyBytes, 1, 1);
+    operations[i].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+    operations[i].flags = hipMemcpyFlagDefault;
+  }
+
+  size_t failIdx = SIZE_MAX;
+  HIP_CHECK(hipMemcpy3DBatchAsync(kNumOps, operations.data(), &failIdx, 0, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<unsigned char> actual(kAllocationBytes);
+  std::vector<unsigned char> expected(kAllocationBytes, kDeviceGuard);
+  HIP_CHECK(hipMemcpy(actual.data(), deviceAllocation, kAllocationBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kNumOps; ++i) {
+    std::copy_n(hostBytes + kSrcOffsets[i], kCopyBytes, expected.data() + kDstOffsets[i]);
+  }
+
+  HIP_CHECK(hipFree(deviceAllocation));
+  HIP_CHECK(hipHostFree(hostAllocation));
+  HIP_CHECK(hipStreamDestroy(stream));
+
+  REQUIRE(failIdx == SIZE_MAX);
+  REQUIRE(actual == expected);
 }
 /**
  * Test Description

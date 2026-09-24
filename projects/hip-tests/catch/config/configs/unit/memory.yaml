@@ -839,6 +839,7 @@ memory:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps: *level_2
+  Unit_hipMemcpy3DBatchAsync_Ptr2PtrInteriorOffsets: *level_2
   Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps:
     <<: *level_2
     tags: [image]

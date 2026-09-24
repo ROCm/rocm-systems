@@ -3390,6 +3390,9 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
         HIP_RETURN(status);
       }
 
+      // validateMemoryObject has already folded each allocation-relative byte offset into
+      // srcRect.start_ and dstRect.start_.  The lookup below only retrieves the backing
+      // memory objects; adding its offsets to the rects again would double-count them.
       size_t sOffset = 0;
       size_t dOffset = 0;
       amd::Memory* srcMemory = nullptr;
