@@ -245,10 +245,20 @@ only the one-value probe has complete static atomic coverage. The eight-value
 and relaxed probes retain their existing unpatched atomic sites. Evidence:
 `lane-host-tests.log` and `lanes-publication-{1,8,relaxed}-inspect.log`.
 
+Static synchronization analysis now retains `lds_release_wait_text_offset`
+separately from the general release role. An exact same-block LDS-zero wait
+before the atomic is evidence of LDS completion, including when earlier scalar
+bookkeeping separates it from a global-store wait. It does not assert completion
+of an outstanding global store. Tests cover both drained and outstanding generic
+stores, and reject nonzero waits, a later store, scalar separation after the wait,
+and branch boundaries. All 22 selected synchronization-analysis tests pass
+(`lds-completion-tests.log`). Device publication capture must consume this
+LDS-only fact explicitly; legacy synchronization attachment is unchanged.
+
 Atomic observations are not yet captured and the publication trace remains
 disabled, so the current red cells are unchanged. Remaining work is device
-atomic-observation capture, completion recognition, and the clean/fault
-qualification matrix above.
+atomic-observation capture, consumption of the LDS completion facts, and the
+clean/fault qualification matrix above.
 The device capture must establish the complete-transition precondition; setting
 that flag on the existing address/role metadata would be unsound.
 

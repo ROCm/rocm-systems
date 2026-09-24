@@ -329,6 +329,11 @@ struct SyncSequence : SyncSemantics {
   /// synchronization event: it is meaningful only as part of the containing
   /// communication sequence.
   std::optional<uint64_t> release_wait_text_offset;
+  /// Same-block zero-count wait completing preceding LDS operations before
+  /// this atomic. This address-space-specific fact does not promote the
+  /// general memory role: global stores may still be outstanding. Publication
+  /// analysis may use it only for accesses proven to refer to LDS.
+  std::optional<uint64_t> lds_release_wait_text_offset;
   /// Header of an exactly proven compiler polling loop whose successful exit
   /// reaches this acquire sequence's fence. A consumer that relocates the
   /// acquire must include this header so the loop backedge cannot re-enter a

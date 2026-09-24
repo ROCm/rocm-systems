@@ -3605,6 +3605,75 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
   EXPECT_NE(sequence.identity.find("|acquire-cache="), std::string::npos);
 }
 
+TEST(ConSan, LdsPublicationCompletionDoesNotInventGlobalRelease) {
+  // Both variants leave scalar bookkeeping between a generic store and the
+  // atomic. Only one variant drains the global store. The final LDS wait proves
+  // LDS completion in either case, and neither suffix proves a global release.
+  for (const bool drain_global : {false, true}) {
+    SCOPED_TRACE(drain_global);
+    std::vector<uint32_t> words = {
+        0xEC06C07Cu,
+        0x04000000u,
+        0x00000000u, // flat_store_b64
+    };
+    if (drain_global)
+      words.push_back(*build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4));
+    words.push_back(0xBE840080u); // s_mov_b32 s4, 0
+    const uint64_t lds_wait_offset = words.size() * sizeof(uint32_t);
+    words.insert(words.end(), {
+                                  0xBFC60000u, // s_wait_dscnt 0
+                                  0xEE0D400Cu,
+                                  0x01980002u,
+                                  0x00000002u, // returning global atomic add
+                                  0xBFC00000u, // s_wait_loadcnt 0
+                                  0xEE0AC000u,
+                                  0x00000000u,
+                                  0x00000000u, // global_inv
+                              });
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
+    const auto result = test_semantic_inventory(make_rdna4_lds_code_object(words), options);
+    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+    const auto sequences = result.program_inventory.sync().sync_sequences;
+    const auto found =
+        std::ranges::find_if(sequences, [](const auto &s) { return s.kind == SyncKind::Atomic; });
+    ASSERT_NE(found, sequences.end());
+    EXPECT_EQ(found->lds_release_wait_text_offset, lds_wait_offset);
+    EXPECT_EQ(found->memory_role, SyncMemoryRole::Acquire);
+    EXPECT_FALSE(found->release_wait_text_offset);
+  }
+}
+
+TEST(ConSan, LdsPublicationCompletionRequiresExactSameBlockZeroWait) {
+  for (const std::vector<uint32_t> &prefix : {
+           std::vector<uint32_t>{0xBFC60001u},              // nonzero LDS wait
+           std::vector<uint32_t>{0xBFC60000u, 0xBE840080u}, // separated wait
+           std::vector<uint32_t>{0xBFC60000u, 0xBFA00000u}, // branch boundary
+           std::vector<uint32_t>{0xBFC60000u, 0xEC06C07Cu, 0x04000000u, 0x00000000u}, // later store
+       }) {
+    std::vector<uint32_t> words = prefix;
+    words.insert(words.end(), {
+                                  0xEE0D400Cu,
+                                  0x01980002u,
+                                  0x00000002u,
+                                  0xBFC00000u,
+                                  0xEE0AC000u,
+                                  0x00000000u,
+                                  0x00000000u,
+                              });
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
+    const auto result = test_semantic_inventory(make_rdna4_lds_code_object(words), options);
+    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+    const auto sequences = result.program_inventory.sync().sync_sequences;
+    const auto found =
+        std::ranges::find_if(sequences, [](const auto &s) { return s.kind == SyncKind::Atomic; });
+    ASSERT_NE(found, sequences.end());
+    EXPECT_FALSE(found->lds_release_wait_text_offset);
+    EXPECT_FALSE(found->release_wait_text_offset);
+  }
+}
+
 TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
   const auto wait_store = build_rdna3_s_wait_vscnt0(kArch);

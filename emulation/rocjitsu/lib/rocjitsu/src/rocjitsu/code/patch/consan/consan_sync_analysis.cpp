@@ -1479,6 +1479,21 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   }
   sync_sequences = std::move(associated);
 
+  // Retain LDS completion independently of the general memory role, before
+  // release association extends begin_text_offset to include preceding waits.
+  // A device atomic may publish LDS even when its exact suffix has no global
+  // store wait (for example, LLVM already drained a generic store before scalar
+  // bookkeeping). Conversely, an LDS wait alone cannot complete global stores.
+  for (SyncSequence &sequence : sync_sequences) {
+    if (sequence.kind != SyncKind::Atomic)
+      continue;
+    sequence.lds_release_wait_text_offset =
+        exact_workgroup_release_wait_boundary(sequence, blocks, arch);
+    if (sequence.lds_release_wait_text_offset)
+      sequence.identity +=
+          "|lds-release-wait=pc=0x" + fixed_hex(*sequence.lds_release_wait_text_offset, 16);
+  }
+
   // RDNA4/CDNA5 lower the release half of an atomic to an immediately preceding
   // store-count-zero wait, either combined or inside a contiguous suffix of
   // counter-specific waits, without a separate release-cache event. This applies
