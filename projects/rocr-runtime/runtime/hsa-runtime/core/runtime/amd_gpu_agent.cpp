@@ -466,8 +466,12 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
 
+  // NonPaged: GPU-executed code, and a trap handler that can itself fault turns one fault into a
+  // retry storm.
   code_buf = system_allocator()(code_buf_size, 0x1000,
-    core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateExecutableBlitKernelObject);
+                                core::MemoryRegion::AllocateExecutable |
+                                    core::MemoryRegion::AllocateExecutableBlitKernelObject |
+                                    core::MemoryRegion::AllocateNonPaged);
   assert(code_buf != NULL && "Code buffer allocation failed");
 
   memset(code_buf, 0, code_buf_size);
@@ -2500,7 +2504,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         }
       }
       // Fallback for when KFD is returning zero.
-      *((uint32_t*)value) = 64;
+      *((uint32_t*)value) = 256;
       break;
     case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
       *((uint32_t*)value) =

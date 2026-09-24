@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
@@ -13,253 +12,87 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
-#include <fcntl.h>
-#include <unistd.h>
-
-namespace rocjitsu::amdgpu {
-class GpuMemoryFetchabilityTestPeer {
-public:
-  static std::unique_lock<std::shared_mutex> lock_registry(GpuMemory &memory) {
-    return std::unique_lock(memory.vmid_mutex_);
-  }
-
-  static void unregister_and_pause(GpuMemory &memory, uint32_t vmid, std::promise<void> &removed,
-                                   const std::shared_future<void> &resume) {
-    memory.update_vmid_registration(vmid, [&](auto it) {
-      memory.vmid_table_.erase(it);
-      removed.set_value();
-      resume.wait();
-      return true;
-    });
-  }
-};
-} // namespace rocjitsu::amdgpu
-
 namespace {
 
 using rocjitsu::amdgpu::GpuMemory;
+using rocjitsu::amdgpu::GpuVm;
 using rocjitsu::amdgpu::InstructionCache;
 namespace amdgpu = rocjitsu::amdgpu;
 
 constexpr uint64_t kCodeBase = 0x200000;
-constexpr uint32_t kMappedVmid = 7;
-
-void register_fetchable_process(GpuMemory &memory, rocjitsu::KfdProcess &process) {
-  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation(), process.page_table_request_mutex(),
-                          process.page_table_fetchability_epoch());
-}
-
-TEST(FetchabilityCacheTest, PositiveHitDoesNotTakeRegistryOrPageTableLocks) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  process.map_pages(kCodeBase, code.data(), code.size());
-  register_fetchable_process(memory, process);
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  auto registry_lock = amdgpu::GpuMemoryFetchabilityTestPeer::lock_registry(memory);
-  std::unique_lock lock(process.page_table_mutex_);
-  auto hit = std::async(std::launch::async,
-                        [&] { return memory.is_fetchable(kCodeBase + 4, kMappedVmid, cache); });
-  const auto status = hit.wait_for(std::chrono::seconds(2));
-  lock.unlock();
-  registry_lock.unlock();
-  EXPECT_EQ(status, std::future_status::ready);
-  EXPECT_TRUE(hit.get());
-}
-
-TEST(FetchabilityCacheTest, MappingMutationsAndPageKeysInvalidateThePositive) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  register_fetchable_process(memory, process);
-  GpuMemory::FetchabilityCache cache;
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  process.map_pages(kCodeBase, code.data(), code.size());
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase + GpuMemory::PAGE_SIZE, kMappedVmid, cache));
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase, kMappedVmid + 1, cache));
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  // Page presence, including disjoint sub-page mappings, matches is_mapped().
-  process.map_pages(kCodeBase + 128, code.data(), code.size());
-  process.unmap_pages(kCodeBase, code.size());
-  EXPECT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  process.unmap_pages(kCodeBase + 128, code.size());
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  process.map_pages(kCodeBase, code.data(), code.size());
-  EXPECT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-}
-
-TEST(FetchabilityCacheTest, InvalidatedPositiveRequiresAFreshLockedSnapshot) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  process.map_pages(kCodeBase, code.data(), code.size());
-  register_fetchable_process(memory, process);
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  process.map_pages(kCodeBase, code.data(), code.size());
-
-  auto registry_lock = amdgpu::GpuMemoryFetchabilityTestPeer::lock_registry(memory);
-  std::unique_lock lock(process.page_table_mutex_);
-  std::promise<void> started;
-  auto started_future = started.get_future();
-  auto refill = std::async(std::launch::async, [&] {
-    started.set_value();
-    return memory.is_fetchable(kCodeBase, kMappedVmid, cache);
-  });
-  started_future.wait();
-  const auto status = refill.wait_for(std::chrono::milliseconds(100));
-  lock.unlock();
-  registry_lock.unlock();
-  EXPECT_EQ(status, std::future_status::timeout);
-  EXPECT_TRUE(refill.get());
-}
-
-TEST(FetchabilityCacheTest, ReplacingARegistrationInvalidatesItsOldToken) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess first(kMappedVmid);
-  rocjitsu::KfdProcess replacement(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  first.map_pages(kCodeBase, code.data(), code.size());
-  register_fetchable_process(memory, first);
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  register_fetchable_process(memory, replacement);
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-}
-
-TEST(FetchabilityCacheTest, InProgressUnregistrationInvalidatesCachedChecks) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  process.map_pages(kCodeBase, code.data(), code.size());
-  register_fetchable_process(memory, process);
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  std::promise<void> removed, resume;
-  auto removed_future = removed.get_future();
-  auto resume_future = resume.get_future().share();
-  auto unregister = std::async(std::launch::async, [&] {
-    amdgpu::GpuMemoryFetchabilityTestPeer::unregister_and_pause(memory, kMappedVmid, removed,
-                                                                resume_future);
-  });
-  removed_future.wait();
-
-  // The binding is gone, but the registry update still holds its lock. A
-  // cached check must refill after that update instead of accepting the old
-  // positive while waiting for the generation to be published.
-  std::promise<void> started;
-  auto started_future = started.get_future();
-  auto check = std::async(std::launch::async, [&] {
-    started.set_value();
-    return memory.is_fetchable(kCodeBase, kMappedVmid, cache);
-  });
-  started_future.wait();
-  const auto status = check.wait_for(std::chrono::milliseconds(100));
-  resume.set_value();
-  unregister.get();
-  EXPECT_EQ(status, std::future_status::timeout);
-  EXPECT_FALSE(check.get());
-}
-
-TEST(FetchabilityCacheTest, RetainedTokenSurvivesUnregistrationAndProcessDestruction) {
-  GpuMemory memory("memory");
-  auto process = std::make_unique<rocjitsu::KfdProcess>(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  process->map_pages(kCodeBase, code.data(), code.size());
-  register_fetchable_process(memory, *process);
-  std::weak_ptr<const std::atomic<uint64_t>> epoch = process->page_table_fetchability_epoch();
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  memory.unregister_process(kMappedVmid);
-  process.reset();
-  EXPECT_FALSE(epoch.expired());
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  EXPECT_TRUE(epoch.expired());
-}
-
-TEST(FetchabilityCacheTest, ReconstructedMemoryDoesNotReuseAPositiveSnapshot) {
-  std::optional<GpuMemory> memory(std::in_place, "first");
-  rocjitsu::KfdProcess first(kMappedVmid);
-  rocjitsu::KfdProcess replacement(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  first.map_pages(kCodeBase, code.data(), code.size());
-  register_fetchable_process(*memory, first);
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory->is_fetchable(kCodeBase, kMappedVmid, cache));
-
-  // The second memory uses the same address and the same registry generation.
-  memory.reset();
-  memory.emplace("replacement");
-  register_fetchable_process(*memory, replacement);
-  EXPECT_FALSE(memory->is_fetchable(kCodeBase, kMappedVmid, cache));
-}
-
-TEST(FetchabilityCacheTest, LegacyRegistrationWithoutATokenIsUncached) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint8_t, InstructionCache::kLineSize> code{};
-  process.map_pages(kCodeBase, code.data(), code.size());
-  memory.register_process(kMappedVmid, &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-  {
-    std::unique_lock lock(process.page_table_mutex_);
-    // Legacy embedders need not publish either kind of generation.
-    process.page_table_.clear();
-  }
-  EXPECT_FALSE(memory.is_fetchable(kCodeBase, kMappedVmid, cache));
-}
-
-TEST(FetchabilityCacheTest, ClientMemoryFallbackIsNotCached) {
-  GpuMemory memory("memory");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  register_fetchable_process(memory, process);
-  const int mem_fd = ::open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(mem_fd, 0);
-  memory.set_process_mem_fd(kMappedVmid, mem_fd);
-  ::close(mem_fd);
-  uint8_t byte = 42;
-  const uint64_t address = reinterpret_cast<uint64_t>(&byte);
-  GpuMemory::FetchabilityCache cache;
-  ASSERT_TRUE(memory.is_fetchable(address, kMappedVmid, cache));
-
-  memory.set_process_mem_fd(kMappedVmid, -1);
-  EXPECT_FALSE(memory.is_fetchable(address, kMappedVmid, cache));
-}
 
 /// @brief Fill @p bytes of code memory at kCodeBase with a per-byte pattern.
-std::vector<uint8_t> fill_code(GpuMemory &memory, size_t bytes, uint8_t salt, uint32_t vmid = 0) {
+std::vector<uint8_t> fill_code(GpuMemory &memory, size_t bytes, uint8_t salt) {
   std::vector<uint8_t> expected(bytes);
   for (size_t i = 0; i < bytes; ++i)
     expected[i] = static_cast<uint8_t>((i * 7) ^ salt);
-  memory.write_block(kCodeBase, std::span<const uint8_t>(expected), vmid);
+  memory.write_block(kCodeBase, std::span<const uint8_t>(expected));
   return expected;
 }
 
-std::array<uint8_t, InstructionCache::kFetchBytes>
-fetch_at(InstructionCache &icache, const GpuMemory &memory, uint64_t pc, uint32_t vmid = 0) {
+std::array<uint8_t, InstructionCache::kFetchBytes> fetch_at(InstructionCache &icache,
+                                                            const GpuMemory &memory, uint64_t pc) {
   std::array<uint8_t, InstructionCache::kFetchBytes> got{};
-  icache.fetch(memory, pc, vmid, got.data());
+  icache.fetch(memory, pc, got.data());
+  return got;
+}
+
+class ExecutableAddressSpace final : public amdgpu::AddressSpaceTranslator,
+                                     public amdgpu::PhysicalMemoryAccess {
+public:
+  explicit ExecutableAddressSpace(uint8_t value, size_t size = InstructionCache::kLineSize * 2)
+      : bytes_(size, static_cast<std::byte>(value)) {}
+
+  void fill(uint8_t value) { std::ranges::fill(bytes_, static_cast<std::byte>(value)); }
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind access) const override {
+    if (access != amdgpu::VmAccessKind::Read && access != amdgpu::VmAccessKind::Execute)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    if (address < kCodeBase || size == 0 || address - kCodeBase > bytes_.size() ||
+        size > bytes_.size() - (address - kCodeBase)) {
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::System,
+                        .address = address - kCodeBase,
+                        .contiguous_bytes = bytes_.size() - (address - kCodeBase),
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = false, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::System || address > bytes_.size() ||
+        bytes.size() > bytes_.size() - address) {
+      return amdgpu::VmAccessOutcome::Faulted;
+    }
+    std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t,
+                                std::span<const std::byte>) override {
+    return amdgpu::VmAccessOutcome::Faulted;
+  }
+
+private:
+  std::vector<std::byte> bytes_;
+};
+
+std::array<uint8_t, InstructionCache::kFetchBytes>
+fetch_at(InstructionCache &icache, const amdgpu::GpuVmAccess &access, uint64_t pc = kCodeBase) {
+  std::array<uint8_t, InstructionCache::kFetchBytes> got{};
+  EXPECT_EQ(icache.fetch(access, pc, got.data()), amdgpu::VmAccessOutcome::Complete);
   return got;
 }
 
@@ -274,7 +107,7 @@ TEST(InstructionCacheTest, PeekOnlyReturnsPresentAlignedWordsForTheOwningVmid) {
   memory.write32(pc + 60, value);
   EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
   uint8_t fetched[InstructionCache::kFetchBytes];
-  cache.fetch(memory, pc, 0, fetched);
+  cache.fetch(memory, pc, fetched);
   ASSERT_TRUE(cache.peek_word(pc + 60, 0, word));
   EXPECT_EQ(word, value);
   EXPECT_FALSE(cache.peek_word(pc + 61, 0, word));
@@ -292,7 +125,7 @@ TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
 
   for (uint32_t off = 0; off + InstructionCache::kFetchBytes <= span; off += 4) {
     const auto got = fetch_at(icache, memory, kCodeBase + off);
-    EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + off))
+    EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(off, got.size())))
         << "mismatch at offset " << off;
   }
 }
@@ -310,7 +143,7 @@ TEST(InstructionCacheTest, FetchWindowStraddlesALineBoundary) {
   ASSERT_GT(kStraddle + InstructionCache::kFetchBytes, InstructionCache::kLineSize);
 
   const auto got = fetch_at(icache, memory, kCodeBase + kStraddle);
-  EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + kStraddle));
+  EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(kStraddle, got.size())));
 }
 
 // The I$ is deliberately not coherent with data writes, matching hardware: a
@@ -321,48 +154,122 @@ TEST(InstructionCacheTest, CachedLineSurvivesABackingWriteUntilInvalidated) {
   const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x11);
 
   const auto before = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(before.begin(), before.end(), first.begin()));
+  EXPECT_TRUE(std::ranges::equal(before, std::span(first).first(before.size())));
 
   const std::vector<uint8_t> second = fill_code(memory, InstructionCache::kLineSize, 0x22);
   ASSERT_NE(first, second);
 
   const auto stale = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(stale.begin(), stale.end(), first.begin()))
+  EXPECT_TRUE(std::ranges::equal(stale, std::span(first).first(stale.size())))
       << "the I$ must not observe a data write on its own";
 
   icache.invalidate_all();
   const auto after = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(after.begin(), after.end(), second.begin()));
+  EXPECT_TRUE(std::ranges::equal(after, std::span(second).first(after.size())));
 }
 
-// Lines are tagged by vmid, so the same address in two address spaces must not
-// alias even though it selects the same line. vmid 1 has no mapping and no
-// client process, so it reaches the same sparse backing as vmid 0 -- rewriting
-// that backing between the two fetches is what makes the miss observable at
-// all. Without it, dropping the vmid check from line_for() would still pass.
-TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
+TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
   GpuMemory memory("memory");
+  InstructionCache instruction_cache;
+  const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x31);
+  const std::array<uint8_t, InstructionCache::kFetchBytes> before =
+      fetch_at(instruction_cache, memory, kCodeBase);
+  ASSERT_TRUE(std::ranges::equal(before, std::span(first).first(before.size())));
+
+  const uint64_t epoch_before = instruction_cache.coherence_domain()->current_instruction_epoch();
+  std::vector<uint8_t> second(InstructionCache::kLineSize, 0x72);
+  {
+    [[maybe_unused]] amdgpu::DeviceCacheMaintenanceLease maintenance =
+        instruction_cache.coherence_domain()->acquire_cache_maintenance(
+            amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    EXPECT_EQ(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
+    memory.write_block(kCodeBase, std::span<const uint8_t>(second));
+  }
+  EXPECT_GT(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
+
+  const std::array<uint8_t, InstructionCache::kFetchBytes> after =
+      fetch_at(instruction_cache, memory, kCodeBase);
+  EXPECT_TRUE(std::ranges::equal(after, std::span(second).first(after.size())));
+}
+
+// Lines are tagged by address-space identity, so the same virtual address in
+// two address spaces must not alias even though it selects the same line.
+TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
+  GpuVm gpu_vm;
   InstructionCache icache;
-  const std::vector<uint8_t> vm0 = fill_code(memory, InstructionCache::kLineSize, 0x01, 0);
+  auto vm0 = std::make_shared<ExecutableAddressSpace>(0x01);
+  auto vm1 = std::make_shared<ExecutableAddressSpace>(0x02);
+  const auto handle0 = gpu_vm.register_translated(0, vm0, vm0);
+  const auto handle1 = gpu_vm.register_translated(1, vm1, vm1);
+  ASSERT_TRUE(handle0);
+  ASSERT_TRUE(handle1);
+  const auto access0 = gpu_vm.snapshot(handle0);
+  const auto access1 = gpu_vm.snapshot(handle1);
+  ASSERT_TRUE(access0);
+  ASSERT_TRUE(access1);
 
-  const auto got0 = fetch_at(icache, memory, kCodeBase, 0);
-  EXPECT_TRUE(std::equal(got0.begin(), got0.end(), vm0.begin()));
+  const auto got0 = fetch_at(icache, *access0);
+  EXPECT_TRUE(std::ranges::all_of(got0, [](uint8_t byte) { return byte == 0x01; }));
+  uint32_t legacy_word = 0;
+  EXPECT_FALSE(icache.peek_word(kCodeBase, 0, legacy_word))
+      << "translated code must not satisfy legacy-address-space lookahead";
 
-  // A vmid 1 fetch of the same address must miss and refill, so it sees the
-  // rewritten bytes rather than the line vmid 0 just installed.
-  const std::vector<uint8_t> vm1 = fill_code(memory, InstructionCache::kLineSize, 0x02, 0);
-  ASSERT_NE(vm0, vm1);
-  const auto got1 = fetch_at(icache, memory, kCodeBase, 1);
-  EXPECT_TRUE(std::equal(got1.begin(), got1.end(), vm1.begin()))
+  const auto got1 = fetch_at(icache, *access1);
+  EXPECT_TRUE(std::ranges::all_of(got1, [](uint8_t byte) { return byte == 0x02; }))
       << "the vmid 1 lookup returned vmid 0's line";
 
-  // ...and it must have installed a line under its own tag, not bypassed the
-  // cache: a second rewrite is invisible to the vmid 1 fetch that follows it.
-  const std::vector<uint8_t> vm2 = fill_code(memory, InstructionCache::kLineSize, 0x03, 0);
-  ASSERT_NE(vm1, vm2);
-  const auto again1 = fetch_at(icache, memory, kCodeBase, 1);
-  EXPECT_TRUE(std::equal(again1.begin(), again1.end(), vm1.begin()))
-      << "the vmid 1 fetch did not cache its line";
+  const auto again1 = fetch_at(icache, *access1);
+  EXPECT_EQ(again1, got1) << "the vmid 1 fetch did not cache its line";
+}
+
+TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto first = std::make_shared<ExecutableAddressSpace>(0x11);
+  const amdgpu::AddressSpaceHandle handle = gpu_vm.register_translated(7, first, first);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> first_access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(first_access);
+
+  const auto first_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(first_fetch, [](uint8_t byte) { return byte == 0x11; }));
+
+  auto replacement = std::make_shared<ExecutableAddressSpace>(0x22);
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  const std::optional<amdgpu::GpuVmAccess> replacement_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(replacement_access);
+  EXPECT_NE(first_access->cache_namespace(), replacement_access->cache_namespace());
+
+  const auto replacement_fetch = fetch_at(icache, *replacement_access);
+  EXPECT_TRUE(std::ranges::all_of(replacement_fetch, [](uint8_t byte) { return byte == 0x22; }));
+  const auto retained_old_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(retained_old_fetch, [](uint8_t byte) { return byte == 0x11; }));
+}
+
+TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto address_space =
+      std::make_shared<ExecutableAddressSpace>(0x11, InstructionCache::kFetchBytes);
+  const amdgpu::AddressSpaceHandle handle =
+      gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+
+  const auto first = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(first, [](uint8_t byte) { return byte == 0x11; }));
+
+  address_space->fill(0x22);
+  const auto second = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(second, [](uint8_t byte) { return byte == 0x22; }))
+      << "a partial executable extent must not leave a cached full line";
+
+  std::array<uint8_t, InstructionCache::kFetchBytes> invalid{};
+  std::ranges::fill(invalid, uint8_t{0xcc});
+  EXPECT_EQ(icache.fetch(*access, kCodeBase + sizeof(uint32_t), invalid.data()),
+            amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_TRUE(std::ranges::all_of(invalid, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
 // A working set larger than the cache must still read correctly once lines
@@ -377,7 +284,7 @@ TEST(InstructionCacheTest, FetchIsCorrectWhenTheWorkingSetExceedsTheCache) {
     for (uint32_t off = 0; off + InstructionCache::kFetchBytes <= span;
          off += InstructionCache::kLineSize) {
       const auto got = fetch_at(icache, memory, kCodeBase + off);
-      EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + off))
+      EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(off, got.size())))
           << "pass " << pass << " offset " << off;
     }
   }
@@ -427,7 +334,7 @@ public:
   /// @brief Bytes the CU's I$ currently returns for @p pc, without refilling.
   std::array<uint8_t, InstructionCache::kFetchBytes> peek(uint64_t pc = kCodeBase) {
     std::array<uint8_t, InstructionCache::kFetchBytes> got{};
-    cu_->instruction_cache().fetch(memory_, pc, 0, got.data());
+    cu_->instruction_cache().fetch(memory_, pc, got.data());
     return got;
   }
 
@@ -444,55 +351,6 @@ private:
   amdgpu::ComputeUnitCore::Config config_{};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu_;
 };
-
-TEST(InstructionCacheCuTest, UnmappingCodeStopsAWaveWithAWarmInstructionCache) {
-  CuFixture fixture("unmap");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint32_t, GpuMemory::PAGE_SIZE / sizeof(uint32_t)> code{};
-  code[0] = s_mov_b32_s0_imm(1);
-  code[1] = s_mov_b32_s0_imm(2);
-  code[2] = kSEndpgm;
-  process.map_pages(kCodeBase, code.data(), sizeof(code));
-  register_fetchable_process(fixture.memory(), process);
-  auto *wf = fixture.launch(1, 0);
-  ASSERT_NE(wf, nullptr);
-  wf->set_process_id(kMappedVmid);
-  fixture.cu()->step();
-  ASSERT_EQ(fixture.read_s0(*wf), 1u);
-  ASSERT_FALSE(wf->is_halted());
-
-  process.unmap_pages(kCodeBase, sizeof(code));
-  fixture.cu()->step();
-  // The cached s_mov would leave the wave running. Halting frees its registers,
-  // so inspect the wave state instead of reading s0 after its allocation is freed.
-  EXPECT_TRUE(wf->is_halted());
-}
-
-TEST(InstructionCacheCuTest, DebuggerWritesRemainVisibleWithAWarmMappedFetchabilityCache) {
-  CuFixture fixture("mapped_debug");
-  rocjitsu::KfdProcess process(kMappedVmid);
-  std::array<uint32_t, GpuMemory::PAGE_SIZE / sizeof(uint32_t)> code{};
-  code[0] = s_mov_b32_s0_imm(1);
-  code[1] = s_mov_b32_s0_imm(2);
-  code[2] = s_mov_b32_s0_imm(3);
-  code[3] = kSEndpgm;
-  process.map_pages(kCodeBase, code.data(), sizeof(code));
-  register_fetchable_process(fixture.memory(), process);
-  auto *wf = fixture.launch(1, 0);
-  ASSERT_NE(wf, nullptr);
-  wf->set_process_id(kMappedVmid);
-  fixture.cu()->step();
-  ASSERT_EQ(fixture.read_s0(*wf), 1u);
-
-  fixture.cu()->set_debug_active(true);
-  code[1] = s_mov_b32_s0_imm(22);
-  fixture.cu()->step();
-  EXPECT_EQ(fixture.read_s0(*wf), 22u);
-  code[2] = s_mov_b32_s0_imm(33);
-  fixture.cu()->set_debug_active(false);
-  fixture.cu()->step();
-  EXPECT_EQ(fixture.read_s0(*wf), 33u);
-}
 
 // Self-modifying code: the rewritten instruction only becomes visible to the
 // fetcher when the wave retires s_icache_inv. This runs the generated
@@ -581,7 +439,7 @@ TEST(InstructionCacheCuTest, LaunchInvalidationIsOncePerDispatch) {
   // launch drops everything.
   ASSERT_NE(fixture.launch(8, 0), nullptr);
   const auto next_dispatch = fixture.peek();
-  EXPECT_TRUE(std::equal(next_dispatch.begin(), next_dispatch.end(), rewritten.begin()))
+  EXPECT_TRUE(std::ranges::equal(next_dispatch, std::span(rewritten).first(next_dispatch.size())))
       << "a new dispatch reused code bytes cached by the previous one";
 }
 

@@ -118,7 +118,7 @@ TEST(ObservableSharedMutexTest, ExclusiveOwnershipHoldsOffAReader) {
   EXPECT_TRUE(read_entered.load(std::memory_order_acquire));
 }
 
-// Acquiring can throw -- std::shared_timed_mutex::lock() reports system errors
+// Acquiring can throw -- DistributedSharedMutex::lock() reports system errors
 // that way -- and a throw past the count would leave a writer that does not
 // exist. Nothing lowers it again, so a later wait for it to fall hangs and a
 // wait for it to rise passes without anything having blocked.

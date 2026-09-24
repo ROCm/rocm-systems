@@ -10,6 +10,7 @@
 #include "algorithms/dda/all_gather/all_gather_dda_fabric_ll.h"
 #include "checks.h"
 #include "comm.h"
+#include "rccl_common.h"
 #include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
@@ -131,7 +132,7 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
     return false;
   }
 
-  if (perRankBytes * (size_t)comm->nRanks > (size_t)rcclParamDdaLLThreshold()) {
+  if (perRankBytes * (size_t)comm->nRanks > rcclDdaLLThreshold(comm, ncclFuncAllGather)) {
     return false;
   }
   // One packet carries 8B of payload, so this rank's contribution has to fit the

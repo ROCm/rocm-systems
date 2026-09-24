@@ -145,9 +145,16 @@ void ReportActivity(const amd::Command& command) {
       }
       record.begin_ns = dispatch.start_ns;
       record.end_ns = dispatch.end_ns;
-      record.kernel_name = dispatch.kernel_name;
       record.queue_id = static_cast<uint64_t>(dispatch.queue_index);
-      function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
+      // A graph's cross-stream sync packets share this command but are not
+      // dispatches, so they carry no name and go out under the barrier op.
+      record.op = dispatch.is_barrier ? OP_ID_BARRIER : operation_id;
+      if (dispatch.is_barrier) {
+        record.bytes = 0;
+      } else {
+        record.kernel_name = dispatch.kernel_name;
+      }
+      function(ACTIVITY_DOMAIN_HIP_OPS, record.op, &record);
     }
   } else {
     record.begin_ns = command.profilingInfo().start_;

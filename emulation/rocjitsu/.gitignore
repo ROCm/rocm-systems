@@ -23,7 +23,7 @@
 # Misc local working artifacts
 *.swp
 .vscode
-build
+build*/
 third_party
 Testing
 tmp
@@ -42,3 +42,15 @@ __pycache__
 .claude
 .codex
 .agents
+
+# Website dependencies and generated artifacts
+/website/node_modules/
+/website/dist/
+/website/.test-dist/
+/website/.test-data/
+/website/.vite/
+/website/coverage/
+/website/playwright-report/
+/website/test-results/
+/website/**/*.local
+/website/**/.DS_Store
