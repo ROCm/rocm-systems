@@ -3059,7 +3059,7 @@ HIP_PUBLIC_API hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
                                                             attrsIdxs, numAttrs, failIdx, stream);
   CATCH;
 }
-hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+HIP_PUBLIC_API hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
                                   size_t* sizes, size_t* sizesDst,
                                   hipExtMemcpyWait* waits,
                                   hipExtMemcpySignal* signals,
