@@ -255,11 +255,16 @@ and branch boundaries. All 22 selected synchronization-analysis tests pass
 (`lds-completion-tests.log`). Device publication capture must consume this
 LDS-only fact explicitly; legacy synchronization attachment is unchanged.
 
-Device capture now journals returning 32-bit add/OR operations when every
+Device capture now journals 32-bit add/OR operations when every
 native RMW in the object has a supported capture path. It preserves the guest
 operands/result, captures every active lane, and records the observed transition,
 lane/owner identity, access-order ticket, and LDS-release/acquire roles. This
-path bypasses the single-window association. Unsupported RMW forms still use
+path bypasses the single-window association. Regular non-returning RDNA4 forms
+are rewritten to return into reserved scratch: only VDST and the return-mode TH
+change, and the guest RMW executes once. This requires scratch preservation before
+the guest; operand-overlapping post-guest spill plans are rejected. Target tests
+verify that the opcode, address, operand, offset, scope, and other bits remain
+unchanged. Unsupported RMW forms still use
 the earlier path; the original Stream-K/tree cells have not been requalified.
 
 Physical gfx1201 inspection runs establish:
@@ -268,6 +273,11 @@ Physical gfx1201 inspection runs establish:
 - Separate 32-lane add and OR arms each record 64 transitions, with the correct
   per-lane address and old/new values, and pass numerically. The OR run exercised
   wave 1 publishing first (`0 → 2 → 3`). Native controls also pass.
+- A four-wave tree probe with three explicit non-returning release ORs and a
+  returning acquiring OR passes natively and instrumented. The journal records
+  `0 → 2 → 6 → 7 → 15`. Record/ticket order differs from modification order,
+  confirming why the host proof must reconstruct old/new transitions. The
+  tracked probe is `hip_consan_atomic_publication_tree_probe.hip`.
 - An overflow arm records 2,048 attempted events against capacity 800, sets the
   sticky dropped-record flag, and passes numerically while the detector rejects
   its trace as incomplete.
@@ -283,18 +293,19 @@ The physical run also corrected a decoder assumption: automatic report headers
 carry the code-object reader identity, whereas event/window dispatch identities
 come from runtime dispatches. Events retain their actual dispatch identity and
 are checked against each other in the proof, rather than against that header
-fallback. All 268 hook tests and 101 selected atomic/publication/layout patcher
+fallback. All 268 hook tests and 103 selected atomic/publication/layout patcher
 tests pass. The current strict one-value run exits 90 for incomplete evidence.
 
 Evidence: `journal-publication-1-inspect.log`,
 `journal-{add,or}-lanes-{native,inspect}.log`,
 `journal-overflow-{native,inspect}.log`, `journal-publication-1-strict.log`,
-`journal-patch-tests.log`, and `journal-host-tests.log` in the
+`journal-patch-tests.log`, `journal-host-tests.log`, `journal-tree-{native,inspect}.log`,
+`noreturn-{rewrite,patch,host}-tests.log` in the
 artifact directory. The inspection runs permit incomplete reports only to
 check guest numerical behavior; they do not change validation's clean gate.
 
-Remaining work includes non-returning OR capture, other atomic forms and
-modifications that could break release sequences, completeness and cross-domain
+Remaining work includes accounting for other atomic forms and stores that
+could break release sequences, completeness and cross-domain
 checks, and the original clean/fault qualification matrix. Setting the complete
 flag before these conditions hold would be unsound.
 

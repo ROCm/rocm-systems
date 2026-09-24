@@ -17,6 +17,8 @@
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
+#include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -181,15 +183,26 @@ std::optional<SyncRole> atomic_role(AtomicEventKind kind, bool is_rmw) {
                                        uint32_t *guest_instruction_offset,
                                        std::span<const uint32_t> leading_guest_words,
                                        std::span<const uint32_t> trailing_guest_words,
-                                       uint32_t *emitted_guest_size = nullptr) {
+                                       uint32_t *emitted_guest_size = nullptr,
+                                       std::optional<uint16_t> observation_vgpr = std::nullopt) {
   const size_t guest_begin = words.size();
   if (guest_instruction_offset)
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.insert(words.end(), leading_guest_words.begin(), leading_guest_words.end());
-  for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
-    words.push_back(word);
+  if (observation_vgpr) {
+    if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+      return false;
+    const auto rewritten = build_rdna4_atomic_observation(
+        bytes.subspan(site.file_offset, site.size), *observation_vgpr);
+    if (!rewritten)
+      return false;
+    words.insert(words.end(), rewritten->begin(), rewritten->end());
+  } else {
+    for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
+      uint32_t word = 0;
+      std::memcpy(&word, bytes.data() + site.file_offset + offset, sizeof(word));
+      words.push_back(word);
+    }
   }
   // A non-RMW candidate carries its compiler-emitted wait/cache suffix. Do
   // not splice a generic atomic wait into that target-native sequence.
@@ -298,7 +311,7 @@ struct AtomicPreludeState {
     rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, AtomicPreludeState &state,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     std::span<const uint32_t> leading_guest_words, std::span<const uint32_t> trailing_guest_words,
-    uint32_t *emitted_guest_size) {
+    uint32_t *emitted_guest_size, std::optional<uint16_t> observation_vgpr = std::nullopt) {
   const AtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
   const bool is_cas = atomic_is_compare_exchange(site);
@@ -308,6 +321,10 @@ struct AtomicPreludeState {
     state.cas_result_vgpr = *site.destination_vgpr;
   }
   const bool guest_first = spill && atomic_spill_overlaps_guest_operands(*spill, lowering_form);
+  if (observation_vgpr && guest_first) {
+    errors.emplace_back("ConSan non-return observation needs pre-guest scratch preservation");
+    return false;
+  }
   assert(!defer_guest || !guest_first);
   const bool guest_preserves_address = atomic_guest_preserves_address(lowering_form);
   assert(!guest_first || guest_preserves_address);
@@ -328,7 +345,8 @@ struct AtomicPreludeState {
       words.push_back(*restore_entry);
     }
     return append_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
-                               leading_guest_words, trailing_guest_words, emitted_guest_size);
+                               leading_guest_words, trailing_guest_words, emitted_guest_size,
+                               observation_vgpr);
   };
   if (guest_first && !append_guest())
     return false;
@@ -428,8 +446,10 @@ bool publication_observation_supported(const AtomicEvidenceSourceView &source) {
       site.mnemonic == "global_atomic_add_u32" || site.mnemonic == "flat_atomic_add_u32" ||
       site.mnemonic == "global_atomic_or_b32" || site.mnemonic == "flat_atomic_or_b32";
   return source.sequence && source.is_rmw() && !source.relocates_polling_loop() && operation &&
-         site.width_bits == 32 && site.returns_old_value.value_or(false) && site.data_vgpr &&
-         site.destination_vgpr && *site.data_vgpr != *site.destination_vgpr && site.scope;
+         site.width_bits == 32 && site.data_vgpr && site.scope && site.returns_old_value &&
+         (site.returns_old_value.value()
+              ? site.destination_vgpr && *site.data_vgpr != *site.destination_vgpr
+              : site.raw_th == 0u);
 }
 
 std::optional<std::vector<uint32_t>>
@@ -466,10 +486,12 @@ build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenc
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   AtomicPreludeState prelude;
-  if (!append_atomic_prelude(words, bytes, source, lowering_form, owner_descriptor_file_offset,
-                             address_plan, plan, spill, scalar_spill, private_layout, arch, address,
-                             false, prelude, errors, guest_instruction_offset, {}, {},
-                             emitted_guest_size))
+  if (!append_atomic_prelude(
+          words, bytes, source, lowering_form, owner_descriptor_file_offset, address_plan, plan,
+          spill, scalar_spill, private_layout, arch, address, false, prelude, errors,
+          guest_instruction_offset, {}, {}, emitted_guest_size,
+          source.site.returns_old_value.value_or(false) ? std::nullopt
+                                                        : std::optional<uint16_t>{observed}))
     return std::nullopt;
   // The guest has completed, and its operands are still available either in
   // registers or in the post-guest spill. Capture both before scratch reuse.
@@ -480,7 +502,9 @@ build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenc
     words.push_back(build_v_mov_b32_e32(destination, vector_source_vgpr(guest), arch));
     return true;
   };
-  sequence.require(snapshot(observed, *source.site.destination_vgpr))
+  sequence
+      .require(!source.site.returns_old_value.value_or(false) ||
+               snapshot(observed, *source.site.destination_vgpr))
       .require(snapshot(written, *source.site.data_vgpr))
       .require(append_atomic_snapshot_wait(words, loaded_private, arch))
       .require(append_save_special_state(words, plan.special_state, arch))

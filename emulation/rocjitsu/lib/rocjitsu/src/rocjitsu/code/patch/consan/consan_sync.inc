@@ -1407,7 +1407,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     }
     const bool allow_post_guest_spill_operand_overlap =
         resources->source == RegisterAllocationSource::SpillRequired &&
-        atomic_guest_preserves_address(candidate.atomic.lowering_form);
+        atomic_guest_preserves_address(candidate.atomic.lowering_form) &&
+        !(publication_trace && !candidate.source.site.returns_old_value.value_or(false));
     const AtomicAddressPlan address_plan =
         plan_atomic_address(candidate.atomic.lowering_form, resources->base, resources->count,
                             resources->source, allow_post_guest_spill_operand_overlap);

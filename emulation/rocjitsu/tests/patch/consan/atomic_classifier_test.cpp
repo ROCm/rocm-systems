@@ -2,9 +2,53 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 namespace rocjitsu::consan {
 namespace {
+
+TEST(ConSan, AtomicObservationReturnRewritePreservesOperationAndAddress) {
+  for (uint32_t family : {0xecu, 0xeeu})
+    for (uint32_t op : {53u, 61u})
+      for (uint32_t scope : {0u, 1u, 2u, 3u}) {
+        rdna4::VflatMachineInst original{};
+        original.encoding = family;
+        original.op = op;
+        original.saddr = 6;
+        original.vaddr = 17;
+        original.vsrc = 23;
+        original.ioffset = 0xfffffcu;
+        original.scope = scope;
+        original.nv = 1;
+        original.vdst = 255;
+        std::array<uint32_t, 3> words;
+        std::memcpy(words.data(), &original, sizeof(original));
+        const auto result = detail::build_rdna4_atomic_observation(
+            {reinterpret_cast<const uint8_t *>(words.data()), sizeof(words)}, 42);
+        ASSERT_TRUE(result);
+        EXPECT_EQ((*result)[0], words[0]);
+        EXPECT_EQ((*result)[2], words[2]);
+        constexpr uint32_t changed = 0xffu | (7u << 20);
+        EXPECT_EQ((*result)[1] & ~changed, words[1] & ~changed);
+        EXPECT_EQ((*result)[1] & changed, 42u | (1u << 20));
+      }
+}
+TEST(ConSan, AtomicObservationReturnRewriteRejectsUnsupportedForms) {
+  std::array<uint32_t, 3> words{0xee0f400cu, 0x01980000u, 0x00000002u};
+  const auto build = [&](uint16_t destination = 42) {
+    return detail::build_rdna4_atomic_observation(
+        {reinterpret_cast<const uint8_t *>(words.data()), sizeof(words)}, destination);
+  };
+  EXPECT_FALSE(build()); // Already returning; cannot steal its guest destination.
+  words[1] &= ~(7u << 20);
+  ASSERT_TRUE(build());
+  EXPECT_FALSE(build(256));
+  words[1] |= 2u << 20;
+  EXPECT_FALSE(build()); // Different temporal policy.
+  words[1] &= ~(7u << 20);
+  words[0] = 0xee01400cu;
+  EXPECT_FALSE(build()); // An ordinary memory operation is not an RMW.
+}
 
 struct AtomicTargetCase {
   rj_code_arch_t arch;

@@ -101,7 +101,8 @@ struct AtomicScratchLayout {
 [[nodiscard]] bool atomic_spill_overlaps_guest_operands(const VgprSpillSequence &spill,
                                                         const AtomicLoweringForm &form);
 
-// Initial observation forms: returning 32-bit add/OR with preserved operands.
+// Initial observation forms: 32-bit add/OR with preserved operands. Non-returning
+// RDNA4 forms require a planned scratch destination and pre-guest preservation.
 // Other forms must not be counted as complete publication coverage.
 [[nodiscard]] bool publication_observation_supported(const AtomicEvidenceSourceView &source);
 [[nodiscard]] std::optional<std::vector<uint32_t>>
