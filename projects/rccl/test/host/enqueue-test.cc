@@ -412,11 +412,38 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CoversEveryP2pBackedCollective) {
     EXPECT_EQ(RCCL_P2P_TRANSFER_WRITE, policy.transferMode);
   }
 
+  rcclCollectiveExecutionPolicy policy;
   for (ncclFunc_t nonCollective : {ncclFuncSend, ncclFuncRecv, ncclFuncAllReduce}) {
+    EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(
+      &comm, RCCL_EXECUTION_SCOPE_P2P, nonCollective, 1 << 20,
+      /*p2pDisabled=*/false, &policy));
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pExecutionPolicy_DirectSendRecvSelectsIpcBelowTwoMiB) {
+  ncclComm comm{};
+  char arch[] = "gfx1201";
+  comm.archName = arch;
+  comm.nNodes = 1;
+  comm.nRanks = 8;
+  comm.p2pnChannels = 32;
+
+  for (ncclFunc_t directP2p : {ncclFuncSend, ncclFuncRecv}) {
+    ncclTaskP2p task{};
+    task.collAPI = directP2p;
+    task.bytes = (2ULL << 20) - 1;
     rcclCollectiveExecutionPolicy policy;
-    EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, nonCollective, 1 << 20,
-                                                  /*p2pDisabled=*/false, &policy))
-      << "collType=" << static_cast<int>(nonCollective);
+    ASSERT_TRUE(rcclExecutionPolicyForP2pTask(
+      &comm, &task, /*p2pDisabled=*/false, &policy));
+    EXPECT_EQ(-1, policy.nChannels);
+    EXPECT_EQ(-1, policy.protocol);
+    EXPECT_EQ(RCCL_P2P_PATH_AUTO, policy.path);
+    EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, policy.transferMode);
+    EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
+
+    task.bytes = 2ULL << 20;
+    EXPECT_FALSE(rcclExecutionPolicyForP2pTask(
+      &comm, &task, /*p2pDisabled=*/false, &policy));
   }
 }
 
@@ -1061,7 +1088,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportMasksFilterCandidate
 
 TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTransportBands) {
   rcclCollectivePolicyInput input = {
-    RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncAllReduce,
+    RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncReduce,
     24ULL << 20, 1, 8, 28,
     rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_IPC) |
       rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_SHM),
@@ -1076,10 +1103,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
     int channels;
   };
   const Case cases[] = {
-    {ncclFuncAllReduce, 24ULL << 20, (192ULL << 20) - 1, 24},
-    {ncclFuncReduce, 12ULL << 20, (16ULL << 20) - 1, 8},
-    {ncclFuncReduce, 16ULL << 20, (768ULL << 20) - 1, 24},
-    {ncclFuncBroadcast, 12ULL << 20, (768ULL << 20) - 1, 8},
+    {ncclFuncReduce, 24ULL << 20, (1536ULL << 20) - 1, 24},
   };
   for (const Case& test : cases) {
     input.collType = test.coll;
@@ -1090,25 +1114,29 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
       EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, policy.transport);
     }
   }
-  const Case winningBands[] = {
-    {ncclFuncAllReduce, 24ULL << 20, (192ULL << 20) - 1, 24},
-    {ncclFuncReduce, 12ULL << 20, (768ULL << 20) - 1, 24},
-    {ncclFuncBroadcast, 12ULL << 20, (768ULL << 20) - 1, 8},
-  };
-  for (const Case& band : winningBands) {
-    input.collType = band.coll;
-    input.dataSize = band.minBytes - 1;
-    EXPECT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
-    EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
-    input.dataSize = band.maxBytes + 1;
-    EXPECT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  input.collType = ncclFuncReduce;
+  for (size_t bytes : {(24ULL << 20) - 1, 1536ULL << 20}) {
+    input.dataSize = bytes;
+    ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
     EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
   }
+
+  input.collType = ncclFuncBroadcast;
+  for (size_t bytes : {size_t{128}, size_t{(16ULL << 20) - 1}}) {
+    input.dataSize = bytes;
+    ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+    EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
+  }
+
+  input.collType = ncclFuncAllReduce;
+  input.dataSize = 32ULL << 20;
+  ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
 }
 
 TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_FallsBackWhenShmTransportUnavailable) {
   rcclCollectivePolicyInput input = {
-    RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncAllReduce,
+    RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncReduce,
     32ULL << 20, 1, 8, 28,
     rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_IPC), false,
     RCCL_EXECUTION_TRANSPORT_INTENT_AUTO,
@@ -1149,7 +1177,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimePersistsSelectedTransp
   comm.nRanks = 8;
   comm.nChannels = 28;
   ncclTaskColl task{};
-  task.func = ncclFuncAllReduce;
+  task.func = ncclFuncReduce;
   task.algorithm = NCCL_ALGO_RING;
   task.protocol = NCCL_PROTO_SIMPLE;
   task.minCTAs = 1;
@@ -1343,33 +1371,37 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
     {ncclFuncGather, 48ULL << 10, true, false},
     {ncclFuncGather, 2ULL << 20, true, true},
     {ncclFuncGather, 1ULL << 20, false, true},
-    {ncclFuncGather, 1ULL << 20, true, true},
+    {ncclFuncGather, 1ULL << 20, true, false},
     {ncclFuncGather, (3ULL << 20) - 1, false, true},
-    {ncclFuncGather, 3ULL << 20, false, false},
+    {ncclFuncGather, 3ULL << 20, false, true},
     {ncclFuncScatter, 512ULL << 10, false, true},
     {ncclFuncScatter, (768ULL << 10) - 1, true, true},
     {ncclFuncScatter, 768ULL << 10, true, false},
     {ncclFuncScatter, 8ULL << 20, true, false},
     {ncclFuncScatter, 8ULL << 20, false, false},
-    {ncclFuncScatter, (24ULL << 20) - 1, false, false},
-    {ncclFuncScatter, 24ULL << 20, false, true},
-    {ncclFuncScatter, 32ULL << 20, true, true},
+    {ncclFuncScatter, (96ULL << 20) - 1, false, false},
+    {ncclFuncScatter, 96ULL << 20, false, true},
+    {ncclFuncScatter, 128ULL << 20, true, true},
     {ncclFuncAlltoAll, 512ULL << 20, false, true},
     {ncclFuncAlltoAll, 512ULL << 20, true, false},
-    {ncclFuncAlltoAll, (1536ULL << 10) - 1, true, true},
-    {ncclFuncAlltoAll, 1536ULL << 10, true, false},
+    {ncclFuncAlltoAll, (768ULL << 10) - 1, true, true},
+    {ncclFuncAlltoAll, 768ULL << 10, true, false},
     {ncclFuncAlltoAll, 2ULL << 20, true, false},
     {ncclFuncAlltoAll, 2ULL << 20, false, false},
-    {ncclFuncAlltoAll, (6ULL << 20) - 1, false, false},
-    {ncclFuncAlltoAll, 6ULL << 20, false, true},
-    {ncclFuncAlltoAll, 8ULL << 20, true, true},
-    {ncclFuncAlltoAll, 8ULL << 20, false, true},
+    {ncclFuncAlltoAll, (12ULL << 20) - 1, false, false},
+    {ncclFuncAlltoAll, 12ULL << 20, false, true},
+    {ncclFuncAlltoAll, 16ULL << 20, true, true},
+    {ncclFuncAlltoAll, 8ULL << 20, false, false},
     {ncclFuncAlltoAll, (96ULL << 20) - 1, true, true},
     {ncclFuncAlltoAll, 96ULL << 20, true, false},
-    {ncclFuncAlltoAllv, 256ULL << 10, false, true},
+    {ncclFuncAlltoAllv, 1, false, false},
+    {ncclFuncAlltoAllv, 1, true, false},
+    {ncclFuncAlltoAllv, 256ULL << 10, false, false},
     {ncclFuncAlltoAllv, 256ULL << 10, true, false},
-    {ncclFuncAlltoAllv, 1ULL << 20, false, true},
+    {ncclFuncAlltoAllv, 1ULL << 20, false, false},
     {ncclFuncAlltoAllv, 1ULL << 20, true, false},
+    {ncclFuncAlltoAllv, 8ULL << 30, false, false},
+    {ncclFuncAlltoAllv, 8ULL << 30, true, false},
   };
   for (const Case& test : cases) {
     input.collType = test.coll;
@@ -1405,6 +1437,14 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
   EXPECT_EQ(-1, policy.protocol);
   EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, policy.transferMode);
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, policy.transport);
+
+  input.collType = ncclFuncAlltoAllv;
+  input.transportIntent = RCCL_EXECUTION_TRANSPORT_INTENT_IPC;
+  ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  EXPECT_EQ(8, policy.nChannels);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, policy.protocol);
+  EXPECT_EQ(RCCL_P2P_TRANSFER_READ, policy.transferMode);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
 }
 
 TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ShmTransportRequiresRuntimeAvailability) {
