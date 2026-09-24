@@ -13,7 +13,6 @@ test_categories:
       - test_profile_section
       - test_pc_sampling
       - test_analyze_workloads
-      - test_analyze_roctx_call_trees
       - test_profile_iteration_multiplexing_1
       - test_profile_sets_func
       - test_utils_common
@@ -107,7 +106,6 @@ test_categories:
       - test_argparser
       - test_analyze_commands
       - test_analyze_workloads
-      - test_analyze_roctx_call_trees
       - test_num_xcds_cli_output
       - test_specs
       - test_num_xcds_spec_class
@@ -203,7 +201,6 @@ test_categories:
       - test_argparser
       - test_analyze_commands
       - test_analyze_workloads
-      - test_analyze_roctx_call_trees
       - test_num_xcds_cli_output
       - test_specs
       - test_num_xcds_spec_class
@@ -299,7 +296,6 @@ test_categories:
       - test_argparser
       - test_analyze_commands
       - test_analyze_workloads
-      - test_analyze_roctx_call_trees
       - test_num_xcds_cli_output
       - test_specs
       - test_num_xcds_spec_class
