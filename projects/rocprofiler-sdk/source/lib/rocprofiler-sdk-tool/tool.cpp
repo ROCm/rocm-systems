@@ -3701,6 +3701,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
+    // A fork() child without exec keeps this process's tool state. Give it its own identity so
+    // its output is not attributed to the parent and sibling children do not derive the same
+    // rocpd UUID from the parent's pid and start time.
+    static bool fork_identity_registered = false;
+    if(!fork_identity_registered)
+    {
+        fork_identity_registered = true;
+        pthread_atfork(nullptr, nullptr, []() {
+            if(!tool_metadata) return;
+            tool_metadata->process_id        = getpid();
+            tool_metadata->parent_process_id = getppid();
+            rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+        });
+    }
+
     return 0;
 }
 

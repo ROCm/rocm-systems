@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Fixed `rocprofv3` attributing the output of `fork()` child processes (without `exec`) to the parent. Each child now records its own process ID and start time, and gets its own rocpd UUID, so sibling children's databases can be merged.
+
 ### Known issues
 
 ### Removed

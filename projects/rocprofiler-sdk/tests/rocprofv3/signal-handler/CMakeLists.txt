@@ -164,3 +164,38 @@ add_signal_handler_test(
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "clean exit"
     APP_EXTRA_FLAGS --app-signal-handler)
+
+# Plain fork() children must record their own pid and derive their own rocpd UUID instead
+# of reusing the parent's identity.
+set(_fork_name app-fork-identity-fork)
+set(_fork_outdir ${BASE_OUT_DIR}/fork-identity-fork)
+
+rocprofiler_add_integration_cleanup_test(
+    ${_fork_name}
+    DIRECTORIES ${_fork_outdir}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_SETUP ${_fork_name}-clean)
+
+rocprofiler_add_integration_execute_test(
+    ${_fork_name}
+    COMMAND
+        ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --marker-trace
+        --output-format rocpd --disable-signal-handlers -d ${_fork_outdir} -o out_%pid% --
+        $<TARGET_FILE:signal-handler-test> --fork --app-signal-handler
+    DEPENDS signal-handler-test
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "clean exit"
+    FIXTURES_REQUIRED ${_fork_name}-clean
+    FIXTURES_SETUP ${_fork_name})
+
+rocprofiler_add_integration_validate_test(
+    ${_fork_name}
+    TEST_PATHS validate_fork_identity.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_REQUIRED ${_fork_name}
+    ARGS --output-dir ${_fork_outdir} --expect clean-exit --process-type fork)
