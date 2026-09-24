@@ -209,9 +209,13 @@ trace_session::open()
 
     m_attached = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
 
-    m_logfile                     = EVENT_TRACE_LOGFILEW{};
-    m_logfile.LoggerName          = m_name.data();
-    m_logfile.ProcessTraceMode    = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+    m_logfile            = EVENT_TRACE_LOGFILEW{};
+    m_logfile.LoggerName = m_name.data();
+    // RAW_TIMESTAMP is what keeps Wnode.ClientContext = 1 meaningful. Without it ProcessTrace
+    // rewrites EVENT_HEADER::TimeStamp into FILETIME no matter how the session was created, and
+    // qpc_ticks_to_ns would then scale a 1601 epoch by the QPC period.
+    m_logfile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD |
+                                 PROCESS_TRACE_MODE_RAW_TIMESTAMP;
     m_logfile.EventRecordCallback = &event_record_callback;
     m_logfile.BufferCallback      = &buffer_callback;
     m_logfile.Context             = m_attached;

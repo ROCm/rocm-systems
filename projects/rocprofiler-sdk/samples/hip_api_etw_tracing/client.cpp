@@ -91,6 +91,12 @@ tool_tracing_callback(rocprofiler_context_id_t /*context*/,
 {
     auto lk = std::unique_lock<std::mutex>{record_mutex};
 
+    // Every record was produced before this callback ran, so this bounds end_timestamp from
+    // above. Checking only end >= start would accept a start and an end drawn from different
+    // clock domains, which is the shape the ETW timestamp conversion gets wrong.
+    auto flush_timestamp_ns = uint64_t{0};
+    ROCPROFILER_CALL(rocprofiler_get_timestamp(&flush_timestamp_ns), "timestamp query");
+
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
@@ -106,7 +112,8 @@ tool_tracing_callback(rocprofiler_context_id_t /*context*/,
         auto* record = static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
 
         if(record->end_timestamp < record->start_timestamp ||
-           record->start_timestamp < setup_timestamp_ns)
+           record->start_timestamp < setup_timestamp_ns ||
+           record->end_timestamp > flush_timestamp_ns)
         {
             std::cerr << "implausible timestamps on " << operation_name(record->operation) << ": ["
                       << record->start_timestamp << ", " << record->end_timestamp << "]\n";
