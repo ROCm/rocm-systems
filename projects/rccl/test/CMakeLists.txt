@@ -1025,9 +1025,10 @@ if(BUILD_TESTS)
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
     # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
-    # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1 and pulls in rocSHMEM's sdma headers.
+    # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE and NCCL_GIN_ROCSHMEM_GDA_ENABLE to 1,
+    # pulling in rocSHMEM device headers that host-only tests cannot resolve.
     if(ENABLE_ROCSHMEM_GIN AND NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
-      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0 NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
     endif()
     if(ENABLE_DEVICE_LINKER)
       # Mirror the rccl library define so device-linker-specific test expectations compile in.

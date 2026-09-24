@@ -596,8 +596,8 @@ if(ENABLE_ROCSHMEM_GIN)
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
     src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
-  # anvil.cpp is compiled from rocshmem source via target_sources after
-  # add_library (bypasses SRC_FILES/hipify). See block after add_library.
+  # Rocshmem GDA shim headers: in SRC_FILES so hipify copies them to the
+  # hipify output tree (hipify is a no-op on them — no CUDA types).
   list(APPEND SRC_FILES
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
@@ -605,6 +605,8 @@ if(ENABLE_ROCSHMEM_GIN)
     src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
     src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
   )
+  # anvil.cpp is compiled from rocshmem source via target_sources after
+  # add_library (bypasses SRC_FILES/hipify). See block after add_library.
 endif()
 
 if(USE_AMDSMI)
