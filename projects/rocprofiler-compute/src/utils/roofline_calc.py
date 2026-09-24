@@ -368,7 +368,7 @@ def calc_ceilings(
 
         peak_matrix = 0.0
         if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-            if dtype.startswith("I"):
+            if dtype.startswith(("I", "B")):
                 target_precision = dtype
             elif dtype.startswith("MX"):
                 target_precision = f"MXF{dtype[4:]}"
@@ -851,7 +851,7 @@ def _expected_benchmark_columns(
     columns.extend(f"{cache_level}Bw" for cache_level in cache_hierarchy)
 
     if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-        if dtype.startswith("I"):
+        if dtype.startswith(("I", "B")):
             target_precision = dtype
         elif dtype.startswith("MX"):
             target_precision = f"MXF{dtype[4:]}"
