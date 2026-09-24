@@ -980,20 +980,19 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   *this, wf,
                   [&]() {
                     float v = [&]() {
-                      float v = [&]() {
-                        int e;
-                        return std::frexp(static_cast<float>([&]() {
-                                            float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                                ::rocjitsu::amdgpu::read_vop3_true16_src(
-                                                    src0, wf, lane, opsel, 0)));
-                                            if (inst_.abs & (1u << 0))
-                                              sv = std::fabs(sv);
-                                            if (inst_.neg & (1u << 0))
-                                              sv = -sv;
-                                            return sv;
-                                          }()),
-                                          &e);
-                      }();
+                      float v = amdgpu::frexp_f32(
+                                    [&]() {
+                                      float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                          ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane,
+                                                                                   opsel, 0)));
+                                      if (inst_.abs & (1u << 0))
+                                        sv = std::fabs(sv);
+                                      if (inst_.neg & (1u << 0))
+                                        sv = -sv;
+                                      return sv;
+                                    }(),
+                                    wf.fp_denorm_mode_f32())
+                                    .mantissa;
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -1051,20 +1050,19 @@ RJ_NOINLINE void VFrexpMantF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                   *this, wf,
                   [&]() {
                     float v = [&]() {
-                      float v = [&]() {
-                        int e;
-                        return std::frexp(static_cast<float>([&]() {
-                                            float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                                ::rocjitsu::amdgpu::read_vop3_true16_src(
-                                                    src0, wf, lane, opsel, 0)));
-                                            if (inst_.abs & (1u << 0))
-                                              sv = std::fabs(sv);
-                                            if (inst_.neg & (1u << 0))
-                                              sv = -sv;
-                                            return sv;
-                                          }()),
-                                          &e);
-                      }();
+                      float v = amdgpu::frexp_f32(
+                                    [&]() {
+                                      float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                          ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane,
+                                                                                   opsel, 0)));
+                                      if (inst_.abs & (1u << 0))
+                                        sv = std::fabs(sv);
+                                      if (inst_.neg & (1u << 0))
+                                        sv = -sv;
+                                      return sv;
+                                    }(),
+                                    wf.fp_denorm_mode_f32())
+                                    .mantissa;
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -1447,6 +1445,15 @@ void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
+        const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
+        auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
+        return std::bit_cast<util::native<uint32_t>>((amdgpu::vop3_fp8_decode_e5m3(inst)
+                                                          ? util::fp8_e5m3_to_f32_simd(byte)
+                                                          : util::fp8_e4m3_to_f32_simd(byte)));
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1485,6 +1492,15 @@ RJ_NOINLINE void VCvtF32Fp8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
+        const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
+        auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
+        return std::bit_cast<util::native<uint32_t>>((amdgpu::vop3_fp8_decode_e5m3(inst)
+                                                          ? util::fp8_e5m3_to_f32_simd(byte)
+                                                          : util::fp8_e4m3_to_f32_simd(byte)));
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1513,6 +1529,13 @@ void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
+        const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
+        auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
+        return std::bit_cast<util::native<uint32_t>>(util::bf8_e5m2_to_f32_simd(byte));
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1544,6 +1567,13 @@ RJ_NOINLINE void VCvtF32Bf8Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [&](auto a) {
+        const uint32_t sel = amdgpu::vop3_opsel(inst.inst_);
+        auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu;
+        return std::bit_cast<util::native<uint32_t>>(util::bf8_e5m2_to_f32_simd(byte));
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4364,6 +4394,12 @@ void VCvtPkBf16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<2, false, false, 0>(inst, wf, [&](auto a, auto b) {
+        return util::pack_bf16_simd(a, wf.fp16_ovfl()) |
+               (util::pack_bf16_simd(b, wf.fp16_ovfl()) << 16);
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4393,6 +4429,12 @@ RJ_NOINLINE void VCvtPkBf16F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<2, false, false, 0>(inst, wf, [&](auto a, auto b) {
+        return util::pack_bf16_simd(a, wf.fp16_ovfl()) |
+               (util::pack_bf16_simd(b, wf.fp16_ovfl()) << 16);
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4460,6 +4502,13 @@ RJ_NOINLINE void VCvtSrPkBf16F32Vop3::execute_modifier_impl(amdgpu::Wavefront &w
 }
 
 void VCvtPkF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<2, false, false, 0>(inst, wf, [&](auto a, auto b) {
+        return util::f32_to_f16_mode_simd(std::bit_cast<util::native<float>>(a), wf.fp16_ovfl()) |
+               (util::f32_to_f16_mode_simd(std::bit_cast<util::native<float>>(b), wf.fp16_ovfl())
+                << 16);
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

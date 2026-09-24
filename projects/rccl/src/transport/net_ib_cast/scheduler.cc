@@ -1,4 +1,5 @@
 #include "common_cast.h"
+#include <algorithm>
 extern int64_t ncclParamIbCastQpsPerConn();
 
 struct ncclIbQpSchedParms castGlobalQpSchedParms;
@@ -23,13 +24,30 @@ FILE* IbCastQpSchedLogStream;
 //   1. RCCL_IB_QP_SCHED_ENABLE / NCCL_IB_QP_SCHED_ENABLE explicitly set (!=−1) → honour it.
 //   2. NCCL_NET=ib-cast explicitly set → force enable.
 //   3. Otherwise → disable on AINIC (default path), enable everywhere else.
+// BY_ORDER comms no-op WRR/split-data (IbCastQpSchedDoWrr returns immediately).
+// An explicit ENABLE=1 still wins, but that combination is unsupported: warn so it
+// is visible instead of silently running a scheduler that never remaps.
 bool rcclUseIbCastQpSched() {
   int64_t schedParam = rcclParamIbCastQpSchedEnable();
+  const bool byOrder = IbCastByOrderRequested();
   if (schedParam != -1) {
     bool enabled = (schedParam != 0);
     INFO(NCCL_NET | NCCL_ENV, "(IB-CAST) NCCL_IB_QP_SCHED_ENABLE explicitly set to %s",
          enabled ? "enabled" : "disabled");
+    if (enabled && byOrder) {
+      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d) but the QP "
+           "scheduler is force-enabled (NCCL_IB_QP_SCHED_ENABLE=%ld): unsupported combination; "
+           "WRR/split-data are no-ops on BY_ORDER comms",
+           BY_ORDER, schedParam);
+    }
     return enabled;
+  }
+
+  if (byOrder) {
+    WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling the QP "
+         "scheduler, split-data and WRR",
+         BY_ORDER);
+    return false;
   }
 
   const char* netEnv = ncclGetEnv("NCCL_NET");
@@ -180,6 +198,7 @@ void IbCastLogSched(struct ncclIbSendComm* comm) {
 }
 
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase* base, int nreqs, int size) {
+  if (base->recvMatchingScheme == BY_ORDER) return;
   if (!base->schedParmsInit) {
     base->schedParms = castGlobalQpSchedParms;
     base->schedParmsInit = true;
@@ -415,19 +434,27 @@ ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r) {
 }
 
 // =============================================================================
-// Test introspection API — exposes internal WRR scheduler state from a
-// sendComm handle.  Only intended for unit tests; not part of the public net
-// plugin ABI.
+// Test introspection API — exposes internal state from a send or recv comm.
+// Only intended for unit tests; not part of the public net plugin ABI.
 // Struct definition and function prototypes live in src/transport/net_ib_cast/net_ib_cast_inspect.h.
 // =============================================================================
 
-// ncclIbCastGetSchedState — copy WRR scheduler state out of a sendComm.
-// sendComm must be a valid ncclIbSendComm* obtained from IbCastConnect/IbCastAccept.
-// Returns ncclInvalidArgument if sendComm or out is null.
+// castBase — extract ncclIbNetCommBase* from a void* send or recv comm.
+// ncclIbNetCommBase is the first member of both ncclIbSendComm and ncclIbRecvComm,
+// so either can be cast to ncclIbSendComm* to reach the base. The static_assert
+// below ensures a future field reorder cannot break this silently.
+static inline struct ncclIbNetCommBase* castBase(void* comm) {
+  static_assert(offsetof(struct ncclIbSendComm, base) == 0,
+                "base must be the first member of ncclIbSendComm for sendComm/recvComm cast to work");
+  return &reinterpret_cast<struct ncclIbSendComm*>(comm)->base;
+}
+
+// ncclIbCastGetSchedState — copy WRR scheduler state out of a send or recv comm.
+// comm must be a valid ncclIbSendComm* or ncclIbRecvComm* obtained from
+// IbCastConnect/IbCastAccept. Returns ncclInvalidArgument if comm or out is null.
 extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out) {
   if (!sendComm || !out) return ncclInvalidArgument;
-  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  struct ncclIbNetCommBase* base = &comm->base;
+  struct ncclIbNetCommBase* base = castBase(sendComm);
 
   out->nqps = base->nqps;
   out->schedInit = base->qpTxSchedInit;
@@ -450,13 +477,45 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
   return ncclSuccess;
 }
 
+// ncclIbCastGetGrhState — read per-QP global-addressing state out of a sendComm.
+// For each active QP, copies rtrAttr.linkLayer and queries the live QP via
+// ibv_query_qp to read back the driver-programmed ah_attr.is_global. Reading it
+// back from the driver (rather than from our intended attrs) makes this a true
+// end-to-end check of what was actually programmed at RTR.
+// Returns ncclInvalidArgument if comm or out is null.
+extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  memset(out, 0, sizeof(*out));
+  struct ncclIbNetCommBase* base = castBase(sendComm);
+
+  int n = std::clamp(base->nqps, 0, NCCL_IB_MAX_QPS);
+  out->nqps = n;
+
+  for (int i = 0; i < n; i++) {
+    struct ncclIbQp* qp = base->activeQps[i];
+    out->linkLayer[i] = qp ? qp->rtrAttr.linkLayer : 0;
+    out->qpNum[i]     = (qp && qp->qp) ? qp->qp->qp_num : 0;
+    if (qp && qp->qp) {
+      struct ibv_qp_attr attr;
+      struct ibv_qp_init_attr initAttr;
+      memset(&attr, 0, sizeof(attr));
+      memset(&initAttr, 0, sizeof(initAttr));
+      if (wrap_ibv_query_qp(qp->qp, &attr, IBV_QP_AV, &initAttr) == ncclSuccess) {
+        out->isGlobal[i] = attr.ah_attr.is_global;
+        out->queryOk[i] = true;
+      }
+    }
+  }
+
+  return ncclSuccess;
+}
+
 // ncclIbCastSetTokens — force-initialize the WRR token table for testing.
 // Bypasses the RTT-based IbCastQpSchedUpdateTx; immediately arms the scheduler.
 // qpTokens must have nqps entries; totTokens is computed as their sum.
 extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps) {
   if (!sendComm || !qpTokens || nqps <= 0 || nqps > NCCL_IB_MAX_QPS) return ncclInvalidArgument;
-  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  struct ncclIbNetCommBase* base = &comm->base;
+  struct ncclIbNetCommBase* base = castBase(sendComm);
 
   // If the connection is already established, nqps must match the real QP count.
   if (base->nqps > 0 && nqps != base->nqps) return ncclInvalidArgument;
@@ -484,8 +543,7 @@ extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens,
 extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                                 uint32_t splitDataMin) {
   if (!sendComm) return ncclInvalidArgument;
-  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  struct ncclIbNetCommBase* base = &comm->base;
+  struct ncclIbNetCommBase* base = castBase(sendComm);
   base->schedParms.enable = schedEnable;
   base->schedParms.doWrr = doWrr;
   base->schedParms.splitData = splitData;
@@ -498,8 +556,7 @@ extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable
 
 extern "C" ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct ncclIbCastResiliencyState* out) {
   if (!sendComm || !out) return ncclInvalidArgument;
-  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  struct ncclIbResiliency* res = comm->base.resiliency;
+  struct ncclIbResiliency* res = castBase(sendComm)->resiliency;
   if (!res) return ncclInvalidArgument;
 
   out->recoveryEnabled = res->recoveryEnabled;
@@ -517,8 +574,7 @@ extern "C" ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct nccl
 
 extern "C" ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out) {
   if (!sendComm || !out) return ncclInvalidArgument;
-  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  struct ncclIbResiliency* res = comm->base.resiliency;
+  struct ncclIbResiliency* res = castBase(sendComm)->resiliency;
   if (!res) return ncclInvalidArgument;
   *out = res->repostCount;
   return ncclSuccess;

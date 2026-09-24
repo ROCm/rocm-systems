@@ -396,6 +396,50 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME VfioGuestRunUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
+    )
+endif()
+
+add_test(
+    NAME RocjitsuVfioCapabilityCheck
+    COMMAND $<TARGET_FILE:rocjitsu_bin> --check-vfio-user
+)
+if(NOT ROCJITSU_ENABLE_VFIO)
+    set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+endif()
+
+add_test(
+    NAME CommandProcessorSdmaBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_cp_sdma_boundary.cmake
+)
+
+add_test(
+    NAME SdmaFrontendBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_sdma_frontend_boundary.cmake
+)
+
+add_test(
+    NAME MesFrontendBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_mes_frontend_boundary.cmake
+)
+
+add_test(
+    NAME GpuMemoryBackingBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_gpu_memory_boundary.cmake
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
@@ -457,11 +501,11 @@ add_executable(
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     gpu_queue_registry_test.cpp
+    gpu_vm_pipeline_test.cpp
+    gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
-    aql_packet_processor_test.cpp
-    pm4_ring_consumer_test.cpp
-    pm4_packet_processor_test.cpp
     config_test.cpp
+    gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
@@ -472,14 +516,26 @@ add_executable(
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
     cdna5_execution_test.cpp
+    cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
+    completion_tracker_test.cpp
+    mes_engine_test.cpp
+    aql_packet_processor_test.cpp
+    pm4_ring_consumer_test.cpp
+    pm4_packet_processor_test.cpp
+    pm4_queue_controller_test.cpp
+    sdma_queue_scheduler_test.cpp
+    sdma_packet_processor_test.cpp
+    sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     lds_test.cpp
+    lds_counter_test.cpp
     l2_cache_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
+    packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
@@ -488,10 +544,15 @@ add_executable(
     partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
+    readlane_selector_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
+    buffer_descriptor_vcc_test.cpp
+    buffer_format_test.cpp
+    image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
+    scalar_buffer_test.cpp
     transcendental_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
@@ -530,17 +591,23 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    vop3_conversion_modifiers_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
+    gfx11_dot2_test.cpp
+    gfx12_dot_test.cpp
+    packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    valu_fp_mode_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_distributed_shared_mutex_test.cpp
     util_observable_shared_mutex_test.cpp
     host_mapping_lock_test.cpp
     util_result_test.cpp
@@ -549,6 +616,7 @@ add_executable(
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    simd_correctness/simd_coverage_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -611,6 +679,7 @@ add_executable(
     pci/gpu_pci_device_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
+    pci/ip_block_model_test.cpp
 )
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
@@ -633,6 +702,12 @@ if(HAS_GFX1250_DEVICE_KERNELS)
         PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
     )
 endif()
+if(HAS_GFX1251_DEVICE_KERNELS)
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE HAS_GFX1251_DEVICE_KERNELS=1
+    )
+endif()
 # The vfio-user backend is optional, so its tests build only when it does.
 if(ROCJITSU_ENABLE_VFIO)
     target_sources(
@@ -646,6 +721,13 @@ if(ROCJITSU_ENABLE_VFIO)
     target_link_libraries(
         rocjitsu_tests
         PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
+    )
+    # Serving now builds a whole machine, so a test that drives the server end to
+    # end needs a real config rather than a synthesized one.
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE
+            RJ_VFU_TEST_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json"
     )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
@@ -1647,11 +1729,10 @@ rj_add_test(
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
-# --- interposer dup/backend bookkeeping test (CLI launcher) ---
-# Runs a small gtest binary via the rocjitsu CLI launcher (which preloads the
-# interposer and writes the config_path file it reads) so open("/dev/kfd") is
-# serviced by the simulated driver, then exercises dup/dup2/dup3/fcntl(F_DUPFD)
-# fd tracking that the SimulatedKfd-level unit tests cannot reach.
+# --- interposer KFD/DRM integration tests (CLI launcher) ---
+# The launcher preloads the interposer and supplies its config_path file.
+# Exercise fd tracking, device discovery, GEM/PRIME mappings, synchronization
+# and PM4 dispatch through the public driver interface.
 add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
@@ -1667,13 +1748,22 @@ if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
 function(rj_add_interposer_test_suite _suite)
-    foreach(_case IN LISTS ARGN)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "")
+    set(_config "${RJ_CDNA4_KMD_CONFIG}")
+    set(_suffix "")
+    if(ARG_CONFIG)
+        set(_config "${ARG_CONFIG}")
+        get_filename_component(_suffix "${_config}" NAME_WE)
+        set(_suffix ".${_suffix}")
+    endif()
+    get_filename_component(_config_name "${_config}" NAME)
+    foreach(_case IN LISTS ARG_UNPARSED_ARGUMENTS)
         rj_add_test(
-            NAME "${_suite}.${_case}"
+            NAME "${_suite}.${_case}${_suffix}"
             COMMAND
                 ${RJ_CLI}
                 --config
-                ${RJ_CDNA4_KMD_CONFIG}
+                ${_config}
                 --
                 $<TARGET_FILE:interposer_dup_test>
                 "--gtest_filter=${_suite}.${_case}"
@@ -1682,7 +1772,7 @@ function(rj_add_interposer_test_suite _suite)
             INSTALL_COMMAND
                 "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                 "--config"
-                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+                "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
                 "--"
                 "bin/interposer_dup_test"
                 "--gtest_filter=${_suite}.${_case}"
@@ -1691,6 +1781,13 @@ function(rj_add_interposer_test_suite _suite)
 endfunction()
 
 set(_rj_interposer_dup_tests
+    ConstructorPreservesDescriptorLimit
+    Dup2PreservesHiddenEventBacking
+    Dup3PreservesHiddenEventBacking
+    Dup2PreservesHiddenAllocationBacking
+    Dup3PreservesHiddenAllocationBacking
+    Dup2PreservesHiddenDoorbellBacking
+    Dup3PreservesHiddenDoorbellBacking
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity
@@ -1718,7 +1815,52 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 rj_add_interposer_test_suite(
     InterposerDrmTest
     DeviceInfoReportsActiveCuCount
+    OpensWithinCurrentDescriptorLimit
+    RenderNodePathMetadataMatchesDescriptor
+    TimestampUsesAdvertisedNanosecondClock
 )
+
+set(_rj_interposer_pm4_tests
+    DependencyDefersMemoryWriteAndCompletion
+    MalformedPacketFailsCompletion
+    FaultedQueueRejectsNewSubmission
+    UnmappedWaitFailsCompletion
+    UnmappedIndirectDispatchFailsCompletion
+    ClosedBufferSurvivesQueuedSubmissions
+    CompletionRacingWaitDoesNotLoseWakeup
+    UnmappedScratchFailsFence
+    InsufficientScratchFailsFence
+    TimelineSignalDoesNotCompleteSharedJobFence
+    TimelineTransferRetainsPendingPredecessor
+    TimelineSubmissionWaitsForEarlierQueue
+    RepeatedTimelineTransfersVisitSharedDependenciesOnce
+    GraphicsQueueAcceptsBufferOwnershipFlushEvents
+    MergedSyncFilesRetainPendingFenceAcrossDupAndImport
+    GridProductOverflowFailsFence
+    UnmappedShaderFailsFence
+    OversizedLdsFailsFence
+    FailedFenceIsStillAvailable
+    MappedScalarLoadSucceeds
+    UnmappedScalarLoadFailsFence
+    MappedVectorLoadSucceeds
+    UnmappedVectorLoadFailsFence
+    ChainedIndirectBufferDoesNotReturn
+    NestedIndirectBufferReturns
+    CyclicNestedIndirectBufferFailsFence
+    CyclicChainedIndirectBufferFailsFence
+    ExcessiveIndirectNestingFailsFence
+    FreeContextCancelsPendingWorkAndRejectsFurtherSubmissions
+    FinalRenderCloseCancelsPendingWorkWhileKfdRemainsOpen
+    PrivateDescriptorsSurviveDup2Replacement
+    PrivateDescriptorsSurviveDup3Replacement
+)
+foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
+    rj_add_interposer_test_suite(
+        InterposerPm4Test
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+        ${_rj_interposer_pm4_tests}
+    )
+endforeach()
 
 rj_add_interposer_test_suite(
     InterposerFreshForkTest
@@ -1775,6 +1917,7 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
+    OversizedBinaryWaitReturnsEnomem
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal

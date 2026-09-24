@@ -42,7 +42,6 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
-RCCL_PARAM_DECLARE(CeAllReduce);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -155,6 +154,12 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* sigWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
+  static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
+  static int64_t paramStaging = rcclParamCeArStagingBytes();
+  static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
+  comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
+      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+  comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
@@ -408,6 +413,12 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDe
   }
   if (!comm->symmetricSupport) {
     TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  // Scratch path writes output to ddaScratch, not the user recv buffer.
+  // Reject if recv is already a registered symmetric window.
+  if (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg) {
+    TRACE(NCCL_TUNING, "Skipping CE scratch: recv buffer is registered");
     return false;
   }
   return true;
@@ -1245,6 +1256,12 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
   // Must be multi-node (single-node uses the regular CE path)
   if (comm->nNodes <= 1) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: not multi-node");
+    return false;
+  }
+  // Sub-comms are only built at nNodes >= 8; rcclHierarchicalAlgoInfo dereferences
+  // them unconditionally, so bail out here if they are not initialized.
+  if (!comm->hierarchicalCommsInitialized) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: hierarchical sub-comms not initialized");
     return false;
   }
   // If LSA already spans the whole comm, use CE path instead
@@ -2114,7 +2131,7 @@ static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
   if (!rcclParamCeAllReduce()) return ncclSuccess;
 
-  maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
+  maxChunkBytes = comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks;
   ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
@@ -2148,7 +2165,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   const size_t shardElems = count / comm->nRanks;
   const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
