@@ -103,7 +103,7 @@ public:
       : Instruction(mnemonic, nullptr) {
     if (words.size() > raw_.size())
       throw std::invalid_argument("too many synthetic instruction words");
-    std::copy(words.begin(), words.end(), raw_.begin());
+    std::ranges::copy(words, raw_.begin());
     raw_encoding_ = raw_.data();
     size_ = static_cast<int>(words.size() * sizeof(uint32_t));
     flags_ = flags;
@@ -434,13 +434,13 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
 
   const auto trace = lines(read_file(trace_.path()));
   ASSERT_GE(trace.size(), 10u);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
-  EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
-                          [](const std::string &line) { return line.starts_with("get_api "); }),
+  EXPECT_EQ(std::ranges::count(trace, "get_api 13"), 1);
+  EXPECT_EQ(std::ranges::count_if(
+                trace, [](const std::string &line) { return line.starts_with("get_api "); }),
             1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 13"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "init 13"), 1);
   EXPECT_EQ(line_with_prefix(trace, "init_rejected "), trace.size());
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
   const size_t shutdown = line_with_prefix(trace, "shutdown");
   ASSERT_LT(shutdown, trace.size());
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
@@ -520,9 +520,9 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
 
   const auto trace = lines(read_file(trace_.path()));
   for (uint32_t version = 13; version >= 8; --version)
-    EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api " + std::to_string(version)), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
+    EXPECT_EQ(std::ranges::count(trace, "get_api " + std::to_string(version)), 1);
+  EXPECT_EQ(std::ranges::count(trace, "init 8"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
 
   const size_t begin = line_with_prefix(trace, "begin 8 ");
   ASSERT_LT(begin, trace.size());
@@ -538,9 +538,9 @@ TEST_F(PerfsimPluginTest, AcceptsBackendSelectedCompatibleVersion) {
   plugin.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 12"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 13"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "init 12"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
 }
 
 TEST_F(PerfsimPluginTest, FallsBackToV12WithDispatchNameAndHostLogger) {
@@ -560,11 +560,11 @@ TEST_F(PerfsimPluginTest, FallsBackToV12WithDispatchNameAndHostLogger) {
   group.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 12"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 11"), 0);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 12"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "host_log present"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 13"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 12"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 11"), 0);
+  EXPECT_EQ(std::ranges::count(trace, "init 12"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "host_log present"), 1);
   EXPECT_NE(line_with_prefix(trace, "begin 12 96 128 4096 32 1 32 2 3 32 1 1 "
                                     "v12_fallback_kernel"),
             trace.size());
@@ -588,12 +588,12 @@ TEST_F(PerfsimPluginTest, FallsBackToV11WithDispatchNameAndNoHostLogger) {
   group.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 12"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 11"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 10"), 0);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 11"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "host_log absent"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 13"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 12"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 11"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "get_api 10"), 0);
+  EXPECT_EQ(std::ranges::count(trace, "init 11"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "host_log absent"), 1);
   EXPECT_NE(line_with_prefix(trace, "begin 11 96 128 4096 32 1 32 2 3 32 1 1 "
                                     "v11_fallback_kernel"),
             trace.size());
@@ -1110,7 +1110,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     plugin.onShutdown();
   }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), cases.size());
+  EXPECT_EQ(std::ranges::count(diagnostic, '\n'), cases.size());
   EXPECT_NE(diagnostic.find("FLAT DDS store or atomic"), std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
@@ -1270,20 +1270,20 @@ TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
   plugin.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
-                          [](const std::string &line) {
-                            return std::string_view(line).starts_with("memory 15 ");
-                          }),
+  EXPECT_EQ(std::ranges::count_if(trace,
+                                  [](const std::string &line) {
+                                    return std::string_view(line).starts_with("memory 15 ");
+                                  }),
             cases.size());
   for (size_t i = 0; i < cases.size(); ++i) {
     const std::string prefix = "memory 15 0 0 0 0 " + std::to_string(i) + " 3 32 " +
                                std::to_string(cases[i].expected_size) + " 5 0 1 0 " +
                                std::to_string(0x2000 + i * 0x100) + " " +
                                std::to_string(0x3000 + i * 0x100);
-    EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
-                            [&](const std::string &line) {
-                              return std::string_view(line).starts_with(prefix);
-                            }),
+    EXPECT_EQ(std::ranges::count_if(trace,
+                                    [&](const std::string &line) {
+                                      return std::string_view(line).starts_with(prefix);
+                                    }),
               1)
         << cases[i].mnemonic;
   }
@@ -1424,9 +1424,8 @@ TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
 
   const auto trace = lines(read_file(trace_.path()));
   const auto count_prefix = [&](std::string_view prefix) {
-    return std::count_if(trace.begin(), trace.end(), [&](const std::string &line) {
-      return std::string_view(line).starts_with(prefix);
-    });
+    return std::ranges::count_if(
+        trace, [&](const std::string &line) { return std::string_view(line).starts_with(prefix); });
   };
   EXPECT_EQ(count_prefix("instruction 24 "), kAddCount + 1);
   const size_t first = line_with_prefix(trace, "instruction 24 0 0 0 0 0 32768 ");
@@ -1475,15 +1474,14 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_NE(diagnostic.find("dedicated SCRATCH instructions are not FFM-compatible"),
             std::string::npos);
-  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+  EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
 
   // The two dispatches cross the 4096-event chunk boundary before dispatch 33
   // is rejected. Its removal compacts dispatch 34's records across chunks.
   const auto trace = lines(read_file(trace_.path()));
   const auto count_prefix = [&](std::string_view prefix) {
-    return std::count_if(trace.begin(), trace.end(), [&](const std::string &line) {
-      return std::string_view(line).starts_with(prefix);
-    });
+    return std::ranges::count_if(
+        trace, [&](const std::string &line) { return std::string_view(line).starts_with(prefix); });
   };
   EXPECT_EQ(count_prefix("instruction 34 "), kAddCount + 1);
   EXPECT_EQ(count_prefix("begin 33 "), 0);
@@ -1585,7 +1583,7 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
   plugin.onAmdgpuDispatchExecutionEnd(28);
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_NE(diagnostic.find("staging budget of 4096 bytes exceeded"), std::string::npos);
-  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+  EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
 
   // Dispatch 27 is still executing, but once rejected it must retain no
   // events and must not hold dispatch 28's completed epoch in memory.
@@ -1698,7 +1696,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
     access.addresses = TensorDmaAddressView::deferred(
         1024, &source, [](const void *context, std::span<uint64_t> destination) {
           *static_cast<const AddressSource *>(context)->materialized = true;
-          std::fill(destination.begin(), destination.end(), 0x100000);
+          std::ranges::fill(destination, 0x100000);
           return true;
         });
     plugin.onAmdgpuTensorDmaMemoryAccess(access);
@@ -1710,7 +1708,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_FALSE(addresses_materialized);
   EXPECT_NE(diagnostic.find("staging budget of 4096 bytes exceeded"), std::string::npos);
-  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+  EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
   const auto trace = lines(read_file(trace_.path()));
   EXPECT_EQ(line_with_prefix(trace, "begin 32 "), trace.size());
   EXPECT_EQ(line_with_prefix(trace, "instruction 32 "), trace.size());
@@ -1743,9 +1741,8 @@ TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
 
   const auto trace = lines(read_file(trace_.path()));
   const auto count_prefix = [&](std::string_view prefix) {
-    return std::count_if(trace.begin(), trace.end(), [&](const std::string &line) {
-      return std::string_view(line).starts_with(prefix);
-    });
+    return std::ranges::count_if(
+        trace, [&](const std::string &line) { return std::string_view(line).starts_with(prefix); });
   };
   EXPECT_EQ(count_prefix("instruction 23 1000 0 0 0 0 "), 2);
   EXPECT_NE(line_with_prefix(trace, "end 23 "), trace.size());
@@ -1773,7 +1770,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks
   }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_NE(diagnostic.find("skipped dispatch 31"), std::string::npos);
-  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+  EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
 
   const auto trace = lines(read_file(trace_.path()));
   EXPECT_EQ(line_with_prefix(trace, "begin 31 "), trace.size());
@@ -1813,9 +1810,8 @@ TEST_F(PerfsimPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
 
   const auto trace = lines(read_file(trace_.path()));
   const auto count_prefix = [&](std::string_view prefix) {
-    return std::count_if(trace.begin(), trace.end(), [&](const std::string &line) {
-      return std::string_view(line).starts_with(prefix);
-    });
+    return std::ranges::count_if(
+        trace, [&](const std::string &line) { return std::string_view(line).starts_with(prefix); });
   };
   EXPECT_EQ(count_prefix("instruction 35 0 0 0 0 0 24576 "), 2);
   EXPECT_NE(line_with_prefix(trace,
@@ -1908,8 +1904,8 @@ TEST_F(PerfsimPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend
   }
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 13"), 2);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 2);
+  EXPECT_EQ(std::ranges::count(trace, "init 13"), 2);
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 2);
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
@@ -1985,8 +1981,8 @@ TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
   group->onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 13"), 1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "init 13"), 1);
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
