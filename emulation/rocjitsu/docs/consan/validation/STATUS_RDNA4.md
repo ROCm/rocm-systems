@@ -11,7 +11,9 @@ coverage evidence, and healthy GPU checks. “Lowest passing” means all smalle
 presets from `default` failed; “lowest verified” means smaller presets remain
 untested or unqualified. Yellow is pending or below the qualification bar; red
 records a failure or an unsupported workload. See [VALIDATION.md](VALIDATION.md)
-for the procedure and qualification rules.
+for the procedure and qualification rules. The September 24
+[SuperCollider investigation](SUPERCOLLIDER_RDNA4_ANALYSIS.md) explains the
+historical color changes and audits the current clean controls.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
@@ -26,7 +28,7 @@ for the procedure and qualification rules.
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟩 delay matrix: fault 8/8; matching clean controls pass |
 | PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟩 high (lowest passing): clean pass; fault 6/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 higher (lowest passing): clean pass; fault 7/8 (bar 6/8) | 🟩 sleep=1: clean pass; fault 8/8 (bar 6/8) |
-| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); historical fault also 0/8 with/without allowlist |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 sleep=1: clean pass; fault 8/8 (bar 6/8) |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 max + 256 banks: clean pass; fault 0/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |

@@ -443,6 +443,41 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(summary["accepted"])
         self.assertIn("analysis incomplete", summary["reasons"])
 
+    def test_clean_coverage_rejects_supercollider_reports(self) -> None:
+        # The historical runner accepted TP2 clean logs with six mismatches.
+        # Exercise both spellings, even when execution exits successfully and
+        # every supported access was instrumented.
+        for spelling in ("SC", "SuperCollider"):
+            for field, value in (
+                ("mismatches", "6"),
+                ("allocation_failures", "1"),
+                ("read_failures", "1"),
+                ("cleanup_failures", "1"),
+                ("complete", "false"),
+                ("mismatches", "invalid"),
+            ):
+                with self.subTest(spelling=spelling, field=field):
+                    fields = dict(
+                        buffers="6", mismatches="0", allocation_failures="0",
+                        read_failures="0", cleanup_failures="0", complete="true",
+                    )
+                    clean = f"[rocjitsu-dbi-hooks] ConSan {spelling} report summary "
+                    good = clean + " ".join(f"{k}={v}" for k, v in fields.items())
+                    good_log = complete_coverage_log(
+                        f"ConSan {spelling} auto report buffer reader=7 addr=0x1000 bytes=4",
+                        f"ConSan {spelling} auto report cleanup reader=7 outcome=runtime-reclaimed",
+                        good,
+                    )
+                    self.assertTrue(validation._coverage_summary(
+                        good_log, profile="supercollider")["accepted"])
+                    fields[field] = value
+                    bad = clean + " ".join(f"{k}={v}" for k, v in fields.items())
+                    self.assertFalse(validation._coverage_summary(
+                        complete_coverage_log(bad), profile="supercollider")["accepted"])
+            self.assertFalse(validation._coverage_summary(complete_coverage_log(
+                f"ConSan {spelling} auto report reader=7 outcome=complete marker=1 mismatch=true"
+            ), profile="supercollider")["accepted"])
+
     def test_coverage_summary_preserves_strict_load_rejection(self) -> None:
         summary = validation._coverage_summary(
             "[rocjitsu-dbi-hooks] ConSan load rejection reader=73 "
@@ -538,7 +573,10 @@ class ConSanValidationTest(unittest.TestCase):
                 status = (status_root / filename).read_text()
                 self.assertEqual(status.count("| Set | Priority |"), 1)
                 self.assertEqual(status.count("| --- | ---: | --- | --- | --- |"), 1)
-                self.assertIn(yellow_rule, status)
+                # RDNA4 now uses the fault-detection qualification bar;
+                # other ledgers retain the historical support-based legend.
+                if target != "gfx1201":
+                    self.assertIn(yellow_rule, status)
                 rows = [
                     line
                     for line in status.splitlines()
