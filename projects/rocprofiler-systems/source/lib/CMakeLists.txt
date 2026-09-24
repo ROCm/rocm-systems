@@ -69,6 +69,7 @@ add_subdirectory(policies)
 add_subdirectory(common)
 add_subdirectory(core)
 add_subdirectory(backends)
+add_subdirectory(avail)
 add_subdirectory(binary)
 add_subdirectory(logger)
 
