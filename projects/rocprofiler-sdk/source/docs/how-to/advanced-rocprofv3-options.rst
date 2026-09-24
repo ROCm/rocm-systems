@@ -313,8 +313,7 @@ The ``--preload`` option works alongside existing ``LD_PRELOAD`` settings:
     # If LD_PRELOAD is already set, --preload libraries are prepended
     export LD_PRELOAD="/existing/library.so"
     rocprofv3 --preload /new/library.so --hip-trace -- ./app
-    # Effective LD_PRELOAD:
-    # "/new/library.so:/existing/library.so:<rocm>/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so:<rocm>/lib/librocprofiler-sdk.so"
+    # Effective LD_PRELOAD: "/new/library.so:/existing/library.so"
 
 The profiler appends its own tool and SDK libraries after any user-supplied and pre-existing entries. When ``--marker-trace`` is active, ``librocprofiler-sdk-roctx.so`` is appended last as well.
 
