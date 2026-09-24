@@ -3127,6 +3127,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint32_t scratch_wave_limit_per_se = std::numeric_limits<uint32_t>::max();
   uint32_t scratch_wave_stride_per_se = 0;
   bool scratch_use_once = false;
+  bool runtime_managed_scratch = false;
   bool scratch_uses_alternate = false;
   if (uses_kfd_queue_abi) {
     queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
@@ -3165,8 +3166,17 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       const AtomicLoadResult loaded = read_gpu_u64(transaction_access, scratch_loc_va);
       if (loaded.outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(loaded.outcome);
+      // A live ROCr queue owns its scratch allocation, including initially empty
+      // queues whose kernels acquire private memory only after instrumentation.
+      // The process-wide scratch reservation is not a per-queue allocation:
+      // using it as a fallback aliases private state across concurrent queues.
+      const AtomicLoadResult inactive_signal = read_gpu_u64(
+          transaction_access, queue_ptr + offsetof(amd_queue_t, queue_inactive_signal));
+      if (inactive_signal.outcome != VmAccessOutcome::Complete)
+        return admission_from_vm_outcome(inactive_signal.outcome);
+      runtime_managed_scratch = inactive_signal.value != 0;
       scratch_backing_addr = loaded.value;
-      if (scratch_backing_addr == 0 && scratch_resolver_)
+      if (scratch_backing_addr == 0 && scratch_resolver_ && !runtime_managed_scratch)
         scratch_backing_addr = scratch_resolver_(queue.process_id);
       const auto properties = isa_properties(arch);
       const uint32_t wavesize_mask = util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
@@ -3186,7 +3196,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       };
       bool main_scratch_usable = scratch_backing_addr != 0;
       bool requires_dynamic_scratch = !main_scratch_usable;
-      if (!requires_dynamic_scratch && !scratch_allocator_) {
+      if (!requires_dynamic_scratch && (runtime_managed_scratch || !scratch_allocator_)) {
         uint32_t compute_tmpring_size = 0;
         outcome = read_gpu_block(transaction_access,
                                  queue_ptr + offsetof(amd_queue_t, compute_tmpring_size),
@@ -3203,7 +3213,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         requires_dynamic_scratch = !main_scratch_usable;
       }
 
-      if (async_scratch && main_scratch_usable && !scratch_allocator_) {
+      if (async_scratch && main_scratch_usable &&
+          (runtime_managed_scratch || !scratch_allocator_)) {
         const AtomicLoadResult max_use = read_gpu_u64(
             transaction_access, queue_ptr + offsetof(amd_queue_v2_t, scratch_max_use_index));
         if (max_use.outcome != VmAccessOutcome::Complete)
@@ -3212,7 +3223,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         requires_dynamic_scratch = !main_scratch_usable;
       }
 
-      if (async_scratch && requires_dynamic_scratch && !scratch_allocator_) {
+      if (async_scratch && requires_dynamic_scratch &&
+          (runtime_managed_scratch || !scratch_allocator_)) {
         const AtomicLoadResult alt_backing =
             read_gpu_u64(transaction_access,
                          queue_ptr + offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location));
@@ -3271,14 +3283,15 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         }
       }
 
-      if (async_scratch && !requires_dynamic_scratch && !scratch_allocator_) {
+      if (async_scratch && !requires_dynamic_scratch &&
+          (runtime_managed_scratch || !scratch_allocator_)) {
         outcome = record_async_scratch_use(queue, transaction_access, aql_packet_id,
                                            scratch_uses_alternate);
         if (outcome != VmAccessOutcome::Complete)
           return admission_from_vm_outcome(outcome);
       }
 
-      if (requires_dynamic_scratch && !scratch_allocator_) {
+      if (requires_dynamic_scratch && (runtime_managed_scratch || !scratch_allocator_)) {
         constexpr uint64_t kInsufficientScratchWave64 = 0x1;
         constexpr uint64_t kInsufficientScratchWave32 = 0x401;
         const uint64_t status =
@@ -3436,8 +3449,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       // them here. Field layout per rocdbgapi architecture.cpp
       // scratch-memory region. The WAVES field is common, while ISA properties
       // describe the generation-specific WAVESIZE unit and field width.
-      if (scratch_allocator_ && dp.scratch_backing_addr != 0 && !cus_.empty() &&
-          !scratch_uses_alternate) {
+      if (!runtime_managed_scratch && scratch_allocator_ && dp.scratch_backing_addr != 0 &&
+          !cus_.empty() && !scratch_uses_alternate) {
         uint64_t per_wave_bytes =
             static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
         // setup_wavefront() allocates scratch slots at a 1 KiB boundary. Encode

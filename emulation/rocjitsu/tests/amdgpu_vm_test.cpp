@@ -3725,7 +3725,9 @@ TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {
   EXPECT_EQ(amdgpu::initial_exec_mask_for_wave(entry, 103, 0, 64), 0xFULL);
 }
 
-TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBeforeConsumingPacket) {
+class DynamicScratchTest : public ::testing::TestWithParam<bool> {};
+
+TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPacket) {
   using namespace rocr::llvm::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
@@ -3772,6 +3774,20 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
   fixture.mem()->write64(kQueueSignal + kMailboxPointerOffset, kMailbox);
   fixture.mem()->write32(kQueueSignal + kEventIdOffset, kEventId);
+
+  if (GetParam()) {
+    // Local KFD installs these helpers even for runtime-managed queues. Neither
+    // may bypass the queue's allocation/reclaim protocol or supply a shared
+    // process-wide fallback in place of its private allocation.
+    fixture.cp()->set_scratch_backing_resolver([](uint32_t) {
+      ADD_FAILURE() << "runtime-managed queue used process-wide scratch";
+      return uint64_t{0x01000000};
+    });
+    fixture.cp()->set_scratch_backing_allocator([](uint32_t, uint64_t, size_t) {
+      ADD_FAILURE() << "runtime-managed queue used fallback scratch allocation";
+      return false;
+    });
+  }
 
   uint32_t scratch_requests = 0;
   uint32_t scratch_reclaims = 0;
@@ -3881,6 +3897,8 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
     return wave.wf_id == 0;
   })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
 }
+
+INSTANTIATE_TEST_SUITE_P(WithAndWithoutLocalAllocator, DynamicScratchTest, ::testing::Bool());
 
 TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) {
   using namespace rocr::llvm::amdhsa;
