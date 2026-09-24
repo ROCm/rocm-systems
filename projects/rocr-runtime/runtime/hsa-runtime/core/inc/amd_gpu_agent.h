@@ -325,10 +325,9 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
-  hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                           const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                           const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
-                           std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
+  hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_t* rects, uint16_t num_rects,
+                           hsa_amd_copy_direction_t dir, std::vector<core::Signal*>& dep_signals,
+                           core::Signal& out_signal);
 
   // @brief Override from core::Agent.
   hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) override;

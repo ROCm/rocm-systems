@@ -1279,6 +1279,23 @@ struct BatchReadMemoryOp {
         metadata(metadata_arg) {}
 };
 
+//! Structure to hold one pitched box copy for batch rectangular copies
+struct BatchCopyRectOp {
+  Memory* src_memory;   //!< Source memory object
+  Memory* dst_memory;   //!< Destination memory object
+  BufferRect src_rect;  //!< Source origin, row pitch and slice pitch
+  BufferRect dst_rect;  //!< Destination origin, row pitch and slice pitch
+  Coord3D size;         //!< Box width in bytes, height and depth
+
+  BatchCopyRectOp(Memory* src_memory_arg, Memory* dst_memory_arg, const BufferRect& src_rect_arg,
+                  const BufferRect& dst_rect_arg, const Coord3D& size_arg)
+      : src_memory(src_memory_arg),
+        dst_memory(dst_memory_arg),
+        src_rect(src_rect_arg),
+        dst_rect(dst_rect_arg),
+        size(size_arg) {}
+};
+
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
  *
  *  \details Executes multiple copy operations as a batch. Copies within
@@ -1319,6 +1336,26 @@ class BatchCopyMemoryCommand : public Command {
     }
     return true;
   }
+};
+
+/*! \brief  A batch copy memory command for multiple pitched buffer-to-buffer box copies
+ *
+ *  \details Copies within a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryRectCommand : public Command {
+ public:
+  BatchCopyMemoryRectCommand(HostQueue& queue, cl_command_type cmd_type,
+                             const EventWaitList& event_wait_list,
+                             std::vector<BatchCopyRectOp>&& copy_ops)
+      : Command(queue, cmd_type, event_wait_list), copy_ops_(std::move(copy_ops)) {}
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchCopyMemoryRect(*this); }
+
+  const std::vector<BatchCopyRectOp>& CopyOps() const { return copy_ops_; }
+
+ private:
+  std::vector<BatchCopyRectOp> copy_ops_;  //!< Vector of box copy operations
 };
 
 /*! \brief  A batch write memory command for multiple pageable host-to-device

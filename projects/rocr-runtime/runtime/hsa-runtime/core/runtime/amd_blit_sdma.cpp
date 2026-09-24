@@ -1859,28 +1859,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyMulticastCommand(
 
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
-    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
-    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
-    core::Signal& out_signal) {
-  // Hardware requires DWORD alignment for base address, pitches
-  // Also confirm that we have a geometric rect (copied block does not wrap an edge).
-  if (((uintptr_t)dst->base) % 4 != 0 || ((uintptr_t)src->base) % 4 != 0)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                             "Copy rect base address not aligned.");
-  if (((uintptr_t)dst->pitch) % 4 != 0 || ((uintptr_t)src->pitch) % 4 != 0)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect pitch not aligned.");
-  if (((uintptr_t)dst->slice) % 4 != 0 || ((uintptr_t)src->slice) % 4 != 0)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice not aligned.");
-  if (uint64_t(src_offset->x) + range->x > src->pitch ||
-      uint64_t(dst_offset->x) + range->x > dst->pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect width out of range.");
-  if ((src->slice != 0) && (uint64_t(src_offset->y) + range->y) > src->slice / src->pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect height out of range.");
-  if ((dst->slice != 0) && (uint64_t(dst_offset->y) + range->y) > dst->slice / dst->pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect height out of range.");
-  if (range->z > 1 && (src->slice == 0 || dst->slice == 0))
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice needed.");
-
+    const hsa_amd_memory_copy_rect_t* rects, uint16_t num_rects,
+    std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
   const bool isGFX12Plus =
                         (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
@@ -1891,40 +1871,69 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
   const uint max_pitch = 1 << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);
 
   std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
-  std::vector<uint64_t> bytes_moved;
   auto append = [&](size_t size) {
     assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
     pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
     return &pkts.back();
   };
 
-  // Do wide pitch 2D copies along X-Z
-  if (range->z == 1 && (src->pitch > max_pitch || dst->pitch > max_pitch)) {
-    hsa_pitched_ptr_t Src = *src;
-    hsa_pitched_ptr_t Dst = *dst;
-    hsa_dim3_t Soff = *src_offset;
-    hsa_dim3_t Doff = *dst_offset;
-    hsa_dim3_t Range = *range;
+  // Every box is checked and built before the single submission, so a failing
+  // box leaves the ring and the completion signal untouched.
+  uint64_t size = 0;
+  for (uint16_t i = 0; i < num_rects; ++i) {
+    const hsa_pitched_ptr_t* dst = &rects[i].dst;
+    const hsa_dim3_t* dst_offset = &rects[i].dst_offset;
+    const hsa_pitched_ptr_t* src = &rects[i].src;
+    const hsa_dim3_t* src_offset = &rects[i].src_offset;
+    const hsa_dim3_t* range = &rects[i].range;
 
-    Src.base = static_cast<char*>(Src.base) + Soff.z * Src.slice + Soff.y * Src.pitch;
-    Dst.base = static_cast<char*>(Dst.base) + Doff.z * Dst.slice + Doff.y * Dst.pitch;
-    Soff.y = Soff.z = 0;
-    Doff.y = Doff.z = 0;
+    // Hardware requires DWORD alignment for base address, pitches
+    // Also confirm that we have a geometric rect (copied block does not wrap an edge).
+    if (((uintptr_t)dst->base) % 4 != 0 || ((uintptr_t)src->base) % 4 != 0)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+                               "Copy rect base address not aligned.");
+    if (((uintptr_t)dst->pitch) % 4 != 0 || ((uintptr_t)src->pitch) % 4 != 0)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect pitch not aligned.");
+    if (((uintptr_t)dst->slice) % 4 != 0 || ((uintptr_t)src->slice) % 4 != 0)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice not aligned.");
+    if (uint64_t(src_offset->x) + range->x > src->pitch ||
+        uint64_t(dst_offset->x) + range->x > dst->pitch)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect width out of range.");
+    if ((src->slice != 0) && (uint64_t(src_offset->y) + range->y) > src->slice / src->pitch)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect height out of range.");
+    if ((dst->slice != 0) && (uint64_t(dst_offset->y) + range->y) > dst->slice / dst->pitch)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect height out of range.");
+    if (range->z > 1 && (src->slice == 0 || dst->slice == 0))
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice needed.");
 
-    Src.slice = Src.pitch;
-    Src.pitch = 0;
-    Dst.slice = Dst.pitch;
-    Dst.pitch = 0;
+    // Do wide pitch 2D copies along X-Z
+    if (range->z == 1 && (src->pitch > max_pitch || dst->pitch > max_pitch)) {
+      hsa_pitched_ptr_t Src = *src;
+      hsa_pitched_ptr_t Dst = *dst;
+      hsa_dim3_t Soff = *src_offset;
+      hsa_dim3_t Doff = *dst_offset;
+      hsa_dim3_t Range = *range;
 
-    Range.z = Range.y;
-    Range.y = 1;
+      Src.base = static_cast<char*>(Src.base) + Soff.z * Src.slice + Soff.y * Src.pitch;
+      Dst.base = static_cast<char*>(Dst.base) + Doff.z * Dst.slice + Doff.y * Dst.pitch;
+      Soff.y = Soff.z = 0;
+      Doff.y = Doff.z = 0;
 
-    BuildCopyRectCommand(append, &Dst, &Doff, &Src, &Soff, &Range);
-  } else {
-    BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
+      Src.slice = Src.pitch;
+      Src.pitch = 0;
+      Dst.slice = Dst.pitch;
+      Dst.pitch = 0;
+
+      Range.z = Range.y;
+      Range.y = 1;
+
+      BuildCopyRectCommand(append, &Dst, &Doff, &Src, &Soff, &Range);
+    } else {
+      BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
+    }
+
+    size += static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
   }
-
-  uint64_t size = static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
 
   std::vector<core::Signal*> gang_signals(0);
 

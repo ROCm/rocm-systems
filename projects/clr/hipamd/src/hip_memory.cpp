@@ -3011,6 +3011,26 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
 }
 
 // ================================================================================================
+// Releases the batch commands that EnqueueBatchCommands placed on other GPUs' null streams.
+// When status is hipSuccess, the caller's stream first receives a marker that waits for them.
+static hipError_t EnqueueBatchMarker(hipError_t status, hip::Stream& stream,
+                                     amd::Command::EventWaitList& marker_wait_list) {
+  if (status == hipSuccess && !marker_wait_list.empty()) {
+    amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
+    if (dependent_marker == nullptr) {
+      status = hipErrorOutOfMemory;
+    } else {
+      dependent_marker->enqueue();
+      dependent_marker->release();
+    }
+  }
+  for (amd::Event* cmd : marker_wait_list) {
+    cmd->release();
+  }
+  return status;
+}
+
+// ================================================================================================
 // Returns the attribute flags that apply to copy `copyIdx`.
 static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
                                              size_t numAttrs, size_t copyIdx, size_t& attrIdx) {
@@ -3218,29 +3238,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     stream_wait_cmd->release();
   }
 
-  if (status != hipSuccess) {
-    for (auto* cmd : marker_wait_list) {
-      cmd->release();
-    }
-    return status;
-  }
-
-  if (!marker_wait_list.empty()) {
-    amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
-    if (dependent_marker == nullptr) {
-      for (auto* cmd : marker_wait_list) {
-        cmd->release();
-      }
-      return hipErrorOutOfMemory;
-    }
-    dependent_marker->enqueue();
-    dependent_marker->release();
-    for (auto* cmd : marker_wait_list) {
-      cmd->release();
-    }
-  }
-
-  return hipSuccess;
+  return EnqueueBatchMarker(status, stream, marker_wait_list);
 }
 
 // ================================================================================================
@@ -3326,14 +3324,79 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   }
   CHECK_STREAM_DETACHED_API(stream);
 
-  hipError_t status = hipSuccess;
-
   *failIdx = SIZE_MAX;
-  for (int i = 0; i < numOps; ++i) {
+  hip::Stream* hip_stream = hip::getStream(stream);
+
+  std::vector<std::vector<amd::BatchCopyRectOp>> copy_ops_by_device(g_devices.size());
+  std::vector<std::pair<size_t, HIP_MEMCPY3D>> per_entry_copies;
+  for (size_t i = 0; i < numOps; ++i) {
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
-    status = ihipMemcpy3D(&parms, stream, true);
+    hipError_t status = ihipMemcpy3D_validate(&parms);
     if (status != hipSuccess) {
       *failIdx = i;
+      HIP_RETURN(status);
+    }
+    HIP_MEMCPY3D desc = getDrvMemcpy3DDesc(parms);
+    if (desc.WidthInBytes == 0 || desc.Height == 0 || desc.Depth == 0) {
+      continue;
+    }
+
+    hipMemoryType src_memory_type;
+    hipMemoryType dst_memory_type;
+    ihipCopyMemParamSet(&desc, src_memory_type, dst_memory_type);
+    if (src_memory_type != hipMemoryTypeDevice || dst_memory_type != hipMemoryTypeDevice) {
+      per_entry_copies.emplace_back(i, desc);
+      continue;
+    }
+
+    amd::Coord3D src_origin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
+    amd::Coord3D dst_origin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
+    amd::Coord3D copy_region = {desc.WidthInBytes, desc.Height, desc.Depth};
+    amd::BufferRect src_rect;
+    amd::BufferRect dst_rect;
+    amd::Image* src_image = nullptr;
+    amd::Image* dst_image = nullptr;
+    status = ihipDrvMemcpy3D_validate(&desc, src_origin, dst_origin, copy_region, &src_rect,
+                                      &dst_rect, &src_image, &dst_image);
+    if (status != hipSuccess) {
+      *failIdx = i;
+      HIP_RETURN(status);
+    }
+
+    amd::Memory* src_memory = nullptr;
+    amd::Memory* dst_memory = nullptr;
+    size_t src_offset = 0;
+    size_t dst_offset = 0;
+    getMemoryObjectPairs(hip::getCurrentDevice(), desc.srcDevice, desc.dstDevice, src_memory,
+                         dst_memory, src_offset, dst_offset);
+    int device_id = hip_stream->DeviceId();
+    if (ihipGetMemcpyType(src_memory, dst_memory, hipMemcpyDefault) != hipCopyBufferP2P) {
+      device_id = (getMemoryType(src_memory) == hipMemoryTypeDevice &&
+                   getMemoryType(dst_memory) == hipMemoryTypeHost)
+                      ? src_memory->getUserData().deviceId
+                      : dst_memory->getUserData().deviceId;
+    }
+    copy_ops_by_device[device_id].emplace_back(src_memory, dst_memory, src_rect, dst_rect,
+                                               copy_region);
+  }
+
+  amd::Command::EventWaitList marker_wait_list;
+  amd::Command* stream_wait_cmd = hip_stream->getLastQueuedCommand(true);
+  hipError_t status = EnqueueBatchCommands<amd::BatchCopyMemoryRectCommand>(
+      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, *hip_stream, true,
+      stream_wait_cmd, marker_wait_list);
+  if (stream_wait_cmd != nullptr) {
+    stream_wait_cmd->release();
+  }
+  status = EnqueueBatchMarker(status, *hip_stream, marker_wait_list);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+
+  for (auto& [index, desc] : per_entry_copies) {
+    status = ihipMemcpyParam3D(&desc, stream, true);
+    if (status != hipSuccess) {
+      *failIdx = index;
       break;
     }
   }
