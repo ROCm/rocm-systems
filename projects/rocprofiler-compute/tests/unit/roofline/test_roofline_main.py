@@ -181,7 +181,9 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
     return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_kernel_traces_score_against_the_roof_that_binds_not_the_tallest_drawn() -> None:
+def test_kernel_traces_score_against_the_roof_that_binds_not_the_tallest_drawn() -> (
+    None
+):
     """The percentage is scored against whichever roof the limiter actually
     names, not always the tallest compute roof stacked on the figure: dropping
     the tall MFMA peak from the candidate set changes both the label (falls
@@ -744,8 +746,9 @@ def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None
         assert roof["sampleAi"][-1] == pytest.approx(max(peaks) / roof["bandwidth"])
 
 
-def test_combined_figures_keep_every_ceiling(benchmarked_roofline) -> None:
-    """Narrowing the standalone document must not alter the source figures."""
+def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
+    """The WebUI has no precision selector, so narrowing the standalone document
+    must not reach back into the figures Dash renders."""
     roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
     source_model = roofline._Roofline__view_models["FLOP"]
     ceiling_indices = [trace["traceIndex"] for trace in source_model.compute_traces]
