@@ -100,6 +100,19 @@ public:
     return translate(address, size, access);
   }
 
+  [[nodiscard]] VmTranslationResult cache_translation(uint64_t address, std::size_t size,
+                                                      VmAccessKind access) const override {
+    const auto translated = translate(address, size, access);
+    if (!translated)
+      return translated;
+    const auto outcome = vm_access_outcome(address_space_->validate_cached_access(
+        address, std::min(size, static_cast<std::size_t>(translated.translation.contiguous_bytes)),
+        vmid_, access == VmAccessKind::Write || access == VmAccessKind::Atomic));
+    if (outcome != VmAccessOutcome::Complete)
+      return {.outcome = outcome, .translation = {}};
+    return translated;
+  }
+
   [[nodiscard]] VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
                                      std::span<std::byte> bytes) override {
     if (domain != VmMemoryDomain::Compatibility)

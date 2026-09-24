@@ -277,8 +277,13 @@ VmAccessOutcome GpuVmAccess::probe(uint64_t address, std::size_t size, VmAccessK
   return probe_impl(address, size, access, true);
 }
 
+VmAccessOutcome GpuVmAccess::validate_cache_access(uint64_t address, std::size_t size,
+                                                   VmAccessKind access) const {
+  return probe_impl(address, size, access, true, true);
+}
+
 VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
-                                        bool report_fault) const {
+                                        bool report_fault, bool cached) const {
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
@@ -294,7 +299,8 @@ VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAc
   while (completed_bytes < size) {
     const uint64_t current_address = address + completed_bytes;
     const VmTranslationResult translated =
-        translator_->probe_translation(current_address, size - completed_bytes, access);
+        cached ? translator_->cache_translation(current_address, size - completed_bytes, access)
+               : translator_->probe_translation(current_address, size - completed_bytes, access);
     if (!translated) {
       if (report_fault)
         report_terminal_fault(current_address, access, translated.outcome);

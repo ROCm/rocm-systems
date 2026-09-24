@@ -182,7 +182,6 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
   const VmAccessOutcome validation =
       l2_->validate_cache_access(addr, num_dwords * sizeof(uint32_t), vmid, VmAccessKind::Read);
   if (validation != VmAccessOutcome::Complete) {
-    std::memset(dst, 0, num_dwords * sizeof(uint32_t));
     return validation;
   }
 
@@ -242,7 +241,6 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
   const VmAccessOutcome validation =
       l2_->validate_cache_access(addr, num_bytes, vmid, VmAccessKind::Read);
   if (validation != VmAccessOutcome::Complete) {
-    std::memset(dst, 0, num_bytes);
     return validation;
   }
 

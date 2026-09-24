@@ -333,6 +333,12 @@ public:
                                                               VmAccessKind access) const {
     return translate(address, size, access);
   }
+
+  /// @brief Revalidate cached demand using the backing's retry policy.
+  [[nodiscard]] virtual VmTranslationResult cache_translation(uint64_t address, std::size_t size,
+                                                              VmAccessKind access) const {
+    return probe_translation(address, size, access);
+  }
 };
 
 /// @brief Flat internal address space that maps GPU virtual addresses to the
@@ -494,6 +500,8 @@ public:
   /// an attempted GPU access. It does not access the physical backing.
   [[nodiscard]] VmAccessOutcome probe(uint64_t address, std::size_t size,
                                       VmAccessKind access) const;
+  [[nodiscard]] VmAccessOutcome validate_cache_access(uint64_t address, std::size_t size,
+                                                      VmAccessKind access) const;
   [[nodiscard]] VmAccessOutcome read(uint64_t address, std::span<std::byte> bytes,
                                      VmAccessKind access = VmAccessKind::Read) const;
   /// @brief Resume a translated read at @p completed_bytes.
@@ -537,7 +545,7 @@ private:
 
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
-                                           bool report_fault) const;
+                                           bool report_fault, bool cached = false) const;
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;

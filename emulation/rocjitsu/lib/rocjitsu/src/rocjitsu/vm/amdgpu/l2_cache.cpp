@@ -215,7 +215,8 @@ VmAccessOutcome L2Cache::validate_cache_access(uint64_t addr, uint32_t size, uin
 #if defined(RJ_VALIDATE_CACHE_ASAN)
   if (vmid != 0 && gpu_vm_) {
     const auto snapshot = gpu_vm_->snapshot_vmid(vmid);
-    return snapshot ? snapshot->probe(addr, size, access) : VmAccessOutcome::Faulted;
+    return snapshot ? snapshot->validate_cache_access(addr, size, access)
+                    : VmAccessOutcome::Unavailable;
   }
 #else
   (void)addr;
@@ -424,7 +425,6 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
                               uint32_t vmid) {
   const VmAccessOutcome validation = validate_cache_access(addr, size, vmid, VmAccessKind::Read);
   if (validation != VmAccessOutcome::Complete) {
-    std::memset(dst, 0, size);
     return validation;
   }
 

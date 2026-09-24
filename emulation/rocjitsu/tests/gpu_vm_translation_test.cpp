@@ -813,6 +813,12 @@ TEST(GpuVmTranslation, LegacyProbeRequiresEveryPageToHaveAGpuMapping) {
   EXPECT_EQ(access->probe(mapped_page_end - sizeof(uint32_t), sizeof(uint64_t), VmAccessKind::Read),
             VmAccessOutcome::Faulted);
 
+  EXPECT_EQ(access->validate_cache_access(mapped_address, sizeof(uint32_t), VmAccessKind::Read),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(access->validate_cache_access(mapped_page_end - sizeof(uint32_t), sizeof(uint64_t),
+                                          VmAccessKind::Read),
+            VmAccessOutcome::Unavailable);
+
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
 
@@ -882,6 +888,12 @@ TEST(GpuVmTranslation, QueryAccessDoesNotReportAnExpectedProvisioningMiss) {
   ASSERT_TRUE(handle);
   const std::optional<GpuVmAccess> access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(access);
+
+  for (const auto kind : {VmAccessKind::Read, VmAccessKind::Write}) {
+    EXPECT_EQ(access->validate_cache_access(unmapped_address, sizeof(uint32_t), kind),
+              VmAccessOutcome::Unavailable);
+  }
+  EXPECT_TRUE(reporter.addresses.empty()) << "cache misses must remain retryable";
 
   EXPECT_EQ(access->query_access(unmapped_address, KfdProcess::kPageSize, VmAccessKind::Atomic),
             VmAccessOutcome::Faulted);

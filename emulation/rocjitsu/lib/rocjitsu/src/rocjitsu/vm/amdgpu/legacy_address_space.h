@@ -541,6 +541,30 @@ public:
     });
   }
 
+  /// @brief Revalidate cached demand without changing missing-mapping retry semantics.
+  [[nodiscard]] CopyOutcome validate_cached_access(uint64_t addr, size_t size, uint32_t vmid,
+                                                   bool write) const {
+    if (!range_within_address_space(addr, size)) {
+      return CopyOutcome::Faulted;
+    }
+    CopyOutcome outcome = CopyOutcome::Complete;
+    for_each_page_chunk_until(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
+      const bool readable = has_host_backing(ea, vmid, chunk);
+      if (write ? has_writable_host_backing(ea, vmid, chunk) : readable)
+        return true;
+      // A debugger probe reports absent mappings as faults. A pending memory
+      // operation instead retries until its backing becomes available.
+      if (!has_page_mapping(ea, vmid) &&
+          (has_client_backing(vmid) || !passthrough_for_vmid(vmid) || ea < PAGE_SIZE)) {
+        outcome = CopyOutcome::Unavailable;
+        return false;
+      }
+      outcome = CopyOutcome::Faulted;
+      return false;
+    });
+    return outcome;
+  }
+
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
   bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)

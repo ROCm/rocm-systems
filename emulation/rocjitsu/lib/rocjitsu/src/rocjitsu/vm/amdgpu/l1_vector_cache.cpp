@@ -139,7 +139,6 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
   const VmAccessOutcome validation =
       l2_->validate_cache_access(addr, size, vmid, VmAccessKind::Read);
   if (validation != VmAccessOutcome::Complete) {
-    std::memset(dst, 0, size);
     return validation;
   }
 
