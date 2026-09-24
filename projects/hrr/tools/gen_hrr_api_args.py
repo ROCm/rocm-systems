@@ -2817,16 +2817,16 @@ def main() -> None:
 
     header_path.parent.mkdir(parents=True, exist_ok=True)
     header = generate_header(entries)
-    header_path.write_text(header, encoding='utf-8')
+    header_path.write_text(header, encoding="utf-8", newline="\n")
     log(f"Written header   -> {header_path}")
 
     capture_path.parent.mkdir(parents=True, exist_ok=True)
-    capture_path.write_text(capture_cpp, encoding="utf-8")
+    capture_path.write_text(capture_cpp, encoding="utf-8", newline="\n")
     log(f"Written capture  -> {capture_path}")
 
     playback_path.parent.mkdir(parents=True, exist_ok=True)
     playback_cpp = generate_playback_cpp(entries)
-    playback_path.write_text(playback_cpp, encoding='utf-8')
+    playback_path.write_text(playback_cpp, encoding="utf-8", newline="\n")
     log(f"Written playback -> {playback_path}")
 
     # Spot-check a few important structs
