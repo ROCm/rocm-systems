@@ -2268,6 +2268,108 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelDynSmem_FalseWhenBitNotS
   EXPECT_EQ(scene.plan->kernelDynSmem, 0);
 }
 
+// ---- Tma kernels: launch geometry and the tile-staging LDS bound ----
+//
+// These read ncclSymkWarpsPerBlock rather than restating 16, but they do not prove the tuner picks
+// it: nWarps arrives already decided and no test target compiles sym_model.cc. They cover what is
+// downstream of that choice. That the width fits the budget is a static_assert in sym_kernels.h.
+constexpr int kSymTmaWaveSize = 32;
+constexpr ncclSymkKernelId kSymTmaKernelId = ncclSymkKernelId_AllGather_TmaST;
+// Fixture value: ncclSymkTileSmemBudget is gfx1250-device-pass only and this is a host binary.
+constexpr int kSymTmaGrantBytes = 320 << 10;
+
+int SymTmaOnlyKernelMask() { return 1 << (int)kSymTmaKernelId; }
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_ShippingGeometry_ThreadsAndSmemParams) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = kSymTmaGrantBytes;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+  ScopedHook smemMaskHook(g_symkDynamicSmemKernelMask, SymTmaOnlyKernelMask);
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, ncclSymkWarpsPerBlock * kSymTmaWaveSize);  // 512
+  EXPECT_EQ(scene.plan->kernelDynSmem, kSymTmaGrantBytes);  // in the dyn-smem mask: reserves it all
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(argsBuf->maxDynamicSmem, kSymTmaGrantBytes);
+}
+
+// The tuned width's windows, one byte short: the plan has to fail rather than launch an overrun
+// that gets DMA'd to peers.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_GrantBelowWarpWindows_RejectsWithWarn) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = ncclSymkWarpsPerBlock * ncclTmaShmemScratchWarpSize() - 1;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()); });
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "tile staging LDS"));
+}
+
+// Exactly enough is enough: pins the comparison as >, not >=.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_GrantExactlyMeetsWarpWindows_Accepted) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = ncclSymkWarpsPerBlock * ncclTmaShmemScratchWarpSize();
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, ncclSymkWarpsPerBlock * kSymTmaWaveSize);
+}
+
+// The width the launch actually got, not just the constant: sym_kernels.h's static_assert cannot see
+// a tuner that hands out something else, or a kernel that took the LL arm by mistake.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TmaKernel_WarpCountNotTheTunedWidth_RejectsWithWarn) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  ncclSymkKernelMaxDynamicSmem[0] = kSymTmaGrantBytes;  // ample: only the width can fail here
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.devFuncId = kSymTmaKernelId;
+  task.nWarps = ncclSymkWarpsPerBlock / 2;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()); });
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "expected the tuned"));
+}
+
+// Both Tma checks are scoped to the mask: a kernel that stages no tiles keeps its own width and is
+// unaffected by an undersized grant.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NonTmaKernel_UndersizedGrantAndOtherWidth_NotRejected) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = kSymTmaWaveSize;
+  constexpr int kWarps = 4;  // deliberately not ncclSymkWarpsPerBlock
+  ncclSymkKernelMaxDynamicSmem[0] = kWarps * ncclTmaShmemScratchWarpSize() - 1;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // AllGather_LL: not in the mask below
+  task.nWarps = kWarps;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook tmaMaskHook(g_symkTmaKernelMask, SymTmaOnlyKernelMask);
+
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, kWarps * kSymTmaWaveSize);
+}
+
 // Head task's nMaxChannels(60) differs from the rest of the batch(kSymSchedBigBatchChannels=100): proves the
 // value comes from headTask specifically, not a std::max shared across the batch (both clear the 4096 floor).
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NMaxChannels_DerivedFromHeadTask_FeedsArgsSize) {

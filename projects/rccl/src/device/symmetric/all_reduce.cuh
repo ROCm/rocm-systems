@@ -33,46 +33,38 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
 
   ncclSymPtr<Pack> inpPacks = (ncclSymPtr<Pack>)input + intptr_t(w) * UnrollPacks * WARP_SIZE +
                               (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                                 EnableTma ? 0 :
 #endif
                                             lane);
 
   ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE +
                               (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                                 EnableTma ? 0 :
 #endif
                                             lane);
 
   Pack acc0[UnrollPacks];
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   int lw = threadIdx.x / WARP_SIZE;
-  extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks, UnrollPeers>;
-  constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-  tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+  tmaSmemStruct_t* tmaSmem = ncclSymkTileSmem<tmaSmemStruct_t>(lw);
   constexpr size_t tilePack = UnrollPacks * WARP_SIZE;
   constexpr size_t tileSize = tilePack * BytePerPack;
   size_t tmaSize = 0;
 
   if NCCL_IF_CONSTEXPR (EnableTma) {
-    if (lane == 0) {
-      init(&tmaSmem->bar, WARP_SIZE);
-    }
+    ncclSymkTileBarInit(&tmaSmem->bar, /*arrivers=*/WARP_SIZE, lane);
   }
 #endif
 
   nIters -= w;
   if (0 < nIters) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      if (lane == 0) {
-        cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks.peerPtr(world, rank),
-                                      cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-        tmaSize += tileSize;
-      }
+      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
     } else
 #endif
     {
@@ -92,17 +84,10 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
       if (++r == nRanks) r = 0;
       {
         Pack tmp1[UnrollPacks];
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
-          if (lane == 0) {
-            cuda::device::memcpy_async_tx(tmaSmem->buff[1], inpPacks.peerPtr(world, r),
-                                          cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-            tmaSize += tileSize;
-          }
-          cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-            cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tmaSize);
-          tmaSmem->bar.wait(std::move(token));
-          tmaSize = 0;
+          ncclSymkTileLoad(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
+          ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
         } else
 #endif
         {
@@ -113,7 +98,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
         }
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
             acc0[u] = tmaSmem->buff[0][lane + WARP_SIZE * u];
             tmp1[u] = tmaSmem->buff[1][lane + WARP_SIZE * u];
@@ -133,9 +118,10 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
           if (partial && dr == nRanks) break;
 
           Pack tmp1[UnrollPeers][UnrollPacks];
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
-            // lane 0 waits for all threads to reduce tmp1 before next batch of TMA loads
+            // The next batch reloads these same tiles, so hold until every lane has
+            // finished reducing out of them.
             __syncwarp();
           }
 #endif
@@ -143,13 +129,9 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
           NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
             if (partial && ur != 0 && dr + ur == nRanks) break;
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              if (lane == 0) {
-                cuda::device::memcpy_async_tx(tmaSmem->buff[ur], inpPacks.peerPtr(world, r),
-                                              cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-                tmaSize += tileSize;
-              }
+              ncclSymkTileLoad(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
             } else
 #endif
             {
@@ -160,12 +142,9 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
             }
             if (++r == nRanks) r = 0;
           }
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
-            cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-              cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tmaSize);
-            tmaSmem->bar.wait(std::move(token));
-            tmaSize = 0;
+            ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
           }
 #endif
           NVCC_PRAGMA_UNROLL_AUTO
@@ -173,7 +152,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
             if (partial && ur != 0 && dr + ur == nRanks) break;
             NVCC_PRAGMA_UNROLL(UnrollPacks)
             for (int u = 0; u < UnrollPacks; u++) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
               if NCCL_IF_CONSTEXPR (EnableTma) {
                 tmp1[ur][u] = tmaSmem->buff[ur][lane + WARP_SIZE * u];
               }
@@ -186,7 +165,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
 
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
           tmaSmem->buff[0][lane + WARP_SIZE * u] = applyCast<Acc, T>(acc1[u]);
         } else
@@ -196,11 +175,10 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
         }
       }
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        // threads flush data to point of consistency for async proxy
-        ptx::fence_proxy_async(ptx::space_shared);
-        __syncwarp();
+        // Publish the lanes' reduced tile to the engine that is about to read it.
+        ncclSymkTileFenceSmem();
       }
 #endif
 
@@ -213,12 +191,9 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
           NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
             if (partial && dr == nRanks) break;
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              if (lane == 0) {
-                ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, outPacks.peerPtr(world, r), tmaSmem->buff[0],
-                                   tileSize);
-              }
+              ncclSymkTileStore(outPacks.peerPtr(world, r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
@@ -231,12 +206,10 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
           }
         }
       }
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        if (lane == 0) {
-          ptx::cp_async_bulk_commit_group();
-          ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
-        }
+        // Drain every peer's store before the next iteration refills the tile.
+        ncclSymkTileStoreWait(lane);
         __syncwarp();
       }
 #endif
@@ -246,14 +219,10 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
       nIters -= wn;
       if (nIters <= 0) break;
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       // Load data for next iteration.
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        if (lane == 0) {
-          cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks.peerPtr(world, rank),
-                                        cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-          tmaSize += tileSize;
-        }
+        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
       } else
 #endif
       {
@@ -344,20 +313,21 @@ static __device__ void allreduce(ncclSymkArgsHandler const& handler, int tn, int
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
 
+  // True only where the deep loop really stages through a TDM engine.
+  constexpr bool AsyncTile = ncclSymkAsyncTile && EnableTma;
+
   uint32_t nPreBytes = (16u - input.offset) % 16u;
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
   if ((input.offset - output.offset) % 16 == 0) {
     constexpr int BytePerPack = ncclSymkBytePerPack,
-                  UnrollPacks =
-#if __CUDA_ARCH__ >= 1000
-                    EnableTma ? ncclSymkDeepUnrollPacks :
-#endif
-                                ncclSymkUnrollPacks,
+                  UnrollPacks = AsyncTile ? ncclSymkDeepUnrollPacks(sizeof(T)) : ncclSymkUnrollPacks,
                   UnrollPeers = 2;
 
-    constexpr int BytePerChunk = EnableTma ? ncclSymkDeepBytePerChunk : ncclSymkBytePerChunk;
+    // Derived from UnrollPacks so the two cannot disagree: a chunk wider than what allreduceDeep()
+    // reduces would leave the difference unreduced.
+    constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
     if (chunks != 0) {

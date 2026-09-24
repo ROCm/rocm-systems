@@ -820,8 +820,12 @@ __device__ constexpr int ncclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH)
          -16; // pad to 16 bytes
 }
 
+// Per-warp async-tile staging window. The widest tile any deep loop stages is 16 KiB
+// (ncclSymkDeepUnrollPacks(4) x 2 peers, and AllGather's 256 B tier), so this leaves a
+// little slack above that. At the symmetric kernels' 16 warps that is 288 KiB of the
+// 320 KiB these kernels already reserve via cudaFuncAttributeMaxDynamicSharedMemorySize.
 __host__ __device__ constexpr int ncclTmaShmemScratchWarpSize(void) {
-  return 10 << 10;
+  return 18 << 10;
 }
 
 // RCCL has its own varient of ncclShmemDynamicSize and ncclShmemScratchWarpSize

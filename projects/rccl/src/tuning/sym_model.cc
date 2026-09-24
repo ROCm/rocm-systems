@@ -192,6 +192,11 @@ static void queryModel_gin(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
 static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
                            int* nBlocks);
 
+// [RCCL] Occupancy cost, charged by the model rather than by the caller: TDM widens its
+// launch after pricing (see queryModel_lsa()), so by the time *nBlocks reaches the caller
+// it is no longer the count the price was based on.
+static constexpr float smPenalty = .025f; // 2.5% percent increase in time per SM
+
 static void queryModel(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
                        int* nBlocks) {
   if (ncclSymkGinKernelMask() >> k & 1) {
@@ -267,6 +272,20 @@ static void queryModel_gin(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   default:
     break;
   }
+  *timeUs *= 1.0f + smPenalty * *nBlocks;
+}
+
+// [RCCL] True only when this kernel will actually stage tiles through the gfx1250
+// Tensor Data Mover. NVIDIA's TMA shares these kernel ids and the same
+// ncclSymkTmaAvailable() gate, but the widening below was measured against TDM, so
+// TMA keeps the shared model.
+static bool usesTdm(struct ncclComm* comm, ncclSymkKernelId k) {
+#if defined(__HIP_PLATFORM_AMD__)
+  return (ncclSymkTmaKernelMask() >> k & 1) && ncclSymkTmaAvailable(comm);
+#else
+  (void)comm, (void)k;
+  return false;
+#endif
 }
 
 static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
@@ -403,6 +422,11 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
         INFO(NCCL_TUNING,
              "NCCL_SYM_KERNEL set to %s. At largest grouped work size %zu Bytes, kernel will not exercise TMA paths.",
              symKernelIdEnv, maxWorkBytes);
+      } else if (ncclSymkTmaForced(comm)) {
+        INFO(NCCL_TUNING,
+             "NCCL_SYM_TMA_ENABLE=2 forces %s. At largest grouped work size %zu Bytes, kernel will not exercise TMA "
+             "paths.",
+             ncclSymkKernelIdToString(k), maxWorkBytes);
       } else {
         *nBlocks = -1;
         return;
@@ -425,6 +449,15 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
       break;
     }
   }
+  *timeUs *= 1.0f + smPenalty * *nBlocks;
+
+  // [RCCL] TDM runs wider than it is priced. smPenalty charges a block as pure occupancy,
+  // which holds once its marginal throughput has saturated -- where the search above stops
+  // -- but a TDM warp moves its tile as a serialized load/drain/store/drain chain through
+  // one LDS window, so its throughput tracks resident blocks all the way up. nMaxBlocks
+  // already honours minCTAs/maxCTAs, NCCL_SYM_CTAS and deep eligibility, so widening to it
+  // cannot exceed a user's bound or push the kernel off its own fast path.
+  if (usesTdm(comm, k)) *nBlocks = nMaxBlocks;
 }
 
 ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, struct ncclTuningResult_t* const tuning) {
@@ -468,7 +501,6 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   float kTime = 0.0f;
   int kBlocks = 0;
-  constexpr float smPenalty = .025f; // 2.5% percent increase in time per SM
   queryModel(inputs, (ncclSymkKernelId)tuning->symKernelId, inputs->nBytes, &kTime, &kBlocks);
   if (kBlocks <= 0) {
     tuning->valid = 0;
@@ -476,16 +508,15 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
     return ncclSuccess;
   }
 
-  tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
+  tuning->timeUs = kTime; // queryModel() has already charged smPenalty
   tuning->nChannels = kBlocks;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // rcclSymKGetInfo reports this field and nothing set it after the 2.31 sync, so nchannels read -1.
   tuning->maxChannels = kBlocks;
-  // The LSA kernels size themselves for ncclSymkMaxThreads. GIN carves its pipeline roles out of
-  // blockDim.x instead, so it keeps the full 16-warp launch.
-  tuning->nWarps = (ncclSymkGinKernelMask() >> tuning->symKernelId & 1)
-                     ? 16
-                     : ncclSymkMaxThreads / inputs->comm->WarpSize;
+  // LL and the vector LSA kernels size themselves for ncclSymkMaxThreads. GIN carves its pipeline
+  // roles out of blockDim.x and symCheckTmaLaunch() requires the full launch for Tma, so both keep it.
+  bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> tuning->symKernelId & 1;
+  tuning->nWarps = fullWidth ? ncclSymkWarpsPerBlock : ncclSymkMaxThreads / inputs->comm->WarpSize;
 #else
   tuning->nWarps = 16;
 #endif
