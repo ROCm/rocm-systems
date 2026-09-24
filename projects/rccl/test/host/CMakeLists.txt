@@ -492,16 +492,12 @@ function(rccl_standalone_setup)
   # --- Per-mode variables consumed by the shared micro-binary block ---------
   set(RCCL_HOST_HIPIFY_DIR "${RCCL_HIPIFY_DIR}" PARENT_SCOPE)
   set(RCCL_INCLUDE_DIRS "${RCCL_INCLUDE_DIRS}" PARENT_SCOPE)
-  # USE_AMDSMI + the fabric probes: the in-RCCL-build path inherits these from
-  # the rccl target via RCCL_COMMON_COMPILE_DEFS, applied uniformly to every
-  # micro binary. This standalone project has no rccl target to read, so add
-  # them here (equally uniformly) as the per-mode baseline.
   set(_MICRO_MODE_DEFS
-    USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     PARENT_SCOPE)
+  set(_MICRO_AMDSMI_DEF USE_AMDSMI PARENT_SCOPE)
   # ENABLE_DEVICE_LINKER defaults ON, so the enqueue arm that SHIPS is the
   # -devlinker one. The in-RCCL-build path builds only the single inherited-arm
   # binary; run_host_tests.sh (the only in-repo workflow that runs these) uses
@@ -541,6 +537,7 @@ endfunction()
 if(BUILD_TESTS)
   set(RCCL_HOST_HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
   set(_MICRO_MODE_DEFS "")
+  set(_MICRO_AMDSMI_DEF "")
   set(_ENQ_BUILD_DEVLINKER FALSE)
   set(_MICRO_BUILD_SYM_KERNELS ${GENERATE_SYM_KERNELS})
 else()
@@ -685,7 +682,7 @@ foreach(_variant "" "-uncached" "-faultinj")
   rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
-    EXTRA_DEFS ${_MICRO_MODE_DEFS} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
+    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
@@ -704,6 +701,7 @@ set(_enq_common_args
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
@@ -725,6 +723,7 @@ if(_MICRO_BUILD_SYM_KERNELS)
     SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
     EXTRA_DEFS
       ${_MICRO_MODE_DEFS}
+      ${_MICRO_AMDSMI_DEF}
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
       SYM_KERNELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/sym_kernels.cc"
