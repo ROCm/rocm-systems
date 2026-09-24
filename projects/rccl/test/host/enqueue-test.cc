@@ -821,6 +821,91 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationHonorsAllowedUserSh
   EXPECT_EQ(NCCL_PROTO_SIMPLE, resolution.policy.protocol);
 }
 
+TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnsupportedTransportShape) {
+  constexpr rcclExecutionPolicyFact facts[] = {
+    {RCCL_EXECUTION_INPUT_SCOPE,
+     rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
+  };
+  constexpr rcclExecutionPolicyAssignment shmTreeProfile[] = {
+    {RCCL_EXECUTION_OUTPUT_ALGORITHM, rcclExecutionPolicyValue::Signed(NCCL_ALGO_TREE)},
+    {RCCL_EXECUTION_OUTPUT_TRANSPORT,
+     rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_TRANSPORT_SHM)},
+  };
+  constexpr rcclExecutionPolicyAssignment shmBaselineProfile[] = {
+    {RCCL_EXECUTION_OUTPUT_TRANSPORT,
+     rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_TRANSPORT_SHM)},
+  };
+  constexpr rcclExecutionPolicyAssignment ipcTreeProfile[] = {
+    {RCCL_EXECUTION_OUTPUT_ALGORITHM, rcclExecutionPolicyValue::Signed(NCCL_ALGO_TREE)},
+    {RCCL_EXECUTION_OUTPUT_TRANSPORT,
+     rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_TRANSPORT_IPC)},
+  };
+  const rcclCollectiveExecutionRule rules[] = {
+    {nullptr, 0, shmTreeProfile, 2},
+    {nullptr, 0, shmBaselineProfile, 1},
+    {nullptr, 0, ipcTreeProfile, 2},
+  };
+  rcclExecutionPolicyValidationContext validation;
+  rcclDefaultExecutionPolicyValidationContext(&validation);
+  validation.baselineAlgorithm = NCCL_ALGO_TREE;
+  validation.baselineProtocol = NCCL_PROTO_SIMPLE;
+  validation.validateAlgoProto = true;
+  validation.algoProtoAvailable[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = true;
+  validation.algoProtoAvailable[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = true;
+  validation.validateTransportCapabilities = true;
+  validation.transportAlgoProtoAvailable[RCCL_EXECUTION_TRANSPORT_SHM][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = true;
+  validation.transportAlgoProtoAvailable[RCCL_EXECUTION_TRANSPORT_IPC][NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = true;
+
+  // SHM cannot run Tree, including a Tree baseline the rule keeps.
+  rcclExecutionPolicyResolution resolution =
+    rcclEvaluateCollectiveExecutionRulesWithValidation(facts, 1, rules, 3, &validation);
+  EXPECT_EQ(RCCL_EXECUTION_POLICY_SELECTED, resolution.status);
+  EXPECT_EQ(2, resolution.selectedRuleId);
+  EXPECT_EQ(0, resolution.firstRejectedRuleId);
+  EXPECT_EQ(RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_CAPABILITY_UNAVAILABLE,
+            resolution.firstRejectedError);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, resolution.policy.transport);
+
+  validation.baselineAlgorithm = NCCL_ALGO_RING;
+  resolution = rcclEvaluateCollectiveExecutionRulesWithValidation(facts, 1, rules, 3, &validation);
+  EXPECT_EQ(RCCL_EXECUTION_POLICY_SELECTED, resolution.status);
+  EXPECT_EQ(1, resolution.selectedRuleId);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, resolution.policy.transport);
+
+  validation.validateTransportCapabilities = false;
+  resolution = rcclEvaluateCollectiveExecutionRulesWithValidation(facts, 1, rules, 3, &validation);
+  EXPECT_EQ(0, resolution.selectedRuleId);
+
+  constexpr rcclExecutionPolicyFact p2pFacts[] = {
+    {RCCL_EXECUTION_INPUT_SCOPE, rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_P2P)},
+  };
+  constexpr rcclExecutionPolicyAssignment shmReadProfile[] = {
+    {RCCL_EXECUTION_OUTPUT_PATH, rcclExecutionPolicyValue::Signed(RCCL_P2P_PATH_SENDRECV)},
+    {RCCL_EXECUTION_OUTPUT_TRANSFER_MODE, rcclExecutionPolicyValue::Signed(RCCL_P2P_TRANSFER_READ)},
+    {RCCL_EXECUTION_OUTPUT_TRANSPORT,
+     rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_TRANSPORT_SHM)},
+  };
+  constexpr rcclExecutionPolicyAssignment shmAutoProfile[] = {
+    {RCCL_EXECUTION_OUTPUT_PATH, rcclExecutionPolicyValue::Signed(RCCL_P2P_PATH_SENDRECV)},
+    {RCCL_EXECUTION_OUTPUT_TRANSPORT,
+     rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_TRANSPORT_SHM)},
+  };
+  const rcclCollectiveExecutionRule p2pRules[] = {
+    {nullptr, 0, shmReadProfile, 3},
+    {nullptr, 0, shmAutoProfile, 2},
+  };
+  rcclDefaultExecutionPolicyValidationContext(&validation);
+  validation.validateTransportCapabilities = true;
+  validation.transportP2pTransferMask[RCCL_EXECUTION_TRANSPORT_IPC] =
+    (1u << RCCL_P2P_TRANSFER_READ) | (1u << RCCL_P2P_TRANSFER_WRITE);
+  resolution = rcclEvaluateCollectiveExecutionRulesWithValidation(p2pFacts, 1, p2pRules, 2, &validation);
+  EXPECT_EQ(RCCL_EXECUTION_POLICY_SELECTED, resolution.status);
+  EXPECT_EQ(1, resolution.selectedRuleId);
+  EXPECT_EQ(RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_CAPABILITY_UNAVAILABLE,
+            resolution.firstRejectedError);
+  EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, resolution.policy.transferMode);
+}
+
 TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ValidationUsesResolvedCapabilityMasks) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE,
@@ -1571,6 +1656,127 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_OutputAdapterDiscoversTranspo
               /*isSendNotRecv=*/true, RCCL_EXECUTION_TRANSPORT_SHM));
 }
 
+TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_CanonicalModeSharesProvisioningAndShmSlot) {
+  ncclComm comm{};
+  char arch[] = "gfx1201";
+  comm.archName = arch;
+  comm.rank = 0;
+  comm.nNodes = 1;
+  comm.nRanks = 8;
+  comm.nChannels = 1;
+
+  // Forced-SHM layout: the primary slots are SHM as well as the dedicated slot.
+  ncclChannelPeer nextPeer{};
+  ncclChannelPeer prevPeer{};
+  ncclChannelPeer* peers[8] = {};
+  peers[1] = &nextPeer;
+  peers[7] = &prevPeer;
+  comm.channels[0].peers = peers;
+  comm.channels[0].ring.next = 1;
+  comm.channels[0].ring.prev = 7;
+  for (int connIndex : {0, RCCL_CONN_IDX_COLL_SHM}) {
+    nextPeer.send[connIndex].connected = 1;
+    nextPeer.send[connIndex].transportComm = &shmTransport.send;
+    prevPeer.recv[connIndex].connected = 1;
+    prevPeer.recv[connIndex].transportComm = &shmTransport.recv;
+  }
+  nextPeer.send[1].connected = 1;
+  nextPeer.send[1].transportComm = &shmTransport.send;
+
+  ncclTaskColl task{};
+  task.algorithm = NCCL_ALGO_RING;
+  task.protocol = NCCL_PROTO_SIMPLE;
+  task.executionTransport = RCCL_EXECUTION_TRANSPORT_SHM;
+
+  struct Intent {
+    const char* env;
+    int64_t p2pDisable;
+  };
+  const Intent autoIntent = {nullptr, 0};
+  const Intent ipcIntent = {"0", 0};
+  const Intent shmIntent = {"1", 1};
+  auto setIntent = [](const Intent& intent) {
+    if (intent.env == nullptr) SetMicroEnvAbsent("NCCL_P2P_DISABLE");
+    else SetMicroEnv("NCCL_P2P_DISABLE", intent.env);
+    g_tuningParamP2pDisable = intent.p2pDisable;
+  };
+
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  setIntent(autoIntent);
+  const int autoChannels =
+    rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, false);
+  EXPECT_GT(autoChannels, 0);
+  for (const Intent& intent : {ipcIntent, shmIntent}) {
+    setIntent(intent);
+    EXPECT_TRUE(rcclPolicyCanonicalTransportEligible(&comm));
+    EXPECT_EQ(autoChannels, rcclGetCollectiveExecutionPolicyRequiredChannels(
+                              &comm, intent.p2pDisable != 0))
+      << "NCCL_P2P_DISABLE=" << intent.env;
+  }
+
+  setIntent(ipcIntent);
+  EXPECT_FALSE(rcclPolicyCanonicalShmEligible(&comm));
+
+  setIntent(shmIntent);
+  EXPECT_TRUE(rcclPolicyCanonicalShmEligible(&comm));
+  EXPECT_FALSE(rcclPolicyTransportToggleEligible(&comm));
+  EXPECT_EQ(RCCL_CONN_IDX_COLL_SHM,
+            rcclPolicyCollectiveConnectorIndex(
+              &comm, &task, /*channelId=*/0, 32ULL << 20));
+  EXPECT_EQ(RCCL_CONN_IDX_P2P_SHM,
+            rcclPolicyP2pConnectorIndex(
+              &comm, /*channelId=*/0, /*peer=*/1,
+              /*isSendNotRecv=*/true, RCCL_EXECUTION_TRANSPORT_SHM));
+
+  // Without the toggle, forced SHM keeps upstream's primary connectors.
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  EXPECT_FALSE(rcclPolicyCanonicalShmEligible(&comm));
+  EXPECT_EQ(0, rcclPolicyCollectiveConnectorIndex(
+                 &comm, &task, /*channelId=*/0, 32ULL << 20));
+  EXPECT_EQ(1, rcclPolicyP2pConnectorIndex(
+                 &comm, /*channelId=*/0, /*peer=*/1,
+                 /*isSendNotRecv=*/true, RCCL_EXECUTION_TRANSPORT_SHM));
+
+  setIntent(autoIntent);
+}
+
+TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot) {
+  ncclComm comm{};
+  char arch[] = "gfx1201";
+  comm.archName = arch;
+  comm.nNodes = 1;
+  comm.nRanks = 8;
+  comm.p2pnChannels = 32;
+  comm.p2pnChannelsPerPeer = 4;
+
+  ncclTaskP2p gather{};
+  gather.collAPI = ncclFuncGather;
+  gather.bytes = 1ULL << 20;
+  rcclP2pPolicyPreconnect preconnect;
+
+  SetMicroEnv("NCCL_P2P_DISABLE", "1");
+  g_tuningParamP2pDisable = 1;
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  ASSERT_TRUE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
+  EXPECT_EQ(32, preconnect.nChannels);
+  EXPECT_EQ(4, preconnect.nChannelsPerPeer);
+  ASSERT_EQ(1, preconnect.nConnIndices);
+  EXPECT_EQ(RCCL_CONN_IDX_P2P_SHM, preconnect.connIndices[0]);
+  EXPECT_FALSE(rcclPolicyP2pTaskAllowsRegistration(&comm, &gather));
+
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  ASSERT_TRUE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
+  ASSERT_EQ(1, preconnect.nConnIndices);
+  EXPECT_EQ(1, preconnect.connIndices[0]);
+
+  SetMicroEnvAbsent("NCCL_P2P_DISABLE");
+  g_tuningParamP2pDisable = 0;
+  gather.collAPI = ncclFuncAllReduce;
+  EXPECT_FALSE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
+  EXPECT_EQ(0, preconnect.nConnIndices);
+  EXPECT_TRUE(rcclPolicyP2pTaskAllowsRegistration(&comm, &gather));
+}
+
 TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportIntentConstrainsCandidates) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_P2P, "gfx1201", ncclFuncGather,
@@ -1670,20 +1876,18 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CapsOnlyUniformMappedWorkItems) {
   ncclTaskP2p send{};
   recv.bytes = send.bytes = 8 << 20;
   ncclTaskP2p* tasks[2] = {&recv, &send};
-  rcclCollectiveExecutionPolicy policies[2];
-  bool policyMatches[2];
+  rcclP2pPolicyWorkPlan plan;
   for (ncclFunc_t collType :
        {ncclFuncAlltoAll, ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncGather, ncclFuncScatter}) {
     recv.collAPI = send.collAPI = collType;
-    rcclResolveP2pExecutionPolicies(&comm, tasks, /*p2pDisabled=*/false, policies, policyMatches);
-    EXPECT_EQ(2, rcclP2pActiveChannelPool(&comm, tasks, policies, policyMatches))
-      << "collType=" << static_cast<int>(collType);
+    rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
+    EXPECT_EQ(2, plan.activeChannels) << "collType=" << static_cast<int>(collType);
   }
 
   recv.collAPI = ncclFuncAlltoAll;
   send.collAPI = ncclFuncSend;
-  rcclResolveP2pExecutionPolicies(&comm, tasks, /*p2pDisabled=*/false, policies, policyMatches);
-  EXPECT_EQ(4, rcclP2pActiveChannelPool(&comm, tasks, policies, policyMatches));
+  rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
+  EXPECT_EQ(4, plan.activeChannels);
 }
 
 TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xMixedDirectionsKeepFullPoolAndLocalCap) {
@@ -1700,15 +1904,16 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xMixedDirectionsKeepFullPoolAn
   send.collAPI = ncclFuncSend;
   send.bytes = 8ULL << 20;
   ncclTaskP2p* tasks[2] = {&recv, &send};
-  rcclCollectiveExecutionPolicy policies[2];
-  bool policyMatches[2];
+  rcclP2pPolicyWorkPlan plan;
 
-  rcclResolveP2pExecutionPolicies(&comm, tasks, /*p2pDisabled=*/false, policies, policyMatches);
-  EXPECT_TRUE(policyMatches[0]);
-  EXPECT_EQ(1, policies[0].nChannels);
-  EXPECT_EQ(RCCL_P2P_PATH_AUTO, policies[0].path);
-  EXPECT_FALSE(policyMatches[1]);
-  EXPECT_EQ(4, rcclP2pActiveChannelPool(&comm, tasks, policies, policyMatches));
+  rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
+  EXPECT_TRUE(plan.matched[0]);
+  EXPECT_EQ(1, plan.policy[0].nChannels);
+  EXPECT_EQ(1, plan.channels[0]);
+  EXPECT_EQ(RCCL_P2P_PATH_AUTO, plan.policy[0].path);
+  EXPECT_FALSE(plan.matched[1]);
+  EXPECT_EQ(-1, plan.channels[1]);
+  EXPECT_EQ(4, plan.activeChannels);
 }
 
 TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ChannelMappingStaysInsideCappedPool) {
@@ -1725,18 +1930,20 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ChannelMappingStaysInsideCappedPool)
 }
 
 TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ProtocolOverrideUsesSupportedRequestsOnly) {
-  EXPECT_EQ(NCCL_PROTO_SIMPLE,
-            rcclP2pApplyProtocolPolicy(NCCL_PROTO_SIMPLE, NCCL_PROTO_LL, /*useLL128=*/false,
-                                       /*latencyBufferAvailable=*/true));
-  EXPECT_EQ(NCCL_PROTO_LL,
-            rcclP2pApplyProtocolPolicy(NCCL_PROTO_LL, NCCL_PROTO_SIMPLE, /*useLL128=*/false,
-                                       /*latencyBufferAvailable=*/true));
-  EXPECT_EQ(NCCL_PROTO_SIMPLE,
-            rcclP2pApplyProtocolPolicy(NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE, /*useLL128=*/false,
-                                       /*latencyBufferAvailable=*/true));
-  EXPECT_EQ(NCCL_PROTO_LL,
-            rcclP2pApplyProtocolPolicy(/*requestedProtocol=*/-1, NCCL_PROTO_LL, /*useLL128=*/false,
-                                       /*latencyBufferAvailable=*/true));
+  rcclP2pPolicyWorkPlan plan{};
+  plan.matched[0] = true;
+  auto applied = [&plan](int requestedProtocol, int selectedProtocol) {
+    plan.policy[0].protocol = requestedProtocol;
+    return rcclPolicyP2pWorkProtocol(&plan, /*dir=*/0, selectedProtocol, /*useLL128=*/false,
+                                     /*latencyBufferAvailable=*/true);
+  };
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, applied(NCCL_PROTO_SIMPLE, NCCL_PROTO_LL));
+  EXPECT_EQ(NCCL_PROTO_LL, applied(NCCL_PROTO_LL, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, applied(NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(NCCL_PROTO_LL, applied(/*requestedProtocol=*/-1, NCCL_PROTO_LL));
+
+  plan.matched[0] = false;
+  EXPECT_EQ(NCCL_PROTO_LL, applied(NCCL_PROTO_SIMPLE, NCCL_PROTO_LL));
 }
 
 // ===========================================================================

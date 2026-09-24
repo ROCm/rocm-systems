@@ -475,11 +475,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   size_t aggregateBytes =
     rankOffset > SIZE_MAX / comm->nRanks ? SIZE_MAX : rankOffset * static_cast<size_t>(comm->nRanks);
   bool inPlace = rcclBuffersOverlap(sendbuff, aggregateBytes, recvbuff, aggregateBytes);
-  struct rcclCollectiveExecutionPolicy executionPolicy;
-  bool forceP2pSendRecv =
-    rcclGetCollectiveExecutionPolicy(comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, aggregateBytes,
-                                     ncclParamP2pDisable(), inPlace, &executionPolicy) &&
-    executionPolicy.path == RCCL_P2P_PATH_SENDRECV;
+  bool forceP2pSendRecv = rcclPolicyAllToAllUsesSendRecvPath(comm, aggregateBytes, inPlace);
 
   struct ncclInfo info;
   if (!forceP2pSendRecv && comm->topo->pivotA2AEnabled &&
