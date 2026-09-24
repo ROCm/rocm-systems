@@ -752,24 +752,14 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
           (void)hipGraphMemcpyNodeSetParams(nodes[i], &cp);
           (void)hipGraphExecMemcpyNodeSetParams(exec, nodes[i], &cp);
         }
-        // The 1D convenience spelling, and the driver-API spelling that takes
-        // HIP_MEMCPY3D instead of hipMemcpy3DParms. Same node, three different
-        // ways in, all no-ops at replay.
+        // The 1D convenience spelling: same node, another way in, also a
+        // no-op at replay. The driver-API spelling that takes HIP_MEMCPY3D is
+        // exercised on the explicitly built graph below, because CLR accepts it
+        // only on a node made by hipDrvGraphAddMemcpyNode.
         (void)hipGraphMemcpyNodeSetParams1D(nodes[i], d_copy, d, kSZ,
                                             hipMemcpyDeviceToDevice);
         (void)hipGraphExecMemcpyNodeSetParams1D(exec, nodes[i], d_copy, d, kSZ,
                                                 hipMemcpyDeviceToDevice);
-        HIP_MEMCPY3D drv{};
-        drv.srcMemoryType = hipMemoryTypeDevice;
-        drv.srcDevice = reinterpret_cast<hipDeviceptr_t>(d);
-        drv.dstMemoryType = hipMemoryTypeDevice;
-        drv.dstDevice = reinterpret_cast<hipDeviceptr_t>(d_copy);
-        drv.WidthInBytes = kSZ;
-        drv.Height = 1;
-        drv.Depth = 1;
-        (void)hipDrvGraphMemcpyNodeSetParams(nodes[i], &drv);
-        (void)hipDrvGraphExecMemcpyNodeSetParams(exec, nodes[i], &drv,
-                                                 nullptr);
       } else if (type == hipGraphNodeTypeHost) {
         hipHostNodeParams hp{};
         if (hipGraphHostNodeGetParams(nodes[i], &hp) == hipSuccess) {
@@ -786,11 +776,12 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
       (void)hipGraphExecUpdate(exec, graph, &error_node, &update_result);
     }
 
-    // The batch-memop and driver-memset members of the same NOOP family. A
-    // stream capture never produces either node kind, so this is the one place
-    // they can be built: explicitly, into a second graph, which is then
-    // instantiated so the exec-level spellings have an exec to mutate. Both
-    // node constructors reject a null hipCtx_t, hence the context.
+    // The batch-memop, driver-memset and driver-memcpy members of the same
+    // NOOP family. A stream capture never produces any of these node kinds, so
+    // this is the one place they can be built: explicitly, into a second graph,
+    // which is then instantiated so the exec-level spellings have an exec to
+    // mutate. The batch-memop and driver-memset constructors reject a null
+    // hipCtx_t, hence the context.
     {
       hipDevice_t mutation_device = 0;
       (void)hipDeviceGet(&mutation_device, 0);
@@ -827,6 +818,21 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
                                      &memset_params, mutation_ctx)
             == hipSuccess;
 
+        HIP_MEMCPY3D drv{};
+        drv.srcMemoryType = hipMemoryTypeDevice;
+        drv.srcDevice = reinterpret_cast<hipDeviceptr_t>(d);
+        drv.dstMemoryType = hipMemoryTypeDevice;
+        drv.dstDevice = reinterpret_cast<hipDeviceptr_t>(d_copy);
+        drv.WidthInBytes = kSZ;
+        drv.Height = 1;
+        drv.Depth = 1;
+        hipGraphNode_t drv_memcpy_node = nullptr;
+        const bool have_memcpy =
+            hipDrvGraphAddMemcpyNode(&drv_memcpy_node, built, nullptr, 0, &drv,
+                                     mutation_ctx) == hipSuccess;
+        if (have_memcpy)
+          (void)hipDrvGraphMemcpyNodeSetParams(drv_memcpy_node, &drv);
+
         hipGraphExec_t built_exec = nullptr;
         if (hipGraphInstantiate(&built_exec, built, nullptr, nullptr, 0)
                 == hipSuccess) {
@@ -836,6 +842,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
           if (have_memset)
             (void)hipDrvGraphExecMemsetNodeSetParams(
                 built_exec, drv_memset_node, &memset_params, mutation_ctx);
+          if (have_memcpy)
+            (void)hipDrvGraphExecMemcpyNodeSetParams(
+                built_exec, drv_memcpy_node, &drv, mutation_ctx);
           (void)hipGraphExecDestroy(built_exec);
         }
         (void)hipGraphDestroy(built);
