@@ -301,7 +301,9 @@ test suite.
   workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
   is the usual way), or emulate a GPU this ROCm supports: a session's
   target comes from its profile, or from the device a drop-in `--config`
-  describes. The check is deliberately conservative — it warns only for a
+  describes. A `--config` with a DBT guest enabled names no target, because
+  the session presents the host's devices and the guest together. The
+  check is deliberately conservative — it warns only for a
   trusted system executable that links ROCr directly through a modern
   absolute or `$ORIGIN`-based `RUNPATH`, with no loader override or
   hardware-capability alternative in the way. Everything else stays

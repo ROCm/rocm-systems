@@ -306,12 +306,22 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// answer is a verdict the preflight handles, and a confident wrong
     /// one is not.
     ///
+    /// `session_dir` is the session's scratch directory, already created.
+    /// A backend that reads a file here should snapshot it there and point
+    /// the profile at the snapshot, so the device it reports and the
+    /// configuration it later injects come from one reading of the file
+    /// rather than two.
+    ///
     /// # Errors
     ///
     /// Returns an error only when the profile is unusable — not when the
     /// backend simply has nothing to correct, which is the default.
-    fn reconcile_profile(&self, profile: &mut ProfileDef) -> Result<()> {
-        let _ = profile;
+    fn reconcile_profile(
+        &self,
+        profile: &mut ProfileDef,
+        session_dir: &std::path::Path,
+    ) -> Result<()> {
+        let _ = (profile, session_dir);
         Ok(())
     }
 
