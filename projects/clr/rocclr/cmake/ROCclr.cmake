@@ -116,16 +116,6 @@ target_compile_definitions(rocclr PUBLIC
   LITTLEENDIAN_CPU
   ${AMD_OPENCL_DEFS})
 
-if(ENABLE_SANITIZER STREQUAL "ASAN")
-  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR
-      "DEVICE_ADDRESS_SANITIZER=1 requires Linux, found '${CMAKE_SYSTEM_NAME}'. ")
-  endif()
-  target_compile_definitions(rocclr PUBLIC DEVICE_ADDRESS_SANITIZER=1)
-else()
-  target_compile_definitions(rocclr PUBLIC DEVICE_ADDRESS_SANITIZER=0)
-endif()
-
 target_include_directories(rocclr PUBLIC
   ${ROCCLR_SRC_DIR}/../
   ${ROCCLR_SRC_DIR}

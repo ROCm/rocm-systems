@@ -10,15 +10,23 @@ set(ENABLE_SANITIZER
     CACHE STRING "Sanitizer mode: OFF, ASAN (host and device), or HOST_ASAN (host only)")
 set_property(CACHE ENABLE_SANITIZER PROPERTY STRINGS OFF ASAN HOST_ASAN)
 
+if(THEROCK_SANITIZER AND NOT ENABLE_SANITIZER STREQUAL "OFF")
+  message(FATAL_ERROR
+    "THEROCK_SANITIZER='${THEROCK_SANITIZER}' already selects the sanitizer for this build, "
+    "so ENABLE_SANITIZER must be left at OFF, found '${ENABLE_SANITIZER}'. Pass "
+    "-DENABLE_SANITIZER=OFF, or configure without THEROCK_SANITIZER for a standalone build.")
+endif()
+
 # TheRock injects THEROCK_SANITIZER variable. It takes precedence over ENABLE_SANITIZER.
 if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  # TheRock puts the host -fsanitize= flags on the compile line itself. Fail if they are
-  # absent, because CLR adds none of its own in this mode and would build uninstrumented.
-  if(NOT (CMAKE_CXX_FLAGS_INIT MATCHES "-fsanitize=" OR CMAKE_CXX_FLAGS MATCHES "-fsanitize="))
+  # TheRock puts the host -fsanitize=address flags on the compile line itself. Fail if they
+  # are absent, because CLR adds none of its own in this mode and would build uninstrumented.
+  if(NOT (CMAKE_CXX_FLAGS_INIT MATCHES "-fsanitize=address"
+          OR CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"))
     message(FATAL_ERROR
-      "THEROCK_SANITIZER='${THEROCK_SANITIZER}' but no -fsanitize= reaches the C++ compile "
-      "line. CLR does not add host flags when THEROCK_SANITIZER is set. For a standalone "
-      "build pass -DENABLE_SANITIZER=${THEROCK_SANITIZER} instead.")
+      "THEROCK_SANITIZER='${THEROCK_SANITIZER}' but no -fsanitize=address reaches the C++ "
+      "compile line. CLR does not add host flags when THEROCK_SANITIZER is set. For a "
+      "standalone build pass -DENABLE_SANITIZER=${THEROCK_SANITIZER} instead.")
   endif()
   set(ENABLE_SANITIZER "${THEROCK_SANITIZER}")
 endif()
@@ -40,17 +48,24 @@ if(ADDRESS_SANITIZER OR ENABLE_ADDRESS_SANITIZER)
     "to instrument only host code.")
 endif()
 
-# Device instrumentation depends on xnack+, a KFD feature.
-if(ENABLE_SANITIZER STREQUAL "ASAN" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# Device instrumentation depends on xnack+, a KFD feature, and the host-only mode has not
+# been brought up anywhere else, so both modes are Linux only for now.
+if(NOT ENABLE_SANITIZER STREQUAL "OFF" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
   message(FATAL_ERROR
-    "ENABLE_SANITIZER=ASAN requires Linux, found '${CMAKE_SYSTEM_NAME}'. "
-    "Use -DENABLE_SANITIZER=HOST_ASAN to instrument only host code.")
+    "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not supported on '${CMAKE_SYSTEM_NAME}'. "
+    "Sanitizer builds are currently Linux only.")
 endif()
 
 if(ENABLE_SANITIZER STREQUAL "ASAN" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   message(FATAL_ERROR
     "ENABLE_SANITIZER=ASAN requires a Clang compiler, found '${CMAKE_CXX_COMPILER_ID}'. "
     "Use -DENABLE_SANITIZER=HOST_ASAN to instrument only host code.")
+endif()
+
+if(ENABLE_SANITIZER STREQUAL "ASAN")
+  add_compile_definitions(DEVICE_ADDRESS_SANITIZER=1)
+else()
+  add_compile_definitions(DEVICE_ADDRESS_SANITIZER=0)
 endif()
 
 # Host instrumentation. Skipped under TheRock, which already instruments the C and C++

@@ -122,7 +122,8 @@ if(NOT WIN32)
 endif() # end win32
 
 # Resolves ENABLE_SANITIZER, applies the sanitizer flags to this scope, and defines
-# hip_tests_sanitizer_rewrite_offload_archs().
+# hip_tests_sanitizer_resolve_offload_archs() and
+# hip_tests_sanitizer_drop_device_flags().
 include(cmake/hip-tests-sanitizers.cmake)
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -287,7 +288,7 @@ endif()
 string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
 
 if(ENABLE_SANITIZER STREQUAL "ASAN")
-  hip_tests_sanitizer_rewrite_offload_archs(OFFLOAD_ARCH_STR)
+  hip_tests_sanitizer_resolve_offload_archs(OFFLOAD_ARCH_STR)
 endif()
 
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
@@ -300,21 +301,14 @@ separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 
-# -fsanitize=address does not work with SPIR-V targets so keep a SPIR-V-specific
-# copy of the device build flags.
-set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
+# SPIR-V does not support ASan, so the ASan-related flags have to be removed.
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
 if(NOT ENABLE_SANITIZER STREQUAL "OFF")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fsanitize=address")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fno-omit-frame-pointer")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-shared-libasan")
-  if(ENABLE_SANITIZER STREQUAL "HOST_ASAN")
-    list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-Xarch_host")
-  endif()
+  hip_tests_sanitizer_drop_device_flags(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN)
 endif()
 
-# ASan is not supported by SPIR-V, so ASan-related device flags must be dropped in those cases.
 if(ENABLE_SPIRV)
-  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV})
+  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN})
 endif()
 
 # get hip-tests commit short hash
