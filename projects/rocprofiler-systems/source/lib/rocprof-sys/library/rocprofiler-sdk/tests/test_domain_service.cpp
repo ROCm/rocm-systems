@@ -228,7 +228,6 @@ TEST_F(domain_service_test,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
-    expect_start_context(context);
 
     // No explicit .operations filter: resolve_operations() must resolve to an empty
     // list rather than enumerating every known operation id, so that
@@ -266,7 +265,6 @@ TEST_F(domain_service_test,
         static_cast<mock_sdk::callback_tracing_kind_t>(
             mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
         domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
-    expect_start_context(context);
 
     // No explicit .operations filter: resolve_operations() must resolve to an empty
     // list so callback_domain::configure() forwards (nullptr, 0) to the SDK instead of
@@ -365,7 +363,6 @@ TEST_F(domain_service_test,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{
         domain_selection{ .name       = "kfd_queue",
@@ -402,7 +399,6 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_queue", .group = std::nullopt, .operations = std::nullopt } });
@@ -434,7 +430,6 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_page_fault", .group = std::nullopt, .operations = std::nullopt } });
@@ -463,7 +458,6 @@ TEST_F(domain_service_test, configure_calls_on_configure_for_event_domain_that_d
             mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT),
         domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_event_page_fault_category_name);
-    expect_start_context(context);
 
     service.configure(
         std::vector<domain_selection>{ domain_selection{ .name  = "kfd_event_page_fault",
@@ -499,7 +493,6 @@ TEST_F(domain_service_test,
         static_cast<mock_sdk::callback_tracing_kind_t>(
             mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
         domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
@@ -541,7 +534,6 @@ TEST_F(domain_service_test,
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = std::nullopt, .group = "KFD_EVENTS", .operations = std::nullopt } });
@@ -587,7 +579,6 @@ TEST_F(domain_service_test,
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
-    expect_start_context(context);
 
     // No name and no group set: match_domains() falls through to its final branch,
     // which selects every available domain.
