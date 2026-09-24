@@ -266,6 +266,13 @@ typedef struct {
 	 * opts in, and only does anything when the path above is on.
 	 */
 	bool svm_host_unregister_async;
+
+	/* DEBUG/TEMPORARY: hold the revoke on the same queue but without a
+	 * worker, so a range registered again before the queue is flushed
+	 * skips its ioctl. HSA_SVM_HOST_UNREGISTER_DEFER opts in, and it is
+	 * mutually exclusive with the worker above.
+	 */
+	bool svm_host_unregister_defer;
 } svm_t;
 
 /*
@@ -364,6 +371,7 @@ struct hsa_kfd_fmm_context
 	pthread_t svm_revoke_thread;
 	bool svm_revoke_running;
 	bool svm_revoke_stop;
+	uint32_t svm_revoke_queued_count;	/* queue length, deferred mode */
 
 	/* On APU, for memory allocated on the system memory that GPU doesn't
 	 * access via GPU driver, they are not managed by GPUVM. cpuvm_aperture
@@ -423,6 +431,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.alignment_order = 0;
 	ctx->fmm_context->svm.svm_host_unregister = -1;
 	ctx->fmm_context->svm.svm_host_unregister_async = false;
+	ctx->fmm_context->svm.svm_host_unregister_defer = false;
 
 	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
@@ -433,6 +442,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm_revoke_inflight = NULL;
 	ctx->fmm_context->svm_revoke_running = false;
 	ctx->fmm_context->svm_revoke_stop = false;
+	ctx->fmm_context->svm_revoke_queued_count = 0;
 	pthread_cond_init(&ctx->fmm_context->svm_revoke_queued, NULL);
 	pthread_cond_init(&ctx->fmm_context->svm_revoke_retired, NULL);
 
@@ -1655,20 +1665,55 @@ static bool svm_range_covers(void *outer_start, uint64_t outer_size,
 }
 
 /*
+ * How many revokes the deferred mode holds before issuing them. The queue only
+ * pays off while entries are still cancellable, and every entry is a range the
+ * GPUs keep access to in the meantime, so this is kept short.
+ */
+#define SVM_REVOKE_DEFER_MAX 32
+
+/*
+ * Issue every queued revoke on the calling thread. The deferred mode has no
+ * worker, so this is what eventually drains the queue: a register or map that
+ * partially overlaps a queued entry, the cap above, or teardown.
+ *
+ * Called with svm_api_mutex held, which is also what the synchronous path
+ * holds across its revoke, so the ordering against a concurrent grant is the
+ * same.
+ */
+static void svm_revoke_flush_locked(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	struct svm_revoke_work *w, *next;
+
+	w = fmm_ctx->svm_revoke_head;
+	fmm_ctx->svm_revoke_head = NULL;
+	fmm_ctx->svm_revoke_tail = NULL;
+	fmm_ctx->svm_revoke_queued_count = 0;
+
+	for (; w; w = next) {
+		next = w->next;
+		fmm_unregister_mem_svm_api(ctx, w->addr, w->size,
+					   w->gpu_mask, w->gpu_all);
+		free(w);
+	}
+}
+
+/*
  * Make the deferred queue safe for a registration or a grant of
  * [address, address + size): cancel the queued revokes it fully covers, since
  * the range is live again and the pages would only have been re-granted, and
- * wait out anything else that overlaps rather than letting it land afterwards.
+ * deal with anything else that overlaps rather than letting it land afterwards.
  *
- * Called with svm_api_mutex held; the wait drops it.
+ * Called with svm_api_mutex held; the worker mode's wait drops it.
  */
-static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
-				   void *address, uint64_t size)
+static void svm_revoke_sync_locked(HsaKFDContext *ctx, void *address, uint64_t size)
 {
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	struct svm_revoke_work *prev, *w, *next;
 	bool wait;
 
-	if (!fmm_ctx->svm.svm_host_unregister_async)
+	if (!fmm_ctx->svm.svm_host_unregister_async &&
+	    !fmm_ctx->svm.svm_host_unregister_defer)
 		return;
 
 	do {
@@ -1686,9 +1731,14 @@ static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 			}
 			if (!svm_range_covers(address, size, w->addr, w->size)) {
 				/* Partial overlap: trimming it would be exact
-				 * but this is rare, so let the worker finish
-				 * it first instead.
+				 * but this is rare, so get it out of the way
+				 * whole instead - the worker mode waits for it,
+				 * the deferred mode issues the queue here.
 				 */
+				if (fmm_ctx->svm.svm_host_unregister_defer) {
+					svm_revoke_flush_locked(ctx);
+					return;
+				}
 				wait = true;
 				break;
 			}
@@ -1699,10 +1749,13 @@ static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 				fmm_ctx->svm_revoke_head = next;
 			if (fmm_ctx->svm_revoke_tail == w)
 				fmm_ctx->svm_revoke_tail = prev;
+			if (fmm_ctx->svm_revoke_queued_count)
+				fmm_ctx->svm_revoke_queued_count--;
 			free(w);
 			w = next;
 		}
 
+		/* Only the worker mode has an in-flight item to wait on. */
 		if (fmm_ctx->svm_revoke_inflight &&
 		    svm_ranges_overlap(address, size,
 				       fmm_ctx->svm_revoke_inflight->addr,
@@ -1766,7 +1819,7 @@ static bool svm_revoke_enqueue_locked(HsaKFDContext *ctx, void *addr, uint64_t s
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	struct svm_revoke_work *w;
 
-	if (!fmm_ctx->svm_revoke_running) {
+	if (fmm_ctx->svm.svm_host_unregister_async && !fmm_ctx->svm_revoke_running) {
 		if (pthread_create(&fmm_ctx->svm_revoke_thread, NULL,
 				   svm_revoke_worker, ctx)) {
 			pr_debug("failed to start the SVM revoke worker: %s\n",
@@ -1791,8 +1844,18 @@ static bool svm_revoke_enqueue_locked(HsaKFDContext *ctx, void *addr, uint64_t s
 	else
 		fmm_ctx->svm_revoke_head = w;
 	fmm_ctx->svm_revoke_tail = w;
+	fmm_ctx->svm_revoke_queued_count++;
 
-	pthread_cond_signal(&fmm_ctx->svm_revoke_queued);
+	if (fmm_ctx->svm.svm_host_unregister_async) {
+		pthread_cond_signal(&fmm_ctx->svm_revoke_queued);
+		return true;
+	}
+
+	/* Deferred mode: nobody else will drain this, so bound how long the
+	 * GPUs keep access to ranges the caller has already let go.
+	 */
+	if (fmm_ctx->svm_revoke_queued_count >= SVM_REVOKE_DEFER_MAX)
+		svm_revoke_flush_locked(ctx);
 
 	return true;
 }
@@ -1839,6 +1902,7 @@ static void svm_revoke_worker_reset(struct hsa_kfd_fmm_context *fmm_ctx)
 	fmm_ctx->svm_revoke_inflight = NULL;
 	fmm_ctx->svm_revoke_running = false;
 	fmm_ctx->svm_revoke_stop = false;
+	fmm_ctx->svm_revoke_queued_count = 0;
 }
 
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
@@ -1888,7 +1952,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 */
 	if (svm_host_unregister_on(ctx)) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
-		svm_revoke_sync_locked(fmm_ctx, (void *)aligned_addr, aligned_size);
+		svm_revoke_sync_locked(ctx, (void *)aligned_addr, aligned_size);
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
 						   aligned_size, size);
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
@@ -3741,7 +3805,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
 	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *svmHostUnregisterStr;
-	char *svmHostUnregisterAsyncStr;
+	char *svmHostUnregisterAsyncStr, *svmHostUnregisterDeferStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
@@ -3801,6 +3865,15 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	svmHostUnregisterAsyncStr = getenv("HSA_SVM_HOST_UNREGISTER_ASYNC");
 	fmm_ctx->svm.svm_host_unregister_async =
 		(svmHostUnregisterAsyncStr && strcmp(svmHostUnregisterAsyncStr, "0"));
+
+	/* The worker wins if both are asked for: it is the same queue, and the
+	 * deferred mode would then have a thread draining behind its back.
+	 */
+	svmHostUnregisterDeferStr = getenv("HSA_SVM_HOST_UNREGISTER_DEFER");
+	fmm_ctx->svm.svm_host_unregister_defer =
+		fmm_ctx->svm.svm_host_unregister &&
+		!fmm_ctx->svm.svm_host_unregister_async &&
+		(svmHostUnregisterDeferStr && strcmp(svmHostUnregisterDeferStr, "0"));
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -4136,6 +4209,10 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	 * goes away.
 	 */
 	svm_revoke_worker_stop(ctx);
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	svm_revoke_flush_locked(ctx);
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 
 	/* Free any SVM-API ranges that were never explicitly deregistered.
 	 * The kernel reclaims the underlying SVM ranges on process teardown,
@@ -4518,7 +4595,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 			 * and the GPUs granted here are recorded for the revoke.
 			 */
 			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
-			svm_revoke_sync_locked(fmm_ctx, svm_addr,
+			svm_revoke_sync_locked(ctx, svm_addr,
 					       PAGE_ALIGN_UP(page_offset + size));
 			ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
@@ -5408,7 +5485,8 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 				 * pages. Fall back to issuing it here if the
 				 * worker or the queue entry cannot be had.
 				 */
-				if (fmm_ctx->svm.svm_host_unregister_async &&
+				if ((fmm_ctx->svm.svm_host_unregister_async ||
+				     fmm_ctx->svm.svm_host_unregister_defer) &&
 				    svm_revoke_enqueue_locked(ctx, rr[i].addr,
 							      rr[i].size,
 							      gpu_mask, gpu_all))
