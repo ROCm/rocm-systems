@@ -60,9 +60,9 @@ On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/v
 
 * **FFmpeg** — pre-built libraries or built from source (required for FFmpeg-based samples and the host decoder library)
 
-### FFmpeg (required for samples and extended tests)
+### FFmpeg (required for FFmpeg-based samples and extended tests)
 
-[FFmpeg](https://github.com/FFmpeg/FFmpeg) development libraries must be installed separately to build and run samples and extended tests.
+[FFmpeg](https://ffmpeg.org/about.html) development libraries must be installed separately to build and run the FFmpeg-based samples and extended tests.
 
 **Linux:**
 
