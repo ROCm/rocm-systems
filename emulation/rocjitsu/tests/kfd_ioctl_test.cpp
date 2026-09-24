@@ -1672,10 +1672,29 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   EXPECT_EQ(peer_cp->dispatched_workgroups(), peer_workgroups)
       << "the fatal queue gate must block an already-fanned-out peer shard";
 
-  hsa_kernel_dispatch_packet_t pending{};
-  pending.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  std::array<uint64_t, 8192> doorbells{};
+  struct DoorbellGuard {
+    rocjitsu::SoC *soc;
+    uint32_t process_id;
+    ~DoorbellGuard() {
+      soc->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *processor) {
+        processor->set_doorbell_base(process_id, nullptr);
+      });
+    }
+  } doorbell_guard{soc_, driver_->local_process_id()};
+  doorbells.fill(std::numeric_limits<uint64_t>::max());
+  const auto &doorbell = process->queue_doorbell_map_.at(create.queue_id);
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *replica) {
+    replica->set_doorbell_base(driver_->local_process_id(), doorbells.data());
+  });
+  hsa_barrier_and_packet_t pending{};
+  pending.header = HSA_PACKET_TYPE_BARRIER_AND;
   std::memcpy(ring.data(), &pending, sizeof(pending));
   write_pointer = 1;
+  std::atomic_ref<uint64_t>(doorbells[doorbell.doorbell_offset / sizeof(uint64_t)])
+      .store(0, std::memory_order_release);
+  EXPECT_EQ(soc_->queue_registry().submit_producer(doorbell.queue_handle, 0).status,
+            rocjitsu::amdgpu::QueueSubmissionStatus::Accepted);
   const uint64_t owner_passes = cp->doorbell_handle_count_for_test();
   engine_->schedule_event_now(cp->doorbell_event());
   for (uint32_t attempt = 0; attempt < 16 && cp->doorbell_handle_count_for_test() == owner_passes;
@@ -1703,6 +1722,12 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   EXPECT_EQ(query.query_debug_event.exception_mask, kWaveAbort | KFD_EC_MASK(EC_QUEUE_NEW));
   query.query_debug_event.exception_mask = kWaveAbort;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  cp->set_queue_debug_suspended(create.queue_id, driver_->local_process_id(), false,
+                                /*resolve_exception=*/true);
+  for (uint32_t attempt = 0; attempt < 32 && read_pointer == 0; ++attempt)
+    static_cast<void>(engine_->step());
+  EXPECT_EQ(read_pointer, 1u) << "the published packet must advance after the exception gate opens";
 }
 
 void KfdIoctlCdna5Test::expect_failed_runtime_exception(bool reject_overlapping_debug_notification,
@@ -7718,8 +7743,10 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   pending_barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
   std::memcpy(runtime_ring.data(), &pending_barrier, sizeof(pending_barrier));
   runtime_write_pointer = 1;
-  const auto runtime_queue_handle =
-      process->queue_doorbell_map_.at(runtime_queue.queue_id).queue_handle;
+  const auto &runtime_doorbell = process->queue_doorbell_map_.at(runtime_queue.queue_id);
+  const auto runtime_queue_handle = runtime_doorbell.queue_handle;
+  std::atomic_ref<uint64_t>(recovery_doorbells[runtime_doorbell.doorbell_offset / sizeof(uint64_t)])
+      .store(0, std::memory_order_release);
   EXPECT_EQ(soc_->queue_registry().submit_producer(runtime_queue_handle, 0).status,
             rocjitsu::amdgpu::QueueSubmissionStatus::Accepted);
   soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
@@ -7746,6 +7773,8 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   std::memcpy(runtime_ring.data() + sizeof(pending_barrier), &pending_barrier,
               sizeof(pending_barrier));
   runtime_write_pointer = 2;
+  std::atomic_ref<uint64_t>(recovery_doorbells[runtime_doorbell.doorbell_offset / sizeof(uint64_t)])
+      .store(1, std::memory_order_release);
   EXPECT_EQ(soc_->queue_registry().submit_producer(runtime_queue_handle, 1).status,
             rocjitsu::amdgpu::QueueSubmissionStatus::Accepted);
   soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
