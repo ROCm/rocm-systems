@@ -116,9 +116,20 @@ struct RuleProfile {
   TransferOverride transferMode;
 };
 
+// Offline-measured efficiency of a rule's profile over its byte range: peak
+// measured bus bandwidth divided by the platform's theoretical peak. Every
+// transport on a platform shares one denominator, so a higher score always
+// means more throughput for the same input. Scores are checked at build time
+// against table order and are not used at runtime.
+struct RuleScore {
+  bool isSet;
+  float efficiency;
+};
+
 struct RuleSpec {
   RuleMatch match;
   RuleProfile profile;
+  RuleScore score;
 };
 
 struct RuleRow {
@@ -183,6 +194,13 @@ constexpr PathOverride SENDRECV = PathOverride::Set(RCCL_P2P_PATH_SENDRECV);
 constexpr TransferOverride AUTO_XFER = TransferOverride::Set(RCCL_P2P_TRANSFER_AUTO);
 constexpr TransferOverride WRITE = TransferOverride::Set(RCCL_P2P_TRANSFER_WRITE);
 constexpr TransferOverride READ = TransferOverride::Set(RCCL_P2P_TRANSFER_READ);
+// A rule the offline sweep could not measure (for example a fallback shadowed
+// by a higher-priority rule of the same transport). It wins only when no
+// measured candidate is valid.
+constexpr RuleScore UNMEASURED = {true, 0.0f};
+constexpr RuleScore EFFICIENCY(double measured, double peak) {
+  return {true, static_cast<float>(measured / peak)};
+}
 
 constexpr bool isAny(const IntRange& range) {
   return range.min == INT_MIN && range.max == INT_MAX;
@@ -254,6 +272,7 @@ constexpr bool isRuleSpecValid(const RuleSpec& rule) {
       !isValidOverride(profile.transferMode, RCCL_P2P_TRANSFER_AUTO, RCCL_P2P_TRANSFER_READ))
     return false;
   if (!hasAssignment(profile) && match.candidateTransport.any) return false;
+  if (!rule.score.isSet || !(rule.score.efficiency >= 0.0f) || rule.score.efficiency > 1.0f) return false;
 
   // P2P-only outputs cannot be attached to a regular collective profile.
   if (match.scope == COLL &&
@@ -320,6 +339,67 @@ constexpr size_t firstMismatchedAllToAllVShape(const RuleSpec (&rules)[RuleCount
       expected = &rule.profile;
     else if (!sameP2pWorkShape(*expected, rule.profile))
       return ruleId;
+  }
+  return RuleCount;
+}
+
+constexpr bool archPatternsOverlap(const char* first, const char* second) {
+  // IsArchMatch is a prefix match, so two patterns select a common arch only
+  // when one is a prefix of the other.
+  for (size_t i = 0; first[i] != '\0' && second[i] != '\0'; i++)
+    if (first[i] != second[i]) return false;
+  return true;
+}
+
+constexpr bool intRangesOverlap(const IntRange& first, const IntRange& second) {
+  return first.min <= second.max && second.min <= first.max;
+}
+
+constexpr bool rulesCanMatchSameInput(const RuleMatch& first, const RuleMatch& second) {
+  return first.scope == second.scope && first.collType == second.collType &&
+         first.dataSize.min <= second.dataSize.max && second.dataSize.min <= first.dataSize.max &&
+         intRangesOverlap(first.nNodes, second.nNodes) && intRangesOverlap(first.nRanks, second.nRanks) &&
+         intRangesOverlap(first.nChannels, second.nChannels) &&
+         (first.inPlace == BoolConstraint::Any || second.inPlace == BoolConstraint::Any ||
+          first.inPlace == second.inPlace) &&
+         archPatternsOverlap(first.gfxArch, second.gfxArch);
+}
+
+// Scores are peaks over the inputs a rule covers, so they only rank candidates
+// that cover the same inputs. Any two rules that can match one input must have
+// identical byte ranges and placement constraints;
+// tools/scripts/execution_policy_scores.py splits rules to satisfy this.
+template<size_t RuleCount>
+constexpr size_t firstMisalignedRule(const RuleSpec (&rules)[RuleCount]) {
+  for (size_t second = 1; second < RuleCount; second++) {
+    for (size_t first = 0; first < second; first++) {
+      const RuleMatch& a = rules[first].match;
+      const RuleMatch& b = rules[second].match;
+      if (a.collType != b.collType || a.scope != b.scope) continue;
+      if (a.dataSize.min == b.dataSize.min && a.dataSize.max == b.dataSize.max &&
+          a.inPlace == b.inPlace)
+        continue;
+      if (rulesCanMatchSameInput(a, b)) return second;
+    }
+  }
+  return RuleCount;
+}
+
+// Selection is first-match, so among rules that can match one input the
+// earlier rule must not be measurably slower. Scores within the margin are
+// measurement noise; unmeasured rules keep the position their author chose.
+constexpr float kScoreOrderMargin = 1.03f;
+
+template<size_t RuleCount>
+constexpr size_t firstMisorderedRule(const RuleSpec (&rules)[RuleCount]) {
+  for (size_t second = 1; second < RuleCount; second++) {
+    const float later = rules[second].score.efficiency;
+    if (later <= 0.0f) continue;
+    for (size_t first = 0; first < second; first++) {
+      const float earlier = rules[first].score.efficiency;
+      if (earlier <= 0.0f || later <= earlier * kScoreOrderMargin) continue;
+      if (rulesCanMatchSameInput(rules[first].match, rules[second].match)) return second;
+    }
   }
   return RuleCount;
 }
