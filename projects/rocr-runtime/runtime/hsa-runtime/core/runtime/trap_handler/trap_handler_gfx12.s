@@ -129,7 +129,7 @@
 .set TTMP1_BUF_ID_BIT_POSITION                    , 25           // TTMP1 bit position for buffer ID
 
 // GFX12.5 (multi-XCC) uses MSG_RTN_GET_SE_AID_ID to retrieve XCC_ID (AID_ID) from bits [19:16].
-// GFX12.0 (single-XCC) has no multi-XCC path and always uses the buffer base directly.
+// GFX12.0 (single-XCC) has per_xcc_size = 0, so multi-XCC path is never taken.
 // Note: HW_ID1 bits [19:16] span SA_ID/SE_ID fields, NOT Virtual_XCC_ID - do not use HW_ID1 for XCC detection.
 
 .set TTMP8_DISPATCH_ID_MASK                        , 0X1FFFFFF
@@ -265,7 +265,6 @@
 // Entry: ttmp[2:3] = buffer base address
 // Exit: ttmp[14:15] = per-XCC buffer address, branches to .profile_trap_handlers
 .calc_xcc_offset:
-.if .amdgcn.gfx_generation_minor >= 5
   // Load per_xcc_size from TMA2 (consolidated here to avoid duplication)
   s_load_b32        ttmp4, ttmp[14:15], 0x10, scope:SCOPE_CU     // ttmp4 = per_xcc_size (32-bit)
   s_wait_kmcnt      0
@@ -274,11 +273,17 @@
   s_cmp_eq_u32      ttmp4, 0
   s_cbranch_scc1    .single_xcc                              // If per_xcc_size == 0, single XCC mode
 
+.if .amdgcn.gfx_generation_minor >= 5
   // GFX12.5 (multi-XCC): Use MSG_RTN_GET_SE_AID_ID to get XCC_ID (AID_ID)
   // AID_ID (chiplet / XCC_ID) resides in MSG_RTN_GET_SE_AID_ID[19:16]
   s_sendmsg_rtn_b32 ttmp5, sendmsg(MSG_RTN_GET_SE_AID_ID)
   s_wait_kmcnt      0
   s_bfe_u32         ttmp5, ttmp5, (16 | (4 << 16))           // Extract XCC_ID from bits [19:16]
+.else
+  // GFX12.0 (single-XCC): Should never reach here since per_xcc_size == 0 on single-XCC.
+  // If we somehow get here, exit trap safely rather than using incorrect HW_ID1 bits.
+  s_branch          .exit_trap
+.endif
 
   // Calculate offset: xcc_id * per_xcc_size -> ttmp[4:5]
   // ttmp5 = xcc_id, ttmp4 = per_xcc_size
@@ -289,11 +294,6 @@
   s_add_u32         ttmp14, ttmp2, ttmp4                     // ttmp14 = base_lo + offset_lo
   s_addc_u32        ttmp15, ttmp3, ttmp10                    // ttmp15 = base_hi + offset_hi + carry
   s_branch          .profile_trap_handlers
-.else
-  // GFX12.0 has one XCC: the single buffer ROCr allocated is at the base pointer, so no offset
-  // and no XCC identifier is needed here (only GFX12.5 exposes one, via AID_ID).
-  s_branch          .single_xcc
-.endif
 
 .single_xcc:
   // Single XCC (gfx12.0): Simple pointer copy, no per-XCC offset needed
