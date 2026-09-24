@@ -1034,46 +1034,12 @@ def _aggregate_operator_summary_rows(
 def build_operator_summary(
     call_trees: dict[str, list[CallTreeNode]],
 ) -> pd.DataFrame:
-    """Build a one-row-per-operator summary table from the call trees.
+    """One row per operator path that launched GPU work.
 
-    Each row describes one operator path (e.g. aten::matmul) that ran at
-    least one GPU kernel. Calls of that path at different locations are
-    combined. All time values are in milliseconds.
-
-    Columns:
-
-    - Operator: full path of the operator (e.g. "aten::matmul/aten::mm").
-
-    - Location: file:line when every combined node shares one; empty when
-      locations differ or file_name is unset.
-
-    - Calls: how many times this operator was invoked. NaN when the trace
-      did not include marker-start invocation ids.
-
-    - Dispatches: how many GPU kernels ran while this operator was on the
-      call stack (kernels launched by operators it called also count).
-
-    - Dispatches_Per_Call: Dispatches divided by Calls. NaN when Calls is
-      unknown.
-
-    - Total_GPU: total GPU time spent while this operator was on the call
-      stack.
-
-    - Pct_Total_GPU: how much of the workload's total GPU time fell while
-      this operator was on the call stack. The same kernel time gets
-      counted for an operator and for any operator that called it, so the
-      column can add up to more than 100%. NaN when no GPU time was
-      recorded at all.
-
-    - Mean_Per_Call: average GPU time per call to this operator.
-
-    - Mean_Per_Dispatch, Min_Dispatch, Max_Dispatch: per-kernel timings
-      across kernels launched while this operator was on the call stack.
-
-    Operators that ran no GPU kernels are skipped. Empty input returns an
-    empty DataFrame with the full column list.
-
-    Sorted by Total_GPU descending, then Operator ascending.
+    Rows combine the same path across locations. Times are milliseconds.
+    Dispatches and GPU time include callees, so Pct_Total_GPU can exceed 100%.
+    Empty input returns an empty frame with the summary columns. Sorted by
+    Total_GPU descending, then Operator.
     """
     columns = [
         "Operator",
