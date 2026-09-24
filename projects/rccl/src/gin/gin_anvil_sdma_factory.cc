@@ -119,19 +119,19 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
                          hipMemcpyHostToDevice),
                "hipMemcpy handles") != 0) {
-    (void)hipFree(dev_row);
+    checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
     return -1;
   }
 
   uint64_t* dirty = nullptr;
   if (checkHip(hipExtMallocWithFlags((void**)&dirty, sizeof(uint64_t), hipDeviceMallocFinegrained),
                "hipExtMallocWithFlags sdmaDirty") != 0) {
-    (void)hipFree(dev_row);
+    checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
     return -1;
   }
   if (checkHip(hipMemset(dirty, 0, sizeof(uint64_t)), "hipMemset sdmaDirty") != 0) {
-    (void)hipFree(dev_row);
-    (void)hipFree(dirty);
+    checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
+    checkHip(hipFree(dirty), "hipFree dirty (cleanup)");
     return -1;
   }
 
@@ -153,8 +153,8 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = handle;
-  if (impl->deviceHandles_d) (void)hipFree(impl->deviceHandles_d);
-  if (impl->sdmaDirty_d) (void)hipFree(impl->sdmaDirty_d);
+  if (impl->deviceHandles_d) checkHip(hipFree(impl->deviceHandles_d), "hipFree handles (destroy)");
+  if (impl->sdmaDirty_d) checkHip(hipFree(impl->sdmaDirty_d), "hipFree dirty (destroy)");
   delete impl;
 }
 
