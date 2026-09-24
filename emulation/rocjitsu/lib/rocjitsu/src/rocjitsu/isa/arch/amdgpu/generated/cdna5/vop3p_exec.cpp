@@ -2474,8 +2474,8 @@ void VSwmmacBf16f3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     throw util::UnimplementedInst(mnemonic());
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
+  amdgpu::exec_swmmac_bf16f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
+                              index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
 }
 
 void VWmmaF3216x16x64Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {

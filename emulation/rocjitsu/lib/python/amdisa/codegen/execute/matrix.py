@@ -608,7 +608,9 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
         if uses_fixed_wave_swmmac_layout:
-            if result_type == 'F16':
+            if result_type == 'BF16F32':
+                exec_fn = 'exec_swmmac_bf16f32'
+            elif result_type == 'F16':
                 exec_fn = 'exec_swmmac_f16'
             elif result_type == 'BF16':
                 exec_fn = 'exec_swmmac_bf16'
