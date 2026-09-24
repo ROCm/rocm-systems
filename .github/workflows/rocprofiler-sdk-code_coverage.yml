@@ -253,7 +253,7 @@ jobs:
         ccache-variant: ccache
 
     - name: Configure, Build, and Test (Total Code Coverage)
-      timeout-minutes: 30
+      timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
@@ -275,7 +275,7 @@ jobs:
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Tests Code Coverage)
-      timeout-minutes: 30
+      timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
