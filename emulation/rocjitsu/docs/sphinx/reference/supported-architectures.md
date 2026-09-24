@@ -34,10 +34,11 @@ The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the r
 
 The `rj_code_target_id_t` enumeration identifies a specific GPU target within an architecture. Use these values when filtering code objects inside an executable or creating instruction lists. For the full enumeration, see [API reference: code object](/reference/api-code-object.md).
 
-gfx1250 is the CDNA5 simulator target. gfx1251 has a concrete target binding
-for decode, inspection, and target-aware DBT identity, but its full simulator
-binding remains disabled. Simulator configuration rejects targets whose
-`execution_implemented` capability is false.
+gfx1250 and gfx1251 both have concrete functional-simulator bindings. The
+checked-in gfx1251 configuration is a minimal synthetic topology for functional
+execution, not a product model or a claim of cycle/timing fidelity. Decoder-only
+consumers use a separate model provider whose instructions have no execution
+callbacks.
 
 ## ISA family groupings
 
