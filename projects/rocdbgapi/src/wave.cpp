@@ -993,10 +993,13 @@ wave_t::get_info (amd_dbgapi_wave_info_t query, size_t value_size,
       return;
 
     case AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD:
-      if (!workgroup ().group_ids ())
-        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
-      utils::get_info (value_size, value, *workgroup ().group_ids ());
-      return;
+      {
+        auto ids = workgroup ().group_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
 
     case AMD_DBGAPI_WAVE_INFO_WAVE_NUMBER_IN_WORKGROUP:
       if (!m_wave_in_group)

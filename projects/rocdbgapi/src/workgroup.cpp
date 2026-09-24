@@ -146,10 +146,13 @@ workgroup_t::get_info (amd_dbgapi_workgroup_info_t query, size_t value_size,
       return;
 
     case AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD:
-      if (!group_ids ())
-        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
-      utils::get_info (value_size, value, *group_ids ());
-      return;
+      {
+        auto ids = group_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
