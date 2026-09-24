@@ -59,6 +59,17 @@ repos:
         files: ^projects/rocprofiler-compute/.*\.(py|hip|cpp)$
         stages: [pre-commit]
 
+  # Local hook: analysis config header/metric key consistency
+  - repo: local
+    hooks:
+      - id: analysis-config-key-check
+        name: Analysis config header/metric key validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_analysis_config_keys.py'
+        language: system
+        files: analysis_configs/gfx.*/\d{4}_.*\.yaml$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: sets metric ID validation
   - repo: local
     hooks:

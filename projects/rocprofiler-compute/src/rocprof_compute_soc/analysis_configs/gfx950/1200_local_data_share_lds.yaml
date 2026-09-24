@@ -60,17 +60,17 @@ Panel Config:
           avg: 64 * SUM(SQ_INSTS_LDS_LOAD_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
           min: 64 * MIN(SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
           max: 64 * MAX(SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          units: Gbps
+          unit: Gbps
         LDS STORE Bandwidth:
           avg: 64 * SUM(SQ_INSTS_LDS_STORE_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
           min: 64 * MIN(SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
           max: 64 * MAX(SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          units: Gbps
+          unit: Gbps
         LDS ATOMIC Bandwidth:
           avg: 64 * SUM(SQ_INSTS_LDS_ATOMIC_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
           min: 64 * MIN(SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
           max: 64 * MAX(SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          units: Gbps
+          unit: Gbps
         Theoretical Bandwidth:
           avg: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu) / (End_Timestamp - Start_Timestamp))
