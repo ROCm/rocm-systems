@@ -73,6 +73,62 @@ by the corpus SDK nightly.
 `rocblas_sgemm::square_64x64` is excluded because the pinned ROCm SDK kernel
 reads a scalar-memory result after a nonzero KMCNT wait.
 
+## Vulkan compute and buffer CTS
+
+The release configuration runs the corpus's opt-in `vulkan` suite separately on
+`gfx1100` (RDNA3) and `gfx1201` (RDNA4). It installs Mesa RADV and libdrm in
+the job container and builds an unmodified pinned headless Vulkan CTS. CI selects 735
+compute and 2,543 texel-buffer cases, leaving twelve expensive
+maximum-workgroup/LDS stress cases available for local runs. Both targets run
+in the main corpus workflow's release configuration. Any CI coverage including
+the stress cases must use a separate workflow. Graphics and image sampling are
+out of scope. Exact hardware-baseline unsupported cases are reported as skips;
+unexpected unsupported results and incomplete logs fail.
+Four cases that initialize images through graphics commands are excluded from
+the original compute selection and recorded in `corpus/vulkan/excluded-graphics.txt`.
+
+The Vulkan corpus has its own commit pin and checkout so the existing HIP and
+DBT corpus, including its translation baseline, retain their current inputs.
+For a coordinated corpus change, publish its commit first, then update both
+`ROCJITSU_VULKAN_CORPUS_REF` and the `vulkan_corpus_ref` dispatch default.
+A manual workflow dispatch can override the Vulkan corpus ref independently.
+
+For local testing, install Mesa 25.2.8+ and libdrm 2.4.125+, activate a Python
+environment, and build CTS once from the corpus checkout:
+
+```sh
+cd /path/to/rocjitsu-test-corpus
+uv pip install -r corpus/vulkan/requirements.txt
+bash scripts/build_vulkan_cts.sh
+export ROCJITSU_CORPUS_DIR="$PWD"
+export ROCJITSU_BUILD_DIR=/path/to/rocjitsu/build
+bash /path/to/rocm-systems/emulation/rocjitsu/tests/corpus/run-vulkan-cts.sh all --case smoke
+```
+
+The RocJITsu build should use `CMAKE_BUILD_TYPE=Release`. Use `--case ci` to
+reproduce the release workflow, omit `--case smoke` for all 3,290 cases, or use
+`--case stress` for just the twelve expensive cases. Replace `all` with one
+target to narrow the run. The wrapper bounds pytest to four workers by default
+and divides `VULKAN_CTS_CPU_BUDGET` among them through RocJITsu's
+`cpu_thread_budget` setting. By default the total budget is at most four, so a
+typical run uses four processes with one execution thread each. Set
+`VULKAN_CTS_WORKERS` and `VULKAN_CTS_CPU_BUDGET` to compare other allocations;
+runtime service threads and Mesa compilation are outside this budget.
+Each generated config retains the shipped target's allocation table and sets
+`cpu_thread_budget` to `floor(VULKAN_CTS_CPU_BUDGET / VULKAN_CTS_WORKERS)`.
+For example, budget 16 with four workers gives each simulator four execution
+threads. Budget three with two workers leaves one execution thread unused.
+The wrapper selects the system RADV ICD, avoiding SDK library overrides.
+CTS verifies the requested device and driver in each result. Logs
+and JUnit reports go to `.pytest-artifacts/vulkan-<target>` in the corpus and
+are uploaded even after test failures. Set `VULKAN_CTS_ARTIFACT_ROOT` to a
+different repo-local prefix to retain separate configurations and logs when
+comparing runs. See the corpus's
+`corpus/vulkan/README.md` for dependencies, individual case selection and
+existing CTS binary overrides. That guide also documents direct hardware runs;
+the corpus adapter has no simulator dependency. Simulator configuration,
+thread budgets and launcher selection belong to this wrapper.
+
 ## Sanitizer simulator coverage
 
 The Clang and GCC ASan+UBSan lanes run the same target-qualified corpus as the
