@@ -53,6 +53,21 @@ inline int sweep_iters() {
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
 
+struct FallbackMask {
+  static constexpr std::size_t kSize = 5;
+  explicit FallbackMask(bool value) { lanes.fill(value); }
+  static constexpr std::size_t size() { return kSize; }
+  bool operator[](std::size_t i) const { return lanes[i]; }
+  bool &operator[](std::size_t i) { return lanes[i]; }
+
+  std::array<bool, kSize> lanes{};
+};
+
+struct FallbackSimd {
+  using mask_type = FallbackMask;
+  static constexpr std::size_t size() { return mask_type::size(); }
+};
+
 TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
   SKIP_IF_NO_SIMD();
   using U = util::native<uint32_t>;
@@ -141,6 +156,65 @@ TEST(UtilSimd, Broadcast_F32) {
   auto v = util::broadcast<float>(bits);
   for (std::size_t i = 0; i < kW; ++i)
     EXPECT_EQ(v[i], kVal) << "lane " << i;
+}
+
+TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const auto check = []<typename Simd>() {
+    constexpr std::size_t W = Simd::size();
+    ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+    const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+    for (uint64_t bits = 0; bits <= full; ++bits) {
+      const auto mask = util::simd_mask_from_bits<Simd>(bits);
+      for (std::size_t i = 0; i < W; ++i)
+        ASSERT_EQ(static_cast<bool>(mask[i]), ((bits >> i) & 1u) != 0)
+            << "width " << W << ", bits " << bits << ", lane " << i;
+      ASSERT_EQ(util::simd_mask_to_bits(mask), bits) << "width " << W << ", bits " << bits;
+    }
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~uint64_t{0})), full)
+        << "input bits above the SIMD width must be ignored";
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~full)), 0u)
+        << "high-only input bits must not set SIMD lanes";
+  };
+
+  check.template operator()<util::native<uint32_t>>();
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  check.template operator()<util::native<uint64_t>>();
+  check.template operator()<util::narrow32<uint32_t>>();
+#endif
+#endif
+}
+
+TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
+    for (std::size_t i = 0; i < FallbackSimd::size(); ++i)
+      ASSERT_EQ(mask[i], ((bits >> i) & 1u) != 0) << "bits " << bits << ", lane " << i;
+    ASSERT_EQ(util::simd_mask_to_bits(mask), bits);
+  }
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~uint64_t{0})), full);
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~full)), 0u);
+#endif
+}
+
+TEST(UtilSimd, MaskBitsExpandToOrderedZeroOneLanes) {
+  SKIP_IF_NO_SIMD();
+  constexpr std::size_t W = util::native<uint32_t>::size();
+  ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+  const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto lanes = util::simd_u32_lanes_from_bits(bits);
+    for (std::size_t i = 0; i < W; ++i)
+      ASSERT_EQ(lanes[i], static_cast<uint32_t>((bits >> i) & 1u))
+          << "bits " << bits << ", lane " << i;
+  }
+  const auto high_bits = util::simd_u32_lanes_from_bits(~uint64_t{0});
+  for (std::size_t i = 0; i < W; ++i)
+    EXPECT_EQ(high_bits[i], 1u) << "lane " << i;
 }
 
 TEST(UtilSimd, MaskedStore_FullMask) {
