@@ -291,6 +291,22 @@ def should_rank_provide_output(
     return current_rank in selected_ranks
 
 
+def is_windows():
+    return sys.platform == "win32"
+
+
+def sdk_library_path(rocm_dir, stem, sdk_subdir=False):
+    """Location of a rocprofiler-sdk shared library. Windows installs DLLs into bin/ with
+    no lib prefix and no rocprofiler-sdk/ subdirectory, because the loader searches the
+    same directory list for DLLs as it does for executables."""
+
+    if is_windows():
+        return f"{rocm_dir}/bin/{stem}.dll"
+
+    subdir = "lib/rocprofiler-sdk" if sdk_subdir else "lib"
+    return f"{rocm_dir}/{subdir}/lib{stem}.so"
+
+
 def resolve_library_path(val, args, is_sdk_lib=True):
     from pathlib import Path
 
@@ -314,7 +330,9 @@ def resolve_library_path(val, args, is_sdk_lib=True):
         ):
             setattr(args, name, value)
 
-    if is_sdk_lib:
+    # A DLL has no soversion chain to fall back through: the version is part of the file
+    # name or it is not there at all.
+    if is_sdk_lib and not is_windows():
         if not os.path.exists(val) and args.sdk_soversion:
             val = f"{val}.{args.sdk_soversion}"
 
@@ -354,12 +372,12 @@ def get_att_paths(args):
     elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
         # Return a list (not a bare str) so the caller iterates over paths and
         # not over the individual characters of the string. Support a
-        # colon-separated list for consistency with LD_LIBRARY_PATH.
-        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(":"):
+        # separator-delimited list for consistency with LD_LIBRARY_PATH.
+        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(os.pathsep):
             if itr and itr not in library_paths:
                 library_paths += [itr]
     else:
-        default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
+        default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep) + [
             f"{ROCM_DIR}/lib"
         ]
         for itr in default_lib_path_env:
@@ -1647,7 +1665,7 @@ def run(app_args, args, **kwargs):
                 )
                 sys.stderr.flush()
             # Execute application without profiling
-            if use_execv:
+            if use_execv and not is_windows():
                 os.execvpe(app_args[0], app_args, env=app_env)
             else:
                 try:
@@ -1667,7 +1685,7 @@ def run(app_args, args, **kwargs):
         _overwrite = kwargs.get("overwrite", True)
         _prepend = kwargs.get("prepend", False)
         _append = kwargs.get("append", False)
-        _join_char = kwargs.get("join_char", ":")
+        _join_char = kwargs.get("join_char", os.pathsep)
 
         # only overwrite if env_val evaluates as true
         _overwrite_if_true = kwargs.get("overwrite_if_true", False)
@@ -1709,17 +1727,18 @@ def run(app_args, args, **kwargs):
             else:
                 app_env[env_var] = _val
 
+        # Dropping empty components is what the old strip(":") was reaching for, and it does
+        # not mistake the colon in a Windows drive letter for a separator.
+        def _join(*parts):
+            return _join_char.join([itr for itr in parts if itr])
+
         if _curr_val is not None:
             if not _overwrite:
                 pass
             elif _prepend:
-                app_env[env_var] = (
-                    "{}{}{}".format(_val, _join_char, _curr_val) if _val else _curr_val
-                ).strip(":")
+                app_env[env_var] = _join(_val, _curr_val)
             elif _append:
-                app_env[env_var] = (
-                    "{}{}{}".format(_curr_val, _join_char, _val) if _val else _curr_val
-                ).strip(":")
+                app_env[env_var] = _join(_curr_val, _val)
             elif _overwrite:
                 _write_env_value()
         else:
@@ -1727,33 +1746,46 @@ def run(app_args, args, **kwargs):
 
         return app_env.get(env_var, None)
 
-    update_env("ROCPROFILER_LIBRARY_CTOR", True)
+    # Initializing from the SDK's library constructor would start the ETW consumer while
+    # rocprofv3-launch is still parsing its own arguments, before it has created the
+    # application and named it as the trace target. The launcher initializes explicitly
+    # once the target exists instead.
+    if not is_windows():
+        update_env("ROCPROFILER_LIBRARY_CTOR", True)
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
     if args.rocm_root is not None:
         ROCM_DIR = os.path.abspath(args.rocm_root)
-    ROCPROF_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
-    ROCPROF_SDK_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk.so"
-    ROCPROF_ROCTX_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-roctx.so"
-    ROCPROF_KOKKOSP_LIBRARY = (
-        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so"
+    ROCPROF_TOOL_LIBRARY = resolve_library_path(
+        sdk_library_path(ROCM_DIR, "rocprofiler-sdk-tool", sdk_subdir=True), args
     )
-    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
-        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
-    )
-    ROCPROF_ATTACH_TOOL_LIBRARY = (
-        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    ROCPROF_SDK_LIBRARY = resolve_library_path(
+        sdk_library_path(ROCM_DIR, "rocprofiler-sdk"), args
     )
 
-    ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
-    ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
-    ROCPROF_ROCTX_LIBRARY = resolve_library_path(ROCPROF_ROCTX_LIBRARY, args)
-    ROCPROF_KOKKOSP_LIBRARY = resolve_library_path(ROCPROF_KOKKOSP_LIBRARY, args)
-    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
-        ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
-    )
-    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
+    # None leaves the corresponding update_env() calls below as no-ops. roctx exists to
+    # interpose symbols through LD_PRELOAD and kokkosp, list-avail and attach are not part
+    # of the Windows build, so there is nothing to point those variables at.
+    ROCPROF_ROCTX_LIBRARY = None
+    ROCPROF_KOKKOSP_LIBRARY = None
+    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = None
+    ROCPROF_ATTACH_TOOL_LIBRARY = None
+
+    if not is_windows():
+        ROCPROF_ROCTX_LIBRARY = resolve_library_path(
+            sdk_library_path(ROCM_DIR, "rocprofiler-sdk-roctx"), args
+        )
+        ROCPROF_KOKKOSP_LIBRARY = resolve_library_path(
+            sdk_library_path(ROCM_DIR, "rocprofiler-sdk-tool-kokkosp", sdk_subdir=True),
+            args,
+        )
+        ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
+            sdk_library_path(ROCM_DIR, "rocprofv3-list-avail", sdk_subdir=True), args
+        )
+        ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(
+            sdk_library_path(ROCM_DIR, "rocprofiler-sdk-tool", sdk_subdir=True), args
+        )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1761,20 +1793,31 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
-    if not args.pid:
-        update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
-        update_env("LD_PRELOAD", ":".join(append_preload), append=True)
+    # Windows has no preload mechanism and does not need one: the tool library is loaded by
+    # rocprofv3-launch in its own process, not injected into the application.
+    if not args.pid and not is_windows():
+        update_env("LD_PRELOAD", os.pathsep.join(prepend_preload), prepend=True)
+        update_env("LD_PRELOAD", os.pathsep.join(append_preload), append=True)
 
-    update_env(
-        "ROCP_TOOL_LIBRARIES",
-        f"{ROCPROF_TOOL_LIBRARY}",
-        append=True,
-    )
-    update_env(
-        "LD_LIBRARY_PATH",
-        f"{ROCM_DIR}/lib",
-        append=True,
-    )
+    # On Windows the tool library is named on rocprofv3-launch's command line instead. The
+    # launcher sets ROCP_TOOL_LIBRARIES for itself only after it has created the application,
+    # so that the application does not inherit it; putting it in the environment here would
+    # defeat that and start a second, redundant ETW session inside the application.
+    if not is_windows():
+        update_env(
+            "ROCP_TOOL_LIBRARIES",
+            f"{ROCPROF_TOOL_LIBRARY}",
+            append=True,
+        )
+
+    if is_windows():
+        update_env("PATH", f"{ROCM_DIR}/bin", prepend=True)
+    else:
+        update_env(
+            "LD_LIBRARY_PATH",
+            f"{ROCM_DIR}/lib",
+            append=True,
+        )
 
     _output_file = args.output_file
     _output_path = (
@@ -1796,7 +1839,8 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
-        args.output_format = ["rocpd"]
+        # rocpd needs sqlite3, which the Windows output library is not built with.
+        args.output_format = ["csv"] if is_windows() else ["rocpd"]
 
     effective_output_formats = list(args.output_format)
     effective_output_formats.extend(
@@ -2483,30 +2527,45 @@ def run(app_args, args, **kwargs):
                     overwrite=True,
                 )
 
+    if is_windows():
+        # Windows traces out of process. rocprofv3-launch owns the ETW session: it creates
+        # the application suspended so that the consumer is recording before the first
+        # instruction runs, and it is the process the tool library is loaded into.
+        app_args = [
+            f"{ROCM_DIR}/bin/rocprofv3-launch.exe",
+            "--tool-library",
+            ROCPROF_TOOL_LIBRARY,
+            "--",
+        ] + app_args
+
     if args.log_level in ("info", "trace", "env", "config"):
         log_config(app_env)
 
+    if args.echo:
+        sys.stderr.flush()
+        print(f"command: {app_args}")
+        sys.stdout.flush()
+        # The execv path has no exit code of its own to report, because it normally does
+        # not return at all.
+        return None if use_execv and not is_windows() else 0
+
+    if is_windows():
+        # Report the application's exit code verbatim, including Windows exception codes
+        # such as 0xC0000005. The trace is written either way, so a crash is a result to
+        # pass along rather than an error in rocprofv3.
+        return subprocess.run(app_args, env=app_env).returncode
+
     if use_execv:
-        if args.echo:
-            sys.stderr.flush()
-            print(f"command: {app_args}")
-            sys.stdout.flush()
-        else:
-            # does not return
-            os.execvpe(app_args[0], app_args, env=app_env)
-    else:
-        if args.echo:
-            sys.stderr.flush()
-            print(f"command: {app_args}")
-            sys.stdout.flush()
-            return 0
-        try:
-            exit_code = subprocess.check_call(app_args, env=app_env)
-            if exit_code != 0:
-                fatal_error("Application exited with non-zero exit code", exit_code)
-        except Exception as e:
-            fatal_error(f"{e}\n")
-        return exit_code
+        # does not return
+        os.execvpe(app_args[0], app_args, env=app_env)
+
+    try:
+        exit_code = subprocess.check_call(app_args, env=app_env)
+        if exit_code != 0:
+            fatal_error("Application exited with non-zero exit code", exit_code)
+    except Exception as e:
+        fatal_error(f"{e}\n")
+    return exit_code
 
 
 def main(argv=None):

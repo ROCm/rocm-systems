@@ -9,10 +9,17 @@ add_subdirectory(etw)
 # The HIP callback/buffer tracing sources pull in details/ostream.hpp, which references
 # Linux glibc types (__locale_struct, etc.), so they are excluded on Windows until that is
 # ported.
-if(NOT WIN32)
+if(WIN32)
+    set(ROCPROFILER_LIB_HIP_SOURCES windows_stubs.cpp)
+    set(ROCPROFILER_LIB_HIP_HEADERS event.hpp graph.hpp stream.hpp)
+else()
     set(ROCPROFILER_LIB_HIP_SOURCES abi.cpp event.cpp graph.cpp hip.cpp stream.cpp)
     set(ROCPROFILER_LIB_HIP_HEADERS event.hpp graph.hpp stream.hpp utils.hpp)
-    target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HIP_SOURCES}
-                                                          ${ROCPROFILER_LIB_HIP_HEADERS})
+endif()
+
+target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HIP_SOURCES}
+                                                      ${ROCPROFILER_LIB_HIP_HEADERS})
+
+if(NOT WIN32)
     add_subdirectory(details)
 endif()

@@ -35,7 +35,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <unistd.h>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>

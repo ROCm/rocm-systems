@@ -20,31 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Windows stand-in for the kernel_replay sources. Kernel replay requires AQL dispatch-packet
-// rewriting, which the ETW tracing path cannot do, so no replay loop is ever active and
-// per-dispatch consumers always fall back to global context state. The replay service is
-// reported as unowned and unclaimable, which is what a caller configuring it should see.
+// Windows stand-in for ompt.cpp. The OpenMP tool interface reaches rocprofiler through the
+// device runtime's callback registration, which has no Windows implementation.
 
 // ROCm's amd_hip_vector_types.h spells its members std::int32_t but does not include
 // <cstdint> itself, so under MSVC it only compiles if something already has.
 #include <cstdint>
 
-#include "lib/rocprofiler-sdk/kernel_replay/kernel_replay.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-
-#include <optional>
 #include <vector>
 
 namespace rocprofiler
 {
-namespace kernel_replay
+namespace ompt
 {
-std::optional<bool> local_context_override(rocprofiler_context_id_t) { return std::nullopt; }
-
 const char* name_by_id(uint32_t) { return nullptr; }
 
 std::vector<uint32_t>
@@ -53,29 +43,12 @@ get_ids()
     return {};
 }
 
-bool
-has_registered_replay_context()
-{
-    return false;
-}
-
-bool
-try_claim_replay_service()
-{
-    return false;
-}
-
 void
-release_replay_service_claim()
+iterate_args(uint32_t,
+             const rocprofiler_callback_tracing_ompt_data_t&,
+             rocprofiler_callback_tracing_operation_args_cb_t,
+             int32_t,
+             void*)
 {}
-
-namespace memory_tracker
-{
-bool
-set_tracking_enabled(bool)
-{
-    return false;
-}
-}  // namespace memory_tracker
-}  // namespace kernel_replay
+}  // namespace ompt
 }  // namespace rocprofiler

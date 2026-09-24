@@ -51,11 +51,13 @@
 
 #include "lib/common/logging.hpp"
 
-#include <cxxabi.h>
-#include <semaphore.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <cxxabi.h>
+#    include <semaphore.h>
+#    include <sys/syscall.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -160,6 +162,7 @@ convert_marker_tracing_kind(TracingKindT val)
 
 // RAII wrapper for semaphore to cleanup and
 // sync worker processes in finalization process
+#if !defined(_WIN32)
 struct SemaphoreGuard
 {
     sem_t*      sem = nullptr;
@@ -201,3 +204,4 @@ struct SemaphoreGuard
         return false;
     }
 };
+#endif

@@ -22,11 +22,13 @@
 
 // Windows stand-in for service.cpp. PC sampling delivers its samples through the KFD
 // ioctl interface, which Windows reaches via D3DKMT instead; there is no session to
-// start, stop, or flush.
+// start, stop, or flush. The public API stays exported so that tools built against the
+// headers still load; every entry point reports that the service is unavailable.
 
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 
 namespace rocprofiler
 {
@@ -53,3 +55,40 @@ rocprofiler_status_t flush_internal_agent_buffers(rocprofiler_buffer_id_t)
 }
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+extern "C" {
+rocprofiler_status_t
+rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t,
+                                          rocprofiler_agent_id_t,
+                                          rocprofiler_pc_sampling_method_t,
+                                          rocprofiler_pc_sampling_unit_t,
+                                          uint64_t,
+                                          rocprofiler_buffer_id_t,
+                                          int)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+
+rocprofiler_status_t
+rocprofiler_query_pc_sampling_agent_configurations(
+    rocprofiler_agent_id_t,
+    rocprofiler_available_pc_sampling_configurations_cb_t,
+    void*)
+{
+    // No agent advertises a configuration, so the callback is never invoked. Reporting
+    // success keeps callers that only enumerate configurations from treating this as fatal.
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+const char* rocprofiler_get_pc_sampling_instruction_type_name(
+    rocprofiler_pc_sampling_instruction_type_t)
+{
+    return nullptr;
+}
+
+const char* rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+    rocprofiler_pc_sampling_instruction_not_issued_reason_t)
+{
+    return nullptr;
+}
+}

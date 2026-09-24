@@ -24,7 +24,10 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>
-#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#if !defined(_WIN32)
+// disassembly reads DWARF out of the loaded code object, which needs libdw
+#    include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#endif
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
 #include "lib/common/static_object.hpp"

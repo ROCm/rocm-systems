@@ -23,10 +23,16 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 
 #if !defined(_WIN32)
 #    include <unistd.h>
+#else
+#    include <windows.h>
+//
+#    include <shellapi.h>
+#    include <tlhelp32.h>
 #endif
 #include <cerrno>
 #include <cstring>
@@ -100,6 +106,49 @@ get_clock_period_ns_impl(clockid_t _clk_id)
 #endif
 }
 
+pid_t
+get_traced_pid()
+{
+#if !defined(_WIN32)
+    return get_pid();
+#else
+    // Set by rocprofv3-launch for the child it created. Same variable the ETW consumer filters
+    // on, so the two can never disagree about which process a run describes.
+    return static_cast<pid_t>(get_env("ROCPROF_ETW_TARGET_PID", static_cast<uint32_t>(get_pid())));
+#endif
+}
+
+pid_t
+get_ppid()
+{
+#if !defined(_WIN32)
+    return ::getppid();
+#else
+    auto _snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if(_snapshot == INVALID_HANDLE_VALUE) return 0;
+
+    auto _self    = static_cast<DWORD>(get_pid());
+    auto _ppid    = pid_t{0};
+    auto _entry   = PROCESSENTRY32W{};
+    _entry.dwSize = sizeof(_entry);
+
+    if(::Process32FirstW(_snapshot, &_entry) != 0)
+    {
+        do
+        {
+            if(_entry.th32ProcessID == _self)
+            {
+                _ppid = static_cast<pid_t>(_entry.th32ParentProcessID);
+                break;
+            }
+        } while(::Process32NextW(_snapshot, &_entry) != 0);
+    }
+
+    ::CloseHandle(_snapshot);
+    return _ppid;
+#endif
+}
+
 uint64_t
 get_process_start_time_ns(pid_t _pid)
 {
@@ -142,7 +191,26 @@ read_command_line(pid_t _pid)
         ifs.close();
     }
 #else
-    (void) _pid;
+    // Only the calling process can be asked for its command line without debug privileges, so
+    // anything else reports nothing rather than guessing.
+    if(_pid != get_pid()) return _cmdline;
+
+    auto  _argc = int{0};
+    auto* _argv = ::CommandLineToArgvW(::GetCommandLineW(), &_argc);
+    if(_argv == nullptr) return _cmdline;
+
+    _cmdline.reserve(_argc);
+    for(int i = 0; i < _argc; ++i)
+    {
+        auto _len = ::WideCharToMultiByte(CP_UTF8, 0, _argv[i], -1, nullptr, 0, nullptr, nullptr);
+        if(_len <= 1) continue;
+
+        auto _str = std::string(static_cast<size_t>(_len) - 1, '\0');
+        ::WideCharToMultiByte(CP_UTF8, 0, _argv[i], -1, _str.data(), _len, nullptr, nullptr);
+        _cmdline.emplace_back(std::move(_str));
+    }
+
+    ::LocalFree(_argv);
 #endif
     return _cmdline;
 }

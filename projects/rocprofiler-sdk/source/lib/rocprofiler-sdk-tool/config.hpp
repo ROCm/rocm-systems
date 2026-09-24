@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/mpl.hpp"

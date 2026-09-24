@@ -41,7 +41,11 @@ tmp_file::fopen(const char* _mode)
 
     ROCP_INFO << "opening (via fopen) temporary file: '" << filename << "'...";
     file = std::fopen(filename.c_str(), _mode);
+#if !defined(_WIN32)
     if(file) fd = ::fileno(file);
+#else
+    if(file) fd = ::_fileno(file);
+#endif
 
     return (file != nullptr && fd > 0);
 }

@@ -7,13 +7,15 @@ if(WIN32)
     # Windows builds compile only the core subset that does not require Linux-specific
     # headers (ELF/DWARF, DRM, KFD ioctl, dlfcn, pthreads) or complex C++ patterns
     # (std::integer_sequence<enum>) that MSVC rejects or ICEs on.
-    set(ROCPROFILER_LIB_HEADERS agent.hpp buffer.hpp external_correlation.hpp
-                                internal_threading.hpp registration.hpp)
+    set(ROCPROFILER_LIB_HEADERS
+        agent.hpp buffer.hpp external_correlation.hpp internal_threading.hpp
+        registration.hpp runtime_initialization.hpp)
     set(ROCPROFILER_LIB_SOURCES
         agent.cpp
         agent_windows.cpp
         buffer.cpp
         buffer_tracing.cpp
+        callback_tracing.cpp
         context.cpp
         counter_config.cpp
         counters.cpp
@@ -21,7 +23,8 @@ if(WIN32)
         external_correlation.cpp
         internal_threading.cpp
         registration.cpp
-        rocprofiler.cpp)
+        rocprofiler.cpp
+        runtime_initialization_windows.cpp)
 else()
     set(ROCPROFILER_LIB_HEADERS
         agent.hpp buffer.hpp external_correlation.hpp intercept_table.hpp
@@ -73,25 +76,29 @@ add_subdirectory(tracing)
 # windows_stubs.cpp in place of its Linux sources, so the call sites in the shared code
 # stay identical across platforms and the stub file is deleted wholesale when the real
 # port lands.
+#
+# callback_tracing.cpp dispatches every tracing kind to the owning subsystem's name and
+# argument tables, so all of them have to resolve at link time even though only the HIP
+# domains report any operations here.
 add_subdirectory(aql)
+add_subdirectory(code_object)
+add_subdirectory(hipfile)
+add_subdirectory(kernel_dispatch)
 add_subdirectory(kernel_replay)
+add_subdirectory(marker)
+add_subdirectory(ompt)
+add_subdirectory(rccl)
 add_subdirectory(registration)
+add_subdirectory(rocdecode)
+add_subdirectory(rocjpeg)
+add_subdirectory(rocshmem)
 add_subdirectory(spm)
 add_subdirectory(thread_trace)
 
 # Subsystems that are still Linux-only: they depend on ELF/DWARF, ptrace, dlfcn, or
 # runtime API tables that have no Windows equivalent yet.
 if(NOT WIN32)
-    add_subdirectory(kernel_dispatch)
     add_subdirectory(details)
-    add_subdirectory(hipfile)
-    add_subdirectory(code_object)
-    add_subdirectory(marker)
-    add_subdirectory(rccl)
-    add_subdirectory(rocdecode)
-    add_subdirectory(rocjpeg)
-    add_subdirectory(rocshmem)
-    add_subdirectory(ompt)
 endif()
 
 if(ROCPROFILER_BUILD_KFD OR WIN32)

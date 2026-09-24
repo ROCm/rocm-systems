@@ -102,14 +102,25 @@ output_config::parse_env()
     for(const auto& itr : sdk::parse::tokenize(output_format, " \t,;:"))
         entries.emplace(to_upper(itr));
 
-    csv_output     = entries.count("CSV") > 0;
+        // Only the CSV generator is built on Windows, so it is also what an unset format falls back
+        // to. The others are absent from supported_formats below and are rejected by name.
+#if !defined(_WIN32)
+    csv_output   = entries.count("CSV") > 0;
+    rocpd_output = entries.count("ROCPD") > 0 || entries.empty();
+#else
+    csv_output                   = entries.count("CSV") > 0 || entries.empty();
+    rocpd_output                 = false;
+#endif
     json_output    = entries.count("JSON") > 0;
     pftrace_output = entries.count("PFTRACE") > 0;
     otf2_output    = entries.count("OTF2") > 0;
-    rocpd_output   = entries.count("ROCPD") > 0 || entries.empty();
 
+#if !defined(_WIN32)
     const auto supported_formats =
         std::set<std::string_view>{"CSV", "JSON", "PFTRACE", "OTF2", "ROCPD"};
+#else
+    const auto supported_formats = std::set<std::string_view>{"CSV"};
+#endif
     for(const auto& itr : entries)
     {
         LOG_IF(FATAL, supported_formats.count(itr) == 0)

@@ -31,7 +31,10 @@
 #include "kernel_iteration_filter.hpp"
 #include "stream_stack.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#if !defined(_WIN32)
+// the ATT decoder is not built on Windows; it needs libdw to read the code object
+#    include "lib/att-tool/att_lib_wrapper.hpp"
+#endif
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -89,9 +92,11 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <pthread.h>
+#if !defined(_WIN32)
+#    include <pthread.h>
+#    include <unistd.h>
+#endif
 #include <time.h>
-#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -117,13 +122,18 @@
 #include <utility>
 #include <vector>
 
-#include <dlfcn.h>
-#include <linux/futex.h>
-#include <sys/eventfd.h>
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+// these back the signal-handler and fork machinery, which only exists on Linux: there the
+// tool library is injected into the application, so it has to survive the application's
+// crashes. On Windows the consumer is a separate process and is unaffected by them.
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#    include <linux/futex.h>
+#    include <sys/eventfd.h>
+#    include <sys/mman.h>
+#    include <sys/syscall.h>
+#    include <sys/types.h>
+#    include <sys/wait.h>
+#endif
 
 #if defined(CODECOV) && CODECOV > 0
 extern "C" {
@@ -136,10 +146,12 @@ namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 namespace fs     = ::rocprofiler::common::filesystem;
 
+#if !defined(_WIN32)
 extern "C" {
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
+#endif
 
 namespace
 {
@@ -150,6 +162,7 @@ auto output_generation_thread = common::Synchronized<std::optional<std::thread>>
 // Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
 std::atomic<bool> detach_output_generated = false;
 
+#if !defined(_WIN32)
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
 using sigaction_func_t = int (*)(int signum,
@@ -158,6 +171,7 @@ using sigaction_func_t = int (*)(int signum,
 
 constexpr auto rocprofv3_num_signals     = NSIG;
 constexpr auto rocprofv3_handled_signals = std::array<int, 4>{SIGINT, SIGQUIT, SIGABRT, SIGTERM};
+#endif
 
 auto destructors = new std::vector<std::function<void()>>{};
 
@@ -187,6 +201,7 @@ add_destructor(Tp*& ptr)
     return ptr;
 }
 
+#if !defined(_WIN32)
 struct chained_siginfo
 {
     int                        signo   = 0;
@@ -209,7 +224,11 @@ is_handled_signal(int signum)
         if(itr == signum) return true;
     return false;
 }
+#endif
 
+// Nothing signals this worker on Windows -- no handler is installed, because the tool library
+// runs in rocprofv3-launch rather than inside the application. It is still compiled so that
+// finalize_rocprofv3 keeps its run-once flag and its join, which the normal exit path uses.
 struct signal_worker_state
 {
     int                   eventfd       = -1;   // handler -> worker wakeup fd
@@ -228,6 +247,7 @@ struct signal_worker_state
     {
         if(thread.joinable() && thread.get_id() != std::this_thread::get_id())
         {
+#if !defined(_WIN32)
             // Wake the worker's blocking read() so it can exit
             // closing the fd while read() blocks is UB.
             if(eventfd >= 0)
@@ -237,13 +257,16 @@ struct signal_worker_state
                     ROCP_WARNING << "signal worker: eventfd wake before join failed: "
                                  << strerror(errno);
             }
+#endif
             thread.join();
+#if !defined(_WIN32)
             if(eventfd >= 0)
             {
                 if(close(eventfd) < 0)
                     ROCP_WARNING << "signal worker: close(eventfd) failed: " << strerror(errno);
                 eventfd = -1;
             }
+#endif
         }
     }
 };
@@ -676,13 +699,13 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
            _data && _data->args.roctxProfilerPause.tid != 0)
         {
             ROCP_INFO_IF(_data->args.roctxProfilerPause.tid !=
-                         static_cast<rocprofiler_thread_id_t>(getpid()))
+                         static_cast<rocprofiler_thread_id_t>(common::get_pid()))
                 << fmt::format("roctxProfilerPause(tid={}) invoked on thread {}. rocprofv3 "
                                "does not support thread-local pause/resume (only global "
                                "pause/resume). Use tid=0 or only call from main thread ({}).",
                                _data->args.roctxProfilerPause.tid,
                                common::get_tid(),
-                               getpid());
+                               common::get_pid());
         }
     };
 
@@ -1068,11 +1091,13 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
 
             CHECK_NOTNULL(tool_metadata)->add_code_object(*obj_data);
+#if !defined(_WIN32)
             if(tool::get_config().pc_sampling_host_trap ||
                tool::get_config().pc_sampling_stochastic)
             {
                 CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
             }
+#endif
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
                tool::get_config().advanced_thread_trace)
@@ -1735,10 +1760,16 @@ get_replay_group_count(rocprofiler_agent_id_t agent_id)
 int64_t
 get_instruction_index(rocprofiler_pc_t pc)
 {
+#if !defined(_WIN32)
     if(pc.code_object_id == ROCPROFILER_CODE_OBJECT_ID_NONE)
         return -1;
     else
         return CHECK_NOTNULL(tool_metadata)->get_instruction_index(pc);
+#else
+    // no code object disassembly here, so every pc stays unresolved
+    (void) pc;
+    return -1;
+#endif
 }
 
 std::set<std::string>
@@ -2334,6 +2365,7 @@ initialize_rocprofv3()
         << "nullptr to client finalizer!";  // exception for listing metrics
 }
 
+#if !defined(_WIN32)
 void
 initialize_signal_handler(sigaction_func_t sigaction_func)
 {
@@ -2444,6 +2476,7 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
     } while(static_cast<unsigned long>(_sem_val) < _peers_pid.size());
 }
+#endif
 
 void
 finalize_rocprofv3(std::string_view context)
@@ -2803,7 +2836,7 @@ write_attach_session(const fs::path& path, uint64_t session)
 void
 assign_attach_output_session_suffix()
 {
-    const auto instrumented_pid = getpid();
+    const auto instrumented_pid = common::get_pid();
     const auto session_path     = attach_session_file_path(instrumented_pid);
 
     auto session = uint64_t{0};
@@ -2857,8 +2890,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix();
 
-    pid_t instrumented_pid = getpid();   // The process being profiled
-    pid_t parent_pid       = getppid();  // Its parent process
+    pid_t instrumented_pid = common::get_pid();   // The process being profiled
+    pid_t parent_pid       = common::get_ppid();  // Its parent process
     ROCP_INFO << "Attach mode: Setting process_id to instrumented PID " << instrumented_pid
               << " (parent PID: " << parent_pid << ")";
     // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
@@ -3668,7 +3701,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(get_client_ctx(), "primary rocprofv3");
     }
 
-    tool_metadata->set_process_id(getpid(), getppid());
+    // When the traced process is not this one, this process is its parent: rocprofv3-launch
+    // created it.
+    auto traced_pid = common::get_traced_pid();
+    auto parent_pid = (traced_pid == common::get_pid()) ? common::get_ppid() : common::get_pid();
+
+    tool_metadata->set_process_id(traced_pid, parent_pid);
 
     // set_process_id should set process_start_ns unless it cannot read from /proc/<pid>/stat
     if(tool_metadata->process_start_ns == 0)
@@ -4018,6 +4056,11 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
     }
 
+    // The JSON, perfetto, rocpd and OTF2 writers each pull in a third-party dependency
+    // (cereal-to-file, perfetto, sqlite3, otf2) that the Windows build of the output
+    // library does not compile. output_config restricts Windows to CSV, so these branches
+    // are unreachable there rather than merely unbuilt.
+#if !defined(_WIN32)
     if(tool::get_config().json_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
@@ -4126,6 +4169,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          &rocdecode_elem_data,
                          &rocjpeg_elem_data);
     }
+#endif
 
     if(tool::get_config().summary_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
@@ -4133,6 +4177,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
     }
 
+#if !defined(_WIN32)
     if(tool::get_config().advanced_thread_trace)
     {
         auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
@@ -4166,6 +4211,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
             decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
         }
     }
+#endif
 
     run_cleanup();
 }
@@ -4301,6 +4347,7 @@ get_tool_counter_dimension_info()
     return _ret;
 }
 
+#if !defined(_WIN32)
 namespace
 {
 using main_func_t = int (*)(int, char**, char**);
@@ -4335,7 +4382,7 @@ int signal_abort_flush_timeout_sec =
 
 }  // namespace
 
-#define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
+#    define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
 std::optional<int>
 wait_pid(pid_t _pid, int _opts = 0)
@@ -4369,7 +4416,10 @@ wait_pid(pid_t _pid, int _opts = 0)
     return _status;
 }
 
+#endif
+
 extern "C" {
+#if !defined(_WIN32)
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 
@@ -4750,6 +4800,8 @@ rocprofv3_sigaction(int signum,
                     const struct sigaction* __restrict__ act,
                     struct sigaction* __restrict__ oldact) ROCPROFV3_INTERNAL_API;
 
+#endif
+
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
                       const char*              runtime_version,
@@ -4803,9 +4855,16 @@ rocprofiler_configure(uint32_t                 version,
     if(tool::get_config().rocshmem_api_trace) libs |= ROCPROFILER_ROCSHMEM_TABLE;
     if(tool::get_config().hipfile_api_trace) libs |= ROCPROFILER_HIPFILE_TABLE;
 
+#if !defined(_WIN32)
     ROCPROFILER_CALL(
         rocprofiler_at_intercept_table_registration(api_timestamps_callback, libs, nullptr),
         "api registration");
+#else
+    // Windows has no intercept table: HIP reports its activity as an ETW provider, so no
+    // runtime ever hands rocprofiler a dispatch table to wrap. The API reports that, and a
+    // tool asking for API timestamps here is not an error.
+    common::consume_args(libs);
+#endif
 
     ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";
@@ -4835,21 +4894,22 @@ rocprofiler_configure_attach(uint32_t /*version*/,
     return &cfg;
 }
 
+#if !defined(_WIN32)
 void
 rocprofv3_set_main(main_func_t main_func)
 {
     get_main_function() = main_func;
 }
 
-#define LOG_FUNCTION_ENTRY(MSG, ...)                                                               \
-    {                                                                                              \
-        ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][rocprofv3] {}" MSG,                    \
-                                 getppid(),                                                        \
-                                 getpid(),                                                         \
-                                 rocprofiler::common::get_tid(),                                   \
-                                 __FUNCTION__,                                                     \
-                                 __VA_ARGS__);                                                     \
-    }
+#    define LOG_FUNCTION_ENTRY(MSG, ...)                                                           \
+        {                                                                                          \
+            ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][rocprofv3] {}" MSG,                \
+                                     getppid(),                                                    \
+                                     getpid(),                                                     \
+                                     rocprofiler::common::get_tid(),                               \
+                                     __FUNCTION__,                                                 \
+                                     __VA_ARGS__);                                                 \
+        }
 
 sighandler_t
 rocprofv3_signal(int signum, sighandler_t handler)
@@ -5006,4 +5066,6 @@ rocprofv3_main(int argc, char** argv, char** envp)
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
 }
+
+#endif
 }

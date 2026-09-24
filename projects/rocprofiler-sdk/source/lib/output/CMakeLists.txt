@@ -39,19 +39,29 @@ set(TOOL_OUTPUT_SOURCES
     domain_type.cpp
     format_path.cpp
     generateCSV.cpp
-    generateJSON.cpp
-    generateOTF2.cpp
-    generatePerfetto.cpp
     generateStats.cpp
-    generateRocpd.cpp
     metadata.cpp
-    node_info.cpp
     output_config.cpp
     output_key.cpp
     output_stream.cpp
     statistics.cpp
     tmp_file_buffer.cpp
     tmp_file.cpp)
+
+if(WIN32)
+    # uname and sysfs have no Windows counterpart; the same fields come from the registry.
+    list(APPEND TOOL_OUTPUT_SOURCES node_info_windows.cpp)
+else()
+    list(APPEND TOOL_OUTPUT_SOURCES node_info.cpp)
+endif()
+
+# The remaining generators are excluded on Windows: perfetto, otf2 and rocpd/sqlite3 are
+# not built here, and the JSON generator serializes the code object and PC sampling data
+# that the ETW tracing path does not produce.
+if(NOT WIN32)
+    list(APPEND TOOL_OUTPUT_SOURCES generateJSON.cpp generateOTF2.cpp
+         generatePerfetto.cpp generateRocpd.cpp)
+endif()
 
 add_library(rocprofiler-sdk-output-library STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-output-library ALIAS
@@ -64,20 +74,30 @@ target_sources(rocprofiler-sdk-output-library PRIVATE ${TOOL_OUTPUT_SOURCES}
 # directly link to the sqlite3 library.
 target_link_libraries(
     rocprofiler-sdk-output-library
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
-           rocprofiler-sdk::rocprofiler-sdk-aqlprofile
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-sanitizer
             rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-cereal
-            rocprofiler-sdk::rocprofiler-sdk-perfetto
-            rocprofiler-sdk::rocprofiler-sdk-otf2
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-elf)
+            rocprofiler-sdk::rocprofiler-sdk-cereal)
+
+# Everything below backs a generator that is not built on Windows, except comgr/dw/elf
+# which back the code object disassembly that metadata.cpp only compiles in elsewhere.
+if(NOT WIN32)
+    target_link_libraries(
+        rocprofiler-sdk-output-library
+        PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
+               rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-perfetto
+                rocprofiler-sdk::rocprofiler-sdk-otf2
+                rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+                rocprofiler-sdk::rocprofiler-sdk-dw
+                rocprofiler-sdk::rocprofiler-sdk-elf)
+endif()
 
 target_compile_definitions(rocprofiler-sdk-output-library
                            PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
 
-add_subdirectory(sql)
+# sql/ is the rocpd backing store and needs sqlite3
+if(NOT WIN32)
+    add_subdirectory(sql)
+endif()

@@ -151,6 +151,28 @@ timestamp_ns()
     return get_ticks(_clk) / _clk_period;
 }
 
+inline pid_t
+get_pid()
+{
+#if !defined(_WIN32)
+    return ::getpid();
+#else
+    return static_cast<pid_t>(::_getpid());
+#endif
+}
+
+// The process whose activity is being recorded, which is what output identifies a run by.
+// On Linux the tool library is loaded into that process, so this is get_pid(). On Windows
+// the ETW consumer runs in a separate host process and rocprofv3-launch names its child.
+pid_t
+get_traced_pid();
+
+// Windows does not keep a parent link in the process itself, so this is a system-wide
+// snapshot lookup there rather than the constant-time read getppid() is. Returns 0 if the
+// parent cannot be determined.
+pid_t
+get_ppid();
+
 // returns the process start time (in CLOCK_BOOTTIME nanoseconds) via /proc/<pid>/stat
 uint64_t
 get_process_start_time_ns(pid_t _pid);
