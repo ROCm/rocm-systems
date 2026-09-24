@@ -58,7 +58,7 @@ On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/v
 
 **Optional:**
 
-* **FFmpeg** — pre-built libraries or built from source (required for samples and the host decoder library)
+* **FFmpeg** — pre-built libraries or built from source (required for FFmpeg-based samples and the host decoder library)
 
 ### FFmpeg (required for samples and tests)
 
