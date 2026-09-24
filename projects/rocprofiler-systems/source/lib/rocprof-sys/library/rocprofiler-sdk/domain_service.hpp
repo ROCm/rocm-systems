@@ -73,8 +73,6 @@ public:
         }
 
         configure_pending_external_correlation_id();
-
-        SdkBackend::start_context(context());
     }
 
     void flush() const
@@ -92,7 +90,7 @@ public:
         return m_configuration;
     }
 
-    void resume()
+    void start()
     {
         if(SdkBackend::context_is_valid(m_context) &&
            !SdkBackend::context_is_active(m_context))
