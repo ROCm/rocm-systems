@@ -177,8 +177,15 @@ using detail::WorkitemOwnerDerivationPlan;
           coordinate_vgpr, scalar_positive_inline_u32(dimension_shift), coordinate_vgpr, arch));
     mix(coordinate_vgpr);
   }
-  if (owner_vgpr)
+  if (owner_vgpr) {
+    // Separate the workgroup tuple from the wave owner before combining them.
+    // Plain XOR makes (workgroup x=0, owner=1) and (x=1, owner=0)
+    // identical at every bank count, discarding independent causal windows.
+    // Keep the owner-free workgroup sampling hash unchanged.
+    sequence.append(instrumentation::build_v_mul_lo_u32_literal(result_vgpr, temporary_vgpr,
+                                                                0x9e3779b9u, result_vgpr, arch));
     mix(*owner_vgpr);
+  }
   sequence
       .append(instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
                                                    result_vgpr, arch))

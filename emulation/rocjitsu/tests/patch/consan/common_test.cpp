@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_access_apply.h"
+#include "rocjitsu/code/patch/consan/consan_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_device_primitives.h"
@@ -845,6 +846,65 @@ TEST(ConSan, FullWorkgroupPayloadRequirementUsesPatchSemantics) {
   patch.owner_descriptor_file_offsets.clear();
   EXPECT_FALSE(
       detail::patch_requires_full_workgroup_id_payload(mode, ROCJITSU_CODE_ARCH_RDNA4, patch));
+}
+
+TEST(ConSan, WindowBanksDoNotSystematicallyAliasWorkgroupsAndWaveOwners) {
+  // Each emulated lane represents one wave from a two-workgroup histogram:
+  // 16 waves per workgroup, with 256 retention banks. The old XOR tuple hash
+  // deterministically collapsed all 32 identities onto just 16 banks.
+  for (const TargetProfile &target : kTargetProfiles) {
+    for (uint32_t dispatch : {0u, 1u, 0x87654321u, 0x95511559u}) {
+      SCOPED_TRACE(testing::Message() << rj_code_target_name(target.target) << '/' << dispatch);
+      std::vector<uint32_t> words;
+      detail::ReportDispatchIdSource dispatch_source;
+      dispatch_source.sgpr = 20u;
+      WorkgroupSources sources;
+      sources.x = WorkgroupSource::vector(43u);
+      ASSERT_TRUE(detail::append_window_bank_index(words, dispatch_source, sources, 256u, 40u, 41u,
+                                                   42u, target.arch));
+      const std::string component = "consan_window_bank_hash";
+      amdgpu::GpuMemory memory(component + "_memory");
+      amdgpu::L2Cache cache(component + "_cache");
+      cache.set_backing_memory(&memory);
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = target.arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      auto compute_unit = amdgpu::ComputeUnitCore::create(component, config, &memory, &cache);
+      ASSERT_NE(compute_unit, nullptr);
+      amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 128, 256);
+      ASSERT_NE(wave, nullptr);
+      for (size_t index = 0; index < words.size(); ++index)
+        memory.write32(index * sizeof(uint32_t), words[index]);
+      wave->pc = 0u;
+      wave->set_exec(0xffffffffu);
+      const uint32_t vgpr_base = wave->vgpr_alloc().base;
+      compute_unit->write_sgpr(wave->sgpr_alloc().base + 20u, dispatch);
+      compute_unit->write_sgpr(wave->sgpr_alloc().base + 21u, 0u);
+      for (uint32_t lane = 0; lane < 32u; ++lane) {
+        compute_unit->write_vgpr(vgpr_base + 42u, lane, lane % 16u);
+        compute_unit->write_vgpr(vgpr_base + 43u, lane, lane / 16u);
+      }
+      size_t steps = 0;
+      while (wave->pc < words.size() * sizeof(uint32_t)) {
+        ASSERT_LT(steps++, words.size());
+        compute_unit->step();
+      }
+      std::set<uint32_t> banks;
+      for (uint32_t lane = 0; lane < 32u; ++lane) {
+        const uint32_t bank = compute_unit->read_vgpr(vgpr_base + 40u, lane);
+        EXPECT_LT(bank, 256u);
+        banks.insert(bank);
+        EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + 42u, lane), lane % 16u);
+        EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + 43u, lane), lane / 16u);
+      }
+      EXPECT_EQ(banks.size(), 32u);
+      if (!wave->is_halted())
+        wave->halt();
+    }
+  }
 }
 
 TEST(ConSan, IndexedReportAddressExecutesExactStrideOnEveryTarget) {
