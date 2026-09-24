@@ -2011,13 +2011,13 @@ DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
 DecodeResult DecoderImpl::subDecodeMubuf(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Mubuf::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mubuf[op.op](opcode, emit_error);
+  return sub_decode_mubuf[op.op | (op.opm << 7)](opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::subDecodeMtbuf(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Mtbuf::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mtbuf[op.op](opcode, emit_error);
+  return sub_decode_mtbuf[op.op | (op.opm << 3)](opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::subDecodeMimg(const MachineInst *opcode,

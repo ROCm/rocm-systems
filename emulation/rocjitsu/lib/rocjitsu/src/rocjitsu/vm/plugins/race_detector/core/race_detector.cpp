@@ -49,10 +49,11 @@ RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                               IntervalSet ldsIntervals,
                               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                              MemoryOrderClass memoryOrder) {
+                              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
   bool hasLds = !ldsIntervals.empty();
-  EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), counterObligations, memoryOrder);
+  EventId eid =
+      events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
+                  std::move(ldsIntervals), counterObligations, memoryOrder, lastRegisterByteMask);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
