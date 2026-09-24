@@ -88,12 +88,22 @@ def signal_op_dec(operation):
 
 
 def signal_fetch_dec():
-    suffixes = ["", "_wg", "_wave"]
-    return "\n".join(
-        f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}("
-        f"const uint64_t *sig_addr);"
-        for suffix in suffixes
-    )
+    declarations = [
+        "__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch("
+        "const uint64_t *sig_addr);"
+    ]
+    for suffix, scope in [("_wg", "work-group"), ("_wave", "wave")]:
+        declarations.append(
+            "/**\n"
+            f" * @brief Atomically fetch a signal value collectively at {scope} scope.\n"
+            " *\n"
+            " * @deprecated Use rocshmem_signal_fetch() instead.\n"
+            " */\n"
+            '[[deprecated("Use rocshmem_signal_fetch() instead")]]\n'
+            f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}("
+            "const uint64_t *sig_addr);"
+        )
+    return "\n".join(declarations)
 
 
 def signal_wait_dec():

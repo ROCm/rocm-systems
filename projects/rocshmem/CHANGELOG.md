@@ -18,6 +18,10 @@
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
 
+### Deprecated
+* Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
+  Use `rocshmem_signal_fetch` instead.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

@@ -124,6 +124,10 @@ ROCSHMEM_SIGNAL_FETCH
 **Description:**
 This function atomically fetches the value stored at ``sig_addr``.
 
+.. deprecated:: 3.8.0
+   ``rocshmem_signal_fetch_wg`` and ``rocshmem_signal_fetch_wave`` are
+   deprecated. Use ``rocshmem_signal_fetch`` instead.
+
 ROCSHMEM_SIGNAL_SET
 -------------------
 
