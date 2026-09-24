@@ -273,6 +273,7 @@ typedef struct {
 	 * mutually exclusive with the worker above.
 	 */
 	bool svm_host_unregister_defer;
+	uint32_t svm_host_unregister_defer_max;
 } svm_t;
 
 /*
@@ -309,6 +310,16 @@ struct svm_api_range {
 };
 
 #define SVM_API_GPU_MASK_BITS (sizeof(uint64_t) * 8)
+
+/*
+ * How many revokes the deferred mode holds before issuing them. The queue only
+ * pays off while entries are still cancellable, so the depth decides how far
+ * back an allocator can reuse a VA and still skip the ioctl; against that,
+ * every queued entry is a range the GPUs keep access to in the meantime.
+ * HSA_SVM_HOST_UNREGISTER_DEFER_MAX overrides it.
+ */
+#define SVM_REVOKE_DEFER_MAX 32
+
 typedef struct svm_api_range svm_api_range_t;
 
 /*
@@ -432,6 +443,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.svm_host_unregister = -1;
 	ctx->fmm_context->svm.svm_host_unregister_async = false;
 	ctx->fmm_context->svm.svm_host_unregister_defer = false;
+	ctx->fmm_context->svm.svm_host_unregister_defer_max = SVM_REVOKE_DEFER_MAX;
 
 	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
@@ -1665,13 +1677,6 @@ static bool svm_range_covers(void *outer_start, uint64_t outer_size,
 }
 
 /*
- * How many revokes the deferred mode holds before issuing them. The queue only
- * pays off while entries are still cancellable, and every entry is a range the
- * GPUs keep access to in the meantime, so this is kept short.
- */
-#define SVM_REVOKE_DEFER_MAX 32
-
-/*
  * Issue every queued revoke on the calling thread. The deferred mode has no
  * worker, so this is what eventually drains the queue: a register or map that
  * partially overlaps a queued entry, the cap above, or teardown.
@@ -1854,7 +1859,7 @@ static bool svm_revoke_enqueue_locked(HsaKFDContext *ctx, void *addr, uint64_t s
 	/* Deferred mode: nobody else will drain this, so bound how long the
 	 * GPUs keep access to ranges the caller has already let go.
 	 */
-	if (fmm_ctx->svm_revoke_queued_count >= SVM_REVOKE_DEFER_MAX)
+	if (fmm_ctx->svm_revoke_queued_count >= fmm_ctx->svm.svm_host_unregister_defer_max)
 		svm_revoke_flush_locked(ctx);
 
 	return true;
@@ -3806,6 +3811,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
 	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *svmHostUnregisterStr;
 	char *svmHostUnregisterAsyncStr, *svmHostUnregisterDeferStr;
+	char *svmHostUnregisterDeferMaxStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
@@ -3871,9 +3877,17 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 */
 	svmHostUnregisterDeferStr = getenv("HSA_SVM_HOST_UNREGISTER_DEFER");
 	fmm_ctx->svm.svm_host_unregister_defer =
-		fmm_ctx->svm.svm_host_unregister &&
 		!fmm_ctx->svm.svm_host_unregister_async &&
 		(svmHostUnregisterDeferStr && strcmp(svmHostUnregisterDeferStr, "0"));
+
+	fmm_ctx->svm.svm_host_unregister_defer_max = SVM_REVOKE_DEFER_MAX;
+	svmHostUnregisterDeferMaxStr = getenv("HSA_SVM_HOST_UNREGISTER_DEFER_MAX");
+	if (svmHostUnregisterDeferMaxStr) {
+		unsigned long v = strtoul(svmHostUnregisterDeferMaxStr, NULL, 0);
+
+		if (v > 0 && v <= (1u << 20))
+			fmm_ctx->svm.svm_host_unregister_defer_max = (uint32_t)v;
+	}
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
