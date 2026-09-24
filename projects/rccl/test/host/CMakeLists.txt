@@ -248,7 +248,7 @@ if(BUILD_TESTS)
   # (fakes/dev_runtime_fakes.cc) instead of compiling real dev_runtime.cc.
   set(TEST_MICRO_SCHEDULER_SOURCE_FILES
     scheduler-test.cc
-    fakes/enqueue_symbols_fakes.cc       # enqueue.cc's own externals, reached transitively by the scheduler UUTs
+    fakes/enqueue_fakes.cc               # enqueue.cc's own externals, reached transitively by the scheduler UUTs
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -517,7 +517,7 @@ if(BUILD_TESTS)
   # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
-    fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
+    fakes/enqueue_test_deps.cc           # ResetEnqueueTestDeps chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -1121,7 +1121,7 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
 # vs real-compile decision.
 set(TEST_MICRO_SCHEDULER_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/scheduler-test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_symbols_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
@@ -1270,7 +1270,7 @@ endforeach()
 # Same --gc-sections coupling as the in-build list; see the comment there.
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_test_deps.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
