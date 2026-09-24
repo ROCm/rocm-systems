@@ -684,7 +684,7 @@ memory:
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
-    tags: [query, P1, managed_memory]
+    tags: [query, P1]
   Unit_hipMallocManaged_Basic:
     <<: *level_2
     tags: [alloc, smoke, P0, managed_memory]
@@ -2121,12 +2121,8 @@ memory:
   Unit_hipMemDiscardBatchAsync_ContentAfterDiscard:
     <<: *level_2
     tags: [managed_memory]
-  Unit_hipMemDiscardBatchAsync_PageableDeviceMemory:
-    <<: *level_2
-    tags: [managed_memory]
-  Unit_hipMemDiscardBatchAsync_PageableSystemMemory:
-    <<: *level_2
-    tags: [managed_memory]
+  Unit_hipMemDiscardBatchAsync_PageableDeviceMemory: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableSystemMemory: *level_2
   Unit_hipMemDiscardBatchAsync_PageableMixedBatch:
     <<: *level_2
     tags: [managed_memory]
@@ -2274,12 +2270,12 @@ memory:
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_2
-    tags: [query, P1, managed_memory]
+    tags: [query, P1]
   Unit_hipMemAdvise_TstAlignedAllocMem_XNACK:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux, amd_wsl]
-    tags: [query, P1, managed_memory]
+    tags: [query, P1]
   Unit_hipMemAdvise_ReadMosltyMgpuTst:
     <<: *level_2
     tags: [multigpu, query, P1, managed_memory]
@@ -2400,7 +2396,7 @@ memory:
     tags: [query, P1, managed_memory]
   Unit_hipStreamAttachMemAsync_Positive_Pageable:
     <<: *level_2
-    tags: [query, P1, managed_memory]
+    tags: [query, P1]
   Unit_hipStreamAttachMemAsync_Positive_AttachGlobal:
     <<: *level_2
     tags: [query, P1, managed_memory]
