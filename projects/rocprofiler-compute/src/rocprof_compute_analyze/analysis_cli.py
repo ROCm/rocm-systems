@@ -203,7 +203,7 @@ class cli_analysis(OmniAnalyze_Base):
                         path_info[0], kernel_top_df, active_operator_lists
                     )
                     _warn_ml_api_trace_errors(workload)
-                    sys.exit(0)
+                    continue
                 if active_operator_filters:
                     self.apply_operator_filter(
                         args, workload, path_info[0], active_operator_filters
@@ -222,6 +222,9 @@ class cli_analysis(OmniAnalyze_Base):
 
             if getattr(args, "membw_analysis", False):
                 workload.membw_result = run_membw_analysis(workload.dfs, gpu_arch)
+
+        if active_operator_lists:
+            sys.exit(0)
 
     @demarcate
     def run_analysis(self) -> None:
