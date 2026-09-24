@@ -4,18 +4,13 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <random>
 #include <string>
-
-#ifdef _WIN32
-#include <process.h>
-#define getpid _getpid
-#else
-#include <unistd.h>
-#endif
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -25,13 +20,27 @@
 namespace {
 constexpr size_t kByteCount = 64;
 
+// Random suffix for temp artifacts, the same way hip_test_process.hh names its
+// capture files. Random rather than derived from the pid: a guessable path in a
+// shared temp directory can be pre-seeded with a symlink, which the export then
+// follows. The clock is mixed in so the name stays unique even where
+// std::random_device is a weak source.
+std::string RandomTag() {
+  std::random_device dev;
+  uint64_t value = (static_cast<uint64_t>(dev()) << 32) ^ dev();
+  value ^= static_cast<uint64_t>(
+      std::chrono::high_resolution_clock::now().time_since_epoch().count());
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(value));
+  return std::string(buf);
+}
+
 // Use the temp directory because installed test directories may be read-only.
 std::string DotPath() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
   return (fs::temp_directory_path() /
-          ("hip_contract_graph_debug_" + std::to_string(device) + "_" +
-           std::to_string(getpid()) + ".dot"))
+          ("hip_contract_graph_debug_" + std::to_string(device) + "_" + RandomTag() + ".dot"))
       .string();
 }
 
@@ -71,7 +80,6 @@ HIP_TEST_CASE(Contract_GraphDebug_HipGraphDebugDotPrint_Default_WritesNonEmptyFi
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
 
   const std::string path = DotPath();
-  std::remove(path.c_str());
 
   // Exporting a non-empty graph to a dot file must succeed (or report the
   // feature unsupported) and, on success, produce a non-empty file on disk.
@@ -97,7 +105,6 @@ HIP_TEST_CASE(Contract_GraphDebug_HipGraphDebugDotPrint_Default_VerboseFlagIsAcc
   HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
   const std::string path = DotPath();
-  std::remove(path.c_str());
 
   // The verbose flag augments the output but must not change the success
   // contract: a valid graph still exports to a non-empty file.

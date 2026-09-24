@@ -9,22 +9,33 @@
 #include <hip_test_common.hh>
 #include <hip_test_filesystem.hh>
 
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <random>
 #include <string>
 #include <vector>
-
-#ifdef _WIN32
-#include <process.h>
-#define getpid _getpid
-#else
-#include <unistd.h>
-#endif
 
 // The library-from-file and managed-symbol APIs (hipLibraryLoadFromFile,
 // hipLibraryGetManaged) are exercised on both backends: on NVIDIA they map to
 // the CUDA driver cuLibrary* entry points.
 namespace {
+// Random suffix for temp artifacts, the same way hip_test_process.hh names its
+// capture files. Random rather than derived from the pid: a guessable path in a
+// shared temp directory can be pre-seeded with a symlink, which the subsequent
+// open then follows. The clock is mixed in so the name stays unique even where
+// std::random_device is a weak source.
+std::string RandomTag() {
+  std::random_device dev;
+  uint64_t value = (static_cast<uint64_t>(dev()) << 32) ^ dev();
+  value ^= static_cast<uint64_t>(
+      std::chrono::high_resolution_clock::now().time_since_epoch().count());
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(value));
+  return std::string(buf);
+}
+
 constexpr char const kWriteKernelName[] = "write_value";
 
 constexpr char const kLibrarySource[] =
@@ -83,11 +94,10 @@ std::string WriteCodeObjectFile(const char* suffix) {
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  const std::string path =
-      (fs::temp_directory_path() /
-       ("hip-contract-library-file-" + std::string(suffix) + "-" +
-        std::to_string(getpid()) + ".code"))
-          .string();
+  const std::string path = (fs::temp_directory_path() /
+                            ("hip-contract-library-file-" + std::string(suffix) + "-" +
+                             RandomTag() + ".code"))
+                               .string();
   std::ofstream out(path, std::ios::binary);
   REQUIRE(out.is_open());
   out.write(code.data(), static_cast<std::streamsize>(code.size()));
