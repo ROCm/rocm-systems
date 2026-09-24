@@ -25,7 +25,7 @@ enum class AtomicEventKind : uint32_t {
 };
 
 inline constexpr uint32_t kReportMagic = 0x494f4d43u; // "CMOI" little-endian.
-inline constexpr uint32_t kReportAbiVersion = 15;
+inline constexpr uint32_t kReportAbiVersion = 16;
 struct alignas(8) ReportHeader {
   uint32_t magic = kReportMagic;
   uint32_t abi_version = kReportAbiVersion;
@@ -49,6 +49,13 @@ struct alignas(8) ReportHeader {
   uint32_t pending_acquire_contention_count = 0;
   uint32_t pending_acquire_collision_count = 0;
   uint32_t pending_acquire_malformed_count = 0;
+  // Monotone ticket source for retained access and atomic observations.
+  // Tickets establish order only within an owner, never cross-owner HB.
+  uint64_t publication_clock = 0;
+  uint32_t publication_event_capacity = 0;
+  uint32_t publication_event_count = 0;
+  uint32_t publication_dropped_count = 0;
+  uint32_t publication_flags = 0;
 };
 
 struct alignas(8) CausalWindow {
@@ -67,6 +74,8 @@ struct alignas(8) CausalWindow {
   // Zero means unavailable. Published with the winning access under the
   // window claim, before Ready; reset with the rest of the report epoch.
   uint64_t exact_lane_mask = 0;
+  // Zero means that no publication ordering observation was retained.
+  uint64_t publication_sequence = 0;
 };
 
 struct alignas(8) SyncMetadataPacked {
@@ -97,9 +106,40 @@ struct alignas(8) PendingAcquireSlot {
   [[nodiscard]] constexpr bool operator==(const PendingAcquireSlot &) const = default;
 };
 
-static_assert(sizeof(ReportHeader) == 96);
-static_assert(sizeof(CausalWindow) == 56);
+// Publication records are immutable after the final Ready store. They retain
+// guest atomic observations, not values subsequently read from the same address.
+inline constexpr uint32_t kPublicationReady = 1u;
+inline constexpr uint32_t kPublicationRelease = 1u;
+inline constexpr uint32_t kPublicationAcquire = 2u;
+inline constexpr uint32_t kPublicationObserved = 4u;
+inline constexpr uint32_t kPublicationTraceEnabled = 1u;
+inline constexpr uint32_t kPublicationTraceComplete = 2u;
+enum class PublicationRecordOperation : uint32_t { Read = 1, Rmw = 2 };
+struct alignas(8) PublicationRecord {
+  uint64_t generation = 0;
+  uint64_t dispatch_id = 0;
+  uint64_t sequence = 0;
+  uint64_t address = 0;
+  uint64_t observed = 0;
+  uint64_t written = 0;
+  uint32_t workgroup_x = 0;
+  uint32_t workgroup_y = 0;
+  uint32_t workgroup_z = 0;
+  uint32_t cluster_workgroup_id = 0;
+  uint32_t owner_id = 0;
+  uint32_t epoch = 0;
+  uint32_t byte_count = 0;
+  uint32_t roles = 0;
+  uint32_t scope = 0;
+  PublicationRecordOperation operation = PublicationRecordOperation::Read;
+  uint32_t state = 0;
+  uint32_t reserved = 0;
+};
+
+static_assert(sizeof(ReportHeader) == 120);
+static_assert(sizeof(CausalWindow) == 64);
 static_assert(sizeof(SyncMetadataPacked) == 24);
 static_assert(sizeof(PendingAcquireSlot) == 72);
+static_assert(sizeof(PublicationRecord) == 96);
 
 } // namespace rocjitsu::consan

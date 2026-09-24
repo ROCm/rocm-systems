@@ -32,7 +32,7 @@ struct ObjectPlan {
   std::string_view warning;
 };
 
-static_assert(sizeof(ObjectPlan) <= 96);
+static_assert(sizeof(ObjectPlan) <= 104);
 
 /// Operational sites that survived semantic admission and resource planning.
 /// ConSan derives persistent-state requirements from these consumers.

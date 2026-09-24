@@ -29,6 +29,7 @@ direct_report_buffer_layout_for_bytes(uint64_t report_buffer_size) {
   layout.required_bytes =
       layout.pending_acquires_offset +
       static_cast<size_t>(layout.pending_acquire_capacity) * sizeof(PendingAcquireSlot);
+  layout.publication_events_offset = layout.required_bytes;
   layout.valid = layout.required_bytes <= report_buffer_size;
   return layout;
 }

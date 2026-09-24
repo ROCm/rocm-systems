@@ -55,6 +55,11 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
              static_cast<unsigned long long>(input.reader),
              static_cast<unsigned long long>(input.expected_generation.value_or(0)),
              static_cast<unsigned long long>(invalid_header.generation));
+    } else if (decoded.failure == ReportDecodeFailure::PublicationEvidenceInvalid) {
+      append(
+          kFailure,
+          "ConSan auto report reader=%llu has incomplete or malformed atomic publication evidence",
+          static_cast<unsigned long long>(input.reader));
     } else if (decoded.failure == ReportDecodeFailure::LayoutMismatch) {
       append(kFailure, "ConSan auto report reader=%llu has inconsistent ABI-v%u layout",
              static_cast<unsigned long long>(input.reader), kReportAbiVersion);
@@ -122,6 +127,7 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
          "pending_acquire_contention=%u pending_acquire_collisions=%u "
          "pending_acquire_malformed=%u pending_release_slots_examined=%llu "
          "conflicts=%u suppressed_uniform_write_conflicts=%u "
+         "ordered_publication_pairs=%u incomplete_publication_pairs=%u "
          "immediate_conflicts=%llu claimed_windows=%llu "
          "dropped_windows=%llu saturated_windows=%llu "
          "stale_snapshots=%llu incomplete_snapshots=%llu "
@@ -143,6 +149,7 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
          header.pending_acquire_malformed_count,
          static_cast<unsigned long long>(records.pending_release_slots_examined),
          analysis.conflict_count, analysis.suppressed_uniform_write_conflict_count,
+         analysis.ordered_publication_pairs, analysis.incomplete_publication_pairs,
          static_cast<unsigned long long>(summary.immediate_conflict_count),
          static_cast<unsigned long long>(summary.claimed_window_count),
          static_cast<unsigned long long>(summary.dropped_window_count),

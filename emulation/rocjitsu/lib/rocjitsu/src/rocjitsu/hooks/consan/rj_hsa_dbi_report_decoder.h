@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_evidence_decoder.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_publication.h"
 
 #include <cstdint>
 #include <vector>
@@ -16,6 +17,7 @@ enum class ReportDecodeFailure : uint8_t {
   InvalidHeader,
   GenerationMismatch,
   LayoutMismatch,
+  PublicationEvidenceInvalid,
 };
 
 struct DecodedReport {
@@ -23,6 +25,7 @@ struct DecodedReport {
   ReportHeader header;
   ReportSummary summary;
   DecodedEvidence records;
+  DecodedPublications publications;
 
   [[nodiscard]] bool complete() const { return failure == ReportDecodeFailure::None; }
 };

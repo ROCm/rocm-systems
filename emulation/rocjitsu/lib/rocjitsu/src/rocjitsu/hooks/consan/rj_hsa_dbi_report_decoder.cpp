@@ -43,6 +43,18 @@ DecodedReport decode_report(const ReportPipelineInput &input, const ReportSnapsh
   result.failure = ReportDecodeFailure::None;
   result.header = *header;
   result.records = decode_evidence(input, *header, snapshot.bytes, summary);
+  const auto *publications = reinterpret_cast<const PublicationRecord *>(
+      snapshot.bytes.data() + expected_layout.publication_events_offset);
+  result.publications =
+      decode_publications(*header, {publications, expected_layout.publication_event_capacity});
+  if (result.publications.status == PublicationDecodeStatus::Malformed ||
+      result.publications.status == PublicationDecodeStatus::Incomplete) {
+    result.failure = ReportDecodeFailure::PublicationEvidenceInvalid;
+    if (result.publications.status == PublicationDecodeStatus::Malformed)
+      ++summary.malformed_snapshot_count;
+    else
+      ++summary.incomplete_snapshot_count;
+  }
   return result;
 }
 

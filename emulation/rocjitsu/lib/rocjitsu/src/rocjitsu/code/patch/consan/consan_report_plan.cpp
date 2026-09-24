@@ -80,9 +80,9 @@ void publish_evidence_requirements(ReportRequirements &requirements, AutoReportI
 namespace rocjitsu::consan {
 namespace {
 
-[[nodiscard]] std::array<size_t *, 4> report_region_offsets(ReportBufferLayout &layout) {
+[[nodiscard]] std::array<size_t *, 5> report_region_offsets(ReportBufferLayout &layout) {
   return {&layout.watchpoints_offset, &layout.causal_windows_offset, &layout.sync_metadata_offset,
-          &layout.pending_acquires_offset};
+          &layout.pending_acquires_offset, &layout.publication_events_offset};
 }
 
 constexpr size_t kUnplannedReportRegionOffset = std::numeric_limits<size_t>::max();
@@ -302,7 +302,10 @@ bool plan_report_layout(const AutoReportInventory &inventory, AutoReportPlan &pl
        report_region<SyncMetadataPacked>(sync_slot_count, layout.sync_metadata_capacity,
                                          layout.sync_metadata_offset),
        report_region<PendingAcquireSlot>(*pending_acquire_count, layout.pending_acquire_capacity,
-                                         layout.pending_acquires_offset)},
+                                         layout.pending_acquires_offset),
+       report_region<PublicationRecord>(
+           inventory.atomic_event_count == 0u ? 0u : *pending_acquire_count,
+           layout.publication_event_capacity, layout.publication_events_offset)},
       plan, cursor);
 }
 

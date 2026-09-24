@@ -20,9 +20,11 @@ ReportPipelineResult process_report(const ReportPipelineInput &input,
 
   std::optional<ConflictAnalysis> analysis;
   if (decoded.complete()) {
-    analysis = analyze_conflicts(decoded.records.evidence,
-                                 decoded.records.synchronization_evidence_complete,
-                                 input.conflict_example_limit, input.allow_uniform_lds_stores);
+    analysis = analyze_conflicts(
+        decoded.records.evidence, decoded.records.synchronization_evidence_complete,
+        input.conflict_example_limit, input.allow_uniform_lds_stores,
+        decoded.publications.status == PublicationDecodeStatus::Disabled ? nullptr
+                                                                         : &decoded.publications);
     accumulate_analysis(summary, *analysis);
   }
 

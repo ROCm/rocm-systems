@@ -28,9 +28,10 @@ struct Evidence {
   bool sync_snapshot_usable = true;
   const AccessStaticMapping *static_mapping = nullptr;
   uint64_t exact_lane_mask = 0;
+  uint64_t publication_sequence = 0;
 };
 
-static_assert(sizeof(Evidence) <= 128, "ConSan host evidence must fit within 128 bytes");
+static_assert(sizeof(Evidence) <= 136, "ConSan host evidence must fit within 136 bytes");
 
 enum class EvidenceReason : uint8_t {
   MalformedWindow,

@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+#include "rj_hsa_dbi_publication.h"
+#include <algorithm>
+#include <limits>
+
+namespace rocjitsu::consan::hook {
+DecodedPublications decode_publications(const ReportHeader &header,
+                                        std::span<const PublicationRecord> records) {
+  using Status = PublicationDecodeStatus;
+  constexpr uint32_t flags = kPublicationTraceEnabled | kPublicationTraceComplete;
+  if (header.publication_flags & ~flags)
+    return {.status = Status::Malformed};
+  if (!(header.publication_flags & kPublicationTraceEnabled)) {
+    if (header.publication_flags || header.publication_event_count || header.publication_clock ||
+        header.publication_dropped_count)
+      return {.status = Status::Malformed};
+    return {};
+  }
+  if (records.size() != header.publication_event_capacity ||
+      header.publication_event_count > header.publication_event_capacity ||
+      header.publication_dropped_count || !(header.publication_flags & kPublicationTraceComplete))
+    return {.status = Status::Incomplete};
+  DecodedPublications result{.status = Status::Complete};
+  std::vector<uint64_t> sequences;
+  for (uint32_t i = 0; i < header.publication_event_count; ++i) {
+    const auto &record = records[i];
+    if (record.state != kPublicationReady)
+      return {.status = Status::Incomplete};
+    if (record.generation != header.generation || !record.dispatch_id ||
+        (header.dispatch_id && record.dispatch_id != header.dispatch_id) || !record.sequence ||
+        record.sequence > header.publication_clock || record.owner_id >= 32 || record.reserved ||
+        !record.byte_count || record.byte_count > 8 ||
+        (record.byte_count & (record.byte_count - 1)) ||
+        record.address > std::numeric_limits<uint64_t>::max() - record.byte_count ||
+        record.scope == 0 || record.scope > 5 ||
+        (record.roles & ~(kPublicationRelease | kPublicationAcquire | kPublicationObserved)) ||
+        (record.operation != PublicationRecordOperation::Read &&
+         record.operation != PublicationRecordOperation::Rmw) ||
+        (record.operation == PublicationRecordOperation::Read &&
+         (record.roles & kPublicationRelease)))
+      return {.status = Status::Malformed};
+    if (!(record.roles & kPublicationObserved))
+      return {.status = Status::Incomplete};
+    const uint64_t mask =
+        record.byte_count == 8 ? ~uint64_t{0} : (uint64_t{1} << (record.byte_count * 8)) - 1;
+    if ((record.observed & ~mask) || (record.written & ~mask))
+      return {.status = Status::Malformed};
+    sequences.push_back(record.sequence);
+    result.events.push_back({.point = {.domain = {.generation = record.generation,
+                                                  .dispatch = record.dispatch_id,
+                                                  .workgroup_x = record.workgroup_x,
+                                                  .workgroup_y = record.workgroup_y,
+                                                  .workgroup_z = record.workgroup_z,
+                                                  .cluster_workgroup = record.cluster_workgroup_id},
+                                       .owner = record.owner_id,
+                                       .sequence = record.sequence},
+                             .address = record.address,
+                             .bytes = record.byte_count,
+                             .observed = record.observed,
+                             .written = record.written,
+                             .operation = record.operation == PublicationRecordOperation::Read
+                                              ? PublicationOperation::Read
+                                              : PublicationOperation::Rmw,
+                             .release = (record.roles & kPublicationRelease) != 0,
+                             .acquire = (record.roles & kPublicationAcquire) != 0,
+                             .covers_workgroup = record.scope >= 2,
+                             .observation_valid = true});
+  }
+  std::ranges::sort(sequences);
+  if (std::adjacent_find(sequences.begin(), sequences.end()) != sequences.end())
+    return {.status = Status::Malformed};
+  return result;
+}
+
+} // namespace rocjitsu::consan::hook

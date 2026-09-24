@@ -45,7 +45,7 @@ TEST(ConSanReportTest, FullLdsByteAddressDoesNotAliasOrCorruptWidth) {
 }
 
 TEST(ConSanReportTest, CompactEvidencePreservesClassificationAcrossMetadataCopies) {
-  static_assert(sizeof(Evidence) == 128);
+  static_assert(sizeof(Evidence) == 136);
   static_assert(alignof(Evidence) == alignof(uint64_t));
   static_assert(sizeof(SyncDecodeResult) == 32);
 

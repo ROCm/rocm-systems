@@ -27,7 +27,8 @@ bool same_access(const Evidence &a, const Evidence &b) {
 
 ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
                                    bool synchronization_evidence_complete, uint32_t example_limit,
-                                   bool allow_uniform_lds_stores) {
+                                   bool allow_uniform_lds_stores,
+                                   const DecodedPublications *publications) {
   ConflictAnalysis result;
   // Keep the linear exact-group pass outside the quadratic cross-wave scan.
   for (const auto &current : evidence) {
@@ -74,9 +75,34 @@ ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
         continue;
       if (!watchpoints_conflict(current.entry, prior.entry))
         continue;
-      if (synchronization_evidence_complete &&
-          atomic_pair_orders_same_workgroup(prior.sync, current.sync))
+      if (publications != nullptr) {
+        const auto point = [](const Evidence &entry) {
+          return PublicationPoint{.domain = {.generation = entry.generation,
+                                             .dispatch = entry.dispatch_id,
+                                             .workgroup_x = entry.workgroup_x,
+                                             .workgroup_y = entry.workgroup_y,
+                                             .workgroup_z = entry.workgroup_z,
+                                             .cluster_workgroup = entry.cluster_workgroup_id},
+                                  .owner = entry.entry.owner_id,
+                                  .sequence = entry.publication_sequence};
+        };
+        const bool complete = synchronization_evidence_complete &&
+                              publications->status == PublicationDecodeStatus::Complete;
+        const auto forward =
+            publication_orders(point(prior), point(current), publications->events, complete);
+        const auto backward =
+            publication_orders(point(current), point(prior), publications->events, complete);
+        if (forward == PublicationOrdering::Ordered || backward == PublicationOrdering::Ordered) {
+          ++result.ordered_publication_pairs;
+          continue;
+        }
+        if (forward == PublicationOrdering::Incomplete ||
+            backward == PublicationOrdering::Incomplete)
+          ++result.incomplete_publication_pairs;
+      } else if (synchronization_evidence_complete &&
+                 atomic_pair_orders_same_workgroup(prior.sync, current.sync)) {
         continue;
+      }
       if (result.conflict_count != std::numeric_limits<uint32_t>::max())
         ++result.conflict_count;
       // Once full, counting continues without allocating, formatting, or
@@ -94,6 +120,7 @@ ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
 
 void accumulate_analysis(ReportSummary &summary, const ConflictAnalysis &analysis) {
   summary.conflict_count = analysis.conflict_count;
+  summary.unsupported_sync_count += analysis.incomplete_publication_pairs;
   summary.suppressed_uniform_write_conflict_count =
       analysis.suppressed_uniform_write_conflict_count;
 }

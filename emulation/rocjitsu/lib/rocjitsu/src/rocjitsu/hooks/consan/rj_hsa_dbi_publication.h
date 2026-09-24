@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_abi.h"
+
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace rocjitsu::consan::hook {
 
@@ -37,6 +40,17 @@ struct PublicationEvent {
   bool observation_valid = false;
 };
 enum class PublicationOrdering { Unordered, Ordered, Incomplete };
+
+enum class PublicationDecodeStatus { Disabled, Complete, Incomplete, Malformed };
+struct DecodedPublications {
+  PublicationDecodeStatus status = PublicationDecodeStatus::Disabled;
+  std::vector<PublicationEvent> events{};
+};
+
+// Called only after the report allocation identity, header and region geometry
+// have been checked. The records are a quiescent immutable snapshot.
+[[nodiscard]] DecodedPublications decode_publications(const ReportHeader &header,
+                                                      std::span<const PublicationRecord> records);
 
 // Requires a complete trace of modifications of the relevant atomic objects,
 // including relaxed RMWs. Non-returning RMWs need an actual observation witness;

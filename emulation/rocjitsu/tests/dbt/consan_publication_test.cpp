@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_conflict_analysis.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_publication.h"
 #include <algorithm>
 #include <array>
@@ -145,6 +146,132 @@ TEST(ConSanPublicationTest, DomainsDoNotJoin) {
 TEST(ConSanPublicationTest, OverlappingAtomicObjectsAreIncomplete) {
   std::array events{rmw(0, 10, 0, 1), rmw(1, 10, 1, 2, true, true, 0x1002)};
   EXPECT_EQ(publication_orders(point(0, 1), point(1, 20), events, true), Result::Incomplete);
+}
+TEST(ConSanPublicationTest, ConflictAnalysisUsesObservationProofAndFailsClosed) {
+  Evidence writer;
+  writer.generation = 7;
+  writer.dispatch_id = 19;
+  writer.entry.valid = true;
+  writer.entry.kind = ShadowAccessKind::Write;
+  writer.entry.byte_count = 4;
+  writer.entry.owner_id = 0;
+  writer.publication_sequence = 1;
+  Evidence reader = writer;
+  reader.entry.kind = ShadowAccessKind::Read;
+  reader.entry.owner_id = 1;
+  reader.publication_sequence = 30;
+  std::array accesses{writer, reader};
+  DecodedPublications publications{.status = PublicationDecodeStatus::Complete,
+                                   .events = {rmw(0, 10, 0, 1), rmw(1, 20, 1, 2)}};
+  const auto ordered = analyze_conflicts(accesses, true, 8, false, &publications);
+  EXPECT_EQ(ordered.conflict_count, 0);
+  EXPECT_EQ(ordered.ordered_publication_pairs, 1);
+  publications.events[1].acquire = false;
+  EXPECT_EQ(analyze_conflicts(accesses, true, 8, false, &publications).conflict_count, 1);
+  publications.events[1].acquire = true;
+  publications.status = PublicationDecodeStatus::Incomplete;
+  const auto incomplete = analyze_conflicts(accesses, true, 8, false, &publications);
+  EXPECT_EQ(incomplete.conflict_count, 1);
+  EXPECT_EQ(incomplete.incomplete_publication_pairs, 1);
+  ReportSummary summary;
+  accumulate_analysis(summary, incomplete);
+  EXPECT_FALSE(evaluate_report_trust(summary, false).dynamic_complete);
+  publications.status = PublicationDecodeStatus::Complete;
+  EXPECT_EQ(analyze_conflicts(accesses, false, 8, false, &publications).conflict_count, 1);
+}
+
+PublicationRecord record(uint32_t owner, uint64_t sequence, uint64_t observed, uint64_t written) {
+  return {.generation = 7,
+          .dispatch_id = 19,
+          .sequence = sequence,
+          .address = 0x1000,
+          .observed = observed,
+          .written = written,
+          .owner_id = owner,
+          .byte_count = 4,
+          .roles = kPublicationRelease | kPublicationAcquire | kPublicationObserved,
+          .scope = 3,
+          .operation = PublicationRecordOperation::Rmw,
+          .state = kPublicationReady};
+}
+ReportHeader publication_header() {
+  ReportHeader header;
+  header.generation = 7;
+  header.dispatch_id = 19;
+  header.publication_clock = 30;
+  header.publication_event_capacity = 2;
+  header.publication_event_count = 2;
+  header.publication_flags = kPublicationTraceEnabled | kPublicationTraceComplete;
+  return header;
+}
+TEST(ConSanPublicationTest, DecodeRetainsGuestObservationAndIdentity) {
+  std::array records{record(0, 10, 0, 1), record(1, 20, 1, 2)};
+  records[0].workgroup_x = records[1].workgroup_x = 13;
+  records[0].cluster_workgroup_id = records[1].cluster_workgroup_id = 4;
+  const auto decoded = decode_publications(publication_header(), records);
+  ASSERT_EQ(decoded.status, PublicationDecodeStatus::Complete);
+  ASSERT_EQ(decoded.events.size(), 2);
+  EXPECT_EQ(decoded.events[0].point.domain.workgroup_x, 13);
+  EXPECT_EQ(decoded.events[0].point.domain.cluster_workgroup, 4);
+  auto before = point(0, 1), after = point(1, 30);
+  before.domain.workgroup_x = after.domain.workgroup_x = 13;
+  before.domain.cluster_workgroup = after.domain.cluster_workgroup = 4;
+  EXPECT_EQ(publication_orders(before, after, decoded.events, true), Result::Ordered);
+}
+TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
+  for (unsigned defect = 0; defect < 12; ++defect) {
+    SCOPED_TRACE(defect);
+    std::array records{record(0, 10, 0, 1), record(1, 20, 1, 2)};
+    auto &r = records[0];
+    if (defect == 0)
+      ++r.generation;
+    if (defect == 1)
+      ++r.dispatch_id;
+    if (defect == 2)
+      r.state = 0;
+    if (defect == 3)
+      r.sequence = 0;
+    if (defect == 4)
+      r.sequence = 31;
+    if (defect == 5)
+      r.sequence = records[1].sequence;
+    if (defect == 6)
+      r.roles &= ~kPublicationObserved;
+    if (defect == 7)
+      r.roles |= 8;
+    if (defect == 8)
+      r.owner_id = 32;
+    if (defect == 9)
+      r.reserved = 1;
+    if (defect == 10)
+      r.byte_count = 3;
+    if (defect == 11)
+      r.observed = uint64_t{1} << 32;
+    const auto decoded = decode_publications(publication_header(), records);
+    EXPECT_NE(decoded.status, PublicationDecodeStatus::Complete);
+    EXPECT_TRUE(decoded.events.empty());
+  }
+}
+TEST(ConSanPublicationTest, DecodeRequiresCompleteBoundedTrace) {
+  std::array records{record(0, 10, 0, 1), record(1, 20, 1, 2)};
+  for (unsigned defect = 0; defect < 5; ++defect) {
+    auto header = publication_header();
+    if (defect == 0)
+      header.publication_dropped_count = 1;
+    if (defect == 1)
+      header.publication_event_count = 3;
+    if (defect == 2)
+      header.publication_event_capacity = 3;
+    if (defect == 3)
+      header.publication_flags &= ~kPublicationTraceComplete;
+    if (defect == 4)
+      header.publication_flags |= 4;
+    EXPECT_NE(decode_publications(header, records).status, PublicationDecodeStatus::Complete);
+  }
+  EXPECT_EQ(decode_publications(ReportHeader{}, {}).status, PublicationDecodeStatus::Disabled);
+  auto header = publication_header();
+  header.publication_flags = 0;
+  EXPECT_EQ(decode_publications(header, records).status, PublicationDecodeStatus::Malformed);
 }
 } // namespace
 } // namespace rocjitsu::consan::hook

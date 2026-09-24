@@ -88,9 +88,14 @@ arrival loads both partials. This is a direct release/acquire publication proof.
 | --- | --- | --- |
 | One value per producer, acq_rel | Pass | 1 conflict each |
 | Eight values per producer, acq_rel | Pass | 2 conflicts each |
-| Eight values, acq_rel plus workgroup barrier | Pass | Clean, zero conflicts |
+| Eight values, acq_rel plus workgroup barrier | Pass | Zero conflicts; incomplete atomic coverage |
 | Eight values, relaxed counter | Pass in these runs | 2 conflicts each |
 | One/eight values, acq_rel plus extra device fence | Not separately rerun natively | 1/2 conflicts each; numerical pass |
+
+The barrier control has four unpatched atomic sites and one unsupported sync
+record in both the original investigation logs and the ABI-v16 rerun. It is a
+zero-conflict localization control, not a qualified clean result. Earlier wording
+calling it clean was incorrect.
 
 The numbers count sampled overlapping records, not all source-level races.
 The compiler combines some of the volatile generic stores. The relaxed arm is
@@ -209,16 +214,24 @@ and checks per-owner dynamic access order. Missing observations, duplicate
 values/ABA, disconnected modification chains, overlapping object identities,
 and inconsistent execution order return explicit incomplete evidence.
 
-Sixteen focused tests cover that contract; all 261 hook unit tests pass. The
-build and test evidence is in `implementation-build.log` and
-`host-publication-tests.log` in the artifact directory below.
+The report ABI is now version 16: it has a bounded publication-record region,
+a monotone observation clock, and per-access sequence identities. Record decoding
+rejects missing/partial observations, invalid domains, duplicate sequence tickets,
+and overflow. The report pipeline now passes validated publication evidence into
+the conflict analyzer; incomplete proofs retain conflicts and make dynamic
+evidence incomplete. Legacy address/role suppression is bypassed when publication
+tracing is enabled.
 
-This component is not yet connected to device reports and does not change the
-current red cells. Remaining work is to emit and validate atomic observation
-records and access sequence identities, improve completion recognition, connect
-the proof to conflict analysis, and run the clean/fault qualification matrix
-above. The device capture must establish the complete-transition precondition;
-setting that flag on the existing address/role metadata would be unsound.
+All 265 hook unit tests and 18 report-layout tests pass. A physical minimal-probe
+run on ABI v16 retains its expected conflict with complete coverage and no
+malformed snapshots. Evidence: `integration-host-tests.log`,
+`abi-layout-tests.log`, and `abi16-publication-1.log` in the artifact directory.
+
+Device emitters do not yet populate or enable the new trace, so the current red
+cells are unchanged. Remaining work is device atomic-observation/access-sequence
+capture, completion recognition, and the clean/fault qualification matrix above.
+The device capture must establish the complete-transition precondition; setting
+that flag on the existing address/role metadata would be unsound.
 
 ## Reproducing the minimal probe
 

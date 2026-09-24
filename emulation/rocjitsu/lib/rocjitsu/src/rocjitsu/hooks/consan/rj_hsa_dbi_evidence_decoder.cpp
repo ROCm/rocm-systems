@@ -183,6 +183,15 @@ DecodedEvidence decode_evidence(const ReportPipelineInput &input, const ReportHe
     case SnapshotState::Empty:
       break;
     case SnapshotState::Stable:
+      if ((header->publication_flags & kPublicationTraceEnabled) &&
+          (window.publication_sequence == 0 ||
+           window.publication_sequence > header->publication_clock)) {
+        ++summary.malformed_snapshot_count;
+        issues.push_back({.reason = EvidenceReason::MalformedWindow,
+                          .index = i,
+                          .words = {window.publication_sequence, header->publication_clock}});
+        break;
+      }
       if (snapshot.entry.epoch != window_epoch) {
         ++summary.malformed_snapshot_count;
         issues.push_back({.reason = EvidenceReason::MalformedWatchpoint,
@@ -194,7 +203,7 @@ DecodedEvidence decode_evidence(const ReportPipelineInput &input, const ReportHe
                          static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u),
                          window_generation, window_dispatch_id, window_x, window_y, window_z,
                          window_epoch, window_cluster_workgroup_id, sync_snapshot_usable,
-                         static_mapping_for_slot(i), exact_lane_mask});
+                         static_mapping_for_slot(i), exact_lane_mask, window.publication_sequence});
       break;
     case SnapshotState::StaleGeneration:
       ++summary.stale_snapshot_count;

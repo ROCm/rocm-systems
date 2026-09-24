@@ -12,6 +12,7 @@ make_report_header_for_layout(uint64_t generation, uint64_t dispatch_id,
   header.causal_window_capacity = layout.causal_window_capacity;
   header.sync_metadata_capacity = layout.sync_metadata_capacity;
   header.pending_acquire_capacity = layout.pending_acquire_capacity;
+  header.publication_event_capacity = layout.publication_event_capacity;
   return header;
 }
 
@@ -28,7 +29,8 @@ make_report_header_for_layout(uint64_t generation, uint64_t dispatch_id,
          header.watchpoint_capacity == layout.watchpoint_capacity &&
          header.causal_window_capacity == layout.causal_window_capacity &&
          header.sync_metadata_capacity == layout.sync_metadata_capacity &&
-         header.pending_acquire_capacity == layout.pending_acquire_capacity;
+         header.pending_acquire_capacity == layout.pending_acquire_capacity &&
+         header.publication_event_capacity == layout.publication_event_capacity;
 }
 
 struct LdsCellRange {

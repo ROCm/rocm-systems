@@ -22,15 +22,17 @@ struct ReportBufferLayout {
   uint32_t causal_window_capacity = 0;
   uint32_t sync_metadata_capacity = 0;
   uint32_t pending_acquire_capacity = 0;
+  uint32_t publication_event_capacity = 0;
   size_t watchpoints_offset = sizeof(ReportHeader);
   size_t causal_windows_offset = sizeof(ReportHeader);
   size_t sync_metadata_offset = sizeof(ReportHeader);
   size_t pending_acquires_offset = sizeof(ReportHeader);
+  size_t publication_events_offset = sizeof(ReportHeader);
   size_t required_bytes = sizeof(ReportHeader);
 
   bool operator==(const ReportBufferLayout &) const = default;
 };
 
-static_assert(sizeof(ReportBufferLayout) <= 64);
+static_assert(sizeof(ReportBufferLayout) <= 80);
 
 } // namespace rocjitsu::consan

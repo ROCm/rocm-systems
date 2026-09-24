@@ -30,6 +30,7 @@ add_library(
     STATIC
         rj_hsa_dbi_report_decoder.cpp
         rj_hsa_dbi_evidence_decoder.cpp
+        rj_hsa_dbi_publication_decoder.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_decoder
