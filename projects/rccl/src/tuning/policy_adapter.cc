@@ -526,29 +526,35 @@ void rcclPolicyResolveP2pTask(ncclComm* comm, ncclTaskP2p* task) {
     rcclDefaultCollectiveExecutionPolicy(&task->executionPolicy);
 }
 
+int rcclPolicyP2pTaskPool(const ncclComm* comm, const ncclTaskP2p* task) {
+  const rcclCollectiveExecutionPolicy& policy = task->executionPolicy;
+  if (task->executionPolicyMatched && policy.path == RCCL_P2P_PATH_SENDRECV && policy.nChannels > 0)
+    return std::min(comm->p2pnChannels, policy.nChannels);
+  return comm->p2pnChannels;
+}
+
+bool rcclPolicyP2pWorkSplitsDirections(
+  const ncclComm* comm, ncclTaskP2p* const tasks[2], int sendRank) {
+  return tasks[0] != nullptr && tasks[1] != nullptr && sendRank != comm->rank &&
+         rcclPolicyP2pTaskPool(comm, tasks[0]) != rcclPolicyP2pTaskPool(comm, tasks[1]);
+}
+
 void rcclPolicyPlanP2pWork(
   const ncclComm* comm, ncclTaskP2p* const tasks[2], bool logSelection,
   rcclP2pPolicyWorkPlan* plan) {
-  bool hasTask = false;
-  bool uniformSendRecv = true;
-  int activeChannels = comm->p2pnChannels;
+  int activeChannels = -1;
   for (int dir = 0; dir < 2; dir++) {
     plan->matched[dir] = tasks[dir] != nullptr && tasks[dir]->executionPolicyMatched;
     if (plan->matched[dir]) plan->policy[dir] = tasks[dir]->executionPolicy;
     else rcclDefaultCollectiveExecutionPolicy(&plan->policy[dir]);
     plan->channels[dir] = plan->matched[dir] ? plan->policy[dir].nChannels : -1;
     if (tasks[dir] == nullptr) continue;
-    hasTask = true;
-    // A work item has one channel namespace shared by send and receive. Never
-    // cap a mixed item containing an ordinary grouped P2P operation.
-    if (!plan->matched[dir] || plan->policy[dir].path != RCCL_P2P_PATH_SENDRECV) {
-      uniformSendRecv = false;
-    } else if (plan->policy[dir].nChannels > 0) {
-      activeChannels = std::min(activeChannels, plan->policy[dir].nChannels);
-    }
+    // Peer directions with different pools are planned as separate work items,
+    // so min() only combines pools for a self send/recv pair.
+    int pool = rcclPolicyP2pTaskPool(comm, tasks[dir]);
+    activeChannels = activeChannels < 0 ? pool : std::min(activeChannels, pool);
   }
-  plan->activeChannels =
-    hasTask && uniformSendRecv ? activeChannels : comm->p2pnChannels;
+  plan->activeChannels = activeChannels > 0 ? activeChannels : comm->p2pnChannels;
 
   if (!logSelection || (!plan->matched[0] && !plan->matched[1])) return;
   int dir = plan->matched[0] ? 0 : 1;
@@ -644,8 +650,8 @@ int rcclPolicyP2pWorkConnectorIndex(
     comm, plan->policy[dir], channelIds, nChannelIds, peer, /*isSendNotRecv=*/dir != 0,
     defaultConnIndex, &failedChannel);
   if (connIndex >= 0) return connIndex;
-  // Only reachable when a work item's channel pool differs from the pool its
-  // task was validated on (mixed or unevenly capped send/receive pairs).
+  // Validation already checked every channel of this task's pool, which is the
+  // pool its work item uses.
   INFO(NCCL_COLL,
        "RCCL P2P execution policy connector unavailable on channel %d; using default connector "
        "(dir=%s peer=%d transport=%d transfer=%d)",
@@ -731,10 +737,10 @@ bool rcclPolicyP2pPreconnect(
   const rcclCollectiveExecutionPolicy& policy = task->executionPolicy;
 
   bool usesShm = policy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
-  if (policy.nChannels <= 0 && policy.transferMode == RCCL_P2P_TRANSFER_AUTO && !usesShm)
+  preconnect->nChannels = rcclPolicyP2pTaskPool(comm, task);
+  if (preconnect->nChannels == comm->p2pnChannels &&
+      policy.transferMode == RCCL_P2P_TRANSFER_AUTO && !usesShm)
     return true;
-  if (policy.nChannels > 0)
-    preconnect->nChannels = std::min(comm->p2pnChannels, policy.nChannels);
   preconnect->nChannelsPerPeer =
     std::min(comm->p2pnChannelsPerPeer, preconnect->nChannels);
   int transportConnIndex = rcclPlannedP2pConnectorIndex(comm, policy.transport);
