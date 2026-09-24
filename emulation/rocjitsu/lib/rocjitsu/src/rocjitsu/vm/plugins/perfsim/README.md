@@ -142,7 +142,10 @@ a helper module on first use.
 ### Use Rocjitsu
 
 Use a Python environment containing ROCm Torch, Triton, and NumPy to run the
-GPT-OSS `_rms_norm_kernel/D1` corpus case. Run it directly with RocJITsu:
+GPT-OSS `_rms_norm_kernel/D1` corpus case. A tested stack used Python 3.12.14,
+ROCm PyTorch `2.10.0+rocm7.13.0a20260511` (HIP 7.13.0), Triton `3.6.0`, and
+NumPy `2.5.2`. These are example versions, not minimum plugin requirements.
+Run it directly with RocJITsu:
 
 ```bash
 export GPT_OSS=/absolute/path/to/gpt-oss-kernel-harness
