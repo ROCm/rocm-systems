@@ -1,7 +1,7 @@
 # AMD SMI Python Tests
 
 Python `unittest`-based test suite for AMD SMI. Tests are split by **test type**
-(unit vs. functional vs. CLI) and by **component** (gpu, cpu, nic, ifoe, system),
+(unit vs. integration vs. functional vs. CLI) and by **component** (gpu, cpu, nic, ifoe, system),
 each driven by one of three top-level runner scripts.
 
 For the broader design rationale (C++ + Python), see the test design guide:
@@ -28,14 +28,19 @@ For the broader design rationale (C++ + Python), see the test design guide:
 
 ```text
 tests/python/
-├── unit_tests.py           # runner: discovers unit/        (no hardware logic)
-├── integration_test.py     # runner: discovers functional/  (live hardware)
-├── cli_unit_test.py        # runner: discovers cli/         (drives amd-smi CLI)
-├── common/                 # shared runner + helpers (common.py, runcmd.py)
-├── unit/                   # pure-logic tests
-│   ├── system/             #   test_bdf.py, test_check_res.py
-│   └── gpu/                #   apu_metrics, ...
-├── functional/             # hardware tests (require a live device + root)
+├── run_tests.py            # runner: one tier, several, or all
+├── unit_tests.py           # runner: discovers unit/         (no hardware)
+├── integration_tests.py     # runner: discovers integration/  (live device)
+├── functional_tests.py      # runner: discovers functional/   (live device + root)
+├── cli_tests.py        # runner: discovers cli/          (drives amd-smi CLI)
+├── common/                 # shared runner + helpers (common.py, api_test.py, runcmd.py)
+├── unit/                   # no hardware: logic and mocked-import suites
+│   ├── gpu/                #   apu_metrics, kfd_process_gpus, the cli_* mocked suites
+│   └── system/             #   bdf, check_res, output_file_stdin
+├── integration/            # live device: one suite per API area
+│   ├── gpu/  cpu/  nic/  system/
+│   └── test_api_coverage.py    #   every public API must be driven by a suite here
+├── functional/             # live device + root: setters, lifecycles, benchmarks
 │   ├── gpu/  cpu/  nic/  ifoe/  system/
 └── cli/                    # exercise the installed `amd-smi` binary
 ```
@@ -45,15 +50,17 @@ subtree.
 
 ```mermaid
 graph TD
-    A[tests/python] --> U[unit_tests.py]
-    A --> I[integration_test.py]
-    A --> C[cli_unit_test.py]
-    U -->|discovers| UU[unit/*/test_*.py<br/>no hardware]
-    I -->|discovers| FF[functional/*/test_*.py<br/>live device]
+    A[tests/python] --> R["run_tests.py<br/>--unit --integration --functional --cli"]
+    A --> U[unit_tests.py]
+    A --> I[integration_tests.py]
+    A --> F[functional_tests.py]
+    A --> C[cli_tests.py]
+    R -->|discovers any combination| ALL[unit/ integration/<br/>functional/ cli/]
+    U -->|discovers| UU[unit/**/test_*.py<br/>no hardware]
+    I -->|discovers| II[integration/**/test_*.py<br/>live device]
+    F -->|discovers| FF[functional/**/test_*.py<br/>live device + root]
     C -->|discovers| CC[cli/test_*.py<br/>amd-smi binary]
-    U -.imports.-> CM[common/common.py]
-    I -.imports.-> CM
-    C -.imports.-> CM
+    I -.imports.-> CM[common/api_test.py]
     C -.imports.-> RC[common/runcmd.py]
 ```
 
@@ -66,38 +73,71 @@ graph TD
   (resolved via `AMDSMI_PATH` → `ROCM_HOME` → `ROCM_PATH` → `/opt/rocm`). See the
   [AMD SMI installation guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 - **Root privileges (`sudo`)** — all three runners enforce a root check and exit
-  with an error if `geteuid() != 0`. Functional tests additionally need a live
-  GPU/CPU/NIC. Unit tests are logic-only but still go through the same runner.
+  with an error if `geteuid() != 0`. Functional tests and the per-component unit
+  API suites additionally need a live GPU/CPU/NIC; the remaining unit tests are
+  logic-only but still go through the same runner. Running the API suites without
+  root turns readable-only-as-root queries into `AMDSMI_STATUS_NO_PERM` failures.
 
 ---
 
-## The three runners
+## The tiers and their runners
 
 | Runner | Discovers | Hardware | Purpose |
 | :--- | :--- | :--- | :--- |
-| `unit_tests.py` | `unit/` | No | Pure logic: BDF parsing, formatting, static data |
-| `integration_test.py` | `functional/` | Yes | API calls against a live device |
-| `cli_unit_test.py` | `cli/` | Yes | Runs the installed `amd-smi` binary and checks its output |
+| `run_tests.py` | any tier(s) | Depends on the tiers chosen | Run one tier, several, or all of them in a single report |
+| `unit_tests.py` | `unit/` | No | BDF parsing, formatting and CLI logic against stubbed imports |
 
-All three share the same option set and the same GTest-style summary, because
+`integration/<component>/` holds one suite per API area, and each API gets a single test that drives
+it both ways via the driver in [common/api_test.py](common/api_test.py):
+
+- **`reject()`** — one deliberately invalid argument per call; the library must refuse it. Every
+  invalid value is rejected by the Python interface before the C entry point, so no device state can
+  change even for a setter.
+- **`expect()`** — valid arguments only. Prints the payload, checks it is structurally sound, and
+  requires `AMDSMI_STATUS_SUCCESS`; a not-supported status is reported rather than failed.
+
+Both repeat every call for each live processor handle and each enum value the other arguments take.
+A suite skips when the platform has no processor of its kind, and an API skips when every
+combination reports not-supported. Setters, stateful lifecycles and benchmarks stay in
+`functional/`.
+
+A test belongs in `unit/` when it runs without a device and in `integration/` when it
+drives one. A unit test that replaces `amdsmi` or a CLI module in `sys.modules` must
+inherit `common.common.ModuleIsolationMixin` and declare `ISOLATED_MODULES` (and
+`ISOLATED_PATH` when it extends `sys.path`), so a stub never outlives its suite —
+[unit/test_module_isolation.py](unit/test_module_isolation.py) finds those suites by
+that marker and enforces the contract.
+
+| `integration_tests.py` | `integration/` | Yes | Per-API argument rejection and payload validation |
+| `functional_tests.py` | `functional/` | Yes | Setters, stateful lifecycles and benchmarks |
+| `cli_tests.py` | `cli/` | Yes | Runs the installed `amd-smi` binary and checks its output |
+
+They all share the same option set and the same GTest-style summary, because
 they all delegate to `common.run_test_dir()`.
+
+`integration/memory_partition_lifecycle.py` is a standalone script rather than a
+suite: it reloads the driver, so it is run on its own with `sudo` and contributes no
+tests to the runner.
 
 ### Invocation
 
 From an installed package (recommended — avoids a shadowing `site-packages` copy):
 
 ```bash
+sudo /opt/rocm/share/amd_smi/tests/python_unittest/run_tests.py -v
+sudo /opt/rocm/share/amd_smi/tests/python_unittest/run_tests.py --unit --integration -v
 sudo /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
-sudo /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
-sudo /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
 ```
 
 From this source tree:
 
 ```bash
-sudo ./unit_tests.py -v
-sudo ./integration_test.py -v
-sudo ./cli_unit_test.py -v
+sudo ./run_tests.py -v                          # every tier
+sudo ./run_tests.py --unit --integration -v     # two tiers together
+sudo ./unit_tests.py -v                         # one tier on its own
+sudo ./integration_tests.py -v
+sudo ./functional_tests.py -v
+sudo ./cli_tests.py -v
 ```
 
 > The install target maps `tests/python/` to `.../tests/python_unittest/` so the
@@ -109,11 +149,13 @@ sudo ./cli_unit_test.py -v
 
 ```mermaid
 flowchart TD
-    Q{What are you testing?} --> L{Pure logic,<br/>no device?}
-    L -->|Yes| UT[unit_tests.py]
-    L -->|No| H{Testing the<br/>amd-smi CLI?}
-    H -->|Yes| CT[cli_unit_test.py]
-    H -->|No, library API| IT[integration_test.py]
+    Q{What are you testing?} --> C{Testing the<br/>amd-smi CLI?}
+    C -->|Yes| CT[cli/]
+    C -->|No| H{Needs a live device?}
+    H -->|No| UT[unit/]
+    H -->|Yes| S{Setter, stateful<br/>lifecycle or benchmark?}
+    S -->|Yes| FT[functional/]
+    S -->|No: an API's<br/>arguments and payload| IT[integration/]
 ```
 
 ---
@@ -171,23 +213,23 @@ sudo ./unit_tests.py -v
 sudo ./unit_tests.py -k "bdf" -v
 
 # Run all functional tests except the performance suites
-sudo ./integration_test.py -x performance -v
+sudo ./functional_tests.py -x performance -v
 
 # Run only the CLI version-command test, buffering per-test output
-sudo ./cli_unit_test.py -k "version" -b -v
+sudo ./cli_tests.py -k "version" -b -v
 
 # Point at a non-default build
-sudo AMDSMI_PATH=/path/to/build/share/amd_smi ./integration_test.py -v
+sudo AMDSMI_PATH=/path/to/build/share/amd_smi ./functional_tests.py -v
 ```
 
 ### `-l` (list) output
 
 ```text
 Available tests:
-    system.test_bdf.TestBDF.test_invalid_bdfs
-    system.test_bdf.TestBDF.test_valid_bdfs
-    system.test_check_res.TestCheckRes.test_check_res
-    gpu.test_apu_metrics.TestApuMetrics.test_metrics
+    unit.gpu.test_apu_metrics.TestAmdSmiApuMetrics.test_convert_apu_unit_scalar
+    unit.gpu.test_vcn_busy_navi.TestVcnBusyNaviFallback.test_navi_vcn_busy_reads_sysfs
+    unit.system.test_bdf.TestAmdSmiPythonBDF.test_parse_bdf
+    unit.system.test_check_res.TestAmdSmiCheckRes.test_check_res
     ...
 ```
 
@@ -218,6 +260,23 @@ Legend: . = pass, s = skipped, F = fail, E = error
 [  SKIPPED ] 1 test, listed below:
 [  SKIPPED ] TestOverdrive.test_overdrive_write
 ```
+
+---
+
+## Known failures
+
+The API suites assert `AMDSMI_STATUS_SUCCESS` from every getter, which surfaces
+defects that previously went unreported. On current hardware the following fail
+for reasons in the library, not the tests — treat any *other* failure as a
+regression:
+
+| Status | Tests | Cause |
+| :--- | :--- | :--- |
+| `AMDSMI_STATUS_UNEXPECTED_DATA` | `test_get_clock_info`, `test_get_energy_count`, `test_get_gpu_activity`, `test_get_gpu_metrics_info`, `test_get_gpu_pci_bandwidth`, `test_get_gpu_xcd_counter`, `test_get_gpu_xgmi_link_status`, `test_get_link_metrics`, `test_get_pcie_info`, `test_get_temp_metric` (HBM sensors), `test_get_utilization_count`, `test_get_violation_status` | The library returns a payload it cannot parse |
+| `AMDSMI_STATUS_NO_PERM` | `test_get_gpu_accelerator_partition_profile_config` | Appears only when a suite is invoked directly with `python3 -m unittest`; the runners require root, where it passes |
+
+These are tracked as library defects rather than suppressed, so that a fix flips
+the test green without anyone having to remember to unmark it.
 
 ---
 

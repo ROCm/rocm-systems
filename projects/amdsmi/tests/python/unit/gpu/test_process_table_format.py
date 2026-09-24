@@ -16,7 +16,7 @@ import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import ModuleIsolationMixin, amdsmi_path
 
 _ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
 LOGGER_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "amdsmi_logger.py")
@@ -57,11 +57,15 @@ def _process(name="python3", cu=None, sdma="0", gpu="0", pid="12345"):
     }
 
 
-class TestProcessTableFormat(unittest.TestCase):
+class TestProcessTableFormat(ModuleIsolationMixin, unittest.TestCase):
+    # The only non-stdlib name amdsmi_logger.py imports.
+    ISOLATED_MODULES = ("amdsmi_helpers",)
+
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(LOGGER_PATH):
             raise unittest.SkipTest(f"amdsmi_logger not installed at {LOGGER_PATH}")
+        super().setUpClass()
         _install_fake_helpers()
         cls.logger = _load_logger_module()
 

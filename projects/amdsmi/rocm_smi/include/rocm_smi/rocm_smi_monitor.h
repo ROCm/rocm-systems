@@ -51,6 +51,8 @@ enum MonitorTypes {
   kMonVoltHighest,
   kMonVoltLabel,
 
+  // Shares 0xFFFFFFFF with RSMI_TEMP_TYPE_INVALID / RSMI_VOLT_TYPE_INVALID, so a
+  // sensor-index check and a monitor-type check cannot be told apart by value.
   kMonInvalid = 0xFFFFFFFF,
 };
 
