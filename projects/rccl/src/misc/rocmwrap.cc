@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
+#include <mutex>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -179,11 +180,16 @@ int ncclIsCuMemSupported() {
 
 // Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
 // NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+// Memoized because ncclCuMemEnable() calls this on every allocation and the
+// check runs a full VMM create/map/unmap cycle.
 #if defined(__GNUC__)
 __attribute__((visibility("default")))
 #endif
 int ncclCuMemRuntimeSupported() {
-  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
+  static std::once_flag once;
+  static int supported = 0;
+  std::call_once(once, []() { supported = ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0); });
+  return supported;
 }
 
 int ncclCuMemEnable() {

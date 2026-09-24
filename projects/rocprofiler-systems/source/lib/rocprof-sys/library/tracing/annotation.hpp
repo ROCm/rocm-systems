@@ -29,7 +29,7 @@ template <size_t Idx>
 struct annotation_value_type;
 
 template <size_t Idx>
-using annotation_value_type_t = typename annotation_value_type<Idx>::type;
+using annotation_value_type_t = annotation_value_type<Idx>::type;
 
 #define ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ENUM, TYPE)                                    \
     template <>                                                                          \
@@ -210,7 +210,7 @@ struct annotate<perfetto_event_context_t, Tp>
         }
         else
         {
-            using value_type = typename Tp::value_type;
+            using value_type = Tp::value_type;
             if constexpr(!std::is_void_v<value_type>)
             {
                 auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);

@@ -935,13 +935,13 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   // fully-defined memory.
   uint64_t* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, 2 * sizeof(uint64_t)));
-  HRR_HIP_CHECK(hipMemset(d, 0, 2 * sizeof(uint64_t)));
+  HRR_HIP_CHECK(hipMemsetAsync(d, 0, 2 * sizeof(uint64_t), s));
 
   // Separate slot for the flags-bearing write. Allocated 8 bytes wide so a
   // 64-bit-granular implementation of the increment cannot overrun it.
   uint32_t* inc = nullptr;
   HRR_HIP_CHECK(hipMalloc(&inc, sizeof(uint64_t)));
-  HRR_HIP_CHECK(hipMemset(inc, 0, sizeof(uint64_t)));
+  HRR_HIP_CHECK(hipMemsetAsync(inc, 0, sizeof(uint64_t), s));
 
   // Both hipMemsets above are asynchronous: ihipMemset() forces isAsync for
   // device memory at offset 0 — "spec says hipMemset will be asynchronous when

@@ -1911,7 +1911,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
-  EXPECT_TRUE(restored_cu->wf(0)->is_halted());
+  EXPECT_EQ(restored_cu->wf(0), nullptr);
   auto *restored_wf = restored_cu->wf(1);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_FALSE(restored_wf->is_halted());

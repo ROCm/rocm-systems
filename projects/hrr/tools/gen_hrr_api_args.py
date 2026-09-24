@@ -2525,12 +2525,6 @@ def generate_shim(entry: ApiEntry) -> str:
     lines.append(f"// Generated shim")
     lines.append(f"static {entry.ret_type} capture_{entry.name}({param_decl}) {{")
 
-    # An API replay cannot reproduce is worth knowing about while the recording
-    # is being made, not only when someone later tries to replay it.
-    if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
-        lines.append(f'  hrr_cap::writer::note_unreplayable("{entry.name}",')
-        lines.append(f'      "{UNREPLAYABLE_PLAYBACK_APIS[entry.name]}");')
-
     if is_non_hiperrort_ret:
         # Return type is a struct/scalar (not hipError_t) — can't capture, just forward
         lines.append(f"  return {table_name}.{fn_field}({fwd_args});")
@@ -2560,6 +2554,7 @@ def generate_shim(entry: ApiEntry) -> str:
                 _fill_output_param_post(lines, p, name)
             _fill_derefs(lines, entry)
             enum_name = "HRR_API_" + entry.name.lstrip('_').upper()
+            _note_unreplayable(lines, entry)
             lines.append(f"    hrr_cap::writer::write_event_raw({enum_name}, &a.hdr, sizeof(a));")
             lines.append(f"  }}")
     else:
@@ -2592,6 +2587,7 @@ def generate_shim(entry: ApiEntry) -> str:
                 _fill_output_param_post(lines, p, name)
             _fill_derefs(lines, entry)
             enum_name = "HRR_API_" + entry.name.lstrip('_').upper()
+            _note_unreplayable(lines, entry)
             lines.append(f"    hrr_cap::writer::write_event_raw({enum_name}, &a.hdr, sizeof(a));")
             lines.append(f"  }}")
         lines.append(f"  return r;")
@@ -2599,6 +2595,16 @@ def generate_shim(entry: ApiEntry) -> str:
     lines.append(f"}}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _note_unreplayable(lines: List[str], entry: ApiEntry) -> None:
+    """An API replay cannot reproduce is worth knowing about while the recording
+    is being made, not only when someone later tries to replay it. Emitted next
+    to write_event_raw() so manifest.json lists the API only when an event was
+    actually recorded — a failed call writes no event."""
+    if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
+        lines.append(f'    hrr_cap::writer::note_unreplayable("{entry.name}",')
+        lines.append(f'        "{UNREPLAYABLE_PLAYBACK_APIS[entry.name]}");')
 
 
 def generate_build_table(entries: List[ApiEntry]) -> str:
