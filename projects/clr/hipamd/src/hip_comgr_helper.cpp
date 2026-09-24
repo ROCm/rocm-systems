@@ -1020,20 +1020,7 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
   is_bundled_ = helpers::CheckIfBundled(link_data);
 
   std::string_view llvm_code_object_view = link_data;
-  if (input_type == hipJitInputLLVMBundledBitcode) {
-    if (!findIsa()) {
-      return false;
-    }
-
-    size_t co_offset = 0;
-    size_t co_size = 0;
-    if (!helpers::UnbundleBitCode(link_data, isa_, co_offset, co_size)) {
-      LogError("Error in hip Linker: unable to unbundle the llvm bitcode");
-      return false;
-    }
-
-    llvm_code_object_view = link_data.substr(co_offset, co_size);
-  } else if (is_bundled_ && input_type == hipJitInputSpirv) {
+  if (is_bundled_ && input_type == hipJitInputSpirv) {
     const char* bundleEntryIDs[] = {helpers::SPIRV_BUNDLE_ENTRY_ID};
     size_t bundleEntryIDsCount = sizeof(bundleEntryIDs) / sizeof(bundleEntryIDs[0]);
     if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_,
