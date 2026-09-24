@@ -259,10 +259,14 @@ if(BUILD_TESTS)
   set(RCCL_HOST_HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
   rccl_define_micro_source_lists()
 
+  # Mark every hipified misc/ oracle TU any target below compiles as GENERATED.
+  # The property is directory-scoped and idempotent, so one call up front covers
+  # all targets -- no need to repeat it per binary.
+  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
+
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicro
   # ---------------------------------------------------------------------------
-  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify archinfo)
   rccl_add_micro_binary(rccl-UnitTestsMicro
     SOURCES ${RCCL_MICRO_TEST_SOURCES}
     EXTRA_INCLUDES ${PROJECT_BINARY_DIR}/hipify/src/devcomm
@@ -302,7 +306,6 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
   # ---------------------------------------------------------------------------
-  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
   rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
     SOURCES ${TEST_MICRO_SCHEDULER_SOURCE_FILES}
     EXTRA_DEFS
@@ -317,7 +320,6 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit and variants
   # ---------------------------------------------------------------------------
-  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
   foreach(_variant "" "-uncached" "-faultinj")
     set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
     rccl_add_micro_binary(${_init_tgt}
@@ -335,7 +337,6 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroEnqueue
   # ---------------------------------------------------------------------------
-  rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue
     SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
     EXTRA_INCLUDES
@@ -354,8 +355,6 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   if(GENERATE_SYM_KERNELS)
     # Source list: TEST_MICRO_SYM_KERNELS_SOURCE_FILES (rccl_define_micro_source_lists).
-    rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
-
     # Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this binary's suites too.
     rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels
       SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
@@ -496,6 +495,12 @@ set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # lists the in-build block above consumes; only the hipify base dir differs).
 set(RCCL_HOST_HIPIFY_DIR "${RCCL_HIPIFY_DIR}")
 rccl_define_micro_source_lists()
+
+# Mark every hipified misc/ oracle TU any target below compiles as GENERATED.
+# One directory-scoped, idempotent call up front covers all targets. (In
+# standalone mode the RCCL build has already run so these files exist on disk,
+# but keep the mark for parity with the in-build block.)
+rccl_mark_oracle_tus_generated(${RCCL_HIPIFY_DIR} argcheck archinfo utils)
 
 if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
   message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
@@ -696,7 +701,6 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # --gc-sections link options, GTest/Threads/fmt link libs, and HOST_TEST_BINARIES
 # registration for coverage are all applied by rccl_add_micro_binary (NO_PIE);
 # only this target's own specifics are set after the call.
-rccl_mark_oracle_tus_generated(${RCCL_HIPIFY_DIR} archinfo)
 rccl_add_micro_binary(rccl-UnitTestsMicro NO_PIE
   SOURCES ${RCCL_MICRO_TEST_SOURCES}
   EXTRA_INCLUDES
