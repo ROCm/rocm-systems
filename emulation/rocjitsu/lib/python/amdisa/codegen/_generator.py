@@ -14648,9 +14648,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  bool packed_16bit_dst_ = false;\n'
             )
 
+        # WARNING: final, kStaticRegisterAccess, and this friendship form the typed-access
+        # contract. Removing any of these restores vtable dispatch, silently degrading performance.
         execution_decls = (
             f'{simd_public_decl}'
             'private:\n'
+            '  friend class amdgpu::RegisterAccess;\n'
             f'{simd_private_decl}'
             '  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
             '  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
@@ -14661,11 +14664,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;\n'
             '  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;\n'
         )
-        operand_base_decl = 'class Operand : public AmdgpuIsaOperand<Isa> {\n'
+        operand_base_decl = 'class Operand final : public AmdgpuIsaOperand<Isa> {\n'
         operand_base_init = 'AmdgpuIsaOperand<Isa>'
         execution_backend_ctor_init = ''
         if self.isa_spec.profile.split_execution_sources:
-            operand_base_decl = 'class Operand : public IsaOperand<Isa> {\n'
+            operand_base_decl = 'class Operand final : public IsaOperand<Isa> {\n'
             operand_base_init = 'IsaOperand<Isa>'
             execution_backend_public_decl = (
                 '  /// @brief Return the immutable full-simulator operand table.\n'
@@ -14749,6 +14752,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 f'{operand_base_decl}'
                 'public:\n'
                 '  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };\n'
+                '  static constexpr bool kStaticRegisterAccess = true;\n'
                 f'{operand_ctor_decl}'
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                 '          uint16_t literal16_display_value, bool has_literal16_display);\n'
