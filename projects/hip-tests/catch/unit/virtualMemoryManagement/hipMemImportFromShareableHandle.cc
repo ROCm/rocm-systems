@@ -113,6 +113,14 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_HostBackedAlloc) {
   HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle,
                                           hipMemHandleTypePosixFileDescriptor, 0));
 
+  // Import with a different device current where one exists, so location.id has to
+  // describe the allocation rather than whichever device happened to be current.
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count > 1) {
+    HIP_CHECK(hipSetDevice(device_count - 1));
+  }
+
   hipMemGenericAllocationHandle_t imported_handle;
   HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
             reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
@@ -132,9 +140,16 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_HostBackedAlloc) {
   REQUIRE(imported_prop.type == hipMemAllocationTypePinned);
   REQUIRE(imported_prop.requestedHandleTypes == hipMemHandleTypePosixFileDescriptor);
 
+  // Host memory is not device-indexed, so the id must not name a device.
+  REQUIRE(imported_prop.location.id == 0);
+
   REQUIRE(close(shareable_handle) == 0);
   HIP_CHECK(hipMemRelease(imported_handle));
   HIP_CHECK(hipMemRelease(allocation_handle));
+
+  if (device_count > 1) {
+    HIP_CHECK(hipSetDevice(0));
+  }
 
   CTX_DESTROY();
 }

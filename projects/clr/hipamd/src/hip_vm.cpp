@@ -337,8 +337,9 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = static_cast<hipMemLocationType>(location_type);
-  // location.id is a device index only for device memory; it is ignored for host.
-  prop.location.id = dev->deviceId();
+  // location.id is a device index only for device memory; host memory has none.
+  prop.location.id =
+      (location_type == amd::Device::VmmLocationType::kDevice) ? dev->deviceId() : 0;
   prop.requestedHandleTypes = shHandleType;
 
   phys_mem_obj->getUserData().deviceId = dev->deviceId();
