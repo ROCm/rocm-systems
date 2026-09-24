@@ -277,6 +277,18 @@ inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool un
   if (cudaArch == 940 || cudaArch == 1250) return 0;
   return 1;
 }
+
+// gfx1250 SendRecv (ncclSend/ncclRecv only, not AlltoAll) LL128 message-size windows
+// for 4 GPU/node. 0 means this communicator has no auto window.
+// Inclusive: [rcclGfx1250SendRecvLl128MinBytes, max].
+constexpr ssize_t rcclGfx1250SendRecvLl128MinBytes = 4 << 10;
+inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nRanks) {
+  if (cudaArch != 1250) return 0;
+  if (nNodes == 1 && nRanks == 4) return 16 << 10;    // 4 KiB .. 16 KiB
+  if (nNodes == 2 && nRanks == 8) return 256 << 10;   // 4 KiB .. 256 KiB
+  if (nNodes == 4 && nRanks == 16) return 128 << 10;  // 4 KiB .. 128 KiB
+  return 0;
+}
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

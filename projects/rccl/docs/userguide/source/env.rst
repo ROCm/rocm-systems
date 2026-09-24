@@ -1719,11 +1719,11 @@ NCCL_P2P_LL128_ENABLE
 ---------------------
 (since 2.28)
 
-``NCCL_P2P_LL128_ENABLE`` opts gfx1250 into the LL128 send/recv kernel for latency-bound P2P (AlltoAll, SendRecv, Scatter, Gather). gfx942/gfx950 do not use this flag; they select LL128 via ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``. Internodal gfx1250 LL128 still needs ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1`` so the net staging buffer exists; without it the op falls back to SIMPLE.
+``NCCL_P2P_LL128_ENABLE`` controls gfx1250 LL128 send/recv. Default ``-1`` (auto) selects LL128 for ``ncclSend``/``ncclRecv`` only (not AlltoAll) on 4 GPU/node in these inclusive message-size windows: 1-node 4 GPU from 4 KiB to 16 KiB, 2-node 8 GPU from 4 KiB to 256 KiB, 4-node 16 GPU from 4 KiB to 128 KiB. Below 4 KiB stays legacy LL; above the window uses SIMPLE. Set to ``1`` to opt all P2P (including AlltoAll) into LL128 below ``NCCL_P2P_LL128_THRESHOLD``. Set to ``0`` to disable. gfx942/gfx950 do not use this flag; they select LL128 via ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``. Internodal gfx1250 LL128 still needs the net staging buffer; for the 2-node and 4-node auto windows RCCL allocates it even when ``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` is unset.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-0 or 1. Default value is 0 (disabled).
+-1 (auto), 0 (disabled), or 1 (force on). Default value is -1.
 
 NCCL_ALLOC_P2P_NET_LL_BUFFERS
 -----------------------------
