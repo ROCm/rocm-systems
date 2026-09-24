@@ -36,8 +36,8 @@ struct component_categories
         };
         (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-        ((_v.emplace(fmt::format(
-             "component::{}", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::")))),
+        (_v.emplace(fmt::format("component::{}",
+                                _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))),
          ...);
     }
 
@@ -56,7 +56,7 @@ struct component_categories<void>
     template <size_t... Idx>
     void operator()(std::set<std::string>& _v, std::index_sequence<Idx...>) const
     {
-        ((component_categories<comp::enumerator_t<Idx>>{}(_v)), ...);
+        (component_categories<comp::enumerator_t<Idx>>{}(_v), ...);
     }
 
     void operator()(std::set<std::string>& _v) const

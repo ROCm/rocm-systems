@@ -87,7 +87,7 @@ get_name(procedure_t* _func)
     auto itr = _v.find(_func);
     if(itr == _v.end())
     {
-        _v.emplace(_func, (_func) ? _func->getDemangledName() : std::string{});
+        _v.emplace(_func, _func ? _func->getDemangledName() : std::string{});
     }
 
     return _v.at(_func);
@@ -823,7 +823,7 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     };
 
     auto _full_chain = _get_chain(_lib);
-    auto _excl_chain = (_exclude_linked_by.empty())
+    auto _excl_chain = _exclude_linked_by.empty()
                            ? std::vector<std::string>{}
                            : _get_chain(_exclude_linked_by.c_str());
     auto _fini_chain = std::vector<std::string>{};

@@ -189,7 +189,7 @@ get_library_search_paths_impl()
 
     auto _path_exists = [](const std::string& _filename) {
         struct stat dummy;
-        return (_filename.empty()) ? false : (stat(_filename.c_str(), &dummy) == 0);
+        return _filename.empty() ? false : (stat(_filename.c_str(), &dummy) == 0);
     };
 
     auto _emplace_if_exists = [&_paths, _path_exists](const std::string& _directory) {

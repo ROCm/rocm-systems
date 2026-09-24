@@ -1316,7 +1316,7 @@ main(int argc, char** argv)
         if(_cmd.find('.') == std::string::npos)
         {
             // there is no extension, assume it is an exe
-            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
+            outfile = _is_local ? _cmd + ".inst" : _cmd;
         }
         else if(_cmd.starts_with("lib") || _cmd.find(".so") != std::string::npos ||
                 _cmd.ends_with(".a"))
@@ -1324,11 +1324,11 @@ main(int argc, char** argv)
             // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
             // libfoo.so.2), assume it is a library and retain the name but put it in a
             // different directory
-            outfile = (_is_local) ? "instrumented/" + _cmd : _cmd;
+            outfile = _is_local ? "instrumented/" + _cmd : _cmd;
         }
         else
         {
-            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
+            outfile = _is_local ? _cmd + ".inst" : _cmd;
         }
         verbprintf(0,
                    "Binary rewrite was activated via '-o' but no filename was provided. "
@@ -1799,7 +1799,7 @@ main(int argc, char** argv)
                         ((prefer_library == "static" || is_static_exe) ? ".a" : ".so"));
             }
 
-            return (lname + ((is_static_exe) ? ".a" : ".so"));
+            return lname + (is_static_exe ? ".a" : ".so");
         };
         for(auto& lname : lnames)
         {
@@ -2731,7 +2731,7 @@ main(int argc, char** argv)
         }
 
         const bool success = app_binary->writeFile(outfile.c_str());
-        code               = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
+        code               = success ? EXIT_SUCCESS : EXIT_FAILURE;
         if(success)
         {
             verbprintf(0, "\n");
@@ -3178,7 +3178,7 @@ find_dyn_api_rt()
 {
 #if defined(ROCPROFSYS_BUILD_DYNINST)
     const std::string _dyn_api_rt_base =
-        (binary_rewrite) ? "librocprof-sys-rt" : "libdyninstAPI_RT";
+        binary_rewrite ? "librocprof-sys-rt" : "libdyninstAPI_RT";
 #else
     std::string _dyn_api_rt_base = "libdyninstAPI_RT";
 #endif

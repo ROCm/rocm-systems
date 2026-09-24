@@ -282,7 +282,7 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
             break;
         }
     }
-    ++(m_data.triggers.*(entry->member));
+    ++(m_data.triggers.*entry->member);
 }
 
 std::optional<std::pair<std::uint32_t, std::uint32_t>>
@@ -516,7 +516,7 @@ unified_memory_processor_t::write_text_output(std::ostream& out) const
         out << "\n Migration Triggers:\n";
         for(const auto& row : detail::kTriggerTable)
         {
-            const auto count = m_data.triggers.*(row.member);
+            const auto count = m_data.triggers.*row.member;
             if(count > 0)
             {
                 out << fmt::format("   {:<16}{:>10}\n", std::string(row.text_label) + ":",
@@ -569,7 +569,7 @@ unified_memory_processor_t::write_json_output(std::ostream& out) const
     nlohmann::json triggers;
     for(const auto& row : detail::kTriggerTable)
     {
-        triggers[row.json_key] = m_data.triggers.*(row.member);
+        triggers[row.json_key] = m_data.triggers.*row.member;
     }
     summary["migration_triggers"] = triggers;
 

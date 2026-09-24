@@ -268,7 +268,7 @@ read_symlink(const std::string& path)
 {
     std::error_code error;
     auto            target = std::filesystem::read_symlink(path, error);
-    return (error) ? path : target.string();
+    return error ? path : target.string();
 }
 
 /**
@@ -320,7 +320,7 @@ realpath(const std::string& path)
 {
     std::error_code error;
     auto            canon = std::filesystem::canonical(path, error);
-    return (error) ? path : canon.string();
+    return error ? path : canon.string();
 }
 
 bool

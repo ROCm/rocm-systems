@@ -346,8 +346,8 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             auto _monochrome = p.get<bool>("monochrome");
             monochrome()     = _monochrome;
             p.set_use_color(!_monochrome);
-            update_env(_env, env_vars::MONOCHROME, (_monochrome) ? "1" : "0");
-            update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
+            update_env(_env, env_vars::MONOCHROME, _monochrome ? "1" : "0");
+            update_env(_env, "MONOCHROME", _monochrome ? "1" : "0");
         });
     parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
@@ -840,7 +840,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             fname << _config_folder << "/causal-" << std::setw(nwidth) << i << ".cfg";
             std::ofstream _ofs{ fname.str() };
             _write_config(_ofs, _causal_envs_tmp.at(i));
-            auto _cfg_name = (_config_file.empty())
+            auto _cfg_name = _config_file.empty()
                                  ? fname.str()
                                  : fmt::format("{}:{}", _config_file, fname.str());
             auto _cfg = std::map<std::string_view, std::string>{ { env_vars::CONFIG_FILE,

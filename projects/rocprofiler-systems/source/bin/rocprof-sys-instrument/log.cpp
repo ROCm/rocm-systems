@@ -72,7 +72,7 @@ log_entry::as_string(const char* _color, const char* _src, const char* _end) con
     _ss << " " << _color << std::regex_replace(m_message, std::regex{ "\n" }, " ... ")
         << _end;
 
-    return (_remove_color) ? std::regex_replace(_ss.str(), _color_regex, "") : _ss.str();
+    return _remove_color ? std::regex_replace(_ss.str(), _color_regex, "") : _ss.str();
 }
 
 log_entry&
@@ -123,7 +123,7 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
 
         if(!_condition || _condition(itr))
         {
-            auto _msg = ((_color_entries) ? itr.as_string() : itr.as_string("", "", ""));
+            auto _msg = (_color_entries ? itr.as_string() : itr.as_string("", "", ""));
             if(_msg != _last)
             {
                 if(_last_n > 0 && !_last.empty())
