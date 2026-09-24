@@ -1,5 +1,10 @@
 # RDNA4 SuperCollider investigation — September 24, 2026
 
+A later [sensitivity experiment](SC_SENSITIVITY_RDNA4_20260924.md) implements
+opt-in wave-dependent replay delay and records its qualification results. The
+historical audit below precedes that change; [STATUS_RDNA4.md](STATUS_RDNA4.md)
+contains the current per-workload results.
+
 The September 23 revalidation has 3 green SuperCollider cells, compared with
 16 in the historical ledger (commit `41c6a6e5e46`). These colors do not establish
 an across-the-board detector regression: the fault contracts and some workloads
