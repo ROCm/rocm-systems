@@ -114,3 +114,150 @@ no-diagnostic oracle. Preferred remedies are a genuinely atomic seed load in the
 workload/library, or a narrowly proven CAS-retry idiom policy with its exemption
 reported. Never exempt arbitrary loads merely because they are near an atomic.
 Confirm the exact generated site in the selected wheel before applying a policy.
+
+### A concrete false-positive trap
+
+The colliding-store probe is stronger than the load-classification example.
+`plain_collision_store` and `wave_collision_store` also have identical instruction
+bodies on each target. The latter uses a relaxed wave-scoped atomic store.
+With one wave, every lane may legally write its lane ID to the same location.
+
+A standalone naive readback comparator, using an atomic system-scoped load,
+reported **31/32 mismatches on gfx1201** and **63/64 on emulated gfx950** while
+the atomic program's oracle passed. Those are expected differences in a legal
+atomic program, not races. This is not a test of the current ConSan detector;
+it demonstrates why an unqualified global-store replay extension would be wrong.
+The checked-in `supercollider_global_semantics_probe.hip` preserves both the
+compiler examples and this executable counterexample. Its successful exit
+requires a valid atomic output and a positive naive-comparator mismatch count.
+
+## Implementation map
+
+Paths below are relative to `emulation/rocjitsu/`.
+
+| Area | Current boundary | Required work |
+| --- | --- | --- |
+| Semantic inventory | `consan_analysis.inc` records native LDS, direct-to-LDS, and `flat_*` access sites; ordinary global instructions are counted but not ordinary access sites | Add explicit GLOBAL, buffer, and scalar-memory origins/forms; retain address expression, width, mask, value placement, cache controls, and semantic access role |
+| Address spaces | `AccessAddressSpace::NonGroup` merges private and global; current FLAT admission rejects it | Distinguish global/private/group/unknown; runtime discrimination for generic FLAT where necessary; never treat private addresses as shared |
+| Semantic admission | `consan_access_policy.cpp` reserves recognized synchronization sites and admits LDS/group-FLAT | Add a SuperCollider-specific global capability; reject or explicitly exclude atomic, volatile/MMIO, unknown-role, and unsupported forms; validate provenance against exact code bytes |
+| Access lowering | `supercollider/consan_supercollider_flat.inc` is built around group-FLAT access/completion semantics | Separate target-specific coherent global probes with correct load/store completion, subword masking, original result preservation, full address capture, and cache policy |
+| Resource planning | Existing owner/liveness analysis, SGPR/VGPR borrowing, spilling, descriptor updates | Reuse these mechanisms; budget saved 64-bit addresses and scalar operands, preserve EXEC/VCC/SCC, and test empty/partial waves and address/result overlap |
+| Reports and validation | Existing site identity, report marker, coverage ledger and final patch validation | Carry global access kind/address/width, prove original access preserved exactly once, verify comparison/readback identity, count all admitted and excluded global sites |
+| Scheduling | Existing timing perturbations and functional emulator scheduling | Test controlled interleavings and inter-workgroup residency; add block-order perturbation later if sensitivity requires it |
+
+### Narrow first vertical slice
+
+1. **Admission and negative tests first.** Define a per-site access-role contract
+   with ordinary, atomic, volatile, private, and unknown states. A reviewed
+   sidecar can bootstrap these two workloads, bound to the original code-object
+   digest, instruction identity, and compiler/source provenance. A kernel-name
+   allowlist is only a selection/performance control; it does not prove all
+   accesses in the kernel are weak. Preserve existing synchronization reservations.
+   For general binaries, compiler-emitted metadata is the reliable long-term path.
+2. **Explicit GLOBAL vector accesses on gfx950 and gfx1201.** Support the measured
+   load widths and stores, using target-specific coherent readback after local
+   completion. Do not replay RMWs or implement readback by an atomic RMW. Retain
+   the original weak load result for the application. Save the effective address
+   before any destination register overwrites it. Compare bits, not floating-point
+   equality, so stable NaNs do not become false reports.
+3. **Scalar global loads and full workload accounting.** The TokenSpeed assembly
+   uses SMEM for routing data as well as kernargs. Cover ordinary mutable-data
+   scalar loads, or prove a specific input immutable and record that exclusion.
+   Do not drop all SMEM as if it were private or constant. A vector-only result is
+   explicitly partial until these sites are accounted for.
+4. **Intra-wave ordinary-store collision checking.** Compare full 64-bit effective
+   addresses and byte ranges across active lanes, respecting partial overlap and
+   the configured same-value policy. This is independent of delayed value changes.
+   Atomic stores must be excluded using semantic evidence, including the
+   indistinguishable wave-scoped store case demonstrated above.
+5. **Broaden forms separately.** Generic FLAT needs private/global discrimination;
+   buffer accesses need descriptor addressing and exact out-of-bounds behavior.
+   A discarded out-of-bounds store must not acquire a spurious readback mismatch.
+   Formatted, packed, wide, and direct-to-LDS source observations need their own
+   lowering/validation contracts. Direct-to-LDS destination checks alone do not
+   cover races on the global source. Host/device and multi-GPU claims require
+   separate coherence and lifetime validation.
+
+For the local TokenSpeed reduction, stage 1 has three static
+`global_load_dwordx4` sites and one `global_store_short`; stage 2 has three
+`global_load_dwordx2` sites and one `global_store_dword`. These are **static
+instruction counts, not dynamic coverage counts**. Both contain scalar loads,
+and neither contains LDS instructions. Several loads overwrite their address
+registers, e.g. `global_load_dwordx4 v[0:3], v[0:1], off`. Merely retargeting a
+second load after the original would read through the newly loaded data. The
+output layouts reduce across lanes and select output-owning lanes; a fault must
+verify actual active writers. Do not assume two same-wave output owners exist
+at a selected store. Test deterministic same-wave collisions in a separate
+fixture when the production site only has one active writer per wave.
+
+Keep this capability confined to SuperCollider. Enabling global accesses in the
+Default engine would require a separate cross-workgroup memory/ownership model.
+
+## Correctness qualification plan
+
+Use the existing [validation rules](VALIDATION.md): exact site selection,
+prospective faults, matching clean controls, reach witnesses, complete coverage,
+GPU health, and independent numerical outcomes. Global support needs new faults;
+weakening an atomic's ordering while leaving all accesses atomic is not a reliable
+positive control for SuperCollider's weak-access detector.
+
+| Test family | Clean / no-false-positive case | Positive case / expected detection |
+| --- | --- | --- |
+| Basic GLOBAL | Disjoint reads/writes, shared read-only inputs, separate kernels ordered on one stream | Controlled overlapping ordinary writes; weak read overlapping a writer |
+| Atomics | Colliding FP32 atomic adds; wave/agent/system scoped atomic loads and stores | Reviewed removal of atomicity, replaced with ordinary load/add/store; actual lost-update race |
+| BF16 scatter | Exact 16-per-bin oracle; diagnose and resolve the CAS seed policy; preserve adjacent packed halves | Non-atomic update fault with in-bounds collisions and an independent exact-count oracle |
+| TokenSpeed | Both production stages versus CPU reference, valid routing IDs, unchanged clean output ownership | Alias real output-owning waves/programs to an overlapping in-bounds store range; add a controlled missing producer/consumer dependency |
+| Register/address hazards | Loads overwriting address VGPRs, SGPR bases, offsets, masked lanes, EXEC=0, spills | Faulted address overlap still identifies the original site and byte range |
+| Width and value | BF16 halves, bytes, 32/64/128-bit accesses, stable NaN bit patterns, disjoint neighboring subwords | Partial-overlap writes and distinct-value collisions; same-value stores handled by the explicit collision check |
+| Memory/synchronization | Valid barrier and release/acquire publication; immutable scalar routing inputs; private FLAT | Missing publication with a witnessed value-changing interleaving; scalar input mutation where in scope |
+
+For scatter-reduce, retain the untouched clean workload and CPU count oracle.
+Audit the specific BF16 seed site before deciding whether a report is a detector
+bug or a source-level memory-model issue. Do not hide it with a kernel-wide
+suppression. Test packed-half preservation explicitly.
+
+For TokenSpeed, restore the complete benchmark adapter's gfx950 baseline after
+the PyTorch image-load issue is resolved, then inventory all four dispatches
+identified in the physical campaign. Reuse the original native rocprofv3 allowlist
+where the exact source/compiler/shape identity matches; otherwise record that a
+new physical trace is unavailable and perform an explicitly emulated dispatch
+inventory. The reduced two-stage probe is an implementation aid, not a replacement
+for that gate. Keep the original shape's qualification separate from reduced
+fixtures. Benchmark tables retain N/A until real hardware measurements exist.
+
+Run deterministic emulator schedules for the controlled positive/negative tests,
+then vary delays and workgroup scheduling. Record sanitizer detection and numeric
+oracle independently: an output mismatch alone is not a race report, and a valid
+output does not prove absence of races. For the finite test matrix require no
+unexpected diagnoses, all expected detections in controlled cases, and unchanged
+clean outputs. Statistical E2E qualification still uses its declared trial bar.
+Emulator success proves behavior in that emulator; it does not prove all gfx950
+cache/coherence behavior or physical scheduling sensitivity. Use gfx1201 hardware
+for the corresponding real-cache tests while gfx950 hardware is unavailable.
+
+## Reproduction
+
+The two checked-in manual probes are:
+
+- `tests/dbi/consan/device/supercollider_global_semantics_probe.hip`:
+  compile with `hipcc -O2 --offload-arch=gfx1201 --offload-arch=gfx950` and run
+  directly on this GPU or through the launcher below. Compile separately with
+  `--cuda-device-only -O2 -S --offload-arch=TARGET` to inspect the access-classification
+  examples. A positive naive mismatch count is the expected outcome.
+- `tests/dbi/consan/consan_global_moe_probe.py --tokenspeed-dir CHECKOUT`:
+  use a Python environment with PyTorch and the pinned `tokenspeed-triton` wheel.
+  It directly imports the pinned production kernels, reports a CPU numerical
+  oracle, and emits no performance measurements.
+
+From the repository root, the launcher used here was:
+
+```sh
+/home/benoit/workspace/rocjitsu-rebase-20260923-build/tools/rocjitsu/rocjitsu \
+  --config emulation/rocjitsu/configs/gfx950_mi355x_kmd.json -- PROGRAM ARGS
+```
+
+The current ROCm environment is recorded in
+`/home/benoit/workspace/consan-validation/rdna4-20260923/env-current.sh`.
+The artifact directory contains compiler assembly, source copies, emulator logs,
+TokenSpeed's pinned checkout, isolated Python packages, and generated Triton
+assembly/code objects. No production detector change was made during this analysis.

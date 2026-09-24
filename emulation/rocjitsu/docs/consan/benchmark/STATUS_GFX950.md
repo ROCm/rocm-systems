@@ -37,7 +37,10 @@ pinned TokenSpeed/Aorta sources. The ConSan hook binary was unchanged.
 TokenSpeed BF16 MoE is **N/A in all three modes**: every selected kernel loaded
 and dispatched, all static inventories completed with zero applicable sites,
 and all numerical checks passed. Its small shape selects register-only wave
-GEMVs. These outcomes are not sanitizer performance measurements.
+GEMVs. These outcomes are not sanitizer performance measurements. The subsequent
+[global-support analysis](../validation/SUPERCOLLIDER_GLOBAL_ANALYSIS.md) includes
+a reduced-shape correctness probe under gfx950 emulation; it does not replace
+this physical benchmark result.
 
 Final native Run drift was **−1.02%** for synthetic decode, **+9.46%** for
 synthetic MoE, and **−0.72%** for TokenSpeed MoE. Synthetic MoE's initial native
