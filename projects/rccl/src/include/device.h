@@ -140,6 +140,9 @@ union ncclLLFifoLine {
   v4u v4u; /* same layout as data1,flag1,data2,flag2 for b128 load/store */
 };
 
+static_assert(sizeof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16 bytes");
+static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-byte aligned");
+
 #if __HIP_DEVICE_COMPILE__
 #if defined(__GFX9__)
 #define WARP_SIZE 64
