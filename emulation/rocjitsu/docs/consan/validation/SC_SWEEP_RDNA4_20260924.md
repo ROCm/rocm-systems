@@ -36,8 +36,10 @@ of scope and is not rerun. Existing green rows are not part of this calibration.
 | `streamk-arrival` | reads | Pass | 0/8 | Below 6/8 |
 | `tree-atomic-or` | all | Pass | 0/8 | Below 6/8 |
 | `tree-atomic-or` | reads | Pass | 0/8 | Below 6/8 |
+| `jakub-attention` | all | Pass | 0/8 | Below 6/8 |
+| `jakub-attention` | reads | Pass | 0/8 | Below 6/8 |
 
-Completed 26 batches. Full results and frozen prospective specifications:
+Completed 28 batches. Full results and frozen prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-sweep-20260924`.
 
 The companion `results.json` records coverage/health/control audits and paths to raw
