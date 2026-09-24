@@ -2385,7 +2385,6 @@ typedef enum {
  *   dst             -- must be NULL
  *   size            -- must be 0
  *   unused_size     -- must be 0
- *   num_dep_signals -- must not exceed 5 for a batch containing this type
  *
  */
 typedef struct hsa_amd_memory_copy_op_s {
