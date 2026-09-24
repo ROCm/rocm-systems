@@ -17,8 +17,8 @@
 #include <memory.h>
 #include <sys/un.h>
 #endif
-#include <filesystem>
 #include "hip_test_context.hh"
+#include "hip_test_ipc_common.hh"
 
 #define checkVMMSupported(device)                                                                  \
   {                                                                                                \
@@ -72,13 +72,6 @@ struct ipcHdl {
     char *name;
 };
 
-#ifdef __linux__
-// IPC socket path in the temp directory so tests work from read-only cwd.
-inline std::string ipcSocketPath(pid_t pid) {
-  return (std::filesystem::temp_directory_path() / std::to_string(pid)).string();
-}
-#endif
-
 class ipcSocketCom {
   ipcHdl *handle;
   // method to create socket from server
@@ -86,7 +79,7 @@ class ipcSocketCom {
     int server_fd;
     struct sockaddr_un servaddr;
 
-    std::string nameStr = ipcSocketPath(getpid());
+    std::string nameStr = hip_ipc::SocketPath(getpid());
     const char *name = nameStr.c_str();
 
     // Create the socket handle
@@ -158,7 +151,7 @@ class ipcSocketCom {
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
 
-    std::string nameStr = ipcSocketPath(getpid());
+    std::string nameStr = hip_ipc::SocketPath(getpid());
     const char *name = nameStr.c_str();
 
     if (strlen(name) > (sizeof(cliaddr.sun_path) - 1)) {
@@ -268,7 +261,7 @@ public:
     // Construct client address to send this SHareable handle to
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    std::string destPath = ipcSocketPath(process);
+    std::string destPath = hip_ipc::SocketPath(process);
     if (destPath.size() > (sizeof(cliaddr.sun_path) - 1)) {
       fprintf(stderr, "Socket failure: Cannot address socket. Name too large\n");
       return -1;
