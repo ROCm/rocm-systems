@@ -57,6 +57,31 @@ function(rccl_apply_rocshmem_gin_optout _tgt)
   endif()
 endfunction()
 
+# Register a micro target with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures
+# do: via RCCL's shared category mechanism (no bare add_test, matching the rest of
+# test/CMakeLists.txt). apply_test_category_labels is defined by
+# shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt include()s
+# (globally) when building inside rocm-systems; INSTALL_TEST_FILE is likewise set by
+# the parent. Guard on COMMAND so a non-monorepo configure (shared/ctest absent) still
+# succeeds -- there, as with the other binaries, the target is built but not
+# category-registered. In-build only; the standalone block intentionally never
+# registers with CTest.
+function(rccl_register_test_categories _tgt _categories_yaml)
+  if(COMMAND apply_test_category_labels)
+    if(EXISTS "${_categories_yaml}")
+      message(STATUS "Applying test categories for ${_tgt}")
+      apply_test_category_labels(
+        ${_tgt}
+        "${_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for ${_tgt}: missing ${_categories_yaml}")
+    endif()
+  endif()
+endfunction()
+
 # Checked against the original sources because hipify output does not exist yet
 # at configure time. Paths are relative to this file, so the same checks cover
 # the in-build and standalone contexts.
@@ -233,28 +258,8 @@ if(BUILD_TESTS)
   # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 
-  # Register with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures do:
-  # via RCCL's shared category mechanism (no bare add_test, matching the rest of
-  # test/CMakeLists.txt). apply_test_category_labels is defined by
-  # shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt
-  # include()s (globally) when building inside rocm-systems; INSTALL_TEST_FILE is
-  # likewise set by the parent. Guard on COMMAND so a non-monorepo configure
-  # (shared/ctest absent) still succeeds -- there, as with the other binaries,
-  # the target is built but not category-registered.
-  if(COMMAND apply_test_category_labels)
-    set(_micro_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-    if(EXISTS "${_micro_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicro")
-      apply_test_category_labels(
-        rccl-UnitTestsMicro
-        "${_micro_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
-    endif()
-  endif()
+  rccl_register_test_categories(rccl-UnitTestsMicro
+    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
   # rccl-UnitTestsMicroWarpSpeed: ENABLE_WARP_SPEED needs ncclComm laid out for it binary-wide, so anything
   # requiring that layout (currently just src/scheduler/*.cc) gets its own binary instead of leaking the
@@ -329,21 +334,8 @@ if(BUILD_TESTS)
     endif()
   endif()
   rocm_install(TARGETS rccl-UnitTestsMicroWarpSpeed COMPONENT tests)
-  if(COMMAND apply_test_category_labels)
-    set(_scheduler_categories_yaml
-        "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
-    if(EXISTS "${_scheduler_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicroWarpSpeed")
-      apply_test_category_labels(
-        rccl-UnitTestsMicroWarpSpeed
-        "${_scheduler_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicroWarpSpeed: missing ${_scheduler_categories_yaml}")
-    endif()
-  endif()
+  rccl_register_test_categories(rccl-UnitTestsMicroWarpSpeed
+    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for src/init.cc
@@ -461,20 +453,8 @@ if(BUILD_TESTS)
       endif()
     endif()
     rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
-    if(COMMAND apply_test_category_labels)
-      set(_init_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
-      if(EXISTS "${_init_categories_yaml}")
-        message(STATUS "Applying test categories for ${_init_tgt}")
-        apply_test_category_labels(
-          ${_init_tgt}
-          "${_init_categories_yaml}"
-          "${PROJECT_BINARY_DIR}"
-          "${INSTALL_TEST_FILE}"
-        )
-      else()
-        message(WARNING "Skipping test categories for ${_init_tgt}: missing ${_init_categories_yaml}")
-      endif()
-    endif()
+    rccl_register_test_categories(${_init_tgt}
+      "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
   endforeach()
 
   # ---------------------------------------------------------------------------
@@ -588,21 +568,8 @@ if(BUILD_TESTS)
     endif()
   endif()
   rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
-  if(COMMAND apply_test_category_labels)
-    set(_enqueue_categories_yaml
-        "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
-    if(EXISTS "${_enqueue_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicroEnqueue")
-      apply_test_category_labels(
-        rccl-UnitTestsMicroEnqueue
-        "${_enqueue_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicroEnqueue: missing ${_enqueue_categories_yaml}")
-    endif()
-  endif()
+  rccl_register_test_categories(rccl-UnitTestsMicroEnqueue
+    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroSymKernels -- host-only microtests for the REAL src/sym_kernels.cc
@@ -673,21 +640,9 @@ if(BUILD_TESTS)
       endif()
     endif()
     rocm_install(TARGETS rccl-UnitTestsMicroSymKernels COMPONENT tests)
-    if(COMMAND apply_test_category_labels)
-      # Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this binary's suites too.
-      set(_symk_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-      if(EXISTS "${_symk_categories_yaml}")
-        message(STATUS "Applying test categories for rccl-UnitTestsMicroSymKernels")
-        apply_test_category_labels(
-          rccl-UnitTestsMicroSymKernels
-          "${_symk_categories_yaml}"
-          "${PROJECT_BINARY_DIR}"
-          "${INSTALL_TEST_FILE}"
-        )
-      else()
-        message(WARNING "Skipping test categories for rccl-UnitTestsMicroSymKernels: missing ${_symk_categories_yaml}")
-      endif()
-    endif()
+    # Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this binary's suites too.
+    rccl_register_test_categories(rccl-UnitTestsMicroSymKernels
+      "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
   endif()
 
   return()
