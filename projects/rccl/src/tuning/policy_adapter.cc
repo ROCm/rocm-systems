@@ -518,17 +518,23 @@ bool rcclPolicyAllToAllUsesSendRecvPath(
          policy.path == RCCL_P2P_PATH_SENDRECV;
 }
 
+void rcclPolicyResolveP2pTask(ncclComm* comm, ncclTaskP2p* task) {
+  task->executionPolicyMatched = rcclExecutionPolicyForP2pTask(
+    comm, task, ncclParamP2pDisable(), &task->executionPolicy);
+  if (!task->executionPolicyMatched)
+    rcclDefaultCollectiveExecutionPolicy(&task->executionPolicy);
+}
+
 void rcclPolicyPlanP2pWork(
-  ncclComm* comm, ncclTaskP2p* const tasks[2], bool logSelection,
+  const ncclComm* comm, ncclTaskP2p* const tasks[2], bool logSelection,
   rcclP2pPolicyWorkPlan* plan) {
-  const bool p2pDisabled = ncclParamP2pDisable();
   bool hasTask = false;
   bool uniformSendRecv = true;
   int activeChannels = comm->p2pnChannels;
   for (int dir = 0; dir < 2; dir++) {
-    rcclDefaultCollectiveExecutionPolicy(&plan->policy[dir]);
-    plan->matched[dir] =
-      rcclExecutionPolicyForP2pTask(comm, tasks[dir], p2pDisabled, &plan->policy[dir]);
+    plan->matched[dir] = tasks[dir] != nullptr && tasks[dir]->executionPolicyMatched;
+    if (plan->matched[dir]) plan->policy[dir] = tasks[dir]->executionPolicy;
+    else rcclDefaultCollectiveExecutionPolicy(&plan->policy[dir]);
     plan->channels[dir] = plan->matched[dir] ? plan->policy[dir].nChannels : -1;
     if (tasks[dir] == nullptr) continue;
     hasTask = true;
@@ -612,20 +618,18 @@ bool rcclPolicyP2pWorkAllowsRegistration(
          plan->policy[dir].transport != RCCL_EXECUTION_TRANSPORT_SHM;
 }
 
-bool rcclPolicyP2pTaskAllowsRegistration(ncclComm* comm, ncclTaskP2p* task) {
-  rcclCollectiveExecutionPolicy policy;
-  return !rcclExecutionPolicyForP2pTask(comm, task, ncclParamP2pDisable(), &policy) ||
-         policy.transport != RCCL_EXECUTION_TRANSPORT_SHM;
+bool rcclPolicyP2pTaskAllowsRegistration(const ncclTaskP2p* task) {
+  return !task->executionPolicyMatched ||
+         task->executionPolicy.transport != RCCL_EXECUTION_TRANSPORT_SHM;
 }
 
 bool rcclPolicyP2pPreconnect(
-  ncclComm* comm, ncclTaskP2p* task, rcclP2pPolicyPreconnect* preconnect) {
+  const ncclComm* comm, const ncclTaskP2p* task, rcclP2pPolicyPreconnect* preconnect) {
   preconnect->nChannels = comm->p2pnChannels;
   preconnect->nChannelsPerPeer = comm->p2pnChannelsPerPeer;
   preconnect->nConnIndices = 0;
-  rcclCollectiveExecutionPolicy policy;
-  if (!rcclExecutionPolicyForP2pTask(comm, task, ncclParamP2pDisable(), &policy))
-    return false;
+  if (!task->executionPolicyMatched) return false;
+  const rcclCollectiveExecutionPolicy& policy = task->executionPolicy;
 
   bool usesShm = policy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
   if (policy.nChannels <= 0 && policy.transferMode == RCCL_P2P_TRANSFER_AUTO && !usesShm)

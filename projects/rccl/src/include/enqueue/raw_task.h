@@ -13,6 +13,7 @@
 #include "sym_kernels.h"
 #include "nccl.h"
 #include "config/collconfig.h"
+#include "collective_execution_policy.h"
 
 struct ncclComm;
 
@@ -65,6 +66,9 @@ struct ncclRawTaskSendRecv {
   cudaStream_t stream;
   cudaEvent_t launchCompletionEvent;
   bool inPlace;
+  // Set by post-tuning preconnect and copied into the planned ncclTaskP2p.
+  bool executionPolicyMatched;
+  struct rcclCollectiveExecutionPolicy executionPolicy;
 };
 
 // ncclPutSignal API inputs captured at enqueue time.

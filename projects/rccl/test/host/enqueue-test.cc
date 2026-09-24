@@ -1769,24 +1769,38 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot
   SetMicroEnv("NCCL_P2P_DISABLE", "1");
   g_tuningParamP2pDisable = 1;
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  rcclPolicyResolveP2pTask(&comm, &gather);
+  ASSERT_TRUE(gather.executionPolicyMatched);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, gather.executionPolicy.transport);
   ASSERT_TRUE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
   EXPECT_EQ(32, preconnect.nChannels);
   EXPECT_EQ(4, preconnect.nChannelsPerPeer);
   ASSERT_EQ(1, preconnect.nConnIndices);
   EXPECT_EQ(RCCL_CONN_IDX_P2P_SHM, preconnect.connIndices[0]);
-  EXPECT_FALSE(rcclPolicyP2pTaskAllowsRegistration(&comm, &gather));
+  EXPECT_FALSE(rcclPolicyP2pTaskAllowsRegistration(&gather));
 
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  rcclPolicyResolveP2pTask(&comm, &gather);
   ASSERT_TRUE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
   ASSERT_EQ(1, preconnect.nConnIndices);
   EXPECT_EQ(1, preconnect.connIndices[0]);
 
+  // Later stages read the stored decision instead of re-resolving it.
   SetMicroEnvAbsent("NCCL_P2P_DISABLE");
   g_tuningParamP2pDisable = 0;
+  EXPECT_FALSE(rcclPolicyP2pTaskAllowsRegistration(&gather));
+  ncclTaskP2p* tasks[2] = {&gather, nullptr};
+  rcclP2pPolicyWorkPlan plan;
+  rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
+  EXPECT_TRUE(plan.matched[0]);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, plan.policy[0].transport);
+
   gather.collAPI = ncclFuncAllReduce;
+  rcclPolicyResolveP2pTask(&comm, &gather);
+  EXPECT_FALSE(gather.executionPolicyMatched);
   EXPECT_FALSE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
   EXPECT_EQ(0, preconnect.nConnIndices);
-  EXPECT_TRUE(rcclPolicyP2pTaskAllowsRegistration(&comm, &gather));
+  EXPECT_TRUE(rcclPolicyP2pTaskAllowsRegistration(&gather));
 }
 
 TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportIntentConstrainsCandidates) {
@@ -1892,12 +1906,16 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CapsOnlyUniformMappedWorkItems) {
   for (ncclFunc_t collType :
        {ncclFuncAlltoAll, ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncGather, ncclFuncScatter}) {
     recv.collAPI = send.collAPI = collType;
+    rcclPolicyResolveP2pTask(&comm, &recv);
+    rcclPolicyResolveP2pTask(&comm, &send);
     rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
     EXPECT_EQ(2, plan.activeChannels) << "collType=" << static_cast<int>(collType);
   }
 
   recv.collAPI = ncclFuncAlltoAll;
   send.collAPI = ncclFuncSend;
+  rcclPolicyResolveP2pTask(&comm, &recv);
+  rcclPolicyResolveP2pTask(&comm, &send);
   rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
   EXPECT_EQ(4, plan.activeChannels);
 }
@@ -1918,6 +1936,8 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xMixedDirectionsKeepFullPoolAn
   ncclTaskP2p* tasks[2] = {&recv, &send};
   rcclP2pPolicyWorkPlan plan;
 
+  rcclPolicyResolveP2pTask(&comm, &recv);
+  rcclPolicyResolveP2pTask(&comm, &send);
   rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
   EXPECT_TRUE(plan.matched[0]);
   EXPECT_EQ(1, plan.policy[0].nChannels);
