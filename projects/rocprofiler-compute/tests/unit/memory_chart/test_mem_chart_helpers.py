@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for utils/mem_chart_common.py."""
+"""Unit tests for memory_chart/mem_chart.py."""
 
 import pytest
 
-from utils import mem_chart_common
+from memory_chart import mem_chart
 from utils.utils_analysis import format_bw_human_readable
 
 # =============================================================================
@@ -43,7 +43,7 @@ class TestFormatBwHumanReadable:
 
 
 # =============================================================================
-# mem_chart_common helpers
+# mem_chart formatting helpers
 # =============================================================================
 
 
@@ -58,10 +58,10 @@ class TestFormatValue:
         ],
     )
     def test_format(self, value, unit, prec, expected):
-        assert mem_chart_common.format_value(value, unit, prec) == expected
+        assert mem_chart.format_value(value, unit, prec) == expected
 
     def test_bytes_per_second_routes_to_human_readable(self):
-        assert "GB/s" in mem_chart_common.format_value(100e9, "Bytes/s", 1)
+        assert "GB/s" in mem_chart.format_value(100e9, "Bytes/s", 1)
 
 
 class TestFormatScientific:
@@ -70,7 +70,7 @@ class TestFormatScientific:
         [(100, "100"), (999, "999"), (1_000_000, "e"), (None, "N/A"), (-500, "-500")],
     )
     def test_format(self, value, expected_contains):
-        assert expected_contains in mem_chart_common.format_scientific(value)
+        assert expected_contains in mem_chart.format_scientific(value)
 
 
 class TestProgressBar:
@@ -79,7 +79,7 @@ class TestProgressBar:
         [(100, 10, 0), (0, 0, 10), (50, 5, 5), (None, 0, 10), (150, 10, 0)],
     )
     def test_bar(self, pct, filled, empty):
-        assert mem_chart_common.progress_bar(pct, 10) == "█" * filled + "░" * empty
+        assert mem_chart.progress_bar(pct, 10) == "█" * filled + "░" * empty
 
 
 class TestSafeFloat:
@@ -95,7 +95,7 @@ class TestSafeFloat:
         ],
     )
     def test_parse(self, value, expected):
-        assert mem_chart_common.safe_float(value) == expected
+        assert mem_chart.safe_float(value) == expected
 
 
 class TestSafeFloatSum:
@@ -104,7 +104,7 @@ class TestSafeFloatSum:
         [((1.5, None, 2.5), 4.0), ((None, None), None), (("10", 5), 15.0)],
     )
     def test_sum(self, args, expected):
-        assert mem_chart_common.safe_float_sum(*args) == expected
+        assert mem_chart.safe_float_sum(*args) == expected
 
 
 class TestFormatEdge:
@@ -113,7 +113,7 @@ class TestFormatEdge:
         [("Read", 1_500_000, "1.50e+06", None), ("Write", None, "Write", ":")],
     )
     def test_edge(self, label, value, check_in, check_not_in):
-        result = mem_chart_common.format_edge(label, value)
+        result = mem_chart.format_edge(label, value)
         assert check_in in result
         if check_not_in is not None:
             assert check_not_in not in result
@@ -121,13 +121,13 @@ class TestFormatEdge:
 
 class TestMetricLine:
     def test_basic_metric(self):
-        result = mem_chart_common.metric_line("Util", 75.5, "%", "green")
+        result = mem_chart.metric_line("Util", 75.5, "%", "green")
         assert "Util" in result
         assert "75.5%" in result
         assert "green" in result
 
     def test_with_none_value(self):
-        result = mem_chart_common.metric_line("BW", None, "GB/s", "cyan")
+        result = mem_chart.metric_line("BW", None, "GB/s", "cyan")
         assert "BW" in result
         assert "N/A" in result
 
@@ -141,34 +141,34 @@ class TestFormatMemChartHeading:
         ],
     )
     def test_heading(self, unit, panel_id, expected):
-        result = mem_chart_common.format_mem_chart_heading(unit, panel_id=panel_id)
+        result = mem_chart.format_mem_chart_heading(unit, panel_id=panel_id)
         assert result == expected
 
 
 class TestBuildLegend:
     def test_contains_read_write_atomic(self):
-        legend = mem_chart_common.build_legend()
+        legend = mem_chart.build_legend()
         assert "Read" in legend and "Write" in legend and "Atomic" in legend
 
     def test_stall_optional(self):
-        assert "Stall" not in mem_chart_common.build_legend()
-        assert "Stall" in mem_chart_common.build_legend(include_stall=True)
+        assert "Stall" not in mem_chart.build_legend()
+        assert "Stall" in mem_chart.build_legend(include_stall=True)
 
     def test_exclude_atomic(self):
-        legend = mem_chart_common.build_legend(include_atomic=False)
+        legend = mem_chart.build_legend(include_atomic=False)
         assert "Atomic" not in legend
 
 
 class TestMakeArrows:
     def test_all_keys_same_length(self):
-        arrows = mem_chart_common.make_arrows(8)
+        arrows = mem_chart.make_arrows(8)
         for key in ("left", "right", "both", "plain"):
             assert len(arrows[key]) == 8
 
 
 class TestPadTo:
     def test_pads_short_list(self):
-        assert mem_chart_common.pad_to(["a"], 3) == ["a", "", ""]
+        assert mem_chart.pad_to(["a"], 3) == ["a", "", ""]
 
     def test_truncates_long_list(self):
-        assert mem_chart_common.pad_to(["a", "b", "c"], 2) == ["a", "b"]
+        assert mem_chart.pad_to(["a", "b", "c"], 2) == ["a", "b"]

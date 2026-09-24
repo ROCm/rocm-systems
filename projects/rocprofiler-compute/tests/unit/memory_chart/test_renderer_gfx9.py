@@ -3,23 +3,22 @@
 
 """Unit tests for the gfx9 memory-chart renderer and panel contract."""
 
-import functools
 import re
-from pathlib import Path
 
-import common
 import pytest
-import yaml
 
-from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
-from utils import mem_chart_gfx9
-from utils.mem_chart_common import strip_ansi
-
-DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
-
-MEMORY_CHART_CONFIG_FILENAME = "0300_memory_chart.yaml"
-
-ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
+from membw_analysis.models import (
+    BottleneckNode,
+    MemBwAnalysisResult,
+    SupportingMetric,
+)
+from memory_chart.mem_chart import plot_mem_chart, strip_ansi
+from tests.unit.memory_chart.conftest import (
+    ANALYSIS_CONFIGS_DIR,
+    DEFAULT_TITLE,
+    MEMORY_CHART_YAML,
+    panel_yaml_metric_keys,
+)
 
 GFX9_ARCHITECTURES = (
     "gfx908",
@@ -32,14 +31,15 @@ GFX9_ARCHITECTURES = (
 
 DISCOVERED_GFX9_ARCHITECTURES = tuple(
     path.parent.name
-    for path in sorted(ANALYSIS_CONFIGS.glob(f"gfx9*/{MEMORY_CHART_CONFIG_FILENAME}"))
+    for path in sorted(ANALYSIS_CONFIGS_DIR.glob(f"gfx9*/{MEMORY_CHART_YAML}"))
 )
 
-GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
+GFX94X_ARCHITECTURES = frozenset({
+    "gfx940",
+    "gfx941",
+    "gfx942",
+})
 
-# Cross-architecture metric contract: expected YAML differences relative to
-# gfx908 (baseline). Update these when intentionally adding or removing
-# arch-specific metrics in a YAML config.
 GFX94X_MISSING_METRIC_KEYS = frozenset()
 
 GFX94X_EXTRA_METRIC_KEYS = frozenset({
@@ -91,29 +91,24 @@ METRICS_THAT_RENDER_NA = frozenset({
     "L2-Fabric Write and Atomic BW",
 })
 
-GFX9_SAMPLE_METRICS = {
-    k: v if v is not None else 1
-    for k, v in mem_chart_gfx9.DEFAULT_SAMPLE_METRICS.items()
-}
+
+GFX9_SAMPLE_METRICS = dict.fromkeys(
+    panel_yaml_metric_keys("gfx908") | panel_yaml_metric_keys("gfx950"),
+    1,
+)
 
 
-def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE, gpu_arch=None):
+def render_gfx9_chart(
+    metrics,
+    chart_title=DEFAULT_TITLE,
+    gpu_arch=None,
+):
     return strip_ansi(
-        mem_chart_gfx9.plot_mem_chart(
-            dict(metrics), chart_title=chart_title, gpu_arch=gpu_arch
+        plot_mem_chart(
+            dict(metrics),
+            chart_title=chart_title,
+            gpu_arch=gpu_arch or "gfx908",
         )
-    )
-
-
-@functools.lru_cache(maxsize=None)
-def panel_yaml_metric_keys(architecture: str) -> frozenset[str]:
-    config_path = ANALYSIS_CONFIGS / architecture / MEMORY_CHART_CONFIG_FILENAME
-    panel_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-    return frozenset(
-        metric_name
-        for data_source in panel_config["Panel Config"]["data source"]
-        for metric_name in data_source["metric_table"]["metric"]
     )
 
 
@@ -138,7 +133,9 @@ def expected_architecture_missing_metric_keys(
     return missing
 
 
-def panel_yaml_metrics(architecture: str) -> dict[str, int]:
+def panel_yaml_metrics(
+    architecture: str,
+) -> dict[str, int]:
     return dict.fromkeys(panel_yaml_metric_keys(architecture), 1)
 
 
@@ -149,7 +146,9 @@ class TestPlotMemChartGfx9:
         assert metrics == {"HBM Rd": "invalid"}
         assert "N/A" in output
 
-    def test_full_sample_metrics_render_without_na_placeholders(self):
+    def test_full_sample_metrics_render_without_na_placeholders(
+        self,
+    ):
         output = render_gfx9_chart(GFX9_SAMPLE_METRICS)
         assert "n/a" not in output.casefold()
 
@@ -201,7 +200,9 @@ class TestPlotMemChartGfx9:
         output = render_gfx9_chart({"VL1_L2 Read BW": 32e9})
         assert "32.000 GB/s" in output
 
-    def test_empty_placeholders_do_not_render_metric_suffixes(self):
+    def test_empty_placeholders_do_not_render_metric_suffixes(
+        self,
+    ):
         output = render_gfx9_chart({})
         assert re.search(r"N/A[ \t]*(?:%|cycles)", output) is None
 
@@ -214,6 +215,11 @@ class TestPlotMemChartGfx9:
         assert "MALL" not in output
         assert "xGMI" in output
         assert "PCIe" not in output
+
+    def test_gfx90a_matches_gfx908(self):
+        output_908 = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx908")
+        output_90a = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx90a")
+        assert output_908 == output_90a
 
     def test_gfx940_has_mall_and_xgmi(self):
         output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx940")
@@ -258,11 +264,14 @@ class TestPanelYamlGfx9:
     @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
     def test_panel_yaml_metrics_render_with_gpu_arch(self, architecture):
         output = render_gfx9_chart(
-            panel_yaml_metrics(architecture), gpu_arch=architecture
+            panel_yaml_metrics(architecture),
+            gpu_arch=architecture,
         )
         assert len(output) > 100
 
-    def test_panel_yaml_metrics_render_same_line_count_across_base_architectures(self):
+    def test_panel_yaml_metrics_render_same_line_count_across_base_architectures(
+        self,
+    ):
         base_archs = [a for a in GFX9_ARCHITECTURES if a != "gfx950"]
         line_counts = {
             arch: len(
@@ -270,7 +279,6 @@ class TestPanelYamlGfx9:
             )
             for arch in base_archs
         }
-        # All archs have xGMI.  gfx908/gfx90a have no MALL; gfx940-942 have MALL.
         no_mall = [a for a in base_archs if a not in ("gfx940", "gfx941", "gfx942")]
         mall = [a for a in base_archs if a in ("gfx940", "gfx941", "gfx942")]
         no_mall_counts = {line_counts[a] for a in no_mall}
@@ -339,7 +347,7 @@ def make_result(
 
 def render_gfx950_with_membw(membw):
     return strip_ansi(
-        mem_chart_gfx9.plot_mem_chart(
+        plot_mem_chart(
             dict(GFX9_SAMPLE_METRICS),
             chart_title=DEFAULT_TITLE,
             gpu_arch="gfx950",
@@ -404,7 +412,7 @@ class TestMembwAnnotations:
 
     def test_without_membw_matches_baseline(self):
         baseline = strip_ansi(
-            mem_chart_gfx9.plot_mem_chart(
+            plot_mem_chart(
                 dict(GFX9_SAMPLE_METRICS),
                 chart_title=DEFAULT_TITLE,
                 gpu_arch="gfx950",
