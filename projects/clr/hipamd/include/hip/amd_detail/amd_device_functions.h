@@ -177,9 +177,23 @@ __device__ static inline unsigned int __bitextract_u32(unsigned int src0, unsign
 
 __device__ static inline __hip_uint64_t __bitextract_u64(__hip_uint64_t src0, unsigned int src1,
                                                          unsigned int src2) {
-  __hip_uint64_t offset = src1 & 63;
-  __hip_uint64_t width = src2 & 63;
-  return width == 0 ? 0 : (src0 << (64 - offset - width)) >> (64 - width);
+  // There is no 64-bit BFE to use here: v_bfe_u64 does not exist on any target, and while
+  // s_bfe_u64 does, it packs the offset and the width into a single operand, which costs more to
+  // assemble than it saves whenever they are not already constants. So this stays open-coded.
+  //
+  // What the mask form buys is the absence of a branch. Expressing the width-0 case as a
+  // condition made the entire body conditional - the compiler formed an s_and_saveexec_b64
+  // region and then sank the operand loads into it, so the loads were predicated on the
+  // selector and lost their scalar-base addressing. Masking then shifting keeps the loads
+  // outside, and shifting twice makes width 0 fall out arithmetically, since
+  // (~0 >> 63) >> 1 == 0, so there is no select left either.
+  //
+  // 63 - width needs no masking of its own: width is already in [0, 63], and the shift
+  // instructions only read the low six bits of the shift amount.
+  __hip_uint32_t offset = src1 & 63;
+  __hip_uint32_t width = src2 & 63;
+  __hip_uint64_t mask = ((~(__hip_uint64_t)0) >> (63 - width)) >> 1;
+  return (src0 >> offset) & mask;
 }
 
 __device__ static inline unsigned int __bitinsert_u32(unsigned int src0, unsigned int src1,
