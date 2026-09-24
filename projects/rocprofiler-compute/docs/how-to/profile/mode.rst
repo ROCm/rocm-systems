@@ -988,7 +988,7 @@ are **retained** in the workload directory.
 
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
-It does not write ``ml_api_trace/consolidated.csv``.
+Analyze no longer writes ``ml_api_trace/consolidated.csv``.
 
 Performance counter data file
 -----------------------------

@@ -37,6 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--torch-trace` now requires PyTorch 2.13 or 2.14, installed alongside ROCm.
 
+* Experimental ML API analyze no longer writes `ml_api_trace/consolidated.csv`.
+
 * Named each per-kernel PC sampling folder `<short_name>_uuid_<kernel_uuid>` instead of `kernel_<kernel_uuid>`, and added the matching `short_name` column to `kernel.csv`. The short name is the demangled identifier captured while profiling.
 
 * Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
