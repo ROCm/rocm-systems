@@ -8,6 +8,16 @@ The rules are split by topic so that each file is short enough to read in one
 sitting and specific enough to link to from a review comment. This page is the
 only index.
 
+## What these rules apply to
+
+New code and existing code alike. No file is exempt, and there is no list of
+legacy files the rules skip.
+
+That does not mean rewriting code nobody touched. A review flags what the pull
+request introduces or moves, not what it happened to scroll past. If you are
+changing a function, the changed lines follow these rules. The rest of the file
+can wait until someone has a reason to touch it.
+
 ## Rules
 
 | Topic | Rules |
