@@ -60,22 +60,12 @@ ncclResult_t IbCastGdrSupport() {
   // Don't probe past a deliberate safety override.
   if (IbCastGdrBlocklisted) return ncclSystemError;
 
-  // -1 = undetermined (retry, up to a cap), 0/1 = definitive and cached forever.
-  static std::mutex probeMutex;
-  static int probeResult = -1;
-  static int probeAttemptsLeft = 3;
-  {
-    std::lock_guard<std::mutex> lock(probeMutex);
-    if (probeResult < 0 && probeAttemptsLeft > 0) {
-      probeAttemptsLeft--;
-      probeResult = ncclIbProbeGdrSupport(IbCastDevs[0].context, IbCastRelaxedOrderingEnabled);
-      if (probeResult < 0 && probeAttemptsLeft == 0) {
-        WARN("NET/IB: peermem probe: giving up after repeated failures to run the test, treating as unsupported");
-        probeResult = 0;
-      }
-    }
-  }
-  return (probeResult == 1) ? ncclSuccess : ncclSystemError;
+  static std::once_flag probeOnce;
+  static bool probeResult = false;
+  std::call_once(probeOnce, []() {
+    probeResult = ncclIbProbeGdrSupport(IbCastDevs[0].context, IbCastRelaxedOrderingEnabled) == 1;
+  });
+  return probeResult ? ncclSuccess : ncclSystemError;
 }
 
 static int IbCastPeerMemModuleLoaded = 0; // 1 = true, 0 = false
