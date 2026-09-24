@@ -779,85 +779,6 @@ def test_slash_only_markers():
     assert not m("//", H3)
 
 
-# -- get_matched_torch_operators_for_display ---------------------------------
-
-
-def get_matched_torch_operators_for_display(
-    torch_operators: dict[str, pd.DataFrame],
-    pattern_list: list[str],
-) -> list[tuple[str, pd.DataFrame]]:
-    """Return (operator_name, filtered_df) for each operator matching any pattern.
-
-    Test-only helper: iterates every unique Operator_Name across all torch trace
-    DataFrames and checks each against the supplied glob patterns.
-    """
-    from utils.parser import torch_operator_pattern_matches
-
-    if not torch_operators or not pattern_list:
-        return []
-    result: list[tuple[str, pd.DataFrame]] = []
-    seen: set[str] = set()
-    for _, df in torch_operators.items():
-        if df is None or df.empty or "Operator_Name" not in df.columns:
-            continue
-        for op_name in df["Operator_Name"].dropna().unique():
-            op_str = str(op_name).strip()
-            if op_str in seen:
-                continue
-            for pattern in pattern_list:
-                if torch_operator_pattern_matches(pattern.strip(), op_str):
-                    seen.add(op_str)
-                    result.append((op_str, df.loc[df["Operator_Name"] == op_name]))
-                    break
-    return result
-
-
-@pytest.mark.torch_ops
-def test_display_match_hierarchy_glob():
-    """Full hierarchy globs are honored by display helper."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H3, H2],
-        "Kernel_Name": ["k1", "k2", "k3"],
-    })
-    torch_operators = {"trace_0": df}
-
-    matched = get_matched_torch_operators_for_display(torch_operators, ["*/torch.relu"])
-    assert len(matched) == 1
-    assert matched[0][0] == H3
-
-
-@pytest.mark.torch_ops
-def test_display_match_multi_patterns():
-    """Multiple glob patterns match their respective operators."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H2],
-        "Kernel_Name": ["k1", "k2"],
-    })
-    torch_operators = {"trace_0": df}
-
-    matched = get_matched_torch_operators_for_display(
-        torch_operators, ["*relu", "*conv*"]
-    )
-    assert len(matched) == 2
-
-
-@pytest.mark.torch_ops
-def test_display_no_match():
-    """No matches returns empty list."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3],
-        "Kernel_Name": ["k1"],
-    })
-    assert get_matched_torch_operators_for_display({"t": df}, ["sigmoid"]) == []
-
-
-@pytest.mark.torch_ops
-def test_display_empty_inputs():
-    """Empty torch_operators or pattern_list returns []."""
-    assert get_matched_torch_operators_for_display({}, ["relu"]) == []
-    assert get_matched_torch_operators_for_display({"x": pd.DataFrame()}, []) == []
-
-
 # -- Additional coverage (xuchen #26) ----------------------------------------
 
 
@@ -1039,31 +960,6 @@ def test_colons_in_operator_names():
     assert m("*aten::*", h)
     assert not m("*relu", h)
     assert not m("*torch.relu", h)
-
-
-@pytest.mark.torch_ops
-def test_display_star_matches_all_operators():
-    """'*' pattern matches all operators in display helper."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H2],
-        "Kernel_Name": ["k1", "k2"],
-    })
-    torch_operators = {"trace_0": df}
-
-    matched = get_matched_torch_operators_for_display(torch_operators, ["*"])
-    assert len(matched) == 2
-
-
-@pytest.mark.torch_ops
-def test_display_dedup_across_dataframes():
-    """Same operator in multiple DataFrames is matched only once."""
-    df1 = pd.DataFrame({"Operator_Name": [H3], "Kernel_Name": ["k1"]})
-    df2 = pd.DataFrame({"Operator_Name": [H3], "Kernel_Name": ["k2"]})
-    torch_operators = {"trace_0": df1, "trace_1": df2}
-
-    matched = get_matched_torch_operators_for_display(torch_operators, ["all"])
-    op_names = [name for name, _ in matched]
-    assert op_names.count(H3) == 1
 
 
 # =============================================================================

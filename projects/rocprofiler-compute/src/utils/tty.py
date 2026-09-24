@@ -23,9 +23,12 @@ from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
+    ARGS_DISPLAY_MAX_VARIANTS,
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
+    fold_identical_sibling_subtrees,
+    format_operator_args,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -317,22 +320,22 @@ def is_roofline_shown(
 
 def list_ml_operators(
     workload_path: str,
-    call_trees: dict[str, CallTreeNode],
-    framework_label: str = "PyTorch",
+    call_trees: dict[str, list[CallTreeNode]],
+    framework_labels: list[str],
 ) -> None:
-    """Display operators as a unified call tree grouped by source location.
+    """Display operators as a call tree sorted by GPU kernel duration.
 
     ``framework_label`` sets the heading text (for example "PyTorch" or
     "Triton").
     """
     if not call_trees:
-        print(f"\n{framework_label} Operators in: {workload_path}")
+        print(f"\n{', '.join(framework_labels)} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"{framework_label} Operator Call Tree: {workload_path}")
-    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print(f"{', '.join(framework_labels)} Operator Call Tree: {workload_path}")
+    print("Sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
     show_operator_summary(build_operator_summary(call_trees))
@@ -348,6 +351,15 @@ def format_duration(duration_ms: Optional[float]) -> str:
     if duration_ms < 0.01:
         return f"{duration_ms * 1000:.2f} us"
     return f"{duration_ms:.2f} ms"
+
+
+def _operator_display_name(node: CallTreeNode) -> str:
+    """Operator name with file:line when file_name is set."""
+    if not node.file_name:
+        return node.name
+    if node.line_number is None:
+        return f"{node.name} {node.file_name}"
+    return f"{node.name} {node.file_name}:{node.line_number}"
 
 
 def format_node_stats(node: CallTreeNode) -> str:
@@ -377,6 +389,46 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
+def format_node_args(node: CallTreeNode) -> str:
+    """Return the leading-space args=... segment for a single blob."""
+    variants = node.args_variants
+    if len(variants) != 1:
+        return ""
+    args_blob, _call_count = variants[0]
+    formatted_args = format_operator_args(args_blob)
+    return f" args={formatted_args}" if formatted_args else ""
+
+
+def format_args_variant_call_count(call_count: int) -> str:
+    """Return the call-count label for one args variant."""
+    if call_count <= 0:
+        return ""
+    return f"{call_count} call" if call_count == 1 else f"{call_count} calls"
+
+
+def format_args_variant_lines(node: CallTreeNode) -> list[str]:
+    """Return the args variants block, most frequent first."""
+    variants = node.args_variants
+    if len(variants) < 2:
+        return []
+
+    shown_variants = variants[:ARGS_DISPLAY_MAX_VARIANTS]
+    call_count_labels = [
+        format_args_variant_call_count(call_count) for _, call_count in shown_variants
+    ]
+    label_width = max(len(label) for label in call_count_labels)
+    lines = ["args variants:"]
+    lines.extend(
+        f"  {label:<{label_width}}  {format_operator_args(args_blob)}"
+        for label, (args_blob, _) in zip(call_count_labels, shown_variants)
+    )
+    hidden_variant_count = len(variants) - len(shown_variants)
+    if hidden_variant_count:
+        plural = "" if hidden_variant_count == 1 else "s"
+        lines.append(f"  ... {hidden_variant_count} more variant{plural}")
+    return lines
+
+
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
@@ -384,11 +436,20 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     return min(safe_width, max_width)
 
 
+def build_continuation_indent(prefix: str, continuation_prefix: str) -> str:
+    """Return the wrapped-line indent under prefix."""
+    if not continuation_prefix:
+        return " " * len(prefix)
+    padding = max(len(prefix) - len(continuation_prefix), 0)
+    return continuation_prefix + " " * padding
+
+
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
     width: Optional[int] = None,
     break_long_words: bool = False,
+    continuation_prefix: str = "",
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
     effective_width = get_tree_wrap_width() if width is None else width
@@ -397,7 +458,7 @@ def print_wrapped_tree_line(
             body,
             width=effective_width,
             initial_indent=prefix,
-            subsequent_indent=" " * len(prefix),
+            subsequent_indent=build_continuation_indent(prefix, continuation_prefix),
             break_long_words=break_long_words,
             break_on_hyphens=False,
         )
@@ -432,15 +493,7 @@ def print_wrapped_kernel_line(
         print(f"{prefix}{suffix}")
         return
 
-    # Build continuation with vertical pipes from parent levels
-    # Preserve parent pipes but replace branch character with spaces
-    if len(continuation_prefix) > 0:
-        # continuation_prefix has pipes, add spaces for branch chars
-        spaces_needed = len(prefix) - len(continuation_prefix)
-        continuation = continuation_prefix + " " * spaces_needed
-    else:
-        # No parent pipes, just use spaces matching the prefix
-        continuation = " " * len(prefix)
+    continuation = build_continuation_indent(prefix, continuation_prefix)
 
     for i, chunk in enumerate(wrapped_name):
         if i == 0:
@@ -454,22 +507,31 @@ def print_wrapped_kernel_line(
             print(f"{continuation}{chunk}")
 
 
-def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
-    """Print the unified call tree grouped by source location."""
-    sorted_locations = sorted(
-        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
-    )
-    for i, (location, root) in enumerate(sorted_locations):
+def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
+    """Print top-level marker nodes sorted by total GPU duration.
+
+    Identical sibling subtrees are folded. The input forest is not mutated.
+    """
+    roots: list[CallTreeNode] = []
+    for thread_roots in call_trees.values():
+        roots.extend(fold_identical_sibling_subtrees(thread_roots))
+    roots.sort(key=lambda node: node.total_duration_ms, reverse=True)
+    for i, root in enumerate(roots):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        stats = format_node_stats(root)
-        print(f"\n{location} {stats}")
-        for child in sorted(
-            root.children.values(),
-            key=lambda c: c.total_duration_ms,
-            reverse=True,
-        ):
-            print_operator_node(child)
+        heading = (
+            f"{_operator_display_name(root)}{format_node_args(root)} "
+            f"{format_node_stats(root)}"
+        )
+        print()
+        print_wrapped_tree_line("", heading)
+        for variant_line in format_args_variant_lines(root):
+            print_wrapped_tree_line("", variant_line)
+        children = fold_identical_sibling_subtrees(root.children)
+        for child_index, child in enumerate(children):
+            child_is_last = (child_index == len(children) - 1) and not root.kernels
+            print_operator_node(child, is_last=child_is_last)
+        _print_node_kernels(root, "")
 
 
 def show_operator_summary(summary_df: pd.DataFrame) -> None:
@@ -557,31 +619,46 @@ def print_operator_node(
     branch_char = "└─ " if is_last else "├─ "
     node_prefix = f"{indent}{branch_char}"
 
-    if is_branching:
-        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
-    else:
-        if len(node.invocation_ids) > 0:
-            suffix = f" (calls: {node.call_count})"
-        else:
-            suffix = ""
-        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
-
-    # Build new parent_pipes for children
     if is_last:
         new_parent_pipes = parent_pipes + "   "  # 3 spaces
     else:
         new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
 
+    args_segment = format_node_args(node)
+    if is_branching:
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{_operator_display_name(node)}{args_segment} {format_node_stats(node)}",
+            continuation_prefix=new_parent_pipes,
+        )
+    else:
+        if len(node.invocation_ids) > 0:
+            suffix = f" (calls: {node.call_count})"
+        else:
+            suffix = ""
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{_operator_display_name(node)}{args_segment}{suffix}",
+            continuation_prefix=new_parent_pipes,
+        )
+
+    for variant_line in format_args_variant_lines(node):
+        print_wrapped_tree_line(
+            new_parent_pipes, variant_line, continuation_prefix=new_parent_pipes
+        )
+
     # Process child nodes
-    children = sorted(
-        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
-    )
+    children = fold_identical_sibling_subtrees(node.children)
     for i, child in enumerate(children):
         # A child is last if it's the final child AND there are no kernels after it
         child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
         print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
 
-    # Process kernels
+    _print_node_kernels(node, new_parent_pipes)
+
+
+def _print_node_kernels(node: CallTreeNode, parent_pipes: str) -> None:
+    """Print this node's GPU dispatches, longest total duration first."""
     for i, (kernel_name, kernel_stats) in enumerate(
         sorted(
             node.kernels.items(),
@@ -597,16 +674,15 @@ def print_operator_node(
         total_ms = duration_ns * NS_TO_MS
         stats = f"(dispatches: {launches}, total: {format_duration(total_ms)})"
 
-        # Last kernel gets └─, others get ├─
         kernel_is_last = i == len(node.kernels) - 1
         kernel_branch_char = "└─ " if kernel_is_last else "├─ "
-        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
+        kernel_prefix = f"{parent_pipes}{kernel_branch_char}"
 
         print_wrapped_kernel_line(
             kernel_prefix,
             display_name,
             f"{id_suffix} {stats}".strip(),
-            continuation_prefix=new_parent_pipes,
+            continuation_prefix=parent_pipes,
         )
 
 

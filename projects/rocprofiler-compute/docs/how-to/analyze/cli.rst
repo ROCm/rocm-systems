@@ -748,7 +748,7 @@ Display all PyTorch operators captured during profiling:
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
-   Grouped by source location, sorted by total GPU kernel duration.
+   Sorted by total GPU kernel duration.
    ================================================================================
 
    main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
@@ -773,10 +773,10 @@ Display all PyTorch operators captured during profiling:
    │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
    ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
-Output is grouped by source location (``file:line``) and shows full operator
-hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
-see :ref:`torch-operator-profiling` for details.
+The printed call tree is sorted by GPU duration. Source location is shown on
+each node that recorded a file and line. Kernel stats appear under the
+operators that launched them. See :ref:`torch-operator-profiling` for how
+markers are captured.
 
 The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel. Time cells auto-switch between
@@ -785,7 +785,7 @@ milliseconds and microseconds per cell; missing values render as ``N/A``.
 * **Operator** — full operator path (for example
   ``aten::matmul/aten::mm``).
 * **Calls** — how many times the operator was invoked. ``N/A`` when the
-  trace did not include ``Context_Id`` information to count invocations.
+  trace did not include marker invocation ids.
 * **Dispatches** — how many GPU kernels ran while the operator was on the
   call stack (kernels launched by operators it called also count).
 * **Total** — total GPU time spent while the operator was on the call
@@ -846,11 +846,10 @@ Triton operator analysis
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
-Triton kernels can be analyzed similar to PyTorch operators. You can use the
-``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
-same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
-``triton``. As a result, Triton kernels are reported independently even if PyTorch
-operators appear in the same run.
+Triton kernels can be analyzed similar to PyTorch operators with
+``--list-triton-operators`` and ``--triton-operator``. Those options keep
+Triton nodes from the same call tree, so Triton kernels are reported
+independently even if PyTorch operators appear in the same run.
 
 List all captured Triton kernels
 ---------------------------------
@@ -863,7 +862,7 @@ Display all Triton kernels captured during profiling:
 
    ================================================================================
    Triton Operator Call Tree: ./workload
-   Grouped by source location, sorted by total GPU kernel duration.
+   Sorted by total GPU kernel duration.
    ================================================================================
 
    torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)

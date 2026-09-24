@@ -4,7 +4,6 @@
 """Unit tests for utils/utils_analysis.py."""
 
 import gzip
-import math
 import os
 from pathlib import Path
 
@@ -13,15 +12,49 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
+from utils.ml_api_trace_errors import (
+    OverlappingMarkerRangeError,
+    UncorrelatedLauncherIntervalError,
+)
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
     NodeRollup,
-    build_call_trees,
+    attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
-    parse_top_level_location,
+    fold_identical_sibling_subtrees,
+    format_operator_args,
+    nest_marker_intervals,
     rollup_node_stats,
+    split_operator_args,
 )
+
+
+def leaf_operator(
+    name: str,
+    start: str,
+    duration_ns: float,
+    kernel: str = "k",
+    file_name: str = "net.py",
+    line_number: int = 10,
+    backend: str = "torch",
+) -> CallTreeNode:
+    node = CallTreeNode(
+        name=name,
+        file_name=file_name,
+        line_number=line_number,
+        backend=backend,
+    )
+    node.invocation_ids.add(start)
+    node.kernels[kernel] = KernelStats(
+        launches=1,
+        total_duration_ns=duration_ns,
+        min_duration_ns=duration_ns,
+        max_duration_ns=duration_ns,
+    )
+    rollup_node_stats(node)
+    return node
+
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
@@ -778,35 +811,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_location_normal():
-    assert parse_top_level_location("10@main.py:60/#10@main.py:21") == "main.py:60"
-
-
-def test_parse_location_single_entry():
-    assert parse_top_level_location("5@train.py:42") == "train.py:42"
-
-
-def test_parse_location_nan():
-    assert parse_top_level_location(float("nan")) == "unknown:0"
-
-
-def test_parse_location_none():
-    assert parse_top_level_location(None) == "unknown:0"
-
-
-def test_parse_location_empty():
-    assert parse_top_level_location("") == "unknown:0"
-    assert parse_top_level_location("   ") == "unknown:0"
-
-
-def test_parse_location_no_at_sign():
-    assert parse_top_level_location("no_at_sign") == "unknown:0"
-
-
-def test_parse_location_no_colon():
-    assert parse_top_level_location("10@mainpy") == "unknown:0"
-
-
 def test_kernel_stats_defaults_min_max_to_none():
     stats = KernelStats()
     assert stats.min_duration_ns is None
@@ -826,6 +830,215 @@ def test_call_tree_node_call_count_is_property_of_invocation_ids():
     node.invocation_ids.add("ctx1")
     node.invocation_ids.add("ctx2")
     assert node.call_count == 2
+
+
+def test_fold_identical_sibling_subtrees_empty():
+    assert fold_identical_sibling_subtrees([]) == []
+
+
+def test_fold_identical_sibling_subtrees_merges_matching_leaves():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 2_000_000.0),
+        leaf_operator("aten::addmm", "2", 3_000_000.0),
+    ])
+    assert len(folded) == 1
+    node = folded[0]
+    assert node.call_count == 2
+    assert node.kernels["k"].launches == 2
+    assert node.kernels["k"].total_duration_ns == 5_000_000.0
+    assert node.kernels["k"].min_duration_ns == 2_000_000.0
+    assert node.kernels["k"].max_duration_ns == 3_000_000.0
+    assert node.kernel_launches == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_kernels_apart():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 1_000_000.0, kernel="addmm"),
+        leaf_operator("aten::addmm", "2", 1_000_000.0, kernel="copy"),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_locations_apart():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 1_000_000.0, line_number=10),
+        leaf_operator("aten::addmm", "2", 1_000_000.0, line_number=20),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_child_shapes_apart():
+    nested = CallTreeNode(
+        name="aten::addmm", file_name="net.py", line_number=10, backend="torch"
+    )
+    nested.invocation_ids.add("1")
+    nested.children = [leaf_operator("aten::relu", "1a", 500_000.0)]
+    rollup_node_stats(nested)
+    folded = fold_identical_sibling_subtrees([
+        nested,
+        leaf_operator("aten::addmm", "2", 1_000_000.0),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_does_not_mutate_input():
+    first = leaf_operator("aten::addmm", "1", 1_000_000.0)
+    second = leaf_operator("aten::addmm", "2", 1_000_000.0)
+    original = [first, second]
+    fold_identical_sibling_subtrees(original)
+    assert original == [first, second]
+    assert first.call_count == 1
+    assert second.call_count == 1
+
+
+def test_fold_identical_sibling_subtrees_merges_nested_children():
+    parent = CallTreeNode(name="forward", backend="torch")
+    parent.invocation_ids.add("0")
+    parent.children = [
+        leaf_operator("aten::addmm", "1", 1_000_000.0),
+        leaf_operator("aten::addmm", "2", 2_000_000.0),
+    ]
+    rollup_node_stats(parent)
+    folded = fold_identical_sibling_subtrees([parent])
+    assert len(folded) == 1
+    assert folded[0].call_count == 1
+    assert len(parent.children) == 2
+    assert len(folded[0].children) == 1
+    assert folded[0].children[0].call_count == 2
+    assert folded[0].children[0].kernels["k"].launches == 2
+
+
+def test_split_operator_args_respects_nested_commas():
+    tokens = split_operator_args("(self=float32[2, 2], other=(1, 2), name='a,b')")
+    assert tokens == ["self=float32[2, 2]", "other=(1, 2)", "name='a,b'"]
+
+
+def test_split_operator_args_empty_blob():
+    assert split_operator_args("") == []
+    assert split_operator_args("()") == []
+    assert split_operator_args("  (  )  ") == []
+
+
+def test_format_operator_args_caps_item_count_and_length():
+    args_blob = "(" + ", ".join(f"a{i}={i}" for i in range(12)) + ")"
+    formatted_args = format_operator_args(args_blob, max_items=3, max_chars=40)
+    assert formatted_args.startswith("(a0=0, a1=1, a2=2, ...")
+    assert len(formatted_args) <= 40
+    assert formatted_args.endswith(")")
+
+
+def test_format_operator_args_empty_blob():
+    assert format_operator_args("") == ""
+    assert format_operator_args("()") == ""
+
+
+def test_args_variants_orders_by_call_count():
+    node = CallTreeNode(name="aten::mm")
+    node.args_invocations["(self=float32[2x2])"] = {"1"}
+    node.args_invocations["(self=float32[4x4])"] = {"2", "3"}
+    assert node.args_variants == [
+        ("(self=float32[4x4])", 2),
+        ("(self=float32[2x2])", 1),
+    ]
+
+
+def test_fold_identical_sibling_subtrees_merges_args_variants():
+    first = leaf_operator("aten::addmm", "1", 2_000_000.0)
+    first.args_invocations["(self=float32[2x2])"] = {"1"}
+    second = leaf_operator("aten::addmm", "2", 3_000_000.0)
+    second.args_invocations["(self=float32[4x4])"] = {"2"}
+    folded = fold_identical_sibling_subtrees([first, second])
+    assert len(folded) == 1
+    assert folded[0].args_variants == [
+        ("(self=float32[2x2])", 1),
+        ("(self=float32[4x4])", 1),
+    ]
+    assert first.args_invocations == {"(self=float32[2x2])": {"1"}}
+
+
+def test_nest_marker_intervals_records_operator_args():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1"],
+        "Start_Timestamp": [0.0],
+        "End_Timestamp": [10.0],
+        "Operator_Name": ["aten::mm"],
+        "args": ["(self=float32[2x2])"],
+    })
+    forest = nest_marker_intervals(trace_df)
+    node = forest["1"][0]
+    assert node.args_invocations == {"(self=float32[2x2])": {"0.0"}}
+
+
+def test_nest_marker_intervals_skips_unavailable_args():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1"],
+        "Start_Timestamp": [0.0],
+        "End_Timestamp": [10.0],
+        "Operator_Name": ["aten::mm"],
+        "args": ["n/a"],
+    })
+    forest = nest_marker_intervals(trace_df)
+    assert forest["1"][0].args_invocations == {}
+
+
+def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
+    backward = CallTreeNode(
+        name="torch.Tensor.backward",
+        file_name="simple.py",
+        line_number=28,
+        backend="torch",
+        start_timestamp=0.0,
+        end_timestamp=10.0,
+    )
+    backward.invocation_ids.add("bw")
+    child = CallTreeNode(
+        name="SumBackward0",
+        backend="torch",
+        start_timestamp=51.0,
+        end_timestamp=59.0,
+    )
+    child.invocation_ids.add("sum_bw")
+    engine = CallTreeNode(
+        name="autograd::engine::evaluate_function: SumBackward0",
+        backend="torch",
+        start_timestamp=50.0,
+        end_timestamp=60.0,
+        launcher_thread_id="14444",
+    )
+    engine.invocation_ids.add("eval")
+    engine.children = [child]
+    forest = {"14444": [backward], "14611": [engine]}
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], UncorrelatedLauncherIntervalError)
+    assert engine in forest["14611"]
+    assert engine not in backward.children
+
+
+def test_nest_overlap_collects_error_and_keeps_first_marker():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1", "1"],
+        "Start_Timestamp": [0.0, 5.0],
+        "End_Timestamp": [10.0, 15.0],
+        "Operator_Name": ["outer", "overlap"],
+    })
+    errors = []
+    forest = nest_marker_intervals(trace_df, errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], OverlappingMarkerRangeError)
+    assert [node.name for node in forest["1"]] == ["outer"]
+
+
+def test_nest_overlap_raises_without_error_list():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1", "1"],
+        "Start_Timestamp": [0.0, 5.0],
+        "End_Timestamp": [10.0, 15.0],
+        "Operator_Name": ["outer", "overlap"],
+    })
+    with pytest.raises(OverlappingMarkerRangeError):
+        nest_marker_intervals(trace_df)
 
 
 def test_rollup_leaf_node():
@@ -870,157 +1083,6 @@ def test_rollup_propagates_min_max_from_kernel_stats():
     assert node.mean_dispatch_ns == 1500.0
 
 
-def test_rollup_parent_rolls_up_children():
-    child = CallTreeNode(name="child")
-    child.kernels["kern_a"] = KernelStats(launches=3, total_duration_ns=3000.0)
-    parent = CallTreeNode(name="parent")
-    parent.children["child"] = child
-    parent.kernels["kern_b"] = KernelStats(launches=1, total_duration_ns=500.0)
-    rollup_node_stats(parent)
-    assert parent.kernel_launches == 4
-    assert child.kernel_launches == 3
-
-
-def test_rollup_deep_hierarchy():
-    grandchild = CallTreeNode(name="grandchild")
-    grandchild.kernels["k"] = KernelStats(launches=1, total_duration_ns=100.0)
-    child = CallTreeNode(name="child")
-    child.children["grandchild"] = grandchild
-    child.kernels["k2"] = KernelStats(launches=2, total_duration_ns=200.0)
-    root = CallTreeNode(name="root")
-    root.children["child"] = child
-    rollup_node_stats(root)
-    assert grandchild.kernel_launches == 1
-    assert child.kernel_launches == 3
-    assert root.kernel_launches == 3
-
-
-def test_build_call_trees_empty_df():
-    assert build_call_trees(pd.DataFrame()) == {}
-
-
-def test_build_call_trees_missing_columns():
-    assert build_call_trees(pd.DataFrame([{"Operator_Name": "a"}])) == {}
-
-
-def test_build_call_trees_single_dispatch():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "torch.nn.Linear",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@train.py:42",
-            "Start_Timestamp_kernel": 1000,
-            "End_Timestamp_kernel": 2000,
-        }
-    ])
-    call_trees = build_call_trees(df)
-    assert "train.py:42" in call_trees
-    assert call_trees["train.py:42"].kernel_launches == 1
-    assert "torch.nn.Linear" in call_trees["train.py:42"].children
-
-
-def test_build_call_trees_hierarchy_split():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "aten/linear/addmm",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@file.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
-    call_trees = build_call_trees(df)
-    root = call_trees["file.py:1"]
-    assert "aten" in root.children
-    assert "linear" in root.children["aten"].children
-    assert "addmm" in root.children["aten"].children["linear"].children
-
-
-def test_build_call_trees_multiple_dispatches_same_kernel():
-    rows = [
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": i * 1000,
-            "End_Timestamp_kernel": (i + 1) * 1000,
-        }
-        for i in range(3)
-    ]
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    assert call_trees["f.py:1"].kernel_launches == 3
-    assert call_trees["f.py:1"].children["op_a"].kernels["kern"].launches == 3
-
-
-def test_build_call_trees_dedup_identical_timestamps():
-    row = {
-        "Operator_Name": "op",
-        "Kernel_Name": "kern",
-        "Context_Id": "10@f.py:1",
-        "Start_Timestamp_kernel": 1000,
-        "End_Timestamp_kernel": 2000,
-    }
-    assert build_call_trees(pd.DataFrame([row, row]))["f.py:1"].kernel_launches == 1
-
-
-def test_build_call_trees_no_context_id():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op",
-            "Kernel_Name": "kern",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
-    assert "unknown:0" in build_call_trees(df)
-
-
-def test_build_call_trees_duration_rollup():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "parent/child",
-            "Kernel_Name": "kern_a",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "parent",
-            "Kernel_Name": "kern_b",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 2_000_000,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-    ])
-    call_trees = build_call_trees(df)
-    root = call_trees["f.py:1"]
-    assert root.kernel_launches == 2
-    assert root.children["parent"].kernel_launches == 2
-    assert root.children["parent"].children["child"].kernel_launches == 1
-
-
-def test_build_call_trees_multiple_source_locations():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@a.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@b.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-    ])
-    call_trees = build_call_trees(df)
-    assert "a.py:1" in call_trees
-    assert "b.py:2" in call_trees
-
-
 # ---------------------------------------------------------------------------
 # build_operator_summary
 # ---------------------------------------------------------------------------
@@ -1041,139 +1103,10 @@ _OPERATOR_SUMMARY_COLUMNS = [
 ]
 
 
-def _build_summary_from_dataframe(rows):
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    return build_operator_summary(call_trees)
-
-
 def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
     summary = build_operator_summary({})
     assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
     assert summary.empty
-
-
-def test_build_operator_summary_skips_synthetic_location_root():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        }
-    ])
-    assert "f.py:1" not in summary["Operator"].tolist()
-    assert "op_a" in summary["Operator"].tolist()
-
-
-def test_build_operator_summary_row_values_for_single_dispatch():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 2_000_000,
-        }
-    ])
-    row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
-    assert row["Location"] == "f.py:1"
-    assert row["Calls"] == 1
-    assert row["Dispatches"] == 1
-    assert row["Dispatches_Per_Call"] == 1.0
-    assert row["Total_GPU"] == pytest.approx(2.0)
-    assert row["Pct_Total_GPU"] == pytest.approx(100.0)
-    assert row["Mean_Per_Call"] == pytest.approx(2.0)
-    assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
-    assert row["Min_Dispatch"] == pytest.approx(2.0)
-    assert row["Max_Dispatch"] == pytest.approx(2.0)
-
-
-def test_build_operator_summary_sort_by_total_descending():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "small_op",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "big_op",
-            "Kernel_Name": "kern",
-            "Context_Id": "20@f.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 10_000_000,
-        },
-    ])
-    operators_in_order = summary["Operator"].tolist()
-    assert operators_in_order.index("big_op") < operators_in_order.index("small_op")
-
-
-def test_build_operator_summary_pct_total_gpu_sums_to_100_at_top_level():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "20@f.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-    ])
-    op_a_pct = summary.loc[summary["Operator"] == "op_a", "Pct_Total_GPU"].iloc[0]
-    op_b_pct = summary.loc[summary["Operator"] == "op_b", "Pct_Total_GPU"].iloc[0]
-    assert op_a_pct == pytest.approx(75.0)
-    assert op_b_pct == pytest.approx(25.0)
-
-
-def test_build_operator_summary_pct_total_gpu_is_nan_when_grand_total_zero():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 0.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    pct = summary.loc[summary["Operator"] == "op", "Pct_Total_GPU"].iloc[0]
-    assert math.isnan(pct)
-
-
-def test_build_operator_summary_min_max_mean_are_nan_when_no_dispatch_stats():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 5.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    row = summary.loc[summary["Operator"] == "op"].iloc[0]
-    assert math.isnan(row["Min_Dispatch"])
-    assert math.isnan(row["Max_Dispatch"])
-    assert math.isnan(row["Mean_Per_Dispatch"])
-
-
-def test_build_operator_summary_calls_nan_when_no_invocation_ids():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="torch.ops.x")
-    op.kernel_launches = 2
-    op.total_duration_ms = 4.0
-    op.mean_dispatch_ns = 2_000_000.0
-    op.min_dispatch_ns = 2_000_000.0
-    op.max_dispatch_ns = 2_000_000.0
-    root.children["torch.ops.x"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    row = summary.loc[summary["Operator"] == "torch.ops.x"].iloc[0]
-    assert math.isnan(row["Calls"])
-    assert math.isnan(row["Dispatches_Per_Call"])
-    assert math.isnan(row["Mean_Per_Call"])
-    assert row["Dispatches"] == 2
 
 
 # get_matrix_ops_type Tests
