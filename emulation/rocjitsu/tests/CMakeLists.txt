@@ -4026,10 +4026,20 @@ if(RJ_ENABLE_HIP_TESTS)
             "daemon_logging_config.json"
         )
 
+        # ASan's live mapping checks make RCCL rank initialization expensive.
+        # Five ranks-pair tests take ~81 s in isolation and exceed 150 s when
+        # sharing the CPU with the parallel emulator stress suite.
+        set(_rccl_rank_timeout 150)
+        set(_rccl_test_timeout 180)
+        if(RJ_ENABLE_ASAN)
+            set(_rccl_rank_timeout 600)
+            set(_rccl_test_timeout 660)
+        endif()
         add_executable(daemon_test daemon_test.cpp)
         target_compile_definitions(
             daemon_test
             PRIVATE
+                RJ_RCCL_RANK_TIMEOUT_SECONDS=${_rccl_rank_timeout}
                 RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
                 RJ_DAEMON_CONFIG="${RJ_HIP_TEST_CONFIG}"
                 RJ_DAEMON_CONFIG_2GPU="${RJ_HIP_TEST_2GPU_CONFIG}"
@@ -4156,7 +4166,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 rj_add_test(
                     NAME ${TC}
                     COMMAND daemon_test --gtest_filter=${TC}
-                    TIMEOUT 180
+                    TIMEOUT ${_rccl_test_timeout}
                     LABELS daemon rccl
                     ENVIRONMENT ${_rccl_test_environment} ${RJ_HIP_TSAN_ENV}
                     INSTALL_COMMAND

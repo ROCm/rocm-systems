@@ -557,7 +557,8 @@ protected:
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
-    std::string cmd = "timeout 150 env ROCJITSU_RUNTIME_DIR=";
+    std::string cmd =
+        "timeout " + std::to_string(RJ_RCCL_RANK_TIMEOUT_SECONDS) + " env ROCJITSU_RUNTIME_DIR=";
     cmd += runtime_dir_;
     cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
