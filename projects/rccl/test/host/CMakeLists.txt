@@ -47,6 +47,7 @@ unset(_rccl_src_root)
 set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  gin-plugin-init-test.cc              # src/plugin/gin.cc init/devices leak (NVIDIA/nccl#2179)
   rma-test.cc                          # RMA launch dispatch + plan scheduling coverage
   rma-ce-test.cc                       # RMA CE init/finalize + put/wait launch coverage
   ras-test.cc                          # src/ras/ras.cc: complete host-side line coverage
@@ -169,6 +170,8 @@ if(BUILD_TESTS)
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
+    # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
+    GIN_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/plugin/gin.cc"
   )
 
   # sym_kernels_host.cc only exists when GENERATE_SYM_KERNELS is ON (OFF via --disable-sym-kernels).
@@ -1077,6 +1080,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
   DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
+  GIN_CC_PATH="${RCCL_HIPIFY_DIR}/src/plugin/gin.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.

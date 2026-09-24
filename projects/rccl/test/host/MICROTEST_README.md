@@ -40,6 +40,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `FreshRegistration*`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
+    `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
     `GroupEndInternalTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
