@@ -61,6 +61,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the deprecated `Active CUs` metric from the System Speed-of-Light panel and the Memory Chart SVG for all CDNA architectures (gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950). Use `CU Utilization` instead.
 
+* Removed the experimental `--gui` and `--tui` analyze modes, the `--random-port` option, and their five dependencies (`dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, `textual_plotext`). Use `rocprof-compute analyze` (CLI, the default) for terminal analysis, or `--output-format db` / `--output-format csv` for graphical analysis via ROCm Optiq or spreadsheet workflows. The `plotly` and `rich` packages, previously pulled in transitively, are now pinned explicitly.
+
 ### Optimized
 
 * HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.

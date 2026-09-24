@@ -54,12 +54,6 @@ Counter collection is performed by injecting two libraries into the target proce
 
 Once counters are collected, ROCm Compute Profiler derives higher-level metrics, such as utilizations and ratios, from the raw counter values to populate the analysis views described next.
 
-ROCm Compute Profiler standalone GUI analyzer (experimental)
--------------------------------------------------------------
-
-ROCm Compute Profiler provides a :doc:`standalone GUI <how-to/analyze/standalone-gui>` to
-enable basic performance analysis.
-
 .. _glance-key-features:
 
 Key features

@@ -728,9 +728,6 @@ PyTorch operator analysis
 
 .. warning::
 
-   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
-   will provide different interfaces for operator selection and visualization.
-
    These options require ``--experimental``. After profiling with
    ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
    use ``rocprof-compute analyze ... --experimental`` with
@@ -840,8 +837,7 @@ Triton operator analysis
 
 .. warning::
 
-   Triton operator analysis is currently available only in CLI mode and
-   requires ``--experimental``. After profiling with
+   Triton operator analysis requires ``--experimental``. After profiling with
    ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
