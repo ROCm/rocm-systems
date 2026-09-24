@@ -2763,9 +2763,8 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise FileNotFoundError(
-                        "Error accessing CPER files. This command requires CPER to be enabled."
-                    ) from e
+                    logging.debug("GPU CPER not supported on this device")
+                    break
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                     raise OSError("Error opening CPER file. Unable to read CPER File") from e
                 else:
