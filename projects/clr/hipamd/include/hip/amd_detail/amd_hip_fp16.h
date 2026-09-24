@@ -764,9 +764,9 @@ inline __HOST_DEVICE__ __half __hmax(const __half x, const __half y) {
   return __half_raw{static_cast<__half_raw>(y).data};
 }
 inline __HOST_DEVICE__ __half __hmax_nan(const __half x, const __half y) {
-  if (__hisnan(x)) return x;
-  if (__hisnan(y)) return y;
-  return __hmax(x, y);
+  // IEEE-754-2019 maximum(), which is what gfx1250's V_MAXIMUM_F16 implements directly.
+  return __half_raw{__builtin_elementwise_maximum(static_cast<__half_raw>(x).data,
+                                                  static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmin(const __half x, const __half y) {
   if (__hisnan(x) && !__hisnan(y)) return y;
@@ -777,9 +777,9 @@ inline __HOST_DEVICE__ __half __hmin(const __half x, const __half y) {
   return __half_raw{static_cast<__half_raw>(x).data};
 }
 inline __HOST_DEVICE__ __half __hmin_nan(const __half x, const __half y) {
-  if (__hisnan(x)) return x;
-  if (__hisnan(y)) return y;
-  return __hmin(x, y);
+  // IEEE-754-2019 minimum(), which is what gfx1250's V_MINIMUM_F16 implements directly.
+  return __half_raw{__builtin_elementwise_minimum(static_cast<__half_raw>(x).data,
+                                                  static_cast<__half_raw>(y).data)};
 }
 
 // Arithmetic
