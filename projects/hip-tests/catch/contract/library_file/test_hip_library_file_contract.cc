@@ -7,9 +7,9 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <hip_test_filesystem.hh>
 
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -84,7 +84,7 @@ std::string WriteCodeObjectFile(const char* suffix) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
   const std::string path =
-      (std::filesystem::temp_directory_path() /
+      (fs::temp_directory_path() /
        ("hip-contract-library-file-" + std::string(suffix) + "-" +
         std::to_string(getpid()) + ".code"))
           .string();

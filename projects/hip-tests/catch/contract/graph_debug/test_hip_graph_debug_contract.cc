@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -20,6 +19,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <hip_test_filesystem.hh>
 #include <contract_cleanup.hh>
 
 namespace {
@@ -29,7 +29,7 @@ constexpr size_t kByteCount = 64;
 std::string DotPath() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
-  return (std::filesystem::temp_directory_path() /
+  return (fs::temp_directory_path() /
           ("hip_contract_graph_debug_" + std::to_string(device) + "_" +
            std::to_string(getpid()) + ".dot"))
       .string();
