@@ -83,6 +83,22 @@ namespace rocjitsu {
 
 namespace {
 
+#ifndef CLONE_ARGS_SIZE_VER0
+// Older build headers may lack clone_args even when the host supports clone3.
+// The original 64-byte ABI is sufficient for the flags and pidfd used below.
+struct clone_args {
+  __aligned_u64 flags;
+  __aligned_u64 pidfd;
+  __aligned_u64 child_tid;
+  __aligned_u64 parent_tid;
+  __aligned_u64 exit_signal;
+  __aligned_u64 stack;
+  __aligned_u64 stack_size;
+  __aligned_u64 tls;
+};
+static_assert(sizeof(clone_args) == 64);
+#endif
+
 bool vm_trace_enabled() {
   static const bool enabled = (std::getenv("RJ_VMEM_TRACE") != nullptr);
   return enabled;
