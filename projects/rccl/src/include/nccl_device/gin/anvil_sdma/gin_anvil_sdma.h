@@ -244,7 +244,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
           if (fallbackDst != nullptr && srcAddr != nullptr) {
             ipcPut(fallbackDst, srcAddr, bytes);
           }
-          sdmaDataPath = false;
         } else if (srcAddr != nullptr) {
           uint64_t* remoteSig = nullptr;
           if (useSdmaFusedSignal(rsCtx, sdmaDataPath, hasSignal, hasCounter, signalOp)) {
@@ -356,7 +355,6 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
         if (fallbackDst != nullptr) {
           ipcPutScalar(fallbackDst, &srcVal, bytes);
         }
-        sdmaDataPath = false;
       } else {
         uint64_t* remoteSig = nullptr;
         if (useSdmaFusedSignal(rsCtx, sdmaDataPath, hasSignal, /*hasCounter=*/false, signalOp)) {
@@ -465,8 +463,11 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
         }
       }
       coop.sync();
+      // Clear only the bits this flush quieted. A concurrent CTA may mark new
+      // dirty bits during the quiet loop; a wholesale store to 0 would drop them
+      // and let a later SignalInc skip the quiet it still needs.
       if (coop.thread_rank() == 0 && sdmaDirty != nullptr) {
-        __scoped_atomic_store_n(sdmaDirty, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        __scoped_atomic_fetch_and(sdmaDirty, ~dirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       }
       coop.sync();
     }
