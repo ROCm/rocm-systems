@@ -621,7 +621,21 @@ __device__ ATTR_NO_INLINE void rocshmem_signal_add(
     uint64_t *sig_addr, uint64_t signal, int pe);
 
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch(const uint64_t *sig_addr);
+
+/**
+ * @brief Atomically fetch a signal value collectively at work-group scope.
+ *
+ * @deprecated Use rocshmem_signal_fetch() instead.
+ */
+[[deprecated("Use rocshmem_signal_fetch() instead")]]
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wg(const uint64_t *sig_addr);
+
+/**
+ * @brief Atomically fetch a signal value collectively at wave scope.
+ *
+ * @deprecated Use rocshmem_signal_fetch() instead.
+ */
+[[deprecated("Use rocshmem_signal_fetch() instead")]]
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wave(const uint64_t *sig_addr);
 
 __device__ ATTR_NO_INLINE void rocshmem_ctx_signal_set(
