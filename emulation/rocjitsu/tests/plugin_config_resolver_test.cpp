@@ -37,8 +37,7 @@ TEST(PluginConfigResolver, EmptySchemaWithEmptyUserConfigYieldsEmptyObject) {
   std::string out;
   EXPECT_TRUE(resolve("{}", "", out));
   // An empty object may be rendered with insignificant whitespace.
-  out.erase(std::remove_if(out.begin(), out.end(), [](unsigned char c) { return std::isspace(c); }),
-            out.end());
+  std::erase_if(out, [](unsigned char c) { return std::isspace(c); });
   EXPECT_EQ(out, "{}");
 }
 

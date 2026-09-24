@@ -14,23 +14,34 @@
 
 namespace amd::smi {
 static uint64_t get_value(uint8_t** ptr, struct metric_field* field) {
-  uint64_t v;
+  uint64_t v = 0;
+  // Fields are packed at arbitrary offsets, so a wider load through uint8_t*
+  // would be misaligned.
   switch (field->field_type) {
-    case FIELD_TYPE_U8:
-      v = *(uint8_t*)(*ptr);
-      ++(*ptr);
+    case FIELD_TYPE_U8: {
+      uint8_t u8;
+      memcpy(&u8, *ptr, sizeof(u8));
+      v = u8;
+      (*ptr) += sizeof(u8);
       break;
-    case FIELD_TYPE_U16:
-      v = *(uint16_t*)(*ptr);
-      (*ptr) += 2;
+    }
+    case FIELD_TYPE_U16: {
+      uint16_t u16;
+      memcpy(&u16, *ptr, sizeof(u16));
+      v = u16;
+      (*ptr) += sizeof(u16);
       break;
-    case FIELD_TYPE_U32:
-      v = *(uint32_t*)(*ptr);
-      (*ptr) += 4;
+    }
+    case FIELD_TYPE_U32: {
+      uint32_t u32;
+      memcpy(&u32, *ptr, sizeof(u32));
+      v = u32;
+      (*ptr) += sizeof(u32);
       break;
+    }
     case FIELD_TYPE_U64:
-      v = *(uint64_t*)(*ptr);
-      (*ptr) += 8;
+      memcpy(&v, *ptr, sizeof(v));
+      (*ptr) += sizeof(v);
       break;
   }
   return v;
@@ -137,10 +148,6 @@ top:
     for (y = 0; y < static_cast<uint64_t>(table[x].field_arr_size); y++) {
       obuf = buf;
       v = get_value(&buf, &table[x]);
-      if ((intptr_t)(buf - origbuf) > buflen) {
-        fprintf(stderr, "[ERROR] Invalid buffer as read length was exceeded\n");
-        return -1;
-      }
       switch (table[x].field_flag) {
         case FIELD_FLAG_INSTANCE_START:
           instance_start = x;
@@ -150,8 +157,9 @@ top:
           // if we hit an SMN start but there are no registers then skip back to the start
           // of the instance block
           if (skip_smn) {
-            // out of instances we're done so bail!
-            if (!num_instance) return 0;
+            // out of instances we're done so bail! num_instance counts the
+            // current instance too, so 1 means there is no next one.
+            if (num_instance <= 1) return 0;
             x = instance_start;
             --num_instance;
             ++cur_instance;
@@ -164,15 +172,19 @@ top:
           }
           break;
         case FIELD_FLAG_NUM_INSTANCE:
-          num_instance = static_cast<int64_t>(v);
+          num_instance = static_cast<uint64_t>(v);
           break;
         case FIELD_FLAG_NUM_SMN:
-          num_smn = static_cast<int64_t>(v);
+          num_smn = static_cast<uint64_t>(v);
           if (v)
             skip_smn = 0;
           else
             skip_smn = 1;
           break;
+      }
+      if ((intptr_t)(buf - origbuf) > buflen) {
+        fprintf(stderr, "[ERROR] Invalid buffer as read length was exceeded\n");
+        return -1;
       }
       if (*kvnum == kvsize) {
         kvsize += 64;
@@ -197,10 +209,12 @@ top:
 
     // done move to next or loop
     ++x;
-    if (table[x].field_name == NULL && --num_smn) {
+    if (table[x].field_name == NULL && num_smn > 1) {
+      --num_smn;
       x = smn_start;
       ++cur_smn;
-    } else if (table[x].field_name == NULL && --num_instance) {
+    } else if (table[x].field_name == NULL && num_instance > 1) {
+      --num_instance;
       x = instance_start;
       ++cur_instance;
     }
@@ -210,10 +224,11 @@ top:
 
 /** present_reg_state: present register state data
  *
- * @dri_instance: The DRI instance to select under /sys/class/drm/card${instance}/device
- * @table: Name of the table to read {"xgmi', "wafl", "pcie", "usr", "usr_1"}
- * @kv: pointer to pointer of rsmi_name_value pairs
+ * @fname: Path to the register-state binary file to read
+ * @reg_type: Table selector {RSMI_REG_XGMI, _WAFL, _PCIE, _USR, _USR_1}
+ * @kv: pointer to pointer of rsmi_name_value pairs; caller frees
  * @kvnum: pointer to number of used rsmi_name_value pairs
+ * @return 0 on success, -1 if the file cannot be read or the table overruns it
  */
 int present_reg_state(const char* fname, rsmi_reg_type_t reg_type, rsmi_name_value_t** kv,
                       uint32_t* kvnum) {

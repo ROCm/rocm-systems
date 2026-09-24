@@ -440,9 +440,11 @@ rsmi_status_t read_gpuboard_temp_metrics(const char* filename,
     LOG_INFO(ess);
     return ErrnoToRsmiStatus(errno);
   }
-  // Always create hex dump for debugging, using the number of bytes actually read
-  std::string hexDump = createHexDump(&metrics, file.gcount(), "GPU Board Temperature Metrics");
-  LOG_DEBUG(hexDump);
+  if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
+    std::string hexDump = createHexDump(&metrics, static_cast<size_t>(file.gcount()),
+                                        "GPU Board Temperature Metrics");
+    LOG_DEBUG(hexDump);
+  }
 
   if (file.gcount() != sizeof(metrics)) {
     std::ostringstream ess;
@@ -516,9 +518,11 @@ rsmi_status_t read_baseboard_temp_metrics(const char* filename,
     LOG_INFO(ess);
     return ErrnoToRsmiStatus(errno);
   }
-  // Always create hex dump for debugging, using the number of bytes actually read
-  std::string hexDump = createHexDump(&metrics, file.gcount(), "Baseboard Temperature Metrics");
-  LOG_DEBUG(hexDump);
+  if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
+    std::string hexDump = createHexDump(&metrics, static_cast<size_t>(file.gcount()),
+                                        "Baseboard Temperature Metrics");
+    LOG_DEBUG(hexDump);
+  }
 
   if (file.gcount() != sizeof(metrics)) {
     std::ostringstream ess;

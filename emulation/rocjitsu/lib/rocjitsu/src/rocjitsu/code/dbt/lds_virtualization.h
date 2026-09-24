@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"

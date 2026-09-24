@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from amdisa.isa_profile import IsaProfile
 
 
+# Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
+F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
+
+
 @dataclass
 class InstructionSemantics:
     """Semantic metadata for a single instruction.
@@ -1557,8 +1561,8 @@ _VOP3P_PK16_MAP = {
     'V_PK_MAX_F16': ('pk_binop', 'max', 'f16'),
     'V_PK_MIN_NUM_F16': ('pk_binop', 'min', 'f16'),
     'V_PK_MAX_NUM_F16': ('pk_binop', 'max', 'f16'),
-    'V_PK_MINIMUM_F16': ('pk_binop', 'min', 'f16'),
-    'V_PK_MAXIMUM_F16': ('pk_binop', 'max', 'f16'),
+    'V_PK_MINIMUM_F16': ('pk_binop', 'minimum', 'f16'),
+    'V_PK_MAXIMUM_F16': ('pk_binop', 'maximum', 'f16'),
     'V_PK_FMAC_F16': ('pk_ternary', 'fmac', 'f16'),
     'V_PK_ADD_MAX_I16': ('pk_ternary', 'add_max_sat', 'i16'),
     'V_PK_ADD_MAX_U16': ('pk_ternary', 'add_max_sat', 'u16'),
@@ -1602,6 +1606,32 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_PK_ADD_F32':
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
+        )
+    packed_f64_binary = {
+        'V_PK_ADD_F64': 'add',
+        'V_PK_MUL_F64': 'mul',
+        'V_PK_MAX_NUM_F64': 'max_num',
+        'V_PK_MIN_NUM_F64': 'min_num',
+    }
+    if name in packed_f64_binary:
+        return InstructionSemantics(
+            name,
+            'pk_binop_f64',
+            operation=packed_f64_binary[name],
+            data_type='f64',
+        )
+    if name == 'V_PK_FMA_F64':
+        return InstructionSemantics(
+            name, 'pk_ternary_f64', operation='fma', data_type='f64'
+        )
+    if name in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64'):
+        operation = 'add' if name == 'V_PK_ADD_NC_U64' else 'sub'
+        return InstructionSemantics(
+            name, 'pk_binop_u64', operation=operation, data_type='u64'
+        )
+    if name == 'V_PK_LSHL_ADD_U64':
+        return InstructionSemantics(
+            name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'
         )
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
@@ -1681,8 +1711,8 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     import re
 
     m = re.match(
-        r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|BF16F32|I32|FP8|BF8)_'
-        r'(\d+)X(\d+)X(\d+)_?(F32|F16|BF16|IU8|IU4|FP8|BF8'
+        r'V_(?:S?WMMA[C]?)_(F32|F64|F16|BF16|BF16F32|I32|FP8|BF8)_'
+        r'(\d+)X(\d+)X(\d+)_?(F32|F64|F16|BF16|IU8|IU4|FP8|BF8'
         r'|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8'
         r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8|F8F6F4|F4)?$',
         name,
@@ -1856,7 +1886,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     # Integer atomics.
     'SWAP': ('swap', 1),
     'CMPSWAP': ('cmpswap', 2),  # src + cmp
-    'FCMPSWAP': ('cmpswap', 2),  # FP compare-and-swap
+    'FCMPSWAP': ('fcmpswap', 2),  # FP compare-and-swap
     'ADD': ('add', 1),
     'SUB': ('sub', 1),
     'SMIN': ('smin', 1),
@@ -1868,8 +1898,8 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'XOR': ('xor', 1),
     'INC': ('inc', 1),
     'DEC': ('dec', 1),
-    'CSUB': ('sub', 1),
-    'SUB_CLAMP': ('sub', 1),
+    'CSUB': ('sub_clamp', 1),
+    'SUB_CLAMP': ('sub_clamp', 1),
     # Floating-point atomics.
     'ADD_F32': ('fadd', 1),
     'ADD_F64': ('fadd', 2),
@@ -1885,7 +1915,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MAX_NUM_F32': ('fmax', 1),
     'MIN_NUM_F64': ('fmin', 2),
     'MAX_NUM_F64': ('fmax', 2),
-    'COND_SUB': ('sub', 1),
+    'COND_SUB': ('cond_sub', 1),
     'ORDERED_ADD': ('add', 2),
     # RDNA3+ typed MIN/MAX (suffix stripped from the full instruction name).
     'MIN_I32': ('smin', 1),
@@ -1896,9 +1926,9 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MIN_U64': ('umin', 2),
     'MAX_I64': ('smax', 2),
     'MAX_U64': ('umax', 2),
-    # Packed FP atomics (treated as 32-bit fadd for now).
-    'PK_ADD_F16': ('fadd', 1),
-    'PK_ADD_BF16': ('fadd', 1),
+    # Packed FP atomics retain the component format through execution.
+    'PK_ADD_F16': ('pk_add_f16', 1),
+    'PK_ADD_BF16': ('pk_add_bf16', 1),
 }
 
 
@@ -1936,13 +1966,15 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
         return None
 
     op, data_dw = info
+    if op == 'cmpswap' and type_suffix in ('_F32', '_F64'):
+        op = 'fcmpswap'
     is_64bit = (
         is_x2
         or '64' in type_suffix
         or original_suffix.endswith(('_B64', '_U64', '_I64', '_F64'))
     )
     elem_size = 8 if is_64bit else 4
-    if op in ('cmpswap', 'mskor'):
+    if op in ('cmpswap', 'fcmpswap', 'mskor'):
         data_dw_actual = 2 * (elem_size // 4)
     elif data_dw == 1:
         data_dw_actual = elem_size // 4
@@ -2009,11 +2041,11 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 name, 'flat_load', elem_size=esz, num_elems=ne, sign_extend=se
             )
 
-    if upper == 'GLOBAL_LOAD_ADDTID_B32':
+    if upper in ('GLOBAL_LOAD_ADDTID_B32', 'GLOBAL_LOAD_DWORD_ADDTID'):
         return InstructionSemantics(
             name, 'global_load_addtid', elem_size=4, num_elems=1
         )
-    if upper == 'GLOBAL_STORE_ADDTID_B32':
+    if upper in ('GLOBAL_STORE_ADDTID_B32', 'GLOBAL_STORE_DWORD_ADDTID'):
         return InstructionSemantics(
             name, 'global_store_addtid', elem_size=4, num_elems=1
         )
@@ -2100,7 +2132,6 @@ def _derive_buffer_data(
     suffix: str,
     is_store: bool,
     typed: bool,
-    typed_format_executable: bool = True,
 ) -> InstructionSemantics | None:
     """Classify a buffer/typed-buffer LOAD/STORE data suffix.
 
@@ -2109,20 +2140,12 @@ def _derive_buffer_data(
     class prefix differs (``buffer_*`` vs ``tbuffer_*``).
 
     D16 FORMAT loads/stores pack two 16-bit components per VGPR. That packed
-    layout is not modeled by the memory pipeline, so they are given dedicated
-    non-executable classes (``buffer_{load,store}_format_d16``) that carry the
-    partial-def metadata (num_elems/elem_size/d16 flags) for liveness without
-    activating incorrect execution. Non-D16 FORMAT (one dword per component) and
-    byte/short/dword data execute correctly and keep their normal classes; the
-    FORMAT variants are modeled as raw dword moves without DFMT/NFMT
-    (data/numeric format) conversion.
+    layout uses dedicated classes (``buffer_{load,store}_format_d16``) carrying
+    partial-def metadata (num_elems/elem_size/d16 flags). Codegen enables format
+    conversion and packed D16 execution on RDNA1-4 and CDNA1-4 targets, with
+    generation-specific descriptor decoding. Non-D16 FORMAT keeps the normal
+    buffer classes and selects conversion in codegen.
 
-    ``typed_format_executable`` gates the executable ``tbuffer_*`` class for
-    non-D16 typed FORMAT ops. Real MTBUF encodings supply mtbuf-style addressing
-    and keep it enabled; RDNA4 folds typed buffers into VBUFFER (mubuf-style
-    addressing, no ``mtbuf_calculate_addresses``), so it is disabled there,
-    leaving non-D16 typed ops unclassified (``nop``) as before -- only the D16
-    typed loads need the partial-def metadata.
     """
     normalized = _normalize_buffer_format_suffix(suffix)
     flat_info = _FLAT_DATA_MAP.get(normalized)
@@ -2131,10 +2154,8 @@ def _derive_buffer_data(
     if not info:
         return None
     esz, ne, se = info
-    if fmt_info is not None and esz == 2:  # D16 FORMAT: packed, metadata-only
+    if fmt_info is not None and esz == 2:  # D16 FORMAT: packed VGPR components
         cls = 'buffer_store_format_d16' if is_store else 'buffer_load_format_d16'
-    elif typed and not typed_format_executable:
-        return None  # non-D16 typed FORMAT under VBUFFER: leave as nop
     else:
         base = 'tbuffer' if typed else 'buffer'
         cls = f'{base}_store' if is_store else f'{base}_load'
@@ -2192,7 +2213,6 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 upper[len(prefix) :],
                 is_store,
                 typed=prefix.startswith('TBUFFER'),
-                typed_format_executable=False,
             )
             if sem:
                 return sem
@@ -2246,6 +2266,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     (was ``DS_CMPST``), which are handled by the atomic fallthrough.
     """
     upper = name.upper()
+    if upper.startswith('DS_BVH_STACK'):
+        return InstructionSemantics(
+            name, 'ds_stack', elem_size=4, num_elems=2 if 'POP2' in upper else 1
+        )
     is_write2 = '_WRITE2' in upper or 'DS_STORE_2ADDR' in upper
     is_read2 = '_READ2' in upper or 'DS_LOAD_2ADDR' in upper
     is_write = ('_WRITE_' in upper or 'DS_STORE_' in upper) and not is_write2
@@ -2357,6 +2381,8 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_ADD_U64': ('add', 8, 2),
         '_ADD_RTN_U32': ('add', 4, 1),
         '_ADD_RTN_U64': ('add', 8, 2),
+        '_COND_SUB_U32': ('cond_sub', 4, 1),
+        '_COND_SUB_RTN_U32': ('cond_sub', 4, 1),
         '_SUB_U32': ('sub', 4, 1),
         '_SUB_U64': ('sub', 8, 2),
         '_SUB_RTN_U32': ('sub', 4, 1),
@@ -2415,15 +2441,16 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_CMPST_B64': ('cmpswap', 8, 4),
         '_CMPST_RTN_B32': ('cmpswap', 4, 2),
         '_CMPST_RTN_B64': ('cmpswap', 8, 4),
-        '_CMPST_F32': ('cmpswap', 4, 2),
-        '_CMPST_F64': ('cmpswap', 8, 4),
-        '_CMPST_RTN_F32': ('cmpswap', 4, 2),
-        '_CMPST_RTN_F64': ('cmpswap', 8, 4),
+        '_CMPST_F32': ('fcmpswap', 4, 2),
+        '_CMPST_F64': ('fcmpswap', 8, 4),
+        '_CMPST_RTN_F32': ('fcmpswap', 4, 2),
+        '_CMPST_RTN_F64': ('fcmpswap', 8, 4),
         '_CMPSTORE_B32': ('cmpswap', 4, 2),
         '_CMPSTORE_B64': ('cmpswap', 8, 4),
         '_CMPSTORE_RTN_B32': ('cmpswap', 4, 2),
         '_CMPSTORE_RTN_B64': ('cmpswap', 8, 4),
-        '_CONDXCHG32_RTN_B64': ('cmpswap', 8, 4),
+        '_CONDXCHG32_RTN_B64': ('condxchg32', 8, 2),
+        '_WRAP_RTN_B32': ('wrap', 4, 2),
         '_ADD_F32': ('fadd', 4, 1),
         '_ADD_RTN_F32': ('fadd', 4, 1),
         '_ADD_F64': ('fadd', 8, 2),
@@ -2444,12 +2471,12 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_MIN_NUM_RTN_F64': ('fmin', 8, 2),
         '_MAX_NUM_F64': ('fmax', 8, 2),
         '_MAX_NUM_RTN_F64': ('fmax', 8, 2),
-        '_SUB_CLAMP_U32': ('sub', 4, 1),
-        '_SUB_CLAMP_RTN_U32': ('sub', 4, 1),
-        '_CMPSTORE_F32': ('cmpswap', 4, 2),
-        '_CMPSTORE_RTN_F32': ('cmpswap', 4, 2),
-        '_CMPSTORE_F64': ('cmpswap', 8, 4),
-        '_CMPSTORE_RTN_F64': ('cmpswap', 8, 4),
+        '_SUB_CLAMP_U32': ('sub_clamp', 4, 1),
+        '_SUB_CLAMP_RTN_U32': ('sub_clamp', 4, 1),
+        '_CMPSTORE_F32': ('fcmpswap', 4, 2),
+        '_CMPSTORE_RTN_F32': ('fcmpswap', 4, 2),
+        '_CMPSTORE_F64': ('fcmpswap', 8, 4),
+        '_CMPSTORE_RTN_F64': ('fcmpswap', 8, 4),
         '_WRXCHG2ST64_RTN_B32': ('swap', 4, 1),
         '_WRXCHG2ST64_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG2ADDR_RTN_B32': ('swap', 4, 1),
@@ -2460,10 +2487,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_STOREXCHG_2ADDR_STRIDE64_RTN_B32': ('swap', 4, 1),
         '_STOREXCHG_2ADDR_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG_2ADDR_STRIDE64_RTN_B64': ('swap', 8, 2),
-        '_PK_ADD_F16': ('fadd', 4, 1),
-        '_PK_ADD_RTN_F16': ('fadd', 4, 1),
-        '_PK_ADD_BF16': ('fadd', 4, 1),
-        '_PK_ADD_RTN_BF16': ('fadd', 4, 1),
+        '_PK_ADD_F16': ('pk_add_f16', 4, 1),
+        '_PK_ADD_RTN_F16': ('pk_add_f16', 4, 1),
+        '_PK_ADD_BF16': ('pk_add_bf16', 4, 1),
+        '_PK_ADD_RTN_BF16': ('pk_add_bf16', 4, 1),
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:

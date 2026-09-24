@@ -186,8 +186,6 @@ global:
     __hipRegisterTexture;
     __hipRegisterManagedVar;
     __hipUnregisterFatBinary;
-    __gnu_h2f_ieee;
-    __gnu_f2h_ieee;
     hipConfigureCall;
     hipSetupArgument;
     hipLaunchByPtr;
@@ -689,10 +687,17 @@ local:
     *;
 } hip_7.14;
 
-hip_10.1 {
+hip_7.16 {
 global:
     hipDeviceGetLuid;
     hipInitDevice;
 local:
     *;
 } hip_7.15;
+
+hip_7.17 {
+global:
+    hipModuleEnumerateFunctions;
+local:
+    *;
+} hip_7.16;

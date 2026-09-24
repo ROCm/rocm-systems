@@ -44,6 +44,9 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         uses_cluster_ttmp_workgroup_ids = (
             'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
         )
+        float_dot_accumulation = (
+            f'FloatDotAccumulation::{profile.float_dot_accumulation.value}'
+        )
         wave_state_layout = f'WaveStateLayout::{profile.wave_state_layout.value}'
         compute_tmpring_wavesize_granule = profile.compute_tmpring_wavesize_granule
         compute_tmpring_wavesize_bits = profile.compute_tmpring_wavesize_bits
@@ -63,6 +66,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .descriptor_sgpr_count_encoded = {descriptor_sgpr_count_encoded},',
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
+            f'        .float_dot_accumulation = {float_dot_accumulation},',
             f'        .wave_state_layout = {wave_state_layout},',
             f'        .compute_tmpring_wavesize_granule = {compute_tmpring_wavesize_granule},',
             f'        .compute_tmpring_wavesize_bits = {compute_tmpring_wavesize_bits},',
@@ -91,6 +95,12 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '',
         'namespace rocjitsu {',
         '',
+        'enum class FloatDotAccumulation : uint8_t {',
+        '  HostF32,',
+        '  Gfx11,',
+        '  Gfx12,',
+        '};',
+        '',
         'enum class WaveStateLayout : uint8_t {',
         '  Legacy,',
         '  Gfx12,',
@@ -103,6 +113,7 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  bool descriptor_sgpr_count_encoded = true;',
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
+        '  FloatDotAccumulation float_dot_accumulation = FloatDotAccumulation::HostF32;',
         '  WaveStateLayout wave_state_layout = WaveStateLayout::Legacy;',
         '  uint32_t compute_tmpring_wavesize_granule = 0;',
         '  uint32_t compute_tmpring_wavesize_bits = 0;',

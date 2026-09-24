@@ -8,6 +8,7 @@
 #include <hip/hip_ext_ocp.h>
 
 #include <cmath>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,12 @@ std::pair<float, float> bracket(const std::vector<float>& reps, float v) {
     if (r >= v && r < hi) hi = r;
   }
   return {lo, hi};
+}
+
+template <typename T> unsigned raw_bits(T v) {
+  unsigned short u = 0;
+  std::memcpy(&u, &v, sizeof(u));
+  return u;
 }
 
 }  // namespace
@@ -234,4 +241,47 @@ HIP_TEST_CASE(Unit_ext_ocp_fp4_device_matches_host) {
 
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_out));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A NaN scale exponent must decode to a NaN of the destination type, and a
+ *    scale that pushes the value past the destination range must saturate to
+ *    infinity. Asserts the exact fp16/bf16 bit patterns for both signs.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp4.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp4_nan_inf_bits_host) {
+  const __amd_scale_t kScaleNan = -128;  // OCP E8M0 NaN scale exponent
+
+  SECTION("NaN scale exponent decodes to NaN") {
+    __hipext_ocp_fp4x2_e2m1 v(-1.0f, 1.0f, 0);
+    __amd_fp16x2_storage_t h = v.get_scaled_fp16x2(kScaleNan);
+    __amd_bf16x2_storage_t b = v.get_scaled_bf16x2(kScaleNan);
+
+    INFO("fp16 0x" << std::hex << raw_bits(h[0]) << ",0x" << raw_bits(h[1]) << " bf16 0x"
+                   << raw_bits(b[0]) << ",0x" << raw_bits(b[1]));
+    REQUIRE(raw_bits(h[0]) == 0xFFFF);
+    REQUIRE(raw_bits(h[1]) == 0x7FFF);
+    REQUIRE(raw_bits(b[0]) == 0xFFFF);
+    REQUIRE(raw_bits(b[1]) == 0x7FFF);
+  }
+
+  SECTION("overflow saturates to infinity") {
+    __hipext_ocp_fp4x2_e2m1 v(6.0f, -6.0f, 0);
+
+    // 6.0 * 2^100 overflows fp16 (max exponent 15).
+    __amd_fp16x2_storage_t h = v.get_scaled_fp16x2(100);
+    INFO("fp16 0x" << std::hex << raw_bits(h[0]) << ",0x" << raw_bits(h[1]));
+    REQUIRE(raw_bits(h[0]) == 0x7C00);
+    REQUIRE(raw_bits(h[1]) == 0xFC00);
+
+    // bf16 has the same exponent range as float, so it needs a larger scale.
+    __amd_bf16x2_storage_t b = v.get_scaled_bf16x2(127);
+    INFO("bf16 0x" << std::hex << raw_bits(b[0]) << ",0x" << raw_bits(b[1]));
+    REQUIRE(raw_bits(b[0]) == 0x7F80);
+    REQUIRE(raw_bits(b[1]) == 0xFF80);
+  }
 }

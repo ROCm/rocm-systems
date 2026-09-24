@@ -1465,7 +1465,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
         enumeration_help = "Enumeration mapping to other features.\
-                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID"
+                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, OAM_ID, and PHYSICAL_ACC_ID"
 
         # Create list subparser
         list_parser = subparsers.add_parser(
@@ -3241,6 +3241,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
         gtt_help = "Displays GTT (shared GPU memory) size"
+        tray_help = "Displays compute tray type and accelerator count"
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3265,6 +3266,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=base_board_temps_help,
         )
         node_parser.add_argument("-G", "--gtt", action="store_true", required=False, help=gtt_help)
+        node_parser.add_argument(
+            "-T", "--tray", action="store_true", required=False, help=tray_help
+        )
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)

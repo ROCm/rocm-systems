@@ -41,7 +41,7 @@ click-log==0.4.0
     # via doxysphinx
 comm==0.2.3
     # via ipykernel
-cryptography==46.0.6
+cryptography==50.0.0
     # via pyjwt
 debugpy==1.8.20
     # via ipykernel
@@ -261,7 +261,7 @@ tabulate==0.10.0
     # via jupyter-cache
 tomli==2.4.1
     # via sphinx
-tornado==6.5.7
+tornado==6.5.8
     # via
     #   ipykernel
     #   jupyter-client

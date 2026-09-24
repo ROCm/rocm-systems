@@ -32,18 +32,48 @@ static_assert(AMDSMI_DEV_PERF_LEVEL_LAST == AMDSMI_DEV_PERF_LEVEL_DETERMINISM,
               "kDevPerfLvlNameMap needs to be updated");
 
 static const std::map<amdsmi_gpu_block_t, const char*> kBlockNameMap = {
-    {AMDSMI_GPU_BLOCK_UMC, "UMC"},     {AMDSMI_GPU_BLOCK_SDMA, "SDMA"},
-    {AMDSMI_GPU_BLOCK_GFX, "GFX"},     {AMDSMI_GPU_BLOCK_MMHUB, "MMHUB"},
-    {AMDSMI_GPU_BLOCK_ATHUB, "ATHUB"}, {AMDSMI_GPU_BLOCK_PCIE_BIF, "PCIE_BIF"},
-    {AMDSMI_GPU_BLOCK_HDP, "HDP"},     {AMDSMI_GPU_BLOCK_XGMI_WAFL, "XGMI_WAFL"},
-    {AMDSMI_GPU_BLOCK_DF, "DF"},       {AMDSMI_GPU_BLOCK_SMN, "SMN"},
-    {AMDSMI_GPU_BLOCK_SEM, "SEM"},     {AMDSMI_GPU_BLOCK_MP0, "MP0"},
-    {AMDSMI_GPU_BLOCK_MP1, "MP1"},     {AMDSMI_GPU_BLOCK_FUSE, "FUSE"},
-    {AMDSMI_GPU_BLOCK_MCA, "MCA"},     {AMDSMI_GPU_BLOCK_VCN, "VCN"},
-    {AMDSMI_GPU_BLOCK_JPEG, "JPEG"},   {AMDSMI_GPU_BLOCK_IH, "IH"},
+    {AMDSMI_GPU_BLOCK_UMC, "UMC"},
+    {AMDSMI_GPU_BLOCK_SDMA, "SDMA"},
+    {AMDSMI_GPU_BLOCK_GFX, "GFX"},
+    {AMDSMI_GPU_BLOCK_MMHUB, "MMHUB"},
+    {AMDSMI_GPU_BLOCK_ATHUB, "ATHUB"},
+    {AMDSMI_GPU_BLOCK_PCIE_BIF, "PCIE_BIF"},
+    {AMDSMI_GPU_BLOCK_HDP, "HDP"},
+    {AMDSMI_GPU_BLOCK_XGMI_WAFL, "XGMI_WAFL"},
+    {AMDSMI_GPU_BLOCK_DF, "DF"},
+    {AMDSMI_GPU_BLOCK_SMN, "SMN"},
+    {AMDSMI_GPU_BLOCK_SEM, "SEM"},
+    {AMDSMI_GPU_BLOCK_MP0, "MP0"},
+    {AMDSMI_GPU_BLOCK_MP1, "MP1"},
+    {AMDSMI_GPU_BLOCK_FUSE, "FUSE"},
+    {AMDSMI_GPU_BLOCK_MCA, "MCA"},
+    {AMDSMI_GPU_BLOCK_VCN, "VCN"},
+    {AMDSMI_GPU_BLOCK_JPEG, "JPEG"},
+    {AMDSMI_GPU_BLOCK_IH, "IH"},
     {AMDSMI_GPU_BLOCK_MPIO, "MPIO"},
+    {AMDSMI_GPU_BLOCK_MMSCH, "MMSCH"},
+    {AMDSMI_GPU_BLOCK_MP5, "MP5"},
+    {AMDSMI_GPU_BLOCK_ATU, "ATU"},
+    {AMDSMI_GPU_BLOCK_DACC_BE, "DACC_BE"},
+    {AMDSMI_GPU_BLOCK_ECLR, "ECLR"},
+    {AMDSMI_GPU_BLOCK_KPX_SERDES, "KPX_SERDES"},
+    {AMDSMI_GPU_BLOCK_LSDMA, "LSDMA"},
+    {AMDSMI_GPU_BLOCK_MPART, "MPART"},
+    {AMDSMI_GPU_BLOCK_MPIFOE, "MPIFOE"},
+    {AMDSMI_GPU_BLOCK_MPRAS, "MPRAS"},
+    {AMDSMI_GPU_BLOCK_NBIF, "NBIF"},
+    {AMDSMI_GPU_BLOCK_NBIO, "NBIO"},
+    {AMDSMI_GPU_BLOCK_OXRP, "OXRP"},
+    {AMDSMI_GPU_BLOCK_PCIE_PL, "PCIE_PL"},
+    {AMDSMI_GPU_BLOCK_PCS_XGMI, "PCS_XGMI"},
+    {AMDSMI_GPU_BLOCK_PIE, "PIE"},
+    {AMDSMI_GPU_BLOCK_CS, "CS"},
+    {AMDSMI_GPU_BLOCK_SHUB, "SHUB"},
+    {AMDSMI_GPU_BLOCK_SSBDCI, "SSBDCI"},
+    {AMDSMI_GPU_BLOCK_UCIE_PCS, "UCIE_PCS"},
 };
-static_assert(AMDSMI_GPU_BLOCK_LAST == AMDSMI_GPU_BLOCK_MPIO, "kBlockNameMap needs to be updated");
+static_assert(AMDSMI_GPU_BLOCK_LAST == AMDSMI_GPU_BLOCK_UCIE_PCS,
+              "kBlockNameMap needs to be updated");
 
 static const char* kRasErrStateStrings[] = {
     "None",                     // AMDSMI_RAS_ERR_STATE_NONE
@@ -115,17 +145,24 @@ uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list) {
       break;
     }
 
+    int32_t num = 0;
     switch (a) {
       case 'i':
-        test->num_iterations = std::stoi(optarg);
+        num = std::stoi(optarg);
+        if (num < 0) num = 0;
+        test->num_iterations = static_cast<uint32_t>(num);
         break;
 
       case 'v':
-        test->verbosity = std::stoi(optarg);
+        num = std::stoi(optarg);
+        if (num < 0) num = 0;
+        test->verbosity = static_cast<uint32_t>(num);
         break;
 
       case 'm':
-        test->monitor_verbosity = std::stoi(optarg);
+        num = std::stoi(optarg);
+        if (num < 0) num = 0;
+        test->monitor_verbosity = static_cast<uint32_t>(num);
         break;
 
       case 'r':

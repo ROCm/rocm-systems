@@ -1,27 +1,9 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <climits>
 #include <iosfwd>
 
 #include "amd_smi/amdsmi.h"
@@ -37,3 +19,31 @@
 // OD_FCLK) or all levels read zero, so the caller falls back to pp_dpm_*.
 bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
                                    unsigned int* max_freq, unsigned int* min_freq);
+
+// Overdrive clock range parsed from pp_od_clk_voltage. When present, the dpm
+// parser prefers it over the pp_dpm_* levels for the domain's min/max.
+struct SmiAmdgpuOdClkRange {
+  bool present = false;
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+};
+
+// Per-domain clock ranges produced by smi_amdgpu_parse_dpm_ranges(). An unset
+// field keeps the "unavailable" marker (-1 as int / UINT32_MAX to callers): a
+// domain with no minimum dpm level or no sleep state reports it as unavailable.
+struct SmiAmdgpuClkRanges {
+  int max_freq = 0;
+  int min_freq = -1;
+  int num_dpm = 0;
+  int sleep_state_freq = -1;
+};
+
+// Finalizes smi_amdgpu_get_ranges() from an open pp_dpm_* stream (definition in
+// src/amd_smi/amd_smi_utils.cc). Exposed as a test seam so the min/max/sleep
+// folding and the out-of-bounds guard can be exercised over in-memory streams
+// without a GPU. od_range carries the already-parsed pp_od_clk_voltage range;
+// the UINT_MAX "unavailable" sentinel is preserved, while other values above
+// INT_MAX are rejected.
+amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
+                                            const SmiAmdgpuOdClkRange& od_range,
+                                            SmiAmdgpuClkRanges& ranges);

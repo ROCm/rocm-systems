@@ -37,6 +37,16 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
 // Returns 0 when records is null or count is 0.
 uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count);
 
+// Derives the memory-activity percentage (0..100) used to estimate current
+// memory bandwidth. Prefers the mem_activity_acc accumulator delta over the
+// firmware-timestamp window (which also reflects DMA/copy traffic) and never
+// drops below the instantaneous umc_activity_pct. Falls back to umc_activity_pct
+// when there is no previous sample or the firmware clock and accumulator did not
+// advance monotonically. Firmware timestamps are in 10ns units (1ms == 100000).
+double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
+                                   uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
+                                   uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts);
+
 // Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,

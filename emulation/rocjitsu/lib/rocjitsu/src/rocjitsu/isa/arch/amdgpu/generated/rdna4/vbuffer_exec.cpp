@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -27,194 +28,306 @@ namespace rdna4 {
 
 void BufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
   d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
 void BufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 2;
   d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
 void BufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 3;
   d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
 void BufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 4;
   d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
 void BufferStoreFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
   d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void BufferStoreFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 2;
   d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void BufferStoreFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 3;
   d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 12);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void BufferStoreFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 4;
   d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
   }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void BufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void BufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void BufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void BufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void BufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void BufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void BufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void BufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void BufferLoadU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -600,13 +713,43 @@ void BufferStoreD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferLoadD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = true;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void BufferStoreD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = true;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -616,6 +759,9 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -639,6 +785,9 @@ void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -664,6 +813,9 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -687,6 +839,9 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -709,7 +864,10 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -733,6 +891,9 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -756,6 +917,9 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -779,6 +943,9 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -802,6 +969,9 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -825,6 +995,9 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -848,6 +1021,9 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -871,6 +1047,9 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -894,6 +1073,9 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -917,6 +1099,9 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -940,6 +1125,9 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -965,6 +1153,9 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -994,6 +1185,9 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1019,6 +1213,9 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1044,6 +1241,9 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1069,6 +1269,9 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1094,6 +1297,9 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1119,6 +1325,9 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1144,6 +1353,9 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1169,6 +1381,9 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1194,6 +1409,9 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1219,6 +1437,9 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1244,6 +1465,9 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1268,7 +1492,10 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::COND_SUB;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1292,6 +1519,12 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1315,6 +1548,12 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1338,6 +1577,12 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1360,7 +1605,10 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1383,7 +1631,10 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
+  d->wait_counter_type =
+      (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
+                                              : amdgpu::WaitCounterType::STORECNT);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1401,83 +1652,307 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void TbufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferStoreFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferStoreFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferStoreFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferStoreFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
 }
 
 void TbufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 1);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 2);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 3);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void TbufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->non_temporal = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  d->buffer_d16 = true;
+  d->d16_hi = false;
+  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 4);
+  if (prepared.failed()) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (prepared.value())
+    mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 } // namespace rdna4

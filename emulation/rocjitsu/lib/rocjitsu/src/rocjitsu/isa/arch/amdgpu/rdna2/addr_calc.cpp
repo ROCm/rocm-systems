@@ -29,7 +29,8 @@ std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf
 
 } // namespace
 
-std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state) {
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
   if (!base)
@@ -39,6 +40,8 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!soffset)
     return std::nullopt;
   off += *soffset;
+  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
+    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state);
   return (*base + off) & ~0x3ULL;
 }
 

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
 
@@ -392,6 +393,53 @@ TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
   EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
 }
 
+TEST(RegisterSetAnalysis, IntersectsIsTheAnyOfCounterpartToContains) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 4, 1});
+
+  // contains() is all-of, intersects() is any-of: a pair straddling s4 is not
+  // contained but does intersect. Register allocation depends on the latter --
+  // a candidate run is unusable if even one of its lanes is taken.
+  EXPECT_FALSE(set.contains({RegClass::SGPR, 3, 2}));
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 3, 2}));
+
+  // Half-open over [index, index + width).
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 2, 3}));
+  EXPECT_FALSE(set.intersects({RegClass::SGPR, 2, 2})) << "s4 is outside [2, 4)";
+  EXPECT_FALSE(set.intersects({RegClass::SGPR, 5, 4}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsKeepsRegisterClassesSeparate) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 0, 1});
+
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 0, 1}));
+  EXPECT_FALSE(set.intersects({RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(set.intersects({RegClass::ACC_VGPR, 0, 1}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsAnswersFalseForUntrackedClasses) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 0, 1});
+
+  // Matches contains(): classes outside the dataflow model are not "present".
+  // free_registers.h documents why its callers must not search one.
+  EXPECT_FALSE(set.intersects({RegClass::EXEC, 0, 1}));
+  EXPECT_FALSE(set.intersects({RegClass::VCC, 0, 1}));
+}
+
+TEST(RegisterSetAnalysis, IntersectsToleratesRunsPastTheTrackedRange) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 0, 1});
+
+  // A run starting in range and extending past it reports the in-range hit
+  // rather than reading past the bitset.
+  EXPECT_TRUE(set.intersects({RegClass::SGPR, 0, 255}));
+  EXPECT_FALSE(set.intersects(
+      {RegClass::SGPR, static_cast<uint16_t>(REGISTER_SET_ALLOCATABLE_SGPRS + 8), 4}));
+}
+
 TEST(RegisterSetAnalysis, TracksGfx1250HighBankVectorRegisters) {
   RegisterSet set;
   set.expand({RegClass::VGPR, 768, 2});
@@ -460,16 +508,22 @@ TEST(GeneratedInstDefUse, MubufCmpswapReturnUsesElementWidthAndTargetGate) {
   }
 }
 
-TEST(RegisterSetAnalysis, IgnoresSpecialRegisterClasses) {
+TEST(RegisterSetAnalysis, SpecialClassesAreHeldButCarryNoOrdinaryLanes) {
   RegisterSet set;
   set.expand({RegClass::EXEC, 0, 2});
   set.expand({RegClass::SCC, 0, 1});
   set.expand({RegClass::FLAT_SCRATCH, 0, 2});
 
-  EXPECT_TRUE(set.none());
-  EXPECT_FALSE(set.contains({RegClass::EXEC, 0, 1}));
-  EXPECT_FALSE(set.contains({RegClass::SCC, 0, 1}));
-  EXPECT_FALSE(set.contains({RegClass::FLAT_SCRATCH, 0, 2}));
+  // Special classes are singleton members, not dropped.
+  EXPECT_FALSE(set.none());
+  EXPECT_TRUE(set.has_specials());
+  EXPECT_TRUE(set.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(set.contains({RegClass::SCC, 0, 1}));
+  EXPECT_TRUE(set.contains({RegClass::FLAT_SCRATCH, 0, 2}));
+
+  // But they contribute no ordinary lanes and vanish under ordinary_only().
+  EXPECT_EQ(set.ordinary_size(), 0u);
+  EXPECT_TRUE(set.ordinary_only().none());
 }
 
 TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
@@ -503,6 +557,573 @@ TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
   EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 141, 1}));
   EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 141, 1}));
   EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1}));
+}
+
+// ---------------------------------------------------------------------------
+// Architectural special-register + memory effect API. Special registers are
+// singleton members of the same RegisterSet as ordinary registers; consumers
+// that drive scratch-allocation liveness project them out with ordinary_only().
+// ---------------------------------------------------------------------------
+
+// Collect a set's special members in ascending RegClass order, so a test can
+// assert the *exact* set of special registers an instruction reads or writes,
+// not just membership.
+std::vector<RegClass> specials_in(const RegisterSet &set) {
+  std::vector<RegClass> classes;
+  set.for_each_special([&](RegClass c) { classes.push_back(c); });
+  return classes;
+}
+
+// Expected special-register list, sorted to match specials_in()'s ascending
+// iteration order.
+std::vector<RegClass> special_regs(std::initializer_list<RegClass> classes) {
+  std::vector<RegClass> sorted(classes);
+  std::ranges::sort(sorted);
+  return sorted;
+}
+
+TEST(RegisterSetSpecial, ClassifiesSpecialVersusOrdinaryClasses) {
+  EXPECT_FALSE(is_special_reg_class(RegClass::SGPR));
+  EXPECT_FALSE(is_special_reg_class(RegClass::VGPR));
+  EXPECT_FALSE(is_special_reg_class(RegClass::ACC_VGPR));
+  EXPECT_FALSE(is_special_reg_class(RegClass::TTMP)); // per-index, untracked, not in the mask
+  EXPECT_TRUE(is_special_reg_class(RegClass::EXEC));
+  EXPECT_TRUE(is_special_reg_class(RegClass::VCC));
+  EXPECT_TRUE(is_special_reg_class(RegClass::SCC));
+  EXPECT_TRUE(is_special_reg_class(RegClass::M0));
+  EXPECT_TRUE(is_special_reg_class(RegClass::FLAT_SCRATCH));
+  EXPECT_TRUE(is_special_reg_class(RegClass::PC));
+}
+
+// TTMP is a known register class that this set deliberately does not track:
+// no bitset, no special-mask bit. Adding one never makes the set non-empty and
+// never reports the register as present, and removal paths are safe no-ops.
+TEST(RegisterSetSpecial, TtmpIsUntracked) {
+  RegisterSet s;
+  s.expand({RegClass::TTMP, 0, 1});
+  EXPECT_FALSE(s.contains({RegClass::TTMP, 0, 1}));
+  EXPECT_FALSE(s.contains({RegClass::TTMP, 15, 1}));
+  EXPECT_TRUE(s.none());
+  EXPECT_EQ(s.ordinary_size(), 0u);
+  EXPECT_FALSE(s.has_specials());
+  s.erase({RegClass::TTMP, 15, 1});
+  s.clear_class(RegClass::TTMP);
+  EXPECT_TRUE(s.none());
+}
+
+TEST(RegisterSetSpecial, OrdinaryAndSpecialInsertionCoexist) {
+  RegisterSet s;
+  s.expand({RegClass::SGPR, 4, 2});
+  s.expand({RegClass::EXEC, 0, 1});
+  s.expand({RegClass::VCC, 0, 1});
+
+  // size() counts ordinary lanes plus special singletons; ordinary_size() sees
+  // only the two SGPR lanes.
+  EXPECT_EQ(s.ordinary_size(), 2u);
+  EXPECT_EQ(s.size(), 4u);
+  EXPECT_TRUE(s.has_specials());
+  EXPECT_TRUE(s.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(s.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_EQ(specials_in(s), special_regs({RegClass::EXEC, RegClass::VCC}));
+}
+
+TEST(RegisterSetSpecial, SpecialMembershipIgnoresIndexAndWidth) {
+  // Special classes are singletons: any index/width refers to the same member.
+  RegisterSet s;
+  s.expand({RegClass::EXEC, 42, 8});
+  EXPECT_TRUE(s.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(s.contains({RegClass::EXEC, 99, 2}));
+  EXPECT_EQ(s.size(), 1u);
+
+  s.erase({RegClass::EXEC, 7, 4});
+  EXPECT_FALSE(s.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(s.none());
+}
+
+TEST(RegisterSetSpecial, FullIterationEmitsCanonicalSpecialRefs) {
+  RegisterSet s;
+  s.expand({RegClass::VGPR, 1, 1});
+  s.expand({RegClass::PC, 5, 2});
+
+  // for_each visits the ordinary lane first, then the special as a canonical
+  // {cls, 0, 1} ref regardless of the index/width it was inserted with.
+  std::vector<RegisterRef> seen;
+  s.for_each([&](RegisterRef r) { seen.push_back(r); });
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0], (RegisterRef{RegClass::VGPR, 1, 1}));
+  EXPECT_EQ(seen[1], (RegisterRef{RegClass::PC, 0, 1}));
+
+  // for_each_ordinary skips the special member entirely.
+  std::vector<RegisterRef> ordinary;
+  s.for_each_ordinary([&](RegisterRef r) { ordinary.push_back(r); });
+  EXPECT_EQ(ordinary, (std::vector<RegisterRef>{{RegClass::VGPR, 1, 1}}));
+}
+
+TEST(RegisterSetSpecial, OrdinaryOnlyDropsSpecialMembers) {
+  RegisterSet s;
+  s.expand({RegClass::SGPR, 3, 1});
+  s.expand({RegClass::SCC, 0, 1});
+
+  const RegisterSet ordinary = s.ordinary_only();
+  EXPECT_FALSE(ordinary.has_specials());
+  EXPECT_EQ(ordinary.size(), 1u);
+  EXPECT_TRUE(ordinary.contains({RegClass::SGPR, 3, 1}));
+  EXPECT_TRUE(s.has_specials()); // source unchanged
+}
+
+TEST(RegisterSetSpecial, SetAlgebraSpansOrdinaryAndSpecial) {
+  RegisterSet a;
+  a.expand({RegClass::SGPR, 0, 1});
+  a.expand({RegClass::EXEC, 0, 1});
+  RegisterSet b;
+  b.expand({RegClass::SGPR, 1, 1});
+  b.expand({RegClass::EXEC, 0, 1});
+  b.expand({RegClass::VCC, 0, 1});
+
+  EXPECT_TRUE(a.intersects(b)); // shared EXEC
+
+  const RegisterSet u = a | b;
+  EXPECT_EQ(u.size(), 4u); // s0, s1, EXEC, VCC
+  EXPECT_EQ(specials_in(u), special_regs({RegClass::EXEC, RegClass::VCC}));
+
+  const RegisterSet i = a & b;
+  EXPECT_EQ(specials_in(i), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(i.contains({RegClass::SGPR, 0, 1})); // s0 only in a
+
+  const RegisterSet d = b - a; // removes shared EXEC; keeps VCC and s1
+  EXPECT_EQ(specials_in(d), special_regs({RegClass::VCC}));
+  EXPECT_TRUE(d.contains({RegClass::SGPR, 1, 1}));
+
+  RegisterSet cleared = u;
+  cleared.clear_class(RegClass::EXEC);
+  EXPECT_EQ(specials_in(cleared), special_regs({RegClass::VCC}));
+  EXPECT_EQ(cleared.ordinary_size(), 2u); // clear_class(special) leaves ordinary intact
+}
+
+TEST(RegisterSetSpecial, EqualityDistinguishesSpecialMembership) {
+  RegisterSet a;
+  a.expand({RegClass::SGPR, 0, 1});
+  RegisterSet b = a;
+  EXPECT_EQ(a, b);
+  b.expand({RegClass::EXEC, 0, 1});
+  EXPECT_NE(a, b); // the special mask participates in equality
+}
+
+TEST(RegisterSetSpecial, HighValuedSpecialMaskBitsRoundTrip) {
+  // FLAT_SCRATCH and PC are the highest RegClass values, where a mask-width bug
+  // would first surface.
+  RegisterSet s;
+  s.expand({RegClass::FLAT_SCRATCH, 0, 1});
+  s.expand({RegClass::PC, 0, 1});
+  EXPECT_EQ(specials_in(s), special_regs({RegClass::FLAT_SCRATCH, RegClass::PC}));
+  EXPECT_FALSE(s.contains({RegClass::SGPR, 0, 1})); // no aliasing onto bit 0
+}
+
+TEST(InstDefUseSpecialEffects, SpecialDefaultEmpty) {
+  // A decoded instruction with only ordinary operands reports no special
+  // members; ordinary def/use extraction is unchanged.
+  TestInstruction inst("test_sp", {{RegClass::SGPR, 4, 1}}, {{RegClass::VGPR, 0, 1}});
+  InstDefUse du(inst);
+
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_FALSE(du.uses.has_specials());
+}
+
+TEST(InstDefUseSpecialEffects, SpecialMembersStayOutOfOrdinaryProjection) {
+  // Special singletons live in defs/uses alongside ordinary registers, but the
+  // ordinary projection that drives scratch allocation is unaffected.
+  TestInstruction inst("test_sp", {{RegClass::SGPR, 4, 1}}, {});
+  InstDefUse du(inst);
+
+  du.defs.expand({RegClass::EXEC, 0, 1});
+  du.uses.expand({RegClass::VCC, 0, 1});
+
+  EXPECT_EQ(du.defs.ordinary_size(), 1u);
+  EXPECT_TRUE(du.defs.ordinary_only().contains({RegClass::SGPR, 4, 1}));
+  EXPECT_FALSE(du.defs.ordinary_only().has_specials());
+  EXPECT_TRUE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::VCC, 0, 1}));
+}
+
+TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
+  // Real decoded instruction: s_and_saveexec_b64 s[0:1], s[0:1] (CDNA4). Its
+  // fieldless special operands become singleton members of defs/uses by
+  // direction:
+  //   dst EXEC + dst SCC  -> special members of defs
+  //   src EXEC (old exec) -> special member of uses
+  // while the ordinary sdst/ssrc0 SGPRs stay in the same sets as ordinary
+  // members. The ordinary projection (ordinary_only) sees only the SGPRs.
+  const uint32_t words[] = {0xBE802000u, 0x00000000u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_and_saveexec_b64");
+
+  InstDefUse du(*inst);
+
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC, RegClass::SCC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::EXEC}));
+
+  // Ordinary sdst/ssrc0 (s[0:1]) still tracked as ordinary registers.
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 0, 2}));
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 2}));
+
+  // EXEC/SCC are members of du.defs but stay out of the ordinary projection
+  // that feeds scratch allocation.
+  EXPECT_TRUE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_FALSE(du.defs.ordinary_only().has_specials());
+}
+
+// Counterpart to the fieldless case above: a special register named through a
+// *generic selector* field (s_mov_b32 exec_lo/exec_hi, where EXEC_LO/HI are
+// encoding values 126/127 in the OPR_SDST selector) decodes to a special
+// RegisterRef, but its class-wide singleton representation would collapse the
+// LO/HI halves. InstDefUse deliberately drops such selector-encoded specials
+// rather than record them imprecisely, so EXEC appears in neither defs nor uses.
+TEST(SpecialEffectAnalysis, SelectorEncodedExecWriteIsNotSurfaced) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const uint32_t word :
+       {0xbefe0080u /* s_mov_b32 exec_lo, 0 */, 0xbeff0080u /* s_mov_b32 exec_hi, 0 */}) {
+    const std::array<uint32_t, 2> words{word, 0u};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "s_mov_b32") << std::hex << word;
+
+    InstDefUse du(*inst);
+    EXPECT_FALSE(du.defs.has_specials()) << std::hex << word;
+    EXPECT_FALSE(du.uses.has_specials()) << std::hex << word;
+    // The dropped EXEC ref must not leak into the ordinary files either.
+    EXPECT_EQ(du.defs.ordinary_size(), 0u) << std::hex << word;
+  }
+}
+
+// The selector-drop policy must also cover implicit reads. s_cvt_f16_f32 writes
+// the low 16 bits of sdst and preserves the high half, so its generated
+// implicit_uses() hook surfaces a preserve-read of sdst via to_register_ref().
+// With an ordinary sdst that read is a real ordinary use; with a selector-encoded
+// special sdst (exec_lo) it collapses to a class-wide EXEC singleton and must be
+// dropped, or EXEC would be used-but-never-defined (the explicit dst path already
+// drops the selector-encoded def).
+TEST(SpecialEffectAnalysis, ImplicitPreserveReadDropsSelectorEncodedSpecial) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  // Ordinary destination: the implicit preserve-read of s4 is a real use.
+  {
+    const auto built = rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 4});
+    const std::array<uint32_t, 2> words{built[0], 0u};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "s_cvt_f16_f32");
+
+    InstDefUse du(*inst);
+    EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 4, 1}));
+    EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 1}));
+    EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1})); // preserve-read via the hook
+    EXPECT_FALSE(du.defs.has_specials());
+    EXPECT_FALSE(du.uses.has_specials());
+  }
+
+  // Selector-encoded exec_lo destination (OPR_SDST value 126): the preserve-read
+  // decodes to a class-wide EXEC ref and must be dropped from uses, and the def
+  // is likewise dropped, leaving no special members and no ordinary destination.
+  {
+    const auto built = rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 126});
+    const std::array<uint32_t, 2> words{built[0], 0u};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "s_cvt_f16_f32");
+
+    InstDefUse du(*inst);
+    EXPECT_FALSE(du.uses.has_specials());
+    EXPECT_FALSE(du.defs.has_specials());
+    EXPECT_EQ(du.defs.ordinary_size(), 0u); // selector-encoded dst dropped
+    EXPECT_EQ(du.uses.ordinary_size(), 1u); // only the ordinary ssrc0 (s0) remains
+    EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 1}));
+  }
+}
+
+TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
+  // A plain vector op with only ordinary register operands exposes no special
+  // effects -- both special sets stay empty.
+  constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, kWritelaneV141S4Lane2.data()));
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse du(*inst);
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_FALSE(du.uses.has_specials());
+}
+
+// Decode-time special-effect coverage for the hidden-side-effect instruction
+// families. Encodings are built through the generated per-ISA encoders so they
+// cannot silently drift, and each case locks the operand-driven special
+// defs/uses so a change elsewhere cannot alter them unnoticed.
+
+// V_CMPX writes EXEC on every ISA, and additionally VCC on CDNA/GFX9 (its
+// operand list carries a VCC destination). gfx1250 is EXEC-only, so the same
+// mnemonic has a genuinely different side-effect set across ISAs.
+TEST(SpecialEffectAnalysis, CmpxWritesVccAndExecOnCdna) {
+  const auto built = cdna3::build_vopc(cdna3::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC, RegClass::VCC}));
+  EXPECT_FALSE(du.uses.has_specials());
+}
+
+TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnGfx1250) {
+  const auto built = cdna5::build_vopc(cdna5::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(du.uses.has_specials());
+}
+
+// RDNA CMPX is EXEC-only like gfx1250 (and unlike CDNA), tested directly on an
+// RDNA target rather than inferred from the CDNA-family gfx1250.
+TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnRdna) {
+  const auto built = rdna4::build_vopc(rdna4::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_eq_f32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(du.uses.has_specials());
+}
+
+// s_cbranch_{scc,vcc,exec}* read a special condition register and branch. The
+// condition operand is a special use; nothing is defined.
+TEST(SpecialEffectAnalysis, CbranchSccIsSpecialSccUse) {
+  const uint32_t word = cdna3::build_sopp(cdna3::kSCbranchScc0Sopp, {.simm16 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_cbranch_scc0");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::SCC}));
+  EXPECT_FALSE(du.defs.has_specials());
+}
+
+TEST(SpecialEffectAnalysis, CbranchVccIsSpecialVccUse) {
+  const uint32_t word = cdna3::build_sopp(cdna3::kSCbranchVcczSopp, {.simm16 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_cbranch_vccz");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::VCC}));
+  EXPECT_FALSE(du.defs.has_specials());
+}
+
+TEST(SpecialEffectAnalysis, CbranchExecIsSpecialExecUse) {
+  const uint32_t word = cdna3::build_sopp(cdna3::kSCbranchExeczSopp, {.simm16 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_cbranch_execz");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::EXEC}));
+  EXPECT_FALSE(du.defs.has_specials());
+}
+
+// VOP2 carry reads and writes VCC implicitly. The mnemonic differs by ISA
+// (CDNA/GFX9 v_addc_co_u32 vs RDNA/gfx1250 v_add_co_ci_u32) but both expose the
+// same VCC carry-in use and carry-out def.
+TEST(SpecialEffectAnalysis, Vop2CarryCdnaAddcUsesAndDefsVcc) {
+  const auto built =
+      cdna3::build_vop2(cdna3::kVAddcCoU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_addc_co_u32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::VCC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::VCC}));
+  EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 2, 1})); // ordinary vdst still tracked
+}
+
+TEST(SpecialEffectAnalysis, Vop2CarryGfx1250AddCoCiUsesAndDefsVcc) {
+  const auto built =
+      cdna5::build_vop2(cdna5::kVAddCoCiU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
+  const std::array<uint32_t, 2> words{built[0], 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_add_co_ci_u32_e32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::VCC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::VCC}));
+}
+
+// PC family: getpc reads PC (writes an ordinary SGPR pair), setpc writes PC
+// (reads an ordinary SGPR pair), s_call does both.
+TEST(SpecialEffectAnalysis, GetpcReadsPc) {
+  const uint32_t word = cdna3::build_sop1(0x1c, {.ssrc0 = 0, .sdst = 8})[0]; // s_getpc_b64 s[8:9]
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_getpc_b64");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::PC}));
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(SpecialEffectAnalysis, SetpcWritesPc) {
+  const uint32_t word = cdna3::build_sop1(0x1d, {.ssrc0 = 8, .sdst = 0})[0]; // s_setpc_b64 s[8:9]
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_setpc_b64");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::PC}));
+  EXPECT_FALSE(du.uses.has_specials());
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(SpecialEffectAnalysis, ScallReadsAndWritesPc) {
+  const uint32_t word = build_s_call_b64(8, 0); // s_call_b64 s[8:9], <rel>
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_call_b64");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::PC}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::PC}));
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 2}));
+}
+
+// M0 family: s_movrels_b32 reads M0 as its relative index (special use), while
+// s_set_gpr_idx_idx both reads M0 and writes it back (special use and def). The
+// M0 operand is fieldless on both, so it surfaces only through the special path.
+TEST(SpecialEffectAnalysis, MovrelsReadsM0) {
+  const uint32_t word = cdna3::build_sop1(cdna3::kSMovrelsB32Sop1, {.ssrc0 = 0, .sdst = 8})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_movrels_b32");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::M0}));
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 8, 1})); // ordinary sdst still tracked
+}
+
+TEST(SpecialEffectAnalysis, SetGprIdxIdxReadsAndWritesM0) {
+  const uint32_t word = cdna3::build_sop1(cdna3::kSSetGprIdxIdxSop1, {.ssrc0 = 0})[0];
+  const std::array<uint32_t, 2> words{word, 0u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_set_gpr_idx_idx");
+
+  InstDefUse du(*inst);
+  EXPECT_EQ(specials_in(du.defs), special_regs({RegClass::M0}));
+  EXPECT_EQ(specials_in(du.uses), special_regs({RegClass::M0}));
+}
+
+// A buffer load's fieldless GPUMEM operand is inert: it yields neither a special
+// register class nor an ordinary register ref, so it contributes nothing to
+// defs/uses.
+TEST(SpecialEffectAnalysis, MemoryPseudoOperandProducesNoSpecialEffect) {
+  const auto words = cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer, {.vdata = 1, .rsrc = 0});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "buffer_load_b32");
+
+  InstDefUse du(*inst);
+  EXPECT_FALSE(du.defs.has_specials());
+  EXPECT_FALSE(du.uses.has_specials());
+}
+
+// Liveness models ordinary scratch registers only: an instruction's special
+// def/use appears in InstDefUse but must never reach BlockLiveness or
+// live_before(), which drive scratch allocation.
+TEST(SpecialEffectLiveness, SpecialEffectsAreAbsentFromOrdinaryLiveness) {
+  // s_and_saveexec_b64 s[0:1], s[0:1] defs {s[0:1], EXEC, SCC} and uses
+  // {s[0:1], EXEC}; s_endpgm terminates the single block.
+  std::vector<uint32_t> words = {
+      0xBE802000u, // s_and_saveexec_b64 s[0:1], s[0:1]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  BasicBlock *entry = block_starting_at(blocks, 0);
+  ASSERT_NE(entry, nullptr);
+  auto &insts = entry->instructions();
+  ASSERT_NE(insts.begin(), insts.end());
+  const Instruction &saveexec = *insts.begin();
+  ASSERT_EQ(saveexec.mnemonic(), "s_and_saveexec_b64");
+
+  // InstDefUse records the special effects.
+  const InstDefUse du(saveexec);
+  EXPECT_TRUE(du.defs.contains({RegClass::EXEC, 0, 1}));
+  EXPECT_TRUE(du.defs.contains({RegClass::SCC, 0, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::EXEC, 0, 1}));
+
+  // Liveness projects them out of every ordinary set.
+  const LivenessAnalysis liveness = analyze_scope(blocks);
+  const BlockLiveness &bl = liveness.block_liveness(*entry);
+  EXPECT_FALSE(bl.live_in.has_specials());
+  EXPECT_FALSE(bl.live_out.has_specials());
+  EXPECT_FALSE(bl.gen.has_specials());
+  EXPECT_FALSE(bl.kill.has_specials());
+  EXPECT_FALSE(liveness.live_before(saveexec).has_specials());
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
@@ -2554,9 +3175,11 @@ TEST(CfgAnalysis, Gfx1250ModeBit27DoesNotInvalidateExactCalleeSummary) {
       cdna5::build_sopk(cdna5::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnable, .sdst = 0});
   constexpr auto ordinary_write = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 2});
 
-  for (std::vector<uint32_t> callee :
-       {std::vector<uint32_t>{enable_with_literal[0], 1u, ordinary_write[0]},
-        std::vector<uint32_t>{enable_dynamically[0], ordinary_write[0]}}) {
+  const std::array<std::pair<std::vector<uint32_t>, bool>, 2> cases{{
+      {{enable_with_literal[0], 1u, ordinary_write[0]}, true},
+      {{enable_dynamically[0], ordinary_write[0]}, false},
+  }};
+  for (const auto &[callee, expect_recovery] : cases) {
     std::vector<uint32_t> words = {
         0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
         0xA980FE00u, 56u,
@@ -2590,8 +3213,12 @@ TEST(CfgAnalysis, Gfx1250ModeBit27DoesNotInvalidateExactCalleeSummary) {
           continuation_fixup = &fixup;
       }
     }
-    ASSERT_NE(continuation_fixup, nullptr);
-    EXPECT_EQ(continuation_fixup->source_target_offset, 60u);
+    if (expect_recovery) {
+      ASSERT_NE(continuation_fixup, nullptr);
+      EXPECT_EQ(continuation_fixup->source_target_offset, 60u);
+    } else {
+      EXPECT_EQ(continuation_fixup, nullptr);
+    }
   }
 }
 
@@ -3025,9 +3652,9 @@ TEST(CfgAnalysis, Gfx1250A0UsesLowByteOfVgprMsb) {
 }
 
 TEST(CfgAnalysis, Gfx1250ImmediateModeWriteKeepsLaneStashBankKnown) {
-  // The hipTensor dispatcher writes WAVE_MODE bit 25 before restoring a
-  // PC from fixed VGPR lanes. The write is disjoint from MODE.VGPR_MSB, so a
-  // lane stash in bank one remains in physical v300 and is still recoverable.
+  // The hipTensor dispatcher writes WAVE_MODE bit 25 before restoring a PC
+  // from fixed VGPR lanes. gfx1250 also takes VGPR-MSB from source bits[12:19],
+  // so the immediate must carry the existing bank-one layout there.
   constexpr auto set_dst_src0_bank_one =
       cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
   constexpr uint16_t kModeBit25Hwreg = 1u | (25u << 6);
@@ -3035,16 +3662,16 @@ TEST(CfgAnalysis, Gfx1250ImmediateModeWriteKeepsLaneStashBankKnown) {
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBit25Hwreg});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u,
-      60u,
+      0xA980FE00u, 60u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
-      set_dst_src0_bank_one[0],
-      0xD761002Cu,
+      set_dst_src0_bank_one[0], 0xD761002Cu,
       0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
       0xD761002Cu,
       0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
       set_mode_bit25[0],
-      1u, // 0x24: s_setreg_imm32_b32 hwreg(WAVE_MODE, 25, 1), 1.
+      1u | (static_cast<uint32_t>(amdgpu::set_vgpr_msb_to_mode_layout(0x41))
+            << amdgpu::VGPR_MSB_MODE_SHIFT),
+      // 0x24: set MODE bit 25 while preserving the bank-one layout in source bits[12:19].
       0xD7600000u,
       0x0201012Cu, // 0x2c: v_readlane_b32 s0, physical v300, 0.
       0xD7600001u,
@@ -3743,11 +4370,15 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
 ///
 /// @details Mirrors BasicBlock::build's decode loop, including its skip of zero alignment padding,
 /// so a fixture written as raw encodings reaches the pass the same way real `.text` does.
-void run_indirect_discovery_for_test(std::vector<uint32_t> words,
-                                     std::vector<PcAddressBuilder> *builders) {
+std::vector<IndirectCallFixup>
+run_indirect_discovery_for_test(std::vector<uint32_t> words,
+                                std::vector<PcAddressBuilder> *builders,
+                                rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID) {
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-  ASSERT_NE(decoder, nullptr);
+  EXPECT_NE(decoder, nullptr);
+  if (decoder == nullptr)
+    return {};
 
   const auto *sec = co.text_sections().front();
   const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
@@ -3760,7 +4391,9 @@ void run_indirect_discovery_for_test(std::vector<uint32_t> words,
       continue;
     }
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &inst_data[pc], byte_offset));
-    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst, nullptr);
+    if (inst == nullptr)
+      return {};
     const uint32_t inst_words = static_cast<uint32_t>(inst->size()) / sizeof(uint32_t);
     byte_offset += inst->size();
     pc += inst_words;
@@ -3773,9 +4406,233 @@ void run_indirect_discovery_for_test(std::vector<uint32_t> words,
   const auto text =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
 
-  (void)discover_indirect_branch_edges(
+  return discover_indirect_branch_edges(
       std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
-      ROCJITSU_CODE_ARCH_CDNA5, {}, ExternalEntryPolicy::InferPredecessorless, builders);
+      ROCJITSU_CODE_ARCH_CDNA5, {}, ExternalEntryPolicy::InferPredecessorless, builders, {}, {},
+      target);
+}
+
+TEST(IndirectBranchDiscovery, ConcreteTargetControlsModeWriteLaneStashMapping) {
+  constexpr auto set_dst_src0_bank_one =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
+  constexpr uint16_t kModeBit25Hwreg = 1u | (25u << 6);
+  constexpr auto set_mode_bit25 =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBit25Hwreg});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      60u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
+      set_dst_src0_bank_one[0],
+      0xD761002Cu,
+      0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
+      set_mode_bit25[0],
+      1u, // gfx1251 ordinary slice write preserves VGPR-MSB; gfx1250 clobbers it to zero.
+      0xD7600000u,
+      0x0201012Cu, // 0x2c: v_readlane_b32 s0, physical v300, 0.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x34: v_readlane_b32 s1, physical v300, 1.
+      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: target/continuation.
+  };
+
+  const auto gfx1250_fixups =
+      run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(gfx1250_fixups.empty());
+  const auto mismatched_target_fixups =
+      run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1200);
+  EXPECT_TRUE(mismatched_target_fixups.empty())
+      << "a target from another architecture must use the fail-closed CDNA5 default";
+
+  const auto gfx1251_fixups =
+      run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1251);
+  ASSERT_EQ(gfx1251_fixups.size(), 1u);
+  EXPECT_EQ(gfx1251_fixups[0].source_target_offset, 64u);
+}
+
+TEST(IndirectBranchDiscovery, InterveningLaneWriteConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      60u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
+      setreg[0],
+      0u, // 0x10: s_setreg_imm32_b32 MODE, 0; arms the next-instruction hazard.
+      0xD761002Cu,
+      0x02010000u, // 0x18: v_writelane_b32 physical v44, s0, 0; consumes the hazard.
+      0xD761002Cu,
+      0x02010201u,             // 0x20: v_writelane_b32 physical v44, s1, 1.
+      select_src0_bank_one[0], // 0x28: executes and selects physical v300 for readlane.
+      0xD7600000u,
+      0x0201012Cu, // 0x2c: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x34: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty())
+      << "the lane write must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, InterveningLaneReadConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      68u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(68) -> target 0x48.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 physical v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 physical v44, s1, 1.
+      setreg[0],
+      0u, // 0x20: s_setreg_imm32_b32 MODE, 0; arms the next-instruction hazard.
+      0xD7600002u,
+      0x0201012Cu,             // 0x28: s2 <- physical v44 lane 0; consumes the hazard.
+      select_src0_bank_one[0], // 0x30: executes and selects physical v300 for readlane.
+      0xD7600000u,
+      0x0201012Cu, // 0x34: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x3c: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x44: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x48: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty())
+      << "the lane read must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, InterveningGetPcConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr auto getpc_s2 = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 2});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      64u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(64) -> target 0x44.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 physical v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 physical v44, s1, 1.
+      setreg[0],
+      0u,                      // 0x20: s_setreg_imm32_b32 MODE, 0.
+      getpc_s2[0],             // 0x28: s_get_pc_i64 s[2:3]; consumes the hazard.
+      select_src0_bank_one[0], // 0x2c: executes and selects physical v300 for readlane.
+      0xD7600000u,
+      0x0201012Cu, // 0x30: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x38: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x40: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x44: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty()) << "get-PC must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, InterveningPairUpdateConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      setreg[0],
+      0u, // 0x04: s_setreg_imm32_b32 MODE, 0.
+      0xA980FE00u,
+      60u,
+      0u,                      // 0x0c: s_add_nc_u64 ..., lit64(60); consumes the hazard.
+      select_src0_bank_one[0], // 0x18: executes; DST bank 0 and SRC0 bank 1.
+      0xD761002Cu,
+      0x02010000u, // 0x1c: v_writelane_b32 physical v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x24: v_writelane_b32 physical v44, s1, 1.
+      0xD7600000u,
+      0x0201012Cu, // 0x2c: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x34: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty())
+      << "the pair update must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, DirectCallConsumesSetregHazardBeforeCalleeEntry) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto select_dst_src0_bank_one =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      select_dst_src0_bank_one[0], // 0x00: select physical v300 for write and read roles.
+      0xBE804700u,                 // 0x04: s_get_pc_i64 s[0:1].
+      0xA980FE00u, 68u,
+      0u, // 0x08: s_add_nc_u64 ..., lit64(68) -> target 0x4c.
+      0xD761002Cu,
+      0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
+      setreg[0],
+      0u, // 0x24: s_setreg_imm32_b32 MODE, 0; switches to bank zero and arms the hazard.
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA5),
+      // 0x2c: direct call consumes the hazard and targets 0x34.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x30: continuation.
+      select_src0_bank_one[0],                  // 0x34: executes in the callee.
+      0xD7600000u,
+      0x0201012Cu, // 0x38: s0 <- the physical v300 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x40: s1 <- the physical v300 stash.
+      0xBE824900u,                              // 0x48: s_swap_pc_i64 s[2:3], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x4c: target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  ASSERT_EQ(fixups.size(), 1u)
+      << "the direct call must not carry its caller's adjacency hazard into the callee";
+  EXPECT_EQ(fixups[0].source_target_offset, 76u);
+}
+
+TEST(IndirectBranchDiscovery, InferredEntryClearsSetregAdjacencyHazard) {
+  constexpr auto set_dst_src0_bank_one =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
+  const std::vector<uint32_t> words = {
+      set_dst_src0_bank_one[0],
+      0xBE804700u, // 0x04: s_get_pc_i64 s[0:1], PC=8.
+      0xA980FE00u,
+      56u,
+      0u, // 0x08: s_add_nc_u64 ..., lit64(56) -> target 0x40.
+      0xD761002Cu,
+      0x02010000u, // 0x14: v44 lane 0 <- s0 in destination bank one.
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v44 lane 1 <- s1 in destination bank one.
+      0xD7600000u,
+      0x0201012Cu, // 0x24: s0 <- v44 lane 0 from source-zero bank one.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x2c: s1 <- v44 lane 1.
+      0xBE9E4900u,                              // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x38: continuation.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: padding.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: indirect target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  ASSERT_EQ(fixups.size(), 1u);
+  EXPECT_EQ(fixups[0].source_target_offset, 64u);
 }
 
 TEST(IndirectBranchDiscovery, ReusedPairPublishesTheCompletedBuilderItReplaces) {
@@ -4435,9 +5292,9 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), 0);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), 0);
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 0);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src1), std::nullopt);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src2), std::nullopt);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
   for (uint16_t bank = 0; bank < 4; ++bank)
     EXPECT_TRUE(liveness.is_live_before(
         *instruction, {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}));
@@ -4451,7 +5308,9 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeSrc0Hwreg});
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
-  TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u, move[0], end[0]});
+  constexpr uint32_t kLiteral = static_cast<uint32_t>(amdgpu::set_vgpr_msb_to_mode_layout(2))
+                                << amdgpu::VGPR_MSB_MODE_SHIFT;
+  TestCodeObject co({dynamic_setreg[0], literal_setreg[0], kLiteral, move[0], end[0]});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
@@ -4473,6 +5332,78 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
   EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAfterSetregModeIsIgnored) {
+  constexpr uint8_t kClobberedModeLayout = 0xA5;
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto literal_setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr auto dropped_set_vgpr_msb =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0xC3});
+  constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  constexpr uint32_t kLiteral = static_cast<uint32_t>(kClobberedModeLayout)
+                                << amdgpu::VGPR_MSB_MODE_SHIFT;
+  TestCodeObject co({literal_setreg[0], kLiteral, dropped_set_vgpr_msb[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  ASSERT_EQ(std::string_view(instruction.operator*().mnemonic()), "v_mov_b32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1)
+      << "the adjacent s_set_vgpr_msb must not replace the bank from source bits[12:19]";
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 257, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAcrossFallthroughBlockIsIgnored) {
+  constexpr uint8_t kClobberedModeLayout = 0xA5;
+  constexpr auto literal_setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto dropped_set_vgpr_msb =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0xC3});
+  constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  constexpr uint32_t kLiteral = static_cast<uint32_t>(kClobberedModeLayout)
+                                << amdgpu::VGPR_MSB_MODE_SHIFT;
+  TestCodeObject co({literal_setreg[0], kLiteral, dropped_set_vgpr_msb[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> kSecondBlock{8};
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, kSecondBlock);
+  ASSERT_EQ(blocks.size(), 2u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks[1]->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks[1]->instructions().end());
+  ASSERT_EQ(std::string_view(instruction.operator*().mnemonic()), "v_mov_b32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1)
+      << "a fallthrough block boundary must not break physical instruction adjacency";
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 257, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
 }
 
 TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
@@ -4518,7 +5449,7 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), std::nullopt);
 }
 
-TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWritePreservesUntouchedBankBit) {
+TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteClobbersAllBankBits) {
   constexpr auto set_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
   constexpr uint16_t kModeSrc0HighBitHwreg = 1u | (15u << 6);
   constexpr auto literal_setreg =
@@ -4544,11 +5475,11 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWritePreservesUntouchedBankBit) 
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(instruction.operator*().mnemonic(), "v_mov_b32_e32");
-  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 3);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1}));
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
 }
 
-TEST(LivenessAnalysis, Gfx1250ImmediateModeWritePreservesBanksOutsideRequestedSlice) {
+TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteClobbersBanksOutsideRequestedSlice) {
   constexpr auto set_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
   // Request a write to MODE bit zero, disjoint from MODE.VGPR_MSB.
   constexpr uint16_t kModeBitZeroHwreg = 1u;
@@ -4574,6 +5505,35 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWritePreservesBanksOutsideRequestedSl
   auto instruction = blocks.front()->instructions().begin();
   std::advance(instruction, 2);
   ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 0);
+}
+
+TEST(LivenessAnalysis, Gfx1251ImmediateModeWritePreservesBanksOutsideRequestedSlice) {
+  constexpr auto set_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr uint16_t kModeBitZeroHwreg = 1u;
+  constexpr auto literal_setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
+  constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  TestCodeObject co({set_bank_one[0], literal_setreg[0], 0u, move[0], end[0]});
+  auto decoder = Decoder::create(default_isa_target_registry(), ROCJITSU_CODE_TARGET_GFX1251);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.target = ROCJITSU_CODE_TARGET_GFX1251;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  std::advance(instruction, 2);
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 1);
 }
 
@@ -4582,7 +5542,7 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
   constexpr auto literal_setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
   // MODE[19:12] is {src2=3, src1=2, src0=1, dst=0}.
-  constexpr uint32_t kModeFields = 0xe4u;
+  constexpr uint32_t kModeFields = 0xe4u << amdgpu::VGPR_MSB_MODE_SHIFT;
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({literal_setreg[0], kModeFields, move[0], end[0]});
@@ -4697,6 +5657,54 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_TRUE(liveness.is_live_before(joined_move, {RegClass::VGPR, 513, 1}));
   EXPECT_FALSE(liveness.is_live_before(joined_move, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250MaybeHazardPreservesOnlyPostSetAgreeingBanks) {
+  constexpr auto branch_to_set = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 2});
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  // The armed path drops S_SET_VGPR_MSB with SRC0=1 and SRC1=0. The clear path executes it with
+  // SRC0=1 and SRC1=2. SRC0 therefore remains known at bank one while SRC1 becomes ambiguous.
+  constexpr uint8_t kDroppedBanks = 0x01;
+  constexpr uint8_t kExecutedBanks = 0x09;
+  constexpr uint32_t kSetregLiteral =
+      static_cast<uint32_t>(amdgpu::set_vgpr_msb_to_mode_layout(kDroppedBanks))
+      << amdgpu::VGPR_MSB_MODE_SHIFT;
+  constexpr auto maybe_dropped_set =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = kExecutedBanks});
+  constexpr auto add =
+      cdna5::build_vop2(cdna5::kVAddNcU32Vop2, {.src0 = 257, .vsrc1 = 2, .vdst = 0});
+  constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  TestCodeObject co(
+      {branch_to_set[0], setreg[0], kSetregLiteral, maybe_dropped_set[0], add[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  auto scope = block_scope(blocks);
+  BasicBlock *join = block_starting_at(blocks, 12);
+  ASSERT_NE(join, nullptr);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto joined = join->instructions().begin();
+  ASSERT_NE(joined, join->instructions().end());
+  ++joined;
+  ASSERT_NE(joined, join->instructions().end());
+  ASSERT_EQ(joined.operator*().mnemonic(), "v_add_nc_u32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src0), 1);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src1), std::nullopt);
+  EXPECT_TRUE(liveness.is_live_before(*joined, {RegClass::VGPR, 257, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*joined, {RegClass::VGPR, 1, 1}));
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        *joined, {RegClass::VGPR, static_cast<uint16_t>(2 + bank * 256), 1}));
 }
 
 TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
@@ -5292,6 +6300,29 @@ TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
   EXPECT_EQ(gfx1250.find_free_run(&use, 1), 256);
 }
 
+TEST(LivenessAnalysis, FreeVgprAllocationRejectsUnnameableRunWidth) {
+  // A candidate run is tested as one RegisterRef, whose width is a uint8_t.
+  // These queries take the width as a uint16_t, so a wider run is expressible
+  // and must fail closed: truncating 256 to 0 would test only the run's first
+  // lane and hand back a base whose other 255 lanes were never checked.
+  auto blocks = build_test_blocks({TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const Instruction &use = *blocks[0]->instructions().begin();
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+
+  LivenessAnalysisOptions options;
+  options.max_free_vgpr = 1024;
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  // v0 is live and globally used, so the widest nameable run starts at v1. The
+  // 255/256 pair is what separates the width gate from an ordinary no-fit.
+  EXPECT_EQ(liveness.find_free_run(&use, 255), 1);
+  EXPECT_EQ(liveness.find_free_run(&use, 256), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 255, 0, 1, 1024), 1);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 256, 0, 1, 1024), std::nullopt);
+}
+
 TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
   auto scope = block_scope(blocks);
@@ -5749,7 +6780,7 @@ constexpr uint32_t kVop3DppFi = 1u << 18;
 // decode when a caller supplies fewer words than the decoded length.
 std::unique_ptr<Instruction> decode_rdna4(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
@@ -6013,14 +7044,14 @@ TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
 // stays 0 (v0).
 std::unique_ptr<Instruction> decode_cdna3(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
 
 std::unique_ptr<Instruction> decode_cdna1(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }

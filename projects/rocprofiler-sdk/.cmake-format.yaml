@@ -315,6 +315,8 @@ parse:
         - WILL_FAIL
         - UNSTABLE
         - DISABLED_CODECOV
+        - DISABLED_NO_KFD
+        - WSL_TIMEOUT_SCALE
       kwargs:
         TARGET: '*'
         WORKING_DIRECTORY: '*'
@@ -340,6 +342,7 @@ parse:
         - WILL_FAIL
         - UNSTABLE
         - DISABLED_CODECOV
+        - DISABLED_NO_KFD
         - STRIP_PARAM_BRACKETS
         - INCLUDE_FILE_NAME
         - BUNDLE_TESTS
@@ -367,6 +370,19 @@ parse:
         PASS_REGULAR_EXPRESSION: '*'
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
+    rocprofiler_add_integration_cleanup_test:
+      kwargs:
+        DIRECTORIES: '*'
+        FILES: '*'
+        LABELS: '*'
+        FIXTURES_SETUP: '*'
+    add_signal_handler_test:
+      kwargs:
+        PROCESS_TYPE: '*'
+        VALIDATE_EXPECT: '*'
+        PASS_REGEX: '*'
+        APP_EXTRA_FLAGS: '*'
+        ROCPROFV3_EXTRA_FLAGS: '*'
   override_spec: {}
   vartags: []
   proptags: []

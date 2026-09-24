@@ -10,7 +10,8 @@ ROCprofiler-SDK documentation
 
 ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software.
 It supports application tracing to provide a big picture of the GPU application execution and kernel counter collection to provide low-level hardware details from the performance counters.
-The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging.
+The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging. To learn more, see
+:doc:`What is ROCprofiler-SDK? <what-is-rocprofiler-sdk>`
 
 You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing HIP applications on ROCm software.
 
@@ -52,7 +53,10 @@ The documentation is structured as follows:
       * :ref:`using-pc-sampling`
       * :ref:`cdna3-cdna4-pc-sampling`
       * :ref:`using-thread-trace`
+      * :ref:`using-rocprofv3-on-wsl`
       * :ref:`using-spm`
+      * :ref:`using-kernel-replay`
+      * :ref:`using-kernel-replay-rocprofv3`
       * :doc:`Samples <how-to/samples>`
 
    .. grid-item-card:: API reference
@@ -66,12 +70,14 @@ The documentation is structured as follows:
       * :doc:`PC sampling <api-reference/pc_sampling>`
       * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
       * :doc:`Streaming Performance Monitor (SPM) <api-reference/spm>`
+      * :doc:`Kernel replay (experimental) <api-reference/kernel_replay>`
       * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
       * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
 
    .. grid-item-card:: Conceptual
 
       * :ref:`comparing-with-legacy-tools`
+      * :ref:`kernel-replay-conceptual`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

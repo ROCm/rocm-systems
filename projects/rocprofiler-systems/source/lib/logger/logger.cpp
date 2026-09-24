@@ -3,15 +3,13 @@
 
 #include "logger.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <string>
 #include <string_view>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace logger_detail
+namespace rocprofsys::logger_detail
 {
 std::string
 include_process_id_in_filename(std::string_view filename)
@@ -28,5 +26,4 @@ include_process_id_in_filename(std::string_view filename)
     return fmt::format("{}_{}{}", filename.substr(0, dot_pos), getpid(),
                        filename.substr(dot_pos));
 }
-}  // namespace logger_detail
-}  // namespace rocprofsys
+}  // namespace rocprofsys::logger_detail

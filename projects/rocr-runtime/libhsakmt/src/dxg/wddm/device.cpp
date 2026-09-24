@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cinttypes>
+#include <algorithm>
 #include <bitset>
 
 #if defined(__linux__)
@@ -61,8 +62,6 @@
 namespace wsl {
 namespace thunk {
 
-const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
-
 WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
   : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id), init_status_(kDeviceSuccess) {
   memset(&device_info_, 0, sizeof(device_info_));
@@ -70,10 +69,22 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
+  // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
+  // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
+  // PM4 path.
+  if (dxg_runtime->use_pm4_) {
+     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+       device_info_.compute_schedid = kSchedulerIdCompute0;
+     } else {
+       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+              kSchedulerIdCompute0, device_info_.compute_schedid);
+     }
+  }
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64
+           " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           (uint64_t)dxg_runtime->use_pm4_);
+           (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -665,10 +676,86 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
-  // Add safety margin to account for alignment and future additions
-  cmdbuf_aql_frame_size_ += 128;
+  // Worst-case PM4 of a single AQL packet, before the PMC headroom is added.
+  const uint32_t aql_packet_size = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // WSL multi-counter PM4 frame headroom (computed worst case).
+  //
+  // A vendor-specific (PMC) AQL packet is expanded in
+  // VendorSpecificAqlToPm4() by inlining the aqlprofile-built PM4 IB that
+  // programs and reads the hardware counters, followed by the fixed
+  // completion trailer already budgeted above. That inlined IB is what
+  // overflowed the previous small margin on multi-counter collection
+  // ("used 616 bytes, limit 544 bytes"). Its size grows with the number of
+  // counters in a pass and, per counter, with the number of block instances
+  // the counter is read from, so we size for the worst case here (device
+  // init runs before any --pmc set is known).
+  //
+  // Byte costs use the real gfx11 PM4 packet sizes (see gfx11_cmd_builder.h):
+  //   SET_UCONFIG_REG (GRBM index / control) = 3 dw = 12 B
+  //   COPY_DATA       (select / read)         = 6 dw = 24 B
+  // Per counter, worst case:
+  //   start: GRBM index (12) + select (24) + control (24)      = 60 B -> 64
+  //   read : per instance -> GRBM index (12) + 2x COPY_DATA(48) = 60 B -> 64
+  // The heaviest blocks (WGP-class on gfx11) are read once per WGP, so a
+  // single counter's worst-case read-instance count is the device WGP count
+  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. The 32
+  // below is only a byte budget, not a ceiling anyone enforces: no upstream
+  // invariant caps the events in a pass, and the one hardware limit that is
+  // checked is per (block, block_index) in CounterPacketConstruct::can_collect(),
+  // so a pass may emit many more events than this. What keeps an oversized pass
+  // from overflowing the frame is the runtime bounds check in
+  // VendorSpecificAqlToPm4() - and, since every translation path now measures
+  // the frame cumulatively, the matching checks in KernelDispatchAqlToPm4() and
+  // BarrierGenericAqlToPm4() - not this constant. The original 128 B alignment
+  // slack is retained, and the per-counter cost still scales with device
+  // geometry instead of being a blunt over-allocation.
+  constexpr uint32_t kFrameAlignmentMargin    = 128;
+  // Per-pass fixed overhead independent of the counter count: the shared PMC
+  // programming aqlprofile emits once around the per-counter loop
+  // (pmc_builder.h GpuPmcBuilder::Start/Stop/Read/Enable/Disable/WaitIdle).
+  // Rough gfx11 tally, using the packet sizes in gfx11_cmd_builder.h
+  // (EVENT_WRITE 2 dw = 8 B, SET_SH/UCONFIG_REG 3 dw = 12 B, COPY_DATA 6 dw =
+  // 24 B, ACQUIRE_MEM 8 dw = 32 B):
+  //   perfmon ctrl : CP_PERFMON_CNTL reset/start/stop + SQ_PERFCOUNTER_CTRL/CTRL2
+  //                  + GRBM broadcast resets, ~10 writes @ 12-24 B     ~= 220 B
+  //   wait-idle    : ~4 x EVENT_WRITE barrier @ 8 B                    ~=  32 B
+  //   cache flush  : ~2 x ACQUIRE_MEM @ 32 B                           ~=  64 B
+  //   enable/disable: 2 x COMPUTE_PERFCOUNT_ENABLE SET_SH_REG @ 12 B   ~=  24 B
+  //   sync waits   : ~2 x WAIT_REG_MEM (7 dw = 28 B)                   ~=  56 B
+  //                                                          subtotal  ~= 396 B
+  // 512 rounds that up with ~115 B slack (per-counter / per-instance costs are
+  // budgeted separately below), so it is a safe fixed bound.
+  constexpr uint32_t kPmcFixedOverheadBytes   = 512;  // perfmon ctrl + wait-idle barriers + cache flush + enable
+  constexpr uint32_t kPmcStartBytesPerCounter = 64;
+  constexpr uint32_t kPmcReadBytesPerInstance = 64;
+  constexpr uint32_t kMaxPmcCountersPerPass   = 32;
+
+  const uint32_t wgp_count = std::max<uint32_t>(1u, ComputeUnitCount() / 2);
+  const uint32_t sesa =
+    std::max<uint32_t>(1u, NumShaderEngine() * ShaderArrayPerShaderEngine());
+  const uint32_t max_counter_instances = std::max(wgp_count, sesa);
+  const uint32_t per_counter_bytes =
+    kPmcStartBytesPerCounter + max_counter_instances * kPmcReadBytesPerInstance;
+
+  cmdbuf_aql_frame_size_ += kFrameAlignmentMargin + kPmcFixedOverheadBytes +
+                            kMaxPmcCountersPerPass * per_counter_bytes;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // Only a vendor-specific (PMC) frame uses the headroom above, but all frames
+  // are sized alike, so cap the ring depth instead of letting the whole
+  // allocation scale with the frame size.
+  constexpr uint32_t kCmdbufBudgetBytes = 2 * 1024 * 1024;
+
+  cmdbuf_aql_frame_num_ =
+      std::clamp(kCmdbufBudgetBytes / cmdbuf_aql_frame_size_, 1u, kMaxAqlFrameNum);
+
+  // SwitchAql2PM4() keeps merging consecutive dispatch packets into the current
+  // frame until the write index reaches a multiple of this limit, so a merge
+  // run must not be able to outgrow one frame.
+  cmdbuf_aql_merge_limit_ =
+      std::clamp(cmdbuf_aql_frame_size_ / aql_packet_size, 1u, cmdbuf_aql_frame_num_);
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
 }
@@ -874,9 +961,179 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   return true;
 }
 
+// Compute the CWSR (Context Wave Save/Restore) region size for this device.
+//
+// Mirrors the Linux KFD calculation in update_ctx_save_restore_size() (queues.c).
+// The region must hold, per XCC:
+//   - HsaUserContextSaveAreaHeader  (save-area header)
+//   - Control stack (wave_num * bytes_per_wave + 8), page-aligned
+//   - WG data (VGPR + SGPR + LDS + HW-regs per CU), page-aligned
+// multiplied by num_xcc for multi-XCC devices.
+//
+// Constants ported from queues.c / dxg/queues.cpp:
+//   CNTL_STACK_BYTES_PER_WAVE : gfx10+ = 12, older = 8
+//   WG_CONTEXT_DATA_SIZE_PER_CU : vgpr_size + SGPR_SIZE_PER_CU + LDS + HWREG_SIZE_PER_CU
+//   SGPR_SIZE_PER_CU: gfx10+ = 0x5000 (20 KB), older = 0x4000 (16 KB)  [matches KMD CalCwsrSaveAreaSize]
+//   HWREG_SIZE_PER_CU: gfx10+ = 0x1400 (5 KB), older = 0x1000 (4 KB)  [matches KMD CalCwsrSaveAreaSize]
+//   vgpr_size: all gfx10/gfx11/gfx12 = 256KB/CU (0x40000)             [matches KMD CalCwsrSaveAreaSize]
+//   DEBUGGER_BYTES_PER_WAVE = 32, DEBUGGER_BYTES_ALIGN = 64
+uint64_t WDDMDevice::AllocateCwsrSize(uint64_t* out_ctx_size, uint64_t* out_debug_size) const {
+  const uint32_t page_size = 4096;
+  const uint32_t debugger_bytes_per_wave = 32;
+  const uint32_t debugger_bytes_align    = 64;
+
+  const int major = device_info_.major;
+  const uint32_t num_xcc         = device_info_.num_xcc ? device_info_.num_xcc : 1;
+  // compute_unit_count in device_info_ is the total CU count across all XCCs.
+  const uint32_t cu_num          = device_info_.compute_unit_count / num_xcc;
+  // wave_per_cu from device_info_ is per-CU (40 for Navi10/12/14, 32 for Navi2x+).
+  // KMD CalCwsrSaveAreaSize() split: gfx10+ (FAMILY_NV) vs pre-gfx10
+  const bool is_gfx10_plus = (major >= 10);
+
+  const uint32_t wave_per_cu     = device_info_.wave_per_cu ? device_info_.wave_per_cu : 32;
+  uint32_t wave_num              = cu_num * wave_per_cu;
+  // Pre-Navi (gfx9): Linux queues.c caps wave_num at NumShaderBanks/NumArrays*512.
+  // Matches get_num_waves() in queues.c for gfxv < GFX_VERSION_NAVI10.
+  // num_shader_engine is total across all XCCs (wkmi.cpp scales it by num_xcc for gfx9.4),
+  // so divide by num_xcc to get per-XCC SE count, matching cu_num which is also per-XCC.
+  if (!is_gfx10_plus) {
+    const uint32_t num_se  = device_info_.num_shader_engine / num_xcc;
+    const uint32_t num_sa  = device_info_.shader_array_per_shader_engine;
+    if (num_se > 0 && num_sa > 0)
+      wave_num = std::min(wave_num, (num_se / num_sa) * 512u);
+  }
+
+  // Control stack: gfx10+ = 12 bytes/wave, older = 8 bytes/wave
+  const uint32_t bytes_per_wave  = is_gfx10_plus ? 12 : 8;
+  uint32_t ctl_stack_size        = wave_num * bytes_per_wave + 8;
+  // gfx10.x (Navi) HW control stack RAM is physically limited to 0x7000 bytes.
+  // Matches Linux queues.c: if ((gfxv & 0x3f0000) == 0xA0000) ctl_stack_size = MIN(..., 0x7000)
+  // major == 10 covers the full gfx10.x family (Navi10/12/14, Navi21/22/23/24).
+  if (major == 10)
+    ctl_stack_size = std::min(ctl_stack_size, 0x7000u);
+
+  // Sizes from KMD kdx/src/RunListMgr.cpp CalCwsrSaveAreaSize():
+  //   gfx10+: sgpr=0x5000, hwreg=0x1400, vgpr=0x40000
+  //   pre-gfx10: sgpr=0x4000, hwreg=0x1000, vgpr=0x40000
+  const uint32_t vgpr_size_per_cu  = 0x40000;
+  const uint32_t sgpr_size_per_cu  = is_gfx10_plus ? 0x5000 : 0x4000;
+  const uint32_t hwreg_size_per_cu = is_gfx10_plus ? 0x1400 : 0x1000;
+  // LDS size stored in device_info_.lds_size (bytes)
+  const uint32_t lds_size_bytes  = device_info_.lds_size;
+  const uint32_t wg_size_per_cu  = vgpr_size_per_cu + sgpr_size_per_cu + lds_size_bytes + hwreg_size_per_cu;
+  const uint32_t wg_data_size    = cu_num * wg_size_per_cu;
+
+  // Align sizes to page boundary
+  auto page_align_up = [&](uint64_t x) -> uint64_t {
+    return (x + page_size - 1) & ~(uint64_t)(page_size - 1);
+  };
+  auto align_up = [&](uint64_t x, uint32_t align) -> uint64_t {
+    return (x + align - 1) & ~(uint64_t)(align - 1);
+  };
+
+  // ctx_save_restore_size per XCC (header + ctl_stack + wg_data)
+  uint64_t ctx_size = page_align_up(sizeof(HsaUserContextSaveAreaHeader) + ctl_stack_size)
+                      + page_align_up(wg_data_size);
+
+  // debug_memory_size per XCC
+  uint64_t debug_size = align_up(wave_num * debugger_bytes_per_wave, debugger_bytes_align);
+
+  if (out_ctx_size)   *out_ctx_size   = ctx_size;
+  if (out_debug_size) *out_debug_size = debug_size;
+
+  uint64_t total = page_align_up((ctx_size + debug_size) * num_xcc);
+
+  return total;
+}
+
+// Initialize HsaUserContextSaveAreaHeader for each XCC in the CWSR region.
+//
+// Mirrors Linux's fill_cwsr_header() in queues.c.  The CWSR allocation is
+// divided into equal-sized per-XCC slots of ctx_save_restore_size bytes, each
+// beginning with an HsaUserContextSaveAreaHeader.  This must be called after
+// the CPU-accessible system memory is allocated so the runtime and debugger can
+// locate the control stack, wave state, and debug areas on context save.
+//
+// Layout per XCC slot (offsets relative to slot base):
+//   [0]                 HsaUserContextSaveAreaHeader
+//   [ctl_stack_offset]  Control stack  (ctl_stack_size bytes, page-aligned)
+//   [wg_data_offset]    Wave/WG state  (wg_data_size bytes,  page-aligned)
+//   [debug_offset]      Debugger area  (debug_memory_size bytes, 64-byte aligned)
+//
+// DebugOffset in each slot's header is relative to that slot's own base address,
+// not the start of the allocation.  It points forward to the debug area at the end
+// of the last XCC slot: (NumXcc - i) * ctx_save_restore_size from slot i's base.
+void WDDMDevice::FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
+                                 uint64_t debug_memory_size, uint32_t num_xcc,
+                                 volatile HSAint64* error_reason, HSAuint32 error_event_id) {
+  for (uint32_t i = 0; i < num_xcc; i++) {
+    auto* header = reinterpret_cast<HsaUserContextSaveAreaHeader*>(
+        static_cast<uint8_t*>(cpu_addr) + i * ctx_save_restore_size);
+
+    // ErrorEventId: the EventId of the HsaEvent passed at queue creation by the
+    // runtime (HSA_EVENTTYPE_SIGNAL, shared across all queues on the agent).
+    // Mirrors Linux fill_cwsr_header(): Event ? Event->EventId : 0.
+    header->ErrorEventId = error_event_id;
+
+    // ErrorReason mirrors Linux fill_cwsr_header(): pointer to the HSA signal
+    // payload used by the runtime to report the error reason bitmask on
+    // queue exception.  Sourced from QueueResource->ErrorReason, stored on the
+    // queue as error_reason_ and passed through here.
+    header->ErrorReason = error_reason;
+
+    // DebugOffset is from this XCC's slot base to the debug area of the *last*
+    // XCC slot, matching fill_cwsr_header():
+    //   header->DebugOffset = (NumXcc - i) * ctx_save_restore_size
+    header->DebugOffset = static_cast<HSAuint32>((num_xcc - i) * ctx_save_restore_size);
+    header->DebugSize   = static_cast<HSAuint32>(debug_memory_size * num_xcc);
+
+    // ControlStackOffset/Size and WaveStateOffset/Size describe where the
+    // saved control stack and wave state ended up inside this XCC's slot.
+    // They are written by the kernel (KFD/KMD) during AMDKFD_IOC_GET_QUEUE_WAVE_STATE
+    // after preemption; see struct kfd_context_save_area_header::wave_state.
+    // Zero is the correct initial value — no context has been saved yet.
+    // rocdbgapi reads these fields (queue.cpp) only after a context save has
+    // occurred, so zeroing here is safe and matches Linux fill_cwsr_header().
+    header->ControlStackOffset = 0;
+    header->ControlStackSize   = 0;
+    header->WaveStateOffset    = 0;
+    header->WaveStateSize      = 0;
+    header->Reserved1          = 0;
+  }
+}
+
 bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   void *priv_data;
   int priv_size;
+
+  // Allocate CWSR (Context Wave Save/Restore) region in system (GTT) memory.
+  // Matches Linux: anonymous mmap + register_svm_range(alwaysMapped=true).
+  // locked keeps pages pinned (HSA_SVM_FLAG_GPU_ALWAYS_MAPPED equivalent).
+  // The allocation handle is passed to KMD via UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA::CwsrMemHandle.
+  // SDMA queues skip CWSR — mirrors Linux handle_concrete_asic() which returns
+  // early for KFD_IOC_QUEUE_TYPE_SDMA/SDMA_XGMI before allocating ctx_save_restore.
+  if (queue->cwsr_mem_ == nullptr && queue->needs_cwsr_) {
+    uint64_t ctx_save_restore_size = 0;
+    uint64_t debug_memory_size = 0;
+    GpuMemoryCreateInfo cwsr_create_info{};
+    cwsr_create_info.domain = Wkmi::kSystem;
+    cwsr_create_info.size = AllocateCwsrSize(&ctx_save_restore_size, &debug_memory_size);
+
+    GpuMemory *cwsr_gpu_mem = nullptr;
+    ErrorCode cwsr_code = CreateGpuMemory(cwsr_create_info, &cwsr_gpu_mem);
+    if (cwsr_code != ErrorCode::Success) {
+      pr_err("CWSR memory allocation failed\n");
+      return false;
+    }
+    queue->cwsr_mem_ = cwsr_gpu_mem->GetGpuMemoryHandle();
+    queue->cwsr_mem_handle_ = cwsr_gpu_mem->KmtHandle();
+
+    // Initialise the per-XCC HsaUserContextSaveAreaHeader in the CPU-visible
+    // system memory, mirroring fill_cwsr_header() in Linux queues.c.
+    const uint32_t num_xcc = device_info_.num_xcc ? device_info_.num_xcc : 1;
+    FillCwsrHeader(cwsr_gpu_mem->CpuAddress(), ctx_save_restore_size,
+                   debug_memory_size, num_xcc, queue->error_reason_, queue->error_event_id_);
+  }
 
   priv_size = Wkmi::GetHwQueuePrivDataSize();
   priv_data = malloc(priv_size);
@@ -884,20 +1141,19 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
-  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
-  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
-  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  // ComputeQueue (AQL or PM4) has amd_queue_t memory -> pass its user-queue handle; SDMAQueue
+  // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
+  GpuMemory* queue_memory = queue->GetAmdQueueMemory();
   D3DKMT_HANDLE resource = 0;
   bool is_aql = false;
-  if (compute_queue != nullptr && IsAqlSupported()) {
-    auto queue_memory = compute_queue->GetAmdQueueMemory();
+  if (queue_memory != nullptr) {
     resource = queue_memory->KmtHandle();
-    is_aql = true;
+    is_aql = IsAqlSupported();
   }
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
-      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
+      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc,
+      queue->cwsr_mem_handle_);
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
@@ -909,6 +1165,11 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     free(priv_data);
+    if (queue->cwsr_mem_ != nullptr) {
+      delete GpuMemory::Convert(queue->cwsr_mem_);
+      queue->cwsr_mem_ = nullptr;
+      queue->cwsr_mem_handle_ = 0;
+    }
     return false;
   }
   if (doorbell_loc != nullptr) {
@@ -933,6 +1194,13 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     return false;
+  }
+
+  if (queue->cwsr_mem_ != nullptr) {
+    auto cwsr_gpu_mem = GpuMemory::Convert(queue->cwsr_mem_);
+    delete cwsr_gpu_mem;
+    queue->cwsr_mem_ = nullptr;
+    queue->cwsr_mem_handle_ = 0;
   }
 
   return true;
