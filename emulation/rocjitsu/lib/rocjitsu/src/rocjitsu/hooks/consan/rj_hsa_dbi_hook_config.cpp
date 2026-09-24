@@ -778,6 +778,14 @@ void report_config_rejection() {
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_SC_DELAY", 0, &config.supercollider_delay_nops))
     return std::nullopt;
+  if (!parse_bool_env("RJ_CONSAN_SC_DELAY_READS_ONLY", false,
+                      &config.supercollider_delay_reads_only))
+    return std::nullopt;
+  if (config.supercollider_delay_reads_only && config.mode != Mode::SuperCollider) {
+    std::fprintf(stderr,
+                 "[rocjitsu-dbi-hooks] RJ_CONSAN_SC_DELAY_READS_ONLY requires SuperCollider\n");
+    return std::nullopt;
+  }
   const bool absolute_growth_limit = env_has_value("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES");
   const bool relative_growth_limit = env_has_value("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT");
   if (absolute_growth_limit && relative_growth_limit) {

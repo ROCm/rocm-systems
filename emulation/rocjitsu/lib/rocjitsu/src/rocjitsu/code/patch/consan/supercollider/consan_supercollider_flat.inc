@@ -354,8 +354,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       planned.info.dynamic_private_segment_addend =
           candidate.dynamic_stack_spill->dynamic_frame_bytes;
     }
-    const auto delay_words = supercollider_build_delay_words(
-        target, options, candidate.vcc_save_sgpr, result.errors, "ConSan flat check/trap proof");
+    const auto delay_words =
+        supercollider_build_delay_words(target, options, candidate.vcc_save_sgpr, site.kind,
+                                        result.errors, "ConSan flat check/trap proof");
     if (!delay_words)
       return;
     InstructionSequence sequence(planned.words);

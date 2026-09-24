@@ -4417,6 +4417,34 @@ TEST(ConSan, ProbeLdsCheckTrapModeSupportsByteD16LoadsAcrossTargets) {
   }
 }
 
+TEST(ConSan, ReadOnlyReplayDelayStillInstrumentsBothLoadsAndStores) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<uint32_t> words(256, build_s_nop(0, arch));
+  words[0] = 0xD8340000u;
+  words[1] = 0x00000102u; // ds_store_b32 v2, v1
+  words[2] = 0xD8D80000u;
+  words[3] = 0x01000002u; // ds_load_b32 v1, v2
+  words.back() = build_s_endpgm(arch);
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.max_patches = 2;
+  options.supercollider_delay_mode = SuperColliderDelayMode::Sleep;
+  options.supercollider_delay_nops = 1;
+  options.supercollider_delay_reads_only = true;
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(words), options);
+  ASSERT_TRUE(patch_succeeded(result));
+  EXPECT_EQ(std::ranges::count(result.patches, PatchKind::LdsLoadCheckTrap, &PatchInfo::kind), 1);
+  EXPECT_EQ(std::ranges::count(result.patches, PatchKind::LdsStoreCheckTrap, &PatchInfo::kind), 1);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto &text = *patched.text_sections().front();
+  const auto emitted = text_words_at_offset(patched, 0u, text.size());
+  EXPECT_EQ(std::ranges::count(emitted, build_s_sleep(1, arch)), 1);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepDelay) {
   const std::array<uint32_t, 12> text_words = {
       0xD8D80000u,

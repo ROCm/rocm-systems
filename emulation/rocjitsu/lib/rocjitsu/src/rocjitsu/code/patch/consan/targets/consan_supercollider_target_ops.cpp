@@ -20,11 +20,12 @@ std::optional<uint32_t> supercollider_build_guest_flat_completion_wait(rj_code_a
 
 std::optional<std::vector<uint32_t>>
 supercollider_build_delay_words(const TargetProfile &target, const Request &request,
-                                uint16_t temporary_sgpr, std::vector<std::string> &errors,
-                                std::string_view context) {
+                                uint16_t temporary_sgpr, LdsAccessKind access_kind,
+                                std::vector<std::string> &errors, std::string_view context) {
   const rj_code_arch_t arch = target.arch;
   std::vector<uint32_t> words;
-  if (request.supercollider_delay_nops == 0)
+  if (request.supercollider_delay_nops == 0 ||
+      (request.supercollider_delay_reads_only && access_kind != LdsAccessKind::Read))
     return words;
 
   switch (request.supercollider_delay_mode) {

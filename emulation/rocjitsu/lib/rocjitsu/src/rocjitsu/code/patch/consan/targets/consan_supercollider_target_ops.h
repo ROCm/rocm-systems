@@ -36,8 +36,8 @@ supercollider_build_guest_flat_completion_wait(rj_code_arch_t arch);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 supercollider_build_delay_words(const TargetProfile &target, const Request &request,
-                                uint16_t temporary_sgpr, std::vector<std::string> &errors,
-                                std::string_view context);
+                                uint16_t temporary_sgpr, LdsAccessKind access_kind,
+                                std::vector<std::string> &errors, std::string_view context);
 
 [[nodiscard]] std::optional<uint32_t>
 supercollider_build_v_cmp_ne_u32(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch);

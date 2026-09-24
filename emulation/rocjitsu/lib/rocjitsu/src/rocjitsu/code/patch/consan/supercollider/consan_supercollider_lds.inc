@@ -524,8 +524,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   planned_patches.reserve(selected_candidates.size());
   for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
     const ProgramSite &site = *candidate.site;
-    const auto delay_words = supercollider_build_delay_words(
-        target, options, candidate.vcc_save_sgpr, result.errors, "ConSan LDS check/trap proof");
+    const auto delay_words =
+        supercollider_build_delay_words(target, options, candidate.vcc_save_sgpr, site.kind,
+                                        result.errors, "ConSan LDS check/trap proof");
     if (!delay_words)
       return;
     const auto split_two_address =

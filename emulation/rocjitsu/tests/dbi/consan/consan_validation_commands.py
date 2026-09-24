@@ -888,6 +888,11 @@ def _clean_environment(
     config = PROFILES[profile]
     environment.update(config.environment)
     if profile == "supercollider":
+        reads_only = os.environ.get("CONSAN_VALIDATION_SC_DELAY_READS_ONLY")
+        if reads_only is not None:
+            if reads_only not in {"0", "1"}:
+                raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY_READS_ONLY")
+            environment["RJ_CONSAN_SC_DELAY_READS_ONLY"] = reads_only
         delay = os.environ.get("CONSAN_VALIDATION_SC_DELAY")
         delay_mode = os.environ.get("CONSAN_VALIDATION_SC_DELAY_MODE")
         if delay is not None:

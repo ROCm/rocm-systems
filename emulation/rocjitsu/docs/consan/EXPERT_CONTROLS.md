@@ -524,6 +524,7 @@ lifetime-sticky and capacity-independent, so status `2` leaves it unchanged.
 | `RJ_CONSAN_SC_DELAY=N` | `0` | Delay parameter between the guest access and duplicate/read-back. |
 | `RJ_CONSAN_SC_DELAY_MODE=nop\|sleep\|sleep_var\|sleep_wave` | `nop` | Select fixed NOP/sleep, a caller-selected scalar sleep source, or RDNA4 resident-wave-dependent `sleep_wave`. |
 | `RJ_CONSAN_SC_DELAY_VAR_SSRC=N` | `106` | Scalar source encoding used by `sleep_var`. |
+| `RJ_CONSAN_SC_DELAY_READS_ONLY=0\|1` | `0` | In SuperCollider, delay only load replays. Store readback checks remain instrumented without a delay, allowing writers to advance while loads are observed. |
 | `RJ_CONSAN_CHECK_TRAP_MODE=all\|lds\|flat` | `all` | Restrict SuperCollider to native DS or admitted flat LDS sites for debugging. |
 
 On RDNA4, `RJ_CONSAN_SC_DELAY_MODE=sleep_wave` varies replay timing by resident

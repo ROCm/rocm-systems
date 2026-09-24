@@ -858,7 +858,8 @@ TEST(ConSan, SuperColliderWaveDelayVariesByPlacementAndPreservesGuestFlags) {
     request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
     request.supercollider_delay_nops = maximum;
     std::vector<std::string> errors;
-    const auto words = supercollider_build_delay_words(*target, request, 20u, errors, "test");
+    const auto words =
+        supercollider_build_delay_words(*target, request, 20u, LdsAccessKind::Read, errors, "test");
     ASSERT_TRUE(words);
     ASSERT_TRUE(errors.empty());
     amdgpu::GpuMemory memory("wave_delay_memory");
@@ -909,6 +910,33 @@ TEST(ConSan, SuperColliderWaveDelayVariesByPlacementAndPreservesGuestFlags) {
   }
 }
 
+TEST(ConSan, SuperColliderReadOnlyDelayLeavesStoreObservationWithoutStallingWriters) {
+  const auto target =
+      std::ranges::find(kTargetProfiles, ROCJITSU_CODE_ARCH_RDNA4, &TargetProfile::arch);
+  ASSERT_NE(target, kTargetProfiles.end());
+  for (const auto mode : {SuperColliderDelayMode::Nop, SuperColliderDelayMode::Sleep,
+                          SuperColliderDelayMode::SleepVar, SuperColliderDelayMode::SleepWave}) {
+    Request request;
+    request.supercollider_delay_mode = mode;
+    request.supercollider_delay_nops = 3u;
+    std::vector<std::string> errors;
+    const auto original = supercollider_build_delay_words(*target, request, 20u,
+                                                          LdsAccessKind::Write, errors, "test");
+    ASSERT_TRUE(original);
+    ASSERT_FALSE(original->empty());
+    request.supercollider_delay_reads_only = true;
+    const auto read =
+        supercollider_build_delay_words(*target, request, 20u, LdsAccessKind::Read, errors, "test");
+    const auto write = supercollider_build_delay_words(*target, request, 20u, LdsAccessKind::Write,
+                                                       errors, "test");
+    ASSERT_TRUE(read);
+    ASSERT_TRUE(write);
+    EXPECT_EQ(*read, *original);
+    EXPECT_TRUE(write->empty());
+    EXPECT_TRUE(errors.empty());
+  }
+}
+
 TEST(ConSan, SuperColliderWaveDelayRejectsUnsupportedTargetsAndUnboundedCounts) {
   for (const auto &target : kTargetProfiles) {
     for (uint32_t count : {1u, 2u, 3u, 127u, 128u, 255u}) {
@@ -916,7 +944,8 @@ TEST(ConSan, SuperColliderWaveDelayRejectsUnsupportedTargetsAndUnboundedCounts) 
       request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
       request.supercollider_delay_nops = count;
       std::vector<std::string> errors;
-      const auto words = supercollider_build_delay_words(target, request, 20u, errors, "test");
+      const auto words = supercollider_build_delay_words(target, request, 20u, LdsAccessKind::Read,
+                                                         errors, "test");
       const bool supported =
           target.arch == ROCJITSU_CODE_ARCH_RDNA4 && (count == 1u || count == 3u || count == 127u);
       EXPECT_EQ(words.has_value(), supported);

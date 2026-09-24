@@ -497,6 +497,8 @@ struct Request {
   SuperColliderDelayMode supercollider_delay_mode = SuperColliderDelayMode::Nop;
   /// Immediate delay amount interpreted by `supercollider_delay_mode`.
   uint32_t supercollider_delay_nops = 0;
+  /// Delay load replays only; store readback remains instrumented without a delay.
+  bool supercollider_delay_reads_only = false;
   /// Scalar source used only by the variable-delay form.
   uint16_t supercollider_delay_var_ssrc = 106;
   /// Sticky value written when SuperCollider observes instability.

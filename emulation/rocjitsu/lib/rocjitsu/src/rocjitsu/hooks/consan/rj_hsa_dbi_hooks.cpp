@@ -2315,6 +2315,7 @@ public:
         "forbid_overflow=%s "
         "fault_barrier_index=%u "
         "supercollider_delay_mode=%s supercollider_delay_var_ssrc=%u "
+        "supercollider_delay_reads_only=%s "
         "patched_image_growth_limit_kind=%s patched_image_growth_limit_value=%llu "
         "process_concurrent_transform_limit_bytes=%s "
         "process_patched_image_limit_bytes=%s "
@@ -2339,6 +2340,7 @@ public:
         config.require_diagnostics ? "true" : "false", config.forbid_diagnostics ? "true" : "false",
         config.forbid_overflow ? "true" : "false", config.fault_barrier_index,
         delay_mode_name(config.supercollider_delay_mode), config.supercollider_delay_var_ssrc,
+        config.supercollider_delay_reads_only ? "true" : "false",
         patched_image_growth_limit_kind_name(config.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
             patched_image_growth_limit_value(config.patched_image_growth_limit)),
@@ -4240,6 +4242,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "init_owner_epoch=%s track_barriers=%s track_atomics=%s "
         "fault_barrier_index=%u "
         "supercollider_delay_mode=%s supercollider_delay_var_ssrc=%u "
+        "supercollider_delay_reads_only=%s "
         "patched_image_growth_limit_kind=%s patched_image_growth_limit_value=%llu "
         "process_concurrent_transform_limit_bytes=%s "
         "process_patched_image_limit_bytes=%s "
@@ -4260,6 +4263,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->track_barriers ? "true" : "false", config->track_atomics ? "true" : "false",
         config->fault_barrier_index, delay_mode_name(config->supercollider_delay_mode),
         config->supercollider_delay_var_ssrc,
+        config->supercollider_delay_reads_only ? "true" : "false",
         patched_image_growth_limit_kind_name(transform_policy.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
             patched_image_growth_limit_value(transform_policy.patched_image_growth_limit)),

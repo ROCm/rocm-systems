@@ -66,6 +66,12 @@ Historical ledgers retain the results of their original configurations. Their
 timeouts are priorities for revalidation with generated allowlists, not evidence
 that those retries will still time out or that the rows are already resolved.
 
+For SuperCollider timing experiments, the runner forwards
+`CONSAN_VALIDATION_SC_DELAY_MODE`, `CONSAN_VALIDATION_SC_DELAY`, and
+`CONSAN_VALIDATION_SC_DELAY_READS_ONLY=0|1` to their corresponding `RJ_CONSAN_*`
+controls. Use identical settings for clean comparators and prospective fault
+trials. The load-only control filters delays, not instrumentation coverage.
+
 ## Explicit sampling configurations
 
 For a separate Default-engine sampling investigation, set
