@@ -4822,11 +4822,13 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
  */
 typedef struct hsa_amd_vmem_handle_info_s {
   /**
-   * Size of this structure in bytes. Must be set by the caller to
+   * Size of this structure in bytes, as compiled by the caller. Must be set to
    * sizeof(hsa_amd_vmem_handle_info_t) prior to the call. ROCr writes only the
-   * members that fit within this many bytes and leaves the rest untouched.
+   * members that fit within this many bytes and leaves the rest untouched. If
+   * ROCr supports an older version of this structure then size will be smaller
+   * on return; members starting after the returned size are not updated.
    */
-  uint32_t size;
+  size_t size;
   /**
    * Size of the allocation in bytes.
    */

@@ -2078,7 +2078,7 @@ hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
 
   /* The caller stamps the layout it was compiled against. Reject a size that
    * cannot hold even the first member; Runtime fills only what fits. */
-  if (info->size < offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(size_t))
+  if (info->size < offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(info->alloc_size))
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   return core::Runtime::runtime_singleton_->VMemoryGetHandleInfo(allocHandle, info);

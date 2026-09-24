@@ -5096,6 +5096,21 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   return HSA_STATUS_SUCCESS;
 }
 
+/* fits() below compares the caller's byte count against member end offsets, which
+ * only holds while every member starts where the previous one ended. */
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::size),
+              "padding before hsa_amd_vmem_handle_info_t::alloc_size");
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, agent) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, alloc_size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::alloc_size),
+              "padding before hsa_amd_vmem_handle_info_t::agent");
+static_assert(sizeof(hsa_amd_vmem_handle_info_t) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, agent) +
+                      sizeof(hsa_amd_vmem_handle_info_t::agent),
+              "trailing padding in hsa_amd_vmem_handle_info_t");
+
 hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHandle,
                                            hsa_amd_vmem_handle_info_t* info) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -5105,19 +5120,16 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   const MemoryRegion* region =
       memoryHandle->imported ? memoryHandle->imported_region : memoryHandle->region;
 
-  /* An import whose placement could not be resolved carries no agent to report.
-   * That covers a fabric handle and a dma-buf the kernel or thunk cannot describe,
-   * but also a dma-buf the driver described against a node outside this process's
-   * topology, where the size is known yet no local region matches. Reporting
-   * success there would hand back a null agent that a caller cannot tell apart
-   * from a real one, so reject the handle instead. */
+  /* An unresolved import has no agent to report, and succeeding would hand back a
+   * null one the caller cannot tell apart from a real agent. */
   if (memoryHandle->imported && region == nullptr)
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  /* Fill only the members that fit in the layout the caller was built against.
-   * Members are append-only, so a prefix is always well defined. */
-  const uint32_t caller_size = info->size;
+  /* Fill only the members that fit the layout the caller was built against, and
+   * report back the prefix actually produced, as hsa_amd_pointer_info does. */
+  const size_t caller_size = info->size;
   auto fits = [caller_size](size_t end_offset) { return caller_size >= end_offset; };
+  info->size = Min(caller_size, sizeof(hsa_amd_vmem_handle_info_t));
 
   if (fits(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(info->alloc_size))) {
     info->alloc_size =
