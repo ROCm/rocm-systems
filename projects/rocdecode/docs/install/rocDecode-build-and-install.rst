@@ -56,7 +56,7 @@ Windows prerequisites
 * Visual Studio 2022 with C++ desktop workload (MSVC compiler, C++17)
 * CMake 3.21 or later (the ``Visual Studio 17 2022`` generator requires 3.21)
 * Windows SDK (provides D3D12 and DXGI headers/libraries)
-* FFmpeg (optional) — pre-built libraries or built from source, required for samples and the host decoder library
+* FFmpeg (optional) — pre-built libraries or built from source, required for FFmpeg-based samples and the host decoder library
 
 Build and install
 =================
