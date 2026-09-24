@@ -203,6 +203,19 @@ bool IsValidQueuePriority(hsa_amd_queue_priority_t priority) {
          priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
 }
 
+core::MemoryRegion::AllocateFlags MemoryPoolFlagsToAllocateFlags(uint64_t flags) {
+  core::MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;
+  if (flags & HSA_AMD_MEMORY_POOL_PCIE_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocatePCIeRW;
+  if (flags & HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateContiguous;
+  if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateExecutable;
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
+  return alloc_flag;
+}
+
 }  // namespace
 
 hsa_status_t handleException() {
@@ -1368,19 +1381,8 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
     return (hsa_status_t)HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
   }
 
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateRestrict;
-
-  if (flags & HSA_AMD_MEMORY_POOL_PCIE_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocatePCIeRW;
-
-  if (flags & HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateContiguous;
-
-  if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateExecutable;
-
-  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateUncached;
+  MemoryRegion::AllocateFlags alloc_flag =
+      core::MemoryRegion::AllocateRestrict | MemoryPoolFlagsToAllocateFlags(flags);
 
 #ifdef SANITIZER_AMDGPU
   if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
@@ -1952,11 +1954,9 @@ hsa_status_t hsa_amd_vmem_handle_create(hsa_amd_memory_pool_t memory_pool, size_
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateMemoryOnly;
+  MemoryRegion::AllocateFlags alloc_flag =
+      core::MemoryRegion::AllocateMemoryOnly | MemoryPoolFlagsToAllocateFlags(flags);
   if (type == MEMORY_TYPE_PINNED) alloc_flag |= core::MemoryRegion::AllocatePinned;
-
-  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateUncached;
 
   if (mem_region->owner()->device_type() == core::Agent::kAmdCpuDevice)
     alloc_flag |= core::MemoryRegion::AllocateNonPaged;

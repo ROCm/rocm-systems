@@ -1959,14 +1959,17 @@ typedef enum hsa_amd_memory_pool_flag_s {
    * Allocates fine grain memory type where memory ordering is per point to point
    * connection. Atomic memory operations on these memory buffers are not
    * guaranteed to be visible at system scope.
+   * Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_PCIE_FLAG = (1 << 0),
   /**
-   *  Allocates physically contiguous memory
+   *  Allocates physically contiguous memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG = (1 << 1),
   /**
-   *  Allocates executable memory
+   *  Allocates executable memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
   /**
@@ -4600,8 +4603,9 @@ typedef enum {
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags A bit-field of ::hsa_amd_memory_pool_flag_t allocation
- * directives. ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG is honored; all other bits
- * are ignored.
+ * directives. ::HSA_AMD_MEMORY_POOL_PCIE_FLAG,
+ * ::HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG, ::HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+ * and ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG are honored.
  * @param[out] memory_handle - handle for the allocation
  *
  * @retval ::HSA_STATUS_SUCCESS memory allocated successfully
