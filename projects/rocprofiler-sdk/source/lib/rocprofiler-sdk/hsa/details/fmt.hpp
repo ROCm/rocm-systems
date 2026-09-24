@@ -459,15 +459,15 @@ struct formatter<hsa_amd_memory_copy_op_t>
                 return fmt::format_to(
                     ctx.out(),
                     "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
-                    "completion_signal={}, rect_list={}, src_agent={}, dst_agent={}{}{}{}]",
+                    "completion_signal={}, rect_list={}, src_agent_list={}, dst_agent_list={}{}{}{}]",
                     type,
                     op.version,
                     op.num_entries,
                     op.traffic_class,
                     op.completion_signal.handle,
                     fmt::ptr(op.rect_list),
-                    op.src_agent.handle,
-                    op.dst_agent.handle,
+                    fmt::ptr(op.src_agent_list),
+                    fmt::ptr(op.dst_agent_list),
                     wait,
                     signal,
                     reserved);

@@ -2277,12 +2277,13 @@ hsa_status_t GpuAgent::DmaCopyRectBatch(const hsa_amd_memory_copy_op_t& op,
 
   core::Signal& out_signal = *core::Signal::Convert(op.completion_signal);
 
-  // The op carries no explicit direction: the agent pair gives the same engine choice the
-  // hsa_amd_copy_direction_t of hsa_amd_memory_async_copy_rect would have, since that entry
-  // point routes everything except host-to-device over BlitDevToHost as well.
+  // Validation guarantees every list element contains the same agent pair.  That pair gives
+  // the same engine choice the hsa_amd_copy_direction_t of hsa_amd_memory_async_copy_rect
+  // would have, since that entry point routes everything except host-to-device over
+  // BlitDevToHost as well.
   const bool is_h2d =
-      core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice &&
-      core::Agent::Convert(op.dst_agent)->device_type() == core::Agent::kAmdGpuDevice;
+      core::Agent::Convert(op.src_agent_list[0])->device_type() == core::Agent::kAmdCpuDevice &&
+      core::Agent::Convert(op.dst_agent_list[0])->device_type() == core::Agent::kAmdGpuDevice;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });

@@ -84,9 +84,10 @@
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_memory_copy_op_type_t: HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 32
+#define HSA_AMD_INTERFACE_VERSION_MINOR 33
 
 #ifdef __cplusplus
 extern "C" {
@@ -2187,6 +2188,33 @@ hsa_status_t HSA_API
                               hsa_amd_sdma_engine_id_t engine_id,
                               bool force_copy_on_sdma);
 
+/*
+[Provisional API]
+Pitched memory descriptor.
+All elements must be 4 byte aligned.  Pitch and slice are in bytes.
+*/
+typedef struct hsa_pitched_ptr_s {
+  void* base;
+  size_t pitch;
+  size_t slice;
+} hsa_pitched_ptr_t;
+
+/*
+[Provisional API]
+One rect (3D) region pair of a HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT operation.  Fields carry
+the same meaning as the corresponding arguments of hsa_amd_memory_async_copy_rect: offsets
+and range carry x in bytes, y in rows and z in layers.  Every pointer must be non-NULL.  The
+runtime reads but does not modify the caller-owned descriptors; they must remain valid and
+unmodified until hsa_amd_memory_async_batch_copy returns.
+*/
+typedef struct hsa_amd_memory_copy_rect_entry_s {
+  hsa_pitched_ptr_t* dst;
+  hsa_dim3_t* dst_offset;
+  hsa_pitched_ptr_t* src;
+  hsa_dim3_t* src_offset;
+  hsa_dim3_t* range;
+} hsa_amd_memory_copy_rect_entry_t;
+
 /**
  * @brief Type of memory copy operation within a batch.
  */
@@ -2197,6 +2225,7 @@ typedef enum {
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT          = 6,  /**< Rect (3D) copies, one per entry in rect_list */
 } hsa_amd_memory_copy_op_type_t;
 
 /**
@@ -2333,27 +2362,50 @@ typedef enum {
  *   num_entries     -- >= 1 and <= 1024
  *   wait.scope      -- hsa_fence_scope_t for indirect address reads
  *
- * Future-proofing unions (reserved, must not be used):
- *   src_agent_list           -- reserved for future gather operations
- *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
+ * LINEAR_RECT (num_entries independent rect copies, one signal for all entries):
+ *   rect_list       -- caller-owned array of num_entries rect region pairs.  Each entry
+ *                      must individually satisfy every requirement of
+ *                      hsa_amd_memory_async_copy_rect, and the rects of different entries
+ *                      must not overlap.  Every pointer field in each entry must be
+ *                      non-NULL.  The array and the caller-owned descriptors it points to
+ *                      must remain valid and unmodified until
+ *                      hsa_amd_memory_async_batch_copy returns.  Entries
+ *                      are lowered to SDMA packets in array order and issued as one
+ *                      submission, so they execute in order on the copy engine, but no
+ *                      ordering is observable between them.
+ *   src_agent_list  -- caller-owned array of num_entries source agents.  All entries must
+ *                      contain the same source agent.
+ *   dst_agent_list  -- caller-owned array of num_entries destination agents.  All entries
+ *                      must contain the same destination agent.  The common source and
+ *                      destination pair selects the copy direction: CPU -> GPU is
+ *                      host-to-device, anything else is routed over the device-to-host
+ *                      engine.  CPU -> CPU is rejected.  Both agent arrays must remain valid
+ *                      and unmodified until hsa_amd_memory_async_batch_copy returns.
+ *   num_entries     -- number of entries (>= 1 and <= 65535); there is no scalar form
+ *   dst             -- must be NULL
+ *   size            -- must be 0
+ *   unused_size     -- must be 0
+ *   num_dep_signals -- must not exceed 5 for a batch containing this type
+ *
  */
 typedef struct hsa_amd_memory_copy_op_s {
   uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
   uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_entries;                    /**< Number of entries for multi-entry forms (LINEAR / SWAP / INDIRECT_*: 0 = scalar form; BROADCAST: always >= 1) */
+  uint16_t num_entries;                    /**< Number of entries for multi-entry forms (LINEAR / SWAP / INDIRECT_*: 0 = scalar form; BROADCAST / LINEAR_RECT: always >= 1) */
   uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {
     void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
     void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
+    hsa_amd_memory_copy_rect_entry_t* rect_list; /**< LINEAR_RECT: caller-owned array of num_entries rect region pairs */
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
-    hsa_agent_t* src_agent_list;          /**< Reserved for future use */
+    hsa_agent_t* src_agent_list;          /**< LINEAR_RECT: caller-owned source-agent array */
   };
   union {
     hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
-    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination agents */
+    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST / LINEAR_RECT: caller-owned destination-agent array */
   };
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
@@ -2400,13 +2452,20 @@ typedef struct hsa_amd_memory_copy_op_s {
  * carries its own completion signal in @c hsa_amd_memory_copy_op_t.completion_signal.
  * All operations within a single batch must share the same completion signal.
  * The caller must initialise the signal value to @p num_copy_ops before calling
- * this function; the runtime decrements it once per completed operation.
+ * this function; the runtime decrements it once per completed operation.  An operation
+ * counts once however many entries it carries, so a multi-entry op (LINEAR multi,
+ * BROADCAST, LINEAR_RECT, ...) contributes a single decrement once all of its entries
+ * have completed, not one per entry.
  *
- * Each operation is self-describing via its @c type field. A BROADCAST operation
+ * Each operation is self-describing via its @c type field, and a batch may freely mix
+ * types: every operation is validated, routed and completed independently of the others.
+ * A BROADCAST operation
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
  * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
- * and 32-byte aligned for gfx1250.
+ * and 32-byte aligned for gfx1250.  A LINEAR_RECT operation performs @c num_entries rect
+ * copies described by @c rect_list as a single SDMA submission; it requires SDMA and fails
+ * with ::HSA_STATUS_ERROR_OUT_OF_RESOURCES if SDMA is unavailable for the direction.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *
@@ -2462,17 +2521,6 @@ hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
 hsa_status_t HSA_API
 hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                          uint32_t* recommended_ids_mask);
-
-/*
-[Provisional API]
-Pitched memory descriptor.
-All elements must be 4 byte aligned.  Pitch and slice are in bytes.
-*/
-typedef struct hsa_pitched_ptr_s {
-  void* base;
-  size_t pitch;
-  size_t slice;
-} hsa_pitched_ptr_t;
 
 /*
 [Provisional API]

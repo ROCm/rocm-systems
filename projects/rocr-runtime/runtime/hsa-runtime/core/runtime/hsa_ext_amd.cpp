@@ -565,13 +565,16 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     core::Signal* sig = core::Signal::Convert(op.completion_signal);
     IS_VALID(sig);
 
-    IS_BAD_PTR(op.src);
-
-    core::Agent* src_agent = core::Agent::Convert(op.src_agent);
-    IS_VALID(src_agent);
-
     if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    IS_BAD_PTR(op.src);
+
+    core::Agent* src_agent = nullptr;
+    if (op.type != HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT) {
+      src_agent = core::Agent::Convert(op.src_agent);
+      IS_VALID(src_agent);
     }
 
     for (const auto& r : op.reserved1) {
@@ -709,13 +712,21 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       }
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT:
-      // Geometry lives in rect_list, which overlays the src union.  There is no scalar
-      // form, so the slots a rect op does not use must be left clear.
-      if (op.rect_list == nullptr || op.num_entries == 0 || op.dst != nullptr ||
-          op.size != 0 || op.unused_size != 0)
+      // Geometry and agents live in caller-owned arrays.  There is no scalar form, so the
+      // slots a rect op does not use must be left clear.
+      if (op.rect_list == nullptr || op.src_agent_list == nullptr ||
+          op.dst_agent_list == nullptr || op.num_entries == 0 || op.dst != nullptr ||
+          op.size != 0 || op.unused_size != 0) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      dst_agent = core::Agent::Convert(op.dst_agent);
+      }
+      src_agent = core::Agent::Convert(op.src_agent_list[0]);
+      dst_agent = core::Agent::Convert(op.dst_agent_list[0]);
+      IS_VALID(src_agent);
       IS_VALID(dst_agent);
+      if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice &&
+          dst_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+      }
       // The entries of a rect op become one SDMA submission, and SubmitCommand caches the
       // dependent signal values in a fixed HSA_MAX_DEP_SIGNALS stack array, so a larger
       // count has to be rejected here rather than truncated.
@@ -723,6 +734,15 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint32_t d = 0; d < op.num_entries; ++d) {
         const hsa_amd_memory_copy_rect_entry_t& entry = op.rect_list[d];
+        core::Agent* entry_src_agent = core::Agent::Convert(op.src_agent_list[d]);
+        core::Agent* entry_dst_agent = core::Agent::Convert(op.dst_agent_list[d]);
+        IS_VALID(entry_src_agent);
+        IS_VALID(entry_dst_agent);
+        // One rect op is one SDMA submission on one copy engine.  Heterogeneous agent
+        // pairs would require splitting the op and aggregating its completion signal.
+        if (entry_src_agent != src_agent || entry_dst_agent != dst_agent) {
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
         IS_BAD_PTR(entry.dst);
         IS_BAD_PTR(entry.dst_offset);
         IS_BAD_PTR(entry.src);
@@ -766,8 +786,8 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
           (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
       const bool is_swap =
           (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
-      // A rect op is multi-entry but keeps one scalar src_agent / dst_agent pair for the
-      // whole op, so it resolves its copy agent the same way a single-entry op does.
+      // A rect op is multi-entry but its lists were validated to contain one common agent
+      // pair, so it resolves its copy agent the same way a single-entry op does.
       const bool is_rect =
           (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT);
 

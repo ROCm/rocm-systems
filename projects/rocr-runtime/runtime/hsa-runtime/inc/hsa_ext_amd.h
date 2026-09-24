@@ -2373,24 +2373,25 @@ typedef enum {
  *                      are lowered to SDMA packets in array order and issued as one
  *                      submission, so they execute in order on the copy engine, but no
  *                      ordering is observable between them.
- *   src_agent       -- source agent, common to all entries
- *   dst_agent       -- destination agent, common to all entries.  The pair selects the copy
- *                      direction: CPU -> GPU is host-to-device, anything else is routed
- *                      over the device-to-host engine.  CPU -> CPU is rejected.
+ *   src_agent_list  -- caller-owned array of num_entries source agents.  All entries must
+ *                      contain the same source agent.
+ *   dst_agent_list  -- caller-owned array of num_entries destination agents.  All entries
+ *                      must contain the same destination agent.  The common source and
+ *                      destination pair selects the copy direction: CPU -> GPU is
+ *                      host-to-device, anything else is routed over the device-to-host
+ *                      engine.  CPU -> CPU is rejected.  Both agent arrays must remain valid
+ *                      and unmodified until hsa_amd_memory_async_batch_copy returns.
  *   num_entries     -- number of entries (>= 1 and <= 65535); there is no scalar form
  *   dst             -- must be NULL
  *   size            -- must be 0
  *   unused_size     -- must be 0
  *   num_dep_signals -- must not exceed 5 for a batch containing this type
  *
- * Future-proofing unions (reserved, must not be used):
- *   src_agent_list           -- reserved for future gather operations
- *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
  */
 typedef struct hsa_amd_memory_copy_op_s {
   uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
   uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_entries;                    /**< Number of entries for multi-entry forms (LINEAR / SWAP / INDIRECT_*: 0 = scalar form; BROADCAST: always >= 1) */
+  uint16_t num_entries;                    /**< Number of entries for multi-entry forms (LINEAR / SWAP / INDIRECT_*: 0 = scalar form; BROADCAST / LINEAR_RECT: always >= 1) */
   uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {
@@ -2400,11 +2401,11 @@ typedef struct hsa_amd_memory_copy_op_s {
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
-    hsa_agent_t* src_agent_list;          /**< Reserved for future use */
+    hsa_agent_t* src_agent_list;          /**< LINEAR_RECT: caller-owned source-agent array */
   };
   union {
     hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
-    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination agents */
+    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST / LINEAR_RECT: caller-owned destination-agent array */
   };
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */

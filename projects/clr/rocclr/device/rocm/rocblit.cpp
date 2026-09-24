@@ -362,8 +362,8 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
     return true;
   }
 
-  // One LINEAR_RECT op carries a single agent pair and a single completion signal, so the
-  // whole batch has to be same-direction host<->device DWORD-aligned rects.  Anything else
+  // One LINEAR_RECT op carries agent lists with one common pair and one completion signal, so
+  // the whole batch has to be same-direction host<->device DWORD-aligned rects.  Anything else
   // (D2D/P2P, which the kernel blit handles, unaligned pitches, or a mixed batch) drops
   // back to issuing the operands one at a time.
   hsa_amd_copy_direction_t direction = hsaHostToHost;
@@ -423,9 +423,8 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
 
   gpu().releaseGpuMemoryFence(kSkipCpuWait);
 
-  // The public rect entry contains pointers so callers can reuse the same geometry passed
-  // to hsa_amd_memory_async_copy_rect.  Size this backing vector before taking addresses;
-  // ROCR consumes the descriptors and lowers them to SDMA packets before the API returns.
+  // Allocate descriptor storage up front so pointers in entries remain valid until
+  // hsa_amd_memory_async_batch_copy returns.
   struct RectEntryStorage {
     hsa_pitched_ptr_t dst{};
     hsa_dim3_t dst_offset{};
@@ -453,6 +452,13 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
                   &storage.range};
   }
 
+  const hsa_agent_t srcAgent =
+      (direction == hsaHostToDevice) ? dev().getCpuAgent() : dev().getBackendDevice();
+  const hsa_agent_t dstAgent =
+      (direction == hsaHostToDevice) ? dev().getBackendDevice() : dev().getCpuAgent();
+  std::vector<hsa_agent_t> srcAgents(entries.size(), srcAgent);
+  std::vector<hsa_agent_t> dstAgents(entries.size(), dstAgent);
+
   const HwQueueEngine engine =
       (direction == hsaHostToDevice) ? HwQueueEngine::SdmaH2D : HwQueueEngine::SdmaD2H;
   auto wait_events = gpu().Barriers().WaitingSignal(engine);
@@ -466,10 +472,8 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
   rectOp.num_entries = static_cast<uint16_t>(entries.size());
   rectOp.completion_signal = active;
   rectOp.rect_list = entries.data();
-  rectOp.src_agent =
-      (direction == hsaHostToDevice) ? dev().getCpuAgent() : dev().getBackendDevice();
-  rectOp.dst_agent =
-      (direction == hsaHostToDevice) ? dev().getBackendDevice() : dev().getCpuAgent();
+  rectOp.src_agent_list = srcAgents.data();
+  rectOp.dst_agent_list = dstAgents.data();
 
   ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
           "HSA BatchCopy Rect entries=%zu, engineOp=%s, wait_event=0x%zx, "
