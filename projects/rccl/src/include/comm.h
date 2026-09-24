@@ -1029,6 +1029,8 @@ struct ncclComm {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+  // [RCCL] Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD
+  int ll128ShmemElemsPerThread;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
