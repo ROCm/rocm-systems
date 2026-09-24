@@ -361,6 +361,9 @@ ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_interop_map_buffer_with_size_fn, 91)
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x13
 ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_svm_discard_and_prefetch_batch_async_fn, 92);
 #endif
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x14
+ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_vmem_get_vmem_info_fn, 93);
+#endif
 
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_get_capability_fn, 1);
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_data_get_info_fn, 2);

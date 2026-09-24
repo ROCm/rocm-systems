@@ -34,6 +34,7 @@
 #include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ext_image.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string_view>
@@ -250,9 +251,7 @@ struct formatter<hsa_fabric_handle_t>
 #if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 13300
 namespace fmt
 {
-// Not a handle struct, so handle_formatter does not apply. The struct-size member
-// is reported alongside the payload because it bounds which members ROCr actually
-// filled in -- a trace without it cannot tell an unset member from a zero one.
+// Not a handle struct, so handle_formatter does not apply.
 template <>
 struct formatter<hsa_amd_vmem_handle_info_t>
 {
@@ -262,14 +261,17 @@ struct formatter<hsa_amd_vmem_handle_info_t>
         return ctx.begin();
     }
 
+    // ROCr fills only the members that fit in v.size, so anything past it is
+    // memory the caller never provided.
     template <typename Ctx>
     auto format(const hsa_amd_vmem_handle_info_t& v, Ctx& ctx) const
     {
-        return fmt::format_to(ctx.out(),
-                              "size={}, alloc_size={}, agent={}",
-                              v.size,
-                              v.alloc_size,
-                              v.agent);
+        auto out = fmt::format_to(ctx.out(), "size={}", v.size);
+        if(v.size >= offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(v.alloc_size))
+            out = fmt::format_to(out, ", alloc_size={}", v.alloc_size);
+        if(v.size >= offsetof(hsa_amd_vmem_handle_info_t, agent) + sizeof(v.agent))
+            out = fmt::format_to(out, ", agent={}", v.agent);
+        return out;
     }
 };
 }  // namespace fmt
