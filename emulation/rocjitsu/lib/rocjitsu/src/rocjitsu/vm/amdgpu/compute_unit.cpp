@@ -1454,6 +1454,7 @@ template <bool EnableAsync>
 
   std::optional<GpuVmAccess> fresh_vm_access;
   const GpuVmAccess *vm_access = active->vm_access();
+  const bool using_retained_vm_access = vm_access != nullptr;
   InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
   // A callback may recursively issue another wave. Keep its fetch from
   // replacing the snapshot borrowed by this instruction's later debug probes.
@@ -1526,6 +1527,15 @@ template <bool EnableAsync>
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
+    if (fetch_outcome == VmAccessOutcome::Revoked) {
+      // Invalidation deliberately revokes pinned snapshots. Drop this wave's
+      // retained fast path so the next issue can capture the new translation
+      // epoch, or report a terminal fault if the binding is gone.
+      if (using_retained_vm_access)
+        active->set_vm_access({});
+      request_functional_yield();
+      return;
+    }
     if (fetch_outcome == VmAccessOutcome::Unavailable) {
       request_functional_yield();
       return;
