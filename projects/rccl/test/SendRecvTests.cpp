@@ -17,7 +17,7 @@
 namespace RcclUnitTesting
 {
   // Return true if device 0's architecture is one for which the LL128 P2P send/recv kernel is
-  // generated and activated (gfx942/gfx950 only; see reg_values_of("SendRecv") and the enqueue
+  // generated and activated (gfx942/gfx950/gfx1250; see reg_values_of("SendRecv") and the enqueue
   // gate). The arch is queried in a forked child so the parent test process does not initialize
   // HIP (mirrors EnvVars' isolated arch detection).
   static bool DeviceSupportsLL128SendRecv()
@@ -44,7 +44,8 @@ namespace RcclUnitTesting
     close(pipefd[0]);
     waitpid(pid, nullptr, 0);
     std::string a(arch);
-    return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos;
+    return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos ||
+           a.find("gfx1250") != std::string::npos;
   }
 
   // Scan the NCCL_DEBUG_SUBSYS=COLL log files matching globPattern for the per-op protocol line
@@ -330,7 +331,7 @@ namespace RcclUnitTesting
                    << testBed.ev.maxGpus << ")";
     }
     if (expect == ExpectProto::LL128 && !DeviceSupportsLL128SendRecv()) {
-      GTEST_SKIP() << "Skipping... LL128 P2P send/recv is only enabled on gfx942/gfx950.";
+      GTEST_SKIP() << "Skipping... LL128 P2P send/recv is only enabled on gfx942/gfx950/gfx1250.";
     }
 
     bool isCorrect = true;
@@ -489,7 +490,7 @@ namespace RcclUnitTesting
   //   off         | any          | any        | below | legacy LL | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
   //   off         | any          | any        | above | SIMPLE    | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
   //
-  // Non-gfx942/950 archs behave like the ENABLE_LL128=off rows (useLL128SendRecv is always false);
+  // Non-gfx942/950/gfx1250 archs behave like the ENABLE_LL128=off rows (useLL128SendRecv is always false);
   // the LL128 cases are skipped there via DeviceSupportsLL128SendRecv().
   // ---------------------------------------------------------------------------
 
@@ -575,6 +576,7 @@ namespace RcclUnitTesting
     PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: opt-in, not the SendRecv auto window
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // pin LL128 threshold to the 16 KiB boundary the sweep straddles
     // Capture the per-op protocol selection so we can assert LL128 was actually chosen (see helper).
@@ -698,6 +700,7 @@ namespace RcclUnitTesting
     PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: opt-in, not the SendRecv auto window
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "0", 1);         // legacy-LL knob at 0: must NOT affect the LL128 path
     setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // LL128 knob governs -> LL128 below 16 KiB

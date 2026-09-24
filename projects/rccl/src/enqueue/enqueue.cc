@@ -1371,10 +1371,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //     selecting it would dispatch to a null/trap device slot.
   //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE;
   //     gfx1250 default-enables this in init).
-  //   - gfx942/gfx950: NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 (Wenkai), which also stages the net LL128
+  //   - gfx942/gfx950: NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, which also stages the net LL128
   //     buffer for internodal P2P.
-  //   - gfx1250: NCCL_P2P_LL128_ENABLE=1 (Pedram) for all P2P below the threshold, or ENABLE unset
-  //     (-1) for SendRecv-only size windows (1-node 4 GPU: 4-16 KiB, 2-node 8 GPU: 4-256 KiB,
+  //   - gfx1250: NCCL_P2P_LL128_ENABLE=1 for all P2P below the threshold, or ENABLE=-1 (auto)
+  //     for SendRecv-only size windows (1-node 4 GPU: 4-16 KiB, 2-node 8 GPU: 4-256 KiB,
   //     4-node 16 GPU: 4-128 KiB). Internodal still needs the LL128 staging buffer
   //     (NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, auto-set for those 2/4-node windows); if it is missing
   //     the op falls back to SIMPLE.
@@ -1382,19 +1382,18 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool p2pLl128Gfx9 = (comm->cudaArch == 940 || comm->cudaArch == 950) && comm->allocP2pNetLLBuffers;
   bool p2pLl128Gfx1250 = (comm->cudaArch == 1250) && ncclParamP2pLL128Enable() > 0;
   bool useLL128OptIn = comm->topo->ll128Enabled && (p2pLl128Gfx9 || p2pLl128Gfx1250);
-  ssize_t srLl128Hi = 0;
-  if (ncclParamP2pLL128Enable() != 0 && comm->topo->ll128Enabled) {
-    bool sendrecvOp = false;
+  ssize_t srLl128Hi[2] = {0, 0};
+  // Auto (ENABLE < 0) only. ENABLE=1 is the opt-in threshold path and must not take the window.
+  if (ncclParamP2pLL128Enable() < 0 && comm->topo->ll128Enabled) {
     for (int t = 0; t < 2; t++) {
       if (p2pTasks[t] && (p2pTasks[t]->collAPI == ncclFuncSend || p2pTasks[t]->collAPI == ncclFuncRecv ||
                           p2pTasks[t]->collAPI == ncclFuncSendRecv))
-        sendrecvOp = true;
+        srLl128Hi[t] = rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, comm->nNodes, comm->nRanks);
     }
-    if (sendrecvOp) srLl128Hi = rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, comm->nNodes, comm->nRanks);
   }
 #else
   bool useLL128OptIn = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
-  ssize_t srLl128Hi = 0;
+  ssize_t srLl128Hi[2] = {0, 0};
 #endif
   bool useLL128SendRecv = useLL128OptIn;
   if (comm->p2pNet) {
@@ -1468,8 +1467,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // or legacy LL, and SIMPLE above it. P2P_LL128_THRESHOLD=0 means no upper bound.
     if (bytes[dir] == -1) {
       protocol[dir] = NCCL_PROTO_SIMPLE;
-    } else if (srLl128Hi > 0) {
-      if (bytes[dir] >= rcclGfx1250SendRecvLl128MinBytes && bytes[dir] <= srLl128Hi && hasLL128[dir])
+    } else if (srLl128Hi[dir] > 0) {
+      if (bytes[dir] >= rcclGfx1250SendRecvLl128MinBytes && bytes[dir] <= srLl128Hi[dir] && hasLL128[dir])
         protocol[dir] = NCCL_PROTO_LL128;
       else if (bytes[dir] < rcclGfx1250SendRecvLl128MinBytes && hasLL[dir])
         protocol[dir] = NCCL_PROTO_LL;
@@ -1481,6 +1480,26 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       if (!(useLL128OptIn && latencyThreshold == 0)) lat &= bytes[dir] <= nChannels[dir] * latencyThreshold;
       protocol[dir] = lat ? (useLL128OptIn ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
     }
+  }
+
+  // One P2P kernel variant for both dirs (ncclDevWorkP2p has no per-dir LL vs LL128). If this
+  // round mixed LL and LL128, run both as the same LL-family protocol so an LL-planned dir does
+  // not execute ProtoLL128 against an LL peer.
+  if (bytes[0] != -1 && bytes[1] != -1) {
+    bool llFam0 = protocol[0] == NCCL_PROTO_LL || protocol[0] == NCCL_PROTO_LL128;
+    bool llFam1 = protocol[1] == NCCL_PROTO_LL || protocol[1] == NCCL_PROTO_LL128;
+    if (llFam0 && llFam1 && protocol[0] != protocol[1]) {
+      if (hasLL128[0] && hasLL128[1]) {
+        protocol[0] = protocol[1] = NCCL_PROTO_LL128;
+      } else if (hasLL[0] && hasLL[1]) {
+        protocol[0] = protocol[1] = NCCL_PROTO_LL;
+      } else {
+        protocol[0] = protocol[1] = NCCL_PROTO_SIMPLE;
+      }
+    }
+  }
+
+  for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send
     protoLatency[dir] = protocol[dir] == NCCL_PROTO_LL || protocol[dir] == NCCL_PROTO_LL128;
 
     // Emit the selected protocol so tests (and NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=COLL) can confirm

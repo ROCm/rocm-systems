@@ -46,6 +46,7 @@ NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
 NCCL_PARAM(CollNetNodeThreshold, "COLLNET_NODE_THRESHOLD", 2);
 NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
+NCCL_PARAM(P2pLL128Enable, "P2P_LL128_ENABLE", -1);
 
 thread_local int ncclDebugNoWarn = 0;
 // Flag to suppress verbose rank/host output (used by test suite)
@@ -915,7 +916,10 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
     }
   }
   // Initialize num P2P LL buffers for this communicator
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1;
+  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1 ||
+                               (ncclParamP2pLL128Enable() != 0 &&
+                                rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, /*nNodes=*/1, nranks) > 0 &&
+                                nranks > 4);
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[4] = { &ringGraph, &treeGraph, &collNetGraph, &nvlsGraph };

@@ -363,6 +363,7 @@ if(BUILD_TESTS)
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
+      Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/RcclEpTests.cpp

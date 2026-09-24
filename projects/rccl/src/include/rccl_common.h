@@ -379,6 +379,10 @@ inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool un
 // gfx1250 SendRecv (ncclSend/ncclRecv only, not AlltoAll) LL128 message-size windows
 // for 4 GPU/node. 0 means this communicator has no auto window.
 // Inclusive: [rcclGfx1250SendRecvLl128MinBytes, max].
+// nNodes is unused: MNNVL folds multi-host gfx1250 into one NVL domain (comm->nNodes=1
+// and comm->localRanks=nRanks), so localRanks cannot tell 4 GPU/node hosts apart from
+// CPX or 1 GPU/node. Callers pass different nNodes meanings (physical hosts in init,
+// NVL domains in enqueue); key off nRanks 4 / 8 / 16 instead.
 constexpr ssize_t rcclGfx1250SendRecvLl128MinBytes = 4 << 10;
 inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nRanks) {
   if (cudaArch != 1250) return 0;
