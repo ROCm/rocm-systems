@@ -508,7 +508,7 @@ enum hip_api_id_t {
   HIP_API_ID_hipInitDevice = 486,
   HIP_API_ID_hipModuleEnumerateFunctions = 487,
   HIP_API_ID_hipExtMemcpyBatchAsync = 488,
-  HIP_API_ID_LAST = 487,
+  HIP_API_ID_LAST = 488,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,

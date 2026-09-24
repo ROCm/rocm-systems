@@ -2045,6 +2045,131 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric) {
 /**
  * Test Description
  * ------------------------
+ * - A single batch that mixes an asymmetric swap entry with a plain linear-copy entry.
+ *   Exercises the asymmetric-swap decomposition (symmetric head swap + linear tail)
+ *   alongside an unrelated op in the same submission. The decomposed head-swap and
+ *   tail-copy touch disjoint byte ranges (split at sizesDst), so the batch is correct
+ *   regardless of intra-batch execution order.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_MixedAsymmetricSwapAndLinear) {
+  constexpr size_t kSizeA = 8192;
+  constexpr size_t kSizeB = 4096;
+  constexpr int kValA = 42;
+  constexpr int kValB = 99;
+  constexpr int kValSrc = 7;
+
+  int* h_a = nullptr;    // pinned host (swap A side)
+  void* d_b = nullptr;   // device (swap B side)
+  void* d_lin = nullptr; // device (linear-copy dest)
+  int* h_lin = nullptr;  // pinned host (linear-copy src)
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_a), kSizeA));
+  HIP_CHECK(hipMalloc(&d_b, kSizeA));
+  HIP_CHECK(hipMalloc(&d_lin, kSizeA));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_lin), kSizeA));
+
+  const size_t totalElems = kSizeA / sizeof(int);
+  for (size_t i = 0; i < totalElems; i++) {
+    h_a[i] = kValA;
+    h_lin[i] = kValSrc;
+  }
+  std::vector<int> hostB(totalElems, kValB);
+  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeA, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_lin, 0, kSizeA));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {h_a, d_lin};
+  void* srcs[] = {d_b, h_lin};
+  size_t sizes[] = {kSizeA, kSizeA};
+  size_t sizesDst[] = {kSizeB, 0};  // entry0 asymmetric; entry1 non-swap => 0
+  size_t attrsIdxs[] = {0, 1};
+  hipExtMemcpyAttributes attrs[2]{};
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[0].flags = hipMemcpyFlagExtOpSwap;
+  attrs[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].flags = 0;  // plain linear copy
+
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst,
+                                          nullptr, nullptr, 2,
+                                          attrs, attrsIdxs, 2, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipHostFree(h_a));
+    HIP_CHECK(hipFree(d_b));
+    HIP_CHECK(hipFree(d_lin));
+    HIP_CHECK(hipHostFree(h_lin));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Entry 0: asymmetric swap. B receives all of A; A's head receives B, A's tail unchanged.
+  std::vector<int> resultB(totalElems);
+  HIP_CHECK(hipMemcpy(resultB.data(), d_b, kSizeA, hipMemcpyDeviceToHost));
+  const size_t swapElems = kSizeB / sizeof(int);
+  for (size_t i = 0; i < swapElems; i++) {
+    REQUIRE(h_a[i] == kValB);
+    REQUIRE(resultB[i] == kValA);
+  }
+  for (size_t i = swapElems; i < totalElems; i++) {
+    REQUIRE(h_a[i] == kValA);
+    REQUIRE(resultB[i] == kValA);
+  }
+  // Entry 1: plain linear copy is unaffected by the decomposed swap.
+  std::vector<int> resultLin(totalElems);
+  HIP_CHECK(hipMemcpy(resultLin.data(), d_lin, kSizeA, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < totalElems; i++) REQUIRE(resultLin[i] == kValSrc);
+
+  HIP_CHECK(hipHostFree(h_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipFree(d_lin));
+  HIP_CHECK(hipHostFree(h_lin));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - A non-zero sizesDst[i] on a non-swap entry is rejected with hipErrorInvalidValue;
+ *   sizesDst is only meaningful for swap entries.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_SizesDst_NonSwap_Negative) {
+  constexpr size_t kSize = 4096;
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, kSize);
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, kSize);
+  StreamGuard stream_guard(Streams::created);
+
+  void* dsts[] = {dst.ptr()};
+  void* srcs[] = {src.ptr()};
+  size_t sizes[] = {kSize};
+  size_t sizesDst[] = {kSize / 2};  // non-zero on a non-swap (default) entry
+  size_t attrs_idxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = 0;  // no swap
+
+  HIP_CHECK_ERROR(hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst,
+                                         nullptr, nullptr, 1,
+                                         &attr, attrs_idxs, 1, stream_guard.stream()),
+                  hipErrorInvalidValue);
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - Indirect source specified via attrs flags (hipMemcpyFlagExtOpIndirectSrc): srcs[i]
  *   holds a pointer to the real source buffer, read when the copy executes.
  *   Skipped where indirect copy is unsupported.

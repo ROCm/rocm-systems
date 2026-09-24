@@ -2904,6 +2904,10 @@ hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
 // hipMemcpyAttributes; the legacy wrapper converts by value (never casts the 24-byte
 // struct to the 56-byte one). Lock hipExtMemcpyAttributes at 56 bytes so its ABI can't drift.
 static_assert(sizeof(hipExtMemcpyAttributes) == 56, "hipExtMemcpyAttributes must stay 56 bytes");
+// The wait/signal structs promise a fixed 64-byte ABI (future fields carve out of their
+// reserved tail); lock the size the same way so a field addition can't silently grow them.
+static_assert(sizeof(hipExtMemcpyWait) == 64, "hipExtMemcpyWait must stay 64 bytes");
+static_assert(sizeof(hipExtMemcpySignal) == 64, "hipExtMemcpySignal must stay 64 bytes");
 
 static amd::CopyMetadata buildCopyMetadataFromAttrs(hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
                                                      size_t numAttrs, size_t copyIdx, bool isAsync) {
@@ -3235,12 +3239,20 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
 
-    // For an asymmetric swap, sizesDst carries the B-side (destination) length; HW
-    // requires count_a >= count_b (sizes[i] >= sizeB).
+    // sizesDst is only meaningful for swap entries, where it carries the B-side
+    // (destination) length; HW requires count_a >= count_b (sizes[i] >= sizeB). For a
+    // non-swap entry it must be zero: a non-zero value is a caller error (a per-entry
+    // destination length is not supported for linear copies) rather than a silently
+    // ignored field.
     size_t sizeB = 0;
-    if (sizesDst != nullptr && metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
-      sizeB = sizesDst[i];
-      if (sizeB == 0 || sizeB > sizes[i]) {
+    if (sizesDst != nullptr) {
+      if (metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
+        sizeB = sizesDst[i];
+        if (sizeB == 0 || sizeB > sizes[i]) {
+          if (failIdx != nullptr) *failIdx = i;
+          return hipErrorInvalidValue;
+        }
+      } else if (sizesDst[i] != 0) {
         if (failIdx != nullptr) *failIdx = i;
         return hipErrorInvalidValue;
       }
@@ -3265,6 +3277,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
           // Native asymmetric swap is unavailable: decompose into a symmetric
           // swap of the first sizeB bytes plus a linear copy of the A-side tail.
+          // The two ops touch DISJOINT byte ranges, split exactly at sizeB: the swap
+          // reads/writes only [0, sizeB) of A and B, while the tail reads A[sizeB..)
+          // and writes B[sizeB..). Because neither op reads or writes a byte the other
+          // touches, they carry no data dependency and are correct regardless of the
+          // order (or concurrency) in which the batch executes them.
           copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
                                                      dstOffsets[i], sizeB, metadata);
           // Tail copy A[sizeB..sizeA-1] -> B[sizeB..sizeA-1]. In swap semantics
@@ -3367,12 +3384,18 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   }
   CHECK_STREAM_DETACHED_API(stream);
 
+  // Validate the attribute-array shape up front so the conversion below never reads
+  // attrs[i] for an index the shared implementation would reject anyway.
+  if (numAttrs > 0 && (attrs == nullptr || attrsIdxs == nullptr || numAttrs > count)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   // The shared batch path takes hipExtMemcpyAttributes. Convert each CUDA-compatible
   // hipMemcpyAttributes by value (never cast the 24-byte struct to the 56-byte one),
   // leaving the reserved fields zeroed.
   std::vector<hipExtMemcpyAttributes> extAttrs;
   hipExtMemcpyAttributes* extAttrsPtr = nullptr;
-  if (attrs != nullptr && numAttrs > 0) {
+  if (numAttrs > 0) {
     extAttrs.resize(numAttrs);  // value-initializes reserved to 0
     for (size_t i = 0; i < numAttrs; ++i) {
       extAttrs[i].srcAccessOrder = attrs[i].srcAccessOrder;

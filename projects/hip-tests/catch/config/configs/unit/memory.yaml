@@ -933,6 +933,8 @@ memory:
   Unit_hipExtMemcpyBatchAsync_SizesDst_Constraint_Negative: *level_2
   Unit_hipExtMemcpyBatchAsync_PreferCU_D2D: *level_2
   Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric: *level_2
+  Unit_hipExtMemcpyBatchAsync_MixedAsymmetricSwapAndLinear: *level_2
+  Unit_hipExtMemcpyBatchAsync_SizesDst_NonSwap_Negative: *level_2
   Unit_hipExtMemcpyBatchAsync_IndirectSrc: *level_2
   Unit_hipExtMemcpyBatchAsync_IndirectDst: *level_2
   Unit_hipExtMemcpyBatchAsync_IndirectSrcDst: *level_2
