@@ -44,7 +44,7 @@ from amdisa.fieldless_policy import (
     fieldless_policy,
     operand_participates,
 )
-from amdisa.semantics import InstructionSemantics, SemanticsSpec
+from amdisa.semantics import F32_TO_INTEGER_DTYPES, InstructionSemantics, SemanticsSpec
 from amdisa.isa_profile import DppOpcodeRule
 
 from amdisa.codegen.config import CodegenConfig
@@ -182,6 +182,7 @@ _LITERAL_CAPABLE_OPERAND_TYPES = frozenset(
         'OPR_SREG_LITERAL',
         'OPR_SSRC',
         'OPR_SSRC_NOLDS',
+        'OPR_SSRC_LANESEL',
     }
 )
 
@@ -979,6 +980,10 @@ class CodeGenerator:
         body = body.replace(
             'util::f32_to_f16_mode(',
             f'amdgpu::sdwa::round_f16_result({instruction}, wf, ',
+        )
+        body = body.replace(
+            'amdgpu::fp_mode::finish_arithmetic_f16(',
+            f'amdgpu::sdwa::finish_arithmetic_f16({instruction}, wf, ',
         )
         return body
 
@@ -2013,9 +2018,9 @@ class CodeGenerator:
                     ('VopdFmacF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)));
+                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2024,9 +2029,9 @@ class CodeGenerator:
                     ('VopdFmaakF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(src2));
+                                              std::bit_cast<float>(src2), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2035,9 +2040,9 @@ class CodeGenerator:
                     ('VopdFmamkF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src2),
-                                              std::bit_cast<float>(src1));
+                                              std::bit_cast<float>(src1), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2046,7 +2051,7 @@ class CodeGenerator:
                     ('VopdMulF32',),
                     '''
                     {
-                      float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2057,9 +2062,7 @@ class CodeGenerator:
                     {
                       float lhs = std::bit_cast<float>(src0);
                       float rhs = std::bit_cast<float>(src1);
-                      if (lhs == 0.0f || rhs == 0.0f)
-                        return std::bit_cast<uint32_t>(0.0f);
-                      return std::bit_cast<uint32_t>(lhs * rhs);
+                      return std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL_LEGACY>(lhs, rhs, 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()));
                     }
                     ''',
                 ),
@@ -2067,7 +2070,7 @@ class CodeGenerator:
                     ('VopdAddF32',),
                     '''
                     {
-                      float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2076,7 +2079,7 @@ class CodeGenerator:
                     ('VopdSubF32',),
                     '''
                     {
-                      float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2085,7 +2088,7 @@ class CodeGenerator:
                     ('VopdSubrevF32',),
                     '''
                     {
-                      float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2153,9 +2156,9 @@ class CodeGenerator:
                     ('VopdFmaF32',),
                     '''
                     {
-                      float result = std::fma(std::bit_cast<float>(src0),
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(src2));
+                                              std::bit_cast<float>(src2), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2375,17 +2378,15 @@ class CodeGenerator:
               switch (slot.op) {
               case kVopdFmaF64: {
                 uint64_t src2 = apply_neg64(amdgpu::RegisterAccess(wf).read_lane64(*slot.src2, lane), slot.neg, 2);
-                double result = std::fma(std::bit_cast<double>(src0),
-                                         std::bit_cast<double>(src1),
-                                         std::bit_cast<double>(src2));
+                double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2), wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
                 return std::bit_cast<uint64_t>(result);
               }
               case kVopdAddF64: {
-                double result = std::bit_cast<double>(src0) + std::bit_cast<double>(src1);
+                double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<double>(src0), std::bit_cast<double>(src1), 0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
                 return std::bit_cast<uint64_t>(result);
               }
               case kVopdMulF64: {
-                double result = std::bit_cast<double>(src0) * std::bit_cast<double>(src1);
+                double result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(std::bit_cast<double>(src0), std::bit_cast<double>(src1), 0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
                 return std::bit_cast<uint64_t>(result);
               }
               case kVopdMinNumF64: {
@@ -2531,6 +2532,7 @@ class CodeGenerator:
             #include "@GENERATED_ARCH@/vopd.h"
             #include "util/except.h"
             #include "rocjitsu/vm/amdgpu/wavefront.h"
+            #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
             #include <algorithm>
             #include <bit>
             #include <cmath>
@@ -2963,6 +2965,7 @@ class CodeGenerator:
                 '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"\n'
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
+                '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"\n'
                 '#include <algorithm>\n'
                 '#include <bit>\n'
                 '#include <cmath>\n'
@@ -6205,21 +6208,32 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
+                is_integer_to_f32 = cls == 'vector_unary' and dtype in (
+                    'f32_i32',
+                    'f32_u32',
+                    'f32_ubyte0',
+                    'f32_ubyte1',
+                    'f32_ubyte2',
+                    'f32_ubyte3',
+                )
+                is_f32_to_integer = (
+                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                )
                 if (
                     is_vop3
-                    and is_float_op
+                    and (is_float_op or is_integer_to_f32 or is_f32_to_integer)
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = {'neg'}
-                    if has_abs:
+                    ef = set() if is_integer_to_f32 else {'neg'}
+                    if has_abs and not is_integer_to_f32:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields:
+                    if 'clamp' in inst_fields and not is_f32_to_integer:
                         ef.add('clamp')
-                    if 'omod' in inst_fields:
+                    if 'omod' in inst_fields and not is_f32_to_integer:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
@@ -7217,7 +7231,7 @@ class CodeGenerator:
                     f'    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(s0, k, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -7282,7 +7296,7 @@ class CodeGenerator:
                 )
                 L.append(f'    float k = std::bit_cast<float>({k_expr});')
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(s0, s1, k, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -9642,6 +9656,9 @@ class CodeGenerator:
             lo = enum_values[pattern.min_enum]
             hi = enum_values[pattern.max_enum]
             intervals.append((min(lo, hi), max(lo, hi)))
+
+        if operand_type == 'OPR_SSRC_LANESEL':
+            intervals.extend(self.isa_spec.profile.extra_lane_selector_intervals)
 
         merged: list[tuple[int, int]] = []
         for lo, hi in sorted(intervals):
@@ -14218,6 +14235,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
             case_lines = []
             ref_case_lines = []
+            # Some XML lane-selector ranges stop at 63. Match the inline 64
+            # qualification used by validation and execution for these profiles.
+            if opnd_sel.operand_type == 'OPR_SSRC_LANESEL' and any(
+                lo <= 192 <= hi
+                for lo, hi in self.isa_spec.profile.extra_lane_selector_intervals
+            ):
+                case_lines.append('if (encoding_value_ == 192u) return "64";')
             for pattern in opnd_sel.name_patterns:
                 if pattern.kind == OperandNamePattern.REG_RANGE:
                     case_lines.append(

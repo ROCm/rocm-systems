@@ -870,14 +870,11 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
     const uint32_t old_val = lds->read32(addr);
     const uint32_t active_count = static_cast<uint32_t>(std::popcount(d.lane_mask));
-    uint32_t active_rank = 0;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(d.lane_mask & (1ULL << lane)))
         continue;
-      const uint32_t result =
-          d.atomic_op == AtomicOp::APPEND ? old_val + active_rank : old_val - active_rank - 1;
-      std::memcpy(&response_data[lane * 4], &result, 4);
-      ++active_rank;
+      // Both operations broadcast the pre-operation counter to active lanes.
+      std::memcpy(&response_data[lane * 4], &old_val, 4);
     }
     const uint32_t new_val =
         d.atomic_op == AtomicOp::APPEND ? old_val + active_count : old_val - active_count;

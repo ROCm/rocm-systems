@@ -432,9 +432,9 @@ private:
                            args_str.c_str());
     }
 
-    typename Policy::clock_type                           clock_{};
-    typename Policy::region_sink_type                     sink_{};
-    typename Policy::thread_metadata_type                 thread_meta_{};
+    Policy::clock_type                                    clock_{};
+    Policy::region_sink_type                              sink_{};
+    Policy::thread_metadata_type                          thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
 };
 

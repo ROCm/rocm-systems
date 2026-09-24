@@ -1278,7 +1278,7 @@ protected:
 
   std::array<uint8_t, kBackingSize> backing_{};
   rocjitsu::KfdProcess::PageTable page_table_;
-  std::shared_mutex page_table_mutex_;
+  util::DistributedSharedMutex page_table_mutex_;
   GpuMemory memory_{"memory"};
   rocjitsu::amdgpu::GpuVm gpu_vm_;
   rocjitsu::amdgpu::LegacyGpuVmAdapter legacy_vm_{gpu_vm_, &memory_};

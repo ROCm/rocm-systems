@@ -44,7 +44,7 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
                             rocprofiler_counter_id_t* counters, size_t num_counters,
                             void* user_data)
 {
-    using value_type = typename agent_counter_info_map_t::mapped_type;
+    using value_type = agent_counter_info_map_t::mapped_type;
 
     auto* data_v = static_cast<agent_counter_info_map_t*>(user_data);
     data_v->emplace(agent_id, value_type{});
