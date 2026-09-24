@@ -1,4 +1,4 @@
-# Proposal: port the rocprofiler-systems C++ skills into rocprofiler-compute
+# LLD: C++ coding guidelines
 
 ## Motivation
 
