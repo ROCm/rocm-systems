@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -208,10 +209,8 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
                                 packet + field_end);
     }
 
-    if(seq_id_limit_exclusive > TRUSTED_SEQ_ID_MAX_EXCLUSIVE)
-    {
-        seq_id_limit_exclusive = TRUSTED_SEQ_ID_MAX_EXCLUSIVE;
-    }
+    seq_id_limit_exclusive =
+        std::min(seq_id_limit_exclusive, TRUSTED_SEQ_ID_MAX_EXCLUSIVE);
 
     const auto seq_id_offset64 = static_cast<std::uint64_t>(seq_id_offset);
     if(seq_id_limit_exclusive == 0 || seq_id_offset64 >= seq_id_limit_exclusive ||

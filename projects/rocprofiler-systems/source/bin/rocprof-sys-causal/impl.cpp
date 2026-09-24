@@ -13,6 +13,7 @@
 
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
@@ -681,10 +682,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         throw std::runtime_error(_cerr.what());
     }
 
-    if(_niterations < 1)
-    {
-        _niterations = 1;
-    }
+    _niterations   = std::max<std::int64_t>(_niterations, 1);
     auto _get_size = [](const auto& _v) { return std::max<size_t>(_v.size(), 1); };
 
     auto _causal_envs_tmp = std::vector<std::map<std::string_view, std::string>>{};
