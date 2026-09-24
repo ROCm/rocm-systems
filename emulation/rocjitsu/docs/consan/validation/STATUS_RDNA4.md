@@ -35,6 +35,6 @@ historical color changes and audits the current clean controls.
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟥 max: clean numerical pass; 8 false-positive atomic-publication conflicts ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 max: clean numerical pass; 12 false-positive atomic-publication conflicts ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟥 max: expanded capture passes numerically, no journal drops; completeness pending (previous 8 false positives; [analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 max: expanded capture passes numerically, no journal drops; completeness pending (previous 12 false positives; [analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |

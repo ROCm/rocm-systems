@@ -127,6 +127,10 @@ using Evidence = EvidenceIntentKind;
 
 [[nodiscard]] constexpr std::optional<Evidence>
 classify_evidence_intent(const ModeProbeVocabulary &vocabulary, Probe kind) {
+  if (vocabulary.mode == Mode::Default && kind == Probe::PublicationModification)
+    return Evidence::PublicationModification;
+  if (vocabulary.mode == Mode::Default && kind == Probe::PublicationAddressCapture)
+    return Evidence::PublicationAddressCapture;
   if (kind == vocabulary.access)
     return vocabulary.sticky_access_evidence ? Evidence::StickyMarker : Evidence::Access;
   if (kind == Probe::AtomicAddressCapture && vocabulary.address_capture)
@@ -139,7 +143,9 @@ classify_evidence_intent(const ModeProbeVocabulary &vocabulary, Probe kind) {
 }
 
 [[nodiscard]] constexpr SemanticSiteDomain evidence_intent_domain(EvidenceIntentKind kind) {
-  return kind == EvidenceIntentKind::Access || kind == EvidenceIntentKind::StickyMarker
+  return kind == EvidenceIntentKind::Access || kind == EvidenceIntentKind::StickyMarker ||
+                 kind == EvidenceIntentKind::PublicationModification ||
+                 kind == EvidenceIntentKind::PublicationAddressCapture
              ? SemanticSiteDomain::Access
              : SemanticSiteDomain::SynchronizationEvent;
 }
@@ -152,8 +158,10 @@ classify_evidence_intent(const ModeProbeVocabulary &vocabulary, Probe kind) {
   case Evidence::Barrier:
     return vocabulary.barrier_elements_per_semantic_site ? semantic_sites.size() : 1u;
   case Evidence::Atomic:
+  case Evidence::PublicationModification:
   case Evidence::StickyMarker:
     return 1u;
+  case Evidence::PublicationAddressCapture:
   case Evidence::AddressCapture:
   case Evidence::Count:
     return 0u;
@@ -221,8 +229,10 @@ detail::accumulate_evidence_counts(const ObservationPlan &plan,
       add_saturating(inventory.barrier_event_count, element_count);
       break;
     case Evidence::Atomic:
+    case Evidence::PublicationModification:
       add_saturating(inventory.atomic_event_count, element_count);
       break;
+    case Evidence::PublicationAddressCapture:
     case Evidence::AddressCapture:
     case Evidence::StickyMarker:
     case Evidence::Count:

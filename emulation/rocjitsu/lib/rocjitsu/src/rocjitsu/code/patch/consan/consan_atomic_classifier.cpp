@@ -187,7 +187,9 @@ AtomicLoweringClassification classify_atomic_lowering(const AtomicSite &site, rj
   const bool global = is_global_family(site, is_rmw);
   if (!flat && !global)
     return reject(Reason::UnsupportedAddressSource);
-  if (site.width_bits != 32u && site.width_bits != 64u)
+  if (is_rmw ? site.width_bits != 32u && site.width_bits != 64u
+             : site.width_bits != 8u && site.width_bits != 16u && site.width_bits != 32u &&
+                   site.width_bits != 64u && site.width_bits != 96u && site.width_bits != 128u)
     return reject(Reason::InvalidAccessWidth);
 
   const uint32_t expected_size = memory.instruction_word_count * sizeof(uint32_t);

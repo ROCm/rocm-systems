@@ -503,6 +503,54 @@ AtomicFencePolicyResult plan_atomic_fence_observation(const ProgramInventory &in
     result.plan.fence_site_decisions.push_back(std::move(decision));
   }
 
+  if (request.publication_modifications_enabled && request.tracking_enabled &&
+      request.mode == Mode::Default && inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    std::vector<PhysicalSiteId> covered;
+    for (const ProgramSite &source : inventory.program_sites()) {
+      const auto *atomic = source.get_if<AtomicSite>();
+      const auto *ordinary = source.get_if<OrdinaryMemorySite>();
+      if (!atomic && (!ordinary || ordinary->operation != OrdinaryMemoryOperation::Store))
+        continue;
+      // LDS has a distinct address space from the global publication objects.
+      if (source.mnemonic_view().starts_with("ds_"))
+        continue;
+      const auto names = inventory.source_container_names(source.physical_id);
+      const auto owners = inventory.execution_owner_descriptors(source);
+      if (owners.empty() || !filter_matches(names, request.container_filter) ||
+          !site_matches_kernel_allowlist(inventory, owners, names, request.kernel_name_allowlist) ||
+          std::ranges::find(covered, source.physical_id) != covered.end() ||
+          std::ranges::any_of(result.plan.probe_intents, [&](const ProbeIntent &intent) {
+            return intent.physical_site == source.physical_id &&
+                   intent.kind == ProbeIntentKind::AtomicAddressCapture;
+          }))
+        continue;
+      const auto site = atomic ? *atomic : atomic_communication_site(*ordinary);
+      const auto classification =
+          classify_atomic_lowering(site, inventory.arch(), atomic != nullptr);
+      if (!classification.address_available())
+        continue; // Completeness is deliberately not asserted by this capture path.
+      covered.push_back(source.physical_id);
+      const SemanticSiteId semantic{.physical = source.physical_id,
+                                    .domain = SemanticSiteDomain::Access};
+      for (const auto kind :
+           {ProbeIntentKind::PublicationAddressCapture, ProbeIntentKind::PublicationModification}) {
+        const bool capture = kind == ProbeIntentKind::PublicationAddressCapture;
+        result.plan.probe_intents.push_back({
+            .id = ProbeIntentId{static_cast<uint32_t>(result.plan.probe_intents.size())},
+            .mode = request.mode,
+            .source_site = source.id,
+            .physical_site = source.physical_id,
+            .covered_semantic_sites = {semantic},
+            .kind = kind,
+            .position = capture ? ProbePosition::Before : ProbePosition::After,
+            .synchronization_association = std::nullopt,
+            .dynamic_result = DynamicResultRequirement::None,
+            .atomic_lowering_form = capture ? classification.form : std::nullopt,
+        });
+      }
+    }
+  }
+
   return result;
 }
 

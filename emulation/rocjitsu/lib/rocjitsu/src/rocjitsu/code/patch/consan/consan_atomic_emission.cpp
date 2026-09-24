@@ -311,10 +311,11 @@ struct AtomicPreludeState {
     rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, AtomicPreludeState &state,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     std::span<const uint32_t> leading_guest_words, std::span<const uint32_t> trailing_guest_words,
-    uint32_t *emitted_guest_size, std::optional<uint16_t> observation_vgpr = std::nullopt) {
+    uint32_t *emitted_guest_size, std::optional<uint16_t> observation_vgpr = std::nullopt,
+    bool capture_cas_outcome = true) {
   const AtomicSite &site = source.site;
   const bool is_rmw = source.is_rmw();
-  const bool is_cas = atomic_is_compare_exchange(site);
+  const bool is_cas = capture_cas_outcome && atomic_is_compare_exchange(site);
   if (is_cas) {
     assert(site.data_vgpr && site.destination_vgpr);
     state.cas_compare_vgpr = static_cast<uint16_t>(*site.data_vgpr + 1u);
@@ -461,8 +462,7 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     uint32_t *emitted_guest_size, PublicationCapture capture) {
   const bool opaque = capture == PublicationCapture::OpaqueModification;
-  const bool supported = opaque ? source.is_rmw() && source.site.width_bits != 0u &&
-                                      source.site.width_bits <= 1024u &&
+  const bool supported = opaque ? source.site.width_bits != 0u && source.site.width_bits <= 1024u &&
                                       source.site.width_bits % 8u == 0u
                                 : publication_observation_supported(source);
   const auto *target = target_profile(arch);
@@ -495,7 +495,8 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
                              emitted_guest_size,
                              opaque || source.site.returns_old_value.value_or(false)
                                  ? std::nullopt
-                                 : std::optional<uint16_t>{observed}))
+                                 : std::optional<uint16_t>{observed},
+                             !opaque))
     return std::nullopt;
   // The guest has completed, and its operands are still available either in
   // registers or in the post-guest spill. Capture both before scratch reuse.
@@ -577,8 +578,8 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
       .require(record.store_vgpr(offsetof(PublicationRecord, epoch), *plan.owner_epoch_vgprs.epoch))
       .require(record.store_literal(offsetof(PublicationRecord, byte_count),
                                     source.site.width_bits / 8u));
-  const auto memory_role = source.sequence->memory_role;
-  const bool release = source.sequence->lds_release_wait_text_offset.has_value();
+  const auto memory_role = source.sequence ? source.sequence->memory_role : SyncMemoryRole::Unknown;
+  const bool release = source.sequence && source.sequence->lds_release_wait_text_offset.has_value();
   const bool acquire =
       memory_role == SyncMemoryRole::Acquire || memory_role == SyncMemoryRole::AcquireRelease;
   sequence

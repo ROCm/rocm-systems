@@ -6,6 +6,9 @@
 // ATOMIC_REPEATS and BOOKKEEPING select comparison and journal-capacity arms.
 #include <cstdio>
 #include <hip/hip_runtime.h>
+#ifndef BOOKKEEPING_RELAXED
+#define BOOKKEEPING_RELAXED 0
+#endif
 #ifndef BOOKKEEPING
 #define BOOKKEEPING 0
 #endif
@@ -45,8 +48,9 @@ __global__ void publication(int *counter, int *output) {
     if (lane == 0) {
       auto *bookkeeping =
           reinterpret_cast<unsigned long long *>(counter + ((ACTIVE_LANES + 1) & ~1));
-      output[ACTIVE_LANES * COUNT + wave] =
-          __hip_atomic_fetch_add(bookkeeping, 1ull, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
+      output[ACTIVE_LANES * COUNT + wave] = __hip_atomic_fetch_add(
+          bookkeeping, 1ull, BOOKKEEPING_RELAXED ? __ATOMIC_RELAXED : __ATOMIC_ACQ_REL,
+          __HIP_MEMORY_SCOPE_AGENT);
     }
 #endif
     if (EXTRA_FENCE)

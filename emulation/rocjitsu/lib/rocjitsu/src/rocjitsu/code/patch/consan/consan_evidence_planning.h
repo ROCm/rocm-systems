@@ -35,10 +35,13 @@ struct AtomicEvidenceSourceView {
   const SyncEvent *event = nullptr;
   const SyncSequence *sequence = nullptr;
   AtomicSite site;
+  bool native_modification = false;
 
-  [[nodiscard]] bool is_rmw() const { return event != nullptr && event->kind == SyncKind::Atomic; }
+  [[nodiscard]] bool is_rmw() const {
+    return event ? event->kind == SyncKind::Atomic : native_modification;
+  }
   [[nodiscard]] bool relocates_polling_loop() const {
-    return sequence->acquire_polling_loop_header_text_offset &&
+    return sequence && sequence->acquire_polling_loop_header_text_offset &&
            *sequence->acquire_polling_loop_header_text_offset < sequence->begin_text_offset;
   }
   [[nodiscard]] uint64_t patch_text_offset() const {

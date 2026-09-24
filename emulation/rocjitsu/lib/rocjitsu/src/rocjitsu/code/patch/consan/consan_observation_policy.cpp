@@ -220,11 +220,14 @@ ObservationProduct assemble_observation_product(const ProgramInventory &inventor
       }
     }
     AtomicFencePolicyResult atomic_fence = plan_atomic_fence_observation(
-        inventory, {.mode = request.mode,
-                    .tracking_enabled = request.atomic_fence_tracking_enabled,
-                    .directional_access_windows = directional_access_windows,
-                    .container_filter = request.container_filter,
-                    .kernel_name_allowlist = request.kernel_name_allowlist});
+        inventory,
+        {.publication_modifications_enabled =
+             inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4 && request.mode == Mode::Default,
+         .mode = request.mode,
+         .tracking_enabled = request.atomic_fence_tracking_enabled,
+         .directional_access_windows = directional_access_windows,
+         .container_filter = request.container_filter,
+         .kernel_name_allowlist = request.kernel_name_allowlist});
     product.atomic_errors = std::move(atomic_fence.atomic_errors);
     product.fence_errors = std::move(atomic_fence.fence_errors);
     product.atomic_fence_fragment_appended = plan.append(atomic_fence.plan);

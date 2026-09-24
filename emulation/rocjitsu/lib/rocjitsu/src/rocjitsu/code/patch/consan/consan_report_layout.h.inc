@@ -151,6 +151,10 @@ enum class EvidenceIntentKind : uint8_t {
   /// Preserve an effective address for a later synchronization observation;
   /// this operation consumes lowering state but no independent report slot.
   AddressCapture,
+  /// Retain a modification footprint independently of synchronization roles.
+  PublicationModification,
+  /// Preserve the address for a publication modification footprint.
+  PublicationAddressCapture,
   /// Publish SuperCollider's fixed sticky mismatch marker.
   StickyMarker,
   /// One-past-the-end iteration bound; never an evidence intent.

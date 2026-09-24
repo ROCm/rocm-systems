@@ -331,6 +331,34 @@ and `journal-opaque-{native,inspect}.log` in the artifact directory.
 **The trace remains incomplete:** ordinary stores and unqualified RMWs still
 need coverage before enabling suppression and rerunning the original cells.
 
+## Capture independent of synchronization qualification
+
+Publication modification intents now select relaxed/unqualified RMWs and
+ordinary stores directly from decoded program inventory. Their address capture
+requires no synchronization sequence and assigns no acquire/release role.
+Ordinary global/flat stores retain their actual operand width, including
+128-bit stores. The existing allowlist applies to these intents as well.
+Unclassifiable modifications are not yet covered; completeness stays disabled.
+
+The `BOOKKEEPING_RELAXED=1` probe passes natively and under instrumentation.
+Its records include the relaxed 64-bit bookkeeping atomic, ordinary output
+stores, and the publication counter transitions. The original workload
+inspection reruns also pass their numerical tests:
+
+- Stream-K: 2,322 records / 15,072 capacity, zero drops.
+- Tree atomic OR: 4,399 records / 15,552 capacity, zero drops.
+
+These runs use the normal workloads and profiling-derived allowlists, with
+strict rejection disabled solely to inspect the still-incomplete journal.
+They are not clean qualifications. Logs are
+`modifications-{streamk-arrival,tree-atomic-or}-inspect.log` and
+`modifications-journal-modifications-{native,inspect}.log` in the artifact
+directory. The broader ConSan test run passes 973 tests, with two benchmark
+tests skipped; 273 host tests pass (`modifications-consan-tests.log` and
+`modifications-host-tests.log`). The remaining gate is a checked completeness
+contract (including unsupported modifications), followed by clean/fault
+qualification.
+
 ## Reproducing the minimal probe
 
 Use the current ROCm environment, an artifact directory outside the source tree,

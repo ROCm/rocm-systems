@@ -361,6 +361,10 @@ enum class ProbeIntentKind : uint8_t {
   AtomicAddressCapture,
   /// ConSan publishes atomic ordering into the selected causal window.
   AtomicOrdering,
+  /// Preserve the exact address of a modification independently of ordering.
+  PublicationAddressCapture,
+  /// Record a modification that can invalidate an atomic publication chain.
+  PublicationModification,
   /// One-past-the-end iteration bound; never an observation intent.
   Count,
 };
@@ -654,6 +658,8 @@ struct DirectionalAccessAvailability {
 };
 
 struct AtomicFencePolicyRequest {
+  /// Include address-only publication modifications, independently of sync roles.
+  bool publication_modifications_enabled = false;
   /// Mode whose ordered-communication contract should be evaluated.
   Mode mode = Mode::None;
   /// Whether atomic and associated-fence tracking belongs to this request.

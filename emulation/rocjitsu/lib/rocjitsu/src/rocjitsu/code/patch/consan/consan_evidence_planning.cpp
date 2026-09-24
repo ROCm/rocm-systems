@@ -75,6 +75,18 @@ std::optional<AtomicEvidenceSourceView>
 resolve_atomic_evidence_source(const ProgramInventory &inventory,
                                const detail::AtomicEvidenceSitePlan &plan) {
   const SynchronizationInventoryView graph = inventory.sync();
+  if (plan.publication_modification) {
+    const ProgramSite *source = inventory.program_site(plan.source_site);
+    if (!source || !resolve_evidence_container(inventory, plan.source_site))
+      return std::nullopt;
+    if (const auto *atomic = source->get_if<AtomicSite>())
+      return AtomicEvidenceSourceView{nullptr, nullptr, *atomic, true};
+    if (const auto *ordinary = source->get_if<OrdinaryMemorySite>();
+        ordinary && ordinary->operation == OrdinaryMemoryOperation::Store)
+      return AtomicEvidenceSourceView{nullptr, nullptr, atomic_communication_site(*ordinary),
+                                      false};
+    return std::nullopt;
+  }
   const SyncEvent *event = graph.find_event(plan.event);
   const SyncSequence *sequence = graph.find_sequence(plan.sequence);
   const std::optional<AtomicSite> site =

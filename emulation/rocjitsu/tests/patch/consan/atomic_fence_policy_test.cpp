@@ -496,7 +496,13 @@ TEST(ConSanAtomicFencePolicy, AssembledPolicyDerivesDirectionalOwnerLocalWindows
   EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ProbeIntentKind::Access,
                                &ProbeIntent::kind),
             1u);
-  EXPECT_EQ(read_only.plan().probe_intents.size(), 1u);
+  EXPECT_EQ(read_only.plan().probe_intents.size(), 3u);
+  EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents,
+                               ProbeIntentKind::PublicationModification, &ProbeIntent::kind),
+            1);
+  EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ProbeIntentKind::AtomicOrdering,
+                               &ProbeIntent::kind),
+            0);
 
   const ObservationProduct write = assemble(LdsAccessKind::Write);
   ASSERT_TRUE(write.valid());
@@ -1007,6 +1013,43 @@ TEST(ConSanAtomicFencePolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInve
     sequence_identities_after.push_back(sequence.identity);
   EXPECT_EQ(event_identities_after, event_identities_before);
   EXPECT_EQ(sequence_identities_after, sequence_identities_before);
+}
+
+TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizationSequences) {
+  auto atomic = make_global_atomic_site();
+  atomic.scope.reset();
+  auto store = make_global_store_site({}, 64);
+  store.scope.reset();
+  store.width_bits = 128;
+  store.mnemonic = "global_store_b128";
+  const auto inventory = build_atomic_inventory({}, {}, {atomic}, {store});
+  auto request = atomic_request(Mode::Default);
+  request.publication_modifications_enabled = true;
+  const auto policy = plan_atomic_fence_observation(inventory, request);
+  ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.probe_intents.size(), 4u);
+  std::vector<std::string> errors;
+  const auto plans = detail::build_atomic_evidence_site_plans(
+      inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
+  ASSERT_TRUE(errors.empty());
+  ASSERT_EQ(plans.size(), 2u);
+  for (const auto &plan : plans) {
+    EXPECT_TRUE(plan.publication_modification);
+    EXPECT_TRUE(plan.is_well_formed());
+    EXPECT_FALSE(plan.sequence.valid());
+    const auto source = detail::resolve_atomic_evidence_source(inventory, plan);
+    ASSERT_TRUE(source);
+    EXPECT_EQ(source->sequence, nullptr);
+    EXPECT_FALSE(source->relocates_polling_loop());
+    EXPECT_FALSE(policy.plan.intent(plan.evidence_intent)->synchronization_association);
+  }
+  EXPECT_TRUE(detail::resolve_atomic_evidence_source(inventory, plans[0])->is_rmw());
+  EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, plans[1])->is_rmw());
+  EXPECT_EQ(plans[1].lowering_form.data_register_count, 4u);
+  EXPECT_EQ(plans[1].lowering_form.destination_register_count, 0u);
+  const std::vector<std::string> excluded{"another_kernel"};
+  request.kernel_name_allowlist = excluded;
+  EXPECT_TRUE(plan_atomic_fence_observation(inventory, request).plan.probe_intents.empty());
 }
 
 } // namespace

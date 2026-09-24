@@ -936,6 +936,26 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     candidates.push_back(
         {std::move(atomic), std::move(*source), semantics, 0, 1, false, std::nullopt});
   }
+  const bool capture_publications =
+      arch == ROCJITSU_CODE_ARCH_RDNA4 && layout.publication_event_capacity != 0u &&
+      std::ranges::all_of(candidates,
+                          [](const Candidate &candidate) { return candidate.source.is_rmw(); });
+  if (capture_publications) {
+    auto modifications =
+        build_atomic_evidence_site_plans(result.program_inventory, result.observation_plan(),
+                                         ProbeIntentKind::PublicationModification, result.errors);
+    if (!result.errors.empty())
+      return;
+    for (auto &modification : modifications) {
+      auto source = resolve_atomic_evidence_source(result.program_inventory, modification);
+      if (!source) {
+        result.errors.emplace_back("ConSan publication modification lost its decoded source");
+        return;
+      }
+      candidates.push_back(
+          {std::move(modification), std::move(*source), {}, 0, 1, false, std::nullopt});
+    }
+  }
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan atomic sync found no qualified atomic sequence");
     return;
@@ -978,18 +998,13 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
   }
 
   const size_t static_patch_budget = std::min<size_t>(options.max_patches, candidates.size());
-  const auto sync_events = result.program_inventory.sync().sync_events;
-  const size_t rmw_count = std::ranges::count_if(
-      sync_events, [](const SyncEvent &event) { return event.kind == SyncKind::Atomic; });
-  // Capture every native RMW as one object-level transaction. This does not
-  // yet assert trace completeness: stores that can modify the same object
-  // also need accounting. Window associations cannot provide that proof.
-  const bool publication_trace =
-      arch == ROCJITSU_CODE_ARCH_RDNA4 && layout.publication_event_capacity != 0u &&
-      rmw_count == candidates.size() && static_patch_budget == candidates.size() &&
-      std::ranges::all_of(candidates, [](const Candidate &candidate) {
-        return candidate.source.is_rmw();
-      });
+  // This route includes address-only modification intents. Trace completeness
+  // remains unset until every potentially interfering modification is covered.
+  const bool publication_trace = capture_publications;
+  if (publication_trace && static_patch_budget != candidates.size()) {
+    result.warnings.emplace_back("ConSan publication trace exceeds its static patch budget");
+    return;
+  }
   if (!publication_trace) {
     struct Window {
       uint32_t slot = 0;
@@ -1459,8 +1474,10 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
   for (const Planned &planned : selected) {
     if (!append_atomic_scalar_clause_patch(
             old_text, planned.candidate.source.site,
-            planned.candidate.source.sequence->scalar_clause_text_offset, arch,
-            scalar_clause_patches, result.errors))
+            planned.candidate.source.sequence
+                ? planned.candidate.source.sequence->scalar_clause_text_offset
+                : std::nullopt,
+            arch, scalar_clause_patches, result.errors))
       return;
     note_sgpr_requirements(scalar_requirements, planned.resources, options, options, planned.point,
                            arch);
@@ -1485,7 +1502,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
                            planned.private_layout ? &*planned.private_layout : nullptr, arch,
                            layout, result.errors, &guest_instruction_offset, &emitted_guest_size,
                            publication_observation_supported(planned.candidate.source)
-                               ? PublicationCapture::Transition : PublicationCapture::OpaqueModification)
+                               ? PublicationCapture::Transition
+                               : PublicationCapture::OpaqueModification)
                  : planned.candidate.deferred_acquire
                      ? build_pending_acquire_cave_words(
                            bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,

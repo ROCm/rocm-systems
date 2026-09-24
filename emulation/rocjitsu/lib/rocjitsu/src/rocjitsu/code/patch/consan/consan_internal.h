@@ -595,6 +595,8 @@ struct WorkitemOwnerDerivationRequest {
 /// different evidence intent. Language-level atomic load/store sequences use
 /// the same handle contract; their ordered suffix remains owned by `sequence`.
 struct AtomicEvidenceSitePlan {
+  /// Address-only modification intent; no synchronization sequence is required.
+  bool publication_modification = false;
   /// Authoritative synchronization event selected by evidence policy.
   SyncEventId event;
 
@@ -619,8 +621,8 @@ struct AtomicEvidenceSitePlan {
     return {address_capture_intent, evidence_intent};
   }
   [[nodiscard]] bool is_well_formed() const {
-    return event.valid() && sequence.valid() && source_site.valid() &&
-           address_capture_intent.valid() && evidence_intent.valid() &&
+    return (publication_modification || (event.valid() && sequence.valid())) &&
+           source_site.valid() && address_capture_intent.valid() && evidence_intent.valid() &&
            address_capture_intent != evidence_intent &&
            lowering_form.kind != AtomicLoweringFormKind::Count;
   }

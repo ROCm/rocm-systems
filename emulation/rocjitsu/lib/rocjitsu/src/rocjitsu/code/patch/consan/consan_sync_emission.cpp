@@ -69,6 +69,35 @@ build_atomic_evidence_site_plans(const ProgramInventory &inventory,
   for (const ProbeIntent &intent : observation.probe_intents) {
     if (intent.kind != evidence_kind)
       continue;
+    if (evidence_kind == ProbeIntentKind::PublicationModification) {
+      const ProbeIntent *capture = nullptr;
+      for (const auto &candidate : observation.probe_intents) {
+        if (candidate.kind != ProbeIntentKind::PublicationAddressCapture ||
+            candidate.source_site != intent.source_site)
+          continue;
+        if (capture) {
+          errors.emplace_back("ConSan publication modification has ambiguous address capture");
+          return {};
+        }
+        capture = &candidate;
+      }
+      if (!capture || !capture->atomic_lowering_form) {
+        errors.emplace_back("ConSan publication modification lost its address capture");
+        return {};
+      }
+      AtomicEvidenceSitePlan plan;
+      plan.publication_modification = true;
+      plan.source_site = intent.source_site;
+      plan.address_capture_intent = capture->id;
+      plan.evidence_intent = intent.id;
+      plan.lowering_form = *capture->atomic_lowering_form;
+      if (!plan.is_well_formed() || !resolve_atomic_evidence_source(inventory, plan)) {
+        errors.emplace_back("ConSan publication modification lost its decoded source");
+        return {};
+      }
+      plans.push_back(std::move(plan));
+      continue;
+    }
     if (!intent.synchronization_association) {
       errors.emplace_back("ConSan admitted atomic evidence lost its capture or association");
       return {};

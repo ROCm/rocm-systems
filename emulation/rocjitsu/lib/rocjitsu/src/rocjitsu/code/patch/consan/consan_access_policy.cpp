@@ -232,13 +232,15 @@ bool ObservationPlan::valid() const {
         (probe.synchronization_association && !probe.synchronization_association->valid())) {
       return false;
     }
-    if (probe.kind == ProbeIntentKind::AtomicAddressCapture) {
+    if (probe.kind == ProbeIntentKind::AtomicAddressCapture ||
+        probe.kind == ProbeIntentKind::PublicationAddressCapture) {
       if (probe.position != ProbePosition::Before ||
           probe.dynamic_result != DynamicResultRequirement::None || !probe.atomic_lowering_form ||
           !probe.atomic_lowering_form->is_well_formed()) {
         return false;
       }
-    } else if (synchronization_intent && probe.position != ProbePosition::After) {
+    } else if ((synchronization_intent || probe.kind == ProbeIntentKind::PublicationModification) &&
+               probe.position != ProbePosition::After) {
       return false;
     } else if (!synchronization_intent && probe.dynamic_result != DynamicResultRequirement::None) {
       return false;
