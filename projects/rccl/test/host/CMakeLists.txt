@@ -403,23 +403,22 @@ if(BUILD_TESTS)
   # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
-  add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
-  target_sources(rccl-UnitTestsMicro PRIVATE
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
+  # All the per-mode boilerplate (include dirs, RCCL_COMMON_COMPILE_DEFS, HIP
+  # compile-only, MICRO_TEST_LINK_LIBS, rocshmem-gin opt-out, the hipify
+  # dependency, host-only + coverage flags, install and CTest category
+  # registration) is applied by rccl_add_micro_binary, exactly as for the other
+  # micro binaries; only this target's own specifics are set after the call.
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify archinfo)
+  rccl_add_micro_binary(rccl-UnitTestsMicro
+    SOURCES ${RCCL_MICRO_TEST_SOURCES}
+    EXTRA_INCLUDES ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
+    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
-  target_include_directories(rccl-UnitTestsMicro PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
-    ${RCCL_COMMON_INCLUDE_DIRS})
-  target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
-
-  rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicro)
-
-  # HIP compile requirements without linking the runtime.
-  rccl_apply_hip_compile_only(rccl-UnitTestsMicro)
-
-  target_link_libraries(rccl-UnitTestsMicro PRIVATE ${MICRO_TEST_LINK_LIBS})
+  # real IsArchMatch, for wrap-test.cc. Added via target_sources() after the
+  # helper because its path is build-directory-relative (see the note by
+  # RCCL_MICRO_TEST_SOURCES).
+  target_sources(rccl-UnitTestsMicro PRIVATE
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)
 
   # Pass the absolute path of hipified source files through as string
   # literals so the #include in the test translation unit stays independent of
@@ -453,32 +452,12 @@ if(BUILD_TESTS)
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc")
   endif()
 
-  # Make sure the hipify step has run before trying to compile the test.
-  add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
-
-  # Always build this binary with llvm source-based coverage.
-  # Host-only micro-test: all HIP/device symbols are satisfied by fakes/, so it
-  # needs HIP host compile requirements but no amdgcn device codegen. Compile
-  # host-only (like the standalone build below) so llvm coverage instrumentation
-  # never reaches the device pass -- there it pulls in LLVM profiling runtime
-  # symbols (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that do
-  # not exist on device, making amdgcn-link fail. --offload-host-only removes the
-  # device pass entirely, which is robust across clang toolchains that ignore the
-  # older -Xarch_device coverage split.
-  # -ffunction-sections/--gc-sections (added for wrap-test.cc): rccl_wrap.cc's
-  # dependency-floor stub surface (fakes/wrap_fakes.cc) is large and mostly
-  # unreached by these tests; this drops the unreferenced deep
-  # deps rather than pulling in the world, matching rccl-UnitTestsMicroInit's
-  # rationale for the same flags.
-  rccl_apply_host_only_flags(rccl-UnitTestsMicro)
-
-  # Deliberately NOT linking librccl.so: this binary is for tests that compile
-  # their unit-under-test source file(s) directly. Add files to
-  # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
-  rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
-
-  rccl_register_test_categories(rccl-UnitTestsMicro
-    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  # The hipify dependency, host-only + coverage flags (--offload-host-only so
+  # llvm coverage never reaches the device pass; -ffunction-sections/--gc-sections
+  # to drop wrap_fakes.cc's unreached dependency floor), install and CTest
+  # category registration for this target are all applied by
+  # rccl_add_micro_binary above -- see rccl_apply_host_only_flags for the flag
+  # rationale it shares with rccl-UnitTestsMicroInit.
 
   # rccl-UnitTestsMicroWarpSpeed: ENABLE_WARP_SPEED needs ncclComm laid out for it binary-wide, so anything
   # requiring that layout (currently just src/scheduler/*.cc) gets its own binary instead of leaking the
@@ -953,25 +932,23 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # #includes each unit-under-test production .cc directly (via the *_CC_PATH
 # definitions below) and satisfies every HIP/nccl symbol from fakes/ rather
 # than librccl.so or the HIP runtime.
-add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
-target_sources(rccl-UnitTestsMicro PRIVATE
-  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
+# The compile options (-Wno-unused*/-ffunction-sections), base include dirs and
+# defines (__HIP_PLATFORM_AMD__/NCCL_OS_LINUX/ROCM_VERSION), -no-hip-rt -no-pie
+# --gc-sections link options, GTest/Threads/fmt link libs, and HOST_TEST_BINARIES
+# registration for coverage are all applied by rccl_add_micro_binary (NO_PIE);
+# only this target's own specifics are set after the call.
 rccl_mark_oracle_tus_generated(${RCCL_HIPIFY_DIR} archinfo)
+rccl_add_micro_binary(rccl-UnitTestsMicro NO_PIE
+  SOURCES ${RCCL_MICRO_TEST_SOURCES}
+  EXTRA_INCLUDES
+    ${RCCL_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
+    ${RCCL_HIPIFY_DIR}/src/include/nccl_device) # device.h includes rccl_ptr.h unqualified
 
-target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
-
-target_include_directories(rccl-UnitTestsMicro PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${RCCL_HIPIFY_DIR}/src/devcomm      # devcomm_v22902.h, included unqualified
-  ${RCCL_INCLUDE_DIRS}
-  ${RCCL_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
-)
+# real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
+target_sources(rccl-UnitTestsMicro PRIVATE
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)
 
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/ras.cc"
   TUNING_GENERAL_CC_PATH="${RCCL_HIPIFY_DIR}/src/tuning/tuning_general.cc"
@@ -1004,22 +981,12 @@ else()
   message(WARNING "Skipping sym-kernels-index-test.cc for rccl-UnitTestsMicro: missing ${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
 endif()
 
-# -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
-# libgtest.a used by this standalone path is built without -fPIC, so a PIE
-# link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-# --gc-sections (added for wrap-test.cc): rccl_wrap.cc's dependency-floor stub
-# surface (fakes/wrap_fakes.cc) is large and mostly unreached by
-# these tests; this drops the unreferenced deep deps, matching
-# rccl-UnitTestsMicroInit's rationale for the same flag.
-# Section GC can also hide an uncalled function's coverage mapping, so a
-# whole-file claim must confirm that ras.cc's linked function inventory still
-# matches its compiled source inventory.
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
-target_link_libraries(rccl-UnitTestsMicro PRIVATE
-  GTest::GTest
-  Threads::Threads
-  fmt::fmt-header-only
-)
+# The -no-hip-rt -no-pie -Wl,--gc-sections link options and GTest/Threads/fmt
+# link libraries are applied by rccl_add_micro_binary (NO_PIE) above. -no-pie is
+# required because the RCCL-vendored libgtest.a is built without -fPIC; and
+# --gc-sections drops wrap_fakes.cc's unreached dependency floor (note: section
+# GC can hide an uncalled function's coverage mapping, so a whole-file coverage
+# claim must confirm ras.cc's linked function inventory still matches source).
 
 # --- Standalone scheduler micro-test binary -----------------------------
 # rccl-UnitTestsMicroWarpSpeed -- see the in-build block for the rationale
