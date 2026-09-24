@@ -372,7 +372,6 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
 // ================================================================================================
 bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
   constexpr uint32_t kMaxEntries = 65535;
-  constexpr size_t kEngineCount = static_cast<size_t>(HwQueueEngine::SdmaP2P) + 1;
   struct RectGroup {
     hsa_agent_t src_agent;
     std::vector<hsa_amd_memory_copy_rect_t> rects;
@@ -385,8 +384,8 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
     std::vector<hsa_agent_t> dst_agents;
     std::vector<size_t> sizes;
   };
-  std::vector<RectGroup> rect_groups[kEngineCount];
-  std::vector<LinearGroup> linear_groups[kEngineCount];
+  std::vector<RectGroup> rect_groups;
+  std::vector<LinearGroup> linear_groups;
 
   const hsa_agent_t cpu_agent = dev().getCpuAgent();
   const hsa_agent_t backend_device = dev().getBackendDevice();
@@ -407,15 +406,6 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
       src_agent = backend_device;
     }
 
-    HwQueueEngine engine = HwQueueEngine::SdmaD2D;
-    if (src_agent.handle == cpu_agent.handle) {
-      engine = HwQueueEngine::SdmaH2D;
-    } else if (dst_agent.handle == cpu_agent.handle) {
-      engine = HwQueueEngine::SdmaD2H;
-    } else if (src_agent.handle != dst_agent.handle) {
-      engine = HwQueueEngine::SdmaP2P;
-    }
-
     address src_base = reinterpret_cast<address>(src_memory.getDeviceMemory());
     address dst_base = reinterpret_cast<address>(dst_memory.getDeviceMemory());
     hsa_pitched_ptr_t src_pitched = {src_base + op.src_rect.offset(0, 0, 0), op.src_rect.rowPitch_,
@@ -430,30 +420,26 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
                                (src_pitched.pitch % 4) == 0 && (dst_pitched.pitch % 4) == 0 &&
                                (src_pitched.slice % 4) == 0 && (dst_pitched.slice % 4) == 0;
 
-    const size_t engine_index = static_cast<size_t>(engine);
     if (dword_aligned) {
-      std::vector<RectGroup>& engine_rect_groups = rect_groups[engine_index];
-      if (engine_rect_groups.empty() ||
-          engine_rect_groups.back().src_agent.handle != src_agent.handle ||
-          engine_rect_groups.back().rects.size() == kMaxEntries) {
-        engine_rect_groups.push_back(RectGroup{src_agent, {}, {}});
+      if (rect_groups.empty() || rect_groups.back().src_agent.handle != src_agent.handle ||
+          rect_groups.back().rects.size() == kMaxEntries) {
+        rect_groups.push_back(RectGroup{src_agent, {}, {}});
       }
       hsa_dim3_t origin = {0, 0, 0};
-      engine_rect_groups.back().rects.push_back(
+      rect_groups.back().rects.push_back(
           hsa_amd_memory_copy_rect_t{dst_pitched, origin, src_pitched, origin, range});
-      engine_rect_groups.back().dst_agents.push_back(dst_agent);
+      rect_groups.back().dst_agents.push_back(dst_agent);
     } else {
-      std::vector<LinearGroup>& rows = linear_groups[engine_index];
       for (size_t z = 0; z < op.size[2]; ++z) {
         for (size_t y = 0; y < op.size[1]; ++y) {
-          if (rows.empty() || rows.back().src_agent.handle != src_agent.handle ||
-              rows.back().sizes.size() == kMaxEntries) {
-            rows.push_back(LinearGroup{src_agent, {}, {}, {}, {}});
+          if (linear_groups.empty() || linear_groups.back().src_agent.handle != src_agent.handle ||
+              linear_groups.back().sizes.size() == kMaxEntries) {
+            linear_groups.push_back(LinearGroup{src_agent, {}, {}, {}, {}});
           }
-          rows.back().srcs.push_back(src_base + op.src_rect.offset(0, y, z));
-          rows.back().dsts.push_back(dst_base + op.dst_rect.offset(0, y, z));
-          rows.back().dst_agents.push_back(dst_agent);
-          rows.back().sizes.push_back(op.size[0]);
+          linear_groups.back().srcs.push_back(src_base + op.src_rect.offset(0, y, z));
+          linear_groups.back().dsts.push_back(dst_base + op.dst_rect.offset(0, y, z));
+          linear_groups.back().dst_agents.push_back(dst_agent);
+          linear_groups.back().sizes.push_back(op.size[0]);
         }
       }
     }
@@ -461,55 +447,51 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
 
   std::vector<hsa_signal_t> wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
   std::vector<ProfilingSignal*> group_signals;
+  std::vector<hsa_amd_memory_copy_op_t> final_ops;
+  final_ops.reserve(rect_groups.size() + linear_groups.size());
 
-  for (size_t engine_index = 0; engine_index < kEngineCount; ++engine_index) {
-    if (rect_groups[engine_index].empty() && linear_groups[engine_index].empty()) {
-      continue;
-    }
-    gpu().Barriers().SetActiveEngine(static_cast<HwQueueEngine>(engine_index));
+  for (RectGroup& group : rect_groups) {
+    hsa_amd_memory_copy_op_t rect_op = {};
+    rect_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+    rect_op.type = HSA_AMD_MEMORY_COPY_OP_RECT;
+    rect_op.num_entries = static_cast<uint16_t>(group.rects.size());
+    rect_op.rect_list = group.rects.data();
+    rect_op.src_agent = group.src_agent;
+    rect_op.dst_agent_list = group.dst_agents.data();
+    rect_op.dst = nullptr;
+    rect_op.size = 0;
+    rect_op.unused_size = 0;
+    final_ops.push_back(rect_op);
+  }
+  for (LinearGroup& group : linear_groups) {
+    hsa_amd_memory_copy_op_t linear_op = {};
+    linear_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+    linear_op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+    linear_op.num_entries = static_cast<uint16_t>(group.sizes.size());
+    linear_op.src_list = group.srcs.data();
+    linear_op.src_agent = group.src_agent;
+    linear_op.dst_list = group.dsts.data();
+    linear_op.dst_agent_list = group.dst_agents.data();
+    linear_op.size_list = group.sizes.data();
+    final_ops.push_back(linear_op);
+  }
 
-    std::vector<hsa_amd_memory_copy_op_t> final_ops;
-    for (RectGroup& group : rect_groups[engine_index]) {
-      hsa_amd_memory_copy_op_t rect_op = {};
-      rect_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      rect_op.type = HSA_AMD_MEMORY_COPY_OP_RECT;
-      rect_op.num_entries = static_cast<uint16_t>(group.rects.size());
-      rect_op.rect_list = group.rects.data();
-      rect_op.src_agent = group.src_agent;
-      rect_op.dst_agent_list = group.dst_agents.data();
-      rect_op.dst = nullptr;
-      rect_op.size = 0;
-      rect_op.unused_size = 0;
-      final_ops.push_back(rect_op);
-    }
-    for (LinearGroup& group : linear_groups[engine_index]) {
-      hsa_amd_memory_copy_op_t linear_op = {};
-      linear_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      linear_op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-      linear_op.num_entries = static_cast<uint16_t>(group.sizes.size());
-      linear_op.src_list = group.srcs.data();
-      linear_op.src_agent = group.src_agent;
-      linear_op.dst_list = group.dsts.data();
-      linear_op.dst_agent_list = group.dst_agents.data();
-      linear_op.size_list = group.sizes.data();
-      final_ops.push_back(linear_op);
-    }
+  for (hsa_amd_memory_copy_op_t& copy_op : final_ops) {
+    const bool from_host = copy_op.src_agent.handle == cpu_agent.handle;
+    gpu().Barriers().SetActiveEngine(from_host ? HwQueueEngine::SdmaH2D : HwQueueEngine::SdmaD2H);
+    copy_op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
+    group_signals.push_back(gpu().Barriers().GetLastSignal());
+  }
 
-    for (hsa_amd_memory_copy_op_t& copy_op : final_ops) {
-      copy_op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
-      group_signals.push_back(gpu().Barriers().GetLastSignal());
+  const hsa_status_t status = Hsa::memory_async_batch_copy(
+      final_ops.data(), static_cast<uint32_t>(final_ops.size()),
+      static_cast<uint32_t>(wait_events.size()), wait_events.data());
+  if (status != HSA_STATUS_SUCCESS) {
+    for (size_t signal_index = 0; signal_index < final_ops.size(); ++signal_index) {
+      gpu().Barriers().ResetCurrentSignal();
     }
-
-    const hsa_status_t status = Hsa::memory_async_batch_copy(
-        final_ops.data(), static_cast<uint32_t>(final_ops.size()),
-        static_cast<uint32_t>(wait_events.size()), wait_events.data());
-    if (status != HSA_STATUS_SUCCESS) {
-      for (size_t signal_index = 0; signal_index < final_ops.size(); ++signal_index) {
-        gpu().Barriers().ResetCurrentSignal();
-      }
-      LogPrintfError("HSA batch rect copy failed with code %d", status);
-      return false;
-    }
+    LogPrintfError("HSA batch rect copy failed with code %d", status);
+    return false;
   }
 
   for (size_t signal_index = 0; signal_index + 1 < group_signals.size(); ++signal_index) {
