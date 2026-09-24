@@ -868,7 +868,7 @@ rocpd merge - Database merging tool
 
 - Trusted schema reconstruction: Copies profiling rows into canonical tables created from the installed, versioned ROCpd schemas, which enforce the schema's constraints on every copied row, and rebuilds indexes and views from the same schemas. Schema SQL stored in input databases is never executed. Additional metadata key/value rows are preserved.
 
-- Input compatibility: Canonical views and indexes may be missing from input databases; merge rebuilds them, and the importer builds trusted temporary analysis views. Custom tables, indexes, views, and triggers in an input database are ignored with a warning and are not copied into the merged output.
+- Input compatibility: Canonical views and indexes may be missing from input databases; merge rebuilds them, and the importer builds trusted temporary analysis views. Custom tables, indexes, views, and triggers in an input database are ignored with a warning and are not copied into the merged output. Tables named ``rocpd_metadata_<UUID>`` with ``id``, ``tag``, and ``value`` columns are reserved for ROCpd partitions.
 
 - Data aggregation: Creates UNION views that automatically aggregate data from all merged sources.
 

@@ -250,6 +250,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
             "table": ("CREATE TABLE rocpd_attacker_controlled (payload TEXT)",),
             "sqlite_prefix": ("CREATE TABLE sqliteXattacker (payload TEXT)",),
             "view": ("CREATE VIEW attacker_view AS SELECT randomblob(1000000)",),
+            "metadata_lookalike": ("CREATE TABLE rocpd_metadata_custom (payload TEXT)",),
             "index": (
                 f'CREATE INDEX attacker_index ON "rocpd_string{self.UUIDS[0]}" '
                 "(string)",
@@ -284,6 +285,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                         "sqliteXattacker",
                         "attacker_view",
                         "attacker_index",
+                        "rocpd_metadata_custom",
                     }
                 )
 
@@ -677,14 +679,40 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         for version_index, version in enumerate(query_supported_schema_versions()):
             version = str(version)
             source = self.directory / f"schema-{version}.db"
-            uuid = f"_{version_index + 1:032x}"
-            guid = f"guid-{version_index + 1}"
+            # rocprofiler-systems style: MD5 hex GUID, UUID = "_" + GUID.
+            guid = f"{version_index + 1:032x}"
+            uuid = f"_{guid}"
             self.create_database(source, uuid=uuid, guid=guid, version=version)
             with closing(sqlite3.connect(":memory:", uri=True)) as connection, connection:
                 configure_untrusted_schema(connection)
                 attach_readonly(connection, str(source), "source")
                 inspected = inspect_attached_rocpd(connection, "source", str(source))
                 self.assertEqual(inspected.version, version)
+
+    def test_uuid_must_derive_from_guid(self):
+        cases = {
+            # rocprofv3: UUIDv7 GUID, hyphens become underscores in the UUID.
+            "uuidv7": (self.UUIDS[0], self.GUIDS[0], None),
+            # rocprofiler-systems: MD5 hex GUID used as-is.
+            "md5": ("_" + "ab" * 16, "ab" * 16, None),
+            "unrelated": ("_foo", "guid-1", "does not match GUID"),
+            "different_guid": (self.UUIDS[0], self.GUIDS[1], "does not match GUID"),
+        }
+        for name, (uuid, guid, error) in cases.items():
+            with self.subTest(case=name):
+                source = self.directory / f"identity-{name}.db"
+                destination = self.directory / f"identity-{name}-merged.db"
+                self.create_database(source, uuid=uuid, guid=guid)
+                if error is None:
+                    merge_sqlite_dbs([str(source)], str(destination))
+                    self.assertTrue(destination.exists())
+                    continue
+                with self.assertRaisesRegex(ValueError, error):
+                    merge_sqlite_dbs([str(source)], str(destination))
+                self.assertFalse(destination.exists())
+                with self.assertRaisesRegex(ValueError, error):
+                    imported = RocpdImportData(str(source), skip_auto_merge=True)
+                    imported.connection.close()
 
     def test_standalone_merge_entry_point(self):
         source = self.directory / "cli input.db"

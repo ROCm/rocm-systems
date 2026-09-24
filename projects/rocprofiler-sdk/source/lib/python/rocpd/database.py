@@ -248,12 +248,28 @@ def _check_table(
         )
 
 
-def _metadata_tables(objects: SchemaObjects, source_path: str) -> List[Tuple[str, str]]:
+def _metadata_tables(
+    connection: sqlite3.Connection,
+    alias: str,
+    objects: SchemaObjects,
+    source_path: str,
+) -> List[Tuple[str, str]]:
+    """Return ``(table, uuid)`` for each partition's metadata table.
+
+    A table named like a metadata table but lacking the metadata columns is a
+    custom object and is ignored with the other unsupported objects.
+    """
+
     candidates = []
     for name in objects:
         match = METADATA_TABLE.fullmatch(name) if isinstance(name, str) else None
-        if match:
-            candidates.append((name, match.group("uuid")))
+        if not match:
+            continue
+        try:
+            _check_table(connection, alias, objects, name, METADATA_COLUMNS, source_path)
+        except ValueError:
+            continue
+        candidates.append((name, match.group("uuid")))
     if not candidates:
         raise ValueError(f"Expected at least one rocPD metadata table in {source_path!r}")
     return sorted(candidates)
@@ -262,15 +278,10 @@ def _metadata_tables(objects: SchemaObjects, source_path: str) -> List[Tuple[str
 def _metadata_values(
     connection: sqlite3.Connection,
     alias: str,
-    objects: SchemaObjects,
     metadata_table: str,
     table_uuid: str,
     source_path: str,
 ) -> Tuple[str, str, str]:
-    _check_table(
-        connection, alias, objects, metadata_table, METADATA_COLUMNS, source_path
-    )
-
     placeholders = ", ".join("?" for _ in REQUIRED_METADATA)
     # Read only required metadata, with one extra row to detect duplicates.
     # Additional metadata remains in the source and is copied by merge.
@@ -299,6 +310,13 @@ def _metadata_values(
         )
     if not isinstance(guid, str) or not ROCPD_GUID.fullmatch(guid):
         raise ValueError(f"Invalid rocPD GUID metadata in {source_path!r}: {guid!r}")
+    # Writers derive the table UUID from the GUID: rocprofv3 uses a UUIDv7 GUID
+    # with hyphens turned into underscores, rocprofiler-systems an MD5 hex GUID.
+    if uuid != "_" + guid.replace("-", "_"):
+        raise ValueError(
+            f"rocPD UUID metadata {uuid!r} does not match GUID {guid!r} in "
+            f"{source_path!r}"
+        )
     if not isinstance(version, str) or not SCHEMA_VERSION.fullmatch(version):
         raise ValueError(f"Invalid rocPD schema version in {source_path!r}: {version!r}")
 
@@ -355,9 +373,11 @@ def inspect_attached_rocpd(
     uuids = []
     version = None
 
-    for metadata_table, table_uuid in _metadata_tables(objects, source_path):
+    for metadata_table, table_uuid in _metadata_tables(
+        connection, alias, objects, source_path
+    ):
         uuid, guid, partition_version = _metadata_values(
-            connection, alias, objects, metadata_table, table_uuid, source_path
+            connection, alias, metadata_table, table_uuid, source_path
         )
         if version is None:
             version = partition_version
