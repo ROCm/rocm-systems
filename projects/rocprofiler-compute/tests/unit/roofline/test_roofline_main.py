@@ -204,10 +204,9 @@ def test_kernel_traces_score_against_the_roof_that_binds_not_the_tallest_drawn()
     assert "Limited by Memory: HBM" in valu_traces[0].hovertemplate
 
 
-def test_kernel_traces_name_the_specific_peak_not_the_tallest_stacked_one() -> None:
-    """When several compute peaks are stacked, the limiter names whichever one
-    actually bounds this kernel's own performance, not whichever peak happens
-    to be tallest on the figure."""
+def test_kernel_traces_given_multiple_stacked_compute_peaks__limiter_names_the_one_that_binds() -> (
+    None
+):
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     traces, _ = kernel_traces(
@@ -219,13 +218,9 @@ def test_kernel_traces_name_the_specific_peak_not_the_tallest_stacked_one() -> N
     assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
 
 
-def test_kernel_traces_ignore_a_memory_roof_the_kernel_already_exceeds() -> None:
-    """A memory level's implied ceiling (bandwidth * AI) that the kernel's own
-    measured performance already exceeds is not an achievable roof, so the
-    limiter must not name it -- exactly as compute peaks below performance are
-    already excluded. Here HBM implies a 1,500 GFLOP/s ceiling but the kernel
-    measures 5,000 GFLOP/s, so the limiter must fall through to the cheapest
-    eligible compute peak instead of naming the impossible memory ceiling."""
+def test_kernel_traces_given_memory_roof_already_exceeded__falls_back_to_compute_peak() -> (
+    None
+):
     traces, _ = kernel_traces(
         make_roofline(["FP32"]),
         {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
@@ -322,13 +317,9 @@ def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() ->
     assert model[0]["limitingPeak"] == "L2"
 
 
-def test_kernel_traces_share_one_performance_value_across_a_kernels_points() -> None:
-    """A kernel's HBM point and L2 point measure the same achieved performance
-    but sit at different arithmetic intensities, so today each point is scored
-    against its own level's bandwidth -- 25.00% at HBM, 66.67% at L2. Once the
-    limiter's own closest-roof search (L2's 1,500 GFLOP/s implied ceiling beats
-    HBM's 4,000) drives the displayed percentage too, both of the kernel's
-    points must show that same 66.67% / 1,500, not their own per-level value."""
+def test_kernel_traces_given_differing_level_bandwidths__all_points_share_the_binding_roofs_percentage() -> (
+    None
+):
     ceiling = {
         "hbm": [[0.01, 1.0], [1.0, 2000.0], 2000.0],
         "l2": [[0.01, 1.0], [1.0, 3000.0], 3000.0],
@@ -351,9 +342,7 @@ def test_kernel_traces_share_one_performance_value_across_a_kernels_points() -> 
     assert points["L2"]["hoverCells"][:2] == ["1,500", "66.67"]
 
 
-def test_bandwidth_hover_shows_zero_levels() -> None:
-    """Every cache level still shows up at 0 when a kernel does no traffic
-    there, instead of vanishing from the tooltip."""
+def test_bandwidth_hover_given_a_level_with_no_traffic__still_lists_it_at_zero() -> None:
     ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
     _, model = kernel_traces(
         make_roofline(["FP32"]),
@@ -374,11 +363,7 @@ def test_bandwidth_hover_shows_zero_levels() -> None:
     )
 
 
-def test_kernel_hover_carries_the_whole_name_up_to_the_limit() -> None:
-    """A demangled name within the tooltip's length cap reaches the tooltip
-    whole. It is wrapped onto as many lines as it takes, but nothing is
-    dropped: two instantiations of the same function are told apart by
-    template arguments that run to the very end of the name."""
+def test_kernel_hover_given_a_name_under_the_length_cap__wraps_it_whole() -> None:
     name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 6
 
     traces, _ = kernel_traces(
@@ -760,11 +745,9 @@ def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
     assert drawn_roof_knees(flops_figure) == roof_extents
 
 
-def test_default_precisions_prefer_fp32_fp16_fp8() -> None:
-    """The standalone page opens on FP32/FP16/FP8 when the run benchmarked
-    them, in that preference order rather than the order the run listed them.
-    A run with none of the three falls back to its first datatype, so the page
-    always opens on something."""
+def test_default_precisions_given_fp32_fp16_fp8_present__orders_fp32_before_fp16_before_fp8() -> (
+    None
+):
     from roofline.roofline_main import _default_precisions
 
     assert _default_precisions(["FP16", "FP32", "FP8", "FP64"]) == [
@@ -772,8 +755,15 @@ def test_default_precisions_prefer_fp32_fp16_fp8() -> None:
         "FP16",
         "FP8",
     ]
-    assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
     assert _default_precisions(["FP8"]) == ["FP8"]
+
+
+def test_default_precisions_given_none_preferred_present__falls_back_to_first_datatype() -> (
+    None
+):
+    from roofline.roofline_main import _default_precisions
+
+    assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
 
 
 def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
