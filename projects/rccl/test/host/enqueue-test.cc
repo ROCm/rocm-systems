@@ -1201,7 +1201,8 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
     int channels;
   };
   const Case cases[] = {
-    {ncclFuncReduce, 24ULL << 20, (1536ULL << 20) - 1, 24},
+    {ncclFuncReduce, 16ULL << 20, (1536ULL << 20) - 1, 24},
+    {ncclFuncAllReduce, 24ULL << 20, (96ULL << 20) - 1, 24},
   };
   for (const Case& test : cases) {
     input.collType = test.coll;
@@ -1211,12 +1212,11 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
       EXPECT_EQ(test.channels, policy.nChannels);
       EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, policy.transport);
     }
-  }
-  input.collType = ncclFuncReduce;
-  for (size_t bytes : {(24ULL << 20) - 1, 1536ULL << 20}) {
-    input.dataSize = bytes;
-    ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
-    EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
+    for (size_t bytes : {test.minBytes - 1, test.maxBytes + 1}) {
+      input.dataSize = bytes;
+      ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+      EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
+    }
   }
 
   input.collType = ncclFuncBroadcast;
@@ -1225,11 +1225,6 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
     ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
     EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
   }
-
-  input.collType = ncclFuncAllReduce;
-  input.dataSize = 32ULL << 20;
-  ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
-  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
 }
 
 TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_FallsBackWhenShmTransportUnavailable) {
@@ -1477,7 +1472,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
     {ncclFuncScatter, 768ULL << 10, true, false},
     {ncclFuncScatter, 8ULL << 20, true, false},
     {ncclFuncScatter, 8ULL << 20, false, false},
-    {ncclFuncScatter, (96ULL << 20) - 1, false, false},
+    {ncclFuncScatter, (24ULL << 20) - 1, false, false},
+    {ncclFuncScatter, 24ULL << 20, false, true},
+    {ncclFuncScatter, (96ULL << 20) - 1, true, true},
     {ncclFuncScatter, 96ULL << 20, false, true},
     {ncclFuncScatter, 128ULL << 20, true, true},
     {ncclFuncAlltoAll, 512ULL << 20, false, true},
@@ -1486,12 +1483,16 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
     {ncclFuncAlltoAll, 768ULL << 10, true, false},
     {ncclFuncAlltoAll, 2ULL << 20, true, false},
     {ncclFuncAlltoAll, 2ULL << 20, false, false},
-    {ncclFuncAlltoAll, (12ULL << 20) - 1, false, false},
+    {ncclFuncAlltoAll, (6ULL << 20) - 1, false, false},
+    {ncclFuncAlltoAll, 6ULL << 20, false, true},
+    {ncclFuncAlltoAll, 8ULL << 20, false, true},
+    {ncclFuncAlltoAll, 8ULL << 20, true, false},
+    {ncclFuncAlltoAll, (12ULL << 20) - 1, false, true},
     {ncclFuncAlltoAll, 12ULL << 20, false, true},
     {ncclFuncAlltoAll, 16ULL << 20, true, true},
-    {ncclFuncAlltoAll, 8ULL << 20, false, false},
     {ncclFuncAlltoAll, (96ULL << 20) - 1, true, true},
     {ncclFuncAlltoAll, 96ULL << 20, true, false},
+    {ncclFuncAlltoAll, 256ULL << 20, false, false},
     {ncclFuncAlltoAllv, 1, false, false},
     {ncclFuncAlltoAllv, 1, true, false},
     {ncclFuncAlltoAllv, 256ULL << 10, false, false},
