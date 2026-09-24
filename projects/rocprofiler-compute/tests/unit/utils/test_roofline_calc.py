@@ -231,14 +231,14 @@ def test_calc_ai_analyze_joins_per_kernel_stats(
         top_stats={"Count": 128, "Sum(ns)": 154000.0, "Percent": 12.4},
     )
     assert joined["counts"] == [128]
-    assert joined["totalTime"] == [154000.0]
-    assert joined["pctRuntime"] == [12.4]
+    assert joined["kernelTime"] == [154000.0]
+    assert joined["kernelPctRuntime"] == [12.4]
     assert joined["timeUnit"] == "ns", "the unit is only recoverable from the column"
 
     missing = run_calc_ai_analyze_with_values(monkeypatch, ai_values)
     assert missing["counts"] == [None]
-    assert missing["totalTime"] == [None]
-    assert missing["pctRuntime"] == [None]
+    assert missing["kernelTime"] == [None]
+    assert missing["kernelPctRuntime"] == [None]
     assert missing["timeUnit"] == ""
 
 

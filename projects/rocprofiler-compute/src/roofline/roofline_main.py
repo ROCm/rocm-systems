@@ -142,12 +142,6 @@ def _decade_label(value: float) -> str:
     return f"1e{int(round(math.log10(value)))}"
 
 
-def _invert_percent(value: Optional[float], pct: Optional[float]) -> Optional[float]:
-    if value is None or not pct:
-        return None
-    return value * 100.0 / pct
-
-
 def _frame_subtitle(
     bounds: tuple[float, float, float, float], is_machine_frame: bool
 ) -> str:
@@ -409,8 +403,9 @@ class Roofline:
         kernels_model: list[dict[str, Any]] = []
 
         counts = self.__ai_data.get("counts", [])
-        total_time = self.__ai_data.get("totalTime", [])
-        pct_runtime = self.__ai_data.get("pctRuntime", [])
+        kernel_time = self.__ai_data.get("kernelTime", [])
+        kernel_pct_runtime = self.__ai_data.get("kernelPctRuntime", [])
+        total_app_time = self.__ai_data.get("totalAppTime")
         time_unit = self.__ai_data.get("timeUnit", "")
         total_dispatches = sum(count for count in counts if count is not None)
 
@@ -425,9 +420,8 @@ class Roofline:
 
             color, count_val, time_val, pct_val = (
                 values[kernel_index] if kernel_index < len(values) else None
-                for values in (kernel_colors, counts, total_time, pct_runtime)
+                for values in (kernel_colors, counts, kernel_time, kernel_pct_runtime)
             )
-            total_app_time_val = _invert_percent(time_val, pct_val)
             limiter, limiter_category, roof_value = self._determine_kernel_limiter(
                 level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
@@ -466,7 +460,7 @@ class Roofline:
                             kernel=count_val, total=total_dispatches
                         ),
                         duration=KernelDurationStats(
-                            kernel=time_val, total=total_app_time_val, unit=time_unit
+                            kernel=time_val, total=total_app_time, unit=time_unit
                         ),
                         ops_flops=ops_flops,
                     ),
