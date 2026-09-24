@@ -513,7 +513,12 @@ TEST(VfioDeviceHost, ReadsAndWritesAcrossHundredsOfPageDistinctWindows) {
             simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(destination, expected);
 
-  const std::vector<std::byte> second(kTransferSize, std::byte{0xc3});
+  // The write payload complements the read pattern, so it stays distinct per
+  // window and no byte equals its original value: a skipped or misplaced
+  // write leaves the old contents behind and cannot pass the comparison.
+  std::vector<std::byte> second(kTransferSize);
+  std::transform(expected.cbegin(), expected.cend(), second.begin(),
+                 [](std::byte value) { return ~value; });
   ASSERT_EQ(served.host().write_outcome(kGuestAddress, second),
             simdojo::DmaAccessOutcome::Complete);
   // Reading the file back, not the mapping, catches a write that landed in
