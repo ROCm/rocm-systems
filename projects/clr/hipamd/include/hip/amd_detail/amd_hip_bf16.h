@@ -1528,7 +1528,25 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hlt2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmax2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+#if defined(__clang__)
+  /* One v_pk_max_num_bf16 on gfx1250 does both elements. Two fixups keep the result
+     bit-identical to __hmax() above, which IEEE maxNum does not match everywhere:
+       - when both inputs are NaN, maxNum returns the quieted operand but __hmax returns a
+         canonical NaN. maxNum only yields a NaN when both inputs are NaN, so canonicalising any
+         NaN in the result is exactly that rule.
+       - __hmax is (a > b) ? a : b, which returns b for every tie. The only tie where that is
+         observable is __hmax(+0, -0): maxNum gives +0, __hmax gives -0. Hence ties select b. */
+  const __bf16_2 x = a, y = b;
+  /* Taken per element rather than on the vector: a v2bf16 llvm.maxnum has no SPIR-V translation,
+     while the scalar pair is re-packed into one v_pk_max_num_bf16 on gfx1250 either way. */
+  __bf16_2 m = {__builtin_elementwise_maxnum(x[0], y[0]),
+                __builtin_elementwise_maxnum(x[1], y[1])};
+  m = (__bf16_2)((x == y) ? y : m);
+  const __bf16_2 canonical_nan = {(__bf16)HIPRT_NAN_BF16, (__bf16)HIPRT_NAN_BF16};
+  return __hip_bfloat162{(__bf16_2)((m != m) ? canonical_nan : m)};
+#else
   return __hip_bfloat162(__hmax(a.x, b.x), __hmax(a.y, b.y));
+#endif
 }
 
 /**
@@ -1537,7 +1555,17 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmax2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmin2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+#if defined(__clang__)
+  // See __hmax2() above; the same two fixups apply, here for __hmin(-0, +0).
+  const __bf16_2 x = a, y = b;
+  __bf16_2 m = {__builtin_elementwise_minnum(x[0], y[0]),
+                __builtin_elementwise_minnum(x[1], y[1])};
+  m = (__bf16_2)((x == y) ? y : m);
+  const __bf16_2 canonical_nan = {(__bf16)HIPRT_NAN_BF16, (__bf16)HIPRT_NAN_BF16};
+  return __hip_bfloat162{(__bf16_2)((m != m) ? canonical_nan : m)};
+#else
   return __hip_bfloat162(__hmin(a.x, b.x), __hmin(a.y, b.y));
+#endif
 }
 
 /**
