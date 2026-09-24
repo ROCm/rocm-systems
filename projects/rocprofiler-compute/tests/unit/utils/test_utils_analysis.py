@@ -1008,7 +1008,8 @@ def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
     engine.invocation_ids.add("eval")
     engine.children = [child]
     forest = {"14444": [backward], "14611": [engine]}
-    errors = attach_unlocated_trees_by_launcher_thread(forest)
+    errors = []
+    attach_unlocated_trees_by_launcher_thread(forest, errors)
     assert len(errors) == 1
     assert isinstance(errors[0], UncorrelatedLauncherIntervalError)
     assert engine in forest["14611"]

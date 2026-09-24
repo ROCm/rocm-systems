@@ -135,6 +135,27 @@ class MissingSourceLocationError(MlApiTraceError):
         )
 
 
+class KernelSequenceLengthMismatchError(MlApiTraceError):
+    """Kernel name and timestamp lists on one marker row have unequal lengths."""
+
+    def __init__(
+        self,
+        operator_name: str,
+        name_count: int,
+        start_count: int,
+        end_count: int,
+    ) -> None:
+        self.operator_name = operator_name
+        self.name_count = name_count
+        self.start_count = start_count
+        self.end_count = end_count
+        super().__init__(
+            "Kernel name and timestamp lists have unequal lengths for "
+            f"Operator_Name={operator_name} names={name_count} "
+            f"starts={start_count} ends={end_count}"
+        )
+
+
 class MarkerNotNestedError(MlApiTraceError):
     """A consolidated marker row is missing from the nested call forest."""
 
