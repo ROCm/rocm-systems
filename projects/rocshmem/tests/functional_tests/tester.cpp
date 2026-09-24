@@ -1015,34 +1015,64 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TileReduceTestType:
       test_name = "Tile Reduce";
-      testers.push_back(new TileReduceTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float &s, float &r) {
-            // Source value depends on PE and element index — set at resetBuffers
-            // time. We use 1.0f here; actual values are PE-seeded in resetBuffers.
-            s = 1.0f; r = 0.0f;
-          },
-          [](float v, int n_pes, [[maybe_unused]] int idx) {
-            return static_cast<int>(v) == n_pes;
-          }));
+      // float, short, int, long × SUM, MAX, MIN
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
     case TileReduceWaveTestType:
       test_name = "Tile Reduce Wave-Collective";
-      testers.push_back(new TileReduceTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float &s, float &r) { s = 1.0f; r = 0.0f; },
-          [](float v, int n_pes, [[maybe_unused]] int idx) {
-            return static_cast<int>(v) == n_pes;
-          }));
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
     case TileReduceWGTestType:
       test_name = "Tile Reduce Workgroup-Collective";
-      testers.push_back(new TileReduceTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float &s, float &r) { s = 1.0f; r = 0.0f; },
-          [](float v, int n_pes, [[maybe_unused]] int idx) {
-            return static_cast<int>(v) == n_pes;
-          }));
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
 #if defined(USE_GDA)
     case QpPingPongTestType:
