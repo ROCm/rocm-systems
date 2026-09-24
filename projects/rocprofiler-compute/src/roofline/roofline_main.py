@@ -382,7 +382,9 @@ class Roofline:
 
         if not candidates:
             return "Unknown", "Unknown", None
-        roof_value, label, category = min(candidates, key=lambda candidate: candidate[0])
+        roof_value, label, category = min(
+            candidates, key=lambda candidate: candidate[0]
+        )
         return label, category, roof_value
 
     def _build_kernel_traces(
@@ -425,9 +427,7 @@ class Roofline:
                 if limiter_category == "Memory"
                 else min(points, key=lambda point: point["ai"])["peak"]
             )
-            pct_roof = (
-                100.0 * points[0]["perf"] / roof_value if roof_value else None
-            )
+            pct_roof = 100.0 * points[0]["perf"] / roof_value if roof_value else None
             hover_cells = [
                 format_hover_number(roof_value, ",.0f"),
                 format_hover_number(pct_roof, ",.2f"),
@@ -453,8 +453,8 @@ class Roofline:
                         name_html=wrap_hover_name(truncate_kernel_name(kernel_name)),
                         limiter=limiter,
                         limiter_category=limiter_category,
-                        count=count_val,
-                        total_dispatches=total_dispatches,
+                        kernel_dispatches_count=count_val,
+                        total_dispatches_count=total_dispatches,
                         total_time=time_val,
                         time_unit=time_unit,
                         pct_runtime=pct_val,
@@ -542,9 +542,7 @@ class Roofline:
             peak_bandwidth = entry["peak_bandwidth"]
             achieved_bandwidth = entry["achieved_bandwidth"]
             pct_bandwidth = (
-                100.0 * achieved_bandwidth / peak_bandwidth
-                if peak_bandwidth
-                else None
+                100.0 * achieved_bandwidth / peak_bandwidth if peak_bandwidth else None
             )
             lines.append(
                 f"\u2003{entry['level_name']}: "

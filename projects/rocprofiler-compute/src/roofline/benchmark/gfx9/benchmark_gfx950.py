@@ -99,12 +99,12 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
         extern "C" __global__ void mfma_bf16(int iter, float *dummy)
         {
             vec16<float> result = {0};
-            vec8<__fp16> a;
+            vec8<short> a;
             a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])

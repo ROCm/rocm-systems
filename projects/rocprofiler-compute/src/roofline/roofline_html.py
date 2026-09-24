@@ -107,7 +107,8 @@ def build_interactive_document(
             "Plot each kernel at its arithmetic intensity for this memory level, "
             "matching the (AI axis) marker in the Bandwidth rooflines panel. "
             "All peaks plots every level at once. Limited by plots only each "
-            "kernel's bottleneck point."
+            "kernel's bottleneck point; as with All peaks, no single roof is "
+            "marked as the AI axis."
         ),
         RUNTIME_TITLE=html.escape(
             "Show only the heaviest kernels whose combined percent of GPU "

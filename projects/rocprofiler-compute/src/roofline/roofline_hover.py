@@ -40,8 +40,8 @@ def build_kernel_hover_template(
     name_html: str,
     limiter: str,
     limiter_category: str,
-    count: Optional[float],
-    total_dispatches: Optional[float],
+    kernel_dispatches_count: Optional[float],
+    total_dispatches_count: Optional[float],
     total_time: Optional[float],
     time_unit: str,
     pct_runtime: Optional[float],
@@ -58,22 +58,27 @@ def build_kernel_hover_template(
     total_app_time_txt = format_hover_number(total_app_time, ",.0f")
     pct_runtime_txt = format_hover_number(pct_runtime, ",.2f")
     pct_dispatches = (
-        100.0 * count / total_dispatches
-        if count is not None and total_dispatches
+        100.0 * kernel_dispatches_count / total_dispatches_count
+        if kernel_dispatches_count is not None and total_dispatches_count
         else None
     )
     pct_dispatches_txt = format_hover_number(pct_dispatches, ",.2f")
+    count_txt = _format_integer(kernel_dispatches_count)
+    total_dispatches_txt = _format_integer(total_dispatches_count)
     return _hover(
         name_html,
         [
             f"<b>Limited by {limiter_category}: {limiter}</b>",
-            f"Performance: %{{customdata[1]}}% (%{{y:,.0f}} / %{{customdata[0]}} {unit})",
+            f"Performance: %{{customdata[1]}}% "
+            f"(%{{y:,.0f}} / %{{customdata[0]}} {unit})",
             "AI: %{x:.6g}",
             "",
             "<b>Details</b>",
             "%{customdata[2]}",
-            f"Dispatch Count: {pct_dispatches_txt}% ({_format_integer(count)} / {_format_integer(total_dispatches)})",
-            f"Duration: {pct_runtime_txt}% ({kernel_time_txt} / {total_app_time_txt} {time_unit})",
+            f"Dispatch Count: {pct_dispatches_txt}% "
+            f"({count_txt} / {total_dispatches_txt})",
+            f"Duration: {pct_runtime_txt}% "
+            f"({kernel_time_txt} / {total_app_time_txt} {time_unit})",
         ],
     )
 
