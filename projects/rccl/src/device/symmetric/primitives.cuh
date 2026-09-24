@@ -118,6 +118,7 @@ struct ncclSymkArgsHandler {
   ncclGinSyncHandle const& ginSyncHandle;
   ncclDevResourceHandle rsGinAccumBuf;
   uint32_t rsGinAccumBytesPerBlock;
+  int hierScaleInSize;
   struct ncclSymkChannelWorkRange* channelWorkRange;
   struct ncclSymkDevWork* devWork;
   uint32_t nRanks_rcp32;
@@ -125,7 +126,8 @@ struct ncclSymkArgsHandler {
   __device__ ncclSymkArgsHandler(ncclSymkDevWorkArgs const* args)
     : comm(args->kcomm.devComm), lsaLLA2A(args->kcomm.lsaLLA2A), ginOutbox(args->kcomm.ginOutbox),
       ginInboxRail(args->kcomm.ginInboxRail), ginSyncHandle(args->kcomm.ginSyncHandle),
-      rsGinAccumBuf(args->kcomm.rsGinAccumBuf), rsGinAccumBytesPerBlock(args->kcomm.rsGinAccumBytesPerBlock) {
+      rsGinAccumBuf(args->kcomm.rsGinAccumBuf), rsGinAccumBytesPerBlock(args->kcomm.rsGinAccumBytesPerBlock),
+      hierScaleInSize(args->kcomm.hierScaleInSize) {
     channelWorkRange = args->getWorkRange();
 
     devWork = args->getWorks(args->nMaxChannels);
@@ -500,10 +502,13 @@ template <typename T>
 struct ncclLsaPointerGetter {
   void* base;
   uint32_t stride4G;
-  __device__ ncclLsaPointerGetter(ncclSymPtr<T> ptr) {
+  // `slot0` folds a constant slot bias into the base so that operator() can be
+  // indexed by a rank of a unit-stride sub-team rather than an absolute LSA slot.
+  __device__ ncclLsaPointerGetter(ncclSymPtr<T> ptr, int slot0 = 0) {
     base = (char*)nccl::utility::loadConst(&ptr.window->lsaFlatBase);
     base = (char*)base + ptr.offset;
     stride4G = nccl::utility::loadConst(&ptr.window->stride4G);
+    base = nccl::utility::add4G(base, slot0 * stride4G);
   }
   __device__ T* operator()(int lsaPeer) const {
     return (T*)nccl::utility::add4G(base, lsaPeer * stride4G);

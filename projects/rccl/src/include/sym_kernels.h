@@ -48,6 +48,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_STMC,
   ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
+  ncclSymkKernelId_AllGather_HierLsa,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -67,6 +68,10 @@ struct ncclSymkDevComm {
   struct ncclGinSyncHandle ginSyncHandle;
   ncclDevResourceHandle rsGinAccumBuf;
   uint32_t rsGinAccumBytesPerBlock;
+  // Ranks sharing one physical device, so a hierarchical kernel can tell the
+  // on-package half of the LSA team from the cross-package half. 0 when the comm
+  // does not decompose that way.
+  int hierScaleInSize;
 };
 
 struct ncclSymkState {

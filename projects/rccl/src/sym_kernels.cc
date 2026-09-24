@@ -28,6 +28,7 @@ constexpr char const* kernelName[] = {
   "AllGather_STMC",
   "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
+  "AllGather_HierLsa",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
   "ReduceScatter_LD",
@@ -54,7 +55,8 @@ constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncc
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_HierLsa;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
@@ -74,6 +76,9 @@ constexpr uint32_t kernelMask_LSA =
   1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
   1 << ncclSymkKernelId_ReduceScatter_LL | 1 << ncclSymkKernelId_ReduceScatter_LD |
   1 << ncclSymkKernelId_ReduceScatter_LDMC | 1 << ncclSymkKernelId_ReduceScatter_TmaLD;
+
+// Needs the LSA team to factor into equal-size packages; see computeHierScaleInSize().
+constexpr uint32_t kernelMask_HierLsa = 1 << ncclSymkKernelId_AllGather_HierLsa;
 
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
@@ -136,6 +141,10 @@ NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 RCCL_PARAM(SymModel, "SYM_MODEL", 0)
+// Ranks per physical device for hierarchical LSA kernels; 0 derives it from the topology.
+RCCL_PARAM(SymHierScaleIn, "SYM_HIER_SCALE_IN", 0)
+// GB/s substituted for the rail link when the topology reports no net bandwidth; see getGinBw().
+RCCL_PARAM(SymGinFallbackBw, "SYM_GIN_FALLBACK_BW", 12)
 
 enum rcclSymkColl {
   rcclSymkColl_AllReduce = 0,
@@ -278,7 +287,16 @@ static double getGinLat(struct ncclComm* comm) {
 }
 
 static double getGinBw(struct ncclComm* comm) {
-  return (/*byte/sec*/ 1.e9) * comm->minNetBw;
+  // [RCCL] ncclTopoGetMinNetBw() yields 0 when a rank reaches no NET node, which is
+  // every single-node comm: rail traffic there runs over GIN/RMA nodes and no NET
+  // node is built. A 0 makes the models below divide by zero, so every GIN kernel
+  // scores as infinitely slow and ncclSymkPickKernel() silently drops back to the
+  // legacy path. Substitute a constant rather than a topology bandwidth: this feeds
+  // kernel selection, so it must be identical on every rank or ranks could choose
+  // different kernels and hang.
+  float bw = comm->minNetBw;
+  if (bw <= 0.0f) bw = (float)std::max<int64_t>(1, rcclParamSymGinFallbackBw());
+  return (/*byte/sec*/ 1.e9) * bw;
 }
 
 static void getBusMul_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc, double* out_smMul, double* out_lsaMul,
@@ -443,6 +461,12 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
   case ncclSymkKernelId_AllGather_ST:
     busBytes = (nRanks - 1) * nBytes;
     break;
+  case ncclSymkKernelId_AllGather_HierLsa:
+    // Two passes of nRanks/2 stores each, so slightly more bytes than the flat
+    // kernel moves. The win is that all but one copy per rank stays on-package,
+    // which this model has no term for, so selection needs measurement first.
+    busBytes = nRanks * nBytes;
+    break;
   case ncclSymkKernelId_AllGather_TmaSTMC:
   case ncclSymkKernelId_AllGather_STMC:
     busBytes = (nRanks - 1) * nBytes; // Wrong. Should be nRanks*nBytes but we want to beat non-MC.
@@ -511,6 +535,28 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
   }
 }
 
+// How many consecutive ranks share a physical device. A partitioned AMD GPU exposes
+// its partitions as PCI functions .0-.7 of one device (see the MLOPart handling in
+// ncclCommInitRankFunc), so masking the function nibble off busId names the card.
+// Yields 0 unless every card holds the same number of ranks and each card's ranks are
+// consecutive, since only then does ncclTeamInnerFactor() describe the hardware.
+static int computeHierScaleInSize(struct ncclComm* comm) {
+  int64_t param = rcclParamSymHierScaleIn();
+  if (param > 0) return (int)param;
+  if (comm->peerInfo == nullptr || comm->nRanks < 2) return 0;
+
+  int size = 1;
+  while (size < comm->nRanks && (comm->peerInfo[size].busId & ~0xfLL) == (comm->peerInfo[0].busId & ~0xfLL)) size++;
+  if (size == comm->nRanks || comm->nRanks % size != 0) return 0;
+
+  int card = 0;
+  for (int r = 1; r < comm->nRanks; r++) {
+    if ((comm->peerInfo[r].busId & ~0xfLL) != (comm->peerInfo[r - 1].busId & ~0xfLL)) card++;
+    if (card != r / size) return 0;
+  }
+  return size;
+}
+
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   // ncclTeamLsa() below calls this internally but drops the error code so we do it here.
   NCCLCHECK(ncclDevrInitOnce(comm));
@@ -518,6 +564,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   struct ncclSymkState* symk = &comm->symkState;
   if (!symk->initialized) {
     symk->initialized = true;
+    symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    INFO(NCCL_INIT, "Symmetric hierarchical scale-in size = %d (nRanks %d)", symk->kcomm.hierScaleInSize,
+         comm->nRanks);
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem = comm->nvlsSupport && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
@@ -672,6 +721,10 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclD
   if (!hasGin) kmask &= ~kernelMask_Gin;
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
+
+  // Needs at least two packages of equal size to have a cross-package hop worth saving.
+  int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (scaleIn <= 0 || comm->nRanks % scaleIn != 0 || comm->nRanks / scaleIn < 2) kmask &= ~kernelMask_HierLsa;
   return kmask;
 }
 

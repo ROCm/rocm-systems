@@ -53,6 +53,8 @@ reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
 gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaST", "RailRing_LsaSTMC"]
+# Algos implemented in the *_gin.cuh translation unit, whether or not they use GIN.
+gin_file_algos = gin_algos + ["HierLsa"]
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
@@ -91,7 +93,7 @@ ty_to_cxxtype = {
 }
 
 def enumerate_kernels():
-  for algo in ["LL","ST","RailRing_LsaST"]:
+  for algo in ["LL","ST","RailRing_LsaST","HierLsa"]:
     yield Rec(coll="AllGather", algo=algo)
   for red in all_reds:
     for ty in all_tys:
@@ -125,11 +127,11 @@ def required_cuda(k):
 ################################################################################
 
 def kernel_fbase(k):
-  return coll_to_lower[k.coll] + ("_gin" if k.algo in gin_algos else "")
+  return coll_to_lower[k.coll] + ("_gin" if k.algo in gin_file_algos else "")
 
 def kernel_fname(k):
   parts = [coll_to_lower[k.coll]]
-  if k.algo in gin_algos: parts += ['gin']
+  if k.algo in gin_file_algos: parts += ['gin']
   if k.coll in reductions:
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
       parts += [k.red, k.ty, k.algo]
