@@ -175,13 +175,22 @@ class MarkerNotNestedError(MlApiTraceError):
         )
 
 
+_UNMATCHED_KERNEL_NAME_PREVIEW = 10
+
+
 def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
-    columns = ["Kernel_Name", "Correlation_ID"]
-    if "GUID" in unmatched_rows.columns:
-        columns.append("GUID")
-    present_columns = [column for column in columns if column in unmatched_rows.columns]
-    lines = ["GPU kernel dispatches with no matching ROCTX marker:"]
-    for row in unmatched_rows[present_columns].itertuples(index=False):
-        parts = [f"{column}={value}" for column, value in zip(present_columns, row)]
-        lines.append("  " + ", ".join(parts))
-    return "\n".join(lines)
+    count = len(unmatched_rows)
+    names: list[str] = []
+    if "Kernel_Name" in unmatched_rows.columns:
+        names = list(
+            dict.fromkeys(str(value) for value in unmatched_rows["Kernel_Name"])
+        )
+    preview = ", ".join(names[:_UNMATCHED_KERNEL_NAME_PREVIEW])
+    if len(names) > _UNMATCHED_KERNEL_NAME_PREVIEW:
+        return (
+            f"{count} unmatched dispatches; first "
+            f"{_UNMATCHED_KERNEL_NAME_PREVIEW} Kernel_Names: {preview}"
+        )
+    if preview:
+        return f"{count} unmatched dispatches; Kernel_Names: {preview}"
+    return f"{count} unmatched dispatches"
