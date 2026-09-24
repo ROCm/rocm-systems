@@ -24,6 +24,7 @@ from consan_tensile_support import (
     TensileValidationPaths,
     resolve_tensile_validation_paths,
     tensile_python_environment,
+    tensile_python_command,
 )
 
 DEFAULT_TIMEOUT_SECONDS = 55
@@ -762,11 +763,7 @@ def main() -> int:
     )
     if args.streamk_fixed_grid is not None:
         environment["TENSILE_STREAMK_FIXED_GRID"] = str(args.streamk_fixed_grid)
-    command = [
-        sys.executable,
-        "-P",
-        "-c",
-        _TENSILE_DRIVER,
+    command = tensile_python_command(sys.executable, _TENSILE_DRIVER) + [
         str(execution_config),
         str(work_dir),
         "--gpu-targets",

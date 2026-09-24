@@ -24,6 +24,22 @@ from consan_validation_test_support import temporary_root
 
 
 class TensileValidationTest(unittest.TestCase):
+    def test_python_command_excludes_implicit_cwd_but_keeps_pythonpath(self) -> None:
+        with temporary_root() as root:
+            (root / "Tensile.py").write_text("raise RuntimeError('cwd imported')\n")
+            package = root / "explicit"
+            package.mkdir()
+            (package / "Tensile.py").write_text("value = 42\n")
+            command = tensile_support.tensile_python_command(
+                sys.executable, "import Tensile; print(Tensile.value)"
+            )
+            self.assertNotIn("-P", command)
+            result = subprocess.run(
+                command, cwd=root, env={**os.environ, "PYTHONPATH": str(package)},
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(result.stdout.strip(), "42")
+
     @staticmethod
     def _make_fake_paths(root: Path) -> tensile_support.TensileValidationPaths:
         tensilelite = root / "tensilelite"

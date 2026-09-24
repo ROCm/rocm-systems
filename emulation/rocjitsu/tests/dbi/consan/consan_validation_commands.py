@@ -20,6 +20,7 @@ from consan_tensile_support import (
     TensileValidationPaths,
     resolve_tensile_validation_paths,
     tensile_python_environment,
+    tensile_python_command,
 )
 from consan_validation_catalog import (
     CONTROLLED_ENV_PREFIX,
@@ -319,7 +320,7 @@ def _tensile_runtime_probe(python: Path, paths: TensileValidationPaths) -> dict:
     environment = tensile_python_environment(paths)
     try:
         import_probe = subprocess.run(
-            [str(python), "-P", "-c", "from Tensile import Tensile"],
+            tensile_python_command(python, "from Tensile import Tensile"),
             check=False,
             capture_output=True,
             text=True,

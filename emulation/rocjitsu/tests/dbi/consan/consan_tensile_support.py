@@ -38,6 +38,20 @@ class TensileValidationPaths:
     llvm_readelf: Path
 
 
+def tensile_python_command(python: str | Path, code: str) -> list[str]:
+    """Run with PYTHONPATH but without the implicit cwd, including Python 3.10.
+
+    Python's -P option only exists from 3.11. The -c startup path is the
+    empty string; remove it before importing Tensile, leaving explicit paths.
+    """
+    return [
+        str(python),
+        "-c",
+        "import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]\n"
+        + code,
+    ]
+
+
 def tensile_python_environment(
     paths: TensileValidationPaths,
     base: dict[str, str] | None = None,

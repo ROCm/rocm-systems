@@ -3543,6 +3543,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_gfx950_test
                 FILTER "${RJ_CONSAN_CDNA_FORCED_SPILL_TEST}"
                 TIMEOUT 30
+                LABELS consan consan-device gfx950 physical
+                RESOURCE_LOCK consan_physical_gfx950
                 RUN_SERIAL
                 PASS_REGEX "ConSan resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
@@ -3562,6 +3564,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_gfx950_test
                 FILTER "${RJ_CONSAN_CDNA_SHARED_HELPER_TEST}"
                 TIMEOUT 30
+                LABELS consan consan-device gfx950 physical
+                RESOURCE_LOCK consan_physical_gfx950
                 RUN_SERIAL
                 PASS_REGEX "ConSan resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
@@ -3580,6 +3584,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_gfx950_test
                 FILTER "${RJ_CONSAN_CDNA_BARRIER_TEST}"
                 TIMEOUT 30
+                LABELS consan consan-device gfx950 physical
+                RESOURCE_LOCK consan_physical_gfx950
                 RUN_SERIAL
                 PASS_REGEX "ConSan proof patch.*kind=trampoline-sync-metadata.*spilled_vgprs=[1-9][0-9]*"
                 ENVIRONMENT
@@ -3599,6 +3605,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_gfx950_test
                 FILTER "${RJ_CONSAN_CDNA_ATOMIC_TEST}"
                 TIMEOUT 30
+                LABELS consan consan-device gfx950 physical
+                RESOURCE_LOCK consan_physical_gfx950
                 RUN_SERIAL
                 PASS_REGEX "ConSan proof patch.*kind=trampoline-sync-metadata.*spilled_vgprs=[1-9][0-9]*"
                 ENVIRONMENT
@@ -3617,6 +3625,8 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_gfx950_test
                 FILTER "${RJ_CONSAN_CDNA_DYNAMIC_STACK_TEST}"
                 TIMEOUT 30
+                LABELS consan consan-device gfx950 physical
+                RESOURCE_LOCK consan_physical_gfx950
                 RUN_SERIAL
                 PASS_REGEX "ConSan resources.*spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
                 ENVIRONMENT
