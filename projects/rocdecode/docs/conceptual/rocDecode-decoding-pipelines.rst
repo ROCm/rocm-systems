@@ -14,13 +14,15 @@ The FFMpeg demultiplexer (demuxer) extracts a segment of video data and sends it
 
   The bitstream reader utility class can be used to extract and parse coded picture data from an elementary video stream. It can only be used with elementary video streams and IVF container files.
 
-When hardware decoding is used, the parser extracts information such as picture and slice parameters, and sends it to the hardware decoder to consume. The hardware decoder decodes the frame using the Video Acceleration API (VA-API). 
+When hardware decoding is used, the parser extracts information such as picture and slice parameters, and sends it to the hardware decoder to consume. The hardware decoder decodes the frame using the Video Acceleration API (VA-API). On Windows, VA-API is provided through the vaon12 backend, which translates VA-API calls to D3D12 Video Decode API calls targeting the same VCN hardware.
 
 When FFMpeg-based software decoding is used, no separate parsing step is required and the data that was extracted by the demuxer is sent directly to the decoder to consume.
 
-.. note:: 
+.. note::
 
-  The FFMpeg development libraries must be installed to use the FFMpeg utilities:
+  The FFMpeg development libraries must be installed to use the FFMpeg utilities.
 
-  ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
+  On Linux: ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
+
+  On Windows: use pre-built FFmpeg libraries or build from source, and pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to CMake when configuring.
 

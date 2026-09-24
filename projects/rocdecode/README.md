@@ -14,6 +14,11 @@ access the video decoding features available on your GPU.
 * AV1 - 8 bit, and 10 bit
 * VP9 - 8 bit, and 10 bit
 
+## Supported platforms
+
+* **Linux** (Ubuntu 22.04 / 24.04)
+* **Windows** (Windows 11) — via the VA-API on D3D12 (vaon12) backend
+
 ## Prerequisites
 
 ### Hardware
@@ -43,13 +48,31 @@ rocDecode is also built and installed as part of
 [TheRock](https://github.com/ROCm/TheRock), which is the recommended path for
 source builds and nightly/CI artifacts.
 
+### Windows additional dependencies
+
+On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/video-acceleration-api-va-api-now-available-on-windows/) backend (Mesa's VA-API on D3D12 translation layer) for hardware-accelerated decoding. The vaon12 driver and libva are provided by TheRock for Windows under `%ROCM_PATH%\lib\rocm_sysdeps`; no separate download is required. The following additional tools are needed:
+
+* **Visual Studio 2022** with C++ desktop workload (MSVC compiler, C++17)
+* **CMake** 3.21 or later (the `Visual Studio 17 2022` generator requires 3.21)
+* **Windows SDK** (provides D3D12 and DXGI headers/libraries)
+
+**Optional:**
+
+* **FFmpeg** — pre-built libraries or built from source (required for samples and the host decoder library)
+
 ### FFmpeg (required for samples and tests)
 
-[FFmpeg](https://github.com/FFmpeg/FFmpeg) development libraries must be installed separately to build and run samples and extended tests:
+[FFmpeg](https://github.com/FFmpeg/FFmpeg) development libraries must be installed separately to build and run samples and extended tests.
+
+**Linux:**
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
+
+**Windows:**
+
+  Use pre-built FFmpeg libraries or build from source. Pass `-DFFMPEG_ROOT=<path>` to CMake when configuring.
 
 ## Install
 
@@ -94,7 +117,9 @@ SDK, the following standalone rocDecode packages are also available:
 
 ### Build and install from source
 
-rocDecode is built as part of [TheRock](https://github.com/ROCm/TheRock). To build standalone from source:
+rocDecode is built as part of [TheRock](https://github.com/ROCm/TheRock) on both Linux and Windows. To build standalone from source:
+
+### Linux
 
 ```shell
 git clone https://github.com/ROCm/rocm-systems.git
@@ -105,20 +130,53 @@ make -j8
 sudo make install
 ```
 
+### Windows
+
+```bat
+git clone https://github.com/ROCm/rocm-systems.git
+cd rocm-systems\projects\rocdecode
+mkdir build && cd build
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+cmake --install . --config Release
+```
+
+> [!NOTE]
+> * Set `ROCM_PATH` to the TheRock build output directory. The VA-API headers and import
+>   libraries are found there at build time, and libva uses it at run time to locate the
+>   VA-API driver.
+> * To include FFmpeg support, add `-DFFMPEG_ROOT=<path-to-ffmpeg>`.
+
 ### Run tests
+
+  **Linux:**
 
   ```shell
   make test
   ```
+
+  **Windows:**
+
+  Before running tests or samples, add the rocDecode, VA-API, and FFmpeg DLL directories to your PATH
+  so that executables can locate the required DLLs at runtime. `ROCM_PATH` must stay set as well, so
+  that libva can locate the VA-API driver:
+
+  ```bat
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  ctest -C Release
+  ```
+
   > [!IMPORTANT]
-  > `make test` requires FFmpeg dev libraries to be installed
+  > Tests require FFmpeg dev libraries to be installed
 
   > [!NOTE]
-  > To run tests with verbose option, use `make test ARGS="-VV"`.
+  > To run tests with verbose output, use `ctest -VV` (or `make test ARGS="-VV"` on Linux).
 
 ## Verify installation
 
 After installation, the following files are available:
+
+**Linux:**
 
 * Libraries in `/opt/rocm/lib`
 * Header files in `/opt/rocm/include/rocdecode`
@@ -152,9 +210,15 @@ See TheRock's
 [Installing artifacts](https://github.com/ROCm/TheRock/blob/main/docs/development/installing_artifacts.md)
 guide for other options.
 
+**Windows:**
+
+* Libraries in `%ROCM_PATH%\lib` and `%ROCM_PATH%\bin`
+* Header files in `%ROCM_PATH%\include\rocdecode`
+* Samples in `%ROCM_PATH%\share\rocdecode`
+
 ### Using sample application
 
-To verify your installation using a sample application, run:
+**Linux:**
 
   ```shell
   mkdir rocdecode-sample && cd rocdecode-sample
@@ -163,14 +227,34 @@ To verify your installation using a sample application, run:
   ./videodecode -i /opt/rocm/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   ```
 
+**Windows:**
+
+  ```bat
+  mkdir rocdecode-sample && cd rocdecode-sample
+  cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake --build . --config Release
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
+  ```
+
 ### Using CTest
 
-To verify your installation using CTest, run:
+**Linux:**
 
   ```shell
   mkdir rocdecode-test && cd rocdecode-test
   cmake /opt/rocm/share/rocdecode/test/
   ctest -VV
+  ```
+
+**Windows:**
+
+  ```bat
+  mkdir rocdecode-test && cd rocdecode-test
+  cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake --build . --config Release
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  ctest -C Release -VV
   ```
 
 ## Samples
@@ -189,5 +273,7 @@ individual folders to build and run the samples.
 
 * Linux
   * Ubuntu - `22.04` / `24.04`
+* Windows
+  * Windows 11 - build `26100`
 * [TheRock](https://github.com/ROCm/TheRock) - `7.12` or later
 * FFmpeg - `4.4.2` / `6.1.1`

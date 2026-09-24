@@ -31,6 +31,9 @@ Prerequisites
 rocDecode requires a supported AMD GPU. For more information, see :ref:`ROCm
 Core SDK components <rocm:release-components>`.
 
+Linux prerequisites
+-------------------
+
 * HIP runtime and development libraries
 * AMD Clang++ compiler (C++17 required)
 * Libva and VA-API drivers
@@ -44,12 +47,28 @@ For example, on Ubuntu:
 
    sudo apt install libavcodec-dev libavformat-dev libavutil-dev
 
+Windows prerequisites
+---------------------
+
+* HIP runtime from `TheRock <https://github.com/ROCm/TheRock>`__ for Windows
+* vaon12 — VA-API on D3D12 libraries (Mesa's ``vaon12_drv_video.dll`` plus libva), provided by
+  TheRock for Windows under ``%ROCM_PATH%\lib\rocm_sysdeps``; no separate download is required
+* Visual Studio 2022 with C++ desktop workload (MSVC compiler, C++17)
+* CMake 3.21 or later (the ``Visual Studio 17 2022`` generator requires 3.21)
+* Windows SDK (provides D3D12 and DXGI headers/libraries)
+* FFmpeg (optional) — pre-built libraries or built from source, required for samples and the host decoder library
+
 Build and install
 =================
 
-rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
+rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_ on both Linux and Windows. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
 
-1. The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg>`__. Use sparse checkout when cloning the rocJPEG project. Clone the repo using `sparse-checkout`.
+To build standalone from source, follow the instructions for your platform below.
+
+Clone the repository
+--------------------
+
+1. The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`__. Use sparse checkout when cloning the rocDecode project.
 
    .. code-block:: bash
 
@@ -65,24 +84,56 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
       git checkout develop
       cd projects/rocdecode
 
-3. Build and install rocDecode using the following commands:
+Build on Linux
+--------------
 
-   .. code-block:: bash
+Build and install rocDecode using the following commands:
 
-      mkdir build && cd build
-      cmake ../
-      make -j8
-      sudo make install
+.. code-block:: bash
 
-   After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
+   mkdir build && cd build
+   cmake ../
+   make -j8
+   sudo make install
 
-4. To run the installed CTest-based verification:
+After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
 
-   .. code-block:: bash
+To run the installed CTest-based verification:
 
-      mkdir rocdecode-test && cd rocdecode-test
-      cmake /opt/rocm/share/rocdecode/test/
-      ctest -VV
+.. code-block:: bash
 
-   Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
+   mkdir rocdecode-test && cd rocdecode-test
+   cmake /opt/rocm/share/rocdecode/test/
+   ctest -VV
+
+Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
+
+Build on Windows
+----------------
+
+Build and install rocDecode using the following commands:
+
+.. code-block:: bat
+
+   mkdir build && cd build
+   cmake .. -DROCM_PATH=<path-to-TheRock-build>
+   cmake --build . --config Release
+   cmake --install . --config Release
+
+.. note::
+
+   * Set ``ROCM_PATH`` to the TheRock build output directory. The VA-API headers and
+     import libraries are found there at build time, and libva uses it at run time to
+     locate the VA-API driver.
+   * To include FFmpeg support for samples and the host decoder, add ``-DFFMPEG_ROOT=<path-to-ffmpeg>``.
+
+To verify the build, build and run a sample from the installed location:
+
+.. code-block:: bat
+
+   mkdir rocdecode-sample && cd rocdecode-sample
+   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw -DROCM_PATH=%ROCM_PATH%
+   cmake --build . --config Release
+   set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%PATH%
+   Release\videodecoderaw.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265 -f 5
 
