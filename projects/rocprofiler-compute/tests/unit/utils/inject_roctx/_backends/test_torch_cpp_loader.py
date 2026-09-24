@@ -1,215 +1,501 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for utils.inject_roctx._backends.torch_cpp_loader. No GPU."""
+"""Unit tests for the generic Torch collector ctypes loader. No GPU."""
 
+import builtins
+import ctypes
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Callable, List, Optional, Tuple
 
-import common  # noqa: F401
 import pytest
-from packaging.version import Version
 
-from utils.inject_roctx._backends import torch_cpp_loader as inject_roctx_loader
+from utils.inject_roctx._backends import torch_cpp_loader
 
-_FAKE_TORCH_VERSION = "2.9"
-_FAKE_ABI = "cpython-312-x86_64-linux-gnu"
+CPU_213_IDENTITY = torch_cpp_loader._TorchIdentity(
+    version="2.13.0+cpu",
+    git_version="cf30153c4c131c8164ee7798e5022d810682e2cb",
+    debug=False,
+    uses_cxx11_abi=True,
+)
+ROCM_214_IDENTITY = torch_cpp_loader._TorchIdentity(
+    version="2.14.0+rocm10.2.0a20260917",
+    git_version="50011224068dd1fbc41573a6e43c9d9ffa053a63",
+    debug=False,
+    uses_cxx11_abi=True,
+)
 
 
-# ---------------------------------------------------------------------------
-# torch_version
-# ---------------------------------------------------------------------------
+class FakeNativeFunction:
+    def __init__(
+        self,
+        return_value: int = 0,
+        callback: Optional[Callable[..., int]] = None,
+    ) -> None:
+        self.return_value = return_value
+        self.callback = callback
+        self.argtypes = None
+        self.restype = None
+        self.calls: List[Tuple[object, ...]] = []
+
+    def __call__(self, *args: object) -> int:
+        self.calls.append(args)
+        if self.callback is not None:
+            return self.callback(*args)
+        return self.return_value
 
 
-def stub_torch(monkeypatch, version: str) -> None:
-    """Install a torch stub exposing ``__version__`` and ``torch_version``."""
-    monkeypatch.setitem(
-        sys.modules, "torch", types.SimpleNamespace(__version__=version)
+def make_native_library(
+    revision: int = 1,
+    install_result: int = 0,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        torch_trace_collector_abi_revision=FakeNativeFunction(revision),
+        torch_trace_collector_install=FakeNativeFunction(install_result),
+        torch_trace_collector_uninstall=FakeNativeFunction(),
+        torch_trace_collector_is_installed=FakeNativeFunction(return_value=1),
+        torch_trace_collector_push_user_scope=FakeNativeFunction(),
+        torch_trace_collector_pop_user_scope=FakeNativeFunction(),
+        torch_trace_collector_get_stats=FakeNativeFunction(),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "torch.torch_version",
-        types.SimpleNamespace(Version=Version),
+
+
+def populate_native_stats(stats_pointer: object) -> int:
+    stats = ctypes.cast(
+        stats_pointer,
+        ctypes.POINTER(torch_cpp_loader._CollectorStats),
+    ).contents
+    assert stats.struct_size == ctypes.sizeof(torch_cpp_loader._CollectorStats)
+    stats.installed = 1
+    stats.pushes = 8
+    stats.pops = 7
+    stats.user_scope_pushes = 3
+    stats.user_scope_pops = 2
+    stats.user_scope_inherits = 1
+    stats.snapshots_saved = 5
+    stats.snapshots_consumed = 4
+    stats.snapshots_dropped = 0
+    stats.snapshots_overwritten = 1
+    stats.callback_errors = 2
+    stats.snapshots_pending = 1
+    return 0
+
+
+def stub_torch(
+    monkeypatch: pytest.MonkeyPatch,
+    identity: torch_cpp_loader._TorchIdentity,
+) -> None:
+    torch_module = types.SimpleNamespace(
+        __file__="/opt/fake/torch/__init__.py",
+        __version__=identity.version,
+        version=types.SimpleNamespace(
+            git_version=identity.git_version,
+            debug=identity.debug,
+        ),
+        _C=types.SimpleNamespace(_GLIBCXX_USE_CXX11_ABI=identity.uses_cxx11_abi),
     )
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
 
 
-def test_torch_version_drops_the_local_build_segment(monkeypatch):
-    """``torch_version()`` ignores a local ``+...`` build suffix."""
-    stub_torch(monkeypatch, "2.9.0+rocm7.1")
-    assert inject_roctx_loader.torch_version() == "2.9"
-
-
-def test_torch_version_drops_a_prerelease_marker(monkeypatch):
-    """``torch_version()`` ignores a prerelease marker such as ``a0``."""
-    stub_torch(monkeypatch, "2.9.0a0+rocm7.1")
-    assert inject_roctx_loader.torch_version() == "2.9"
-
-
-def test_torch_version_exits_when_torch_is_missing(monkeypatch):
-    """``torch_version()`` exits when torch is not importable."""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "torch" or (isinstance(name, str) and name.startswith("torch.")):
-            raise ImportError("torch missing")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-    monkeypatch.delitem(sys.modules, "torch", raising=False)
-    with pytest.raises(SystemExit) as raised:
-        inject_roctx_loader.torch_version()
-    assert raised.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# Artifact discovery
-# ---------------------------------------------------------------------------
-
-
-def write_collector_so(directory: Path, version: str, abi: str = _FAKE_ABI) -> Path:
+def write_collector_so(directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"torch_trace_collector-{version}.{abi}.so"
+    path = directory / "torch_trace_collector.so"
     path.write_bytes(b"stub")
     return path
 
 
-def installed_package_root(tmp_path: Path, libdir: str, *versions: str):
-    """Return ``(package_root, artifact_dir)`` for an install-prefix layout."""
+def create_installed_package_layout(tmp_path: Path, libdir: str) -> Tuple[Path, Path]:
     package_root = tmp_path / "libexec" / "rocprofiler-compute"
     package_root.mkdir(parents=True)
     artifact_dir = tmp_path / libdir / "rocprofiler-compute"
-    for version in versions:
-        write_collector_so(artifact_dir, version)
+    artifact_dir.mkdir(parents=True)
     return package_root, artifact_dir
 
 
-def test_list_collector_artifacts_returns_paths_and_versions(tmp_path, monkeypatch):
-    package_root, artifact_dir = installed_package_root(
-        tmp_path, "lib", "2.8", "2.9", "2.8"
+@pytest.fixture(autouse=True)
+def reset_loader_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch_cpp_loader, "_torch_cpu_library", None)
+
+
+def test_workload_torch_identity_uses_exact_build_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_torch(monkeypatch, CPU_213_IDENTITY)
+
+    assert torch_cpp_loader._workload_torch_identity() == CPU_213_IDENTITY
+
+
+def test_workload_torch_identity_fails_closed_when_metadata_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings = []
+    torch_module = types.SimpleNamespace(
+        __file__="/opt/fake/torch/__init__.py",
+        __version__=CPU_213_IDENTITY.version,
+        version=types.SimpleNamespace(git_version=CPU_213_IDENTITY.git_version),
+        _C=types.SimpleNamespace(_GLIBCXX_USE_CXX11_ABI=True),
     )
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {
-        "2.8": artifact_dir / f"torch_trace_collector-2.8.{_FAKE_ABI}.so",
-        "2.9": artifact_dir / f"torch_trace_collector-2.9.{_FAKE_ABI}.so",
-    }
-
-
-def test_list_collector_artifacts_is_empty_without_artifacts(tmp_path, monkeypatch):
-    package_root, _artifact_dir = installed_package_root(tmp_path, "lib")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {}
-
-
-def test_list_collector_artifacts_skips_legacy_names(tmp_path, monkeypatch):
-    package_root, artifact_dir = installed_package_root(
-        tmp_path, "lib", "2.8", _FAKE_TORCH_VERSION
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "console_warning",
+        lambda _category, message: warnings.append(message),
     )
+
+    assert torch_cpp_loader._workload_torch_identity() == ("", "", False, False)
+    assert "build identity" in warnings[0]
+
+
+def test_workload_torch_identity_fails_closed_when_torch_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings = []
+    real_import = builtins.__import__
+
+    def fail_torch_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torch" or name.startswith("torch."):
+            raise ImportError("torch missing")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_torch_import)
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "console_warning",
+        lambda _category, message: warnings.append(message),
+    )
+
+    assert torch_cpp_loader._workload_torch_identity() == ("", "", False, False)
+    assert "torch missing" in warnings[0]
+
+
+@pytest.mark.parametrize("libdir", ["lib", "lib64"])
+def test_discover_collector_uses_installed_generic_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    libdir: str,
+) -> None:
+    package_root, artifact_dir = create_installed_package_layout(tmp_path, libdir)
+    write_collector_so(artifact_dir)
+    monkeypatch.setattr(torch_cpp_loader, "_PACKAGE_ROOT", package_root)
+
+    assert (
+        torch_cpp_loader._discover_collector_artifact()
+        == (artifact_dir / "torch_trace_collector.so").resolve()
+    )
+
+
+def test_discover_collector_ignores_versioned_and_soabi_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    package_root, artifact_dir = create_installed_package_layout(tmp_path, "lib")
+    (artifact_dir / "torch_trace_collector-2.13.so").write_bytes(b"legacy")
     (
-        artifact_dir / "torch_trace_collector-py3.12_torch2.13.0_srcdeadbeef.so"
+        artifact_dir / "torch_trace_collector.cpython-312-x86_64-linux-gnu.so"
     ).write_bytes(b"legacy")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {
-        "2.8": artifact_dir / f"torch_trace_collector-2.8.{_FAKE_ABI}.so",
-        _FAKE_TORCH_VERSION: (
-            artifact_dir / f"torch_trace_collector-{_FAKE_TORCH_VERSION}.{_FAKE_ABI}.so"
+    monkeypatch.setattr(torch_cpp_loader, "_PACKAGE_ROOT", package_root)
+
+    assert torch_cpp_loader._discover_collector_artifact() is None
+
+
+def test_promote_torch_cpu_reopens_workload_library_globally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_torch(monkeypatch, CPU_213_IDENTITY)
+    loaded_libraries: List[Tuple[str, int]] = []
+    fake_library = object()
+    monkeypatch.setattr(
+        torch_cpp_loader.ctypes,
+        "CDLL",
+        lambda path, mode: loaded_libraries.append((path, mode)) or fake_library,
+    )
+
+    assert torch_cpp_loader._promote_torch_cpu() is fake_library
+    assert loaded_libraries == [
+        (
+            "/opt/fake/torch/lib/libtorch_cpu.so",
+            torch_cpp_loader._TORCH_LIBRARY_LOAD_MODE,
+        )
+    ]
+
+
+@pytest.mark.parametrize("identity", [CPU_213_IDENTITY, ROCM_214_IDENTITY])
+def test_load_returns_plain_c_wrapper_for_validated_torch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    identity: torch_cpp_loader._TorchIdentity,
+) -> None:
+    collector_path = tmp_path / "torch_trace_collector.so"
+    native_library = make_native_library()
+    torch_library = object()
+    load_order = []
+    monkeypatch.setattr(torch_cpp_loader, "_workload_torch_identity", lambda: identity)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_discover_collector_artifact",
+        lambda: collector_path,
+    )
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_promote_torch_cpu",
+        lambda: load_order.append("torch") or torch_library,
+    )
+    monkeypatch.setattr(
+        torch_cpp_loader.ctypes,
+        "PyDLL",
+        lambda path, mode: load_order.append((path, mode)) or native_library,
+    )
+    monkeypatch.setattr(torch_cpp_loader, "console_log", lambda *_args: None)
+
+    collector = torch_cpp_loader.load()
+
+    assert isinstance(collector, torch_cpp_loader.TorchTraceCollector)
+    assert load_order == [
+        "torch",
+        (str(collector_path), torch_cpp_loader._COLLECTOR_LOAD_MODE),
+    ]
+    assert torch_cpp_loader._torch_cpu_library is torch_library
+    revision = native_library.torch_trace_collector_abi_revision
+    assert revision.argtypes == []
+    assert revision.restype is ctypes.c_uint32
+    assert revision.calls == [()]
+
+
+@pytest.mark.parametrize(
+    ("identity", "message_fragment"),
+    [
+        pytest.param(
+            torch_cpp_loader._TorchIdentity(
+                version="2.12.0+cpu",
+                git_version="old",
+                debug=False,
+                uses_cxx11_abi=True,
+            ),
+            "version=2.12.0+cpu",
+            id="version",
         ),
+        pytest.param(
+            torch_cpp_loader._TorchIdentity(
+                version="2.13.0+self-built",
+                git_version=CPU_213_IDENTITY.git_version,
+                debug=False,
+                uses_cxx11_abi=True,
+            ),
+            "version=2.13.0+self-built",
+            id="build-tag",
+        ),
+        pytest.param(
+            torch_cpp_loader._TorchIdentity(
+                version=CPU_213_IDENTITY.version,
+                git_version="unvalidated",
+                debug=False,
+                uses_cxx11_abi=True,
+            ),
+            "git=unvalidated",
+            id="git-revision",
+        ),
+        pytest.param(
+            torch_cpp_loader._TorchIdentity(
+                version=CPU_213_IDENTITY.version,
+                git_version=CPU_213_IDENTITY.git_version,
+                debug=True,
+                uses_cxx11_abi=True,
+            ),
+            "debug=True",
+            id="debug-build",
+        ),
+        pytest.param(
+            torch_cpp_loader._TorchIdentity(
+                version=CPU_213_IDENTITY.version,
+                git_version=CPU_213_IDENTITY.git_version,
+                debug=False,
+                uses_cxx11_abi=False,
+            ),
+            "cxx11_abi=False",
+            id="cxx11-abi",
+        ),
+    ],
+)
+def test_load_rejects_unvalidated_torch_before_artifact_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    identity: torch_cpp_loader._TorchIdentity,
+    message_fragment: str,
+) -> None:
+    monkeypatch.setattr(torch_cpp_loader, "_workload_torch_identity", lambda: identity)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_discover_collector_artifact",
+        lambda: pytest.fail("collector lookup must not run"),
+    )
+
+    with pytest.raises(torch_cpp_loader.UnsupportedTorchVersionError) as raised:
+        torch_cpp_loader.load()
+    assert message_fragment in str(raised.value)
+
+
+def test_load_reports_missing_generic_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_workload_torch_identity",
+        lambda: CPU_213_IDENTITY,
+    )
+    monkeypatch.setattr(torch_cpp_loader, "_discover_collector_artifact", lambda: None)
+
+    with pytest.raises(torch_cpp_loader.CollectorNotBuiltError):
+        torch_cpp_loader.load()
+
+
+def test_load_wraps_collector_dlopen_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    collector_path = tmp_path / "torch_trace_collector.so"
+    torch_library = object()
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_workload_torch_identity",
+        lambda: CPU_213_IDENTITY,
+    )
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_discover_collector_artifact",
+        lambda: collector_path,
+    )
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_promote_torch_cpu",
+        lambda: torch_library,
+    )
+
+    def fail_load(_path: str, mode: int) -> None:
+        assert mode == torch_cpp_loader._COLLECTOR_LOAD_MODE
+        raise OSError("missing symbol")
+
+    monkeypatch.setattr(torch_cpp_loader.ctypes, "PyDLL", fail_load)
+
+    with pytest.raises(torch_cpp_loader.CollectorLoadError, match="missing symbol"):
+        torch_cpp_loader.load()
+    assert torch_cpp_loader._torch_cpu_library is torch_library
+
+
+def test_load_rejects_incompatible_plain_c_abi(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    collector_path = tmp_path / "torch_trace_collector.so"
+    native_library = make_native_library(revision=2)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_workload_torch_identity",
+        lambda: CPU_213_IDENTITY,
+    )
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_discover_collector_artifact",
+        lambda: collector_path,
+    )
+    monkeypatch.setattr(torch_cpp_loader, "_promote_torch_cpu", object)
+    monkeypatch.setattr(
+        torch_cpp_loader.ctypes,
+        "PyDLL",
+        lambda _path, mode: native_library,
+    )
+
+    with pytest.raises(
+        torch_cpp_loader.CollectorLoadError,
+        match="incompatible interface revision 2",
+    ):
+        torch_cpp_loader.load()
+
+
+def test_wrapper_calls_installation_api(tmp_path: Path) -> None:
+    native_library = make_native_library()
+    collector = torch_cpp_loader.TorchTraceCollector(
+        native_library,
+        tmp_path / "torch_trace_collector.so",
+    )
+
+    collector.install()
+    assert collector.is_installed()
+    collector.uninstall()
+
+    assert native_library.torch_trace_collector_install.calls == [()]
+    assert native_library.torch_trace_collector_is_installed.calls == [()]
+    assert native_library.torch_trace_collector_uninstall.calls == [()]
+
+
+def test_wrapper_encodes_user_scope_arguments(tmp_path: Path) -> None:
+    native_library = make_native_library()
+    collector = torch_cpp_loader.TorchTraceCollector(
+        native_library,
+        tmp_path / "torch_trace_collector.so",
+    )
+
+    collector.push_user_scope("outer/µ", "#1@file.py:7", "torch")
+    collector.pop_user_scope()
+
+    assert native_library.torch_trace_collector_push_user_scope.calls == [
+        (b"outer/\xc2\xb5", b"#1@file.py:7", b"torch")
+    ]
+    assert native_library.torch_trace_collector_pop_user_scope.calls == [()]
+
+
+def test_wrapper_returns_native_stats(tmp_path: Path) -> None:
+    native_library = make_native_library()
+    native_library.torch_trace_collector_get_stats.callback = populate_native_stats
+    collector = torch_cpp_loader.TorchTraceCollector(
+        native_library,
+        tmp_path / "torch_trace_collector.so",
+    )
+
+    stats = collector.dump_stats()
+
+    assert stats == {
+        "installed": True,
+        "pushes": 8,
+        "pops": 7,
+        "user_scope_pushes": 3,
+        "user_scope_pops": 2,
+        "user_scope_inherits": 1,
+        "snapshots_saved": 5,
+        "snapshots_consumed": 4,
+        "snapshots_dropped": 0,
+        "snapshots_overwritten": 1,
+        "callback_errors": 2,
+        "snapshots_pending": 1,
     }
 
 
-def test_list_collector_artifacts_finds_lib64_install(tmp_path, monkeypatch):
-    package_root, artifact_dir = installed_package_root(tmp_path, "lib64", "2.13")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    so_path = artifact_dir / f"torch_trace_collector-2.13.{_FAKE_ABI}.so"
-    assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
-
-
-def test_list_collector_artifacts_finds_lib64_when_lib_has_no_collector(
-    tmp_path, monkeypatch
-):
-    package_root, artifact_dir = installed_package_root(tmp_path, "lib64", "2.13")
-    lib_install_dir = tmp_path / "lib" / "rocprofiler-compute"
-    lib_install_dir.mkdir(parents=True)
-    (lib_install_dir / "librocprofiler-compute-tool.so").write_bytes(b"tool")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    so_path = artifact_dir / f"torch_trace_collector-2.13.{_FAKE_ABI}.so"
-    assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
-
-
-def test_list_collector_artifacts_uses_src_lib_build_when_install_dir_missing(
-    tmp_path, monkeypatch
-):
-    package_root = tmp_path / "src"
-    so_path = write_collector_so(package_root / "lib" / "_build" / "lib", "2.13")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
-
-
-def test_list_collector_artifacts_uses_root_build_lib(tmp_path, monkeypatch):
-    package_root = tmp_path / "src"
-    package_root.mkdir(parents=True)
-    so_path = write_collector_so(tmp_path / "build" / "lib", "2.13")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
-
-
-def test_list_collector_artifacts_finds_source_build_when_prefix_lib_is_empty(
-    tmp_path, monkeypatch
-):
-    package_root = tmp_path / "src"
-    (tmp_path / "lib" / "rocprofiler-compute").mkdir(parents=True)
-    so_path = write_collector_so(package_root / "lib" / "_build" / "lib", "2.13")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    assert inject_roctx_loader.list_collector_artifacts() == {"2.13": so_path}
-
-
-# ---------------------------------------------------------------------------
-# load()
-# ---------------------------------------------------------------------------
-
-
-def test_load_raises_when_torch_version_is_unsupported(monkeypatch, tmp_path):
-    package_root, _artifact_dir = installed_package_root(tmp_path, "lib", "2.8")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    monkeypatch.setattr(
-        inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
+@pytest.mark.parametrize(
+    ("method_name", "native_name"),
+    [
+        ("install", "torch_trace_collector_install"),
+        ("uninstall", "torch_trace_collector_uninstall"),
+        ("push_user_scope", "torch_trace_collector_push_user_scope"),
+        ("pop_user_scope", "torch_trace_collector_pop_user_scope"),
+        ("dump_stats", "torch_trace_collector_get_stats"),
+    ],
+)
+def test_wrapper_raises_when_native_operation_fails(
+    tmp_path: Path,
+    method_name: str,
+    native_name: str,
+) -> None:
+    native_library = make_native_library()
+    getattr(native_library, native_name).return_value = 1
+    collector = torch_cpp_loader.TorchTraceCollector(
+        native_library,
+        tmp_path / "torch_trace_collector.so",
     )
 
-    with pytest.raises(inject_roctx_loader.UnsupportedTorchVersionError) as raised:
-        inject_roctx_loader.load()
-
-    error = raised.value
-    assert _FAKE_TORCH_VERSION in str(error)
-    assert "2.8" in str(error)
-
-
-def test_load_raises_a_distinct_error_when_nothing_was_built(monkeypatch, tmp_path):
-    """A build with no collector is reported apart from an unsupported version."""
-    package_root, _artifact_dir = installed_package_root(tmp_path, "lib")
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    monkeypatch.setattr(
-        inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
-    )
-
-    with pytest.raises(inject_roctx_loader.CollectorNotBuiltError) as raised:
-        inject_roctx_loader.load()
-
-    message = str(raised.value)
-    assert _FAKE_TORCH_VERSION in message
-    assert "Supported PyTorch versions" not in message
-
-
-def test_load_exits_when_matching_artifact_fails(monkeypatch, tmp_path):
-    package_root, _artifact_dir = installed_package_root(
-        tmp_path, "lib", _FAKE_TORCH_VERSION
-    )
-    monkeypatch.setattr(inject_roctx_loader, "_PACKAGE_ROOT", package_root)
-    monkeypatch.setattr(
-        inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
-    )
-
-    with pytest.raises(SystemExit) as raised:
-        inject_roctx_loader.load()
-    assert raised.value.code == 1
+    method = getattr(collector, method_name)
+    args = ("marker", "context", "torch") if method_name == "push_user_scope" else ()
+    expected_operation = "get_stats" if method_name == "dump_stats" else method_name
+    with pytest.raises(RuntimeError, match=expected_operation):
+        method(*args)

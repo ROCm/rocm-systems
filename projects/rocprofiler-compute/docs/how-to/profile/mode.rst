@@ -902,15 +902,17 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* PyTorch 2.13 or 2.14 in the profiling environment.
+* PyTorch in the profiling environment. Full native coverage requires an exact
+  validated PyTorch 2.13 or 2.14 build; other builds use the reduced Python
+  fallback.
 * PyTorch application must be run as a Python script or a Python command.
 
 .. important::
 
-   PyTorch must be installed together with ROCm from the TheRock package index.
-   Torch trace is built against the PyTorch that ships alongside ROCm, so a
-   PyTorch installed separately, for example from the default PyPI index, is not
-   supported.
+   For full native coverage, install PyTorch together with ROCm from the TheRock
+   package index. The native collector is enabled only for exact PyTorch wheel
+   builds validated with that ROCm release. A separately installed or self-built
+   PyTorch uses reduced-coverage Python tracing instead.
 
    Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
    ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
@@ -971,11 +973,18 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-``--torch-trace`` loads ``torch_trace_collector-<major>.<minor>.<abi>.so`` for
-the workload PyTorch version. If this installation has no collector at all,
-profiling stops and says so. If a collector exists but none matches the workload
-PyTorch version, profiling stops with an error listing the supported versions and
-the workload version.
+``--torch-trace`` loads one generic ``torch_trace_collector.so`` through a
+plain-C interface. The collector is built and packaged as C++17 without
+PyTorch headers or libraries and has no dependency on the workload's Python
+ABI. The loader verifies the exact PyTorch build, and the collector verifies
+the paired ``libtorch_cpu.so`` and ``libc10.so`` GNU build IDs before
+installing its callback.
+
+If the collector is absent, fails to load, or does not recognize the workload's
+exact PyTorch or native-library identities, profiling continues with
+``TorchDispatchMode`` and prints a warning. This fallback records operations
+executed on the Python thread but has reduced coverage for autograd worker
+threads.
 
 Output
 ------

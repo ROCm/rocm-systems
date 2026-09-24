@@ -13,10 +13,12 @@ flowchart LR
   launch["launch.py"] --> torch["torch.py"]
   torch --> loader["torch_cpp_loader.py"]
   loader --> finder["native_tool_finder.py"]
-  loader --> so["torch_trace_collector-*.so"]
-  so --> module["torch_trace_collector_module.cpp"]
-  torch --> module
-  module --> core["torch_trace_collector.cpp"]
+  loader --> cpu["workload libtorch_cpu.so"]
+  loader --> so["torch_trace_collector.so"]
+  cpu --> so
+  so --> api["plain-C entry points"]
+  torch --> api
+  api --> core["torch_trace_collector.cpp"]
   core --> snap["snapshot_store.cpp"]
   core --> roctx["roctxRangePushA"]
 ```
@@ -150,26 +152,70 @@ ROCTX range, the leaf, then those extras.
 
 ---
 
+## Plain-C interface
+
+The shared library exports an ABI revision query plus operations to install and
+uninstall the callback, query installation state, push and pop user scopes, and
+copy collector statistics into caller-owned storage. Strings cross as UTF-8 C
+strings, and statistics use a size-tagged C structure. No Python objects or
+PyTorch C++ objects cross this public boundary.
+
+The Python facade binds these functions with `ctypes` and preserves the method
+surface previously provided by the extension module. Failures are reported by
+status code, and exceptions are contained before returning through the C or
+RecordFunction callback boundary.
+
+---
+
 ## Build and load
 
-- `src/lib/torch_trace_collector/CMakeLists.txt` skips the build when PyTorch is missing or unsupported. CMake looks for the PyTorch install in the `torch` directory beside `$ROCM_PATH` (sibling of the ROCm prefix).
-- The version comes from `TORCH_VERSION_MAJOR` and `TORCH_VERSION_MINOR` in the PyTorch headers, not `find_package(Torch)`, and must be 2.13 or 2.14. The MODULE takes the Python include dirs and links no Python library. `PREFIX` is empty.
-- CMake names the artifact `torch_trace_collector-<major>.<minor>.<Python3_SOABI>.so`. Library output is `${CMAKE_BINARY_DIR}/lib`. Install destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or `lib64`).
-- `torch_cpp_loader.py` keys on the workload PyTorch major and minor version, from `Version(torch.__version__).release[:2]`. The ABI tag in the filename records the interpreter the artifact was built for; the loader reports it but does not require a match.
+- `src/lib/torch_trace_collector/CMakeLists.txt` always builds the collector as
+  C++17. It requires `rocprofiler-sdk-roctx`, but no PyTorch installation,
+  PyTorch headers or libraries, or Python development headers.
+- Small declarations under `torch_abi/` describe only the private PyTorch C++
+  surface required by the existing live-stack collector. The resulting
+  artifact intentionally resolves those symbols from the workload at runtime.
+- CMake produces one `torch_trace_collector.so`, without a Torch-version or
+  Python-SOABI suffix. Library output is `${CMAKE_BINARY_DIR}/lib`; the install
+  destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or
+  `lib64`).
+- `torch_cpp_loader.py` imports the workload's PyTorch, checks its exact
+  version/build tag, Git revision, debug flag, and libstdc++ ABI mode against
+  the validated allowlist, and locates the generic artifact.
+- The loader reopens the workload's `libtorch_cpu.so` so its Torch/c10 symbols
+  are globally visible, loads the collector locally through `ctypes`, and uses
+  only its plain-C interface. The collector has no Python ABI dependency.
+- Before callback registration, the native gate matches the mapped
+  `libtorch_cpu.so` and `libc10.so` GNU build IDs as a validated pair. This
+  build-only collector has no AOTI dependency.
+- A missing artifact, unsupported identity, mismatched library pair, loader
+  error, or rejected installation emits a warning and returns control to
+  `TorchDispatchMode`; it does not terminate the workload.
 
 Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
 
-1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector-*.so`
+1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector.so`
 2. `<package_root>/../build/lib`
 3. `<package_root>/lib/_build/lib`
 
-First unique resolved path per version wins. Install is scanned first, so a packaged `.so` beats a source build **in the same process**. Run the in-tree `rocprof-compute` (package root `src/`) to use a source build; the install glob then does not see `/opt/rocm`.
+The first unique resolved path wins. Install is scanned first, so a packaged
+`.so` beats a source build **in the same process**. Run the in-tree
+`rocprof-compute` (package root `src/`) to use a source build; the install glob
+then does not see `/opt/rocm`.
 
 ---
 
 ## Tests
 
-  - `src/lib/torch_trace_collector/tests/test_torch_trace_collector.cpp`: verifies snapshot join of backward to forward, overlay of wrap frames on a worker, dummy locations, marker encoding, and install.
-  - `tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py`: verifies the loader finds a matching collector artifact.
-  - `tests/integration/test_profile_torch_trace.py`: verifies end-to-end `--torch-trace` on a sample workload.
-  - `tests/integration/test_torch_trace_coverage.py`: compares `--torch-trace` operator and kernel coverage to `torch.profiler`.
+- `src/lib/torch_trace_collector/tests/test_torch_trace_collector.cpp` verifies
+  snapshot join of backward to forward, overlay of wrap frames on a worker,
+  dummy locations, marker encoding, and install.
+- Loader unit tests verify generic-artifact discovery, exact Torch identity
+  gating, native-library promotion, the plain-C call boundary, and fallback.
+- ELF and packaging checks verify the generic name, exported C surface,
+  unresolved Torch/c10 imports, absence of Torch/Python `DT_NEEDED` entries,
+  and installation when no PyTorch is available at build time.
+- `tests/integration/test_profile_torch_trace.py` verifies end-to-end
+  `--torch-trace` on a sample workload.
+- `tests/integration/test_torch_trace_coverage.py` compares `--torch-trace`
+  operator and kernel coverage to `torch.profiler`.

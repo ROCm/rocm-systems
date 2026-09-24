@@ -1,5 +1,32 @@
 find_package(MPI COMPONENTS CXX)
 
+add_library(torch-trace-roctx-intercept SHARED torch_trace_collector/roctx_intercept.cpp)
+set_target_properties(
+    torch-trace-roctx-intercept
+    PROPERTIES OUTPUT_NAME torch_trace_roctx_intercept
+)
+target_compile_features(torch-trace-roctx-intercept PRIVATE cxx_std_17)
+
+add_library(
+    torch-trace-collector-c-header-check
+    OBJECT
+    torch_trace_collector/header_c_test.c
+)
+target_include_directories(
+    torch-trace-collector-c-header-check
+    PRIVATE ${PROJECT_SOURCE_DIR}/src/lib/torch_trace_collector
+)
+target_compile_features(torch-trace-collector-c-header-check PRIVATE c_std_11)
+
+if(INSTALL_TESTS)
+    install(
+        TARGETS torch-trace-roctx-intercept
+        LIBRARY
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            COMPONENT tests
+    )
+endif()
+
 if(NOT CMAKE_HIP_COMPILER)
     set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler")
 endif()

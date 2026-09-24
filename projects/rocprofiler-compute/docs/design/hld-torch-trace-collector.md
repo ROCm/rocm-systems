@@ -30,8 +30,9 @@ profiler records those ranges for analyze.
 structural Python frames in the same hierarchy; Inductor kernels launched
 through the static launcher; analyze join on the existing marker CSV.
 
-**Out of scope:** non-Python workloads; PyTorch versions other than 2.13 and
-2.14.
+**Out of scope:** non-Python workloads and arbitrary self-built PyTorch
+binaries. The native collector is enabled only for exact PyTorch builds that
+have passed compatibility validation; other builds use the Python fallback.
 
 **Assumptions:**
 
@@ -63,13 +64,14 @@ What the system shall do:
   same range as nested ATen ops.
 - Marker strings remain compatible with existing analyze: split `Function`
   on `:#`; optional `|backend` moved to a `Backend` column.
-- A workload PyTorch version with no matching collector module fails with a
-  list of supported versions.
+- A workload whose exact PyTorch and native-library identities are not
+  validated uses `TorchDispatchMode` after a warning.
 
 Non-functional:
 
 - RecordFunction callbacks must not throw into PyTorch.
-- The collector is a prebuilt module. Profile does not compile it.
+- The collector is a prebuilt shared library. Profile does not compile it.
+- Every build produces the collector without requiring a PyTorch installation.
 
 ---
 
@@ -80,7 +82,7 @@ Two producers share one per-thread stack. Each ROCTX range is the full stack.
 ```mermaid
 flowchart LR
   profile["profile --torch-trace"] --> wraps["Python wraps"]
-  profile --> collector["versioned collector module"]
+  profile --> collector["generic collector shared library"]
   wraps --> stack["per-thread stack"]
   collector --> stack
   stack --> roctx["ROCTX ranges"]
@@ -96,14 +98,14 @@ flowchart LR
 | `RecordFunction` only | Every thread, sequence numbers | Does not name `nn.Module.forward` |
 | **RecordFunction and wraps (chosen)** | **Workers, sequence numbers, module names** | Two producers to keep consistent |
 
-- RecordFunction is a C++ hook. The collector is a module loaded into the
+- RecordFunction is a C++ hook. The collector is a shared library loaded into the
   workload interpreter.
 - Python wraps push frames for entry points ATen does not name.
 - When the collector is loaded, ATen ops use the callback only
   (`TorchDispatchMode` is off).
-- If the module fails to install, profile falls back to
+- If the shared library fails to install, profile falls back to
   `TorchDispatchMode` and warns.
-- An unsupported PyTorch version is an error, not a fallback.
+- An unvalidated PyTorch build also warns and uses `TorchDispatchMode`.
 - This collector needs two wraps: module forward
   (`nn.Module.{Class}.forward`) and `Tensor.backward`.
 - The rest of the wrap surface is leftover from the Python tracer
@@ -129,11 +131,21 @@ flowchart LR
 | --- | --- | --- |
 | Compile at profile time | Matches any Torch | Slow first run; extra toolchain in the user env |
 | Link into the native tool `.so` | One artifact | Wrong load path: the callback must live in the Python process |
-| **Prebuilt `torch_trace_collector-<version>.so` (chosen)** | **No compile at profile time** | One artifact per supported Torch |
+| Build against each supported PyTorch | Uses upstream headers directly | PyTorch must exist before rocprofiler-compute and produces version-specific artifacts |
+| **Prebuilt generic `torch_trace_collector.so` (chosen)** | **One artifact, built and packaged without PyTorch** | Requires strict runtime compatibility gates for the private C++ ABI |
 
-- Build finds Torch at `$ROCM_PATH/../torch`.
-- The loader selects the artifact whose version matches the workload
-  Torch version.
+- The collector is always built as C++17 using local declarations for the
+  minimal RecordFunction and thread-local-debug-info surface it needs. It does
+  not consume PyTorch or Python headers and does not link their libraries.
+- The artifact has no Torch-version or Python-SOABI suffix. Python loads its
+  plain-C interface through `ctypes`.
+- The loader checks the exact Torch version/build tag, Git revision, debug
+  flag, and libstdc++ ABI mode. Before callback registration, the collector
+  also verifies the paired GNU build IDs of the loaded `libtorch_cpu.so` and
+  `libc10.so`.
+- Unknown or mismatched identities fail closed to `TorchDispatchMode`. Adding
+  support for another build requires validating it and extending both gates;
+  it does not require another collector artifact.
 
 ---
 
@@ -145,6 +157,10 @@ Details: `lld-torch-trace-collector.md`.
 ## Validation, security and debuggability
 
 - Profile/analyze tests for `--torch-trace` output and operator listing.
+- Build, install, and package tests run without PyTorch installed and verify
+  that the generic collector is present.
+- Loader and native tests cover exact-identity acceptance, mismatched-library
+  rejection, and warning-based fallback without registering a callback.
 
 ---
 
@@ -154,5 +170,5 @@ Details: `lld-torch-trace-collector.md`.
 | --- | --- |
 | Inductor static launcher | Those kernels launch without Triton's Python entry point now, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
 | Offline correlation | Encode `seqNr` and PyTorch thread ids in the ROCTX string, larger payload to `roctxRangePushA`. Analyze splices the worker leaf to the matching forward nest (main thread, same `seqNr`). No snapshot store. We may still need overlay to append `Tensor.backward` wrap range (also a main-thread write; no `seqNr`).|
-| Further Torch versions | Each new version needs a built artifact and a CMake version gate. |
-| DispatchMode fallback | Unsupported version is fatal; install failures fall back. Whether fallback should remain is not settled. |
+| Further Torch versions | Each exact build needs validation and entries in the Python identity and paired native-library build-ID gates. The generic artifact is unchanged. |
+| DispatchMode fallback | Missing, unvalidated, mismatched, or failed native collectors warn and use the reduced Python path. |
