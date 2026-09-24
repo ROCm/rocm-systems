@@ -194,6 +194,17 @@ function(rj_add_consan_hip_case)
     if(NOT _case_TIMEOUT)
         set(_case_TIMEOUT 30)
     endif()
+    if(
+        RJ_ENABLE_ASAN
+        AND _case_CONFIG
+        AND _case_NAME MATCHES "(DenseBranchOnlyPressure|ManyOwnerPressure|Gfx950LargeLdsPipeline)"
+        AND _case_TIMEOUT LESS 300
+    )
+        # These spill/large-LDS stress cases take up to 107 seconds in ASan
+        # even at four-way concurrency. Leave room for the parallel emulator
+        # suite while retaining all output, coverage, and diagnostic oracles.
+        set(_case_TIMEOUT 300)
+    endif()
     if(DEFINED _rj_consan_physical_target)
         if(_case_CONFIG)
             message(
