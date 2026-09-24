@@ -2022,7 +2022,9 @@ TEST(InterposerForkTest, SystemAndPopenWorkFromAMultithreadedParent) {
 
   for (int round = 0; round < 8; ++round) {
     EXPECT_EQ(system("/bin/true"), 0) << "round " << round;
-    FILE *pipe = popen("/bin/echo rocjitsu", "r");
+    // Exercise popen's shell spawn without inheriting allocator diagnostics
+    // from an unrelated /bin/echo implementation (e.g. Rust coreutils).
+    FILE *pipe = popen("printf 'rocjitsu\\n'", "r");
     ASSERT_NE(pipe, nullptr) << "round " << round;
     char buf[64] = {};
     EXPECT_NE(fgets(buf, sizeof(buf), pipe), nullptr);
