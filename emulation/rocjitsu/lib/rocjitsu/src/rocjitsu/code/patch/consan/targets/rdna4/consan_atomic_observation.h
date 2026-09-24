@@ -29,4 +29,23 @@ build_rdna4_atomic_observation(std::span<const uint8_t> instruction, uint16_t de
   std::memcpy(result.data(), &raw, sizeof(raw));
   return result;
 }
+// A qualified 32-bit release store is replaced by one exchange to observe
+// its overwritten value. The report keeps Store semantics, so this RMW must
+// never extend the original program's release sequence through the store.
+[[nodiscard]] inline std::optional<std::array<uint32_t, 3>>
+build_rdna4_store_observation(std::span<const uint8_t> instruction, uint16_t destination) {
+  if (instruction.size() != sizeof(rdna4::VflatMachineInst) || destination > 255u)
+    return std::nullopt;
+  rdna4::VflatMachineInst raw{};
+  std::memcpy(&raw, instruction.data(), sizeof(raw));
+  if ((raw.encoding != 0xecu && raw.encoding != 0xeeu) || raw.th != 0u || raw.pad_8_13 ||
+      raw.pad_22_23 || raw.pad_40_48 || raw.pad_63 || raw.op != rdna4::kFlatStoreB32Vflat)
+    return std::nullopt;
+  raw.op = rdna4::kFlatAtomicSwapB32Vflat;
+  raw.vdst = destination;
+  raw.th = 1u;
+  std::array<uint32_t, 3> result;
+  std::memcpy(result.data(), &raw, sizeof(raw));
+  return result;
+}
 } // namespace rocjitsu::consan::detail

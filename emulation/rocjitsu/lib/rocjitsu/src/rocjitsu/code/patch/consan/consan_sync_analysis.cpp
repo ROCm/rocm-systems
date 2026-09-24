@@ -1485,10 +1485,18 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   // store wait (for example, LLVM already drained a generic store before scalar
   // bookkeeping). Conversely, an LDS wait alone cannot complete global stores.
   for (SyncSequence &sequence : sync_sequences) {
-    if (sequence.kind != SyncKind::Atomic)
+    if (sequence.kind != SyncKind::Atomic && sequence.operation != SyncOperation::OrdinaryStore)
       continue;
+    auto communication = sequence;
+    if (sequence.operation == SyncOperation::OrdinaryStore) {
+      for (const auto id : sequence.member_event_ids) {
+        const auto *event = events.find_event(id);
+        if (event && event->operation == SyncOperation::OrdinaryStore)
+          communication.begin_text_offset = event->text_offset();
+      }
+    }
     sequence.lds_release_wait_text_offset =
-        exact_workgroup_release_wait_boundary(sequence, blocks, arch);
+        exact_workgroup_release_wait_boundary(communication, blocks, arch);
     if (sequence.lds_release_wait_text_offset)
       sequence.identity +=
           "|lds-release-wait=pc=0x" + fixed_hex(*sequence.lds_release_wait_text_offset, 16);

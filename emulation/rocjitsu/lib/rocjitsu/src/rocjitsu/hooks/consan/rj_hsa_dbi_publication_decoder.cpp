@@ -33,16 +33,19 @@ DecodedPublications decode_publications(const ReportHeader &header,
     if (record.state != kPublicationReady)
       return {.status = Status::Incomplete};
     if (record.generation != header.generation || !record.dispatch_id || !record.sequence ||
-        record.sequence > header.publication_clock || record.owner_id >= 32 ||
-        record.lane_id >= 64 || !record.byte_count || record.byte_count > (opaque ? 128u : 8u) ||
+        record.sequence > header.publication_clock || record.lane_id >= 64 || !record.byte_count ||
+        record.byte_count > (opaque ? 128u : 8u) ||
         (!opaque && (record.byte_count & (record.byte_count - 1))) ||
         record.address > std::numeric_limits<uint64_t>::max() - record.byte_count ||
         (!opaque && record.scope == 0) || record.scope > 5 ||
         (record.roles & ~(kPublicationRelease | kPublicationAcquire | kPublicationObserved)) ||
         (record.operation != PublicationRecordOperation::Read &&
-         record.operation != PublicationRecordOperation::Rmw && !opaque) ||
+         record.operation != PublicationRecordOperation::Rmw &&
+         record.operation != PublicationRecordOperation::Store && !opaque) ||
         (record.operation == PublicationRecordOperation::Read &&
-         (record.roles & kPublicationRelease)))
+         (record.roles & kPublicationRelease)) ||
+        (record.operation == PublicationRecordOperation::Store &&
+         (record.roles & kPublicationAcquire)))
       return {.status = Status::Malformed};
     if (opaque && (record.roles || record.observed || record.written))
       return {.status = Status::Malformed};
@@ -69,6 +72,8 @@ DecodedPublications decode_publications(const ReportHeader &header,
                              .operation = opaque ? PublicationOperation::OpaqueModification
                                           : record.operation == PublicationRecordOperation::Read
                                               ? PublicationOperation::Read
+                                          : record.operation == PublicationRecordOperation::Store
+                                              ? PublicationOperation::Store
                                               : PublicationOperation::Rmw,
                              .release = (record.roles & kPublicationRelease) != 0,
                              .acquire = (record.roles & kPublicationAcquire) != 0,

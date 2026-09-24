@@ -25,7 +25,7 @@ enum class AtomicEventKind : uint32_t {
 };
 
 inline constexpr uint32_t kReportMagic = 0x494f4d43u; // "CMOI" little-endian.
-inline constexpr uint32_t kReportAbiVersion = 17;
+inline constexpr uint32_t kReportAbiVersion = 18;
 struct alignas(8) ReportHeader {
   uint32_t magic = kReportMagic;
   uint32_t abi_version = kReportAbiVersion;
@@ -120,6 +120,8 @@ enum class PublicationRecordOperation : uint32_t {
   // Address/range witness only. May modify an atomic object without a usable
   // old/new observation; it can invalidate a proof but never establish one.
   OpaqueModification = 3,
+  // Observed old/new values, but the original store breaks a release sequence.
+  Store = 4,
 };
 struct alignas(8) PublicationRecord {
   uint64_t generation = 0;

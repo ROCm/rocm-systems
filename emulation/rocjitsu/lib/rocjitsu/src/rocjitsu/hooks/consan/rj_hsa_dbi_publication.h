@@ -28,7 +28,7 @@ struct PublicationPoint {
   // Program order belongs to one workitem, not every lane of a wave.
   uint32_t lane = 0;
 };
-enum class PublicationOperation : uint8_t { Read, Rmw, OpaqueModification };
+enum class PublicationOperation : uint8_t { Read, Rmw, OpaqueModification, Store };
 struct PublicationEvent {
   PublicationPoint point;
   uint64_t address = 0;

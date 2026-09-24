@@ -85,6 +85,21 @@ TEST(ConSanPublicationTest, FailedCasCanAcquireButNeverPublishesRelease) {
   events[1].release = true;
   EXPECT_EQ(publication_orders(point(0, 1), point(1, 20), events, true), Result::Incomplete);
 }
+TEST(ConSanPublicationTest, StorePublishesItsOwnWritesButBreaksThePreviousReleaseSequence) {
+  std::array events{rmw(0, 10, 0, 1, true, false), rmw(1, 20, 1, 2, true, false),
+                    rmw(2, 30, 2, 3, false, true)};
+  events[1].operation = PublicationOperation::Store;
+  EXPECT_EQ(publication_orders(point(1, 15), point(2, 40), events, true), Result::Ordered);
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 40), events, true), Result::Unordered);
+  events[1].release = false;
+  EXPECT_EQ(publication_orders(point(1, 15), point(2, 40), events, true), Result::Unordered);
+}
+TEST(ConSanPublicationTest, SameValueStoreCannotBeElidedAsAnIdentityRmw) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 1, false, false),
+                    rmw(2, 30, 1, 2, false, true)};
+  events[1].operation = PublicationOperation::Store;
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 40), events, true), Result::Incomplete);
+}
 TEST(ConSanPublicationTest, ProgramOrderPreventsRetroactivePublication) {
   std::array events{rmw(0, 10, 0, 1), rmw(1, 10, 1, 2)};
   EXPECT_EQ(publication_orders(point(0, 11), point(1, 20), events, true), Result::Unordered);
@@ -363,7 +378,7 @@ TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
     if (defect == 7)
       r.roles |= 8;
     if (defect == 8)
-      r.owner_id = 32;
+      r.scope = 6;
     if (defect == 9)
       r.lane_id = 64;
     if (defect == 10)
@@ -374,6 +389,15 @@ TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
     EXPECT_NE(decoded.status, PublicationDecodeStatus::Complete);
     EXPECT_TRUE(decoded.events.empty());
   }
+}
+TEST(ConSanPublicationTest, DecodePreservesOpaqueHardwareOwnerIds) {
+  // HW_ID is not a workgroup-local wave ordinal. Owner IDs are equality
+  // keys, not indices into a 32-element array.
+  std::array records{record(0x1234, 10, 0, 1), record(0x5678, 20, 1, 2)};
+  const auto decoded = decode_publications(publication_header(), records);
+  ASSERT_EQ(decoded.status, PublicationDecodeStatus::Complete);
+  EXPECT_EQ(publication_orders(point(0x1234, 1), point(0x5678, 30), decoded.events, true),
+            Result::Ordered);
 }
 TEST(ConSanPublicationTest, DecodeRequiresCompleteBoundedTrace) {
   std::array records{record(0, 10, 0, 1), record(1, 20, 1, 2)};

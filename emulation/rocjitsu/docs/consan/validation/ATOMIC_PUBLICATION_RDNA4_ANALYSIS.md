@@ -454,3 +454,27 @@ The hook SHA-256 for the initial diagnostic measurements was
 `69566b53a48b3d65aa1835b2ae206c4f3cc5799952dcdb34560dfc5fe328e803`.
 No detector behavior was changed for those initial measurements; the implementation
 checkpoints above use subsequent local builds.
+
+## Publication regression follow-up (September 24)
+
+The full GCC qualification pass exposed additional capture and fixture gaps.
+Report ABI 18 adds an explicit store event: a qualified, aligned 32-bit release
+store is executed as one returning exchange to observe its predecessor value,
+but the proof retains **store** semantics. It can head its own release sequence
+and cannot relay an earlier release. Unaligned stores execute the original
+instruction and mark the trace incomplete. Unqualified stores remain opaque
+modifications.
+
+Returning 32-bit CAS records its actual outcome per lane. A successful CAS
+records the observed and written values and its qualified success ordering;
+a failed CAS records an observation with no publication. Failed-CAS acquire
+ordering is conservatively omitted. Identity RMW observations may acquire a
+proven incoming release, but cannot establish their own outgoing release.
+Ambiguous values and ABA remain incomplete, not inferred ordering.
+
+Capture also preserves aliased atomic data/destination operands during spilling.
+Hardware owner IDs are opaque equality keys. Fixture LDS stores must expose
+completion to the compiler or explicitly wait before assembly releases.
+The [publication test report](PUBLISH_TESTS_20260924.md) tracks full-suite
+qualification; this follow-up does not replace the external-workload results
+above.

@@ -9,6 +9,10 @@
 
 namespace rocjitsu::consan::hook {
 namespace {
+bool modifies(const PublicationEvent &event) {
+  return event.operation == PublicationOperation::Rmw ||
+         event.operation == PublicationOperation::Store;
+}
 PublicationOrdering publication_orders_validated(const PublicationPoint &before,
                                                  const PublicationPoint &after,
                                                  std::span<const PublicationEvent> input,
@@ -27,8 +31,10 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
         event.bytes == 0 || event.bytes > 8 || (event.bytes & (event.bytes - 1)) != 0 ||
         event.address > std::numeric_limits<uint64_t>::max() - event.bytes ||
         (event.operation != PublicationOperation::Read &&
-         event.operation != PublicationOperation::Rmw) ||
-        (event.operation == PublicationOperation::Read && event.release))
+         event.operation != PublicationOperation::Rmw &&
+         event.operation != PublicationOperation::Store) ||
+        (event.operation == PublicationOperation::Read && event.release) ||
+        (event.operation == PublicationOperation::Store && event.acquire))
       return Result::Incomplete;
     const uint64_t mask = event.bytes == 8 ? ~uint64_t{0} : (uint64_t{1} << (event.bytes * 8)) - 1;
     if ((event.observed & ~mask) || (event.written & ~mask))
@@ -61,7 +67,7 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
   std::vector<size_t> predecessor(count, count);
   for (size_t i = 0; i < count; ++i) {
     const auto &event = *events[i];
-    if (event.operation == PublicationOperation::Rmw && event.observed == event.written)
+    if (modifies(event) && event.observed == event.written)
       return Result::Incomplete;
     for (size_t j = 0; j < count; ++j) {
       if (i == j)
@@ -73,11 +79,10 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
           return Result::Incomplete;
         continue;
       }
-      if (event.operation == PublicationOperation::Rmw &&
-          other.operation == PublicationOperation::Rmw &&
+      if (modifies(event) && modifies(other) &&
           (event.written == other.written || event.observed == other.observed))
         return Result::Incomplete;
-      if (other.operation == PublicationOperation::Rmw && other.written == event.observed) {
+      if (modifies(other) && other.written == event.observed) {
         if (predecessor[i] != count)
           return Result::Incomplete;
         predecessor[i] = j;
@@ -87,11 +92,10 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
   // Reject disconnected modification chains: an omitted transition cannot be
   // repaired by guessing which same-address publication an acquire observed.
   for (size_t i = 0; i < count; ++i) {
-    if (events[i]->operation != PublicationOperation::Rmw || predecessor[i] != count)
+    if (!modifies(*events[i]) || predecessor[i] != count)
       continue;
     for (size_t j = i + 1; j < count; ++j) {
-      if (same_object(i, j) && events[j]->operation == PublicationOperation::Rmw &&
-          predecessor[j] == count)
+      if (same_object(i, j) && modifies(*events[j]) && predecessor[j] == count)
         return Result::Incomplete;
     }
   }
@@ -99,7 +103,7 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
     if (events[i]->operation != PublicationOperation::Read || predecessor[i] != count)
       continue;
     for (size_t j = 0; j < count; ++j) {
-      if (!same_object(i, j) || events[j]->operation != PublicationOperation::Rmw)
+      if (!same_object(i, j) || !modifies(*events[j]))
         continue;
       if ((predecessor[j] == count && events[i]->observed != events[j]->observed) ||
           (events[i]->point.owner == events[j]->point.owner &&
@@ -112,6 +116,7 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
     size_t current = predecessor[i];
     size_t traversed = 0;
     bool scopes_cover = events[i]->covers_workgroup;
+    bool release_sequence = true;
     while (current != count) {
       if (++traversed > count)
         return Result::Incomplete;
@@ -120,8 +125,12 @@ PublicationOrdering publication_orders_validated(const PublicationPoint &before,
           events[current]->point.sequence >= events[i]->point.sequence)
         return Result::Incomplete;
       scopes_cover &= events[current]->covers_workgroup;
-      if (events[i]->acquire && scopes_cover && events[current]->release)
+      if (release_sequence && events[i]->acquire && scopes_cover && events[current]->release)
         edges[current].push_back(i);
+      // A store may head its own release sequence, but cannot relay a
+      // preceding release through the observation RMW used to instrument it.
+      if (events[current]->operation == PublicationOperation::Store)
+        release_sequence = false;
       current = predecessor[current];
     }
   }

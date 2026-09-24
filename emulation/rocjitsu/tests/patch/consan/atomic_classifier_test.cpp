@@ -51,6 +51,29 @@ TEST(ConSan, AtomicFaultValidationAllowsOnlyTheComposedObservationRewrite) {
   (*after)[0] ^= 1u; // An unrelated address-register change is still invalid.
   EXPECT_EQ(validate(true), EncodedMutationValidation::InvalidMutation);
 }
+TEST(ConSan, StoreObservationRewritePreservesAddressValueAndScope) {
+  for (uint32_t family : {0xecu, 0xeeu}) {
+    rdna4::VflatMachineInst original{};
+    original.encoding = family;
+    original.op = rdna4::kFlatStoreB32Vflat;
+    original.saddr = 6;
+    original.vaddr = 17;
+    original.vsrc = 23;
+    original.ioffset = 12;
+    original.scope = 2;
+    const auto result = detail::build_rdna4_store_observation(
+        {reinterpret_cast<const uint8_t *>(&original), sizeof(original)}, 42);
+    ASSERT_TRUE(result);
+    auto expected = original;
+    expected.op = rdna4::kFlatAtomicSwapB32Vflat;
+    expected.th = 1;
+    expected.vdst = 42;
+    EXPECT_EQ(std::memcmp(result->data(), &expected, sizeof(expected)), 0);
+    original.op = rdna4::kFlatLoadB32Vflat;
+    EXPECT_FALSE(detail::build_rdna4_store_observation(
+        {reinterpret_cast<const uint8_t *>(&original), sizeof(original)}, 42));
+  }
+}
 TEST(ConSan, AtomicObservationReturnRewriteRejectsUnsupportedForms) {
   std::array<uint32_t, 3> words{0xee0f400cu, 0x01980000u, 0x00000002u};
   const auto build = [&](uint16_t destination = 42) {
