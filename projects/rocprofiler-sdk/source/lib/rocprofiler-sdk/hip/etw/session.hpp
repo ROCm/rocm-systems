@@ -31,9 +31,8 @@ namespace hip
 namespace etw
 {
 // HIP API tracing on Windows is out-of-process: amdhip64 is an ETW provider and
-// rocprofiler-sdk is the consumer. These open and close the real-time consumer session and
-// are reference counted, so every context that traces a HIP domain can call them
-// independently.
+// rocprofiler-sdk is the consumer. These open and close the consumer session and are
+// reference counted, so every context that traces a HIP domain can call them independently.
 //
 // Declared on both platforms and no-ops off Windows so that the context start/stop call
 // sites need no preprocessor guards.
@@ -42,6 +41,14 @@ start_session();
 
 rocprofiler_status_t
 stop_session();
+
+// The session hands its events over in one go when it is stopped, so unlike an in-process
+// runtime it produces all of its records during teardown. Those records need active contexts
+// and a live correlation service to land anywhere, which makes the start of finalization --
+// before either is torn down -- the last moment this can happen. Idempotent: a subsequent
+// stop_session() finds the session already closed.
+void
+drain_sessions();
 }  // namespace etw
 }  // namespace hip
 }  // namespace rocprofiler

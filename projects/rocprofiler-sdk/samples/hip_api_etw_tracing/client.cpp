@@ -68,6 +68,11 @@ std::set<std::string>    expected_names     = {};
 uint64_t                 record_count       = 0;
 uint64_t                 setup_timestamp_ns = 0;
 
+// True when setup() ran, meaning this process is both the tool and the application. Loaded as
+// a tool library by rocprofv3-launch it is false: the records then describe another process's
+// threads and calls, so the per-thread and per-operation expectations below do not apply.
+bool tracing_self = false;
+
 std::string
 operation_name(rocprofiler_tracing_operation_t operation)
 {
@@ -120,7 +125,7 @@ tool_tracing_callback(rocprofiler_context_id_t /*context*/,
             std::exit(EXIT_FAILURE);
         }
 
-        if(record->thread_id != client_tid)
+        if(tracing_self && record->thread_id != client_tid)
         {
             std::cerr << "record thread id " << record->thread_id << " does not match the calling "
                       << "thread " << client_tid << "\n";
@@ -186,6 +191,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 void
 tool_fini(void* /*tool_data*/)
 {
+    // The ETW consumer emplaces everything it decoded during finalization, so the buffer still
+    // holds records at this point no matter what the application did before exiting. Flush
+    // outside the lock: the callback that fills these containers takes it too.
+    ROCPROFILER_CALL(rocprofiler_flush_buffer(client_buffer), "buffer flush");
+
     auto lk = std::unique_lock<std::mutex>{record_mutex};
 
     std::cout << "[hip-api-etw-tracing] collected " << record_count << " HIP runtime API records\n";
@@ -219,6 +229,8 @@ tool_fini(void* /*tool_data*/)
 void
 setup()
 {
+    tracing_self = true;
+
     if(int status = 0;
        rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
     {
@@ -229,15 +241,9 @@ setup()
 void
 shutdown()
 {
-    if(client_id)
-    {
-        // Stop first: ETW delivery is asynchronous, and closing the session is what flushes
-        // the provider's buffers and drains the decoding thread. Flushing before that would
-        // race the tail of the trace.
-        ROCPROFILER_CALL(rocprofiler_stop_context(client_ctx), "context stop");
-        ROCPROFILER_CALL(rocprofiler_flush_buffer(client_buffer), "buffer flush");
-        client_fini_func(*client_id);
-    }
+    // Finalization is what closes the ETW session and decodes what it collected, so there is
+    // nothing useful to do before it.
+    if(client_id) client_fini_func(*client_id);
 }
 
 void

@@ -70,6 +70,12 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
         COMPONENT rocpd)
 endforeach()
 
+if(WIN32)
+    # HIP tracing on Windows consumes ETW from outside the application, so rocprofv3 needs
+    # a host process to run the tool library in.
+    add_subdirectory(rocprofv3-launch)
+endif()
+
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

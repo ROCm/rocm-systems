@@ -255,6 +255,26 @@ typedef rocprofiler_tool_configure_result_t* (*rocprofiler_configure_func_t)(
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func);
 
+/**
+ * @brief Finalize rocprofiler on the calling thread: stop every client's contexts, invoke every
+ * client's finalize function and shut down the internal threads.
+ *
+ * Finalization normally happens from an `atexit` handler, which is sufficient when the client
+ * library is loaded into the application. A host process that loads client libraries on behalf of
+ * another process cannot rely on that: on Windows a DLL's `atexit` handlers run at
+ * `DLL_PROCESS_DETACH`, after the process has already terminated every thread but the one that
+ * called `exit`, so any finalizer that flushes a buffer would wait on a worker that no longer
+ * exists. Calling this before returning from `main` finalizes while those threads are still alive.
+ *
+ * Idempotent and safe to call even if the `atexit` handler subsequently runs.
+ *
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Finalization completed
+ * @retval ::ROCPROFILER_STATUS_ERROR_FINALIZED rocprofiler had already been finalized
+ */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_finalize(void);
+
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

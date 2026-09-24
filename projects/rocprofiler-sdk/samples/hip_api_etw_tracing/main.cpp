@@ -25,6 +25,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 // The provider emits an enter/exit pair for every call it wraps, whatever the call returns, so
@@ -41,9 +42,16 @@
     }
 
 int
-main(int /*argc*/, char** /*argv*/)
+main(int argc, char** argv)
 {
-    client::setup();
+    // Run as a plain HIP application, for the case where the consumer lives in another process
+    // and this one is only the provider. Self-tracing as well would open a second session on the
+    // same provider, and the two would then race over which one outlives the trace.
+    auto self_trace = true;
+    for(int i = 1; i < argc; ++i)
+        if(std::strcmp(argv[i], "--no-self-trace") == 0) self_trace = false;
+
+    if(self_trace) client::setup();
 
     // Every call below crosses the traced HIP runtime entry points, which is all the ETW
     // provider reports on; no kernel is launched because the sample is compiled as plain C++
@@ -63,7 +71,7 @@ main(int /*argc*/, char** /*argv*/)
     HIP_API_CALL(hipStreamSynchronize, nullptr);
     HIP_API_CALL(hipFree, device_buffer);
 
-    client::shutdown();
+    if(self_trace) client::shutdown();
 
     return EXIT_SUCCESS;
 }
