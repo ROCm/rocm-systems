@@ -23,7 +23,6 @@
 // name mangling from outside the project.
 #include <cstdint>
 
-
 #include <sys/queue.h>
 #include <sys/uio.h>
 #include <syslog.h>
@@ -474,7 +473,7 @@ TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchan
   ::close(backing);
 }
 
-TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
+TEST(VfioDeviceHost, ReadsAndWritesAcrossHundredsOfPageDistinctWindows) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
   rocjitsu::test::VfioUserClient client;
@@ -491,18 +490,38 @@ TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
   ASSERT_EQ(::ftruncate(backing, kTransferSize), 0);
   void *mapping = ::mmap(nullptr, kTransferSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
   ASSERT_NE(mapping, MAP_FAILED);
-  std::memset(mapping, 0x69, kTransferSize);
+
+  // Each page carries its own index in the first two bytes and a varying fill
+  // after that, so reusing one window for every region or reordering them
+  // cannot pass the comparisons below the way a uniform fill would.
+  auto *pages = static_cast<std::byte *>(mapping);
+  for (std::size_t page = 0; page < kWindowCount; ++page) {
+    const uint16_t index = static_cast<uint16_t>(page);
+    pages[page * kWindowSize] = static_cast<std::byte>(index & 0xFF);
+    pages[page * kWindowSize + 1] = static_cast<std::byte>(index >> 8);
+    std::memset(pages + page * kWindowSize + 2, 0x69 + (page % 32), kWindowSize - 2);
+  }
 
   for (std::size_t index = 0; index < kWindowCount; ++index) {
     ASSERT_TRUE(client.dma_map(kGuestAddress + index * kWindowSize, kWindowSize, backing,
                                index * kWindowSize));
   }
 
+  std::vector<std::byte> expected(pages, pages + kTransferSize);
   std::vector<std::byte> destination(kTransferSize);
   ASSERT_EQ(served.host().read_outcome(kGuestAddress, destination),
             simdojo::DmaAccessOutcome::Complete);
-  EXPECT_TRUE(
-      std::ranges::all_of(destination, [](std::byte value) { return value == std::byte{0x69}; }));
+  EXPECT_EQ(destination, expected);
+
+  const std::vector<std::byte> second(kTransferSize, std::byte{0xc3});
+  ASSERT_EQ(served.host().write_outcome(kGuestAddress, second),
+            simdojo::DmaAccessOutcome::Complete);
+  // Reading the file back, not the mapping, catches a write that landed in
+  // the wrong window or only partly completed.
+  std::vector<std::byte> written(kTransferSize);
+  ASSERT_EQ(::pread(backing, written.data(), kTransferSize, 0),
+            static_cast<ssize_t>(kTransferSize));
+  EXPECT_EQ(written, second) << "the aggregate write lost or misplaced data";
 
   ASSERT_EQ(::munmap(mapping, kTransferSize), 0);
   ::close(backing);
@@ -1424,8 +1443,6 @@ TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
       served.dma().read(kCrossRegistrationIova + page_size - kBoundaryHalfBytes, read_back));
   EXPECT_EQ(read_back, read_pattern);
 }
-
-
 
 // A hole between registrations is not memory the device may touch, whichever
 // side of the boundary a transfer starts from. The transport rejects these
