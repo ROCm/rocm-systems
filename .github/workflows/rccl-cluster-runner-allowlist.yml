@@ -1,0 +1,93 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: RCCL cluster runner allowlist
+
+# Cluster scale runners may only appear in workflows listed in
+# .github/scripts/allowlist/rccl-cluster-runners.allowlist.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs PR-authored code, so no write scope; the review request is a separate job.
+  check-allowlist:
+    name: Check RCCL cluster runner allowlist
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      new_runner_lines: ${{ steps.check.outputs.new_runner_lines }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # HEAD^ on a PR merge commit is the base branch tip.
+          fetch-depth: 2
+          sparse-checkout: |
+            .github/workflows
+            .github/scripts
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest
+
+      - name: Test the RCCL CI scripts
+        run: |
+          set -euo pipefail
+          # Glob, so a new rccl test file is picked up without editing this list.
+          # -k rccl would also match rccl-named tests in TheRock's test module.
+          python3 -m pytest .github/scripts/tests/*rccl*_test.py
+
+      - name: Scan workflows for unallowlisted cluster runners
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -o pipefail
+          args=()
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            args+=(--base HEAD^ --head HEAD)
+          fi
+          python3 .github/scripts/rccl_check_cluster_runner_allowlist.py "${args[@]}"
+
+  request-rccl-ci-review:
+    name: Request @ROCm/rccl-ci review
+    needs: check-allowlist
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.check-allowlist.outputs.new_runner_lines == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Request rccl-ci review for new cluster runner usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if gh api \
+            --method POST \
+            "repos/${REPO}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -f "team_reviewers[]=rccl-ci" 2>/tmp/reviewer_err; then
+            echo "Requested review from @ROCm/rccl-ci."
+          else
+            # Usually already requested, or a fork PR with a read-only token.
+            # Not fatal, but a real failure here silently skips the review.
+            echo "::warning::Could not request @ROCm/rccl-ci review: $(cat /tmp/reviewer_err)"
+          fi
