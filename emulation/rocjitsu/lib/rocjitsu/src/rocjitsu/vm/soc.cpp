@@ -307,7 +307,7 @@ void SoC::initialize() {
       } else {
         cps.push_back(nullptr);
       }
-    if (std::find(cps.begin(), cps.end(), nullptr) == cps.end()) {
+    if (std::ranges::find(cps, nullptr) == cps.end()) {
       for (uint32_t i = 0; i < cps.size(); ++i)
         cps[i]->set_xcd_topology(i, cps);
     }

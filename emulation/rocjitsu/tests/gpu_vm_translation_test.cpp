@@ -19,7 +19,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <span>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -755,7 +754,7 @@ TEST(GpuVmTranslation, TranslatedBindingDoesNotDependOnLegacyMemoryOrNonzeroMeta
 TEST(GpuVmTranslation, LegacyBindingUsesTheSharedVmInterfaceWithoutClaimingPhysicalIdentity) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4123;
   std::array<uint8_t, KfdProcess::kPageSize> backing{};
@@ -791,7 +790,7 @@ TEST(GpuVmTranslation, LegacyBindingUsesTheSharedVmInterfaceWithoutClaimingPhysi
 TEST(GpuVmTranslation, LegacyProbeRequiresEveryPageToHaveAGpuMapping) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t mapped_address = 0x4000;
   constexpr uint64_t unmapped_address = 0;
@@ -820,7 +819,7 @@ TEST(GpuVmTranslation, LegacyProbeRequiresEveryPageToHaveAGpuMapping) {
 TEST(GpuVmTranslation, LegacyProbeRejectsWritesAndAtomicsToReadOnlyBacking) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   HostPage backing;
@@ -865,7 +864,7 @@ TEST(GpuVmTranslation, LegacyProbeRejectsWritesAndAtomicsToReadOnlyBacking) {
 TEST(GpuVmTranslation, QueryAccessDoesNotReportAnExpectedProvisioningMiss) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t unmapped_address = 0x4000;
   RecordingFaultReporter reporter;
@@ -897,7 +896,7 @@ TEST(GpuVmTranslation, QueryAccessDoesNotReportAnExpectedProvisioningMiss) {
 TEST(GpuVmTranslation, LegacyExecuteUsesFetchableCompatibilityBacking) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t executable_address = 0x9000;
   constexpr uint32_t instruction = 0xbf800000;
@@ -928,8 +927,8 @@ TEST(GpuVmTranslation, LegacySnapshotRetainsStorageButIsRevokedAcrossUnregister)
   auto replacement_memory = std::make_shared<GpuMemory>("replacement-memory");
   KfdProcess::PageTable original_page_table;
   KfdProcess::PageTable replacement_page_table;
-  std::shared_mutex original_page_table_mutex;
-  std::shared_mutex replacement_page_table_mutex;
+  util::DistributedSharedMutex original_page_table_mutex;
+  util::DistributedSharedMutex replacement_page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   std::array<uint8_t, KfdProcess::kPageSize> original_backing{};
@@ -982,7 +981,7 @@ TEST(GpuVmTranslation, LegacySnapshotRetainsStorageButIsRevokedAcrossUnregister)
 TEST(GpuVmTranslation, LegacyUnregisterRevokesFaultDeliveryFromRetainedSnapshot) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
@@ -1008,7 +1007,7 @@ TEST(GpuVmTranslation, LegacyUnregisterRevokesFaultDeliveryFromRetainedSnapshot)
 TEST(GpuVmTranslation, LegacyAdapterTeardownRevokesFaultDeliveryFromRetainedSnapshot) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   AddressSpaceHandle handle;
@@ -1037,7 +1036,7 @@ TEST(GpuVmTranslation, LegacyAdapterTeardownRevokesFaultDeliveryFromRetainedSnap
 TEST(GpuVmTranslation, LegacyAdapterTeardownPreservesQueueRetainedBindingWithoutFaultSink) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   AddressSpaceHandle handle;
@@ -1069,7 +1068,7 @@ TEST(GpuVmTranslation, LegacyAdapterTeardownPreservesQueueRetainedBindingWithout
 TEST(GpuVmTranslation, LegacyMutationPrunesBindingRevokedByGenericVmReset) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   RecordingFaultReporter reporter;
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
@@ -1099,7 +1098,7 @@ TEST(GpuVmTranslation, LegacyMutationPrunesBindingRevokedByGenericVmReset) {
 TEST(GpuVmTranslation, LegacyBackingRetriesUntilPageTableMappingIsPublished) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   GpuVm gpu_vm;
@@ -1131,7 +1130,7 @@ TEST(GpuVmTranslation, LegacyBackingRetriesUntilPageTableMappingIsPublished) {
 TEST(GpuVmTranslation, LegacyAtomicsDoNotFallBackToSparseStorage) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   constexpr uint32_t sparse_value = 0x11223344;
@@ -1159,7 +1158,7 @@ TEST(GpuVmTranslation, LegacyAtomicsDoNotFallBackToSparseStorage) {
 TEST(GpuVmTranslation, LegacyBackingRejectsMappedPageClippingWithoutPartialTransfer) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   constexpr size_t mapped_bytes = 64;
@@ -1190,7 +1189,7 @@ TEST(GpuVmTranslation, LegacyBackingRejectsMappedPageClippingWithoutPartialTrans
 TEST(GpuVmTranslation, LegacyAtomicTranslationFaultsReportExactlyOncePerOperation) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   std::array<uint8_t, sizeof(uint32_t)> backing{};
@@ -1232,7 +1231,7 @@ TEST(GpuVmTranslation, LegacyAtomicTranslationFaultsReportExactlyOncePerOperatio
 TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   HostPage backing;
@@ -1266,7 +1265,7 @@ TEST(GpuVmTranslation, LegacyBackingFaultsForInaccessibleMappedPage) {
 TEST(GpuVmTranslation, FaultedLegacyAtomicModifyDoesNotInvokeMutation) {
   GpuMemory memory("memory");
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   constexpr uint32_t vmid = 7;
   constexpr uint64_t virtual_address = 0x4000;
   constexpr uint32_t initial_value = 0x11223344;
@@ -1317,7 +1316,7 @@ TEST(GpuVmTranslation, StrictLegacyBackingReportsWrappingRange) {
   GpuVm gpu_vm;
   LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
   LegacyPageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   const AddressSpaceHandle handle =
       legacy_vm.register_address_space(vmid, {.page_table = &page_table,
                                               .page_table_mutex = &page_table_mutex,
@@ -1347,7 +1346,7 @@ TEST(GpuVmTranslation, LegacyVmidZeroGetsGenerationSafePassthroughBinding) {
   backing.data()[0] = 0x5a;
 
   LegacyPageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   const AddressSpaceHandle handle =
       legacy_vm.register_address_space(0, {.page_table = &page_table,
                                            .page_table_mutex = &page_table_mutex,

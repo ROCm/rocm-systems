@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 33
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 34
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1183,6 +1183,8 @@ typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent
 
 typedef hipError_t (*t_hipMemGetDefaultMemPool)(hipMemPool_t* memPool, hipMemLocation* location,
                                                 hipMemAllocationType type);
+typedef hipError_t (*t_hipModuleEnumerateFunctions)(hipFunction_t* functions,
+                                                    unsigned int numFunctions, hipModule_t module);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1836,8 +1838,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
   t_hipInitDevice hipInitDevice_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
+  t_hipModuleEnumerateFunctions hipModuleEnumerateFunctions_fn;
+
+  // DO NOT EDIT ABOVE!
+
 
   // ******************************************************************************************* //
   //
