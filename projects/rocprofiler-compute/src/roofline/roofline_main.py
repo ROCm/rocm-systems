@@ -25,6 +25,7 @@ from roofline.roofline_hover import (
 )
 from roofline.roofline_html import (
     ALL_PEAKS_VALUE,
+    LIMITING_PEAK_VALUE,
     ROOF_EXTRAP_MAX_AI,
     ROOF_EXTRAP_MIN_AI,
     RooflineViewModel,
@@ -54,7 +55,6 @@ from utils.specs import MachineSpecs
 from utils.utils_analysis import get_matrix_ops_type
 
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
-DEFAULT_PEAK = "HBM"
 DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
 TRACE_COLORS: dict[str, dict[str, str]] = {
@@ -72,8 +72,8 @@ _ROOF_SAMPLES_PER_DECADE = 48
 _ROOF_SAMPLES_MIN = 64
 _ROOF_SAMPLES_MAX = 800
 
-# The precision the standalone page opens with when the run benchmarked it.
-_PREFERRED_DEFAULT_PRECISION = "FP32"
+# The precisions the standalone page opens with when the run benchmarked them.
+_PREFERRED_DEFAULT_PRECISIONS = ["FP32", "FP16", "FP8"]
 
 
 def _figure_class(dtype: str) -> str:
@@ -82,11 +82,10 @@ def _figure_class(dtype: str) -> str:
 
 
 def _default_precisions(precisions: list[str]) -> list[str]:
-    """The precisions the page opens with: FP32 when the run has it, else the
-    first datatype plotted."""
-    if _PREFERRED_DEFAULT_PRECISION in precisions:
-        return [_PREFERRED_DEFAULT_PRECISION]
-    return precisions[:1]
+    """The precisions the page opens with: FP32/FP16/FP8 when the run has
+    them, else the first datatype plotted."""
+    defaults = [p for p in _PREFERRED_DEFAULT_PRECISIONS if p in precisions]
+    return defaults if defaults else precisions[:1]
 
 
 def _roof_clipped_to_peak(
@@ -905,11 +904,7 @@ class Roofline:
 
         present_peaks = self._present_peaks(kernels_model, sanitized_cache_hierarchy)
         view_model.peaks = present_peaks
-        view_model.default_peak = (
-            DEFAULT_PEAK
-            if DEFAULT_PEAK in present_peaks
-            else (present_peaks[0] if present_peaks else ALL_PEAKS_VALUE)
-        )
+        view_model.default_peak = LIMITING_PEAK_VALUE
         view_model.kernels = kernels_model
         view_model.kernel_trace_indices = list(
             range(first_index, first_index + len(kernel_traces))
