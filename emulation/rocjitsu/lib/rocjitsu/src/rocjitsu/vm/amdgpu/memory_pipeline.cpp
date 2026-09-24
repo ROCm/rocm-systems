@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
+#include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/log.h"
 
@@ -280,6 +282,11 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
 
+  if (d.buffer_components) {
+    complete_buffer_format_load(wf, cu, d);
+    return MemoryAccessCompletion::Complete;
+  }
+
   // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
   // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
   if (d.lds_dst)
@@ -378,10 +385,14 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
+  // Masked loads still write the zero response, without taking a VM snapshot or
+  // touching backing memory, including byte and halfword requests.
+  if (d.is_load && d.load_dword_mask == 0)
+    return VmAccessOutcome::Complete;
   if (wf.address_space()) {
-    const bool may_refresh_unready = d.translated.initialized && d.translated.access &&
-                                     !d.translated.access->info().ready &&
-                                     d.translated.completed_bytes == 0;
+    const bool may_refresh_unready =
+        d.translated.initialized && d.translated.access && !d.translated.access->info().ready &&
+        d.translated.completed_bytes == 0 && d.translated.request_index == 0;
     if (!d.translated.initialized || may_refresh_unready) {
       d.translated.access = wf.snapshot_vm_access();
       if (!d.translated.access)
@@ -390,7 +401,21 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
       if (d.is_load) {
-        if (d.elem_size < 4) {
+        if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
+          while (d.translated.request_index < d.num_dwords) {
+            const auto index = d.translated.request_index;
+            if (d.load_dword_mask & (1u << index)) {
+              const auto outcome = d.translated.access->read(
+                  d.addr + index * sizeof(uint32_t),
+                  {reinterpret_cast<std::byte *>(&d.response_data[index]), sizeof(uint32_t)},
+                  d.translated.completed_bytes);
+              if (outcome != VmAccessOutcome::Complete)
+                return outcome;
+            }
+            ++d.translated.request_index;
+            d.translated.completed_bytes = 0;
+          }
+        } else if (d.elem_size < 4) {
           uint8_t *bytes = reinterpret_cast<uint8_t *>(d.response_data);
           const VmAccessOutcome outcome = d.translated.access->read(
               d.addr, std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), d.elem_size),
@@ -421,12 +446,21 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
   }
 
   if (d.is_load) {
-    if (d.elem_size < 4) {
+    if (d.load_dword_mask == 0) {
+      // Descriptor bounds suppress memory access while preserving zero writeback.
+    } else if (d.elem_size < 4) {
       uint8_t bytes[4] = {};
       const VmAccessOutcome outcome = l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
+    } else if (d.load_dword_mask != 0xffff) {
+      for (uint32_t i = 0; i < d.num_dwords; ++i)
+        if (d.load_dword_mask & (1u << i)) {
+          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id());
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+        }
     } else {
       const VmAccessOutcome outcome =
           l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
@@ -499,6 +533,8 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return old_val >= src_val ? old_val - src_val : T{0};
   case AtomicOp::COND_SUB:
     return old_val >= src_val ? old_val - src_val : old_val;
+  case AtomicOp::WRAP:
+    return old_val >= src_val ? old_val - src_val : old_val + cmp_val;
   case AtomicOp::RSUB:
     return src_val - old_val;
   case AtomicOp::SMIN:
@@ -556,7 +592,7 @@ bool is_packed_add(AtomicOp op) {
 uint32_t atomic_source_stride(const VectorMemState &d, const std::vector<uint8_t> &store_data) {
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
-       d.atomic_op == AtomicOp::MSKOR);
+       d.atomic_op == AtomicOp::MSKOR || d.atomic_op == AtomicOp::WRAP);
   const uint32_t fallback = uses_two_sources ? d.elem_size * 2 : d.elem_size;
   if (d.wf_size == 0 || store_data.empty())
     return fallback;
@@ -615,7 +651,8 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t 
   };
 
   if (addr_stride != 0) {
-    assert(addr_base_offset < sizeof(uint32_t));
+    assert((d.scratch_swizzle_unit == 4 || d.scratch_swizzle_unit == 16) &&
+           addr_base_offset < d.scratch_swizzle_unit);
     for (uint32_t elem = 0; elem < d.num_elems; ++elem) {
       uint64_t mask =
           d.element_lane_masks.empty() ? lane_mask : (d.element_lane_masks[elem] & lane_mask);
@@ -623,15 +660,17 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t 
         const uint32_t lane = std::countr_zero(mask);
         mask &= mask - 1;
         const uint64_t base = d.per_lane_addr[lane];
-        const uint32_t first_byte_in_dword = static_cast<uint32_t>((base - addr_base_offset) & 3);
+        const uint32_t first_byte_in_unit =
+            static_cast<uint32_t>((base - addr_base_offset) % d.scratch_swizzle_unit);
         uint32_t copied = elem * d.elem_size;
         const uint32_t elem_end = copied + d.elem_size;
         while (copied < elem_end) {
-          const uint32_t logical_byte = first_byte_in_dword + copied;
-          const uint32_t byte_in_dword = logical_byte & 3;
-          const uint32_t chunk = std::min(elem_end - copied, 4 - byte_in_dword);
-          const uint64_t address =
-              base - first_byte_in_dword + logical_byte / 4 * addr_stride + byte_in_dword;
+          const uint32_t logical_byte = first_byte_in_unit + copied;
+          const uint32_t byte_in_unit = logical_byte % d.scratch_swizzle_unit;
+          const uint32_t chunk = std::min(elem_end - copied, d.scratch_swizzle_unit - byte_in_unit);
+          const uint64_t address = base - first_byte_in_unit +
+                                   logical_byte / d.scratch_swizzle_unit * addr_stride +
+                                   byte_in_unit;
           append(address, lane * stride + copied, chunk);
           copied += chunk;
         }
@@ -788,7 +827,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
-       d.atomic_op == AtomicOp::MSKOR);
+       d.atomic_op == AtomicOp::MSKOR || d.atomic_op == AtomicOp::WRAP);
   const uint32_t src_stride = atomic_source_stride(d, d.store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
@@ -871,7 +910,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
-       d.atomic_op == AtomicOp::MSKOR);
+       d.atomic_op == AtomicOp::MSKOR || d.atomic_op == AtomicOp::WRAP);
   const uint32_t src_stride = atomic_source_stride(d, store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
@@ -1016,10 +1055,10 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   if (d.is_load) {
     d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
     if (swizzled_lanes) {
-      const VmAccessOutcome outcome =
-          l1_->load(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
-                    d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                    d.wf_size, wf.process_id(), stride, base_offset, d.element_lane_masks.view());
+      const VmAccessOutcome outcome = l1_->load(
+          d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems, d.response_data.data(),
+          d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), stride,
+          base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
@@ -1036,7 +1075,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-                     stride, base_offset, d.element_lane_masks.view());
+                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
@@ -1066,6 +1105,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  if (d.lds_stack_inputs) {
+    execute_lds_stack(wf, d);
+    return VmAccessOutcome::Complete;
+  }
   if (d.atomic_op != AtomicOp::NONE) {
     execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data);
     if (d.ds2_active) {
@@ -1161,7 +1204,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
     const uint32_t vgpr_count = d.destination_vgpr_count();
     auto &cu = wf.raw_cu();
     if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count) ||
-        !cu.owns_vgpr_range(wf, d.ds2_dst_reg_base, vgpr_count))
+        !cu.owns_vgpr_range(wf, d.ds2_dst_reg_base, d.ds2_destination_vgpr_count()))
       return MemoryAccessCompletion::Complete;
   }
   if (d.transpose != 0)
@@ -1171,7 +1214,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   // DS dual-access: write the second load or returning-atomic result.
   if (d.ds2_active && d.is_load) {
     auto &cu = wf.raw_cu();
-    uint32_t vgpr_count = d.destination_vgpr_count();
+    const uint32_t vgpr_count = d.ds2_destination_vgpr_count();
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(d.lane_mask & (1ULL << lane)))
         continue;

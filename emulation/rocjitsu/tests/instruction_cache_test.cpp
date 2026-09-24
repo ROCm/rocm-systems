@@ -75,7 +75,8 @@ public:
         bytes.size() > bytes_.size() - address) {
       return amdgpu::VmAccessOutcome::Faulted;
     }
-    std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -124,7 +125,7 @@ TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
 
   for (uint32_t off = 0; off + InstructionCache::kFetchBytes <= span; off += 4) {
     const auto got = fetch_at(icache, memory, kCodeBase + off);
-    EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + off))
+    EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(off, got.size())))
         << "mismatch at offset " << off;
   }
 }
@@ -142,7 +143,7 @@ TEST(InstructionCacheTest, FetchWindowStraddlesALineBoundary) {
   ASSERT_GT(kStraddle + InstructionCache::kFetchBytes, InstructionCache::kLineSize);
 
   const auto got = fetch_at(icache, memory, kCodeBase + kStraddle);
-  EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + kStraddle));
+  EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(kStraddle, got.size())));
 }
 
 // The I$ is deliberately not coherent with data writes, matching hardware: a
@@ -153,18 +154,18 @@ TEST(InstructionCacheTest, CachedLineSurvivesABackingWriteUntilInvalidated) {
   const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x11);
 
   const auto before = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(before.begin(), before.end(), first.begin()));
+  EXPECT_TRUE(std::ranges::equal(before, std::span(first).first(before.size())));
 
   const std::vector<uint8_t> second = fill_code(memory, InstructionCache::kLineSize, 0x22);
   ASSERT_NE(first, second);
 
   const auto stale = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(stale.begin(), stale.end(), first.begin()))
+  EXPECT_TRUE(std::ranges::equal(stale, std::span(first).first(stale.size())))
       << "the I$ must not observe a data write on its own";
 
   icache.invalidate_all();
   const auto after = fetch_at(icache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(after.begin(), after.end(), second.begin()));
+  EXPECT_TRUE(std::ranges::equal(after, std::span(second).first(after.size())));
 }
 
 TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
@@ -173,7 +174,7 @@ TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
   const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x31);
   const std::array<uint8_t, InstructionCache::kFetchBytes> before =
       fetch_at(instruction_cache, memory, kCodeBase);
-  ASSERT_TRUE(std::equal(before.begin(), before.end(), first.begin()));
+  ASSERT_TRUE(std::ranges::equal(before, std::span(first).first(before.size())));
 
   const uint64_t epoch_before = instruction_cache.coherence_domain()->current_instruction_epoch();
   std::vector<uint8_t> second(InstructionCache::kLineSize, 0x72);
@@ -188,7 +189,7 @@ TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
 
   const std::array<uint8_t, InstructionCache::kFetchBytes> after =
       fetch_at(instruction_cache, memory, kCodeBase);
-  EXPECT_TRUE(std::equal(after.begin(), after.end(), second.begin()));
+  EXPECT_TRUE(std::ranges::equal(after, std::span(second).first(after.size())));
 }
 
 // Lines are tagged by address-space identity, so the same virtual address in
@@ -283,7 +284,7 @@ TEST(InstructionCacheTest, FetchIsCorrectWhenTheWorkingSetExceedsTheCache) {
     for (uint32_t off = 0; off + InstructionCache::kFetchBytes <= span;
          off += InstructionCache::kLineSize) {
       const auto got = fetch_at(icache, memory, kCodeBase + off);
-      EXPECT_TRUE(std::equal(got.begin(), got.end(), expected.begin() + off))
+      EXPECT_TRUE(std::ranges::equal(got, std::span(expected).subspan(off, got.size())))
           << "pass " << pass << " offset " << off;
     }
   }
@@ -438,7 +439,7 @@ TEST(InstructionCacheCuTest, LaunchInvalidationIsOncePerDispatch) {
   // launch drops everything.
   ASSERT_NE(fixture.launch(8, 0), nullptr);
   const auto next_dispatch = fixture.peek();
-  EXPECT_TRUE(std::equal(next_dispatch.begin(), next_dispatch.end(), rewritten.begin()))
+  EXPECT_TRUE(std::ranges::equal(next_dispatch, std::span(rewritten).first(next_dispatch.size())))
       << "a new dispatch reused code bytes cached by the previous one";
 }
 

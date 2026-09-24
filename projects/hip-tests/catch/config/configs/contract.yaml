@@ -1725,6 +1725,18 @@ contract:
   Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected:
     <<: *level_0
     tags: [module_exec, P0]
+  Contract_ModuleExec_HipModuleEnumerateFunctions_ZeroMax_LeavesBufferUntouched:
+    <<: *level_0
+    tags: [module_exec, P0]
+  Contract_ModuleExec_HipModuleEnumerateFunctions_Default_IncludesKnownSymbol:
+    <<: *level_0
+    tags: [module_exec, P0]
+  Contract_ModuleExec_HipModuleEnumerateFunctions_NullFunctions_IsRejected:
+    <<: *level_0
+    tags: [module_exec, P0]
+  Contract_ModuleExec_HipModuleEnumerateFunctions_NullModule_IsRejected:
+    <<: *level_0
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleOccupancyMaxPotentialBlockSize_Default_ReturnsUsableValues:
     <<: *level_0
     tags: [module_exec, P0]

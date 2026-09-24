@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
+#include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -85,6 +86,7 @@ public:
   bool is_load = true;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
   TranslatedMemoryProgress translated;
@@ -174,12 +176,22 @@ public:
   // cacheability and response policy used by the downstream memory path.
   bool request_force_l1_bypass = false;
   bool sign_extend = false;
-  // Some accesses store data in a hardware dword-interleaved ("swizzled")
-  // layout: consecutive dwords of a lane are separated rather than contiguous.
+  // Formatted buffer transfers use elem_size bytes in memory and one full
+  // VGPR per component, or packed halves for D16. Zero components selects
+  // the ordinary memory path.
+  uint32_t buffer_format = 0;
+  BufferFormat decoded_buffer_format;
+  BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
+  uint32_t buffer_selectors = 0;
+  uint32_t buffer_components = 0;
+  bool buffer_d16 = false;
+  // Some accesses use an interleaved ("swizzled") layout: consecutive units
+  // of a lane are separated rather than contiguous. Units are 4 bytes for
+  // scratch and GFX9 buffers, and 4 or 16 bytes for RDNA buffers.
   // Private scratch uses this layout so it matches what rocm-dbgapi reads, but
-  // GFX9 buffer descriptors can independently request a similar layout for
+  // Buffer descriptors can independently request a similar layout for
   // ordinary global memory. When scratch_swizzle is set, per_lane_addr holds
-  // the swizzled address of element 0 and scratch_addr_stride is the per-element
+  // the swizzled address of element 0 and scratch_addr_stride is the per-unit
   // destination-address stride; the register/LDS buffer indexing is unchanged.
   // See rocm-dbgapi memory.cpp private_swizzled conversion.
   // FLAT routing is per lane: one wave can mix private-aperture lanes with
@@ -194,8 +206,9 @@ public:
   bool requires_scratch_backing = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
+  uint32_t scratch_swizzle_unit = 4; ///< Bytes per swizzle unit; RDNA buffers can use 16.
   // Low bits of the uniform address contribution applied after swizzling. The
-  // cache walker subtracts this contribution when locating logical dword
+  // cache walker subtracts this contribution when locating logical swizzle-unit
   // boundaries, while per_lane_addr remains the actual first-byte address.
   uint32_t scratch_addr_base_offset = 0;
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
@@ -240,6 +253,9 @@ public:
   /// atomics, ds2_dst_reg_base is the VGPR base for the second result and the
   /// two response vectors preserve each access independently. For stores and
   /// atomics, ds2_store_data contains the second access payload.
+  // LDS stack inputs are snapshotted in store_data; the second-result slot returns
+  // the stack pointer. Flags: bit 0 = RDNA4, bit 1 = triangle pairs, bit 2 = primitive ranges.
+  uint8_t lds_stack_inputs = 0, lds_stack_size = 0, lds_stack_flags = 0;
   bool ds2_active = false;
   std::array<uint64_t, 64> ds2_per_lane_addr = {};
   uint32_t ds2_dst_reg_base = 0;
@@ -247,13 +263,20 @@ public:
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
 
-  /// Number of consecutive VGPRs written by one load-result range.
-  /// DS dual-access instructions have two such ranges, starting at
-  /// dst_reg_base and ds2_dst_reg_base respectively.
+  /// Number of consecutive VGPRs written starting at dst_reg_base.
   [[nodiscard]] uint32_t destination_vgpr_count() const {
+    if (buffer_components)
+      return buffer_d16 ? (buffer_components + 1) / 2 : buffer_components;
     const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;
     constexpr uint32_t kBytesPerVgpr = sizeof(uint32_t);
     return std::max(1u, (result_bytes + kBytesPerVgpr - 1u) / kBytesPerVgpr);
+  }
+
+  /// Number of consecutive VGPRs written starting at ds2_dst_reg_base.
+  /// LDS stack instructions return one pointer DWORD independently of the
+  /// popped-node count. Ordinary DS dual-access results have equal widths.
+  [[nodiscard]] uint32_t ds2_destination_vgpr_count() const {
+    return lds_stack_inputs ? 1u : destination_vgpr_count();
   }
 };
 

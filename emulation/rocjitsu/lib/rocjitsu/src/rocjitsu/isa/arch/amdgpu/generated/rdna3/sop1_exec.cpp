@@ -326,8 +326,7 @@ void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t value = 0;
   switch (msg) {
   case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
+    value = wf.realtime_timestamp();
     break;
   }
   case 0x80:
@@ -354,8 +353,7 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t value = 0;
   switch (msg) {
   case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
+    value = wf.realtime_timestamp();
     break;
   }
   case 0x80:
