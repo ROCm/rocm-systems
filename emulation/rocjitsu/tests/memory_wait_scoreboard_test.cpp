@@ -211,6 +211,78 @@ TEST_F(MemoryWaitScoreboardTest, AdmissionReservesEveryIncomingCounterUnit) {
   }
 }
 
+TEST_F(MemoryWaitScoreboardTest, BackpressureMatchesPossibleCompletionOrders) {
+  // Enumerate every legal FIFO completion prefix, plus an independent unordered
+  // completion. An admission may release a result only if every possible state
+  // that leaves room for the incoming units has completed that result.
+  for (uint32_t capacity : {3u, 5u, 7u}) {
+    for (uint32_t incoming : {1u, 2u}) {
+      for (uint32_t a_units : {1u, 2u}) {
+        for (uint32_t a_count = 0; a_count <= 4; ++a_count) {
+          for (uint32_t b_count = 0; b_count <= 4; ++b_count) {
+            for (int prior_wait : {-1, 0, 2}) {
+              SCOPED_TRACE(std::format("capacity={} incoming={} a_units={} a_count={} b_count={} "
+                                       "prior_wait={}",
+                                       capacity, incoming, a_units, a_count, b_count, prior_wait));
+              state.clear();
+              struct Result {
+                uint16_t reg;
+                unsigned kind;
+                unsigned end;
+              };
+              std::vector<Result> results;
+              auto add = [&](unsigned kind, unsigned end, unsigned units = 1) {
+                const auto reg = static_cast<uint16_t>(results.size());
+                results.push_back({reg, kind, end});
+                const auto sequence = state.issue(WaitCounterKind::Ds, kind == 0, kind, units);
+                state.add({sequence, 0x100, 1, {RegClass::VGPR, reg, 1}, WaitCounterKind::Ds, 0xf});
+              };
+              for (unsigned i = 0; i < std::max(a_count, b_count); ++i) {
+                if (i < a_count)
+                  add(1, (i + 1) * a_units, a_units);
+                if (i < b_count)
+                  add(2, i + 1);
+              }
+              add(0, 1); // One unordered operation cannot borrow a FIFO guarantee.
+              const unsigned old_a = a_count * a_units;
+              if (prior_wait >= 0)
+                state.wait(WaitCounterKind::Ds, prior_wait);
+              add(1, old_a + 1); // New work after the wait must remain distinguishable.
+              state.backpressure(WaitCounterKind::Ds, capacity, incoming);
+              std::vector<bool> can_be_pending(results.size(), false);
+              unsigned possibilities = 0;
+              for (unsigned done_a = 0; done_a <= old_a + 1; ++done_a) {
+                for (unsigned done_b = 0; done_b <= b_count; ++done_b) {
+                  for (unsigned done_unordered : {0u, 1u}) {
+                    const unsigned old_pending =
+                        old_a - std::min(done_a, old_a) + b_count - done_b + 1 - done_unordered;
+                    if (prior_wait >= 0 && old_pending > static_cast<unsigned>(prior_wait))
+                      continue;
+                    const unsigned pending =
+                        old_a + 1 - done_a + b_count - done_b + 1 - done_unordered;
+                    if (pending + incoming > capacity)
+                      continue;
+                    ++possibilities;
+                    for (const auto &result : results) {
+                      const unsigned done = result.kind == 1   ? done_a
+                                            : result.kind == 2 ? done_b
+                                                               : done_unordered;
+                      can_be_pending[result.reg] = can_be_pending[result.reg] || result.end > done;
+                    }
+                  }
+                }
+              }
+              ASSERT_GT(possibilities, 0u);
+              for (const auto &result : results)
+                EXPECT_EQ(shadow.test(result.reg), can_be_pending[result.reg]) << result.reg;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST_F(MemoryWaitScoreboardTest, BackpressureKeepsCounterMembershipSeparateFromOrder) {
   load(5, WaitCounterKind::Ds);
   for (uint32_t i = 0; i < 30; ++i) {
@@ -1554,8 +1626,9 @@ TEST(MemoryWaitExecutionTest, VopdCndmaskChecksPendingVccOnlyForActiveLanes) {
           inst.execute(inst, wf);
         }
         EXPECT_EQ(hazards.size(), active && !waited ? 1u : 0u);
-        if (active)
+        if (active) {
           EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), 17u);
+        }
       }
     }
   }

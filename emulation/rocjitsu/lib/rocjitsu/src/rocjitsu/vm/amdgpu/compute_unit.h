@@ -115,7 +115,9 @@ struct FunctionalQuantumResult {
 /// file type, instruction execution dispatch, wavefront creation) are
 /// implemented by IsaExecComputeUnit<Mode, Isa>. Use the create() factory
 /// to construct.
-class ComputeUnitCore : public simdojo::CompositeComponent {
+// Observers compile inline register accessors against this polymorphic type.
+// Its RTTI must be visible to GCC UBSan's vptr checks in separately loaded DSOs.
+class RJ_API_TYPE_EXPORT ComputeUnitCore : public simdojo::CompositeComponent {
   friend class AsyncInstructionWindow;
 
 public:
