@@ -257,7 +257,13 @@ typedef struct {
 	 * default, so deregistration stays the no-op it was until the path has
 	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in.
 	 */
-	bool svm_host_unregister;
+	/* Effective state of the host unregister path, resolved on first use:
+	 * -1 unknown, 0 off, 1 on. HSA_SVM_HOST_UNREGISTER_DEBUG forces it
+	 * either way; with the variable unset the XNACK mode decides, which is
+	 * not known yet when the apertures are initialised. See
+	 * svm_host_unregister_on().
+	 */
+	int svm_host_unregister;
 } svm_t;
 
 /*
@@ -379,7 +385,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
-	ctx->fmm_context->svm.svm_host_unregister = false;
+	ctx->fmm_context->svm.svm_host_unregister = -1;
 
 	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
@@ -1468,6 +1474,48 @@ static int svm_api_range_put_locked(struct hsa_kfd_fmm_context *fmm_ctx, void *a
 }
 
 /*
+ * Is the SVM-API host unregister path in use for this process?
+ *
+ * HSA_SVM_HOST_UNREGISTER_DEBUG decides it when set. Otherwise the XNACK mode
+ * does: with retry faults on, a GPU that touches a range whose access was
+ * revoked simply faults it back in, so the teardown buys little and its cost
+ * is pure overhead; with XNACK off there is no fault to recover from, so a
+ * grant that is never revoked is a mapping the GPU keeps for the life of the
+ * process, which is what this path exists to clean up.
+ *
+ * The mode is not known when the apertures are initialised - the client binds
+ * it afterwards - so this resolves on first use and caches the answer. A
+ * client that registers host memory through the SVM API before binding its
+ * XNACK mode would resolve against the kernel's current mode instead of the
+ * one it goes on to choose.
+ */
+static bool svm_host_unregister_on(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	int state = __atomic_load_n(&fmm_ctx->svm.svm_host_unregister,
+				    __ATOMIC_ACQUIRE);
+	HSAint32 xnack = 0;
+
+	if (state >= 0)
+		return state;
+
+	/* Treat an unreadable mode as XNACK on, which leaves the path off and
+	 * keeps deregistration the no-op it has always been by default.
+	 */
+	if (hsaKmtGetXNACKModeCtx(ctx, &xnack) != HSAKMT_STATUS_SUCCESS)
+		xnack = 1;
+
+	state = xnack ? 0 : 1;
+	pr_debug("SVM host unregister %s (XNACK %s)\n",
+		 state ? "on" : "off", xnack ? "on" : "off");
+
+	__atomic_store_n(&fmm_ctx->svm.svm_host_unregister, state,
+			 __ATOMIC_RELEASE);
+
+	return state;
+}
+
+/*
  * Inverse of fmm_map_mem_svm_api(): revoke GPU access to the range. Only the
  * GPUs in @gpu_mask (indices into all_gpu_id_array) are revoked, or all of them
  * when @gpu_all is set, because only those were ever granted. Called with
@@ -1590,7 +1638,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 * reused VA. The coherency-flag attributes below never conflict with a
 	 * concurrent NO_ACCESS, so the mutex does not span this ioctl.
 	 */
-	if (fmm_ctx->svm.svm_host_unregister) {
+	if (svm_host_unregister_on(ctx)) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
 						   aligned_size, size);
@@ -2828,7 +2876,7 @@ static int __fmm_release(HsaKFDContext *ctx,
 		 * reference here, or the range outlives the VA and a later
 		 * registration that reuses it inherits the stale entry.
 		 */
-		if (ctx->fmm_context->svm.svm_host_unregister) {
+		if (svm_host_unregister_on(ctx)) {
 			struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 			struct svm_revoke_range *rr = NULL;
 			uint64_t gpu_mask;
@@ -3490,9 +3538,12 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 * deregistering an SVM-API host range stays the no-op it has always
 	 * been and register only sets the coherency flags.
 	 */
+	/* Leave it unresolved when unset: the XNACK mode that decides the
+	 * default is bound by the client after this runs.
+	 */
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
-	fmm_ctx->svm.svm_host_unregister =
-		(svmHostUnregisterStr && strcmp(svmHostUnregisterStr, "0"));
+	fmm_ctx->svm.svm_host_unregister = svmHostUnregisterStr ?
+		!!strcmp(svmHostUnregisterStr, "0") : -1;
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -4199,7 +4250,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 		}
 		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
-		if (fmm_ctx->svm.svm_host_unregister) {
+		if (svm_host_unregister_on(ctx)) {
 			/* This grant is what a concurrent deregister's NO_ACCESS
 			 * races with, so the two are serialized on svm_api_mutex
 			 * and the GPUs granted here are recorded for the revoke.
@@ -5073,7 +5124,7 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			bool gpu_all;
 			int nr, i;
 
-			if (!fmm_ctx->svm.svm_host_unregister)
+			if (!svm_host_unregister_on(ctx))
 				return HSAKMT_STATUS_SUCCESS;
 
 			/* Revoke only the sub-ranges no surviving registration
