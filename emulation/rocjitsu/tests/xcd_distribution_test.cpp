@@ -80,7 +80,7 @@ enum class Threading {
   ThreadPerXcd,
 };
 
-/// A loaded gfx950 SoC plus a trivial s_endpgm kernel resident in GPU memory.
+/// A SoC loaded from the requested config (gfx950 by default), with a trivial kernel.
 struct XcdDistributionFixture {
   config::LoadedConfig loaded;
   std::unique_ptr<simdojo::SimulationEngine> engine;
@@ -88,8 +88,9 @@ struct XcdDistributionFixture {
   amdgpu::GpuMemory *memory = nullptr;
 
   explicit XcdDistributionFixture(Threading threading = Threading::Single,
-                                  uint32_t dispatch_threads = 1)
-      : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+                                  uint32_t dispatch_threads = 1,
+                                  const std::string &config_path = CONFIG_PATH)
+      : loaded(config::load_config(config_path, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
     soc->set_dispatch_threads(dispatch_threads);
@@ -154,19 +155,21 @@ struct Cdna5ScratchTopologyFixture {
   }
 };
 
-void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes) {
+void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
+                            rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  const uint32_t vgpr_granule = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 16 : 8;
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
+                  ((256 / vgpr_granule) - 1));
+  // CDNA4 uses this count; CDNA5 ignores it and allocates its fixed scalar file.
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   ((104 / 8) - 1));
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   kd.private_segment_fixed_size = private_bytes;
   memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
-  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t),
-                 build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
 }
 
 /// Index of the XCD whose command processor is @p cp.
@@ -391,6 +394,21 @@ public:
     return true;
   }
 
+  size_t scratch_probe_bytes() const {
+    return scratch_probe_bytes_.load(std::memory_order_relaxed);
+  }
+
+  amdgpu::VmTranslationResult probe_translation(uint64_t address, std::size_t size,
+                                                amdgpu::VmAccessKind access) const override {
+    if (host_window_ && address >= host_window_->base &&
+        address - host_window_->base < host_window_->extent) {
+      const size_t page_bytes =
+          amdgpu::GpuMemory::PAGE_SIZE - (address & amdgpu::GpuMemory::PAGE_MASK);
+      scratch_probe_bytes_.fetch_add(std::min(size, page_bytes), std::memory_order_relaxed);
+    }
+    return translate(address, size, access);
+  }
+
   amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                         amdgpu::VmAccessKind) const override {
     if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
@@ -496,6 +514,7 @@ private:
   amdgpu::GpuMemory *memory_;
   std::optional<HostWindow> host_window_;
   std::vector<std::byte> host_bytes_;
+  mutable std::atomic<size_t> scratch_probe_bytes_{0};
 };
 
 } // namespace
@@ -1367,12 +1386,14 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
     amdgpu::CommandProcessor *cp = fx.soc->xcd(xi)->command_processor();
     cp->set_scratch_backing_resolver([&](uint32_t) { return scratch_va; });
     cp->set_scratch_backing_allocator([&](uint32_t pid, uint64_t va, size_t size) {
-      allocations.fetch_add(1, std::memory_order_relaxed);
       EXPECT_EQ(pid, process.process_id());
       EXPECT_EQ(va, scratch_va);
       EXPECT_EQ(size, backing.size());
       EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
-      process.map_pages(va, backing.data(), backing.size());
+      if (allocations.load(std::memory_order_relaxed) == 0) {
+        process.map_pages(va, backing.data(), backing.size());
+        allocations.fetch_add(1, std::memory_order_relaxed);
+      }
       return true;
     });
   }
@@ -1504,8 +1525,8 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
     EXPECT_NE(request.size, share_wide) << "sized from this XCD's own share";
   }
 
-  EXPECT_EQ(requests.size(), 1u)
-      << "the shared GPUVM mapping should prevent per-XCD scratch reprovisioning";
+  EXPECT_EQ(requests.size(), kTotalXcds)
+      << "each shard should ensure backing once before admitting waves";
 }
 
 // Every CP learns its fan-out rank from SoC::initialize(). Scratch addressing
@@ -1624,6 +1645,97 @@ TEST(XcdDistributionTest, Cdna5QueueAdmissionCapsScratchButKeepsGeneralWaveSlots
   EXPECT_EQ(general.completed, kGeneralWorkgroups);
   EXPECT_GE(general.max_slot, 32u)
       << "the scratch limit reduced residency for a kernel without private memory";
+}
+
+// Model a spill as soon as each wave is admitted, without relying on host
+// scheduling to place the spill before another XCD grows the shared pool.
+TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
+  for (const bool cdna5 : {false, true}) {
+    SCOPED_TRACE(cdna5 ? "gfx1250 physical scratch slots" : "gfx950 logical scratch slots");
+    XcdDistributionFixture fx(Threading::Single, 1,
+                              cdna5 ? test::config_path("gfx1250_mi455x.json") : CONFIG_PATH);
+    const auto &cus = fx.soc->all_cus();
+    ASSERT_FALSE(cus.empty());
+    const uint32_t wave_size = cus.front()->wf_size();
+    const uint32_t total_cus = static_cast<uint32_t>(cus.size());
+    constexpr uint32_t kPrivateBytes = 64;
+    const size_t per_wave = kPrivateBytes * wave_size;
+    size_t scratch_slots = total_cus;
+    if (cdna5) {
+      scratch_slots = 0;
+      for (const auto *cu : cus)
+        scratch_slots += cu->scratch_slots_per_cu();
+    }
+    const size_t pool_bytes = per_wave * scratch_slots;
+    install_scratch_kernel(*fx.memory, kPrivateBytes,
+                           cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4);
+
+    // A preceding dispatch left enough backing for the first wave, but not the
+    // new grid. Provision the missing tail before admitting any new waves.
+    auto vm_access = std::make_shared<SparseGpuVmAccess>(
+        *fx.memory, SparseGpuVmAccess::HostWindow{
+                        .base = kDefaultScratchPool, .size = per_wave, .extent = pool_bytes});
+    constexpr uint32_t kProcessId = 17;
+    const auto address_space =
+        fx.soc->gpu_vm().register_translated(kProcessId, vm_access, vm_access);
+    ASSERT_TRUE(address_space);
+    uint32_t allocations = 0;
+    for (uint32_t xi = 0; xi < fx.soc->num_xcds(); ++xi) {
+      auto *cp = fx.soc->xcd(xi)->command_processor();
+      cp->set_scratch_backing_allocator([&](uint32_t, uint64_t gpu_va, size_t size) {
+        EXPECT_EQ(gpu_va, kDefaultScratchPool);
+        EXPECT_EQ(size, pool_bytes);
+        if (allocations != 0)
+          return true;
+        ++allocations;
+        std::vector<uint8_t> tail(size - per_wave);
+        fx.memory->write_block(gpu_va + per_wave, tail);
+        return vm_access->provision_host_window(size);
+      });
+    }
+
+    class SpillPlugin final : public ExecutionPlugin {
+    public:
+      SpillPlugin(amdgpu::GpuMemory &memory, const uint32_t &allocations)
+          : ExecutionPlugin("scratch-spills"), memory_(memory), allocations_(allocations) {}
+      void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+        EXPECT_EQ(allocations_, 1u) << "wave admitted before the whole pool was provisioned";
+        memory_.write32(wf.scratch_base(), kSentinel + wf.wg_id());
+        ++admitted;
+      }
+      void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+        EXPECT_EQ(memory_.read32(wf.scratch_base()), kSentinel + wf.wg_id())
+            << "scratch backing changed after wave admission";
+        ++halted;
+      }
+      uint32_t admitted = 0;
+      uint32_t halted = 0;
+
+    private:
+      enum : uint32_t { kSentinel = 0x12345678 };
+      amdgpu::GpuMemory &memory_;
+      const uint32_t &allocations_;
+    };
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<SpillPlugin>(*fx.memory, allocations);
+    auto *spills = plugin.get();
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    fx.soc->set_plugin_group(group);
+    auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+    ASSERT_NE(cp, nullptr);
+    auto queue =
+        test::make_fanout_queue(fx.memory, cp, /*queue_id=*/1, test::AqlQueue::DEFAULT_RING_ADDR,
+                                address_space, kProcessId);
+    queue->dispatch(kScratchKdAddr, total_cus * wave_size, wave_size);
+    fx.engine->run();
+
+    EXPECT_EQ(allocations, 1u);
+    EXPECT_EQ(spills->admitted, total_cus);
+    EXPECT_EQ(spills->halted, total_cus);
+    // Provisioning must not probe every unused physical scratch slot on each
+    // shard. Bound the work by the wave slices that can actually execute.
+    EXPECT_LE(vm_access->scratch_probe_bytes(), 2 * per_wave * total_cus);
+  }
 }
 
 TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {
