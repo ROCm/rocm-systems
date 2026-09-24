@@ -5,7 +5,7 @@ Clang + UBSan, and Clang + ASan, including ConSan device tests on the emulator
 and the physical gfx1201. It is a regression gate, not a replacement for the
 external-workload qualification tables.
 
-**Completed, not green.** All builds passed and the complete registered matrix
+**Initial baseline, before repairs.** All builds passed and the complete registered matrix
 ran against the production sources at `5d45a79720b`. The full test run took
 818 seconds, excluding builds and focused diagnostics. The interrupted first
 attempt is retained in `attempt1/` and is not included in these results.
@@ -75,7 +75,7 @@ physical tests per build. All 469 physical tests per build share the GPU lock.
   restriction. The classifier regressions pass in all three builds; atomic-arrival
   now has a complete trace but retains the ordering failure described below.
 
-## Remaining failures under investigation
+## Initial failures (before the repair passes below)
 
 - Atomic-arrival's clean case now has a complete trace but reports a conflict.
   The observed release RMW has `release=false`; the generated code has a global
@@ -144,8 +144,8 @@ ConSan passed in every build.
 ## GCC repair pass — resolved
 
 The [other host's report](https://gist.github.com/bjacob/e96ca161cf0623a2824a96a140b18095)
-reproduces the same 21 gfx1201 emulator failures. Repairs are being completed
-with GCC before moving to UBSan and ASan. Evidence is retained locally in
+reproduces the same 21 gfx1201 emulator failures. GCC repairs were qualified
+before proceeding to UBSan and ASan. Evidence is retained locally in
 `/home/benoit/workspace/consan-validation/publish-fixes-20260924/`.
 
 - Python 3.10 Tensile launches no longer require `-P`; 37 Tensile tests pass,
@@ -184,3 +184,32 @@ and its CTest rerun (`gcc-vfio-fixed.xml`) pass. No GCC failure remains.
 
 Sanitizer rebuilds and qualification are now underway, using the GCC repairs.
 The original matrix above remains the pre-repair baseline.
+
+## Sanitizer repair pass — in progress
+
+- ASan cache validation must preserve demand-access semantics: missing backing
+  remains retryable, and a refused read leaves its destination untouched.
+  `c2c35c72a66` separates this from debugger probes. The focused run passes all
+  81 cache, VM, debugger, and scratch cases (`asan-cache-focused3.log`).
+- Concurrent HIP graph queues previously shared the process-wide scratch
+  reservation when instrumentation introduced private memory. This corrupted
+  ConSan epochs and produced false conflicts. `21c709eec97` honors ROCr's existing
+  per-queue allocation, resize, and reclaim protocol, even with local KFD backing
+  helpers installed. Both failing ASan graph replay cases pass; a deterministic
+  allocation-protocol regression checks both helper configurations.
+- The physical deliberate-trap test now distinguishes its expected GPU abort
+  from host sanitizer failures. Its checked runner requires trap evidence and
+  successful instrumentation, and rejects sanitizer diagnostics. Five Python
+  regressions cover the runner's acceptance and rejection paths.
+- The installed ROCr predates this branch's existing `069613ef876` signal-pool
+  LeakSanitizer root registration. A fresh branch ROCr build fixes the isolated
+  live-signal and gfx942 HIP leak cases with leak checking enabled. ASan tests
+  use an isolated runtime overlay in the repair artifacts' `runtime/` directory:
+  a copy of SDK `libamdhip64.so.7` with RUNPATH instead of its original RPATH,
+  and symlinks to the freshly built `libhsa-runtime64.so.1`. This prevents HIP's
+  `$ORIGIN` RPATH from silently selecting the old SDK ROCr. The SDK libraries
+  themselves are unchanged; no new leak suppressions were added.
+
+The complete ASan/UBSan rerun is underway (`sanitizers-full1.log`), with 24 CPU
+workers and all physical GPU tests serialized by the shared lock. The original
+baseline above is retained separately from these repair results.
