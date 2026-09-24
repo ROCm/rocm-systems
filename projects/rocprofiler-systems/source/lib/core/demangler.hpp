@@ -15,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 
 struct cxa_demangle_wrapper_impl
@@ -130,5 +128,4 @@ demangle(std::string_view name)
     return get_demangler().demangle(name);
 }
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

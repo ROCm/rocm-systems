@@ -45,7 +45,7 @@ from amdisa.fieldless_policy import (
     operand_participates,
 )
 from amdisa.semantics import F32_TO_INTEGER_DTYPES, InstructionSemantics, SemanticsSpec
-from amdisa.isa_profile import DppOpcodeRule
+from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation
 
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.cpp_file import CppFile
@@ -2197,6 +2197,34 @@ class CodeGenerator:
                 ),
             )
         )
+        dot_accumulation = self.isa_spec.profile.float_dot_accumulation
+        if dot_accumulation is not FloatDotAccumulation.HOST_F32:
+            dot_arch = (
+                'gfx12' if dot_accumulation is FloatDotAccumulation.GFX12 else 'gfx11'
+            )
+            for op, bf16 in (
+                ('VopdDot2AccF32F16', 'false'),
+                ('VopdDot2AccF32Bf16', 'true'),
+            ):
+                vopd_execute_slot_cases = join_cases(
+                    vopd_execute_slot_cases,
+                    case_block(
+                        (op,),
+                        f"""
+                    {{
+                      if (slot.src0->opr_type_ == OperandType::OPR_SRC &&
+                          amdgpu::dot2_src_needs_half_replication(slot.src0->encoding_value())) {{
+                        uint32_t half = src0 & 0xffffu;
+                        if (amdgpu::is_inline_float_src(slot.src0->encoding_value()))
+                          half = {"src0 >> 16" if bf16 == 'true' else "util::f32_to_f16(std::bit_cast<float>(src0))"};
+                        src0 = half * 0x10001u;
+                      }}
+                      const uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
+                      return amdgpu::{dot_arch}_dot2_f32<{bf16}>(src0, src1, src0 >> 16, src1 >> 16, acc);
+                    }}
+                    """,
+                    ),
+                )
         vopd_src2_operand_exprs = ['opx_ == kVopdCndmaskB32']
         if has_op('VopdFmaF32'):
             vopd_src2_operand_exprs.append('opx_ == kVopdFmaF32')
@@ -2210,7 +2238,7 @@ class CodeGenerator:
         vopd_y_src2_is_imm = vopd_x_src2_is_imm.replace('opx_', 'opy_')
         vopd_add_slot_source_cases = join_cases(
             case_block(
-                ('VopdFmacF32',),
+                ('VopdFmacF32', 'VopdDot2AccF32F16', 'VopdDot2AccF32Bf16'),
                 '''
                   add_src(slot.dst);
                   add_src(slot.src0);
@@ -2966,7 +2994,12 @@ class CodeGenerator:
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
                 '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"\n'
-                '#include <algorithm>\n'
+                + (
+                    f'#include "rocjitsu/isa/arch/amdgpu/shared/{"gfx12_dot.h" if dot_accumulation is FloatDotAccumulation.GFX12 else "gfx11_dot2.h"}"\n'
+                    if dot_accumulation is not FloatDotAccumulation.HOST_F32
+                    else ''
+                )
+                + '#include <algorithm>\n'
                 '#include <bit>\n'
                 '#include <cmath>\n'
                 '#include <format>\n'
@@ -6907,8 +6940,7 @@ class CodeGenerator:
             L.append('  uint64_t value = 0;')
             L.append('  switch (msg) {')
             L.append('  case 0x83: {')
-            L.append('    auto *engine = wf.cu().engine();')
-            L.append('    value = engine ? engine->global_time() : 0;')
+            L.append('    value = wf.realtime_timestamp();')
             L.append('    break;')
             L.append('  }')
             L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL
@@ -7101,7 +7133,14 @@ class CodeGenerator:
             L.append(
                 f'  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
             )
-            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            write_kind = (
+                ', amdgpu::HwregWriteKind::Setreg'
+                if profile.uses_vgpr_msb_indexing
+                else ''
+            )
+            L.append(
+                f'  auto result = amdgpu::write_hwreg_field(wf, hwreg, src{write_kind});'
+            )
             L.append('  if (result != amdgpu::HwregAccessResult::Success)')
             L.append(
                 '    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result), '
@@ -7124,7 +7163,14 @@ class CodeGenerator:
                 else 'literal_'
             )
             L.append(f'  uint32_t src = {src_expr};')
-            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            write_kind = (
+                ', amdgpu::HwregWriteKind::SetregImm32'
+                if profile.uses_vgpr_msb_indexing
+                else ''
+            )
+            L.append(
+                f'  auto result = amdgpu::write_hwreg_field(wf, hwreg, src{write_kind});'
+            )
             L.append('  if (result != amdgpu::HwregAccessResult::Success)')
             L.append(
                 '    util::Logger::warn("s_setreg_imm32_b32: ", '
@@ -7354,7 +7400,7 @@ class CodeGenerator:
                 src_ops,
                 cls,
                 opsel_exprs=self._vop3p_opsel_exprs(),
-                replicate_inline=self.isa_spec.arch_name == 'rdna4',
+                dot_accumulation=self.isa_spec.profile.float_dot_accumulation,
             )
 
         if cls.startswith('dot4_'):
@@ -12644,6 +12690,8 @@ class CodeGenerator:
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
                     ('util/except.h', False),
                 ]
@@ -13184,6 +13232,8 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': 'gfx11_dot2_f32',
+                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': 'gfx12_dot2_f32',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',
                     'div_fmas(',
@@ -13646,6 +13696,8 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',

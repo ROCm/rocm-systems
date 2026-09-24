@@ -79,7 +79,15 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_fp8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_fp8(y.__x, 0)));
-  return __builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
+  // The builtin returns the packed fp8 bytes in an int. Returning that int
+  // directly would select rccl_float8's numeric int constructor, which converts
+  // the bit pattern as a value, so reinterpret it as raw storage instead.
+  union {
+    fp8x2_storage_t fp8x2;
+    rccl_float8 fp8[2];
+  } u{0};
+  u.fp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
+  return u.fp8[0];
 #else
   return rccl_float8(float(x) + float(y));
 #endif
@@ -105,7 +113,14 @@ inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_bf8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_bf8(y.__x, 0)));
-  return __builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
+  // See hadd: reinterpret the packed bytes rather than letting the int
+  // constructor convert them numerically.
+  union {
+    fp8x2_storage_t bfp8x2;
+    rccl_bfloat8 bfp8[2];
+  } u{0};
+  u.bfp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
+  return u.bfp8[0];
 #else
   return rccl_bfloat8(float(x) + float(y));
 #endif

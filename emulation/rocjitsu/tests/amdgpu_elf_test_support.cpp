@@ -320,6 +320,33 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text() {
   return make_minimal_amdgpu_elf_with_descriptor_after_text({0xBF800000u, 0xBF800000u});
 }
+
+std::vector<uint8_t> make_minimal_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                    uint32_t elf_machine,
+                                                    const TestKernelDescriptor &kernel_descriptor) {
+  std::vector<uint8_t> image = make_minimal_amdgpu_elf_with_descriptor_after_text(text_words);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  if (ehdr.e_shnum <= 2 || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      ehdr.e_shoff + static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) > image.size())
+    throw std::runtime_error("single-kernel fixture has an invalid section table");
+  ehdr.e_flags = elf_machine;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  Elf64_Shdr rodata{};
+  std::memcpy(&rodata, image.data() + ehdr.e_shoff + 2 * sizeof(Elf64_Shdr), sizeof(rodata));
+  if (rodata.sh_size < sizeof(TestKernelDescriptor) ||
+      rodata.sh_offset + sizeof(TestKernelDescriptor) > image.size())
+    throw std::runtime_error("single-kernel fixture has an invalid kernel descriptor");
+
+  TestKernelDescriptor descriptor = kernel_descriptor;
+  const int64_t entry_offset = read_kernel_descriptor_entry_offset(image.data() + rodata.sh_offset);
+  write_kernel_descriptor_entry_offset(&descriptor, entry_offset);
+  std::memcpy(image.data() + rodata.sh_offset, &descriptor, sizeof(descriptor));
+  return image;
+}
+
 std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
   auto decoder = Decoder::create(arch);
   if (!decoder)

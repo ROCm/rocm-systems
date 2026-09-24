@@ -16,10 +16,7 @@
 
 using namespace std::chrono_literals;
 
-namespace rocprofsys
-{
-
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 struct cacheable_t
@@ -213,5 +210,4 @@ parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
 }
 
 }  // namespace utility
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

@@ -68,6 +68,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).

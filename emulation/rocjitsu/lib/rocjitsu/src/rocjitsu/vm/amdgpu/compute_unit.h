@@ -472,6 +472,9 @@ public:
   /// @brief Lazily acquire and cache the VM helper pool.
   matrix_coexecution::SharedPool &async_pool();
 
+  /// @brief Whether this concrete target has the MODE/VGPR-MSB setreg fixup.
+  bool setreg_vgpr_msb_fixup() const { return setreg_vgpr_msb_fixup_; }
+
   /// @brief Return the shared GPU memory.
   /// @returns Pointer to the GPU memory.
   GpuMemory *memory() const { return memory_; }
@@ -972,6 +975,9 @@ public:
   util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
     assert(inst->execute && "instruction execution backend is not linked");
     wf.clear_instruction_execution_error();
+    const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
+    if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
+      return util::Result::success();
     // The decoded instruction already selects its ISA execution callback.
     inst->execute(*inst, &wf);
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
@@ -1047,7 +1053,7 @@ protected:
   /// @param pre_routing_addresses Original addresses when routing rewrote them.
   /// @param flat_local_lane_mask Requesting FLAT lanes in the LDS aperture half.
   /// @param flat_dds_lane_mask Requesting FLAT lanes in the DDS aperture half.
-  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+  void report_routed_access(const Instruction &inst, Wavefront &wf, uint8_t route_tag,
                             uint8_t decoded_route_tag, bool normalized_to_local,
                             std::span<const uint64_t> pre_routing_addresses,
                             uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);
@@ -1075,6 +1081,7 @@ protected:
   uint32_t shader_engine_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
+  const bool setreg_vgpr_msb_fixup_ = false;
   std::unique_ptr<Decoder> decoder_;
   SgprFile sgpr_file_{"sgpr"};
   /// Null slots are idle; materialized waves persist across dispatches.
@@ -1235,6 +1242,9 @@ inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
 inline Lds &InstructionComputeUnitView::lds() { return raw_cu().lds(); }
 inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_ecc(); }
+inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
+  return raw_cu().setreg_vgpr_msb_fixup();
+}
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
