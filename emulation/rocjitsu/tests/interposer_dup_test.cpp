@@ -613,40 +613,84 @@ TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
     ASSERT_EQ(syscall(SYS_fstat, replacement, &replacement_stat), 0);
 
     std::barrier start(3);
+    // Keep both workers alive until the intended fd operations finish. A worker's
+    // runtime teardown may itself open and close temporary descriptors; letting it
+    // overlap the other worker's deliberate reuse of the lowest free fd adds an
+    // unrelated fd-number ABA race. This barrier is after the syscalls, so it does
+    // not order dup() against close()/dup2().
+    std::barrier workers_finished(2);
     std::atomic<int> duplicated{-1};
+    std::atomic<int> duplicate_errno{0};
     std::atomic<int> close_result{-1};
+    std::atomic<int> close_errno{0};
     std::atomic<int> reuse_result{-1};
+    std::atomic<int> reuse_errno{0};
     std::thread duplicator([&] {
       start.arrive_and_wait();
-      duplicated = dup(drm);
+      errno = 0;
+      const int result = dup(drm);
+      const int saved_errno = errno;
+      duplicated = result;
+      duplicate_errno = saved_errno;
+      workers_finished.arrive_and_wait();
     });
     std::thread closer([&] {
       start.arrive_and_wait();
-      close_result = close(drm);
-      reuse_result = dup2(replacement, drm);
+      errno = 0;
+      const int closed = close(drm);
+      const int saved_close_errno = errno;
+      int reused;
+      int saved_reuse_errno;
+      do {
+        errno = 0;
+        reused = dup2(replacement, drm);
+        saved_reuse_errno = errno;
+      } while (reused < 0 && (saved_reuse_errno == EBUSY || saved_reuse_errno == EINTR));
+      close_result = closed;
+      close_errno = saved_close_errno;
+      reuse_result = reused;
+      reuse_errno = saved_reuse_errno;
+      workers_finished.arrive_and_wait();
     });
     start.arrive_and_wait();
     duplicator.join();
     closer.join();
-    ASSERT_EQ(close_result.load(), 0);
-    ASSERT_EQ(reuse_result.load(), drm);
+    const int duplicate = duplicated.load();
+    ASSERT_EQ(close_result.load(), 0)
+        << "iteration=" << iteration << " close_errno=" << close_errno.load();
+    ASSERT_EQ(reuse_result.load(), drm)
+        << "iteration=" << iteration << " reuse_errno=" << reuse_errno.load()
+        << " duplicated=" << duplicate << " duplicate_errno=" << duplicate_errno.load();
+    if (duplicate < 0) {
+      EXPECT_EQ(duplicate_errno.load(), EBADF) << "iteration=" << iteration;
+    }
 
-    if (duplicated.load() >= 0) {
+    struct stat reused_stat {};
+    ASSERT_EQ(syscall(SYS_fstat, drm, &reused_stat), 0) << "iteration=" << iteration;
+    EXPECT_EQ(reused_stat.st_dev, replacement_stat.st_dev);
+    EXPECT_EQ(reused_stat.st_ino, replacement_stat.st_ino);
+
+    if (duplicate >= 0) {
       struct stat duplicate_stat {};
-      ASSERT_EQ(syscall(SYS_fstat, duplicated.load(), &duplicate_stat), 0);
+      ASSERT_EQ(syscall(SYS_fstat, duplicate, &duplicate_stat), 0);
       drm_syncobj_destroy destroy{};
       destroy.handle = create.handle;
       if (duplicate_stat.st_ino == drm_stat.st_ino) {
-        EXPECT_EQ(ioctl(duplicated.load(), DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+        EXPECT_EQ(ioctl(duplicate, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
       } else {
         EXPECT_EQ(duplicate_stat.st_ino, replacement_stat.st_ino);
-        EXPECT_EQ(ioctl(duplicated.load(), DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+        EXPECT_EQ(ioctl(duplicate, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
         EXPECT_EQ(errno, ENOTTY);
       }
-      EXPECT_EQ(close(duplicated.load()), 0);
+      EXPECT_EQ(close(duplicate), 0) << "iteration=" << iteration;
     }
 
-    EXPECT_EQ(close(drm), 0);
+    // dup() can legally reuse drm's numeric fd if it acquired the source file
+    // before close() freed that number. In that case duplicate and drm name the
+    // same post-dup2 descriptor and must be closed only once.
+    if (duplicate != drm) {
+      EXPECT_EQ(close(drm), 0) << "iteration=" << iteration;
+    }
     EXPECT_EQ(close(replacement), 0);
   }
   EXPECT_EQ(close(kfd), 0);
