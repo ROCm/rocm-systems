@@ -149,6 +149,16 @@ to_string (amd_dbgapi_workgroup_id_t workgroup_id)
 
 template <>
 std::string
+to_string (amd_dbgapi_cluster_id_t cluster_id)
+{
+  if (cluster_id == AMD_DBGAPI_CLUSTER_NONE)
+    return "CLUSTER_NONE";
+
+  return string_printf ("cluster_%" PRId64, cluster_id.handle);
+}
+
+template <>
+std::string
 to_string (amd_dbgapi_dispatch_id_t dispatch_id)
 {
   if (dispatch_id == AMD_DBGAPI_DISPATCH_NONE)
