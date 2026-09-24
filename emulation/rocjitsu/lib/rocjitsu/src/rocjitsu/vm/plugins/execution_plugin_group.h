@@ -12,7 +12,8 @@
 ///
 /// When a plugin is added via add(), the group constructs an internal fanout sink
 /// combining all configured sinks + an optional per-plugin FileSink, and
-/// assigns it to the plugin.
+/// assigns it to the plugin. Every fanout in one group shares a sink mutex so
+/// asynchronous plugin writers cannot concurrently enter a configured sink.
 
 #pragma once
 
@@ -203,6 +204,15 @@ public:
       for (auto &entry : plugins_)
         if (entry.observes_memory_routing)
           entry.plugin->onAmdgpuMemoryAccessRouted(access);
+    });
+  }
+
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &inst, amdgpu::Wavefront &wf) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        if (entry.observes_memory_routing)
+          entry.plugin->onAmdgpuMemoryAccessRouted(access, inst, wf);
     });
   }
 
@@ -401,14 +411,18 @@ private:
   /// group or SinkBundle. It is deliberately not part of the public sink API.
   class FanoutSink final : public PluginSink {
   public:
+    explicit FanoutSink(std::mutex &mutex) : mutex_(mutex) {}
+
     void add(PluginSink &sink) { children_.push_back(&sink); }
     void write(std::string_view msg) override {
+      std::lock_guard<std::mutex> lock(mutex_);
       for (auto *sink : children_)
         sink->write(msg);
     }
     bool empty() const { return children_.empty(); }
 
   private:
+    std::mutex &mutex_;
     std::vector<PluginSink *> children_;
   };
 
@@ -429,13 +443,13 @@ private:
 
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
-  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) const {
+  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
     bool has_file = !sink_dir_.empty() && !file_name.empty();
     if (configured_sinks_.empty() && !has_file)
       return {};
 
     SinkBundle result;
-    auto fanout = std::make_unique<FanoutSink>();
+    auto fanout = std::make_unique<FanoutSink>(sink_mutex_);
     for (const auto &s : configured_sinks_)
       fanout->add(*s);
     if (has_file) {
@@ -458,6 +472,7 @@ private:
 
   // These sinks are declared before plugin entries so plugins and their local
   // fanouts are destroyed before the configured sinks they reference.
+  std::mutex sink_mutex_;
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
   /// Owns the sink assigned to one plugin. The plugin is declared last and is

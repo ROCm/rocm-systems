@@ -186,6 +186,7 @@ def add_general_group(
             "   Triton trace (--triton-trace, --list-triton-operators, "
             "--triton-operator)\n"
             "   ML API trace (--ml-api-trace)\n"
+            "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
         ),
@@ -579,7 +580,7 @@ Examples:
         feature_label="Memory Bandwidth Analysis",
         nargs=0,
         const=True,
-        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+        help="\t\t\tEnable Memory Bandwidth Analysis counters (block 30).",
     )
 
     profile_group.add_argument(
@@ -673,6 +674,12 @@ Examples:
         nargs="+",
         action="append",
         help="\t\tSpecify the raw data root dirs or desired results directory.",
+    )
+    analyze_group.add_argument(
+        "--verify-deps",
+        dest="verify_deps",
+        action="store_true",
+        help="\t\tCheck the Python dependencies analyze mode needs, then exit.",
     )
     analyze_group.add_argument(
         "--list-stats",
@@ -1031,20 +1038,6 @@ Examples:
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-    analyze_group.add_argument(
-        "--membw-analysis",
-        dest="membw_analysis",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
-        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
-    )
-
     analyze_group.add_argument(
         "--gui",
         type=int,

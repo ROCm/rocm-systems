@@ -98,11 +98,54 @@ This includes the ROCm profilers, dependencies, and base packages.
             source .venv/bin/activate
 
             # Install ROCm and the profilers from the AMD package repository.
-            python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
+            python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[profiler]"
 
          .. note::
 
             This pip installation option installs only the components required to run ROCm profiling tools (ROCm Compute Profiler and :doc:`ROCm Systems Profiler <rocprofiler-systems:index>`). It doesn't include other components for developing or building ROCm applications. To install the full development environment, use ``pip install "rocm[devel]"`` or refer to the appropriate pip installation instruction under :doc:`Install AMD ROCm <rocm:install/rocm>` for your system environment.
+
+            This environment runs profile mode. Analyze mode needs Python
+            packages that profile mode does not, so install those separately as
+            described in :ref:`analyze-deps`.
+
+.. _analyze-deps:
+
+Install the analyze mode dependencies
+=====================================
+
+Profile mode uses only the standard library. Analyze mode needs packages such as
+``numpy``, ``pandas``, ``dash``, and ``textual``, at the versions it pins.
+
+Install them into a virtual environment of their own, separate from the one your
+profiled application uses. Those pins can conflict with a workload that brings
+its own ``torch`` or ``numpy``, and a shared environment breaks either side.
+
+.. code-block:: bash
+
+   python3 -m venv ~/.venvs/rocprof-compute-analyze
+   source ~/.venvs/rocprof-compute-analyze/bin/activate
+   python -m pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
+
+This command uses ``--extra-index-url`` rather than the ``--index-url`` used
+above because the analyze packages come from PyPI while ``rocm-profiler`` comes
+from the AMD package repository. ``--index-url`` would replace PyPI and leave
+the analyze packages unresolvable.
+
+To confirm the environment has everything analyze mode needs:
+
+.. code-block:: bash
+
+   rocprof-compute analyze --verify-deps
+
+If you installed ROCm Compute Profiler from a package manager or the tarball
+rather than pip, install the dependencies from the requirements file in that
+installation:
+
+.. code-block:: bash
+
+   pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
+
+``<ROCM_PATH>`` is your ROCm installation path, for example ``/opt/rocm``.
 
 Install from source
 ===================

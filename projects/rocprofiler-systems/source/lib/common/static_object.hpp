@@ -11,9 +11,7 @@
 #include <mutex>
 #include <stack>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 using static_dtor_func_t = void (*)();
 
@@ -184,5 +182,4 @@ register_static_dtor(static_dtor_func_t&& _func)
         _stack->push(_func);
     }
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

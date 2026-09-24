@@ -7,9 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <rocprofiler-sdk/agent.h>
 
-namespace rocprofsys
-{
-namespace agent_info
+namespace rocprofsys::agent_info
 {
 
 inline std::string
@@ -217,5 +215,4 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     return normalize_json_string(data);
 }
 
-}  // namespace agent_info
-}  // namespace rocprofsys
+}  // namespace rocprofsys::agent_info

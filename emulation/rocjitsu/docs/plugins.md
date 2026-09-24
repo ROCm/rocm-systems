@@ -11,7 +11,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
-| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v8 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
+| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
@@ -262,7 +262,9 @@ public:
 ```
 
 The sink is assigned by the `ExecutionPluginGroup` when the plugin is
-added. If no group configures a sink, the default is stderr.
+added. Writes through sinks assigned by one group are serialized at the
+group's fanout boundary, including writes from asynchronous plugin workers.
+If no group configures a sink, the default is stderr.
 
 `KernelDispatchInfo` reports the effective LDS allocation in
 `lds_size_bytes`, the descriptor-selected `wave_size`, the configured
@@ -320,7 +322,13 @@ group divides hooks by frequency and synchronization cost:
   register-access callbacks are high-frequency and run concurrently with both
   other high-frequency callbacks and infrequent callbacks by default. Each
   callback is scoped to a wavefront below the simulation's shader-engine
-  partition granularity.
+  partition granularity. During the before-instruction callback, a memory
+  instruction exposes its decoded wait-counter obligations and completion-order
+  metadata through `amdgpu_memory_issue_info()`, before address or store-data
+  operands are read. This metadata describes operations
+  routed through the scalar, vector, and local memory pipelines; it is not a
+  complete inventory of non-memory events, such as messages and timestamp
+  queries, that hardware wait counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -357,6 +365,12 @@ skipped entirely unless a contained plugin asks for it. A plugin that overrides
 return `true`; the group samples this policy when each plugin is added, and its
 conservative default is `false`. Overriding the hook alone is silent — the
 plugin simply never sees an access.
+
+Plugins that also need execution state may override the context-preserving
+`onAmdgpuMemoryAccessRouted(access, inst, wf)` form. Its default implementation
+forwards to the observation-only form, so existing observers keep the same
+behavior. The borrowed instruction and wavefront already reflect the selected
+route and are valid only during the callback.
 
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.

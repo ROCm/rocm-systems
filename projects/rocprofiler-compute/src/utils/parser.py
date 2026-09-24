@@ -24,6 +24,7 @@ from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
@@ -46,8 +47,6 @@ from utils.utils_common import (
 PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
-# Panel id of block 30, Memory Bandwidth Analysis
-MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
 
 @demarcate
@@ -57,7 +56,6 @@ def build_dfs(
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
     arch: Optional[str] = None,
-    membw_analysis: bool = False,
 ) -> None:
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
@@ -90,10 +88,6 @@ def build_dfs(
         profile_panel_filter = convert_filter_blocks_to_panel_ids(
             profiling_config.get("filter_blocks", []), arch
         )
-
-    # --membw-analysis asks for block 30, so keep it even when -b narrows.
-    if membw_analysis and user_metric_filter:
-        user_metric_filter = [*user_metric_filter, "30"]
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info

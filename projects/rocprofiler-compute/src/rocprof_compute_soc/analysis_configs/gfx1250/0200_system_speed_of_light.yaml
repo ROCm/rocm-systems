@@ -64,30 +64,32 @@ Panel Config:
           peak: $max_sclk * $cu_per_gpu * 16 / 1000
           pct_of_peak: true
         # WMMA FLOPs - Each instruction performs multiple FLOPs
+        # peak uses cu_per_gpu, which in gfx1250 is given to us as num WGP per GPU, therefore
+        # max_sclk * wgp_per_gpu * 4 simd32 per wgp * ops per simd32
         WMMA FLOPs (FP64):
           value: 64 * SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 16384 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 64 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP32):
           value: 128 * SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 16384 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 128 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP16):
           value: 2048 * SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 2048 / 1000
           pct_of_peak: true
         WMMA FLOPs (BF16):
           value: 2048 * SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 2048 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP8):
           value: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 4096 / 1000
           pct_of_peak: true
         WMMA FLOPs (MXFP8):
           value: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -97,22 +99,22 @@ Panel Config:
         WMMA FLOPs (FP6):
           value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 8192 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP4):
           value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 8192 / 1000
           pct_of_peak: true
         WMMA IOPs (Int8):
           value: 4096 * SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 4096 / 1000
           pct_of_peak: true
         WMMA IOPs (Int4):
           value: 8192 * SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 8192 / 1000
           pct_of_peak: true
         Active WGPs:
           value: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM) / SUM(SQG_CYCLES_sum)

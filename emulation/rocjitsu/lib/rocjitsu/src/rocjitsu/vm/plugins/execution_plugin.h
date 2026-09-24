@@ -98,6 +98,8 @@ public:
 
   /// Called before a synchronously executed AMDGPU instruction.
   /// Wavefront state reflects the state prior to the instruction's effects.
+  /// Memory instructions expose their decoded issue metadata through
+  /// Instruction::amdgpu_memory_issue_info() at this point.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
@@ -146,6 +148,16 @@ public:
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
+
+  /// Context-preserving form of onAmdgpuMemoryAccessRouted(). The instruction
+  /// and wavefront are borrowed for the duration of the callback and already
+  /// reflect the selected route. The default preserves source compatibility by
+  /// forwarding to the observation-only hook.
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                          const Instruction & /*inst*/,
+                                          amdgpu::Wavefront & /*wf*/) {
+    onAmdgpuMemoryAccessRouted(access);
+  }
 
   /// Called after one tensor DMA instruction and any descriptor-requested
   /// atomic-barrier arrival return normally. The observation contains only

@@ -115,6 +115,10 @@ class RocProfCompute:
     def get_mode(self) -> Optional[str]:
         return self.__mode
 
+    def get_args(self) -> argparse.Namespace:
+        assert self.__args is not None
+        return self.__args
+
     def set_version(self) -> None:
         vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
@@ -156,43 +160,6 @@ class RocProfCompute:
             )
 
         self._validate_list_option_exclusions()
-
-        # Validate block 30 / block 21 require their respective experimental flags
-        filter_list: list[str] = []
-        if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
-            filter_list = self.__args.filter_blocks
-        elif hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics:
-            filter_list = self.__args.filter_metrics
-
-        for block_input in filter_list:
-            # Check if this is block 30 (starts with "30" or "30.")
-            if block_input.startswith("30") and (
-                len(block_input) == 2 or block_input[2] == "."
-            ):
-                if not self.__args.membw_analysis or not self.__args.experimental:
-                    console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
-                        "feature.\n"
-                        f'To use "-b {block_input}", you must also specify: '
-                        "--experimental --membw-analysis"
-                    )
-            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
-            # from the profiling config yaml.
-            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
-                if not self.__args.pc_sampling or not self.__args.experimental:
-                    console_error(
-                        "Block 21 (PC Sampling) is an experimental feature.\n"
-                        f'To use "-b {block_input}", you must also specify: '
-                        "--experimental --pc-sampling"
-                    )
-
-        # When --pc-sampling is set, inject "21" into filter_blocks so the
-        # profiling config yaml records it and downstream code is unchanged.
-        if self.__mode == "profile" and self.__args.pc_sampling:
-            current = list(self.__args.filter_blocks or [])
-            if "21" not in current:
-                current.append("21")
-            self.__args.filter_blocks = current
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
