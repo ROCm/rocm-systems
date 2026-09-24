@@ -178,6 +178,12 @@ bool ncclAllReduceGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDat
 bool ncclAllReduceGinSdmaYieldToDda(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
   return false;
 }
+
+// Same arrangement for the alltoall selector, whose real definition lives in
+// gin_alltoall_sdma.cu.
+bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+  return false;
+}
 #endif
 
 // Drives `symEligible` in all three rcclSelectXxx functions. Default false:
