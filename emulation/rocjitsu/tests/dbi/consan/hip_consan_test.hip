@@ -258,7 +258,8 @@ __device__ __noinline__ void shared_noinline_atomic_add_for_instrumentation(uint
   uint32_t one = 1;
   // Give ConSan an LDS producer whose release must be instrumented.
   asm volatile("ds_store_b32 %0, %1\n\t" RJ_CONSAN_NOP_CAVE : : "v"(lds_addr), "v"(one) : "memory");
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t" RJ_CONSAN_WAIT_ATOMIC_STORE
@@ -587,7 +588,8 @@ __global__ __launch_bounds__(64) void atomic_handoff_lds_accesses(uint32_t *out,
                  :
                  : "v"(lds_addr), "v"(value)
                  : "memory");
-    asm volatile("s_wait_storecnt 0\n\t"
+    asm volatile("s_wait_dscnt 0\n\t"
+                 "s_wait_storecnt 0\n\t"
                  "global_wb scope:SCOPE_DEV\n\t"
                  "s_wait_storecnt 0\n\t"
                  "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t" RJ_CONSAN_WAIT_ATOMIC_STORE

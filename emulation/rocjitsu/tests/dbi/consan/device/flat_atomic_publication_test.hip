@@ -39,7 +39,8 @@ __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
                : "v"(counter), "v"(one)
                : "memory");
 #else
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"

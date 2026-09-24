@@ -63,7 +63,8 @@ __device__ __forceinline__ void release_vglobal(uint32_t *flag) {
                : "v"(flag), "v"(one)
                : "memory");
 #else
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "global_atomic_add_u32 %0, %1, off scope:SCOPE_DEV\n\t" RJ_VGLOBAL_ATOMIC_STORE_WAIT

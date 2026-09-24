@@ -20,7 +20,8 @@ struct DeviceState {
 
 __device__ __forceinline__ void release_device_scope(uint32_t *flag) {
   const uint32_t one = 1u;
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "global_atomic_add_u32 %0, %1, off scope:SCOPE_DEV\n\t"

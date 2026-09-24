@@ -393,7 +393,8 @@ __device__ __forceinline__ void padded_strong_group_flat_store_b32_at(uint32_t l
 
 __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
   uint32_t one = 1;
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"
@@ -405,7 +406,8 @@ __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
 
 __device__ __forceinline__ void release_global_atomic(uint32_t *counter) {
   uint32_t one = 1;
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "global_atomic_add_u32 %0, %1, off scope:SCOPE_DEV\n\t"
@@ -444,7 +446,8 @@ __device__ __forceinline__ uint32_t acquire_global_atomic(uint32_t *counter) {
 
 __device__ __forceinline__ void release_global_atomic_system(uint32_t *counter) {
   uint32_t one = 1;
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_SYS\n\t"
                "s_wait_storecnt 0\n\t"
                "global_atomic_add_u32 %0, %1, off scope:SCOPE_SYS\n\t"
@@ -472,7 +475,8 @@ __device__ __forceinline__ uint32_t release_flat_cas(uint32_t *counter, uint32_t
                                                      uint32_t replacement) {
   uint32_t old = 0;
   const uint2 values = make_uint2(replacement, compare);
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "flat_atomic_cmpswap_b32 %0, %1, %2 th:TH_ATOMIC_RETURN scope:SCOPE_DEV\n\t"
@@ -487,7 +491,8 @@ __device__ __forceinline__ uint32_t release_global_cas(uint32_t *counter, uint32
                                                        uint32_t replacement) {
   uint32_t old = 0;
   const uint2 values = make_uint2(replacement, compare);
-  asm volatile("s_wait_storecnt 0\n\t"
+  asm volatile("s_wait_dscnt 0\n\t"
+               "s_wait_storecnt 0\n\t"
                "global_wb scope:SCOPE_DEV\n\t"
                "s_wait_storecnt 0\n\t"
                "global_atomic_cmpswap_b32 %0, %1, %2, off th:TH_ATOMIC_RETURN "
