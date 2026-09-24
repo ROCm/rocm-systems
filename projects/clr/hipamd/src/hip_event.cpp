@@ -532,7 +532,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
     amd::ScopedLock lock(g_captureStreamsLock);
     if (!g_captureStreams.empty()) {
       for (auto stream : g_captureStreams) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        stream->InvalidateCapture();
       }
       return hipErrorStreamCaptureUnsupported;
     }
@@ -541,7 +541,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
   // Block if calling thread itself is capturing (both GLOBAL and THREAD_LOCAL)
   if (!hip::tls.capture_streams_.empty()) {
     for (auto stream : hip::tls.capture_streams_) {
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      stream->InvalidateCapture();
     }
     return hipErrorStreamCaptureUnsupported;
   }

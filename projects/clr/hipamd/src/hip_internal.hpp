@@ -251,7 +251,7 @@ extern "C" void __hipOnError(const void *err_info);
       hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                               \
     if (!hip::tls.capture_streams_.empty()) {                                                      \
       for (auto stream : hip::tls.capture_streams_) {                                              \
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                               \
+        stream->InvalidateCapture();                                                               \
       }                                                                                            \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
@@ -259,7 +259,7 @@ extern "C" void __hipOnError(const void *err_info);
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal &&                               \
       !g_captureStreams.empty()) {                                                                 \
     for (auto stream : g_captureStreams) {                                                         \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+      stream->InvalidateCapture();                                                                 \
     }                                                                                              \
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
@@ -268,7 +268,7 @@ extern "C" void __hipOnError(const void *err_info);
 #define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
   if (!g_allCapturingStreams.empty()) {                                                            \
     for (auto stream : g_allCapturingStreams) {                                                    \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+      stream->InvalidateCapture();                                                                 \
     }                                                                                              \
     return err;                                                                                    \
   }
@@ -472,7 +472,8 @@ namespace hip {
       captureEvents_.erase(e);
     }
     /// Mark the whole capture that this stream belongs to as invalidated: the origin and
-    /// every stream enrolled in it. Callable from the origin or from any participant.
+    /// every stream enrolled in it. Callable from the origin or from any participant, and a
+    /// no-op on a stream that is not taking part in a capture.
     void InvalidateCapture();
 
     // --- Execution context (green context) lifecycle ---

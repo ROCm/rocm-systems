@@ -57,14 +57,14 @@ Stream::~Stream() = default;
 
 // ================================================================================================
 void Stream::InvalidateCapture() {
-  // Should be reachable only for a stream mid-capture.
-  assert(GetCaptureStatus() == hipStreamCaptureStatusActive &&
-         "InvalidateCapture expects a live capture; callers skip the other states");
-  assert(captureOwner_ != nullptr && "a stream mid-capture always has a capture owner");
+  hip::Stream* owner = captureOwner_;
+  if (owner == nullptr) {
+    return;
+  }
 
-  captureOwner_->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-  std::scoped_lock lock(captureOwner_->lock_);
-  for (auto* participant : captureOwner_->captureStreams_) {
+  owner->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+  std::scoped_lock lock(owner->lock_);
+  for (auto* participant : owner->captureStreams_) {
     participant->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
   }
 }
@@ -114,7 +114,10 @@ void Stream::JoinCapture(hip::Stream* member) {
   captureOwner_ = owner;
   captureMode_ = owner->captureMode_;
   captureID_ = owner->captureID_;
-  SetCaptureStatus(hipStreamCaptureStatusActive);
+
+  // Inherits the capture's status instead of assuming Active. This protects against the
+  // scenario where InvalidateCapture() runs concurrently on the owner.
+  SetCaptureStatus(owner->GetCaptureStatus());
 }
 
 // ================================================================================================
@@ -262,7 +265,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   const auto captureStatus = s->GetCaptureStatus();
 
   if (captureStatus == hipStreamCaptureStatusActive) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    s->InvalidateCapture();
     return true;
   }
   if (captureStatus == hipStreamCaptureStatusInvalidated) {
@@ -282,7 +285,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
     amd::ScopedLock lock(g_captureStreamsLock);
     if (!g_captureStreams.empty()) {
       for (auto stream : hip::g_captureStreams) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        stream->InvalidateCapture();
       }
       return true;
     }
@@ -290,7 +293,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   // ThreadLocal mode — invalidate all capturing streams in current thread.
   if (!hip::tls.capture_streams_.empty()) {
     for (auto stream : hip::tls.capture_streams_) {
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      stream->InvalidateCapture();
     }
     return true;
   }
@@ -764,7 +767,7 @@ hipError_t hipStreamAddCallback_common(hipStream_t stream, hipStreamCallback_t c
   if (stream != nullptr && stream != hipStreamLegacy && hip::isValid(stream)) {
     hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
     if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      s->InvalidateCapture();
       return hipErrorStreamCaptureUnsupported;
     }
   } else if (Stream::StreamCaptureBlocking()) {

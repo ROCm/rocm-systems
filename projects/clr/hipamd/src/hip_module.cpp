@@ -1018,7 +1018,7 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
     // Not supported while stream is capturing
     hip::Stream* s = reinterpret_cast<hip::Stream*>(launch.stream);
     if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      s->InvalidateCapture();
       return hipErrorStreamCaptureUnsupported;
     }
     if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {

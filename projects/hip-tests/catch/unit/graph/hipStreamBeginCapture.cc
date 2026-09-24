@@ -2668,6 +2668,196 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent) {
   HIP_CHECK(hipStreamDestroy(str2));
 }
 
+namespace {
+void emptyStreamCallback(hipStream_t, hipError_t, void*) {}
+
+// An operation that is not permitted while a stream is capturing. The first four name the stream
+// they act on; the last two name none, so the runtime has to reach the capture without being told
+// which one is meant.
+enum class CaptureOffence {
+  AddCallback,
+  StreamQuery,
+  StreamSynchronize,
+  EventQuery,
+  Malloc,
+  DeviceSynchronize
+};
+
+// `stream` is ignored by the offences that name no stream. `event` must already be recorded
+// inside the capture on `stream` for EventQuery, which is the one offence that reaches the
+// capture through an event rather than through the stream itself.
+hipError_t commitOffence(CaptureOffence offence, hipStream_t stream, hipEvent_t event) {
+  switch (offence) {
+    case CaptureOffence::AddCallback:
+      return hipStreamAddCallback(stream, emptyStreamCallback, nullptr, 0);
+    case CaptureOffence::StreamQuery:
+      return hipStreamQuery(stream);
+    case CaptureOffence::StreamSynchronize:
+      return hipStreamSynchronize(stream);
+    case CaptureOffence::EventQuery:
+      return hipEventQuery(event);
+    case CaptureOffence::Malloc: {
+      void* unused = nullptr;
+      const hipError_t status = hipMalloc(&unused, sizeof(int));
+      if (status == hipSuccess) {
+        static_cast<void>(hipFree(unused));
+      }
+      return status;
+    }
+    case CaptureOffence::DeviceSynchronize:
+      return hipDeviceSynchronize();
+  }
+  return hipSuccess;
+}
+
+// Asserts that every stream taking part in the capture observes the invalidation and that the
+// origin then yields no graph.
+void requireWholeCaptureInvalidated(hipStream_t origin, const std::vector<hipStream_t>& forks) {
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(origin, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+  for (hipStream_t fork : forks) {
+    HIP_CHECK(hipStreamIsCapturing(fork, &captureStatus));
+    REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+  }
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(origin, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verifies that an unsafe call naming one stream of a capture invalidates the whole
+ *      capture, not only the stream named.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture) {
+  const hipStreamCaptureMode captureMode = GENERATE(
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+  const CaptureOffence offence =
+      GENERATE(CaptureOffence::AddCallback, CaptureOffence::StreamQuery,
+               CaptureOffence::StreamSynchronize, CaptureOffence::EventQuery);
+  const bool offendOnFork = GENERATE(false, true);
+
+  StreamsGuard streams(2);
+  EventsGuard events(2);
+  hipStream_t origin = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+
+  HIP_CHECK(hipStreamBeginCapture(origin, captureMode));
+  dummyKernel<<<1, 1, 0, origin>>>();
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipEventRecord(forkEvent, origin));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+  dummyKernel<<<1, 1, 0, forkedStream>>>();
+  HIP_CHECK(hipGetLastError());
+
+  hipStream_t target = offendOnFork ? forkedStream : origin;
+  hipEvent_t offenceEvent = events[1];
+  if (offence == CaptureOffence::EventQuery) {
+    HIP_CHECK(hipEventRecord(offenceEvent, target));
+  }
+
+  // Guards against the offence silently becoming legal, which would let the test pass without
+  // ever invalidating anything.
+  REQUIRE(commitOffence(offence, target, offenceEvent) != hipSuccess);
+  static_cast<void>(hipGetLastError());
+
+  requireWholeCaptureInvalidated(origin, {forkedStream});
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verifies that an unsafe call naming no stream invalidates every stream of a capture.
+ *      Such a call identifies neither the origin nor any fork, so the runtime has to reach every
+ *      stream of every live capture on its own.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_GlobalOffenceInvalidatesWholeCapture) {
+  const hipStreamCaptureMode captureMode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal);
+  const CaptureOffence offence =
+      GENERATE(CaptureOffence::Malloc, CaptureOffence::DeviceSynchronize);
+
+  StreamsGuard streams(2);
+  EventsGuard events(1);
+  hipStream_t origin = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+
+  HIP_CHECK(hipStreamBeginCapture(origin, captureMode));
+  dummyKernel<<<1, 1, 0, origin>>>();
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipEventRecord(forkEvent, origin));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+  dummyKernel<<<1, 1, 0, forkedStream>>>();
+  HIP_CHECK(hipGetLastError());
+
+  REQUIRE(commitOffence(offence, nullptr, nullptr) != hipSuccess);
+  static_cast<void>(hipGetLastError());
+
+  requireWholeCaptureInvalidated(origin, {forkedStream});
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verifies that invalidating a capture through one forked stream reaches its siblings.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_InvalidationReachesSiblingForks) {
+  constexpr int kForks = 3;
+
+  StreamsGuard streams(kForks + 1);
+  EventsGuard events(kForks);
+  hipStream_t origin = streams[0];
+
+  HIP_CHECK(hipStreamBeginCapture(origin, hipStreamCaptureModeThreadLocal));
+  dummyKernel<<<1, 1, 0, origin>>>();
+  HIP_CHECK(hipGetLastError());
+
+  std::vector<hipStream_t> forks;
+  for (int i = 0; i < kForks; ++i) {
+    HIP_CHECK(hipEventRecord(events[i], origin));
+    HIP_CHECK(hipStreamWaitEvent(streams[i + 1], events[i], 0));
+    dummyKernel<<<1, 1, 0, streams[i + 1]>>>();
+    HIP_CHECK(hipGetLastError());
+    forks.push_back(streams[i + 1]);
+  }
+
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  for (hipStream_t fork : forks) {
+    HIP_CHECK(hipStreamIsCapturing(fork, &captureStatus));
+    REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+  }
+
+  HIP_CHECK_ERROR(hipStreamAddCallback(forks[0], emptyStreamCallback, nullptr, 0),
+                  hipErrorStreamCaptureUnsupported);
+  static_cast<void>(hipGetLastError());
+
+  requireWholeCaptureInvalidated(origin, forks);
+}
+
 /**
  * End doxygen group GraphTest.
  * @}

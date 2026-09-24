@@ -723,6 +723,15 @@ graph:
   Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_GlobalOffenceInvalidatesWholeCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_InvalidationReachesSiblingForks:
+    <<: *level_2
+    tags: [capture]
   Unit_hipGraphAddMemcpyNode1D_Functional:
     <<: *level_2
     tags: [node]

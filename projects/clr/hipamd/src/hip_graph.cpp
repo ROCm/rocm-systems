@@ -411,7 +411,7 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
         if (attr.value.dynDataPrefetch == nullptr) {
           return hipErrorInvalidValue;
         }
-        s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        s->InvalidateCapture();
         return hipErrorStreamCaptureUnsupported;
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
