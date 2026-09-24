@@ -181,6 +181,131 @@ set(RCCL_MICRO_TEST_SOURCES
 # Added via target_sources() in each block below instead, once the right
 # path variable for that context is actually in scope.
 
+# Define the per-target micro-test source lists shared by BOTH build paths.
+function(rccl_define_micro_source_lists)
+  # rccl-UnitTestsMicroWarpSpeed -- scheduler UUTs under ENABLE_WARP_SPEED.
+  set(TEST_MICRO_SCHEDULER_SOURCE_FILES
+    scheduler-test.cc
+    fakes/enqueue_fakes.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    # Shared per-production-TU fakes
+    fakes/ce_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rccl_wrap_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/register_stubs.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/sym_kernels_index_fakes.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc.
+  set(TEST_MICRO_INIT_SOURCE_FILES
+    init-test.cc
+    fakes/init_fakes.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/amdsmi_fakes.cc
+    fakes/api_trace_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/env_plugin_fakes.cc
+    fakes/gin_fakes.cc
+    fakes/group_fakes.cc
+    fakes/init_nvtx_fakes.cc
+    fakes/kernel_config_fakes.cc
+    fakes/libc_interposers.cc
+    fakes/mem_manager_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rccl_wrap_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/tuning_fakes.cc
+    fakes/rccl_arch_thresholds_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    ../common/ProcessIsolatedTestRunner.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
+  set(TEST_MICRO_ENQUEUE_SOURCE_FILES
+    enqueue-test.cc
+    fakes/enqueue_test_deps.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/ce_fakes.cc
+    fakes/collconfig_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/group_fakes.cc
+    fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rccl_wrap_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/register_stubs.cc
+    fakes/sched_stubs.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/tuning_fakes.cc
+    fakes/rccl_arch_thresholds_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
+  set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
+    sym-kernels-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/env_fakes.cc
+    fakes/devcomm_fakes.cc
+    fakes/os_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/recorder_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+endfunction()
+
 # =====================================================================
 # In-RCCL-build integration.
 #
@@ -197,6 +322,10 @@ set(RCCL_MICRO_TEST_SOURCES
 # rccl-HostUnitTests + rccl-UnitTestsMicro from a hipified snapshot.
 # =====================================================================
 if(BUILD_TESTS)
+  # Per-mode hipified-snapshot base dir + the shared micro source lists.
+  set(RCCL_HOST_HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
+  rccl_define_micro_source_lists()
+
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
   # to provide test doubles for anything that would require a GPU or other
@@ -284,35 +413,7 @@ if(BUILD_TESTS)
   # requiring that layout (currently just src/scheduler/*.cc) gets its own binary instead of leaking the
   # define into the ~8 unrelated TUs in rccl-UnitTestsMicro. Fakes ncclDevrInitOnce/ncclDevrFindWindow
   # (fakes/dev_runtime_fakes.cc) instead of compiling real dev_runtime.cc.
-  set(TEST_MICRO_SCHEDULER_SOURCE_FILES
-    scheduler-test.cc
-    fakes/enqueue_fakes.cc               # enqueue.cc's own externals, reached transitively by the scheduler UUTs
-    fakes/bootstrap_stubs.cc
-    fakes/topo_stubs.cc
-    fakes/transport_stubs.cc
-    fakes/nccl_stubs.cc
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
-    fakes/ce_fakes.cc                    # src/ce_coll.cc
-    fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
-    fakes/comm_fakes.cc                  # src/init.cc comm lifecycle
-    fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc (window seams + g_devrInitOnce)
-    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-    fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
-    fakes/proxy_fakes.cc                 # src/proxy.cc
-    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
-    fakes/recorder_fakes.cc              # src/recorder.cc
-    fakes/register_stubs.cc              # src/register/*.cc
-    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
-    fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
-    fakes/sym_kernels_index_fakes.cc     # kernel-index/table symbols: own file, rccl-UnitTestsMicro defines these for real
-    fakes/tuning_fakes.cc                # src/graph/tuning.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
-    ../common/main_altrsmi.cpp
-  )
+  # Source list: TEST_MICRO_SCHEDULER_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
   add_executable(rccl-UnitTestsMicroWarpSpeed ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
@@ -349,41 +450,7 @@ if(BUILD_TESTS)
   # the second arm of each macro; tests self-select via #ifdef and coverage is
   # merged across the three binaries.
   # ---------------------------------------------------------------------------
-  set(TEST_MICRO_INIT_SOURCE_FILES
-    init-test.cc
-    fakes/init_fakes.cc                  # src/init.cc-only seams + the Reset/Install chains
-    fakes/bootstrap_stubs.cc             # fail-loud stub floor, grouped by subsystem
-    fakes/topo_stubs.cc
-    fakes/transport_stubs.cc
-    fakes/nccl_stubs.cc                  # core/lifecycle stubs + data symbols
-    fakes/nccl_fakes.cc                  # reusable nccl* stubs
-    fakes/hip_fakes.cc                   # HIP runtime seams
-    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
-    fakes/amdsmi_fakes.cc                # src/misc/amdsmi_wrap.cc
-    fakes/api_trace_fakes.cc             # src/misc/api_trace.cc NCCL_API dispatch
-    fakes/dev_runtime_fakes.cc            # src/dev_runtime.cc window seams
-    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-    fakes/env_plugin_fakes.cc            # src/plugin/env.cc
-    fakes/gin_fakes.cc                   # src/plugin/gin.cc + src/gin/gin_host.cc
-    fakes/group_fakes.cc                 # src/group.cc
-    fakes/init_nvtx_fakes.cc             # src/init_nvtx.cc
-    fakes/kernel_config_fakes.cc         # src/misc/kernel_config.cc
-    fakes/libc_interposers.cc            # gethostname / dladdr
-    fakes/mem_manager_fakes.cc           # src/mem_manager.cc
-    fakes/os_fakes.cc                    # src/os/linux.cc
-    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
-    fakes/recorder_fakes.cc              # src/recorder.cc
-    fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc
-    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
-    fakes/sym_kernels_fakes.cc            # src/sym_kernels.cc
-    fakes/tuning_fakes.cc                # src/graph/tuning.cc
-    fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch/GcnArchNameFormat
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
-    ../common/main_altrsmi.cpp
-    ../common/ProcessIsolatedTestRunner.cpp
-  )
+  # Source list: TEST_MICRO_INIT_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
   # Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
@@ -466,39 +533,7 @@ if(BUILD_TESTS)
   # code) is the same signal: write the fake in its owning TU's fakes file.
   # To recount: take this target's CMakeFiles/.../link.txt, swap --gc-sections for
   # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
-  set(TEST_MICRO_ENQUEUE_SOURCE_FILES
-    enqueue-test.cc
-    fakes/enqueue_test_deps.cc           # ResetEnqueueTestDeps chain only
-    fakes/bootstrap_stubs.cc
-    fakes/topo_stubs.cc
-    fakes/transport_stubs.cc
-    fakes/nccl_stubs.cc
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
-    fakes/ce_fakes.cc                    # src/ce_coll.cc
-    fakes/collconfig_fakes.cc            # src/config/collconfig.cc
-    fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
-    fakes/comm_fakes.cc                  # src/init.cc comm lifecycle
-    fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc
-    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-    fakes/group_fakes.cc                 # src/group.cc (ncclGroupCommJoin's thread-locals)
-    fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
-    fakes/proxy_fakes.cc                 # src/proxy.cc
-    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
-    fakes/recorder_fakes.cc              # src/recorder.cc
-    fakes/register_stubs.cc              # src/register/*.cc
-    fakes/sched_stubs.cc                 # src/scheduler/*.cc + deep launch paths
-    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
-    fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
-    fakes/tuning_fakes.cc                # src/graph/tuning.cc
-    fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
-    ../common/main_altrsmi.cpp
-  )
-
+  # Source list: TEST_MICRO_ENQUEUE_SOURCE_FILES (rccl_define_micro_source_lists).
   rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
   add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
@@ -546,24 +581,7 @@ if(BUILD_TESTS)
   # Gated on GENERATE_SYM_KERNELS: it #includes the generated sym_kernels_host.cc, ON-only.
   # ---------------------------------------------------------------------------
   if(GENERATE_SYM_KERNELS)
-    set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
-      sym-kernels-test.cc
-      fakes/bootstrap_stubs.cc
-      fakes/topo_stubs.cc
-      fakes/transport_stubs.cc
-      fakes/nccl_stubs.cc
-      fakes/nccl_fakes.cc
-      fakes/hip_fakes.cc
-      fakes/env_fakes.cc                   # src/misc/param.cc's ncclGetEnv + getenv interposition
-      fakes/devcomm_fakes.cc               # ncclTeamLsa
-      fakes/os_fakes.cc
-      fakes/strongstream_stubs.cc
-      fakes/recorder_fakes.cc
-      ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
-      ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
-      ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
-      ../common/main_altrsmi.cpp
-    )
+    # Source list: TEST_MICRO_SYM_KERNELS_SOURCE_FILES (rccl_define_micro_source_lists).
     rccl_mark_oracle_tus_generated(${PROJECT_BINARY_DIR}/hipify argcheck archinfo utils)
 
     add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
@@ -711,6 +729,11 @@ endif()
 
 set(RCCL_HIPIFY_DIR "${RCCL_BUILD_DIR}/hipify")
 set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# Per-mode hipified-snapshot base dir + the shared micro source lists (same
+# lists the in-build block above consumes; only the hipify base dir differs).
+set(RCCL_HOST_HIPIFY_DIR "${RCCL_HIPIFY_DIR}")
+rccl_define_micro_source_lists()
 
 if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
   message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
@@ -978,35 +1001,7 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
 # rccl-UnitTestsMicroWarpSpeed -- see the in-build block for the rationale
 # behind the separate binary, ENABLE_WARP_SPEED, and the dev_runtime.cc fakes
 # vs real-compile decision.
-set(TEST_MICRO_SCHEDULER_SOURCE_FILES
-  ${CMAKE_CURRENT_SOURCE_DIR}/scheduler-test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dev_runtime_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/proxy_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_wrap_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/recorder_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/register_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_index_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/tuning_fakes.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
-  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-)
-
+# Source list: TEST_MICRO_SCHEDULER_SOURCE_FILES (rccl_define_micro_source_lists).
 add_test_executable(rccl-UnitTestsMicroWarpSpeed ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
 target_compile_options(rccl-UnitTestsMicroWarpSpeed PRIVATE
   -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
@@ -1039,40 +1034,7 @@ target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE
 # src/init.cc, same model as rccl-UnitTestsMicro. Compiles the real host-only
 # oracle TUs (argcheck/archinfo/utils) from the hipified snapshot; --gc-sections
 # drops their unreferenced deps. One variant per preprocessor-gated arm.
-set(TEST_MICRO_INIT_SOURCE_FILES
-  init-test.cc
-  fakes/init_fakes.cc
-  fakes/bootstrap_stubs.cc
-  fakes/topo_stubs.cc
-  fakes/transport_stubs.cc
-  fakes/nccl_stubs.cc
-  fakes/nccl_fakes.cc
-  fakes/hip_fakes.cc
-  fakes/amdsmi_fakes.cc
-  fakes/api_trace_fakes.cc
-  fakes/dev_runtime_fakes.cc
-  fakes/env_fakes.cc
-  fakes/env_plugin_fakes.cc
-  fakes/gin_fakes.cc
-  fakes/group_fakes.cc
-  fakes/init_nvtx_fakes.cc
-  fakes/kernel_config_fakes.cc
-  fakes/libc_interposers.cc
-  fakes/mem_manager_fakes.cc
-  fakes/os_fakes.cc
-  fakes/rccl_wrap_fakes.cc
-  fakes/recorder_fakes.cc
-  fakes/rocmwrap_fakes.cc
-  fakes/strongstream_stubs.cc
-  fakes/sym_kernels_fakes.cc
-  fakes/tuning_fakes.cc
-  fakes/rccl_arch_thresholds_fakes.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
-  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
-)
+# Source list: TEST_MICRO_INIT_SOURCE_FILES (rccl_define_micro_source_lists).
 
 # Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
 # HIP_UNCACHED_MEMORY and, separately, ENABLE_FAULT_INJECTION at the preprocessor,
@@ -1127,37 +1089,7 @@ endforeach()
 # rationale behind the separate binary and the RCCL_STUBS_OMIT_* macros.
 # ---------------------------------------------------------------------------
 # Same --gc-sections coupling as the in-build list; see the comment there.
-set(TEST_MICRO_ENQUEUE_SOURCE_FILES
-  ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_test_deps.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collconfig_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dev_runtime_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/group_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/proxy_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_wrap_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/recorder_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/register_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sched_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/tuning_fakes.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_arch_thresholds_fakes.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
-  ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
-  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-)
+# Source list: TEST_MICRO_ENQUEUE_SOURCE_FILES (rccl_define_micro_source_lists).
 
 # Two binaries, for the same reason the init pair above exists: enqueue.cc gates
 # rcclShmemDynamicSize (:72-88) at the PREPROCESSOR on RCCL_DEVICE_LINKER, so each
@@ -1213,25 +1145,7 @@ endforeach()
 # -ffunction-sections/--gc-sections dependency-dropping technique.
 # No GENERATE_SYM_KERNELS variable exists in this standalone project(); check the file directly.
 if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
-  set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/sym-kernels-test.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/devcomm_fakes.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/recorder_fakes.cc
-    ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
-    ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
-    ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-  )
-
+  # Source list: TEST_MICRO_SYM_KERNELS_SOURCE_FILES (rccl_define_micro_source_lists).
   add_test_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
 
   target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE
