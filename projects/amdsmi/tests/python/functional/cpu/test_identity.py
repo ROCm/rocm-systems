@@ -25,7 +25,8 @@ class TestCpuIdentity(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
+        self.common.TODO_SKIP_FAIL = False
+        self.common.TODO_SKIP_NOT_COMPLETE = False
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
@@ -38,7 +39,7 @@ class TestCpuIdentity(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_first_online_core_on_cpu_socket=amdsmi.amdsmi_first_online_core_on_cpu_socket
         )
         return
@@ -72,7 +73,7 @@ class TestCpuIdentity(unittest.TestCase):
 
     def test_get_cpu_smu_fw_version(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_smu_fw_version=amdsmi.amdsmi_get_cpu_smu_fw_version
         )
         return

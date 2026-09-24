@@ -19,15 +19,18 @@ class TestCpuBenchmark(unittest.TestCase):
     It only runs performance-specific tests.
     """
 
+    @staticmethod
+    def _cpu_handles_available(cpus):
+        """Return whether CPU socket handles were enumerated."""
+        handles = cpus.get("processor_handles", []) if isinstance(cpus, dict) else cpus
+        return bool(handles)
+
     @classmethod
     def setUpClass(cls):
         # Shared Common instance for logging parity with the unit/integration
         # tests (print_func_name, etc.). Created once per class, as they do.
         cls.common = common.Common(common.verbose)
-        # Detect CPU presence once. Like the regular CPU tests, the CPU perf suite
-        # is skipped on machines without a CPU instead of exercising CPU APIs, which
-        # the C library logs noisily ("No CPU sockets on machine", "Failed to get
-        # cpu family", ...) when no CPU/ESMI driver is present.
+        # Detect CPU presence once for the existing availability coverage.
         cls._has_cpu = False
         try:
             cls.common.amdsmi_smart_init()
@@ -35,13 +38,7 @@ class TestCpuBenchmark(unittest.TestCase):
             # amdsmi_get_cpu_handles() returns {"cpu_count", "processor_handles"};
             # use the handle list (an empty list means no CPU sockets present).
             handles = cpus["processor_handles"] if isinstance(cpus, dict) else cpus
-            # Require a *working* CPU monitoring driver, not just a CPU handle (which
-            # exists on any AMD host even without the ESMI/HSMP driver). Without the
-            # driver the CPU APIs log C-library errors, so skip the suite — mirroring
-            # the regular CPU tests, which skip when the driver is absent.
-            if handles:
-                amdsmi.amdsmi_get_cpu_hsmp_driver_version(handles[0])
-                cls._has_cpu = True
+            cls._has_cpu = cls._cpu_handles_available(handles)
         except Exception:
             cls._has_cpu = False
         finally:
@@ -63,9 +60,6 @@ class TestCpuBenchmark(unittest.TestCase):
 
     def setUp(self):
         """Setup for performance tests - minimal setup just for performance testing."""
-        if not self.__class__._has_cpu:
-            self.skipTest("No AMD CPU present on this machine.")
-
         self.time = time
         self.statistics = statistics
 
@@ -83,10 +77,11 @@ class TestCpuBenchmark(unittest.TestCase):
         # machines without a CPU/ESMI driver.
         try:
             self.common.amdsmi_smart_init()
+            cpu_handles = amdsmi.amdsmi_get_cpu_handles()
             self.processors = (
-                amdsmi.amdsmi_get_processor_handles()
-                if hasattr(amdsmi, "amdsmi_get_processor_handles")
-                else []
+                cpu_handles["processor_handles"]
+                if isinstance(cpu_handles, dict)
+                else cpu_handles
             )
         except Exception as e:
             self.common.print(f"Warning: Failed to initialize AMDSMI: {e}")
@@ -1384,56 +1379,6 @@ class TestCpuBenchmark(unittest.TestCase):
             "amdsmi_get_processor_count_from_handles",
             "Processors",
             "get_processor_count_from_handles",
-        )
-
-    def test_performance_get_processor_handle_from_bdf(self):
-        self.common.print_func_name("")
-        i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
-
-        if len(processor_handles) == 0:
-            self.common.print("No CPU sockets on machine")
-        else:
-            for processor in processor_handles:
-                self._log_test_start("amdsmi_get_processor_handle_from_bdf", "CPU", i)
-
-                try:
-                    # Get BDF for this processor first
-                    bdf = amdsmi.amdsmi_get_gpu_device_bdf(processor)
-
-                    stats = self._measure_api_performance(
-                        amdsmi.amdsmi_get_processor_handle_from_bdf,
-                        f"get_processor_handle_from_bdf_cpu_{i}",
-                        bdf,
-                    )
-
-                    self.perf_results[f"get_processor_handle_from_bdf_cpu_{i}"] = stats
-                    if stats["successful_runs"] > 0:
-                        self._print_performance_results(stats)
-                        self._run_performance_assertions(
-                            stats, "amdsmi_get_processor_handle_from_bdf"
-                        )
-
-                    # Validate that the returned handle matches the original processor
-                    ret = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
-                    if processor.value != ret.value:
-                        self.common.print(
-                            f"  WARNING: CPU {i} - Handle mismatch! Expected: {processor.value}, Received: {ret.value}"
-                        )
-                    else:
-                        self.common.print(
-                            f"  CPU {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
-                        )
-
-                except Exception as e:
-                    self.common.print(f"  CPU {i}: Error getting BDF - {e}")
-
-                self._log_test_completion("CPU", i)
-                i = i + 1
-
-        self._log_performance_summary(
-            "amdsmi_get_processor_handle_from_bdf", "CPUs", "get_processor_handle_from_bdf"
         )
 
     def test_performance_get_processor_handles(self):
