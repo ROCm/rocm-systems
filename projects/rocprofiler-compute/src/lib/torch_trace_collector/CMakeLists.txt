@@ -41,20 +41,12 @@ set_target_properties(
         POSITION_INDEPENDENT_CODE ON
 )
 
-add_library(
-    torch-trace-collector-module
-    MODULE
-    torch_trace_collector_module.cpp
-    torch_abi/runtime.cpp
-)
+add_library(torch-trace-collector-module MODULE torch_trace_collector_module.cpp)
 target_include_directories(
     torch-trace-collector-module
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/torch_abi
 )
-target_link_libraries(
-    torch-trace-collector-module
-    PRIVATE torch-trace-collector ${CMAKE_DL_LIBS}
-)
+target_link_libraries(torch-trace-collector-module PRIVATE torch-trace-collector)
 # Only the plain-C interface is public. PyTorch symbols intentionally remain
 # unresolved until the workload loader promotes its real libtorch_cpu.so.
 set(_torch_collector_exports "${CMAKE_CURRENT_SOURCE_DIR}/exports.map")

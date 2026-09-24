@@ -30,9 +30,8 @@ profiler records those ranges for analyze.
 structural Python frames in the same hierarchy; Inductor kernels launched
 through the static launcher; analyze join on the existing marker CSV.
 
-**Out of scope:** non-Python workloads and arbitrary self-built PyTorch
-binaries. The native collector is enabled only for exact PyTorch builds that
-have passed compatibility validation; other builds use the Python fallback.
+**Out of scope:** non-Python workloads; PyTorch versions other than 2.13 and
+2.14, which use the Python fallback.
 
 **Assumptions:**
 
@@ -64,8 +63,8 @@ What the system shall do:
   same range as nested ATen ops.
 - Marker strings remain compatible with existing analyze: split `Function`
   on `:#`; optional `|backend` moved to a `Backend` column.
-- A workload whose exact PyTorch and native-library identities are not
-  validated uses `TorchDispatchMode` after a warning.
+- A workload PyTorch version with no recorded ABI layout uses
+  `TorchDispatchMode` after a warning.
 
 Non-functional:
 
@@ -105,7 +104,7 @@ flowchart LR
   (`TorchDispatchMode` is off).
 - If the shared library fails to install, profile falls back to
   `TorchDispatchMode` and warns.
-- An unvalidated PyTorch build also warns and uses `TorchDispatchMode`.
+- An unsupported PyTorch version also warns and uses `TorchDispatchMode`.
 - This collector needs two wraps: module forward
   (`nn.Module.{Class}.forward`) and `Tensor.backward`.
 - The rest of the wrap surface is leftover from the Python tracer
@@ -139,13 +138,12 @@ flowchart LR
   not consume PyTorch or Python headers and does not link their libraries.
 - The artifact has no Torch-version or Python-SOABI suffix. Python loads its
   plain-C interface through `ctypes`.
-- The loader checks the exact Torch version/build tag, Git revision, debug
-  flag, and libstdc++ ABI mode. Before callback registration, the collector
-  also verifies the paired GNU build IDs of the loaded `libtorch_cpu.so` and
-  `libc10.so`.
-- Unknown or mismatched identities fail closed to `TorchDispatchMode`. Adding
-  support for another build requires validating it and extending both gates;
-  it does not require another collector artifact.
+- The local declarations read a few PyTorch fields by byte offset. The
+  loader therefore gates on the Torch `<major>.<minor>` whose layouts
+  `torch_abi.h` records, and an unsupported version falls back to
+  `TorchDispatchMode`.
+- The real-libtorch test checks those layouts against the upstream headers, so
+  a layout change fails a test rather than corrupting reads at runtime.
 
 ---
 
@@ -159,8 +157,9 @@ Details: `lld-torch-trace-collector.md`.
 - Profile/analyze tests for `--torch-trace` output and operator listing.
 - Build, install, and package tests run without PyTorch installed and verify
   that the generic collector is present.
-- Loader and native tests cover exact-identity acceptance, mismatched-library
-  rejection, and warning-based fallback without registering a callback.
+- Loader and native tests cover version acceptance and rejection, the
+  plain-C boundary, and warning-based fallback without registering a
+  callback.
 
 ---
 
@@ -170,5 +169,5 @@ Details: `lld-torch-trace-collector.md`.
 | --- | --- |
 | Inductor static launcher | Those kernels launch without Triton's Python entry point now, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
 | Offline correlation | Encode `seqNr` and PyTorch thread ids in the ROCTX string, larger payload to `roctxRangePushA`. Analyze splices the worker leaf to the matching forward nest (main thread, same `seqNr`). No snapshot store. We may still need overlay to append `Tensor.backward` wrap range (also a main-thread write; no `seqNr`).|
-| Further Torch versions | Each exact build needs validation and entries in the Python identity and paired native-library build-ID gates. The generic artifact is unchanged. |
-| DispatchMode fallback | Missing, unvalidated, mismatched, or failed native collectors warn and use the reduced Python path. |
+| Further Torch versions | Each new minor version needs its layouts confirmed by the real-libtorch test and an entry in the loader's supported set. The artifact is unchanged. |
+| DispatchMode fallback | A missing, unsupported, or failed collector warns and uses the reduced Python path. |

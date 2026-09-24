@@ -902,17 +902,28 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* PyTorch in the profiling environment. Full native coverage requires an exact
-  validated PyTorch 2.13 or 2.14 build; other builds use the reduced Python
-  fallback.
+* PyTorch in the profiling environment. PyTorch 2.13 or 2.14 gets the full
+  operator trace; other versions get the reduced trace described below.
 * PyTorch application must be run as a Python script or a Python command.
+
+``--torch-trace`` records PyTorch operators in one of two ways:
+
+* The **collector** is a small shared library that registers a callback inside
+  PyTorch itself. The callback runs on every thread, so the trace includes the
+  operators that autograd runs on its own worker threads during the backward
+  pass. This is used for PyTorch 2.13 and 2.14.
+* ``TorchDispatchMode`` is a PyTorch hook that calls back into Python around
+  each operator. It works on any PyTorch version, but it only sees the thread
+  it was entered on, so backward-pass operators are missed. This is used for
+  every other PyTorch version, and whenever the collector cannot be loaded.
+
+Profiling never stops because of this. When the collector is unavailable,
+``--torch-trace`` prints a warning and continues with ``TorchDispatchMode``.
 
 .. important::
 
-   For full native coverage, install PyTorch together with ROCm from the TheRock
-   package index. The native collector is enabled only for exact PyTorch wheel
-   builds validated with that ROCm release. A separately installed or self-built
-   PyTorch uses reduced-coverage Python tracing instead.
+   PyTorch must be installed together with ROCm from the TheRock package index.
+   Loading two different ROCm installations in one process aborts at startup.
 
    Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
    ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
@@ -973,18 +984,14 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-``--torch-trace`` loads one generic ``torch_trace_collector.so`` through a
-plain-C interface. The collector is built and packaged as C++17 without
-PyTorch headers or libraries and has no dependency on the workload's Python
-ABI. The loader verifies the exact PyTorch build, and the collector verifies
-the paired ``libtorch_cpu.so`` and ``libc10.so`` GNU build IDs before
-installing its callback.
+One ``torch_trace_collector.so`` ships with rocprofiler-compute and is loaded
+through a plain-C interface. It is built as C++17 without PyTorch headers or
+libraries, and it does not depend on the Python version the workload runs, so
+a single file covers every supported setup.
 
-If the collector is absent, fails to load, or does not recognize the workload's
-exact PyTorch or native-library identities, profiling continues with
-``TorchDispatchMode`` and prints a warning. This fallback records operations
-executed on the Python thread but has reduced coverage for autograd worker
-threads.
+The collector reads a few PyTorch types by byte offset, so it is enabled only
+for the PyTorch versions whose layouts rocprofiler-compute records. Any other
+version falls back to ``TorchDispatchMode``.
 
 Output
 ------

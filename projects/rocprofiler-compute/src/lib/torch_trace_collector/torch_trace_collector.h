@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Plain-C interface to the collector, which emits ROCTX ranges around PyTorch
+// operators through a RecordFunction callback.
+
 #pragma once
 
 #include <stdint.h>
@@ -49,36 +52,39 @@ struct torch_trace_collector_stats
 TORCH_TRACE_COLLECTOR_NODISCARD TORCH_TRACE_COLLECTOR_EXPORT uint32_t torch_trace_collector_abi_revision(void);
 
 /**
- * Installs the process-global PyTorch RecordFunction callback.
- * @return Zero on success and nonzero on failure or an unsupported runtime.
+ * Installs the global RecordFunction callback that emits a ROCTX range around
+ * each PyTorch operator. Idempotent.
+ * @return Zero on success and nonzero on failure.
  */
 TORCH_TRACE_COLLECTOR_NODISCARD TORCH_TRACE_COLLECTOR_EXPORT int32_t torch_trace_collector_install(void);
 
 /**
- * Removes the process-global RecordFunction callback and clears snapshots.
+ * Removes the registered callback and clears snapshots.
  * @return Zero on success and nonzero on failure.
  */
 TORCH_TRACE_COLLECTOR_NODISCARD TORCH_TRACE_COLLECTOR_EXPORT int32_t torch_trace_collector_uninstall(void);
 
-/** @return One when installed, otherwise zero. */
+/** @return One when the callback is installed, otherwise zero. */
 TORCH_TRACE_COLLECTOR_NODISCARD TORCH_TRACE_COLLECTOR_EXPORT int32_t torch_trace_collector_is_installed(void);
 
 /**
- * Pushes a Python user scope into the live stack and ThreadLocalDebugInfo.
- * The collector must already be installed and all strings must be non-null.
+ * Pushes a marker frame, emits a ROCTX range, and publishes the thread stack
+ * to ThreadLocalDebugInfo so autograd workers inherit it. The collector must
+ * already be installed and all strings must be non-null UTF-8.
  * @return Zero on success and nonzero on failure.
  */
 TORCH_TRACE_COLLECTOR_NODISCARD TORCH_TRACE_COLLECTOR_EXPORT int32_t
     torch_trace_collector_push_user_scope(const char* marker, const char* context, const char* backend);
 
 /**
- * Pops the most recent user scope on the calling thread.
- * @return Zero on success and nonzero on failure.
+ * Pops the most recent torch_trace_collector_push_user_scope frame on the
+ * calling thread.
+ * @return Zero on success and nonzero when the thread has no frame to pop.
  */
 TORCH_TRACE_COLLECTOR_NODISCARD TORCH_TRACE_COLLECTOR_EXPORT int32_t torch_trace_collector_pop_user_scope(void);
 
 /**
- * Copies the current counters into @p stats. The caller must initialize
+ * Copies the collector counters into @p stats. The caller must initialize
  * `stats->struct_size` to at least `sizeof(struct torch_trace_collector_stats)`.
  * @return Zero on success and nonzero on invalid input or failure.
  */

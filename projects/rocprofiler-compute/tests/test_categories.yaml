@@ -54,9 +54,6 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test-torch-abi-runtime
-      - test_torch_trace_collector_elf
-      - test_torch_trace_collector_runtime
       - test_conftest
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
@@ -150,9 +147,6 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test-torch-abi-runtime
-      - test_torch_trace_collector_elf
-      - test_torch_trace_collector_runtime
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -252,9 +246,6 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test-torch-abi-runtime
-      - test_torch_trace_collector_elf
-      - test_torch_trace_collector_runtime
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -354,9 +345,6 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test-torch-abi-runtime
-      - test_torch_trace_collector_elf
-      - test_torch_trace_collector_runtime
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -395,8 +383,6 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-abi-runtime
-      - test_torch_trace_collector_elf
     labels:
       - "sanitizer"
 

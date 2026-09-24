@@ -26,7 +26,7 @@ struct DebugInfoKind
 };
 
 // These assertions validate the replacement declaration, not PyTorch itself.
-// A build is allowlisted only after a separate probe verifies the real layouts.
+// test_torch_trace_collector.cpp checks the constants against the real headers.
 static_assert(sizeof(DebugInfoKind) == torch_abi::kDebugInfoKindSize);
 static_assert(alignof(DebugInfoKind) == torch_abi::kDebugInfoKindAlignment);
 static_assert(std::is_trivially_copyable_v<DebugInfoKind>);

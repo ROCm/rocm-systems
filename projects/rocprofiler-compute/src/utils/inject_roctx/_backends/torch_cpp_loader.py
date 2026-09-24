@@ -11,7 +11,7 @@ before the collector is loaded.
 import ctypes
 import os
 from pathlib import Path
-from typing import Dict, FrozenSet, NamedTuple, Optional
+from typing import Dict, FrozenSet, Optional, Tuple
 
 from utils.logger import console_log, console_warning
 from utils.native_tool_finder import find_prebuilt_artifacts
@@ -23,38 +23,11 @@ _ARTIFACT_NAME = "torch_trace_collector.so"
 _TORCH_CPU_LIBRARY_NAME = "libtorch_cpu.so"
 _EXPECTED_COLLECTOR_ABI_REVISION = 1
 
+_UNKNOWN_TORCH_VERSION = ""
 
-class _TorchIdentity(NamedTuple):
-    version: str
-    git_version: str
-    debug: bool
-    uses_cxx11_abi: bool
-
-
-_UNKNOWN_TORCH_IDENTITY = _TorchIdentity(
-    version="",
-    git_version="",
-    debug=False,
-    uses_cxx11_abi=False,
-)
-
-
-# This identity gate is a cheap necessary precondition. The native build-ID
-# gate is authoritative and intentionally narrower for exact wheel artifacts.
-_VALIDATED_TORCH_BUILDS: FrozenSet[_TorchIdentity] = frozenset({
-    _TorchIdentity(
-        version="2.13.0+cpu",
-        git_version="cf30153c4c131c8164ee7798e5022d810682e2cb",
-        debug=False,
-        uses_cxx11_abi=True,
-    ),
-    _TorchIdentity(
-        version="2.14.0+rocm10.2.0a20260917",
-        git_version="50011224068dd1fbc41573a6e43c9d9ffa053a63",
-        debug=False,
-        uses_cxx11_abi=True,
-    ),
-})
+# The collector reads PyTorch types by byte offset, so it is enabled only for
+# the minor versions whose layouts torch_abi.h records.
+_SUPPORTED_TORCH_VERSIONS: FrozenSet[str] = frozenset({"2.13", "2.14"})
 
 _TORCH_LIBRARY_LOAD_MODE = os.RTLD_GLOBAL | os.RTLD_LAZY | os.RTLD_NODELETE
 _COLLECTOR_LOAD_MODE = ctypes.RTLD_LOCAL | os.RTLD_NOW | os.RTLD_NODELETE
@@ -95,16 +68,13 @@ class CollectorNotBuiltError(CollectorUnavailableError):
 
 
 class UnsupportedTorchVersionError(CollectorUnavailableError):
-    """The workload PyTorch build has not passed native ABI validation."""
+    """The workload PyTorch minor version has no recorded ABI layout."""
 
-    def __init__(self, identity: _TorchIdentity) -> None:
-        validated_versions = sorted(build.version for build in _VALIDATED_TORCH_BUILDS)
+    def __init__(self, workload_torch_version: str) -> None:
         super().__init__(
-            "torch_trace_collector does not support this PyTorch build "
-            f"(version={identity.version or 'unknown'}, "
-            f"git={identity.git_version or 'unknown'}, debug={identity.debug}, "
-            f"cxx11_abi={identity.uses_cxx11_abi}). Validated builds: "
-            f"{', '.join(validated_versions)}."
+            "torch_trace_collector does not support PyTorch "
+            f"{workload_torch_version or 'unknown'}. Supported versions: "
+            f"{', '.join(sorted(_SUPPORTED_TORCH_VERSIONS))}."
         )
 
 
@@ -153,25 +123,27 @@ class TorchTraceCollector:
         self._library.torch_trace_collector_get_stats.restype = ctypes.c_int32
 
     def install(self) -> None:
-        """Install the global RecordFunction callbacks."""
+        """Install the global RecordFunction callback. Idempotent."""
         self._require_success(
             self._library.torch_trace_collector_install(),
             "install",
         )
 
     def uninstall(self) -> None:
-        """Remove the global RecordFunction callbacks."""
+        """Remove the registered callback."""
         self._require_success(
             self._library.torch_trace_collector_uninstall(),
             "uninstall",
         )
 
     def is_installed(self) -> bool:
-        """Return whether the global RecordFunction callbacks are installed."""
+        """Return True if the callback is installed."""
         return self._library.torch_trace_collector_is_installed() == 1
 
     def push_user_scope(self, marker: str, context: str, backend: str = "") -> None:
-        """Push one user scope using UTF-8 strings."""
+        """Push a marker frame, emit a ROCTX range, and publish the stack to
+        ThreadLocalDebugInfo.
+        """
         result = self._library.torch_trace_collector_push_user_scope(
             marker.encode("utf-8"),
             context.encode("utf-8"),
@@ -180,14 +152,14 @@ class TorchTraceCollector:
         self._require_success(result, "push_user_scope")
 
     def pop_user_scope(self) -> None:
-        """Pop the most recent user scope on this thread."""
+        """Pop the most recent push_user_scope frame on this thread."""
         self._require_success(
             self._library.torch_trace_collector_pop_user_scope(),
             "pop_user_scope",
         )
 
     def dump_stats(self) -> Dict[str, object]:
-        """Return a snapshot of the native collector counters."""
+        """Return collector counters."""
         stats = _CollectorStats()
         stats.struct_size = ctypes.sizeof(_CollectorStats)
         self._require_success(
@@ -216,24 +188,21 @@ class TorchTraceCollector:
             )
 
 
-def _workload_torch_identity() -> _TorchIdentity:
-    """Return the exact workload Torch identity used by the ABI allowlist."""
+def _workload_torch_version() -> str:
+    """Return the workload PyTorch version as major.minor."""
     try:
         import torch
+        from torch.torch_version import Version
 
-        return _TorchIdentity(
-            version=str(torch.__version__),
-            git_version=str(getattr(torch.version, "git_version", "")),
-            debug=bool(torch.version.debug),
-            uses_cxx11_abi=bool(torch._C._GLIBCXX_USE_CXX11_ABI),
-        )
+        release: Tuple[int, ...] = Version(torch.__version__).release
+        return f"{release[0]}.{release[1]}"
     except Exception as error:
         console_warning(
             "ml api trace",
-            "Could not determine the PyTorch build identity "
+            "Could not determine the PyTorch version "
             f"({type(error).__name__}: {error}).",
         )
-        return _UNKNOWN_TORCH_IDENTITY
+        return _UNKNOWN_TORCH_VERSION
 
 
 def _discover_collector_artifact() -> Optional[Path]:
@@ -253,21 +222,21 @@ def _promote_torch_cpu() -> ctypes.CDLL:
 
 
 def load() -> TorchTraceCollector:
-    """Load the generic collector for an explicitly validated Torch build."""
+    """Load the generic collector for a supported workload PyTorch version."""
     global _torch_cpu_library
 
-    identity = _workload_torch_identity()
-    if identity not in _VALIDATED_TORCH_BUILDS:
-        raise UnsupportedTorchVersionError(identity)
+    torch_version = _workload_torch_version()
+    if torch_version not in _SUPPORTED_TORCH_VERSIONS:
+        raise UnsupportedTorchVersionError(torch_version)
 
     so_path = _discover_collector_artifact()
     if so_path is None:
-        raise CollectorNotBuiltError(identity.version)
+        raise CollectorNotBuiltError(torch_version)
 
     try:
         if _torch_cpu_library is None:
             _torch_cpu_library = _promote_torch_cpu()
-        library = ctypes.PyDLL(str(so_path), mode=_COLLECTOR_LOAD_MODE)
+        library = ctypes.CDLL(str(so_path), mode=_COLLECTOR_LOAD_MODE)
         collector = TorchTraceCollector(library, so_path)
     except Exception as error:
         raise CollectorLoadError(so_path, error) from error

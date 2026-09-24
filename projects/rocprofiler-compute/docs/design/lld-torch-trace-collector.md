@@ -179,18 +179,16 @@ RecordFunction callback boundary.
   Python-SOABI suffix. Library output is `${CMAKE_BINARY_DIR}/lib`; the install
   destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or
   `lib64`).
-- `torch_cpp_loader.py` imports the workload's PyTorch, checks its exact
-  version/build tag, Git revision, debug flag, and libstdc++ ABI mode against
-  the validated allowlist, and locates the generic artifact.
+- `torch_cpp_loader.py` imports the workload's PyTorch, reduces its version to
+  `<major>.<minor>`, checks it against `_SUPPORTED_TORCH_VERSIONS`, and locates
+  the artifact. `torch_abi.h` records one set of layouts covering those
+  versions, so the version is the whole gate.
 - The loader reopens the workload's `libtorch_cpu.so` so its Torch/c10 symbols
   are globally visible, loads the collector locally through `ctypes`, and uses
   only its plain-C interface. The collector has no Python ABI dependency.
-- Before callback registration, the native gate matches the mapped
-  `libtorch_cpu.so` and `libc10.so` GNU build IDs as a validated pair. This
-  build-only collector has no AOTI dependency.
-- A missing artifact, unsupported identity, mismatched library pair, loader
-  error, or rejected installation emits a warning and returns control to
-  `TorchDispatchMode`; it does not terminate the workload.
+- A missing artifact, unsupported version, loader error, or rejected
+  installation emits a warning and returns control to `TorchDispatchMode`; it
+  does not terminate the workload.
 
 Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
 
@@ -209,12 +207,11 @@ then does not see `/opt/rocm`.
 
 - `src/lib/torch_trace_collector/tests/test_torch_trace_collector.cpp` verifies
   snapshot join of backward to forward, overlay of wrap frames on a worker,
-  dummy locations, marker encoding, and install.
-- Loader unit tests verify generic-artifact discovery, exact Torch identity
-  gating, native-library promotion, the plain-C call boundary, and fallback.
-- ELF and packaging checks verify the generic name, exported C surface,
-  unresolved Torch/c10 imports, absence of Torch/Python `DT_NEEDED` entries,
-  and installation when no PyTorch is available at build time.
+  dummy locations, marker encoding, and install. It links the real libtorch, so
+  it also checks every `torch_abi.h` constant against the real PyTorch headers
+  and exercises the plain-C entry points. A layout change fails this test.
+- Loader unit tests verify generic-artifact discovery, version gating,
+  native-library promotion, the plain-C call boundary, and fallback.
 - `tests/integration/test_profile_torch_trace.py` verifies end-to-end
   `--torch-trace` on a sample workload.
 - `tests/integration/test_torch_trace_coverage.py` compares `--torch-trace`

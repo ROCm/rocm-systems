@@ -9,13 +9,19 @@
 #include "snapshot_store.h"
 #include "stack_entry.h"
 #include "stats.h"
+#include "torch_trace_collector.h"
 #include "user_scope.h"
 #include "wire_format.h"
+
+// Included by path so the real ATen and c10 headers above are not shadowed by
+// the collector's stand-in declarations under torch_abi/.
+#include "../torch_abi/torch_abi.h"
 
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <ATen/ThreadLocalState.h>
 #include <ATen/record_function.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 #include <gtest/gtest.h>
 
 extern "C"
@@ -27,6 +33,8 @@ extern "C"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -751,4 +759,183 @@ TEST_F(TorchTraceCollectorRealOpsTest, ConcurrentThreadsScopedMarkers)
     EXPECT_EQ(stats().callback_errors.load(), 0u);
     EXPECT_EQ(stats().pushes.load(), stats().pops.load());
     EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
+}
+
+// ---------------------------------------------------------------------------
+// torch_abi.h layouts, checked against the real PyTorch headers.
+// ---------------------------------------------------------------------------
+
+static_assert(sizeof(at::RecordFunction) == torch_abi::kRecordFunctionSize);
+static_assert(alignof(at::RecordFunction) == torch_abi::kRecordFunctionAlignment);
+static_assert(static_cast<std::size_t>(at::RecordScope::NUM_SCOPES) == torch_abi::kScopeCount);
+
+static_assert(sizeof(at::RecordFunctionCallback) == torch_abi::kCallbackSize);
+static_assert(alignof(at::RecordFunctionCallback) == torch_abi::kCallbackAlignment);
+static_assert(sizeof(at::ObserverContext) == torch_abi::kObserverContextSize);
+static_assert(alignof(at::ObserverContext) == torch_abi::kObserverContextAlignment);
+
+static_assert(sizeof(c10::DebugInfoKind) == torch_abi::kDebugInfoKindSize);
+static_assert(alignof(c10::DebugInfoKind) == torch_abi::kDebugInfoKindAlignment);
+static_assert(sizeof(c10::DebugInfoBase) == torch_abi::kDebugInfoBaseSize);
+static_assert(alignof(c10::DebugInfoBase) == torch_abi::kDebugInfoBaseAlignment);
+static_assert(sizeof(c10::DebugInfoGuard) == torch_abi::kDebugInfoGuardSize);
+static_assert(alignof(c10::DebugInfoGuard) == torch_abi::kDebugInfoGuardAlignment);
+static_assert(sizeof(std::shared_ptr<c10::DebugInfoBase>) == torch_abi::kSharedDebugInfoSize);
+static_assert(alignof(std::shared_ptr<c10::DebugInfoBase>) == torch_abi::kSharedDebugInfoAlignment);
+
+namespace
+{
+
+// The fields the collector reads are private in PyTorch, so offsetof is out of
+// reach. Read through the offsets and compare against the public accessors.
+template<typename Tp>
+Tp read_at_offset(const at::RecordFunction& record, std::size_t offset)
+{
+    Tp value{};
+    std::memcpy(&value, reinterpret_cast<const std::byte*>(&record) + offset, sizeof(value));
+    return value;
+}
+
+}  // namespace
+
+TEST(TorchAbiLayout, RecordFunctionOffsetsMatchAccessors)
+{
+    constexpr std::int64_t kProbeSeqNr = 987654321;
+
+    at::RecordFunction record(at::RecordScope::USER_SCOPE);
+    record.before("torch_abi.probe", kProbeSeqNr);
+
+    EXPECT_EQ(read_at_offset<at::RecordScope>(record, torch_abi::kRecordFunctionScopeOff),
+              record.scope());
+    EXPECT_EQ(read_at_offset<std::int64_t>(record, torch_abi::kRecordFunctionSeqNrOff), record.seqNr());
+    EXPECT_EQ(read_at_offset<std::uint64_t>(record, torch_abi::kRecordFunctionFwdThreadOff),
+              record.forwardThreadId());
+    EXPECT_EQ(record.seqNr(), kProbeSeqNr);
+}
+
+// ---------------------------------------------------------------------------
+// Plain-C interface exported by torch_trace_collector.so.
+// ---------------------------------------------------------------------------
+
+class TorchTraceCollectorCApiTest : public TorchTraceCollectorTest
+{
+protected:
+    void TearDown() override
+    {
+        EXPECT_EQ(torch_trace_collector_uninstall(), 0);
+        TorchTraceCollectorTest::TearDown();
+    }
+};
+
+TEST_F(TorchTraceCollectorCApiTest, ReportsExpectedAbiRevision)
+{
+    EXPECT_EQ(torch_trace_collector_abi_revision(), TORCH_TRACE_COLLECTOR_ABI_REVISION);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, InstallIsIdempotentAndVisible)
+{
+    EXPECT_EQ(torch_trace_collector_is_installed(), 0);
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+    EXPECT_EQ(torch_trace_collector_is_installed(), 1);
+    EXPECT_EQ(torch_trace_collector_install(), 0);
+    EXPECT_EQ(torch_trace_collector_is_installed(), 1);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, RejectsNullUserScopeStrings)
+{
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+
+    EXPECT_NE(torch_trace_collector_push_user_scope(nullptr, "ctx", "gtest"), 0);
+    EXPECT_NE(torch_trace_collector_push_user_scope("marker", nullptr, "gtest"), 0);
+    EXPECT_NE(torch_trace_collector_push_user_scope("marker", "ctx", nullptr), 0);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, RejectsUserScopeBeforeInstall)
+{
+    EXPECT_NE(torch_trace_collector_push_user_scope("before-install", "n/a", "gtest"), 0);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, RejectsPopWithoutMatchingPush)
+{
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+
+    EXPECT_NE(torch_trace_collector_pop_user_scope(), 0);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, UserScopeEmitsEncodedRange)
+{
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+
+    roctx_range_intercept::start_recording();
+    ASSERT_EQ(torch_trace_collector_push_user_scope("test.outer/%", "#1@test:7", "runtime"), 0);
+    const auto recorded = roctx_range_intercept::stop_recording();
+    ASSERT_EQ(torch_trace_collector_pop_user_scope(), 0);
+
+    ASSERT_EQ(recorded.size(), 1u);
+    EXPECT_EQ(recorded.front(), "test.outer%2F%25:#1@test:7|runtime");
+}
+
+TEST_F(TorchTraceCollectorCApiTest, ScopeOpenedBeforeUninstallCanStillBePopped)
+{
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+    ASSERT_EQ(torch_trace_collector_push_user_scope("lifecycle-scope", "n/a", "gtest"), 0);
+    ASSERT_EQ(torch_trace_collector_uninstall(), 0);
+
+    EXPECT_EQ(torch_trace_collector_pop_user_scope(), 0);
+    EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
+}
+
+TEST_F(TorchTraceCollectorCApiTest, StatsRejectUndersizedOrNullStorage)
+{
+    torch_trace_collector_stats collector_stats{};
+    collector_stats.struct_size = sizeof(collector_stats) - 1;
+    EXPECT_NE(torch_trace_collector_get_stats(&collector_stats), 0);
+    EXPECT_NE(torch_trace_collector_get_stats(nullptr), 0);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, StatsReportUserScopeActivity)
+{
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+    ASSERT_EQ(torch_trace_collector_push_user_scope("test.stats", "#1@test:1", "gtest"), 0);
+    ASSERT_EQ(torch_trace_collector_pop_user_scope(), 0);
+
+    torch_trace_collector_stats collector_stats{};
+    collector_stats.struct_size = sizeof(collector_stats);
+    ASSERT_EQ(torch_trace_collector_get_stats(&collector_stats), 0);
+
+    EXPECT_EQ(collector_stats.installed, 1u);
+    EXPECT_EQ(collector_stats.user_scope_pushes, 1u);
+    EXPECT_EQ(collector_stats.user_scope_pops, 1u);
+    EXPECT_EQ(collector_stats.callback_errors, 0u);
+}
+
+TEST_F(TorchTraceCollectorCApiTest, ConcurrentInstallAndUninstallStayConsistent)
+{
+    constexpr int kThreads    = 8;
+    constexpr int kIterations = 16;
+
+    std::vector<std::thread> workers;
+    std::atomic<int>         failures{0};
+    for (int index = 0; index < kThreads; ++index)
+    {
+        workers.emplace_back(
+            [&failures]
+            {
+                for (int iteration = 0; iteration < kIterations; ++iteration)
+                {
+                    if (torch_trace_collector_install() != 0 || torch_trace_collector_uninstall() != 0)
+                    {
+                        failures.fetch_add(1);
+                        return;
+                    }
+                }
+            });
+    }
+    for (auto& worker : workers)
+    {
+        worker.join();
+    }
+
+    EXPECT_EQ(failures.load(), 0);
+    EXPECT_EQ(torch_trace_collector_is_installed(), 0);
 }

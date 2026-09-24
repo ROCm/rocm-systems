@@ -1,10 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "marker_stack.h"
 #include "process_state.h"
 #include "record_function_installation.h"
-#include "torch_abi/runtime.h"
 #include "torch_trace_collector.h"
 #include "user_scope.h"
 
@@ -40,10 +38,6 @@ extern "C" std::int32_t torch_trace_collector_install(void)
             return 0;
         }
 
-        if (!torch_abi::runtime_is_supported())
-        {
-            return 1;
-        }
         if (torch_trace_collector::detail::install() == at::INVALID_CALLBACK_HANDLE)
         {
             return 1;
@@ -112,10 +106,7 @@ extern "C" std::int32_t torch_trace_collector_pop_user_scope(void)
 {
     try
     {
-        const auto& thread             = torch_trace_collector::detail::thread_state();
-        const bool  has_matching_scope = !thread.stack.empty() && !thread.guards.empty();
-        torch_trace_collector::detail::pop_user_scope();
-        return has_matching_scope ? 0 : 1;
+        return torch_trace_collector::detail::pop_user_scope() ? 0 : 1;
     }
     catch (...)
     {

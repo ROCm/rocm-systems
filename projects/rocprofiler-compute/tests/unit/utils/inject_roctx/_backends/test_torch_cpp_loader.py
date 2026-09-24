@@ -15,18 +15,15 @@ import pytest
 
 from utils.inject_roctx._backends import torch_cpp_loader
 
-CPU_213_IDENTITY = torch_cpp_loader._TorchIdentity(
-    version="2.13.0+cpu",
-    git_version="cf30153c4c131c8164ee7798e5022d810682e2cb",
-    debug=False,
-    uses_cxx11_abi=True,
-)
-ROCM_214_IDENTITY = torch_cpp_loader._TorchIdentity(
-    version="2.14.0+rocm10.2.0a20260917",
-    git_version="50011224068dd1fbc41573a6e43c9d9ffa053a63",
-    debug=False,
-    uses_cxx11_abi=True,
-)
+CPU_213_VERSION = "2.13.0+cpu"
+ROCM_214_VERSION = "2.14.0+rocm10.2.0a20260917"
+
+
+class FakeTorchVersion:
+    """Stand-in for torch.torch_version.Version."""
+
+    def __init__(self, value: str) -> None:
+        self.release = tuple(int(part) for part in value.split("+")[0].split("."))
 
 
 class FakeNativeFunction:
@@ -84,20 +81,14 @@ def populate_native_stats(stats_pointer: object) -> int:
     return 0
 
 
-def stub_torch(
-    monkeypatch: pytest.MonkeyPatch,
-    identity: torch_cpp_loader._TorchIdentity,
-) -> None:
+def stub_torch(monkeypatch: pytest.MonkeyPatch, version: str) -> None:
     torch_module = types.SimpleNamespace(
         __file__="/opt/fake/torch/__init__.py",
-        __version__=identity.version,
-        version=types.SimpleNamespace(
-            git_version=identity.git_version,
-            debug=identity.debug,
-        ),
-        _C=types.SimpleNamespace(_GLIBCXX_USE_CXX11_ABI=identity.uses_cxx11_abi),
+        __version__=version,
     )
+    version_module = types.SimpleNamespace(Version=FakeTorchVersion)
     monkeypatch.setitem(sys.modules, "torch", torch_module)
+    monkeypatch.setitem(sys.modules, "torch.torch_version", version_module)
 
 
 def write_collector_so(directory: Path) -> Path:
@@ -120,36 +111,41 @@ def reset_loader_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch_cpp_loader, "_torch_cpu_library", None)
 
 
-def test_workload_torch_identity_uses_exact_build_metadata(
+@pytest.mark.parametrize(
+    ("torch_version", "expected"),
+    [
+        (CPU_213_VERSION, "2.13"),
+        (ROCM_214_VERSION, "2.14"),
+        ("2.13.0+rocm10.2.0a20260922", "2.13"),
+        ("2.12.1", "2.12"),
+    ],
+)
+def test_workload_torch_version_returns_major_minor(
     monkeypatch: pytest.MonkeyPatch,
+    torch_version: str,
+    expected: str,
 ) -> None:
-    stub_torch(monkeypatch, CPU_213_IDENTITY)
+    stub_torch(monkeypatch, torch_version)
 
-    assert torch_cpp_loader._workload_torch_identity() == CPU_213_IDENTITY
+    assert torch_cpp_loader._workload_torch_version() == expected
 
 
-def test_workload_torch_identity_fails_closed_when_metadata_is_missing(
+def test_workload_torch_version_fails_closed_when_version_is_unparsable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     warnings = []
-    torch_module = types.SimpleNamespace(
-        __file__="/opt/fake/torch/__init__.py",
-        __version__=CPU_213_IDENTITY.version,
-        version=types.SimpleNamespace(git_version=CPU_213_IDENTITY.git_version),
-        _C=types.SimpleNamespace(_GLIBCXX_USE_CXX11_ABI=True),
-    )
-    monkeypatch.setitem(sys.modules, "torch", torch_module)
+    stub_torch(monkeypatch, "not-a-version")
     monkeypatch.setattr(
         torch_cpp_loader,
         "console_warning",
         lambda _category, message: warnings.append(message),
     )
 
-    assert torch_cpp_loader._workload_torch_identity() == ("", "", False, False)
-    assert "build identity" in warnings[0]
+    assert torch_cpp_loader._workload_torch_version() == ""
+    assert "Could not determine the PyTorch version" in warnings[0]
 
 
-def test_workload_torch_identity_fails_closed_when_torch_is_missing(
+def test_workload_torch_version_fails_closed_when_torch_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     warnings = []
@@ -168,7 +164,7 @@ def test_workload_torch_identity_fails_closed_when_torch_is_missing(
         lambda _category, message: warnings.append(message),
     )
 
-    assert torch_cpp_loader._workload_torch_identity() == ("", "", False, False)
+    assert torch_cpp_loader._workload_torch_version() == ""
     assert "torch missing" in warnings[0]
 
 
@@ -205,7 +201,7 @@ def test_discover_collector_ignores_versioned_and_soabi_artifacts(
 def test_promote_torch_cpu_reopens_workload_library_globally(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stub_torch(monkeypatch, CPU_213_IDENTITY)
+    stub_torch(monkeypatch, CPU_213_VERSION)
     loaded_libraries: List[Tuple[str, int]] = []
     fake_library = object()
     monkeypatch.setattr(
@@ -223,17 +219,21 @@ def test_promote_torch_cpu_reopens_workload_library_globally(
     ]
 
 
-@pytest.mark.parametrize("identity", [CPU_213_IDENTITY, ROCM_214_IDENTITY])
-def test_load_returns_plain_c_wrapper_for_validated_torch(
+@pytest.mark.parametrize("torch_version", ["2.13", "2.14"])
+def test_load_returns_plain_c_wrapper_for_supported_torch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    identity: torch_cpp_loader._TorchIdentity,
+    torch_version: str,
 ) -> None:
     collector_path = tmp_path / "torch_trace_collector.so"
     native_library = make_native_library()
     torch_library = object()
     load_order = []
-    monkeypatch.setattr(torch_cpp_loader, "_workload_torch_identity", lambda: identity)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_workload_torch_version",
+        lambda: torch_version,
+    )
     monkeypatch.setattr(
         torch_cpp_loader,
         "_discover_collector_artifact",
@@ -246,7 +246,7 @@ def test_load_returns_plain_c_wrapper_for_validated_torch(
     )
     monkeypatch.setattr(
         torch_cpp_loader.ctypes,
-        "PyDLL",
+        "CDLL",
         lambda path, mode: load_order.append((path, mode)) or native_library,
     )
     monkeypatch.setattr(torch_cpp_loader, "console_log", lambda *_args: None)
@@ -266,66 +266,18 @@ def test_load_returns_plain_c_wrapper_for_validated_torch(
 
 
 @pytest.mark.parametrize(
-    ("identity", "message_fragment"),
-    [
-        pytest.param(
-            torch_cpp_loader._TorchIdentity(
-                version="2.12.0+cpu",
-                git_version="old",
-                debug=False,
-                uses_cxx11_abi=True,
-            ),
-            "version=2.12.0+cpu",
-            id="version",
-        ),
-        pytest.param(
-            torch_cpp_loader._TorchIdentity(
-                version="2.13.0+self-built",
-                git_version=CPU_213_IDENTITY.git_version,
-                debug=False,
-                uses_cxx11_abi=True,
-            ),
-            "version=2.13.0+self-built",
-            id="build-tag",
-        ),
-        pytest.param(
-            torch_cpp_loader._TorchIdentity(
-                version=CPU_213_IDENTITY.version,
-                git_version="unvalidated",
-                debug=False,
-                uses_cxx11_abi=True,
-            ),
-            "git=unvalidated",
-            id="git-revision",
-        ),
-        pytest.param(
-            torch_cpp_loader._TorchIdentity(
-                version=CPU_213_IDENTITY.version,
-                git_version=CPU_213_IDENTITY.git_version,
-                debug=True,
-                uses_cxx11_abi=True,
-            ),
-            "debug=True",
-            id="debug-build",
-        ),
-        pytest.param(
-            torch_cpp_loader._TorchIdentity(
-                version=CPU_213_IDENTITY.version,
-                git_version=CPU_213_IDENTITY.git_version,
-                debug=False,
-                uses_cxx11_abi=False,
-            ),
-            "cxx11_abi=False",
-            id="cxx11-abi",
-        ),
-    ],
+    "torch_version",
+    ["2.12", "2.15", "3.0", ""],
 )
-def test_load_rejects_unvalidated_torch_before_artifact_lookup(
+def test_load_rejects_unsupported_torch_before_artifact_lookup(
     monkeypatch: pytest.MonkeyPatch,
-    identity: torch_cpp_loader._TorchIdentity,
-    message_fragment: str,
+    torch_version: str,
 ) -> None:
-    monkeypatch.setattr(torch_cpp_loader, "_workload_torch_identity", lambda: identity)
+    monkeypatch.setattr(
+        torch_cpp_loader,
+        "_workload_torch_version",
+        lambda: torch_version,
+    )
     monkeypatch.setattr(
         torch_cpp_loader,
         "_discover_collector_artifact",
@@ -334,7 +286,7 @@ def test_load_rejects_unvalidated_torch_before_artifact_lookup(
 
     with pytest.raises(torch_cpp_loader.UnsupportedTorchVersionError) as raised:
         torch_cpp_loader.load()
-    assert message_fragment in str(raised.value)
+    assert "2.13, 2.14" in str(raised.value)
 
 
 def test_load_reports_missing_generic_collector(
@@ -342,8 +294,8 @@ def test_load_reports_missing_generic_collector(
 ) -> None:
     monkeypatch.setattr(
         torch_cpp_loader,
-        "_workload_torch_identity",
-        lambda: CPU_213_IDENTITY,
+        "_workload_torch_version",
+        lambda: "2.13",
     )
     monkeypatch.setattr(torch_cpp_loader, "_discover_collector_artifact", lambda: None)
 
@@ -359,8 +311,8 @@ def test_load_wraps_collector_dlopen_failure(
     torch_library = object()
     monkeypatch.setattr(
         torch_cpp_loader,
-        "_workload_torch_identity",
-        lambda: CPU_213_IDENTITY,
+        "_workload_torch_version",
+        lambda: "2.13",
     )
     monkeypatch.setattr(
         torch_cpp_loader,
@@ -377,7 +329,7 @@ def test_load_wraps_collector_dlopen_failure(
         assert mode == torch_cpp_loader._COLLECTOR_LOAD_MODE
         raise OSError("missing symbol")
 
-    monkeypatch.setattr(torch_cpp_loader.ctypes, "PyDLL", fail_load)
+    monkeypatch.setattr(torch_cpp_loader.ctypes, "CDLL", fail_load)
 
     with pytest.raises(torch_cpp_loader.CollectorLoadError, match="missing symbol"):
         torch_cpp_loader.load()
@@ -392,8 +344,8 @@ def test_load_rejects_incompatible_plain_c_abi(
     native_library = make_native_library(revision=2)
     monkeypatch.setattr(
         torch_cpp_loader,
-        "_workload_torch_identity",
-        lambda: CPU_213_IDENTITY,
+        "_workload_torch_version",
+        lambda: "2.13",
     )
     monkeypatch.setattr(
         torch_cpp_loader,
@@ -403,7 +355,7 @@ def test_load_rejects_incompatible_plain_c_abi(
     monkeypatch.setattr(torch_cpp_loader, "_promote_torch_cpu", object)
     monkeypatch.setattr(
         torch_cpp_loader.ctypes,
-        "PyDLL",
+        "CDLL",
         lambda _path, mode: native_library,
     )
 

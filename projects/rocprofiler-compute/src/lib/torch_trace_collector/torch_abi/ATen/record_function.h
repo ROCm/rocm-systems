@@ -92,7 +92,7 @@ private:
 };
 
 // These assertions validate the replacement declaration, not PyTorch itself.
-// A build is allowlisted only after a separate probe verifies the real layouts.
+// test_torch_trace_collector.cpp checks the constants against the real headers.
 static_assert(sizeof(RecordFunction) == torch_abi::kRecordFunctionSize);
 static_assert(alignof(RecordFunction) == torch_abi::kRecordFunctionAlignment);
 

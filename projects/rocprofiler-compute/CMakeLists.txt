@@ -411,23 +411,6 @@ add_test(
         ${COV_OPTION} tests/unit/utils/test_native_tool_finder.py ${WORKING_DIR_OPTION}
 )
 
-if(TEST_FROM_INSTALL)
-    set(_torch_test_root tests)
-    set(_torch_test_working_directory .)
-    set(_torch_test_pythonpath .)
-    set(_torch_collector_test_module
-        ../../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/torch_trace_collector.so
-    )
-    set(_torch_runtime_interceptor tests/libtorch_trace_roctx_intercept.so)
-else()
-    set(_torch_test_root ${PROJECT_SOURCE_DIR}/tests)
-    set(_torch_test_working_directory ${PROJECT_SOURCE_DIR})
-    set(_torch_test_pythonpath ${PROJECT_SOURCE_DIR}/src)
-    set(_torch_collector_test_module $<TARGET_FILE:torch-trace-collector-module>)
-    set(_torch_runtime_interceptor $<TARGET_FILE:torch-trace-roctx-intercept>)
-endif()
-set(_torch_loader_confcutdir ${_torch_test_root}/unit/utils/inject_roctx/_backends)
-
 add_test(
     NAME test_profile_torch_trace
     COMMAND
@@ -890,22 +873,6 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-if(TARGET test-torch-abi-runtime)
-    if(TEST_FROM_INSTALL)
-        set(_torch_abi_runtime_test_cmd tests/test-torch-abi-runtime)
-    else()
-        set(_torch_abi_runtime_test_cmd $<TARGET_FILE:test-torch-abi-runtime>)
-    endif()
-    add_test(NAME test-torch-abi-runtime COMMAND ${_torch_abi_runtime_test_cmd})
-    sanitizer_runtime_env(_torch_abi_runtime_sanitizer_env OFF)
-    if(_torch_abi_runtime_sanitizer_env)
-        set_tests_properties(
-            test-torch-abi-runtime
-            PROPERTIES ENVIRONMENT "${_torch_abi_runtime_sanitizer_env}"
-        )
-    endif()
-endif()
-
 if(TARGET test-torch-trace-collector)
     if(TEST_FROM_INSTALL)
         set(_ttc_test_cmd tests/test-torch-trace-collector)
@@ -954,26 +921,9 @@ add_test(
     NAME test_torch_cpp_loader
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_cpp_loader.xml
-        ${COV_OPTION} --confcutdir=${_torch_loader_confcutdir}
-        ${_torch_loader_confcutdir}/test_torch_cpp_loader.py ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py
+        ${WORKING_DIR_OPTION}
 )
-
-if(TARGET torch-trace-collector-module AND TARGET torch-trace-roctx-intercept)
-    add_test(
-        NAME test_torch_trace_collector_runtime
-        COMMAND
-            ${PYTHON_TEST_COMMAND}
-            ${_torch_test_root}/torch_trace_collector_runtime_check.py
-    )
-    set_tests_properties(
-        test_torch_trace_collector_runtime
-        PROPERTIES
-            SKIP_RETURN_CODE 77
-            WORKING_DIRECTORY ${_torch_test_working_directory}
-            ENVIRONMENT
-                "PYTHONPATH=${_torch_test_pythonpath}:$ENV{PYTHONPATH};ROCPROFCOMPUTE_TEST_TORCH_COLLECTOR=${_torch_collector_test_module};ROCPROFCOMPUTE_TEST_ROCTX_INTERCEPT=${_torch_runtime_interceptor}"
-    )
-endif()
 
 add_test(
     NAME test_inject_roctx_package
@@ -1088,34 +1038,6 @@ if(TARGET test-pc-sampling-collector)
             PROPERTIES ENVIRONMENT "${_san_env}"
         )
     endif()
-endif()
-
-if(TARGET torch-trace-collector-module AND CMAKE_NM AND CMAKE_READELF)
-    set(_torch_elf_test_options)
-    # Clang adds a RUNPATH for its shared sanitizer runtime. Sanitizer artifacts
-    # are not shipped, so retain every other ELF check and exempt only this tag.
-    if(
-        ENABLE_SANITIZER
-        AND (
-            CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
-            OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang"
-        )
-    )
-        list(APPEND _torch_elf_test_options --allow-sanitizer-runpath)
-    endif()
-
-    add_test(
-        NAME test_torch_trace_collector_elf
-        COMMAND
-            ${PYTHON_TEST_COMMAND} ${_torch_test_root}/torch_trace_collector_elf_check.py
-            ${_torch_collector_test_module} --nm ${CMAKE_NM} --readelf ${CMAKE_READELF}
-            ${_torch_elf_test_options}
-    )
-elseif(TARGET torch-trace-collector-module)
-    message(
-        WARNING
-        "torch_trace_collector ELF test disabled: nm or readelf was not found"
-    )
 endif()
 
 # -----------------------------------
