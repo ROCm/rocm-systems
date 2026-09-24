@@ -27,7 +27,6 @@ enum class provider_state : int {
 };
 
 std::atomic<provider_state> g_state{provider_state::kUnregistered};
-std::atomic<uint64_t> g_correlation_id{0};
 
 }  // namespace
 
@@ -48,23 +47,12 @@ void finalize() {
   TraceLoggingUnregister(rocm_hip_tlg);
 }
 
-uint64_t emit_api_enter(uint32_t domain, uint32_t op_id, const char* op_name) {
-  const uint64_t correlation_id = g_correlation_id.fetch_add(1, std::memory_order_relaxed) + 1;
-
-  TraceLoggingWrite(rocm_hip_tlg, "hip_api_enter", TraceLoggingUInt32(domain, "domain"),
+void emit_api(uint32_t domain, uint32_t op_id, const char* op_name, uint64_t start_qpc,
+              int32_t retval) {
+  TraceLoggingWrite(rocm_hip_tlg, "hip_api", TraceLoggingUInt32(domain, "domain"),
                     TraceLoggingUInt32(op_id, "op_id"),
                     TraceLoggingString(op_name != nullptr ? op_name : "", "op_name"),
-                    TraceLoggingUInt64(correlation_id, "correlation_id"));
-
-  return correlation_id;
-}
-
-void emit_api_exit(uint32_t domain, uint32_t op_id, const char* op_name, uint64_t correlation_id,
-                   int32_t retval) {
-  TraceLoggingWrite(rocm_hip_tlg, "hip_api_exit", TraceLoggingUInt32(domain, "domain"),
-                    TraceLoggingUInt32(op_id, "op_id"),
-                    TraceLoggingString(op_name != nullptr ? op_name : "", "op_name"),
-                    TraceLoggingUInt64(correlation_id, "correlation_id"),
+                    TraceLoggingUInt64(start_qpc, "start_qpc"),
                     TraceLoggingInt32(retval, "retval"));
 }
 

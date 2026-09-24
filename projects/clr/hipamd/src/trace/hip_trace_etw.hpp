@@ -34,12 +34,26 @@ enum domain_t : uint32_t {
   kDomainCompilerApi = 1,
 };
 
-// Reported as the exit retval when the wrapped call escaped via an exception.
+// Reported as the retval when the wrapped call escaped via an exception.
 constexpr int32_t kRetvalException = -1;
 
-uint64_t emit_api_enter(uint32_t domain, uint32_t op_id, const char* op_name);
-void emit_api_exit(uint32_t domain, uint32_t op_id, const char* op_name, uint64_t correlation_id,
-                   int32_t retval);
+// One event per call, emitted on return. An ETW event costs ~370ns on the measurement
+// box almost irrespective of its payload, so the event count is the only lever that
+// materially moves per-call cost; a start/end pair cost twice this for no extra
+// information, since rocprofiler_buffer_tracing_hip_api_record_t wants both timestamps
+// in a single record anyway.
+//
+// start_qpc is raw QueryPerformanceCounter ticks. The consumer takes the matching end
+// from EVENT_HEADER::TimeStamp, which is QPC because the session sets
+// Wnode.ClientContext = 1, so both ends share a clock domain.
+void emit_api(uint32_t domain, uint32_t op_id, const char* op_name, uint64_t start_qpc,
+              int32_t retval);
+
+inline uint64_t now_qpc() {
+  LARGE_INTEGER value;
+  QueryPerformanceCounter(&value);
+  return static_cast<uint64_t>(value.QuadPart);
+}
 
 inline int32_t to_retval(hipError_t value) { return static_cast<int32_t>(value); }
 
@@ -51,23 +65,23 @@ template <typename Fn>
 auto invoke(uint32_t domain, uint32_t op_id, const char* op_name, Fn&& fn) -> decltype(fn()) {
   using return_type = decltype(fn());
 
-  const uint64_t correlation_id = emit_api_enter(domain, op_id, op_name);
+  const uint64_t start_qpc = now_qpc();
 
   if constexpr (std::is_void_v<return_type>) {
     try {
       fn();
     } catch (...) {
-      emit_api_exit(domain, op_id, op_name, correlation_id, kRetvalException);
+      emit_api(domain, op_id, op_name, start_qpc, kRetvalException);
       throw;
     }
-    emit_api_exit(domain, op_id, op_name, correlation_id, 0);
+    emit_api(domain, op_id, op_name, start_qpc, 0);
   } else {
     try {
       return_type retval = fn();
-      emit_api_exit(domain, op_id, op_name, correlation_id, to_retval(retval));
+      emit_api(domain, op_id, op_name, start_qpc, to_retval(retval));
       return retval;
     } catch (...) {
-      emit_api_exit(domain, op_id, op_name, correlation_id, kRetvalException);
+      emit_api(domain, op_id, op_name, start_qpc, kRetvalException);
       throw;
     }
   }
