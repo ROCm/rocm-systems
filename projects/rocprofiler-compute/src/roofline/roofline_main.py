@@ -464,6 +464,7 @@ class Roofline:
             )
             kernels_model.append({
                 "name": kernel_name,
+                "label": truncate_kernel_name(kernel_name),
                 "color": color,
                 "points": points,
                 "pctRuntime": pct_val,

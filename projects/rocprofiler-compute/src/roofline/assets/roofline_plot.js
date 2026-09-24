@@ -24,7 +24,6 @@
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
   var LIMITING_PEAK_LABEL = "Limited by";
-  var KERNEL_LIST_NAME_MAX_LENGTH = 200;
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
   // How far a roof drawn at 45 degrees in data space may lean on screen.
@@ -206,13 +205,6 @@
 
   function formatCount(shown, total) {
     return "(" + shown + " / " + total + ")";
-  }
-
-  function truncateKernelListName(name) {
-    if (name.length <= KERNEL_LIST_NAME_MAX_LENGTH) {
-      return name;
-    }
-    return name.slice(0, KERNEL_LIST_NAME_MAX_LENGTH - 3) + "...";
   }
 
   // A native `title` attribute gets dismissed by the row's click-to-filter
@@ -1608,7 +1600,7 @@
       kernelList.appendChild(
         createPanelRow({
           color: kernel.color,
-          label: truncateKernelListName(kernel.name),
+          label: kernel.label,
           title: kernel.name,
           labelClass: "roofline-panel-name roofline-kernel-name",
           dataset: { index: String(index) },
