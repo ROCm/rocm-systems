@@ -185,10 +185,18 @@ callback_thread_get()
 // Held via static_object, like get_buffer_mut() above: a tool that finalizes after this
 // translation unit's statics were destroyed would otherwise lock a dead mutex, which is the
 // same teardown hazard 78d6079 fixed for the context stopping set.
+//
+// static_object's default ContextT is unique per translation unit but shared within one, so
+// it needs a distinct tag here: get_buffer_mut() already constructs static_object<std::mutex>
+// in this file and a second construct() on the same instantiation aborts the process with
+// "reconstructing static object".
+struct callback_thread_mut_tag
+{};
+
 std::mutex&
 callback_thread_mut()
 {
-    static auto*& _v = common::static_object<std::mutex>::construct();
+    static auto*& _v = common::static_object<std::mutex, callback_thread_mut_tag>::construct();
     return *CHECK_NOTNULL(_v);
 }
 
