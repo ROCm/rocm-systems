@@ -1495,9 +1495,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
   for (const Planned &planned : selected) {
     if (!append_atomic_scalar_clause_patch(
             old_text, planned.candidate.source.site,
-            planned.candidate.source.sequence
-                ? planned.candidate.source.sequence->scalar_clause_text_offset
-                : std::nullopt,
+            resource_scalar_clause_at_offset(resource_state,
+                                             planned.candidate.source.site.text_offset),
             arch, scalar_clause_patches, result.errors))
       return;
     note_sgpr_requirements(scalar_requirements, planned.resources, options, options, planned.point,

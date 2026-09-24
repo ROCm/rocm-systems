@@ -15,6 +15,40 @@
 namespace rocjitsu::consan {
 namespace {
 
+TEST(ConSan, PublicationStoreCaptureRemovesMemoryClauseWithoutOrderingSequence) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const std::vector<uint32_t> words{
+      build_s_nop(0, arch), 0xd8340000u, 0u, // ds_store_b32 v0, v0: selects the kernel for
+                                             // observation
+      0xbf850001u, // s_clause 1: two ordinary global stores, no release/acquire
+      0xee068002u, 0x00000000u, 0x00000020u, 0xee068002u, 0x00800000u, 0x00008020u,
+      build_s_endpgm(arch)};
+  const auto bytes = make_rdna4_lds_code_object(words, "publication_store_clause");
+  TestOptions options = test_options();
+  options.track_atomics = true;
+  options.max_patches = 65536;
+  options.max_patches_is_expert_limit = false;
+  AutoReportInventory capacity;
+  capacity.access_range_count = 1;
+  capacity.range_bank_count = 8;
+  capacity.sync_slot_count = 10;
+  capacity.watchpoint_count = 10;
+  capacity.atomic_event_count = 2;
+  const auto plan = plan_auto_report(capacity);
+  ASSERT_TRUE(plan.complete());
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = plan.required_bytes;
+  options.report_layout = *plan.complete_layout();
+  const auto result = test_lower_consan(bytes, options);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, PatchKind::TrampolineSyncMetadata, &PatchInfo::kind),
+            2u);
+  EXPECT_EQ(
+      std::ranges::count(result.patches, PatchKind::InlineScalarClauseNopRewrite, &PatchInfo::kind),
+      1u);
+}
+
 TEST(ConSan, UniformAddressBroadcastCopiesAndClobbers) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA4}) {

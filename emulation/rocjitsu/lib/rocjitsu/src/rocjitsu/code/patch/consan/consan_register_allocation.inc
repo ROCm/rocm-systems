@@ -2036,6 +2036,12 @@ void append_resource_plans(ResourcePlanningState &state, const Request &request,
   }
 }
 
+std::optional<uint64_t> resource_scalar_clause_at_offset(const ResourcePlanningState &state,
+                                                         uint64_t text_offset) {
+  BasicBlock *block = block_for_offset(state.block_index, text_offset);
+  return scalar_clause_at_text_offset(std::span<BasicBlock *const>(&block, 1), text_offset);
+}
+
 bool resource_offsets_share_block(const ResourcePlanningState &state, uint64_t first_offset,
                                   uint64_t second_offset) {
   BasicBlock *first = block_for_offset(state.block_index, first_offset);

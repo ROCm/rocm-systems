@@ -75,6 +75,10 @@ choose_scratch_vgpr(const ProgramSite &access, std::optional<uint16_t> requested
 block_ptrs_for(const std::vector<std::unique_ptr<BasicBlock>> &blocks);
 [[nodiscard]] const Instruction *
 find_instruction_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t text_offset);
+/// Clause marker covering an instruction, independent of synchronization semantics.
+[[nodiscard]] std::optional<uint64_t>
+scalar_clause_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t text_offset);
+
 [[nodiscard]] bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks,
                                                   uint64_t text_offset);
 [[nodiscard]] KernelMaxRegisterRefs

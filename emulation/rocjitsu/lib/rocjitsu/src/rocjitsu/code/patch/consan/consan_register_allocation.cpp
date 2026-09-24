@@ -24,6 +24,7 @@
 #include "rocjitsu/code/patch/consan/consan_lowering_plan.h"
 #include "rocjitsu/code/patch/consan/consan_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
+#include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_prologue.h"

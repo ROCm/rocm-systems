@@ -387,24 +387,31 @@ find_instruction_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t te
   return nullptr;
 }
 
-[[nodiscard]] bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks,
-                                                  uint64_t text_offset) {
+[[nodiscard]] std::optional<uint64_t>
+scalar_clause_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t text_offset) {
   for (BasicBlock *block : blocks) {
     if (block == nullptr || text_offset < block->start_offset() ||
         text_offset >= block->end_offset())
       continue;
     uint32_t clause_remaining = 0;
+    std::optional<uint64_t> clause_offset;
     for (const Instruction &inst : block->instructions()) {
       const bool blocked_by_clause = clause_remaining > 0;
       if (clause_remaining > 0)
         --clause_remaining;
-      if (is_s_clause(inst))
-        clause_remaining = s_clause_following_instruction_count(inst);
       if (inst.src_loc() == text_offset)
-        return blocked_by_clause;
+        return blocked_by_clause ? clause_offset : std::nullopt;
+      if (is_s_clause(inst)) {
+        clause_remaining = s_clause_following_instruction_count(inst);
+        clause_offset = inst.src_loc();
+      }
     }
   }
-  return false;
+  return std::nullopt;
+}
+
+bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks, uint64_t text_offset) {
+  return scalar_clause_at_text_offset(blocks, text_offset).has_value();
 }
 
 void update_max_vgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_vgpr) {

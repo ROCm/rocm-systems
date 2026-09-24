@@ -162,6 +162,9 @@ order_replay_access_candidates(std::span<const Candidate> admitted,
 [[nodiscard]] bool resource_reserve_range_if_uncovered(ResourcePlanningState &state,
                                                        PreappliedReservedRange range);
 
+[[nodiscard]] std::optional<uint64_t>
+resource_scalar_clause_at_offset(const ResourcePlanningState &state, uint64_t text_offset);
+
 [[nodiscard]] bool resource_offsets_share_block(const ResourcePlanningState &state,
                                                 uint64_t first_offset, uint64_t second_offset);
 
