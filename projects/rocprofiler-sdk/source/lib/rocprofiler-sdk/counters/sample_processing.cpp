@@ -173,20 +173,43 @@ callback_thread_get()
 // the thread is only joined when the count returns to zero.  Two dispatch-counting contexts
 // with disjoint agent sets may be active at the same time, so without the refcount stopping
 // either one would kill the consumer while the other still needs it.
-std::atomic<int> callback_thread_refcount{0};
+//
+// The count and the start()/exit() call have to move together under one lock. An atomic is
+// not enough: a stop that decremented to zero can be overtaken by a start that increments
+// back to one and finds the consumer still valid, so start() no-ops and the stop then tears
+// the thread down underneath it, leaving a non-zero count with no consumer. Completions still
+// get processed in that state -- consumer_thread_t::add() runs them inline when the thread is
+// gone -- but they run on the HSA async signal handler, which is exactly what this consumer
+// exists to avoid.
+//
+// Held via static_object, like get_buffer_mut() above: a tool that finalizes after this
+// translation unit's statics were destroyed would otherwise lock a dead mutex, which is the
+// same teardown hazard 78d6079 fixed for the context stopping set.
+std::mutex&
+callback_thread_mut()
+{
+    static auto*& _v = common::static_object<std::mutex>::construct();
+    return *CHECK_NOTNULL(_v);
+}
+
+int callback_thread_refcount = 0;
 }  // namespace
 
 void
 callback_thread_start()
 {
-    ++callback_thread_refcount;
-    callback_thread_get().start();
+    auto _lk = std::unique_lock<std::mutex>{callback_thread_mut()};
+    if(callback_thread_refcount++ == 0) callback_thread_get().start();
 }
 
 void
 callback_thread_stop()
 {
-    if(--callback_thread_refcount == 0) callback_thread_get().exit();
+    auto _lk = std::unique_lock<std::mutex>{callback_thread_mut()};
+    // The > 0 test keeps an unbalanced stop from driving the count negative and leaking the
+    // consumer thread for the rest of the process.
+    if(callback_thread_refcount > 0 && --callback_thread_refcount == 0)
+        callback_thread_get().exit();
 }
 
 /**
