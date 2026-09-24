@@ -25,12 +25,13 @@ Collecting it runs microbenchmarks in addition to profiling the application,
 which takes extra time. `--no-roof` skips them when the user only wants
 counters.
 
-Not every architecture supports the roofline microbenchmarks. On one that does
-not, the benchmark is skipped and the profile still succeeds, so a missing
-roofline is not always a mistake in how the profile was run. Check
-[compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst)
-before telling a user to re-profile, and do not advise removing `--no-roof`
-when the architecture is the actual reason.
+MI100 (gfx908) does not support the roofline microbenchmarks. Every other
+supported architecture does. On MI100 the benchmark is skipped and the profile
+still succeeds, so a missing roofline there is not a mistake in how the profile
+was run. Never tell an MI100 user to re-profile without `--no-roof`; use
+Speed-of-Light and the `memory` skill instead. Confirm support for a new
+architecture against
+[compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
 
 `--device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
@@ -51,6 +52,13 @@ FLOPs per byte alongside the empirical peak FLOPs and peak bandwidth measured
 on this machine. Compare against those printed numbers; never compute a peak
 yourself.
 
+Report two things first, before any tuning advice:
+
+1. **Which ceiling limits the kernel**, memory or compute.
+2. **How far the kernel sits below that ceiling**, as a percentage of it.
+
+Read the verdict from the table as:
+
 - Low arithmetic intensity, close to the bandwidth ceiling: memory-bound. Work
   on traffic, reuse, tiling, and locality. Continue with the `memory` skill.
 - High arithmetic intensity, close to the compute ceiling: compute-bound. Work
@@ -60,12 +68,18 @@ yourself.
   `kernel-bottleneck` skill.
 
 A kernel sitting below both ceilings is the common case and the most
-misread one. Do not report it as compute-bound merely because its arithmetic
+misread one. Never report it as compute-bound merely because its arithmetic
 intensity is high.
+
+The distance to the ceiling is what makes the verdict actionable. "Memory-bound
+at 45% of peak bandwidth" tells the user there is headroom; "memory-bound at
+94%" tells them to reduce traffic instead of chasing it.
 
 ## 3. Pick the right precision and memory level
 
-Roofline ceilings depend on the data type and the level of the hierarchy:
+Section 2 gives the verdict against the default ceilings. Refine it here when
+the kernel does not use FP32, or when the question is about a specific level of
+the hierarchy.
 
 ```bash
 # Ceilings for the precision the kernel actually uses
@@ -79,8 +93,10 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 
 `-R` defaults to FP32. A mixed-precision or matrix kernel compared against the
 FP32 ceiling will look far worse than it is, so set `-R` to the precision the
-kernel actually issues. Confirm that from the instruction mix with `-b cu_ins`
-rather than assuming it.
+kernel actually issues. Read that from the instruction mix with `-b cu_ins`
+rather than assuming it. Ask the user which precision the kernel is meant to
+use only when the mix is genuinely mixed and no single type dominates; they
+know the intent, the counters know what ran.
 
 `-m` defaults to every level. HBM answers "am I limited by main memory", while
 L2 and vL1D show whether caches are absorbing the traffic.

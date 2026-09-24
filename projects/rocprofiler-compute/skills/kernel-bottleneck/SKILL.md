@@ -3,16 +3,31 @@ name: kernel-bottleneck
 description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
 ---
 
-# Find the bottleneck in an AMD GPU kernel
+# Profile an AMD GPU application and find the kernel bottleneck
 
 Start here for any "profile this" or "why is this kernel slow" request. This
-skill collects counters and narrows a workload down to one kernel and one
-reason. Hand off to a focused skill once the reason is clear.
+skill collects counters, narrows a workload down to one kernel, and identifies
+what limits it. Hand off to a focused skill once the limit is clear.
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
 
 Never use the GUI or TUI. This is a command-line workflow.
+
+## Two sources of performance data
+
+rocprof-compute collects from two independent sources, and they answer
+different questions. Choose by what the user is asking, not by difficulty.
+
+| Source | Answers | Skill |
+|---|---|---|
+| Perfmon counters | How the architecture behaves: bandwidth, cache, occupancy, pipeline utilization | this skill, then `speed-of-light`, `memory`, `roofline` |
+| PC sampling | How the source code behaves: which instruction or line is hot and why it stalls | `pc-sampling` |
+
+Counters are the default starting point because they cover the whole kernel
+cheaply. Go straight to `pc-sampling` when the user asks about instructions,
+source lines, or stall reasons, and use both when an architectural limit needs
+to be traced back to the code that causes it.
 
 ## 1. Check the environment
 
@@ -143,8 +158,8 @@ Where to go next:
 |---|---|
 | Memory throughput near peak, low compute | the `memory` skill |
 | Compute near peak, or unclear compute vs memory | the `roofline` skill |
-| Everything far below peak | occupancy and stalls, below |
-| Need per-instruction detail | the `pc-sampling` skill |
+| Everything far below peak | `-b wavefront` for occupancy, then `-b spi` for launch limits, both below |
+| Question is about instructions, source lines, or stall reasons | the `pc-sampling` skill |
 | Kernels come from PyTorch | the `torch-trace` skill |
 
 ### Occupancy and wavefront limits
@@ -186,14 +201,25 @@ and the unit still makes sense for it. Bandwidth per cycle does not.
 
 ## 7. Compare two runs
 
+Pass `--path` twice to put two workloads side by side. Use this for:
+
+1. Measuring a software optimization against its baseline on the same GPU.
+2. Checking that the same code performs consistently across nodes with the
+   same GPU architecture.
+3. Comparing the same code across different GPU architectures.
+
 ```bash
 rocprof-compute analyze \
     --path ./workloads/baseline/<gpu_model> \
     --path ./workloads/optimized/<gpu_model>
 ```
 
-Do not compare runs taken on different GPUs, partition modes, or clock settings
-without saying so.
+Cases 1 and 2 expect the numbers to match except where the change intended
+otherwise, so an unexplained difference is the finding. Case 3 compares
+different hardware, so compare percent of peak rather than absolute values.
+
+Never present a comparison across different GPUs, partition modes, or clock
+settings without stating that those differ.
 
 ## 8. Save a report
 
