@@ -287,21 +287,18 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
 
 // Two-level load/store AllGather for an LSA team spanning several packages joined by
 // narrow links, e.g. MI300X in CPX mode where each run of S slots is the XCDs of one
-// card. The team factors into a scale-in team (peers reachable over the on-package
-// fabric) and a scale-up team (the matching slot on each other package).
+// card. The team factors into a scale-in team (peers on the same package) and a
+// scale-up team (the rank at the same lane on every package, this one included).
 //
-// Scale-in first: each rank stores its own contribution into its own output slot on
-// every same-package peer, so afterwards a package holds the slots of all its own
-// ranks. Scale-up second: each rank pulls one slot per remote package -- always the
-// one at its own lane -- and replays each to its same-package peers. Lanes cover
-// disjoint slots, so a package collects every remote slot exactly once and the links
-// carry one slot per rank instead of one per cross-package pair, which is what makes
-// the flat kernel collapse.
+// Each rank pulls the contribution of every scale-up member and writes it into that
+// member's output slot on itself and its scale-in peers. Lanes cover disjoint slots,
+// so a package collects every remote slot exactly once and the narrow links carry one
+// slot per rank instead of one per cross-package pair.
 //
-// Scale-up has to read the partner's *output* slot rather than its input: input
-// offsets are not symmetric across ranks, since in-place AllGather puts each rank's
-// input at rank*nAllElts inside the output window. That is what the middle barrier
-// pays for -- it publishes the scale-in phase before anyone reads it.
+// A member's contribution is its own output slot when in-place, which sits at the
+// same offset on every rank, and its input otherwise, which is only reachable when
+// the input window is registered. Nothing read is written during the kernel, so the
+// entry and exit barriers are the only ordering needed.
 __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsa(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
@@ -316,26 +313,20 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsa(ncclSymkDevWorkArg
 
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
-        // Threads numbered over rank.
+    // Threads numbered over rank.
     int t =
       flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
     int tn = nBlocks * blockDim.x;
-    bcastLsa(handler, tn, t, input, output + rank * nAllElts, nElts, /*multimem=*/BoolTag<false>{}, scaleIn,
-             /*srcSlot=*/-1, slot0);
-  });
-
-  bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
-
-  handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
-                                           ncclSymPtr<char> input, ncclSymPtr<char> output) {
-    int t =
-      flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
-    int tn = nBlocks * blockDim.x;
-    for (int su = 0; su < scaleUp.nRanks; su++) {
-      if (su == scaleUp.rank) continue; // own package landed in the scale-in phase
-      int srcSlot = ncclTeamRankToLsa(handler.comm, scaleUp, su);
+    bool inPlace = input == output + rank * nAllElts;
+    // Packages are visited starting from our own so they don't all pull from the
+    // same one at once.
+    for (int k = 0; k < scaleUp.nRanks; k++) {
+      int su = scaleUp.rank + k;
+      if (su >= scaleUp.nRanks) su -= scaleUp.nRanks;
       ncclSymPtr<char> slot = output + ncclTeamRankToWorld(handler.comm, scaleUp, su) * nAllElts;
-      bcastLsa(handler, tn, t, slot, slot, nElts, /*multimem=*/BoolTag<false>{}, scaleIn, srcSlot, slot0);
+      int srcSlot = k == 0 ? -1 : ncclTeamRankToLsa(handler.comm, scaleUp, su);
+      bcastLsa(handler, tn, t, inPlace ? slot : input, slot, nElts, /*multimem=*/BoolTag<false>{}, scaleIn, srcSlot,
+               slot0);
     }
   });
 

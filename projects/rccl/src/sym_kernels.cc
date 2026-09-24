@@ -750,6 +750,7 @@ ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   } else if (coll == ncclFuncAllGather) {
     if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg) kmask &= kernelMask_LL;
     if (winRegType != ncclSymSendRegRecvReg && comm->nNodes > 1) kmask &= ~kernelMask_Gin;
+    if (winRegType != ncclSymSendRegRecvReg) kmask &= ~kernelMask_HierLsa;
   } else if (coll == ncclFuncReduceScatter) {
     if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendRegRecvNonreg) kmask &= kernelMask_LL;
   }
