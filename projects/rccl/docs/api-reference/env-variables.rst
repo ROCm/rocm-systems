@@ -96,6 +96,17 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``RCCL_HIERARCHICAL_LAZY_INIT``
+        | Controls when a communicator of eight or more nodes builds the
+          sub-communicators that hierarchical collectives use. Deferring them
+          saves their initialization time and device memory for workloads that
+          never run a hierarchical AllGather. Hierarchical ReduceScatter and the
+          zero-CTA policy still build them during initialization. All ranks in a
+          communicator must use the same value.
+      - | ``0``: Build them during communicator initialization (default).
+        | ``1``: Build them on the first AllGather eligible for hierarchical
+          AllGather, outside graph capture.
+
 Logging and debugging
 =====================
 
@@ -259,13 +270,25 @@ collected in the following table.
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
 
-    * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
-        | Sets the minimum contribution per rank required before hierarchical
-          AllGather can be selected. All ranks in a communicator must use the
-          same value because first-use setup creates collective sub-communicators.
+    * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES``
+        | Sets the smallest AllGather that can select hierarchical AllGather,
+          measured in total gathered bytes (``sendcount`` x type size x number of
+          ranks, the size ``rccl-tests`` reports). The bound does not scale with
+          the number of ranks. With ``RCCL_HIERARCHICAL_LAZY_INIT=1``, it is also
+          the smallest AllGather that builds the sub-communicators, so all ranks
+          in a communicator must use the same value.
       - | Nonnegative byte count.
         | Default: ``1024``.
-        | ``0`` restores the previous upper-bound-only selection behavior.
+        | ``0``: No lower bound.
+
+    * - | ``RCCL_HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES``
+        | Sets the smallest ReduceScatter that can select hierarchical
+          ReduceScatter, measured in total bytes (``recvcount`` x type size x
+          number of ranks, the size ``rccl-tests`` reports). The bound does not
+          scale with the number of ranks.
+      - | Nonnegative byte count.
+        | Default: ``1024``.
+        | ``0``: No lower bound.
 
 Network and topology
 ====================

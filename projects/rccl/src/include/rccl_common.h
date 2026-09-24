@@ -290,6 +290,8 @@ RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 // Hierarchical ReduceScatter enabled
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+// Hierarchical sub-communicators deferred to the first eligible AllGather
+RCCL_PARAM_DECLARE(HierarchicalLazyInit);
 // Pivot AlltoAll enabled (defined in collectives.cc)
 RCCL_PARAM_DECLARE(AlltoAllPivotEnable);
 #define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB

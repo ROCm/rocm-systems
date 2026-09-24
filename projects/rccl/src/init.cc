@@ -754,6 +754,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalEligible = false;
+  comm->hierarchicalLazyInit = false;
+  comm->hierarchicalLazyCalls = 0;
   comm->hierarchicalInitAttempted = false;
   comm->hierarchicalInitResult = ncclSuccess;
   comm->hierarchicalCommsInitialized = false;
@@ -2801,15 +2803,48 @@ static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* exclude
   return ncclSuccess;
 }
 
-// Hierarchical AllGather builds the sub-communicators on first use. Two users
-// have no lazy trigger and need them from init: hierarchical ReduceScatter, and
+// The sub-communicators are built at init unless RCCL_HIERARCHICAL_LAZY_INIT
+// defers them to the first eligible AllGather. Two users have no lazy trigger
+// and need them from init either way: hierarchical ReduceScatter, and
 // hierarchical CE AllGather/AlltoAll, which requires the zero-CTA policy and
 // initialized sub-communicators (ncclHierCeAvailable). Turning both
 // hierarchical flags off disables the hierarchy for CE as well.
 static bool hierarchicalCommsNeededAtInit(struct ncclComm* comm) {
   if (!comm->hierarchicalEligible) return false;
   if (rcclParamHierarchicalReduceScatter() == 1) return true;
-  return rcclParamHierarchicalAllGather() == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO);
+  if (rcclParamHierarchicalAllGather() != 1) return false;
+  if (rcclParamHierarchicalLazyInit() != 1) return true;
+  return (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+}
+
+// Decide whether this communicator can use hierarchical collectives, then build
+// the sub-communicators now or, under lazy setup, leave them to the first
+// eligible AllGather.
+static ncclResult_t hierarchicalCommsInit(struct ncclComm* comm, bool hasParent) {
+  comm->hierarchicalEligible = false;
+  comm->hierarchicalLazyInit = false;
+  if (hasParent || comm->isGrow || comm->nNodes < 8 || comm->maxLocalRanks <= 1) return ncclSuccess;
+  if (rcclParamHierarchicalAllGather() != 1 && rcclParamHierarchicalReduceScatter() != 1) return ncclSuccess;
+
+  if (comm->minLocalRanks != comm->maxLocalRanks) {
+    INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
+    return ncclSuccess;
+  }
+  // Hierarchical Shuffle kernel assumes compact rank ordering.
+  // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
+  const int lr = comm->maxLocalRanks;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (comm->rankToNode[r] != r / lr || comm->rankToLocalRank[r] != r % lr) {
+      INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
+      return ncclSuccess;
+    }
+  }
+  comm->hierarchicalEligible = true;
+
+  if (hierarchicalCommsNeededAtInit(comm)) return rcclEnsureHierarchicalComms(comm);
+  comm->hierarchicalLazyInit = true;
+  INFO(NCCL_INIT, "Hierarchical collectives: deferring sub-communicator setup to the first eligible AllGather");
+  return ncclSuccess;
 }
 
 static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
@@ -3039,37 +3074,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
 
-  // Record topology eligibility now, but defer hierarchical AllGather resources
-  // until the first eligible live call. See hierarchicalCommsNeededAtInit for
-  // the features that still build them here.
-  comm->hierarchicalEligible = false;
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1) {
-    if (comm->minLocalRanks != comm->maxLocalRanks) {
-      INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
-    } else {
-      // Hierarchical Shuffle kernel assumes compact rank ordering.
-      // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
-      const int lr = comm->maxLocalRanks;
-      bool compactRanks = true;
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (comm->rankToNode[r] != r / lr || comm->rankToLocalRank[r] != r % lr) {
-          compactRanks = false;
-          break;
-        }
-      }
-      if (!compactRanks) {
-        INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
-      } else {
-        comm->hierarchicalEligible = true;
-      }
-    }
-  }
-  if (hierarchicalCommsNeededAtInit(comm)) {
-    NCCLCHECKGOTO(rcclEnsureHierarchicalComms(comm), res, fail);
-  } else if (comm->hierarchicalEligible) {
-    INFO(NCCL_INIT,
-         "Hierarchical collectives: topology eligible; deferring sub-communicator setup until enabled first use");
-  }
+  // Initialize hierarchical sub-communicators and temp buffers
+  NCCLCHECKGOTO(hierarchicalCommsInit(comm, job->parent != nullptr), res, fail);
 
   // RCCL: init-time allocations are done; release the side stream now so its GPU
   // hardware queue is freed before the steady-state collective phase begins.

@@ -1078,32 +1078,23 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
-// Minimum number of bytes each rank must contribute before an AllGather is
-// allowed to take the hierarchical path.
-//
-// Without a lower bound, even startup-sized AllGather operations can select the
-// two-stage path and retain its resources for the communicator lifetime.
-//
-// The bound is per-rank rather than on the total gathered size on purpose.
-// msgSize is count * typeSize * nRanks, so a fixed total-byte floor drifts
-// against the small per-rank contribution it exists to exclude. A per-rank
-// bound remains stable as communicator size changes.
-//
-// Set to 0 to restore the previous behaviour: an upper bound only, and with it
-// the bootstrap-triggered build.
-RCCL_PARAM(HierarchicalAllGatherMinBytesPerRank, "HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", 1024);
+// Smallest AllGather, in total gathered bytes (sendcount * typeSize * nRanks,
+// the size rccl-tests reports), that may take the hierarchical path. The bound
+// is fixed: it does not scale with the number of ranks. Under
+// RCCL_HIERARCHICAL_LAZY_INIT it is also the smallest AllGather that builds the
+// sub-communicators. 0 removes the floor.
+RCCL_PARAM(HierarchicalAllGatherMinBytes, "HIERARCHICAL_ALLGATHER_MIN_BYTES", 1024);
+
+// Defer the hierarchical sub-communicators from init to the first eligible
+// AllGather. Read once at init (init.cc); off by default.
+RCCL_PARAM(HierarchicalLazyInit, "HIERARCHICAL_LAZY_INIT", 0);
 
 bool rcclHierarchicalAllGatherEligible(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
 
-  // msgSize is the total gathered size; recover this rank's own contribution to
-  // compare against the floor.
-  int64_t minBytesPerRank = rcclParamHierarchicalAllGatherMinBytesPerRank();
-  if (minBytesPerRank > 0 && comm->nRanks > 0 &&
-      msgSize / (size_t)comm->nRanks < (size_t)minBytesPerRank) {
-    return false;
-  }
+  const int64_t minBytes = rcclParamHierarchicalAllGatherMinBytes();
+  if (minBytes > 0 && msgSize < (size_t)minBytes) return false;
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
   return threshold > 0 && msgSize <= threshold;
@@ -1131,30 +1122,29 @@ static ncclResult_t rcclAllRanksAgree(struct ncclComm* comm, bool local, bool* a
   return ncclSuccess;
 }
 
-// Collective. The splits run only once no rank is capturing, and a setup
-// failure on any rank disables the hierarchy on every rank: the communicator
-// keeps using the non-hierarchical algorithms rather than failing the
-// collective and never attempts the splits again. Whatever a rank did build is
-// released by commFree.
+// Collective. Every rank reaches this on the same eligible AllGathers, so the
+// handshake schedule below is the same on every rank. The splits run only once
+// no rank is capturing; a capturing rank defers the setup to a later call.
 static ncclResult_t rcclLazyInitHierarchicalComms(struct ncclComm* comm, bool localReady) {
+  // Handshake on the 1st, 2nd, 4th, 8th... eligible call, so a rank that keeps
+  // capturing costs its peers O(log n) bootstrap AllGathers rather than one per call.
+  const uint64_t call = ++comm->hierarchicalLazyCalls;
+  if ((call & (call - 1)) != 0) return ncclSuccess;
+
   bool allReady = false;
   NCCLCHECK(rcclAllRanksAgree(comm, localReady, &allReady));
   if (!allReady) return ncclSuccess;
 
-  const ncclResult_t initResult = rcclEnsureHierarchicalComms(comm);
-  bool allInitialized = false;
-  NCCLCHECK(rcclAllRanksAgree(comm, initResult == ncclSuccess && comm->hierarchicalCommsInitialized, &allInitialized));
-  if (allInitialized) return ncclSuccess;
-
-  if (initResult != ncclSuccess) {
-    WARN("Hierarchical collectives: sub-communicator setup failed (%s), using non-hierarchical algorithms",
-         ncclGetErrorString(initResult));
-  } else {
-    INFO(NCCL_INIT, "Hierarchical collectives: sub-communicator setup failed on another rank, using "
-                    "non-hierarchical algorithms");
+  // A split can fail before this rank reaches its rendezvous, while peers are
+  // still exchanging split info on the parent's bootstrap ring, so no further
+  // handshake is safe after a failure. Return it once, as eager setup returns
+  // it from ncclCommInitRank, and stop using the hierarchy on this rank.
+  const ncclResult_t res = rcclEnsureHierarchicalComms(comm);
+  if (res != ncclSuccess) {
+    WARN("Hierarchical collectives: sub-communicator setup failed (%s)", ncclGetErrorString(res));
+    comm->hierarchicalEligible = false;
+    return res;
   }
-  comm->hierarchicalCommsInitialized = false;
-  comm->hierarchicalEligible = false;
   return ncclSuccess;
 }
 
@@ -1663,12 +1653,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     }
 
     if (!query && symEligible) INFO(NCCL_TUNING, "AG DDA disqualified: symk eligible");
-    // (2) Hierarchical AllGather. Only live, non-captured dispatch may build the
-    // sub-communicators. Reporting remains side-effect-free, while capture can
-    // use a hierarchy initialized by an earlier call.
+    // (2) Hierarchical AllGather. Under lazy setup, only live, non-captured
+    // dispatch may build the sub-communicators; eager setup built them at init.
+    // Reporting remains side-effect-free, while capture can use a hierarchy
+    // initialized by an earlier call.
     bool useHierarchical = false;
     if (ncclGroupDepth == 0 && rcclHierarchicalAllGatherEligible(comm, msgSize)) {
-      if (!query && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized) {
+      if (!query && comm->hierarchicalLazyInit && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized) {
         NCCLCHECK(rcclLazyInitHierarchicalComms(comm, /*localReady=*/!ceCapturing));
       }
       useHierarchical = comm->hierarchicalCommsInitialized;
@@ -2164,10 +2155,18 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
 
+// Smallest ReduceScatter, in total bytes (recvcount * typeSize * nRanks, the
+// size rccl-tests reports), that may take the hierarchical path. The bound is
+// fixed: it does not scale with the number of ranks. 0 removes the floor.
+RCCL_PARAM(HierarchicalReduceScatterMinBytes, "HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES", 1024);
+
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8 || rcclParamHierarchicalReduceScatter() != 1) {
     return false;
   }
+
+  const int64_t minBytes = rcclParamHierarchicalReduceScatterMinBytes();
+  if (minBytes > 0 && msgSize < (size_t)minBytes) return false;
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false, /*reduceScatter=*/true);
   return threshold > 0 && msgSize <= threshold && comm->hierarchicalCommsInitialized;

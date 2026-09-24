@@ -7,8 +7,6 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <unordered_map>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "comm.h"
@@ -19,16 +17,10 @@ namespace RcclUnitTesting
 
 TEST(HierarchicalCollectives, LazyInitGuards)
 {
-    const std::unordered_map<std::string, std::string> env = {
-        {"RCCL_HIERARCHICAL_ALLGATHER", "1"},
-        {"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", "1024"},
-    };
-
-    auto registerCase = [&env](const char* name, auto test)
+    auto registerCase = [](const char* name, auto test)
     {
         ProcessIsolatedTestRunner::registerTest(
             ProcessIsolatedTestRunner::TestConfig(name, test)
-                .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(60))
         );
     };

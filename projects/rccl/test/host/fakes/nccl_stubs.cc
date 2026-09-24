@@ -136,8 +136,8 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
 }
 // src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
 // rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
-// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter):
-// rccl_wrap_fakes.cc.
+// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter,
+// rcclParamHierarchicalLazyInit): rccl_wrap_fakes.cc.
 // rcclGetTuningIndexForArch (src/graph/tuning.cc): tuning_fakes.cc.
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
