@@ -117,12 +117,18 @@ target_link_libraries(
             GTest::gtest_main
             rocprofiler-sdk::counter-test-constants)
 
+# Every test in this suite needs at least one GPU agent and most need two, so on a
+# single-agent runner they GTEST_SKIP(). gtest still exits 0 when it skips, which ctest
+# reports as "Passed" -- indistinguishable from a suite that actually exercised two
+# agents. Matching the skip text makes the difference visible in the ctest summary, the
+# same way pcs-test matches "PC sampling unavailable".
 rocprofiler_add_unit_test(
     TARGET thread-trace-per-agent-test
     SOURCES ${ROCPROFILER_THREAD_TRACE_PER_AGENT_TEST_SOURCES}
     TEST_LIST thread-trace-test_TESTS
     TIMEOUT 45
     LABELS "unittests"
+    SKIP_REGULAR_EXPRESSION "no GPU agent available|fewer than two GPU agents available"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
