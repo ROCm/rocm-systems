@@ -38,6 +38,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -63,6 +64,7 @@ constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint64_t kKdAddr = 0x10000;
 constexpr uint64_t kScratchKdAddr = 0x20000;
 constexpr uint64_t kCdna5ScratchKdAddr = 0x30000;
+constexpr uint64_t kCdna5PlainKdAddr = 0x40000;
 constexpr uint64_t kDefaultScratchPool = 0x1'0000'0000ULL;
 constexpr uint32_t kWavefrontSize = 64;
 constexpr uint32_t kCdna5WavefrontSize = 32;
@@ -144,6 +146,10 @@ struct Cdna5ScratchTopologyFixture {
     kd.private_segment_fixed_size = 64;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5ScratchKdAddr);
     memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t),
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    kd.private_segment_fixed_size = 0;
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5PlainKdAddr);
+    memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t),
                     build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   }
 };
@@ -328,6 +334,37 @@ public:
 
 private:
   std::map<uint32_t, uint64_t> scratch_bases_;
+};
+
+/// Count queue-dispatched workgroups and record the largest physical wave slot.
+class WaveSlotPlugin : public ExecutionPlugin {
+public:
+  struct Stats {
+    uint32_t dispatched = 0;
+    uint32_t completed = 0;
+    uint32_t max_slot = 0;
+  };
+
+  WaveSlotPlugin() : ExecutionPlugin("xcd-wave-slot") {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    ASSERT_EQ(waves.size(), 1u);
+    if (waves.empty())
+      return;
+    auto &stats = stats_[dispatch_id];
+    ++stats.dispatched;
+    stats.max_slot = std::max(stats.max_slot, waves.front()->wf_id());
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t) override {
+    ++stats_[dispatch_id].completed;
+  }
+
+  const std::map<uint32_t, Stats> &stats() const { return stats_; }
+
+private:
+  std::map<uint32_t, Stats> stats_;
 };
 
 /// Identity translator and transport adapter used only to put the ordinary
@@ -1504,7 +1541,7 @@ TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
   ASSERT_EQ(se->num_compute_units(), 16u);
   constexpr uint64_t kPerWave = 64 * kCdna5WavefrontSize;
   const uint64_t waves_per_se =
-      static_cast<uint64_t>(se->num_compute_units()) * se->compute_unit(0)->num_wf_slots();
+      static_cast<uint64_t>(se->num_compute_units()) * se->compute_unit(0)->scratch_slots_per_cu();
   const uint64_t xcc_stride = xcd->num_shader_engines() * waves_per_se * kPerWave;
   std::set<uint64_t> unique_bases;
   for (const auto &[workgroup, scratch_base] : addresses->scratch_bases()) {
@@ -1514,6 +1551,79 @@ TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
   }
   EXPECT_EQ(unique_bases.size(), kTotalXcds)
       << "corresponding wave slots on different XCDs shared private memory";
+}
+
+TEST(XcdDistributionTest, Cdna5ScratchCapacityKeepsEveryCuAddressable) {
+  Cdna5ScratchTopologyFixture fx;
+  auto *cp = fx.soc->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_EQ(cp->compute_units().size(), 32u);
+
+  constexpr uint32_t kScratchSlotsPerCu = 32;
+  constexpr uint32_t kCusPerShaderEngine = 16;
+  constexpr uint32_t kScratchSlotsPerShaderEngine = kScratchSlotsPerCu * kCusPerShaderEngine;
+  for (const auto *cu : cp->compute_units()) {
+    EXPECT_EQ(cu->num_wf_slots(), 64u);
+    EXPECT_EQ(cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
+    EXPECT_LT(cu->scratch_scoreboard_base(), kScratchSlotsPerShaderEngine);
+    EXPECT_TRUE(
+        cu->can_accept_workgroup(/*num_wfs=*/1, /*lds_bytes=*/0, kScratchSlotsPerShaderEngine));
+  }
+
+  auto *cu = cp->compute_units().front();
+  std::vector<amdgpu::Wavefront *> scratch_waves;
+  for (uint32_t slot = 0; slot < kScratchSlotsPerCu; ++slot) {
+    auto *wave = cu->dispatch_wf(slot, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1,
+                                 kCdna5WavefrontSize, kScratchSlotsPerShaderEngine);
+    ASSERT_NE(wave, nullptr) << "scratch slot " << slot;
+    scratch_waves.push_back(wave);
+  }
+  EXPECT_EQ(cu->dispatch_wf(kScratchSlotsPerCu, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1,
+                            kCdna5WavefrontSize, kScratchSlotsPerShaderEngine),
+            nullptr)
+      << "scratch-backed residency exceeded the advertised per-CU capacity";
+
+  auto *general_wave = cu->dispatch_wf(kScratchSlotsPerCu, /*pc=*/0, /*num_sgprs=*/1,
+                                       /*num_vgprs=*/1, kCdna5WavefrontSize);
+  ASSERT_NE(general_wave, nullptr)
+      << "the scratch limit incorrectly removed a general execution slot";
+  for (auto *wave : scratch_waves)
+    cu->free_wavefront_resources(*wave);
+  cu->free_wavefront_resources(*general_wave);
+}
+
+TEST(XcdDistributionTest, Cdna5QueueAdmissionCapsScratchButKeepsGeneralWaveSlots) {
+  Cdna5ScratchTopologyFixture fx;
+  auto *cp = fx.soc->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+
+  auto plugin = std::make_unique<WaveSlotPlugin>();
+  auto *slots = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  test::AqlQueue queue(fx.memory, cp);
+  constexpr uint32_t kScratchWorkgroups = 1056; // More than 32 slots on each of 32 CUs.
+  queue.dispatch(kCdna5ScratchKdAddr, kScratchWorkgroups * kCdna5WavefrontSize,
+                 kCdna5WavefrontSize);
+  constexpr uint32_t kGeneralWorkgroups = 2048; // Fill all 64 execution slots on each CU.
+  queue.dispatch_with_barrier(kCdna5PlainKdAddr, kGeneralWorkgroups * kCdna5WavefrontSize,
+                              kCdna5WavefrontSize);
+  fx.engine->run();
+
+  ASSERT_EQ(slots->stats().size(), 2u);
+  const auto &scratch = slots->stats().begin()->second;
+  EXPECT_EQ(scratch.dispatched, kScratchWorkgroups);
+  EXPECT_EQ(scratch.completed, kScratchWorkgroups);
+  EXPECT_LT(scratch.max_slot, 32u)
+      << "scratch-backed waves escaped the 32-slot per-CU admission limit";
+
+  const auto &general = std::next(slots->stats().begin())->second;
+  EXPECT_EQ(general.dispatched, kGeneralWorkgroups);
+  EXPECT_EQ(general.completed, kGeneralWorkgroups);
+  EXPECT_GE(general.max_slot, 32u)
+      << "the scratch limit reduced residency for a kernel without private memory";
 }
 
 TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {

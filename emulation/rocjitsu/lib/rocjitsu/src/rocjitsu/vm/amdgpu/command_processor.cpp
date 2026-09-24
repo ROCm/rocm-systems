@@ -845,6 +845,16 @@ void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProces
   next_dispatch_id_ = dispatch_id_base_;
 }
 
+void CommandProcessor::set_scratch_slots_per_cu(uint32_t slots) {
+  configured_scratch_slots_per_cu_ = std::max(slots, 1u);
+  scratch_waves_per_se_ = 1;
+  for (ComputeUnitCore *cu : cus_) {
+    cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->scratch_slots_per_cu());
+  }
+}
+
 void CommandProcessor::set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count) {
   assert(xcc_count != 0 && xcc_count <= MAX_NUM_XCC);
   assert(xcc_id < xcc_count);
@@ -1334,8 +1344,11 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         return QueuePrepareCloseStatus::Faulted;
       retry_close = queue->read_pointer_journal.publication_pending() ||
                     queue->publication_retry_pending || queue->idle_publication.active() ||
-                    queue->scratch_request.active() || queue->scratch_reclaim.active() ||
-                    !queue->entries.empty();
+                    // After delivery, ROCr owns the scratch request and may suspend the queue
+                    // while allocating backing. Only an unfinished notification publication
+                    // must delay that removal.
+                    queue->scratch_request.publication_pending() ||
+                    queue->scratch_reclaim.active() || !queue->entries.empty();
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
@@ -3749,6 +3762,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint32_t scratch_wave_stride_per_se = 0;
   bool scratch_use_once = false;
   bool scratch_uses_alternate = false;
+  const uint32_t private_segment_fixed_size =
+      std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   if (uses_kfd_queue_abi) {
     queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
     if (AMDHSA_BITS_GET(kd.kernel_code_properties,
@@ -3768,8 +3783,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       launch_metadata.write_dispatch_id = loaded.value;
     }
 
-    const uint32_t private_segment_fixed_size =
-        std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
     if (private_segment_fixed_size > 0) {
       uint32_t queue_caps = 0;
       VmAccessOutcome outcome =
@@ -3927,6 +3940,9 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     }
   }
 
+  if (private_segment_fixed_size > 0 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+    scratch_wave_limit_per_se = std::min(scratch_wave_limit_per_se, scratch_waves_per_se_);
+
   DispatchEntry dp{};
   dp.queue_id = queue.queue_id;
   dp.enabled_cus = queue.enabled_cus;
@@ -3960,7 +3976,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
-  dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
+  dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
   dp.scratch_wave_stride_per_se = scratch_wave_stride_per_se;
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);

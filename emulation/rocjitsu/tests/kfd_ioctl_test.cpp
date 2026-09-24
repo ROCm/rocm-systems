@@ -4879,29 +4879,37 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
 }
 
 TEST_F(KfdIoctlCdna5Test, ScratchScoreboardSlotsRestartOnEachShaderEngine) {
+  constexpr uint32_t kScratchSlotsPerCu = 32;
+  constexpr uint32_t kCusPerShaderEngine = 16;
+  constexpr uint32_t kScratchSlotsPerShaderEngine = kScratchSlotsPerCu * kCusPerShaderEngine;
+
   auto *xcd = soc_->xcd(0);
   ASSERT_NE(xcd, nullptr);
   ASSERT_EQ(xcd->num_shader_engines(), 2u);
   auto *se0 = xcd->shader_engine(0);
   auto *se1 = xcd->shader_engine(1);
-  ASSERT_EQ(se0->num_compute_units(), 16u);
-  ASSERT_EQ(se1->num_compute_units(), 16u);
+  ASSERT_EQ(se0->num_compute_units(), kCusPerShaderEngine);
+  ASSERT_EQ(se1->num_compute_units(), kCusPerShaderEngine);
 
   auto *se0_last_cu = se0->compute_unit(15);
   auto *se1_first_cu = se1->compute_unit(0);
+  ASSERT_EQ(se0_last_cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
+  ASSERT_EQ(se1_first_cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
   auto *se0_last_wave = se0_last_cu->dispatch_wf_at(
-      /*wf_id=*/63, /*wg_id=*/0, /*pc=*/0x600000000ULL, /*sgprs=*/16, /*vgprs=*/4);
+      /*wf_id=*/kScratchSlotsPerCu - 1, /*wg_id=*/0, /*pc=*/0x600000000ULL,
+      /*sgprs=*/16, /*vgprs=*/4);
   auto *se1_first_wave = se1_first_cu->dispatch_wf_at(
       /*wf_id=*/0, /*wg_id=*/1, /*pc=*/0x600001000ULL, /*sgprs=*/16, /*vgprs=*/4);
   ASSERT_NE(se0_last_wave, nullptr);
   ASSERT_NE(se1_first_wave, nullptr);
 
   EXPECT_EQ(se0_last_wave->shader_engine_id(), 0u);
-  EXPECT_EQ(se0_last_wave->scratch_scoreboard_id(), 1023u);
+  EXPECT_EQ(se0_last_wave->scratch_scoreboard_id(), kScratchSlotsPerShaderEngine - 1);
   EXPECT_EQ(se1_first_wave->shader_engine_id(), 1u);
   EXPECT_EQ(se1_first_wave->scratch_scoreboard_id(), 0u);
-  EXPECT_EQ(se1_first_wave->shader_engine_id() * 1024u + se1_first_wave->scratch_scoreboard_id(),
-            1024u);
+  EXPECT_EQ(se1_first_wave->shader_engine_id() * kScratchSlotsPerShaderEngine +
+                se1_first_wave->scratch_scoreboard_id(),
+            kScratchSlotsPerShaderEngine);
 }
 
 TEST_F(KfdIoctlCdna5Test, DbgTrapPublishesAndRestoresSecondQueueAcrossActiveXccAreas) {
