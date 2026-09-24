@@ -370,6 +370,157 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
 }
 
 // ================================================================================================
+bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
+  constexpr uint32_t kMaxEntries = 65535;
+  constexpr size_t kEngineCount = static_cast<size_t>(HwQueueEngine::SdmaP2P) + 1;
+  struct RectGroup {
+    hsa_agent_t src_agent;
+    std::vector<hsa_amd_memory_copy_rect_t> rects;
+    std::vector<hsa_agent_t> dst_agents;
+  };
+  struct LinearGroup {
+    hsa_agent_t src_agent;
+    std::vector<void*> srcs;
+    std::vector<void*> dsts;
+    std::vector<hsa_agent_t> dst_agents;
+    std::vector<size_t> sizes;
+  };
+  std::vector<RectGroup> rect_groups[kEngineCount];
+  std::vector<LinearGroup> linear_groups[kEngineCount];
+
+  const hsa_agent_t cpu_agent = dev().getCpuAgent();
+  const hsa_agent_t backend_device = dev().getBackendDevice();
+
+  gpu().releaseGpuMemoryFence(kSkipCpuWait);
+
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    const Memory& src_memory =
+        gpuMem(*op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]));
+    const Memory& dst_memory =
+        gpuMem(*op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]));
+    hsa_agent_t src_agent = src_memory.getOwningAgent();
+    hsa_agent_t dst_agent = dst_memory.getOwningAgent();
+    // Peer copies run on this device's SDMA engines, matching the linear batch.
+    if (src_agent.handle != dst_agent.handle && src_agent.handle != cpu_agent.handle &&
+        dst_agent.handle != cpu_agent.handle) {
+      dst_agent = (src_agent.handle == backend_device.handle) ? dst_agent : src_agent;
+      src_agent = backend_device;
+    }
+
+    HwQueueEngine engine = HwQueueEngine::SdmaD2D;
+    if (src_agent.handle == cpu_agent.handle) {
+      engine = HwQueueEngine::SdmaH2D;
+    } else if (dst_agent.handle == cpu_agent.handle) {
+      engine = HwQueueEngine::SdmaD2H;
+    } else if (src_agent.handle != dst_agent.handle) {
+      engine = HwQueueEngine::SdmaP2P;
+    }
+
+    address src_base = reinterpret_cast<address>(src_memory.getDeviceMemory());
+    address dst_base = reinterpret_cast<address>(dst_memory.getDeviceMemory());
+    hsa_pitched_ptr_t src_pitched = {src_base + op.src_rect.offset(0, 0, 0), op.src_rect.rowPitch_,
+                                     op.src_rect.slicePitch_};
+    hsa_pitched_ptr_t dst_pitched = {dst_base + op.dst_rect.offset(0, 0, 0), op.dst_rect.rowPitch_,
+                                     op.dst_rect.slicePitch_};
+    hsa_dim3_t range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
+                        static_cast<uint32_t>(op.size[2])};
+
+    const bool dword_aligned = (reinterpret_cast<uintptr_t>(src_pitched.base) % 4) == 0 &&
+                               (reinterpret_cast<uintptr_t>(dst_pitched.base) % 4) == 0 &&
+                               (src_pitched.pitch % 4) == 0 && (dst_pitched.pitch % 4) == 0 &&
+                               (src_pitched.slice % 4) == 0 && (dst_pitched.slice % 4) == 0;
+
+    const size_t engine_index = static_cast<size_t>(engine);
+    if (dword_aligned) {
+      std::vector<RectGroup>& engine_rect_groups = rect_groups[engine_index];
+      if (engine_rect_groups.empty() ||
+          engine_rect_groups.back().src_agent.handle != src_agent.handle ||
+          engine_rect_groups.back().rects.size() == kMaxEntries) {
+        engine_rect_groups.push_back(RectGroup{src_agent, {}, {}});
+      }
+      hsa_dim3_t origin = {0, 0, 0};
+      engine_rect_groups.back().rects.push_back(
+          hsa_amd_memory_copy_rect_t{dst_pitched, origin, src_pitched, origin, range});
+      engine_rect_groups.back().dst_agents.push_back(dst_agent);
+    } else {
+      std::vector<LinearGroup>& rows = linear_groups[engine_index];
+      for (size_t z = 0; z < op.size[2]; ++z) {
+        for (size_t y = 0; y < op.size[1]; ++y) {
+          if (rows.empty() || rows.back().src_agent.handle != src_agent.handle ||
+              rows.back().sizes.size() == kMaxEntries) {
+            rows.push_back(LinearGroup{src_agent, {}, {}, {}, {}});
+          }
+          rows.back().srcs.push_back(src_base + op.src_rect.offset(0, y, z));
+          rows.back().dsts.push_back(dst_base + op.dst_rect.offset(0, y, z));
+          rows.back().dst_agents.push_back(dst_agent);
+          rows.back().sizes.push_back(op.size[0]);
+        }
+      }
+    }
+  }
+
+  std::vector<hsa_signal_t> wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
+  std::vector<ProfilingSignal*> group_signals;
+
+  for (size_t engine_index = 0; engine_index < kEngineCount; ++engine_index) {
+    if (rect_groups[engine_index].empty() && linear_groups[engine_index].empty()) {
+      continue;
+    }
+    gpu().Barriers().SetActiveEngine(static_cast<HwQueueEngine>(engine_index));
+
+    std::vector<hsa_amd_memory_copy_op_t> final_ops;
+    for (RectGroup& group : rect_groups[engine_index]) {
+      hsa_amd_memory_copy_op_t rect_op = {};
+      rect_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      rect_op.type = HSA_AMD_MEMORY_COPY_OP_RECT;
+      rect_op.num_entries = static_cast<uint16_t>(group.rects.size());
+      rect_op.rect_list = group.rects.data();
+      rect_op.src_agent = group.src_agent;
+      rect_op.dst_agent_list = group.dst_agents.data();
+      rect_op.dst = nullptr;
+      rect_op.size = 0;
+      rect_op.unused_size = 0;
+      final_ops.push_back(rect_op);
+    }
+    for (LinearGroup& group : linear_groups[engine_index]) {
+      hsa_amd_memory_copy_op_t linear_op = {};
+      linear_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      linear_op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+      linear_op.num_entries = static_cast<uint16_t>(group.sizes.size());
+      linear_op.src_list = group.srcs.data();
+      linear_op.src_agent = group.src_agent;
+      linear_op.dst_list = group.dsts.data();
+      linear_op.dst_agent_list = group.dst_agents.data();
+      linear_op.size_list = group.sizes.data();
+      final_ops.push_back(linear_op);
+    }
+
+    for (hsa_amd_memory_copy_op_t& copy_op : final_ops) {
+      copy_op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
+      group_signals.push_back(gpu().Barriers().GetLastSignal());
+    }
+
+    const hsa_status_t status = Hsa::memory_async_batch_copy(
+        final_ops.data(), static_cast<uint32_t>(final_ops.size()),
+        static_cast<uint32_t>(wait_events.size()), wait_events.data());
+    if (status != HSA_STATUS_SUCCESS) {
+      for (size_t signal_index = 0; signal_index < final_ops.size(); ++signal_index) {
+        gpu().Barriers().ResetCurrentSignal();
+      }
+      LogPrintfError("HSA batch rect copy failed with code %d", status);
+      return false;
+    }
+  }
+
+  for (size_t signal_index = 0; signal_index + 1 < group_signals.size(); ++signal_index) {
+    gpu().Barriers().AddExternalSignal(group_signals[signal_index]);
+  }
+
+  gpu().setFenceDirty(false);
+  return true;
+}
+
+// ================================================================================================
 bool DmaBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                        const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                        const amd::Coord3D& size, bool entire, size_t rowPitch,
@@ -2119,6 +2270,24 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   synchronize();
 
   return result;
+}
+
+// ================================================================================================
+bool KernelBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
+  if (dev().info().pcie_atomics_) {
+    return DmaBlitManager::CopyBufferRectBatch(copy_ops);
+  }
+
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    device::Memory* src_dev_mem =
+        op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
+    device::Memory* dst_dev_mem =
+        op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]);
+    if (!copyBufferRect(*src_dev_mem, *dst_dev_mem, op.src_rect, op.dst_rect, op.size)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // ================================================================================================

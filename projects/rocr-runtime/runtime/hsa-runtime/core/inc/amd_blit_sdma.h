@@ -65,10 +65,8 @@ class BlitSdmaBase : public core::Blit {
   virtual bool isSDMA() const override { return true; }
   virtual hsa_status_t Initialize(const core::Agent& agent, bool use_xgmi,
                                   size_t linear_copy_size_override, int rec_engine) = 0;
-  virtual hsa_status_t SubmitCopyRectCommand(const hsa_pitched_ptr_t* dst,
-                                             const hsa_dim3_t* dst_offset,
-                                             const hsa_pitched_ptr_t* src,
-                                             const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
+  virtual hsa_status_t SubmitCopyRectCommand(const hsa_amd_memory_copy_rect_t* rects,
+                                             uint16_t num_rects,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
 
@@ -246,10 +244,10 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) override;
 
-  virtual hsa_status_t SubmitCopyRectCommand(const hsa_pitched_ptr_t* dst,
-                                             const hsa_dim3_t* dst_offset,
-                                             const hsa_pitched_ptr_t* src,
-                                             const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
+  /// @brief Submit the packets of all boxes in one command, so that the
+  /// dependency polls and the completion update run once for the whole list.
+  virtual hsa_status_t SubmitCopyRectCommand(const hsa_amd_memory_copy_rect_t* rects,
+                                             uint16_t num_rects,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) override;
 
