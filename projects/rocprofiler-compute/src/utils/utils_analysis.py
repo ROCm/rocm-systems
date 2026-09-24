@@ -1444,7 +1444,11 @@ def _collapse_matching_markers_across_passes(
                 "Kernel_Start_Timestamps": first["Kernel_Start_Timestamps"],
                 "Kernel_End_Timestamps": first["Kernel_End_Timestamps"],
             })
-        collapsed = pd.DataFrame.from_records(records)
+        collapsed = (
+            pd.DataFrame.from_records(records)
+            if records
+            else pd.DataFrame(columns=list(_COLLAPSED_MARKER_COLUMNS))
+        )
     drop_columns = [
         column for column in _PASS_DROP_COLUMNS if column in collapsed.columns
     ]
