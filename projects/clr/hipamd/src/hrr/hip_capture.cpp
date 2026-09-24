@@ -1592,45 +1592,47 @@ void hrr_install_clr_exception_handler() {
 }  // namespace
 
 void hip_capture_init() {
-  if (!hip_capture_enabled()) return;
+  #if 0
+    if (!hip_capture_enabled()) return;
 
-  // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
-  // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
-  // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
-  // level to LOG_INFO (never lower an already-higher level) so enabling
-  // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
-  // went through raw fprintf(stderr).
-  if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
-    AMD_LOG_LEVEL = amd::LOG_INFO;
-    LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
-                  "to %d (LOG_INFO) so argument traces are visible",
-                  static_cast<int>(amd::LOG_INFO));
-  }
+    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+    // level to LOG_INFO (never lower an already-higher level) so enabling
+    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
+    // went through raw fprintf(stderr).
+    if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
+      AMD_LOG_LEVEL = amd::LOG_INFO;
+      LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
+                    "to %d (LOG_INFO) so argument traces are visible",
+                    static_cast<int>(amd::LOG_INFO));
+    }
 
-  // Snapshot the fully-initialized dispatch table and install runtime shims here
-  // only (see comment above — no static-init capture hook).
-  if (!g_installed) {
-    hip_capture_build_table();
-    hip_capture_install();
-  }
+    // Snapshot the fully-initialized dispatch table and install runtime shims here
+    // only (see comment above — no static-init capture hook).
+    if (!g_installed) {
+      hip_capture_build_table();
+      hip_capture_install();
+    }
 
-  // Open the events writer now — Flag::init() has run so output_dir is valid.
-  if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+    // Open the events writer now — Flag::init() has run so output_dir is valid.
+    if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
 
-  hrr_cap::writer::set_capture_metadata_json(
-      hrr_cap::metadata::collect_json());
+    hrr_cap::writer::set_capture_metadata_json(
+        hrr_cap::metadata::collect_json());
 
-  hrr_install_clr_exception_handler();
+    hrr_install_clr_exception_handler();
 
-  // Install compiler dispatch shims now — hip::init() has completed so
-  // the compiler dispatch table is fully populated.
-  hip_capture_build_compiler_table();
+    // Install compiler dispatch shims now — hip::init() has completed so
+    // the compiler dispatch table is fully populated.
+    hip_capture_build_compiler_table();
 
-  // Retroactively record fat binaries that fired before our shims were live.
-  // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
-  hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
+    // Retroactively record fat binaries that fired before our shims were live.
+    // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
+    hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
 
-  std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+    std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+  #endif
 }
 
 void hip_capture_shutdown() {
