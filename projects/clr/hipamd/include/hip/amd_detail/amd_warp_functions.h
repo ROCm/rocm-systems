@@ -539,15 +539,136 @@ __device__ inline unsigned long long __shfl_down(MAYBE_UNDEF unsigned long long 
   return tmp1;
 }
 
+// True when (lane_mask, width) are both known at compile time and the xor cannot leave the
+// width-aligned lane group. Every fixed-permutation back end below is gated on this.
+//
+// Both operands need their own __builtin_constant_p, and neither test is redundant:
+//
+//  - lane_mask, because the back ends select on it with a switch whose arms take it as a
+//    template argument. Testing only the comparison is not enough - the optimiser will report
+//    `lane_mask > 0 && lane_mask < width` as constant once it can bound the range, even when
+//    lane_mask is still a register. The switch then survives as a runtime binary search
+//    (measured: a 54-instruction reduction became 299).
+//  - width, because otherwise the comparison survives as a runtime branch. If width is
+//    divergent, that branch is divergent too, and the cross-lane instruction inside it runs
+//    under a partial exec mask, reading lanes that are switched off. On gfx942 that silently
+//    corrupts half the wave.
+//
+// Requiring both folds the condition away entirely, so neither failure is reachable by
+// construction. It costs nothing in practice: warpSize folds to a literal, so the default
+// `width` argument still takes the fast path.
+//
+// This must be expanded directly into an `if` condition. Assigning it to a local first makes
+// clang evaluate __builtin_constant_p in the front end - where lane_mask is still a parameter -
+// so it always yields false and every caller falls back to ds_bpermute.
+#define __HIP_SHFL_XOR_FIXED(lane_mask, width)                                                     \
+  (__builtin_constant_p(lane_mask) && __builtin_constant_p(width) && (lane_mask) > 0 &&            \
+   (lane_mask) < (width))
+
+// DPP is an operand modifier rather than an instruction, so GCNDPPCombine folds the move into
+// the consuming VALU op and a shuffle that feeds arithmetic costs nothing at all. The fold needs
+// row_mask and bank_mask fully enabled and either bound_ctrl set or old == 0 (GCNDPPCombine.cpp,
+// "Combining rules"); __hip_move_dpp_N passes poison as old, so bound_ctrl must be true. That is
+// also the form whose behaviour matches ds_bpermute when the source lane is inactive - both
+// yield 0 - so this does not change the (undefined) partial-exec corner.
+#define __HIP_SHFL_XOR_DPP(dpp_ctrl) __hip_move_dpp_N<(dpp_ctrl), 0xf, 0xf, true>(var)
+
+// ds_swizzle_b32 in BITMASK_PERM mode: and_mask in [4:0], or_mask in [9:5], xor_mask in [14:10]
+// (SIDefines.h). A pure xor by N is therefore (N << 10) | 0x1f. Groups are 32 lanes wide, so
+// this covers every mask below 32 regardless of wavefront size.
+#define __HIP_SHFL_XOR_SWIZZLE(lane_mask)                                                          \
+  static_cast<int>(__hip_ds_swizzle_N<((lane_mask) << 10) | 0x1f>(static_cast<unsigned int>(var)))
+
 __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width = warpSize) {
+  if (__HIP_SHFL_XOR_FIXED(lane_mask, width)) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_update_dpp)) {
+#if __has_builtin(__builtin_amdgcn_permlane16)
+      // row_xmask:N is "exchange with lane ^ N inside the row of 16", which is exactly this
+      // function. It is gfx10 and later, but the restriction is on the dpp_ctrl value rather
+      // than on the builtin, and it is only diagnosed in the backend, so is_invocable cannot
+      // query it. permlane16 carries the matching "gfx10-insts" target feature.
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane16)) {
+        switch (lane_mask) {
+          case 1: return __HIP_SHFL_XOR_DPP(0x161);
+          case 2: return __HIP_SHFL_XOR_DPP(0x162);
+          case 3: return __HIP_SHFL_XOR_DPP(0x163);
+          case 4: return __HIP_SHFL_XOR_DPP(0x164);
+          case 5: return __HIP_SHFL_XOR_DPP(0x165);
+          case 6: return __HIP_SHFL_XOR_DPP(0x166);
+          case 7: return __HIP_SHFL_XOR_DPP(0x167);
+          case 8: return __HIP_SHFL_XOR_DPP(0x168);
+          case 9: return __HIP_SHFL_XOR_DPP(0x169);
+          case 10: return __HIP_SHFL_XOR_DPP(0x16a);
+          case 11: return __HIP_SHFL_XOR_DPP(0x16b);
+          case 12: return __HIP_SHFL_XOR_DPP(0x16c);
+          case 13: return __HIP_SHFL_XOR_DPP(0x16d);
+          case 14: return __HIP_SHFL_XOR_DPP(0x16e);
+          case 15: return __HIP_SHFL_XOR_DPP(0x16f);
+        }
+      } else
+#endif
+      {
+        // DPP16 has no general xor mode before gfx10. The masks it can still express are the
+        // modes that happen to be involutions - a quad swap, and the two row mirrors.
+        switch (lane_mask) {
+          case 1: return __HIP_SHFL_XOR_DPP(0x0b1);   // quad_perm:[1,0,3,2]
+          case 2: return __HIP_SHFL_XOR_DPP(0x04e);   // quad_perm:[2,3,0,1]
+          case 3: return __HIP_SHFL_XOR_DPP(0x01b);   // quad_perm:[3,2,1,0]
+          case 7: return __HIP_SHFL_XOR_DPP(0x141);   // row_half_mirror
+          case 15: return __HIP_SHFL_XOR_DPP(0x140);  // row_mirror
+        }
+      }
+    }
+  }
 #if __has_builtin(__builtin_amdgcn_permlane_xor)
   // v_permlane_xor_b32 computes (lane ^ lane_mask) and falls back to the lane's own value when
   // that leaves the lane group, which is the same select as below. Its extra
   // lane_mask >= wavefrontSize case also yields the lane's own value, matching the select below
   // because width never exceeds the wavefront size.
+  //
+  // It is a real instruction, so unlike DPP it cannot be absorbed by the consumer - hence it
+  // sits below the DPP cases. It still beats ds_swizzle for what DPP could not reach, because
+  // it stays on the VALU pipe, and unlike both it accepts a runtime lane_mask.
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane_xor))
     return __builtin_amdgcn_permlane_xor(var, lane_mask, width);
 #endif
+  if (__HIP_SHFL_XOR_FIXED(lane_mask, width) && lane_mask < 32) {
+    switch (lane_mask) {
+      case 1: return __HIP_SHFL_XOR_SWIZZLE(1);
+      case 2: return __HIP_SHFL_XOR_SWIZZLE(2);
+      case 3: return __HIP_SHFL_XOR_SWIZZLE(3);
+      case 4: return __HIP_SHFL_XOR_SWIZZLE(4);
+      case 5: return __HIP_SHFL_XOR_SWIZZLE(5);
+      case 6: return __HIP_SHFL_XOR_SWIZZLE(6);
+      case 7: return __HIP_SHFL_XOR_SWIZZLE(7);
+      case 8: return __HIP_SHFL_XOR_SWIZZLE(8);
+      case 9: return __HIP_SHFL_XOR_SWIZZLE(9);
+      case 10: return __HIP_SHFL_XOR_SWIZZLE(10);
+      case 11: return __HIP_SHFL_XOR_SWIZZLE(11);
+      case 12: return __HIP_SHFL_XOR_SWIZZLE(12);
+      case 13: return __HIP_SHFL_XOR_SWIZZLE(13);
+      case 14: return __HIP_SHFL_XOR_SWIZZLE(14);
+      case 15: return __HIP_SHFL_XOR_SWIZZLE(15);
+      case 16: return __HIP_SHFL_XOR_SWIZZLE(16);
+      case 17: return __HIP_SHFL_XOR_SWIZZLE(17);
+      case 18: return __HIP_SHFL_XOR_SWIZZLE(18);
+      case 19: return __HIP_SHFL_XOR_SWIZZLE(19);
+      case 20: return __HIP_SHFL_XOR_SWIZZLE(20);
+      case 21: return __HIP_SHFL_XOR_SWIZZLE(21);
+      case 22: return __HIP_SHFL_XOR_SWIZZLE(22);
+      case 23: return __HIP_SHFL_XOR_SWIZZLE(23);
+      case 24: return __HIP_SHFL_XOR_SWIZZLE(24);
+      case 25: return __HIP_SHFL_XOR_SWIZZLE(25);
+      case 26: return __HIP_SHFL_XOR_SWIZZLE(26);
+      case 27: return __HIP_SHFL_XOR_SWIZZLE(27);
+      case 28: return __HIP_SHFL_XOR_SWIZZLE(28);
+      case 29: return __HIP_SHFL_XOR_SWIZZLE(29);
+      case 30: return __HIP_SHFL_XOR_SWIZZLE(30);
+      case 31: return __HIP_SHFL_XOR_SWIZZLE(31);
+    }
+  }
+  // General case: a runtime lane_mask, a runtime width, or a mask that reaches outside the
+  // 32-lane group that swizzle can address.
   int self = __lane_id();
   int index = self ^ lane_mask;
   index = index >= ((self + width) & ~(width - 1)) ? self : index;
@@ -560,6 +681,10 @@ __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width =
   }
   __builtin_trap();
 }
+
+#undef __HIP_SHFL_XOR_FIXED
+#undef __HIP_SHFL_XOR_DPP
+#undef __HIP_SHFL_XOR_SWIZZLE
 __device__ inline unsigned int __shfl_xor(MAYBE_UNDEF unsigned int var, int lane_mask,
                                           int width = warpSize) {
   union {
