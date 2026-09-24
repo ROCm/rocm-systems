@@ -127,8 +127,11 @@ Build and install rocDecode using the following commands:
      use the same command prompt for the steps below. The VA-API headers and import libraries
      are found there at build time, libva reads it at run time to locate the VA-API driver, and
      the verification commands below expand ``%ROCM_PATH%``.
-   * To include FFmpeg support for samples and the host decoder, set ``FFMPEG_ROOT=<path-to-ffmpeg>``
-     the same way and add ``-DFFMPEG_ROOT=%FFMPEG_ROOT%``.
+   * FFmpeg, needed for the samples and the host decoder, is detected automatically when it is
+     installed in a common location: on ``PATH``, under Chocolatey or scoop, in
+     ``%ProgramFiles%\ffmpeg``, or in ``C:\ffmpeg``. Set ``FFMPEG_ROOT=<path-to-ffmpeg>`` the same
+     way as ``ROCM_PATH`` and add ``-DFFMPEG_ROOT=%FFMPEG_ROOT%`` only if it lives elsewhere, or to
+     pin a specific build.
 
 To verify the build, build and run a sample from the installed location:
 

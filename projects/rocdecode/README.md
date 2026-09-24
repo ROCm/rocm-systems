@@ -72,7 +72,9 @@ On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/v
 
 **Windows:**
 
-  Use pre-built FFmpeg libraries or build from source. Pass `-DFFMPEG_ROOT=<path>` to CMake when configuring.
+  Use pre-built FFmpeg libraries or build from source. CMake finds FFmpeg automatically if it is
+  installed in a common location — on `PATH`, under Chocolatey or scoop, in `%ProgramFiles%\ffmpeg`,
+  or in `C:\ffmpeg`. Otherwise, pass `-DFFMPEG_ROOT=<path>` when configuring.
 
 ## Install
 
@@ -147,8 +149,10 @@ cmake --install . --config Release
 >   same command prompt for the steps below. The VA-API headers and import libraries are found
 >   there at build time, libva reads it at run time to locate the VA-API driver, and the test and
 >   sample commands below expand `%ROCM_PATH%`.
-> * To include FFmpeg support, set `FFMPEG_ROOT=<path-to-ffmpeg>` the same way and add
->   `-DFFMPEG_ROOT=%FFMPEG_ROOT%`.
+> * FFmpeg is detected automatically when it is installed in a common location. Set
+>   `FFMPEG_ROOT=<path-to-ffmpeg>` the same way and add `-DFFMPEG_ROOT=%FFMPEG_ROOT%` only if it
+>   lives somewhere else, or to pin a specific build. The commands below use `%FFMPEG_ROOT%` to
+>   name the DLL directory for `PATH`, so set it either way if you plan to copy them verbatim.
 
 ### Run tests
 
@@ -233,12 +237,27 @@ guide for other options.
 **Windows:**
 
   ```bat
+  set ROCM_PATH=<path-to-rocm-installation>
+  set FFMPEG_ROOT=<path-to-ffmpeg>
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
   ```
+
+  > [!NOTE]
+  > `videoDecode` uses FFmpeg to demultiplex the container, so FFmpeg must be present at configure
+  > time. `FFMPEG_ROOT` is only needed if FFmpeg is not in one of the locations CMake probes
+  > automatically; it is used above to name the DLL directory for `PATH`. If you don't have FFmpeg
+  > at all, use `videoDecodeRaw` instead — it reads an elementary bitstream and has no FFmpeg
+  > dependency:
+  >
+  > ```bat
+  > cmake %ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw -DROCM_PATH=%ROCM_PATH%
+  > cmake --build . --config Release
+  > Release\videodecoderaw.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265 -f 5
+  > ```
 
 ### Using CTest
 
@@ -253,10 +272,12 @@ guide for other options.
 **Windows:**
 
   ```bat
+  set ROCM_PATH=<path-to-rocm-installation>
+  set FFMPEG_ROOT=<path-to-ffmpeg>
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-test && cd rocdecode-test
   cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release -VV
   ```
 
