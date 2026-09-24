@@ -108,6 +108,7 @@ if (USE_HOST_VERBS)
       ib_ctrl_gtest.cpp
       rdma_loopback_gtest.cpp
       rma_engine_gtest.cpp
+      window_info_verbs_gtest.cpp
   )
 endif()
 
