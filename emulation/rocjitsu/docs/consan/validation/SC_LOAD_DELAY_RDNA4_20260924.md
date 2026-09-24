@@ -11,8 +11,9 @@ of scope and is not rerun. Existing green rows are not part of this calibration.
 | Workload | Delay selection | Clean | Detections | Qualification |
 | --- | --- | --- | ---: | --- |
 | `pytorch-rdna4-compiled-softmax` | uniform1-reads | Pass | 3/8 | Below 6/8 |
+| `tp1-decode-combined` | uniform1-reads | Pass | 0/8 | Below 6/8 |
 
-Completed 1 batches. Full results and frozen prospective specifications:
+Completed 2 batches. Full results and frozen prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-sweep-20260924/uniform1`.
 
 The companion `results.json` records coverage/health/control audits and paths to raw
