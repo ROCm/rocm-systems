@@ -783,12 +783,20 @@ inline __HOST_DEVICE__ __half __hmin_nan(const __half x, const __half y) {
 }
 
 // Arithmetic
-inline __device__ __half __clamp_01(__half x) {
-  auto r = static_cast<__half_raw>(x);
 
-  if (__hlt(x, __half_raw{0})) return __half_raw{0};
-  if (__hlt(__half_raw{1}, x)) return __half_raw{1};
-  return r;
+// Saturation to [0, 1].  Using builtins to clamp with `minnum(maxnum(x, 0), 1)`
+inline __HOST_DEVICE__ __half __clamp_01(__half x) {
+  return __half_raw{__builtin_elementwise_minnum(
+      __builtin_elementwise_maxnum(static_cast<__half_raw>(x).data, static_cast<_Float16>(0.0f)),
+      static_cast<_Float16>(1.0f))};
+}
+
+// Saturation to [0, 1].  Using elementwise builtins to clamp with `minnum(maxnum(x, 0), 1)`
+inline __HOST_DEVICE__ __half2 __clamp2_01(__half2 x) {
+  constexpr _Float16_2 lo{static_cast<_Float16>(0.0f), static_cast<_Float16>(0.0f)};
+  constexpr _Float16_2 hi{static_cast<_Float16>(1.0f), static_cast<_Float16>(1.0f)};
+  return __half2{__builtin_elementwise_minnum(
+      __builtin_elementwise_maxnum(static_cast<__half2_raw>(x).data, lo), hi)};
 }
 
 inline __HOST_DEVICE__ __half __hadd(__half x, __half y) {
@@ -860,16 +868,13 @@ inline __HOST_DEVICE__ __half2 __hmul2_rn(__half2 x, __half2 y) {
   return __half2{static_cast<__half2_raw>(x).data * static_cast<__half2_raw>(y).data};
 }
 inline __HOST_DEVICE__ __half2 __hadd2_sat(__half2 x, __half2 y) {
-  auto r = static_cast<__half2_raw>(__hadd2(x, y));
-  return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
+  return __clamp2_01(__hadd2(x, y));
 }
 inline __HOST_DEVICE__ __half2 __hsub2_sat(__half2 x, __half2 y) {
-  auto r = static_cast<__half2_raw>(__hsub2(x, y));
-  return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
+  return __clamp2_01(__hsub2(x, y));
 }
 inline __HOST_DEVICE__ __half2 __hmul2_sat(__half2 x, __half2 y) {
-  auto r = static_cast<__half2_raw>(__hmul2(x, y));
-  return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
+  return __clamp2_01(__hmul2(x, y));
 }
 inline __device__ __half2 __hfma2(__half2 x, __half2 y, __half2 z) {
   return __half2{__builtin_elementwise_fma(static_cast<__half2_raw>(x).data,
@@ -877,8 +882,7 @@ inline __device__ __half2 __hfma2(__half2 x, __half2 y, __half2 z) {
                                            static_cast<__half2_raw>(z).data)};
 }
 inline __device__ __half2 __hfma2_sat(__half2 x, __half2 y, __half2 z) {
-  auto r = static_cast<__half2_raw>(__hfma2(x, y, z));
-  return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
+  return __clamp2_01(__hfma2(x, y, z));
 }
 inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
   return __half2{static_cast<__half2_raw>(x).data / static_cast<__half2_raw>(y).data};
