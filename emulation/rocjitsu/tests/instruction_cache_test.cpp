@@ -238,12 +238,35 @@ TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
   ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
   const std::optional<amdgpu::GpuVmAccess> replacement_access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(replacement_access);
+  EXPECT_FALSE(first_access->revoked());
   EXPECT_NE(first_access->cache_namespace(), replacement_access->cache_namespace());
 
   const auto replacement_fetch = fetch_at(icache, *replacement_access);
   EXPECT_TRUE(std::ranges::all_of(replacement_fetch, [](uint8_t byte) { return byte == 0x22; }));
   const auto retained_old_fetch = fetch_at(icache, *first_access);
   EXPECT_TRUE(std::ranges::all_of(retained_old_fetch, [](uint8_t byte) { return byte == 0x11; }));
+}
+
+TEST(InstructionCacheTest, TranslatedHitRejectsARevokedSnapshot) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto address_space = std::make_shared<ExecutableAddressSpace>(0x11);
+  const amdgpu::AddressSpaceHandle handle =
+      gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  ASSERT_FALSE(access->revoked());
+
+  const auto first = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(first, [](uint8_t byte) { return byte == 0x11; }));
+
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  ASSERT_TRUE(access->revoked());
+  std::array<uint8_t, InstructionCache::kFetchBytes> revoked{};
+  std::ranges::fill(revoked, uint8_t{0xcc});
+  EXPECT_EQ(icache.fetch(*access, kCodeBase, revoked.data()), amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_TRUE(std::ranges::all_of(revoked, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
 TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {

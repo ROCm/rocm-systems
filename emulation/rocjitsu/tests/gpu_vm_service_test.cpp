@@ -230,7 +230,7 @@ TEST(GpuVmService, UnroutedIdentityBindingCoexistsWithRoutedVmidZero) {
   EXPECT_TRUE(gpu_vm.snapshot(gart));
   EXPECT_FALSE(gpu_vm.snapshot(gart)->info().ready);
   readback.fill(std::byte{0});
-  EXPECT_EQ(internal_access->read(0x4000, readback), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(internal_access->read(0x4000, readback), VmAccessOutcome::Revoked);
   EXPECT_EQ(readback, (std::array<std::byte, 4>{}));
 
   EXPECT_TRUE(gpu_vm.reset());
@@ -962,7 +962,7 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_EQ(new_access->cache_namespace().address_space, address_space);
 
   std::array<std::byte, 1> value{std::byte{0x5a}};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Complete);
   EXPECT_EQ(std::to_integer<uint8_t>(value[0]), 0x22);
@@ -970,9 +970,9 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
   EXPECT_FALSE(gpu_vm.snapshot(address_space));
   value[0] = std::byte{0x5a};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
-  EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Revoked);
 }
 
 TEST(GpuVmService, ClearingGartPreservesItsIdentityAndUnrelatedAddressSpaces) {

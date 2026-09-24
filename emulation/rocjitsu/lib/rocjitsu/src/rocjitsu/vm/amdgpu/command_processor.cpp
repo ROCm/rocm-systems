@@ -238,6 +238,8 @@ AqlAdmissionResult admission_from_vm_outcome(VmAccessOutcome outcome) {
     return {.status = AqlAdmissionStatus::Faulted};
   case VmAccessOutcome::Malformed:
     return {.status = AqlAdmissionStatus::Malformed};
+  case VmAccessOutcome::Revoked:
+    return {.status = AqlAdmissionStatus::Faulted};
   }
   return {.status = AqlAdmissionStatus::Malformed};
 }
@@ -2153,6 +2155,12 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
 CommandProcessor::DispatchWorkgroupResult
 CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   assert(!cus_.empty() && "command processor has no compute units");
+
+  // A dispatch may remain queued after its admission snapshot is invalidated.
+  // Fall back to current operation snapshots for subsequent wave setup rather
+  // than retrying the permanently revoked snapshot forever.
+  if (entry.execution_access && entry.execution_access->revoked())
+    entry.execution_access.reset();
 
   // A peer can publish the shared terminal-fault latch before this CP drains
   // its fault inbox. Stop placement as soon as that publication is visible;

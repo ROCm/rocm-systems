@@ -200,6 +200,29 @@ TEST(AqlPacketProcessorTest, BarrierDependencyMustResolveBeforeAdmission) {
   EXPECT_TRUE(complete.blocks_following);
 }
 
+TEST(AqlPacketProcessorTest, RevokedDependencySnapshotIsTerminalRatherThanBlocked) {
+  hsa_barrier_and_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+  packet.dep_signal[0].handle = 0x1000;
+  const auto bytes = packet_bytes(packet);
+
+  uint32_t admissions = 0;
+  AqlPacketProcessor processor({
+      .load_signal = [](const AqlPacketProcessRequest &,
+                        uint64_t) { return AtomicLoadResult{.outcome = VmAccessOutcome::Revoked}; },
+      .admit =
+          [&](const AqlPacketProcessRequest &, AqlPreparedPacket) {
+            ++admissions;
+            return AqlAdmissionResult{.status = AqlAdmissionStatus::Complete};
+          },
+  });
+
+  const AqlPacketProcessResult result = processor.process(request_for(bytes));
+  EXPECT_EQ(result.packet.status, PacketProcessStatus::Faulted);
+  EXPECT_EQ(result.packet.retirement, PacketRetirement::Hold);
+  EXPECT_EQ(admissions, 0u);
+}
+
 TEST(AqlPacketProcessorTest, Pm4IbDoesNotBlockFollowingPackets) {
   AmdExtKernelDispatchPacket packet{};
   packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;

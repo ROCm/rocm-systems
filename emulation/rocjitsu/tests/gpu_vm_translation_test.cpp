@@ -675,12 +675,36 @@ TEST(GpuVmTranslation, InvalidationDrainsAnInFlightAccessAndRevokesOldSnapshots)
   EXPECT_EQ(value, (std::array<std::byte, 2>{std::byte{1}, std::byte{2}}));
 
   std::array<std::byte, 1> stale_value{std::byte{0x5a}};
-  EXPECT_EQ(old_access->read(0, stale_value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, stale_value), VmAccessOutcome::Revoked);
   EXPECT_EQ(stale_value[0], std::byte{0x5a});
   const std::optional<GpuVmAccess> current_access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(current_access);
   EXPECT_NE(current_access->cache_namespace(), old_access->cache_namespace());
   EXPECT_EQ(current_access->read(0, stale_value), VmAccessOutcome::Complete);
+}
+
+TEST(GpuVmTranslation, RevokedSnapshotIsDistinctFromTransientUnavailability) {
+  GpuVm gpu_vm;
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  const AddressSpaceHandle handle =
+      gpu_vm.register_translated(7, std::make_shared<ByteTranslator>(), physical);
+  ASSERT_TRUE(handle);
+  const std::optional<GpuVmAccess> access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+
+  std::array<std::byte, sizeof(uint32_t)> bytes{};
+  EXPECT_EQ(access->translate(0, bytes.size(), VmAccessKind::Read).outcome,
+            VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->query_access(0, bytes.size(), VmAccessKind::Read), VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->probe(0, bytes.size(), VmAccessKind::Read), VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->read(0, bytes), VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->write(0, bytes), VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->atomic_load(0, sizeof(uint32_t)).outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->atomic_store(0, sizeof(uint32_t), 1), VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->compare_exchange(0, sizeof(uint32_t), 0, 1).outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(access->atomic_modify(0, sizeof(uint32_t), [](std::span<std::byte>) {}),
+            VmAccessOutcome::Revoked);
 }
 
 TEST(GpuVmTranslation, DeviceGartPublishesOnInvalidateAndRejectsItsHandleAfterReset) {
@@ -968,7 +992,7 @@ TEST(GpuVmTranslation, LegacySnapshotRetainsStorageButIsRevokedAcrossUnregister)
   EXPECT_EQ(value[0], std::byte{0xa5});
 
   value[0] = std::byte{0x5a};
-  EXPECT_EQ(old_access->read(virtual_address, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(virtual_address, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
   ASSERT_TRUE(gpu_vm.snapshot(replacement));
   EXPECT_NE(old_access->cache_namespace(), gpu_vm.snapshot(replacement)->cache_namespace());
@@ -999,8 +1023,7 @@ TEST(GpuVmTranslation, LegacyUnregisterRevokesFaultDeliveryFromRetainedSnapshot)
   ASSERT_TRUE(access);
 
   ASSERT_TRUE(legacy_vm.unregister_address_space(handle));
-  EXPECT_EQ(access->probe(0x4000, sizeof(uint32_t), VmAccessKind::Read),
-            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(access->probe(0x4000, sizeof(uint32_t), VmAccessKind::Read), VmAccessOutcome::Revoked);
   EXPECT_TRUE(reporter.addresses.empty());
 }
 
@@ -1028,8 +1051,7 @@ TEST(GpuVmTranslation, LegacyAdapterTeardownRevokesFaultDeliveryFromRetainedSnap
   }
 
   EXPECT_FALSE(gpu_vm.lookup(handle));
-  EXPECT_EQ(access->probe(0x4000, sizeof(uint32_t), VmAccessKind::Read),
-            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(access->probe(0x4000, sizeof(uint32_t), VmAccessKind::Read), VmAccessOutcome::Revoked);
   EXPECT_TRUE(reporter.addresses.empty());
 }
 
@@ -1090,8 +1112,7 @@ TEST(GpuVmTranslation, LegacyMutationPrunesBindingRevokedByGenericVmReset) {
   EXPECT_EQ(const_legacy_vm.address_space(7), nullptr);
   EXPECT_FALSE(legacy_vm.set_client_pid(handle, 42));
   EXPECT_EQ(legacy_vm.address_space(7), nullptr);
-  EXPECT_EQ(access->probe(0x4000, sizeof(uint32_t), VmAccessKind::Read),
-            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(access->probe(0x4000, sizeof(uint32_t), VmAccessKind::Read), VmAccessOutcome::Revoked);
   EXPECT_TRUE(reporter.addresses.empty());
 }
 

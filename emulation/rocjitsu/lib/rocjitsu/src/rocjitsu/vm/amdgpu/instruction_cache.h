@@ -98,6 +98,10 @@ public:
     synchronize_coherence_epoch();
     uint32_t copied = 0;
     while (copied < kFetchBytes) {
+      // A translated hit otherwise bypasses GpuVmAccess entirely and could
+      // continue executing cached code after its snapshot was revoked.
+      if (access.revoked())
+        return VmAccessOutcome::Revoked;
       const uint64_t address = pc + copied;
       const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
       const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);

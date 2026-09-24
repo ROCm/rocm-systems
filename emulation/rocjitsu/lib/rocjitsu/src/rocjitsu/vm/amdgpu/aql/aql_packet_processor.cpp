@@ -95,10 +95,10 @@ AqlPacketProcessor::process_barrier(const Request &request,
     const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
     if (loaded.outcome == VmAccessOutcome::Unavailable)
       return blocked(AqlBlockedReason::MemoryUnavailable);
-    if (loaded.outcome == VmAccessOutcome::Faulted)
-      return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
     if (loaded.outcome == VmAccessOutcome::Malformed)
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
+    if (loaded.outcome != VmAccessOutcome::Complete)
+      return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
 
     const int64_t dependency_value = std::bit_cast<int64_t>(loaded.value);
     if (dependency_value > 0) {
@@ -139,10 +139,10 @@ AqlPacketProcessor::process_vendor(const Request &request,
       const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
       if (loaded.outcome == VmAccessOutcome::Unavailable)
         return blocked(AqlBlockedReason::MemoryUnavailable);
-      if (loaded.outcome == VmAccessOutcome::Faulted)
-        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
       if (loaded.outcome == VmAccessOutcome::Malformed)
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
+      if (loaded.outcome != VmAccessOutcome::Complete)
+        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
 
       const int64_t signal_value = std::bit_cast<int64_t>(loaded.value);
       const int64_t masked_value = signal_value & barrier.mask;
@@ -185,10 +185,10 @@ AqlPacketProcessor::process_vendor(const Request &request,
       const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
       if (loaded.outcome == VmAccessOutcome::Unavailable)
         return blocked(AqlBlockedReason::MemoryUnavailable);
-      if (loaded.outcome == VmAccessOutcome::Faulted)
-        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
       if (loaded.outcome == VmAccessOutcome::Malformed)
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
+      if (loaded.outcome != VmAccessOutcome::Complete)
+        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
       if (std::bit_cast<int64_t>(loaded.value) != 0)
         return blocked(AqlBlockedReason::DependencyUnsatisfied);
     }

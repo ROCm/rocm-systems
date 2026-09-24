@@ -388,6 +388,23 @@ TEST(SdmaRingConsumerTest, RetriesBlockedInitialLoadFetchPacketProcessingAndPubl
   EXPECT_EQ(processor_retry.cursor(), 48u);
 }
 
+TEST(SdmaRingConsumerTest, RevokedTransactionBecomesTerminalInsteadOfBlocked) {
+  RingConsumerFixture fixture;
+  fixture.memory->store<uint64_t>(RingConsumerFixture::kReadPointer, 0);
+  fixture.memory->store<uint32_t>(RingConsumerFixture::kRing, 0);
+  fixture.memory->return_next_atomic_load(RingConsumerFixture::kReadPointer,
+                                          VmAccessOutcome::Unavailable);
+  SdmaRingConsumer consumer = fixture.make_consumer(std::nullopt);
+
+  EXPECT_EQ(consumer.service(sizeof(uint32_t)), SdmaRingStatus::Blocked);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  EXPECT_EQ(consumer.service(sizeof(uint32_t)), SdmaRingStatus::Faulted);
+  ASSERT_TRUE(consumer.terminal());
+  EXPECT_EQ(*consumer.terminal(), SdmaRingStatus::Faulted);
+  EXPECT_FALSE(consumer.in_flight());
+}
+
 TEST(SdmaRingConsumerTest, PublishesRetiredPacketBeforeLatchingTerminalOutcome) {
   RingConsumerFixture fixture;
   constexpr uint64_t kBadSource = 0x2000;
