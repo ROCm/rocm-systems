@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <hip/amd_detail/amd_gfx1250_TDM.h>
