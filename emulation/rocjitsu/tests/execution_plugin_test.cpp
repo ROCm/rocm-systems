@@ -5584,6 +5584,52 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    if (util::native<float>::size() != 16)
+      GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+
+    ForceScalarOverride force_simd(false);
+    Wave32PluginFixture f;
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu.get();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 56; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0);
+    plugin->events.clear();
+
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                            amdgpu::ACC_FROM_VGPR,
+                                            /*c_modifier=*/0);
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                         {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
+                          S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
+                          ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
+                         0xFFFF'FFFFu);
+    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {DST + 0, DST + 1, DST + 2, DST + 3},
+                         0xFFFF'FFFFu);
+
+    size_t last_read = 0;
+    size_t first_write = plugin->events.size();
+    for (size_t i = 0; i < plugin->events.size(); ++i) {
+      if (plugin->events[i].kind == HookEvent::READ_VGPR)
+        last_read = i;
+      if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+        first_write = std::min(first_write, i);
+    }
+    ASSERT_LT(last_read, first_write);
+  }
+}
+
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   PluginFixture f(/*num_wf_slots=*/1);
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});

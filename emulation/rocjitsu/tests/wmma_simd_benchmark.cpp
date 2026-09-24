@@ -42,6 +42,7 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -409,6 +410,57 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x32_bf16_Specialized) {
                                             fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_bf16_16x16x32_bf16 [specialized]", fx, run, double(M) * N * K, Cmp::Bf16Tol);
+}
+
+// Dense WMMA, f32 accumulator and packed bf16 output.  Keep the eight-register
+// f32 accumulator separate from the four-register destination so repeated
+// iterations do not reinterpret a prior packed result as the next accumulator.
+TEST(WmmaSimdBenchmark, Bf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(65));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(66));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(67));
+  auto run = [&] {
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                            fx.vbase + S1_OFF, fx.vbase + INDEX_OFF,
+                                            amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+  };
+  bench("v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact, /*out_regs=*/4);
+}
+
+// Full decoded/executed path for the same mixed-width instruction.  Decode is
+// intentionally outside the timed loop; dispatch and architectural register
+// routing remain inside it.
+TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(68));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(69));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(70));
+
+  const auto words = cdna5::build_vop3p(
+      cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+      {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 256 + INDEX_OFF});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_bf16f32_16x16x32_bf16");
+  ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+  bool execution_failed = false;
+  auto run = [&] {
+    execution_failed |= !fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
+  };
+  bench("decoded v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact,
+        /*out_regs=*/4);
+  ASSERT_FALSE(execution_failed);
 }
 
 // Dense WMMA, i32 output, iu8 input, K=64 — the real gfx1250 integer shape,

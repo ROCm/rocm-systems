@@ -2260,10 +2260,10 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
   }
 }
 
-/// Fast path for v_wmma_f32_16x16x32_bf16 / v_wmma_bf16f32_16x16x32_bf16
-/// (gfx1250, wave32). Identical to exec_wmma_f32_16x16x32_f16 except the bulk
-/// input convert is the bf16 zero-extend (no F16C needed). Falls back to the
-/// generic exec_wmma_f32 without AVX-512 / under force-scalar.
+/// Fast path for v_wmma_f32_16x16x32_bf16 (gfx1250, wave32). Identical to
+/// exec_wmma_f32_16x16x32_f16 except the bulk input convert is the bf16
+/// zero-extend (no F16C needed). Falls back to the generic exec_wmma_f32
+/// without AVX-512 / under force-scalar.
 inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                         uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                         uint32_t c_modifier = 0) {
@@ -2742,56 +2742,135 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
                                             uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                             uint32_t c_modifier = 0) {
   constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
-  require_wmma_wave32(cu);
-  struct Result {
-    uint32_t reg;
-    uint32_t lane;
-    uint32_t sub_element;
-    uint16_t val;
+  auto run_scalar = [&]() {
+    require_wmma_wave32(cu);
+    struct Result {
+      uint32_t reg;
+      uint32_t lane;
+      uint32_t sub_element;
+      uint16_t val;
+    };
+    std::vector<Result> results;
+    results.reserve(M * N);
+
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto cout = wmma_output_loc_32(M, N, row, col);
+        float acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? std::bit_cast<float>(const_acc)
+                : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + cout.reg, cout.lane));
+        acc = apply_wmma_c_modifier(acc, c_modifier);
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = wmma_input_loc(M, K, row, k, in_bits);
+          auto bl = wmma_input_loc(N, K, col, k, in_bits);
+          acc = std::fma(extract_bf16(cu, s0, al), extract_bf16(cu, s1, bl), acc);
+        }
+        auto out = wmma_output_loc_16(M, N, row, col);
+        results.push_back({out.reg, out.lane, out.sub_element, util::f32_to_bf16(acc)});
+      }
+    }
+
+    uint32_t dst_regs = ((M * N) / WMMA_WAVE32 + 1) / 2;
+    std::vector<uint32_t> words(dst_regs * WMMA_WAVE32, 0);
+    std::vector<uint8_t> masks(dst_regs * WMMA_WAVE32, 0);
+    for (const auto &r : results) {
+      uint32_t idx = r.reg * WMMA_WAVE32 + r.lane;
+      uint32_t shift = r.sub_element * 16;
+      words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(r.val) << shift);
+      masks[idx] |= 1u << r.sub_element;
+    }
+    for (uint32_t reg = 0; reg < dst_regs; ++reg) {
+      for (uint32_t lane = 0; lane < WMMA_WAVE32; ++lane) {
+        uint32_t idx = reg * WMMA_WAVE32 + lane;
+        uint32_t word = words[idx];
+        if (masks[idx] != 0x3u) {
+          uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
+          if ((masks[idx] & 0x1u) == 0)
+            word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
+          if ((masks[idx] & 0x2u) == 0)
+            word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
+        }
+        RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
+      }
+    }
   };
-  std::vector<Result> results;
-  results.reserve(M * N);
 
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto cout = wmma_output_loc_32(M, N, row, col);
-      float acc =
-          (const_acc != ACC_FROM_VGPR)
-              ? std::bit_cast<float>(const_acc)
-              : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + cout.reg, cout.lane));
-      acc = apply_wmma_c_modifier(acc, c_modifier);
+  if constexpr (!util::has_stdx_simd) {
+    run_scalar();
+    return;
+  } else {
+    if (util::force_scalar() || util::native<float>::size() != 16) {
+      run_scalar();
+      return;
+    }
+
+    require_wmma_wave32(cu);
+    const uint32_t wf = cu.wf_size();
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
+                                             const_acc, wf);
+    auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
+
+    alignas(64) float A_buf[M * K];
+    alignas(64) float B_buf[K * N];
+    alignas(64) float C_buf[M * N];
+    alignas(64) float A_f32[M * K];
+    alignas(64) float B_f32[K * N];
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
+    convert_bf16_matrix_region(reads.a, A_f32, M * K);
+    convert_bf16_matrix_region(reads.b, B_f32, K * N);
+
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        C_buf[row * N + col] = apply_wmma_c_modifier(
+            (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
+                                         : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
+            c_modifier);
+      }
+    for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, in_bits);
-        auto bl = wmma_input_loc(N, K, col, k, in_bits);
-        acc = std::fma(extract_bf16(cu, s0, al), extract_bf16(cu, s1, bl), acc);
+        auto in = wmma_input_loc(M, K, row, k, in_bits);
+        A_buf[row * K + k] = A_f32[(in.vgpr_offset * wf + in.lane) * 2 + in.sub_element];
       }
-      auto out = wmma_output_loc_16(M, N, row, col);
-      results.push_back({out.reg, out.lane, out.sub_element, util::f32_to_bf16(acc)});
-    }
-  }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto in = wmma_input_loc(N, K, col, k, in_bits);
+        B_buf[k * N + col] = B_f32[(in.vgpr_offset * wf + in.lane) * 2 + in.sub_element];
+      }
 
-  uint32_t dst_regs = ((M * N) / WMMA_WAVE32 + 1) / 2;
-  std::vector<uint32_t> words(dst_regs * WMMA_WAVE32, 0);
-  std::vector<uint8_t> masks(dst_regs * WMMA_WAVE32, 0);
-  for (const auto &r : results) {
-    uint32_t idx = r.reg * WMMA_WAVE32 + r.lane;
-    uint32_t shift = r.sub_element * 16;
-    words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(r.val) << shift);
-    masks[idx] |= 1u << r.sub_element;
-  }
-  for (uint32_t reg = 0; reg < dst_regs; ++reg) {
-    for (uint32_t lane = 0; lane < WMMA_WAVE32; ++lane) {
-      uint32_t idx = reg * WMMA_WAVE32 + lane;
-      uint32_t word = words[idx];
-      if (masks[idx] != 0x3u) {
-        uint32_t old = RegisterAccess(cu).read_vgpr(dst + reg, lane);
-        if ((masks[idx] & 0x1u) == 0)
-          word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
-        if ((masks[idx] & 0x2u) == 0)
-          word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
+    for (uint32_t row = 0; row < M; ++row) {
+      util::native<float> c_row;
+      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        util::native<float> b_row;
+        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
+        c_row = util::stdx::fma(util::native<float>(A_buf[row * K + k]), b_row, c_row);
       }
-      RegisterAccess(cu).write_vgpr(dst + reg, lane, word);
+      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
     }
+
+    // wmma_output_loc_16 pairs adjacent rows in each destination register.
+    // Pack two complete rows per vector: even rows become the low halves and
+    // odd rows become the high halves.  This is the scalar BF16 truncation
+    // contract (high 16 bits of each f32), not round-to-nearest-even.
+    constexpr uint32_t DST_REGS = 4;
+    alignas(64) uint32_t words[DST_REGS * WMMA_WAVE32];
+    for (uint32_t pair = 0; pair < M / 2; ++pair) {
+      util::native<float> even_row;
+      util::native<float> odd_row;
+      even_row.copy_from(&C_buf[(2 * pair) * N], util::stdx::vector_aligned);
+      odd_row.copy_from(&C_buf[(2 * pair + 1) * N], util::stdx::vector_aligned);
+      auto packed = (std::bit_cast<util::native<uint32_t>>(even_row) >> 16) |
+                    (std::bit_cast<util::native<uint32_t>>(odd_row) & 0xFFFF0000u);
+      packed.copy_to(&words[(pair % DST_REGS) * WMMA_WAVE32 + (pair / DST_REGS) * N],
+                     util::stdx::vector_aligned);
+    }
+    for (uint32_t reg = 0; reg < DST_REGS; ++reg)
+      for (uint32_t lane = 0; lane < WMMA_WAVE32; ++lane)
+        writes.set_linear_word(reg * wf + lane, words[reg * WMMA_WAVE32 + lane]);
   }
 }
 
