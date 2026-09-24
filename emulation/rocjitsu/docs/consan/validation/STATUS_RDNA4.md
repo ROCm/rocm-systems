@@ -9,8 +9,8 @@ six of eight admitted and reached trials must detect the injected fault. Green
 also requires a passing clean correctness run with matching controls, complete
 coverage evidence, and healthy GPU checks. “Lowest passing” means all smaller
 presets from `default` failed; “lowest verified” means smaller presets remain
-untested or unqualified. Yellow is pending or below the qualification bar; red
-records a failure or an unsupported workload. See [VALIDATION.md](VALIDATION.md)
+untested or unqualified. Yellow is pending, below the qualification bar, or outside the detector’s
+scope; red records an observed correctness or instrumentation failure. See [VALIDATION.md](VALIDATION.md)
 for the procedure and qualification rules. The September 24
 [SuperCollider investigation](SUPERCOLLIDER_RDNA4_ANALYSIS.md) explains the
 historical color changes and audits the current clean controls.
@@ -23,7 +23,7 @@ historical color changes and audits the current clean controls.
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 2/8 (bar 6/8) |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=1: clean pass; fault 2/8 (bar 6/8) |
-| PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Current hook: clean numerical pass; traced global-atomic kernels have no LDS/FLAT accesses; outside detector scope | 🟥 Current hook: clean numerical pass; traced global-atomic kernels have no LDS/FLAT accesses; outside detector scope |
+| PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 Out of scope: clean numerical pass; traced global-atomic kernels have no LDS/FLAT accesses; no applicable race coverage | 🟨 Out of scope: clean numerical pass; traced global-atomic kernels have no LDS/FLAT accesses; no applicable race coverage |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟨 sleep=1: clean pass; fault 4/8 (bar 6/8); same-value writes allowed |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟩 delay matrix: fault 8/8; matching clean controls pass |
 | PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟩 high (lowest passing): clean pass; fault 6/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
