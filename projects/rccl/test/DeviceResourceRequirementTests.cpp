@@ -175,16 +175,19 @@ TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_SizeLog2AboveFlo
 }
 
 // bufferSize == nBlocks * (sizeof(state) + RequestBytes + alignUp(1<<size_log2, alignof(state))).
+// goldenBufferSize is a literal, not derived from RequestBytes/alignas(128): the formula below
+// would move with either if they changed, hiding a real device buffer size change from every row.
 TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_BufferSizeFormula) {
   struct Case {
     const char* name;
     int nBlocks;
     int sizeLog2;
+    size_t goldenBufferSize;
   };
   const std::vector<Case> cases = {
-    {"clamped_floor", 1, 0},
-    {"at_floor", 3, 7},
-    {"above_floor", 2, 8},
+    {"clamped_floor", 1, 0, 8448},   // 1 * (128 + 8192 + 128)
+    {"at_floor", 3, 7, 25344},       // 3 * (128 + 8192 + 128)
+    {"above_floor", 2, 8, 17152},    // 2 * (128 + 8192 + 256)
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
@@ -196,11 +199,7 @@ TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_BufferSizeFormul
       static_cast<size_t>(c.nBlocks) * (sizeof(ncclGinOutboxState) + ncclGinOutboxState::RequestBytes +
                                         alignUpLocal(size_t(1) << clampedLog2, alignof(ncclGinOutboxState)));
     EXPECT_EQ(req.bufferSize, expected);
-    // A golden literal on one row: the formula above would move with RequestBytes or the state's
-    // alignas(128) if either changed, hiding a real device buffer size change from every row.
-    if (std::strcmp(c.name, "at_floor") == 0) {
-      EXPECT_EQ(req.bufferSize, size_t{25344});  // 3 * (128 + 8192 + 128)
-    }
+    EXPECT_EQ(req.bufferSize, c.goldenBufferSize);
     EXPECT_EQ(req.bufferAlign, 128u);
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     // The outbox has no GIN signals; only the inbox A2A sibling below sets ginSignalCount.
@@ -221,16 +220,20 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_NoFloorOnSizeL
 }
 
 // bufferSize and ginSignalCount formulas over a small table of teams and block/size combinations.
+// Both goldens are literals, not derived from ncclGinInboxA2AState/ncclGinScratchMaxBufs_log2: the
+// formulas below would move with either of those if they changed, same reasoning as the outbox above.
 TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula) {
   struct Case {
     const char* name;
     int nRanks; // nPeers = nRanks - 1
     int nBlocks;
     int sizeLog2;
+    size_t goldenBufferSize;
+    int goldenGinSignalCount;
   };
   const std::vector<Case> cases = {
-    {"smallest_safe_team", 2, 1, 7},
-    {"larger_team", 5, 2, 8},
+    {"smallest_safe_team", 2, 1, 7, 256, 2052},   // 1*(128+128); 1*4*(1+512)
+    {"larger_team", 5, 2, 8, 768, 4128},          // 2*(128+256); 2*4*(4+512)
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
@@ -243,9 +246,11 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_BufferSizeAndS
       static_cast<size_t>(c.nBlocks) *
       (sizeof(ncclGinInboxA2AState) + alignUpLocal(size_t(1) << c.sizeLog2, alignof(ncclGinInboxA2AState)));
     EXPECT_EQ(req.bufferSize, expectedBufferSize);
+    EXPECT_EQ(req.bufferSize, c.goldenBufferSize);
     EXPECT_EQ(req.bufferAlign, 128u);
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     EXPECT_EQ(req.ginSignalCount, c.nBlocks * 4 * (nPeers + (1 << ncclGinScratchMaxBufs_log2)));
+    EXPECT_EQ(req.ginSignalCount, c.goldenGinSignalCount);
     EXPECT_EQ(req.outGinSignalStart, &handle.signals);
     ExpectNoGinCounterFields(req);
     // handle.nPeers_rcp32 feeds imodFast32 in device code (gin_scratch__types.h / __funcs.h); check
@@ -291,16 +296,18 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_SingleRankTeam
 
 // bufferSize == (3*nBarriers + nBarriers*team.nRanks) * sizeof(uint32_t); nBarriers == 0 gives 0.
 // Same out-of-scope-overflow reasoning as the LLA2A formula above applies to this plain-int formula.
+// goldenBufferSize hand-computes the same value independently of the formula below, same reasoning.
 TEST(DeviceResourceRequirementTests, LsaBarrierCreateRequirement_BufferSizeFormula) {
   struct Case {
     const char* name;
     int nBarriers;
     int nRanks;
+    size_t goldenBufferSize;
   };
   const std::vector<Case> cases = {
-    {"zero_barriers", 0, 4},
-    {"small", 2, 4},
-    {"larger", 5, 3},
+    {"zero_barriers", 0, 4, 0},     // (0 + 0) * 4
+    {"small", 2, 4, 56},            // (6 + 8) * 4
+    {"larger", 5, 3, 120},          // (15 + 15) * 4
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
@@ -310,6 +317,7 @@ TEST(DeviceResourceRequirementTests, LsaBarrierCreateRequirement_BufferSizeFormu
     ASSERT_EQ(ncclLsaBarrierCreateRequirement(team, c.nBarriers, &handle, &req), ncclSuccess);
     const size_t expected = static_cast<size_t>(3 * c.nBarriers + c.nBarriers * c.nRanks) * sizeof(uint32_t);
     EXPECT_EQ(req.bufferSize, expected);
+    EXPECT_EQ(req.bufferSize, c.goldenBufferSize);
     EXPECT_EQ(req.bufferAlign, alignof(uint32_t));
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     EXPECT_EQ(handle.nBarriers, c.nBarriers);
