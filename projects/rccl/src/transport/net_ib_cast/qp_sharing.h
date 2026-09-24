@@ -183,10 +183,13 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);
 extern int64_t rcclParamIbCastQpSharingValidatePool();
 void IbCastValidateSharedQpPool(void);
 
-// Encode commId into wr_id[63:48]. When commId==0 (sharing disabled or
-// fallback) this is a no-op (OR with zero).
+// Encode commId into wr_id[63:48]. Clears the target bits first so that
+// slot-request bytes packed into the same range (nreqs >= 7) do not
+// corrupt the commId. The cleared slot bytes are never read on the
+// completion path — only byte 0 is used to recover the request slot.
 static inline uint64_t IbCastEncodeCommId(uint64_t wr_id, uint16_t commId) {
-  return wr_id | (((uint64_t)commId << WR_ID_RX_COMM_ID_BIT_POS) & WR_ID_RX_COMM_ID_MASK);
+  return (wr_id & ~WR_ID_RX_COMM_ID_MASK) |
+         (((uint64_t)commId << WR_ID_RX_COMM_ID_BIT_POS) & WR_ID_RX_COMM_ID_MASK);
 }
 
 // Encode receiver commId into immData for BY_ID matching scheme:
@@ -209,7 +212,6 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id);
 // Look up the target comm from the commId encoded in immData.
 // Returns target base based on commId in immData if sharing is enabled or
 // returns NULL if sharing is disabled or commId is invalid.
-struct ncclIbNetCommBase* IbCastRouteCommFromImmData(
-    struct ncclIbNetCommBase* base, uint32_t immDataHost);
+struct ncclIbNetCommBase* IbCastRouteCommFromImmData(uint32_t immDataHost);
 
 #endif // NET_IB_CAST_QP_SHARING_H_

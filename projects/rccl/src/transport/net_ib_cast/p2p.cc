@@ -1338,7 +1338,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
             struct ncclIbNetCommBase* routed = IbCastRouteCommFromWrId(wc->wr_id);
             if (routed) targetBase = routed;
           } else {
-            struct ncclIbNetCommBase* routed = IbCastRouteCommFromImmData((struct ncclIbNetCommBase*)r->base, be32toh(wc->imm_data));
+            struct ncclIbNetCommBase* routed = IbCastRouteCommFromImmData(be32toh(wc->imm_data));
             if (routed && !routed->isSend && (routed->recvMatchingScheme == BY_ID)) targetBase = routed;
           }
 
