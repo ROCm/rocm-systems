@@ -415,19 +415,8 @@ class Roofline:
             limiter, limiter_category, roof_value = self._determine_kernel_limiter(
                 level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
-            limiting_peak = (
-                limiter
-                if limiter_category == "Memory"
-                else min(points, key=lambda point: point["ai"])["peak"]
-            )
-            pct_roof = 100.0 * points[0]["perf"] / roof_value if roof_value else None
-            hover_cells = [
-                format_hover_number(roof_value, ",.0f"),
-                format_hover_number(pct_roof, ",.2f"),
-                bandwidth_html,
-            ]
-            for point in points:
-                point["hoverCells"] = hover_cells
+            limiting_peak = self._resolve_limiting_peak(limiter, limiter_category, points)
+            self._attach_kernel_hover_cells(points, roof_value, bandwidth_html)
 
             traces.append(
                 go.Scatter(
@@ -467,6 +456,29 @@ class Roofline:
 
         return traces, kernels_model
 
+    @staticmethod
+    def _resolve_limiting_peak(
+        limiter: str, limiter_category: str, points: list[dict[str, Any]]
+    ) -> str:
+        if limiter_category == "Memory":
+            return limiter
+        return min(points, key=lambda point: point["ai"])["peak"]
+
+    @staticmethod
+    def _attach_kernel_hover_cells(
+        points: list[dict[str, Any]],
+        roof_value: Optional[float],
+        bandwidth_html: str,
+    ) -> None:
+        pct_roof = 100.0 * points[0]["perf"] / roof_value if roof_value else None
+        hover_cells = [
+            format_hover_number(roof_value, ",.0f"),
+            format_hover_number(pct_roof, ",.2f"),
+            bandwidth_html,
+        ]
+        for point in points:
+            point["hoverCells"] = hover_cells
+
     def _build_kernel_points(
         self,
         kernel_index: int,
@@ -495,34 +507,38 @@ class Roofline:
             performance = level_points[1][kernel_index]
             cache_key = cache_level.removeprefix("ai_")
             peak_bandwidth = self._peak_value(ceiling_data, cache_key)
-
-            if not (ai_value > 0 and performance > 0):
-                # A level with no traffic still gets a 0-valued bandwidth
-                # line instead of silently disappearing from the tooltip.
-                bandwidth_entries.append({
-                    "level_name": level_name,
-                    "achieved_bandwidth": 0.0,
-                    "peak_bandwidth": peak_bandwidth,
-                })
-                continue
+            has_traffic = ai_value > 0 and performance > 0
 
             # This kernel's own achieved bandwidth at this level (not the
             # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
-            achieved_bandwidth = performance / ai_value
+            # A level with no traffic still gets a 0-valued bandwidth line
+            # instead of silently disappearing from the tooltip.
+            achieved_bandwidth = performance / ai_value if has_traffic else 0.0
+            bandwidth_entries.append(
+                self._build_bandwidth_entry(level_name, achieved_bandwidth, peak_bandwidth)
+            )
+            if not has_traffic:
+                continue
+
             points.append({
                 "peak": level_name,
                 "ai": ai_value,
                 "perf": performance,
             })
-            bandwidth_entries.append({
-                "level_name": level_name,
-                "achieved_bandwidth": achieved_bandwidth,
-                "peak_bandwidth": peak_bandwidth,
-            })
             level_ai[level_name] = ai_value
 
         bandwidth_html = self._build_bandwidth_hover_html(bandwidth_entries)
         return points, level_ai, bandwidth_html
+
+    @staticmethod
+    def _build_bandwidth_entry(
+        level_name: str, achieved_bandwidth: float, peak_bandwidth: Optional[float]
+    ) -> dict[str, Any]:
+        return {
+            "level_name": level_name,
+            "achieved_bandwidth": achieved_bandwidth,
+            "peak_bandwidth": peak_bandwidth,
+        }
 
     @staticmethod
     def _build_bandwidth_hover_html(bandwidth_entries: list[dict[str, Any]]) -> str:
