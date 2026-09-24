@@ -11,6 +11,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Resolved issues
 
   - Fixed `rocprofv3` hanging at exit when the application has a child process that only exits after the application does, such as the resource tracker started by Python `multiprocessing`.
+  - Fixed `rocprofv3` losing rocpd databases and aborting when several processes shared one output file name, for example spawned child processes profiled with a fixed `-o`. Each process now keeps its own database, and a later one is written as `<name>_<pid>.db` with a warning.
 
 ### Known issues
 

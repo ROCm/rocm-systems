@@ -181,3 +181,38 @@ add_signal_handler_test(
     NO_SIGNAL
     VALIDATE_EXPECT clean-exit
     PASS_REGEX "clean exit")
+
+# Processes sharing one output name (no %pid% in -o) must each keep a complete rocpd
+# database instead of unlinking each other's open database file.
+set(_shared_name app-shared-output-name-fork)
+set(_shared_outdir ${BASE_OUT_DIR}/shared-output-name-fork)
+
+rocprofiler_add_integration_cleanup_test(
+    ${_shared_name}
+    DIRECTORIES ${_shared_outdir}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_SETUP ${_shared_name}-clean)
+
+rocprofiler_add_integration_execute_test(
+    ${_shared_name}
+    COMMAND
+        ${TIMEOUT_CMD} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --marker-trace
+        --output-format rocpd --disable-signal-handlers -d ${_shared_outdir} -o shared --
+        $<TARGET_FILE:signal-handler-test> --fork --app-signal-handler
+    DEPENDS signal-handler-test
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "clean exit"
+    FIXTURES_REQUIRED ${_shared_name}-clean
+    FIXTURES_SETUP ${_shared_name})
+
+rocprofiler_add_integration_validate_test(
+    ${_shared_name}
+    TEST_PATHS validate_shared_output.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_REQUIRED ${_shared_name}
+    ARGS --output-dir ${_shared_outdir} --expect clean-exit --process-type fork)

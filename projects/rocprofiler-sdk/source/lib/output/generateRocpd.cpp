@@ -157,6 +157,7 @@ struct rocpd_db
     uint64_t            pending_touch_count = 0;
     batch_stats_map_t   batch_stats         = {};
 
+    void   close();
     size_t get_event_id() { return ++event_id_counter; }
     size_t get_sample_id() { return ++sample_id_counter; }
 };
@@ -371,8 +372,13 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
     return insert_value(_name, _value.value(), TraitT{});
 }
 
-rocpd_db::~rocpd_db()
+rocpd_db::~rocpd_db() { close(); }
+
+void
+rocpd_db::close()
 {
+    if(!conn) return;
+
     finish_pending_insert_batch(*this);
     log_batch_flush_stats(*this);
 
@@ -382,11 +388,48 @@ rocpd_db::~rocpd_db()
     }
     statements.clear();
 
-    if(conn)
+    SQLITE3_CHECK(sqlite3_close_v2(conn));
+    conn = nullptr;
+}
+
+// Filesystem time when the tool was loaded into this process. An existing output file last
+// written after this point was produced during this run by another profiled process.
+const auto tool_load_time = fs::file_time_type::clock::now();
+
+// Move the completed database at tmp_file to output_file without removing a file that another
+// profiled process wrote during this run. Processes that share an output name (e.g. spawned
+// children with a fixed -o) would otherwise unlink each other's open database, which fails
+// the SQLite writes and loses the profile.
+std::string
+publish_database(const fs::path& tmp_file, const fs::path& output_file)
+{
+    if(::link(tmp_file.c_str(), output_file.c_str()) == 0)
     {
-        SQLITE3_CHECK(sqlite3_close_v2(conn));
-        conn = nullptr;
+        fs::remove(tmp_file);
+        return output_file.string();
     }
+
+    auto link_errno = errno;
+    auto ec         = std::error_code{};
+    auto mtime      = fs::last_write_time(output_file, ec);
+    if(link_errno == EEXIST && !ec && mtime >= tool_load_time)
+    {
+        auto unique_file =
+            output_file.parent_path() /
+            fmt::format(
+                "{}_{}{}", output_file.stem().string(), getpid(), output_file.extension().string());
+        ROCP_WARNING << fmt::format("{} was written by another process during this run; writing "
+                                    "{} instead. Include %pid% in the output file name to give "
+                                    "each process its own database.",
+                                    output_file.string(),
+                                    unique_file.string());
+        fs::rename(tmp_file, unique_file);
+        return unique_file.string();
+    }
+
+    // Stale output from an earlier run, or a filesystem without hard links: replace it.
+    fs::rename(tmp_file, output_file);
+    return output_file.string();
 }
 
 size_t
@@ -1051,8 +1094,10 @@ write_rocpd(
     ROCP_WARNING << fmt::format(
         "writing SQL database for process {} on node {}", this_pid, this_nid);
 
-    auto      db   = rocpd_db{};
-    sqlite3*& conn = db.conn;
+    auto      db          = rocpd_db{};
+    sqlite3*& conn        = db.conn;
+    auto      output_file = std::string{};
+    auto      tmp_file    = fs::path{};
 
     {
         const auto& mach_id = tool_metadata.node_data.machine_id;
@@ -1065,11 +1110,14 @@ write_rocpd(
 
         // reading schemata
         auto table_schema = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_TABLES);
-        auto output_file  = get_output_filename(cfg, "results", "db");
-        if(fs::exists(output_file)) fs::remove(output_file);
+        output_file       = get_output_filename(cfg, "results", "db");
+        // Build the database privately and publish it once complete (see publish_database).
+        tmp_file = fs::path{output_file}.parent_path() /
+                   fmt::format(".{}.{}.tmp", fs::path{output_file}.filename().string(), getpid());
+        if(fs::exists(tmp_file)) fs::remove(tmp_file);
 
         SQLITE3_CHECK(sqlite3_open_v2(
-            output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
+            tmp_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
 
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
@@ -2337,6 +2385,9 @@ write_rocpd(
             execute_raw_sql_statements(conn, indexes_schema);
         }
     }
+
+    db.close();
+    ROCP_ERROR << fmt::format("Wrote result file: {}", publish_database(tmp_file, output_file));
 }
 }  // namespace tool
 }  // namespace rocprofiler
