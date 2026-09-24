@@ -36,7 +36,9 @@
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#endif
 #include <atomic>
 #include <cstddef>
 #include <cstdint>

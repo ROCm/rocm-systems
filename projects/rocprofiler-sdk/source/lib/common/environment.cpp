@@ -26,7 +26,9 @@
 
 #include <fmt/format.h>
 
-#include <sys/auxv.h>
+#if !defined(_WIN32)
+#    include <sys/auxv.h>
+#endif
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -35,6 +37,18 @@
 #include <optional>
 #include <string>
 #include <string_view>
+
+#if defined(_WIN32)
+namespace
+{
+// Windows shim: ::setenv does not exist; map to _putenv_s.
+int
+setenv(const char* name, const char* value, int /*overwrite*/)
+{
+    return _putenv_s(name, value);
+}
+}  // namespace
+#endif
 
 namespace rocprofiler
 {
@@ -47,15 +61,20 @@ namespace impl
 // breaks when setenv() is called before bash initializes its internal tables.
 //
 // THREAD SAFETY: Reads are NOT safe against concurrent setenv()/putenv()/
-// unsetenv() from any thread, because glibc may reallocate the environ
+// unsetenv() from any thread, because glibc/MSVCRT may reallocate the environ
 // array itself (not just mutate entries). Prefer reading at init time or
 // caching in a function-local static.
 std::optional<std::string>
 get_env_direct(std::string_view name)
 {
-    if(name.empty() || !environ) return std::nullopt;
+#if !defined(_WIN32)
+    char** env_ptr = environ;
+#else
+    char** env_ptr = _environ;
+#endif
+    if(name.empty() || !env_ptr) return std::nullopt;
 
-    for(char** env = environ; *env; ++env)
+    for(char** env = env_ptr; *env; ++env)
     {
         std::string_view entry{*env};
         if(entry.size() > name.size() && entry.compare(0, name.size(), name) == 0 &&
@@ -209,11 +228,17 @@ SPECIALIZE_SET_ENV(uint64_t)
 bool
 is_at_secure()
 {
+#if !defined(_WIN32)
     // AT_SECURE is set by the kernel when the program was executed in a way that
     // requires "secure execution" (setuid/setgid, file capabilities, etc.).
     // Cache the value since it cannot change during the lifetime of the process.
     static const bool _v = (::getauxval(AT_SECURE) != 0);
     return _v;
+#else
+    // Windows has no equivalent of AT_SECURE; elevated processes use a separate
+    // integrity mechanism (token elevation). Conservatively return false.
+    return false;
+#endif
 }
 
 env_store::env_store(std::initializer_list<env_config>&& _container)

@@ -14,7 +14,16 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_VISIBILITY_PRESET "hidden")
 # C++ settings
-set(CMAKE_CXX_STANDARD 17)
+#
+# MSVC accepts designated initializers (e.g. {.handle = 0}) only under C++20; GCC and
+# Clang accept them as an extension at C++17. Measured on this tree: building the Windows
+# source set at C++17 produces 787 C7555 errors across ~17 headers, including core ones
+# (hsa/aql_packet.hpp, hsa/agent_cache.hpp, hsa/queue.hpp). Hence C++20 here.
+if(MSVC)
+    set(CMAKE_CXX_STANDARD 20)
+else()
+    set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
@@ -40,6 +49,28 @@ rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code sampl
                        ${ROCPROFILER_BUILD_CI})
 
 rocprofiler_add_option(ROCPROFILER_BUILD_BENCHMARK "Enable building the benchmarks" OFF)
+
+# Subsystems built on the AMDKFD ioctl interface. Unavailable on Windows, where the
+# kernel-mode driver is reached through D3DKMT rather than /dev/kfd.
+if(WIN32)
+    set(ROCPROFILER_KFD_DEFAULT OFF)
+else()
+    set(ROCPROFILER_KFD_DEFAULT ON)
+endif()
+
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_KFD
+    "Build the KFD subsystem (AMD GPU kernel driver ioctl interface)"
+    ${ROCPROFILER_KFD_DEFAULT})
+rocprofiler_add_option(ROCPROFILER_BUILD_PC_SAMPLING "Build PC sampling support"
+                       ${ROCPROFILER_KFD_DEFAULT})
+
+if(ROCPROFILER_BUILD_PC_SAMPLING AND NOT ROCPROFILER_BUILD_KFD)
+    message(
+        FATAL_ERROR
+            "ROCPROFILER_BUILD_PC_SAMPLING requires ROCPROFILER_BUILD_KFD -- PC sampling reads its data through the KFD ioctl interface"
+        )
+endif()
 rocprofiler_add_option(
     ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS
     "Disable adjusting for clock skew b/t CPU and GPU timestamps" OFF ADVANCED)

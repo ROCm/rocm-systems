@@ -250,8 +250,8 @@ configure(uint32_t                 version,
 
 // Exported late_start_init() function - call this to trigger late-start
 extern "C" {
-void
-late_start_init() ROCPROFILER_PUBLIC_API;
+ROCPROFILER_PUBLIC_API void
+late_start_init();
 
 void
 late_start_init()

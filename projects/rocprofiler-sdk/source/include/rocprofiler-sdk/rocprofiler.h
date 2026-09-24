@@ -87,8 +87,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
-rocprofiler_status_t
-rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPROFILER_API;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
 /**
  * @brief Simplified alternative to ::rocprofiler_get_version
@@ -101,9 +101,8 @@ rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPR
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
-rocprofiler_status_t
-rocprofiler_get_version_triplet(rocprofiler_version_triplet_t* info) ROCPROFILER_API
-    ROCPROFILER_NONNULL(1);
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_get_version_triplet(rocprofiler_version_triplet_t* info) ROCPROFILER_NONNULL(1);
 
 ROCPROFILER_EXTERN_C_FINI
 
@@ -151,8 +150,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
-rocprofiler_status_t
-rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_NONNULL(1);
 
 /**
  * @fn rocprofiler_status_t rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid)
@@ -161,8 +160,8 @@ rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_API ROCPROFIL
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
-rocprofiler_status_t
-rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid) ROCPROFILER_NONNULL(1);
 
 /**
  * @fn const char* rocprofiler_get_status_name(rocprofiler_status_t status)
@@ -170,8 +169,8 @@ rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid) ROCPROFILER_API ROCPROFI
  * @param [in] status error code value
  * @return Will return a nullptr if invalid/unsupported ::rocprofiler_status_t value is provided.
  */
-const char*
-rocprofiler_get_status_name(rocprofiler_status_t status) ROCPROFILER_API;
+ROCPROFILER_API const char*
+rocprofiler_get_status_name(rocprofiler_status_t status);
 
 /**
  * @fn const char* rocprofiler_get_status_string(rocprofiler_status_t status)
@@ -179,8 +178,8 @@ rocprofiler_get_status_name(rocprofiler_status_t status) ROCPROFILER_API;
  * @param [in] status error code value
  * @return Will return a nullptr if invalid/unsupported ::rocprofiler_status_t value is provided.
  */
-const char*
-rocprofiler_get_status_string(rocprofiler_status_t status) ROCPROFILER_API;
+ROCPROFILER_API const char*
+rocprofiler_get_status_string(rocprofiler_status_t status);
 
 /** @} */
 

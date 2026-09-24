@@ -25,7 +25,11 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#else
+#    include <windows.h>
+#endif
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -97,11 +101,21 @@ static constexpr int64_t GHz = 1000 * MHz;
 inline int64_t
 get_page_size()
 {
+#if !defined(_WIN32)
     static auto _pagesz = sysconf(_SC_PAGESIZE);
+#else
+    SYSTEM_INFO si{};
+    ::GetSystemInfo(&si);
+    static auto _pagesz = static_cast<long>(si.dwPageSize);
+#endif
     return _pagesz;
 }
 
+#if !defined(_WIN32)
 const int64_t clocks_per_sec = sysconf(_SC_CLK_TCK);
+#else
+const int64_t clocks_per_sec = CLOCKS_PER_SEC;
+#endif
 
 //--------------------------------------------------------------------------------------//
 

@@ -34,7 +34,7 @@
 
 namespace
 {
-constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
+constexpr rocprofiler_context_id_t rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
 }
 
 extern "C" {

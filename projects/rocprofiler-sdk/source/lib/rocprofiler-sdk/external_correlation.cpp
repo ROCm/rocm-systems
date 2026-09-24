@@ -28,7 +28,9 @@
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#endif
 
 namespace rocprofiler
 {

@@ -50,17 +50,16 @@ typedef struct rocprofiler_thread_trace_decoder_id_t
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Library found but version not supported
  * @retval ::ROCPROFILER_STATUS_SUCCESS Handle created
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_id_t* handle,
-                                        const char* path) ROCPROFILER_API ROCPROFILER_NONNULL(1, 2);
+                                        const char* path) ROCPROFILER_NONNULL(1, 2);
 
 /**
  * @brief Deletes handle created by ::rocprofiler_thread_trace_decoder_create
  * @param[in] handle Handle to destroy
  */
-void
-rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_id_t handle)
-    ROCPROFILER_API;
+ROCPROFILER_API void
+rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_id_t handle);
 
 /**
  * @brief Loads a code object binary to match with Thread Trace.
@@ -82,13 +81,13 @@ rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_id_t h
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Invalid handle
  * @retval ::ROCPROFILER_STATUS_SUCCESS Code object loaded
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_id_t handle,
                                               uint64_t                              load_id,
                                               uint64_t                              load_addr,
                                               uint64_t                              load_size,
                                               const void*                           data,
-                                              uint64_t size) ROCPROFILER_API ROCPROFILER_NONNULL(5);
+                                              uint64_t size) ROCPROFILER_NONNULL(5);
 
 /**
  * @brief Unloads a code object binary.
@@ -99,9 +98,9 @@ rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_i
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Invalid handle
  * @retval ::ROCPROFILER_STATUS_SUCCESS Code object unloaded
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_thread_trace_decoder_codeobj_unload(rocprofiler_thread_trace_decoder_id_t handle,
-                                                uint64_t load_id) ROCPROFILER_API;
+                                                uint64_t                              load_id);
 
 /**
  * @brief Callback for rocprof-trace-decoder to return decoder traces back to user.
@@ -134,12 +133,12 @@ typedef void (*rocprofiler_thread_trace_decoder_callback_t)(
  * @retval ::ROCPROFILER_STATUS_ERROR generic error
  * @retval ::ROCPROFILER_STATUS_SUCCESS on success
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_id_t       handle,
                          rocprofiler_thread_trace_decoder_callback_t callback,
                          void*                                       data,
                          uint64_t                                    size,
-                         void* userdata) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3);
+                         void* userdata) ROCPROFILER_NONNULL(2, 3);
 
 /**
  * @brief Returns the string description of a ::rocprofiler_thread_trace_decoder_info_t record.
@@ -147,10 +146,9 @@ rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_id_t       handle,
  * @param[in] info The decoder info received
  * @retval null terminated string as description of "info".
  */
-const char*
+ROCPROFILER_API const char*
 rocprofiler_thread_trace_decoder_info_string(rocprofiler_thread_trace_decoder_id_t   handle,
-                                             rocprofiler_thread_trace_decoder_info_t info)
-    ROCPROFILER_API;
+                                             rocprofiler_thread_trace_decoder_info_t info);
 
 /** @} */
 

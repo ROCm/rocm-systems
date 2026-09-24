@@ -86,11 +86,10 @@ typedef rocprofiler_status_t (*rocprofiler_spm_available_configurations_cb_t)(
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND if agent not found
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  **/
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t                        agent_id,
                                            rocprofiler_spm_available_configurations_cb_t cb,
-                                           void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
+                                           void* user_data) ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) SPM configuration parameter used to configure sampling behavior.
@@ -143,14 +142,13 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if an input counter is not found in metrics
  file
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
                                       rocprofiler_counter_id_t*        counters_list,
                                       size_t                           counters_count,
                                       rocprofiler_spm_parameters_t**   parameters,
                                       size_t                           parameters_count,
-                                      rocprofiler_counter_config_id_t* config_id) ROCPROFILER_API
+                                      rocprofiler_counter_config_id_t* config_id)
     ROCPROFILER_NONNULL(2, 4, 6);
 
 /**
@@ -162,9 +160,8 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
  * @retval ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND if the profile is not found
  * @retval ROCPROFILER_STATUS_ERROR if config could not be destroyed
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
-rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id) ROCPROFILER_API;
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id);
 
 /**
  * @brief (experimental) SPM record flags.
@@ -255,11 +252,10 @@ typedef void (*rocprofiler_spm_dispatch_counting_service_cb_t)(
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED agent has no supported SPM counter
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                                  rocprofiler_available_counters_cb_t cb,
-                                                 void* user_data) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2);
+                                                 void* user_data) ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Configure callback dispatch profile Counting Service.
@@ -279,13 +275,13 @@ rocprofiler_spm_iterate_agent_supported_counters(rocprofiler_agent_id_t         
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT conflicting services being enabled in the
  * context
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_configure_callback_dispatch_service(
     rocprofiler_context_id_t                       context_id,
     rocprofiler_spm_dispatch_counting_service_cb_t dispatch_callback,
     void*                                          dispatch_callback_args,
     rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
-    void* record_callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(2, 4);
+    void*                                          record_callback_args) ROCPROFILER_NONNULL(2, 4);
 
 /**
  * @brief (experimental) Configure buffered dispatch spm service.
@@ -308,11 +304,11 @@ rocprofiler_spm_configure_callback_dispatch_service(
  * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_configure_buffer_dispatch_service(
     rocprofiler_context_id_t                       context_id,
     rocprofiler_buffer_id_t                        buffer_id,
     rocprofiler_spm_dispatch_counting_service_cb_t callback,
-    void* callback_data_args) ROCPROFILER_API ROCPROFILER_NONNULL(3);
+    void*                                          callback_data_args) ROCPROFILER_NONNULL(3);
 
 ROCPROFILER_EXTERN_C_FINI

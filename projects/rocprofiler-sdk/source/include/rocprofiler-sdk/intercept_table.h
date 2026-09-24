@@ -84,11 +84,10 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if a valid domain, regardless if there is a
  * constant string or not.
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_query_intercept_table_name(rocprofiler_intercept_table_t kind,
                                        const char**                  name,
-                                       uint64_t*                     name_len) ROCPROFILER_API;
+                                       uint64_t*                     name_len);
 
 /**
  * @brief (experimental) Invoke this function to receive callbacks when a ROCm library registers its
@@ -237,11 +236,10 @@ rocprofiler_query_intercept_table_name(rocprofiler_intercept_table_t kind,
  * @example intercept_table/client.cpp
  * Example demonstrating ::rocprofiler_at_intercept_table_registration usage
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t callback,
                                             int                                libs,
-                                            void* data) ROCPROFILER_API;
+                                            void*                              data);
 
 /** @} */
 

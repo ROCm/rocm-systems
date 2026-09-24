@@ -5,8 +5,6 @@ rocprofiler_activate_clang_tidy()
 
 set(common_sources
     demangle.cpp
-    dl.cpp
-    elf_utils.cpp
     environment.cpp
     logging.cpp
     md5sum.cpp
@@ -18,6 +16,10 @@ set(common_sources
     string_entry.cpp
     utility.cpp
     uuid_v7.cpp)
+
+if(NOT WIN32)
+    list(APPEND common_sources dl.cpp elf_utils.cpp)
+endif()
 set(common_headers
     abi.hpp
     defines.hpp
@@ -56,19 +58,20 @@ target_include_directories(rocprofiler-sdk-common-library
 
 target_link_libraries(
     rocprofiler-sdk-common-library
-    PUBLIC $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-ptl>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-elfio>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>)
+    PUBLIC
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
+        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-ptl>
+        $<$<NOT:$<BOOL:${WIN32}>>:$<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>>
+        $<$<NOT:$<BOOL:${WIN32}>>:$<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>>
+        $<$<NOT:$<BOOL:${WIN32}>>:$<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-elfio>>
+        $<$<NOT:$<BOOL:${WIN32}>>:$<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>>)
 
 set_target_properties(rocprofiler-sdk-common-library PROPERTIES OUTPUT_NAME
                                                                 rocprofiler-sdk-common)

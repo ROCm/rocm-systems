@@ -25,6 +25,11 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/mpl.hpp"
 
+#if !defined(_WIN32)
+#    include <unistd.h>
+#else
+using pid_t = int;
+#endif
 #include <array>
 #include <cstdint>
 #include <random>

@@ -130,14 +130,13 @@ typedef int (*rocprofiler_external_correlation_id_request_cb_t)(
  * ::rocprofiler_callback_tracing_kind_t value is provided more than once (per context) -- in other
  * words, we do not support overriding or combining the kinds in separate function calls.
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_external_correlation_id_request_service(
     rocprofiler_context_id_t                                  context_id,
     const rocprofiler_external_correlation_id_request_kind_t* kinds,
     size_t                                                    kinds_count,
     rocprofiler_external_correlation_id_request_cb_t          callback,
-    void* callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(4);
+    void*                                                     callback_args) ROCPROFILER_NONNULL(4);
 
 /**
  * @brief Query the name of the external correlation request kind. The name retrieved from this
@@ -155,12 +154,11 @@ rocprofiler_configure_external_correlation_id_request_service(
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if a valid domain, regardless if there is a
  * constant string or not.
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_query_external_correlation_id_request_kind_name(
     rocprofiler_external_correlation_id_request_kind_t kind,
     const char**                                       name,
-    uint64_t*                                          name_len) ROCPROFILER_API;
+    uint64_t*                                          name_len);
 
 /**
  * @brief Push default value for `external` field in ::rocprofiler_correlation_id_t onto stack.
@@ -180,11 +178,10 @@ rocprofiler_query_external_correlation_id_request_kind_name(
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Context does not exist
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Thread id is not valid
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
                                          rocprofiler_thread_id_t  tid,
-                                         rocprofiler_user_data_t  external_correlation_id)
-    ROCPROFILER_API;
+                                         rocprofiler_user_data_t  external_correlation_id);
 
 /**
  * @brief Pop default value for `external` field in ::rocprofiler_correlation_id_t off of stack.
@@ -196,11 +193,10 @@ rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Context does not exist
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Thread id is not valid
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_pop_external_correlation_id(rocprofiler_context_id_t context,
                                         rocprofiler_thread_id_t  tid,
-                                        rocprofiler_user_data_t* external_correlation_id)
-    ROCPROFILER_API;
+                                        rocprofiler_user_data_t* external_correlation_id);
 
 /** @} */
 

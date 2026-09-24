@@ -143,9 +143,19 @@ string(REPLACE "//" "/" rocp_inc_rel_path "${rocp_bin2src_rel_path}/source/inclu
 set(_BUILDTREE_EXPORT_DIR
     "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}")
 
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E create_symlink ${rocp_inc_rel_path}
-            ${PROJECT_BINARY_DIR}/include WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+if(NOT WIN32)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink ${rocp_inc_rel_path}
+                ${PROJECT_BINARY_DIR}/include WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+else()
+    # Windows: create the include directory pointing to the source include tree
+    if(NOT EXISTS "${PROJECT_BINARY_DIR}/include")
+        file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include")
+    endif()
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/source/include"
+                "${PROJECT_BINARY_DIR}/include")
+endif()
 
 if(NOT EXISTS "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
     file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")

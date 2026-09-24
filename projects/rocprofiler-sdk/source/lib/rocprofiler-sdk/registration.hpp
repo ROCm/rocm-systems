@@ -33,12 +33,13 @@
 extern "C" {
 // this is the "hidden" function that rocprofiler-register invokes to pass
 // the API tables to rocprofiler
+ROCPROFILER_PUBLIC_API
 int
 rocprofiler_set_api_table(const char* name,
                           uint64_t    lib_version,
                           uint64_t    lib_instance,
                           void**      tables,
-                          uint64_t    num_tables) ROCPROFILER_PUBLIC_API;
+                          uint64_t    num_tables);
 }
 
 namespace rocprofiler

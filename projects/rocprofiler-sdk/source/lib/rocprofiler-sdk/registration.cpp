@@ -20,13 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#define _GNU_SOURCE 1
+#if !defined(_WIN32)
+#    define _GNU_SOURCE 1
+#endif
 
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/aqlprofile/aqlprofile.hpp"
+#if !defined(_WIN32)
+#    include "lib/aqlprofile/aqlprofile.hpp"
+#endif
 #include "lib/common/container/stable_vector.hpp"
-#include "lib/common/dl.hpp"
-#include "lib/common/elf_utils.hpp"
+#if !defined(_WIN32)
+#    include "lib/common/dl.hpp"
+#endif
+#if !defined(_WIN32)
+#    include "lib/common/elf_utils.hpp"
+#endif
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -34,7 +42,9 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#endif
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hip/event.hpp"
@@ -42,28 +52,48 @@
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
-#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
+#endif
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
+#endif
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#endif
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
-#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#endif
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
-#include "lib/rocprofiler-sdk/kfd/kfd.hpp"
-#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
-#include "lib/rocprofiler-sdk/marker/marker.hpp"
-#include "lib/rocprofiler-sdk/ompt.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
-#include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#    include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+#    include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+#endif
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/marker/marker.hpp"
+#endif
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/ompt.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#    include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#endif
 #include "lib/rocprofiler-sdk/registration/iterate.hpp"
 #include "lib/rocprofiler-sdk/registration/late.hpp"
-#include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
-#include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
-#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
+#endif
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#endif
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
+#endif
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/context.h>
@@ -80,9 +110,18 @@
 
 #include <fmt/format.h>
 
-#include <dlfcn.h>
-#include <link.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#    include <link.h>
+#    include <unistd.h>
+#else
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    include <windows.h>
+// psapi.h depends on the types windows.h declares, so it has to follow it.
+#    include <psapi.h>
+#endif
 #include <atomic>
 #include <cctype>
 #include <cstddef>
@@ -102,10 +141,12 @@
 #include <vector>
 
 extern "C" {
-#pragma weak rocprofiler_configure
+#if !defined(_WIN32)
+#    pragma weak rocprofiler_configure
 
 extern rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*);
+#endif
 
 #if defined(CODECOV) && CODECOV > 0
 extern void
@@ -184,6 +225,7 @@ same_library_path(const fs::path& lhs, const fs::path& rhs)
 auto
 get_this_library_path()
 {
+#if !defined(_WIN32)
     const auto libnames = std::vector<std::string>{
         fmt::format("librocprofiler-sdk.so.{}.{}.{}",
                     ROCPROFILER_VERSION_MAJOR,
@@ -221,6 +263,26 @@ get_this_library_path()
         fmt::join(libnames.begin(), libnames.end(), "/"));
 
     return std::string{};
+#else
+    // On Windows, find our own DLL path via the address of a known export.
+    HMODULE hmod = nullptr;
+    if(GetModuleHandleExW(
+           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+           reinterpret_cast<LPCWSTR>(rocprofiler_set_api_table),
+           &hmod) &&
+       hmod != nullptr)
+    {
+        wchar_t wbuf[4096] = {};
+        if(GetModuleFileNameW(hmod, wbuf, static_cast<DWORD>(std::size(wbuf))) > 0)
+        {
+            int  len = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, nullptr, 0, nullptr, nullptr);
+            auto s   = std::string(static_cast<size_t>(len > 0 ? len - 1 : 0), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, s.data(), len, nullptr, nullptr);
+            return s;
+        }
+    }
+    return std::string{};
+#endif
 }
 
 void
@@ -322,7 +384,8 @@ get_forced_configures()
 std::vector<std::string>
 get_link_map()
 {
-    auto  chain  = std::vector<std::string>{};
+    auto chain = std::vector<std::string>{};
+#if !defined(_WIN32)
     void* handle = dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
 
     if(handle)
@@ -339,13 +402,49 @@ get_link_map()
             next_link = next_link->l_next;
         }
     }
-
+#else
+    HMODULE mods[4096] = {};
+    DWORD   needed     = 0;
+    if(EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed))
+    {
+        DWORD count = needed / sizeof(HMODULE);
+        chain.reserve(count);
+        for(DWORD i = 0; i < count; ++i)
+        {
+            wchar_t wbuf[4096] = {};
+            if(GetModuleFileNameW(mods[i], wbuf, static_cast<DWORD>(std::size(wbuf))) > 0)
+            {
+                int  len = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, nullptr, 0, nullptr, nullptr);
+                auto s   = std::string(static_cast<size_t>(len > 0 ? len - 1 : 0), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, s.data(), len, nullptr, nullptr);
+                if(!s.empty()) chain.emplace_back(std::move(s));
+            }
+        }
+    }
+#endif
     return chain;
 }
 
 struct client_library
 {
     client_library() = default;
+
+    // declaring any constructor makes this a non-aggregate in C++20, so the fields cannot
+    // be brace-initialized positionally the way they can under C++17
+    client_library(std::string                         _name,
+                   void*                               _dlhandle,
+                   rocprofiler_configure_func_t        _configure_func,
+                   rocprofiler_configure_attach_func_t _configure_attach_func,
+                   rocprofiler_client_id_t             _internal_client_id,
+                   rocprofiler_client_id_t             _mutable_client_id)
+    : name{std::move(_name)}
+    , dlhandle{_dlhandle}
+    , configure_func{_configure_func}
+    , configure_attach_func{_configure_attach_func}
+    , internal_client_id{_internal_client_id}
+    , mutable_client_id{_mutable_client_id}
+    {}
+
     ~client_library()
     {
         delete configure_result;
@@ -360,8 +459,8 @@ struct client_library
 
     std::string                                 name                    = {};
     void*                                       dlhandle                = nullptr;
-    decltype(::rocprofiler_configure)*          configure_func          = nullptr;
-    decltype(::rocprofiler_configure_attach)*   configure_attach_func   = nullptr;
+    rocprofiler_configure_func_t                configure_func          = nullptr;
+    rocprofiler_configure_attach_func_t         configure_attach_func   = nullptr;
     rocprofiler_tool_configure_result_t*        configure_result        = nullptr;
     rocprofiler_tool_configure_attach_result_t* configure_attach_result = nullptr;
     rocprofiler_client_id_t                     internal_client_id      = {};
@@ -417,8 +516,6 @@ emplace_client(Tp&                                 data,
                                     _dlhandle,
                                     _cfg_func,
                                     _attach_func,
-                                    nullptr,
-                                    nullptr,
                                     rocprofiler_client_id_t{client_id_size, nullptr, _prio},
                                     rocprofiler_client_id_t{client_id_size, nullptr, _prio}};
 
@@ -452,14 +549,25 @@ find_clients()
     };
 
     auto rocprofiler_configure_dlsym = [](auto _handle) {
-        decltype(::rocprofiler_configure)* _sym = nullptr;
-        *(void**) (&_sym)                       = dlsym(_handle, "rocprofiler_configure");
+        rocprofiler_configure_func_t _sym = nullptr;
+#if !defined(_WIN32)
+        *(void**) (&_sym) = dlsym(_handle, "rocprofiler_configure");
+#else
+        HMODULE hmod      = reinterpret_cast<HMODULE>(_handle);
+        *(void**) (&_sym) = reinterpret_cast<void*>(GetProcAddress(hmod, "rocprofiler_configure"));
+#endif
         return _sym;
     };
 
     auto rocprofiler_configure_attach_dlsym = [](auto _handle) {
-        decltype(::rocprofiler_configure_attach)* _sym = nullptr;
+        rocprofiler_configure_attach_func_t _sym = nullptr;
+#if !defined(_WIN32)
         *(void**) (&_sym) = dlsym(_handle, "rocprofiler_configure_attach");
+#else
+        HMODULE hmod      = reinterpret_cast<HMODULE>(_handle);
+        *(void**) (&_sym) =
+            reinterpret_cast<void*>(GetProcAddress(hmod, "rocprofiler_configure_attach"));
+#endif
         return _sym;
     };
 
@@ -520,7 +628,8 @@ find_clients()
     auto env = get_env_libs();
 
     // set to true to disable elf utils optimizations
-    auto optimize_elf_parsing = common::get_env("ROCPROFILER_OPTIMIZE_FIND_CLIENTS", true);
+    [[maybe_unused]] auto optimize_elf_parsing =
+        common::get_env("ROCPROFILER_OPTIMIZE_FIND_CLIENTS", true);
 
     if(!env.empty())
     {
@@ -528,6 +637,9 @@ find_clients()
         {
             ROCP_INFO << "[ROCP_TOOL_LIBRARIES] searching " << itr << " for rocprofiler_configure";
 
+#if !defined(_WIN32)
+            // ELF parsing is only a pre-check that produces a warning; the GetProcAddress
+            // path below is authoritative on Windows
             if(fs::exists(itr) && resolved_exists(itr))
             {
                 auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
@@ -543,9 +655,11 @@ find_clients()
                         itr);
                 }
             }
+#endif
 
-            void* handle = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
-
+            void* handle = nullptr;
+#if !defined(_WIN32)
+            handle = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
             if(!handle)
             {
                 ROCP_INFO << "[ROCP_TOOL_LIBRARIES] '" << itr
@@ -553,10 +667,20 @@ find_clients()
                 handle = dlopen(itr.c_str(), RTLD_LOCAL | RTLD_LAZY);
                 ROCP_INFO << "[ROCP_TOOL_LIBRARIES] dlopen result: " << handle;
             }
+#else
+            handle = reinterpret_cast<void*>(GetModuleHandleA(itr.c_str()));
+            if(!handle)
+            {
+                ROCP_INFO << "[ROCP_TOOL_LIBRARIES] '" << itr
+                          << "' is not already loaded, doing a LoadLibrary...";
+                handle = reinterpret_cast<void*>(LoadLibraryA(itr.c_str()));
+                ROCP_INFO << "[ROCP_TOOL_LIBRARIES] LoadLibrary result: " << handle;
+            }
+#endif
 
             if(!handle)
             {
-                ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
+                ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error loading '" << itr << "'";
             }
 
             for(const auto& ditr : data)
@@ -582,9 +706,14 @@ find_clients()
         }
     }
 
+#if !defined(_WIN32)
+    // weak-symbol lookup of a rocprofiler_configure linked directly into this image; Windows
+    // has no weak symbols, and the executable-module scan below covers the same case
     if(rocprofiler_configure && is_unique_configure_func(rocprofiler_configure))
         emplace_client(data, "unknown", nullptr, rocprofiler_configure, nullptr);
+#endif
 
+#if !defined(_WIN32)
     auto _default_configure        = rocprofiler_configure_dlsym(RTLD_DEFAULT);
     auto _next_configure           = rocprofiler_configure_dlsym(RTLD_NEXT);
     auto _default_configure_attach = rocprofiler_configure_attach_dlsym(RTLD_DEFAULT);
@@ -596,78 +725,113 @@ find_clients()
 
     if(_next_configure && is_unique_configure_func(_next_configure))
         emplace_client(data, "(RTLD_NEXT)", nullptr, _next_configure, _next_configure_attach);
-
-    // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
-    // libraries
-    if(_default_configure)
+#else
+    // On Windows there is no RTLD_DEFAULT/RTLD_NEXT; scan the executable module
+    // (equivalent of RTLD_DEFAULT for the main image) as the single primary source.
     {
-        for(const auto& itr : get_link_map())
-        {
-            ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
+        HMODULE hExe                      = GetModuleHandleW(nullptr);
+        void*   _default_handle           = reinterpret_cast<void*>(hExe);
+        auto    _default_configure        = rocprofiler_configure_dlsym(_default_handle);
+        auto    _default_configure_attach = rocprofiler_configure_attach_dlsym(_default_handle);
+        if(_default_configure && is_unique_configure_func(_default_configure))
+            emplace_client(
+                data, "(EXE)", _default_handle, _default_configure, _default_configure_attach);
+    }
+#endif
+    // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
+    // libraries — on Linux we key off _default_configure, on Windows we always scan.
+    {
+        bool _do_link_map_scan = false;
+#if !defined(_WIN32)
+        _do_link_map_scan = (_default_configure != nullptr);
+#else
+        _do_link_map_scan = true;
+#endif
 
-            if(fs::exists(itr) && resolved_exists(itr))
+        if(_do_link_map_scan)
+        {
+            for(const auto& itr : get_link_map())
             {
-                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
-                if(!elfinfo.has_symbol([](std::string_view symname) {
-                       return (symname == "rocprofiler_configure");
-                   }))
+                ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
+
+#if !defined(_WIN32)
+                if(fs::exists(itr) && resolved_exists(itr))
                 {
-                    ROCP_TRACE << fmt::format(
-                        "Shared library '{}' did not contain the 'rocprofiler_configure' symbol "
-                        "(search method: ELF parsing) required by rocprofiler-sdk for tools",
+                    auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
+                    if(!elfinfo.has_symbol([](std::string_view symname) {
+                           return (symname == "rocprofiler_configure");
+                       }))
+                    {
+                        ROCP_TRACE << fmt::format(
+                            "Shared library '{}' did not contain the 'rocprofiler_configure' "
+                            "symbol (search method: ELF parsing) required by rocprofiler-sdk for "
+                            "tools",
+                            itr);
+                        continue;
+                    }
+                }
+                else
+                {
+                    ROCP_INFO << fmt::format(
+                        "Shared library '{}' either does not exist or is a broken symbolic link",
                         itr);
                     continue;
                 }
-            }
-            else
-            {
-                ROCP_INFO << fmt::format(
-                    "Shared library '{}' either does not exist or is a broken symbolic link", itr);
-                continue;
-            }
+#endif
 
-            ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
+                ROCP_INFO << "opening " << itr << " for 'rocprofiler_configure' symbol...";
 
-            void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
-            ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
+                void* handle = nullptr;
+#if !defined(_WIN32)
+                handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+                ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
+#else
+                handle = reinterpret_cast<void*>(GetModuleHandleA(itr.c_str()));
+#endif
+                if(!handle) continue;
 
-            auto* _sym        = rocprofiler_configure_dlsym(handle);
-            auto* _attach_sym = rocprofiler_configure_attach_dlsym(handle);
+                auto* _sym        = rocprofiler_configure_dlsym(handle);
+                auto* _attach_sym = rocprofiler_configure_attach_dlsym(handle);
 
-            // symbol not found
-            if(!_sym)
-            {
-                ROCP_INFO << "|_" << itr << " did not contain rocprofiler_configure symbol";
-                continue;
-            }
+                // symbol not found
+                if(!_sym)
+                {
+                    ROCP_INFO << "|_" << itr << " did not contain rocprofiler_configure symbol";
+                    continue;
+                }
 
-            // skip the configure function that was forced
-            if(get_forced_configures())
-            {
-                const bool _exists =
-                    get_forced_configures()->rlock([&_sym](const auto& _forced_configures) {
-                        return (_forced_configures.find(_sym) != _forced_configures.end());
-                    });
+                // skip the configure function that was forced
+                if(get_forced_configures())
+                {
+                    const bool _exists =
+                        get_forced_configures()->rlock([&_sym](const auto& _forced_configures) {
+                            return (_forced_configures.find(_sym) != _forced_configures.end());
+                        });
 
-                if(_exists)
+                    if(_exists)
+                    {
+                        data.front()->name                    = itr;
+                        data.front()->dlhandle                = handle;
+                        data.front()->internal_client_id.name = "(forced)";
+                        continue;
+                    }
+                }
+
+#if !defined(_WIN32)
+                if(_sym == &rocprofiler_configure && data.size() == 1)
+#else
+                if(false)
+#endif
                 {
                     data.front()->name                    = itr;
                     data.front()->dlhandle                = handle;
-                    data.front()->internal_client_id.name = "(forced)";
-                    continue;
+                    data.front()->internal_client_id.name = "default";
                 }
-            }
-
-            if(_sym == &rocprofiler_configure && data.size() == 1)
-            {
-                data.front()->name                    = itr;
-                data.front()->dlhandle                = handle;
-                data.front()->internal_client_id.name = "default";
-            }
-            else if(is_unique_configure_func(_sym))
-            {
-                auto& entry = emplace_client(data, itr, handle, _sym, _attach_sym);
-                entry->internal_client_id.name = entry->name.c_str();
+                else if(is_unique_configure_func(_sym))
+                {
+                    auto& entry = emplace_client(data, itr, handle, _sym, _attach_sym);
+                    entry->internal_client_id.name = entry->name.c_str();
+                }
             }
         }
     }
@@ -925,6 +1089,7 @@ invoke_client_detaches()
         {
             context::stop_client_contexts(itr->internal_client_id);
 
+#if !defined(_WIN32)
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
             // Terminal fail-closed fence: client detach frees the tool's callback
@@ -933,6 +1098,7 @@ invoke_client_detaches()
             // (correct here -- the client is going away). No-op with the feature off.
             kfd::signal_less_fence_completions();
             pc_sampling::service_sync(itr->internal_client_id);
+#endif
 
             auto _fini_status = get_fini_status();
             if(_fini_status == 0) set_fini_status(-1);
@@ -982,6 +1148,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
 
+#if !defined(_WIN32)
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
                 // Terminal fail-closed fence: the client finalizer frees the
@@ -990,6 +1157,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 // process-wide. No-op with the feature off.
                 kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
+#endif
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
@@ -1183,6 +1351,7 @@ finalize()
         // consults the loss ledger this populates. Its drain waits on the in-flight counter,
         // so it still works when an application hsa_shut_down stopped the monitor first.
         // No-op unless signal-less is active.
+#if !defined(_WIN32)
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
@@ -1191,13 +1360,14 @@ finalize()
         thread_trace::finalize();
         ompt::finalize_ompt();
         kfd::finalize();
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#    if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // WARNING: this must precede `code_object::finalize()`
         pc_sampling::code_object::finalize();
         // WARNING: this must follows queue_controller_fini.
         pc_sampling::service_fini();
-#endif
+#    endif
         code_object::finalize();
+#endif
         context::correlation_id_finalize();
         if(get_init_status() > 0)
         {
@@ -1352,6 +1522,14 @@ rocprofiler_status_t
 rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
                                               void*                                      data)
 {
+#if defined(_WIN32)
+    // enumerates runtimes that registered via rocprofiler-register, which is not part of
+    // the Windows ETW tracing path
+    (void) callback;
+    (void) data;
+
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+#else
     auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations(nullptr);
 
     if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
@@ -1363,6 +1541,7 @@ rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_i
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
+#endif
 }
 
 int
@@ -1372,6 +1551,18 @@ rocprofiler_set_api_table(const char* name,
                           void**      tables,
                           uint64_t    num_tables)
 {
+#if defined(_WIN32)
+    // Windows tracing consumes ETW events emitted by the runtime rather than interposing
+    // dispatch tables, so rocprofiler-register is not in the path and nothing ever calls
+    // this entry point. The symbol is retained for ABI compatibility.
+    (void) name;
+    (void) lib_version;
+    (void) lib_instance;
+    (void) tables;
+    (void) num_tables;
+
+    return -1;
+#else
     // implementation has a call once
     rocprofiler::registration::init_logging();
 
@@ -1466,6 +1657,7 @@ rocprofiler_set_api_table(const char* name,
             lib_instance,
             std::make_tuple(hip_runtime_api_table));
     }
+#    if !defined(_WIN32)
     else if(std::string_view{name} == "hip_compiler")
     {
         // pass to hip init
@@ -1520,13 +1712,13 @@ rocprofiler_set_api_table(const char* name,
         ROCP_ERROR_IF(num_tables > 1)
             << "rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
 
-        auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
+        auto* hsa_api_table      = static_cast<HsaApiTable*>(*tables);
 
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-        auto hsa_api_table_size = hsa_api_table->version.minor_id;
-        auto runtime_pc_sampling_table =
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        auto  hsa_api_table_size = hsa_api_table->version.minor_id;
+        auto  runtime_pc_sampling_table =
             (offsetof(::HsaApiTable, pc_sampling_ext_) < hsa_api_table_size);
-#endif
+#        endif
 
         // needed for anytime initialization. If this is the first time the dispatch table is passed
         // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
@@ -1549,10 +1741,10 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::restore_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::restore_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::restore_table(hsa_api_table->tools_, lib_instance);
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::hsa::restore_table(hsa_api_table->pc_sampling_ext_, lib_instance);
-#endif
+#        endif
 
         // store a reference of the HsaApiTable implementations for invoking these functions
         // without going through tracing wrappers
@@ -1561,10 +1753,10 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::copy_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::copy_table(hsa_api_table->tools_, lib_instance);
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
-#endif
+#        endif
 
         rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
 
@@ -1594,10 +1786,10 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
         rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->amd_ext_, lib_instance);
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
-#endif
+#        endif
         rocprofiler::thread_trace::code_object::initialize(hsa_api_table);
 
         // install rocprofiler API wrappers
@@ -1676,11 +1868,11 @@ rocprofiler_set_api_table(const char* name,
         // after queue_controller_init + interposition; starting SQTT earlier hangs the GPU.
         rocprofiler::thread_trace::start_active_contexts();
 
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::post_hsa_init_start_active_service();
-#endif
+#        endif
 
         // Tracing notifications the runtime has initialized
         rocprofiler::runtime_init::initialize(
@@ -1768,9 +1960,9 @@ rocprofiler_set_api_table(const char* name,
         // NOTE: These checks are necessary because rocprofiler-sdk enforces ABI
         // compatibility at compile time. If RCCL is rebuilt afterwards with an
         // incorrect or mismatched dispatch table, compile-time checks are bypassed.
-#if ROCPROFILER_SDK_COMPUTE_VERSION(RCCL_API_TRACE_VERSION_MAJOR,                                  \
-                                    0,                                                             \
-                                    RCCL_API_TRACE_VERSION_PATCH) >= 1
+#        if ROCPROFILER_SDK_COMPUTE_VERSION(RCCL_API_TRACE_VERSION_MAJOR,                          \
+                                            0,                                                     \
+                                            RCCL_API_TRACE_VERSION_PATCH) >= 1
         // 1. For RCCL_API_TRACE_VERSION_PATCH = 1, ncclAllReduceWithBias_fn is expected
         //    to be the last entry (38th function) in the dispatch table. Its offset is
         //    therefore used as the canonical end of the table for patch 1.
@@ -1803,7 +1995,7 @@ rocprofiler_set_api_table(const char* name,
                 0,
                 RCCL_API_TRACE_VERSION_PATCH);
         }
-#endif
+#        endif
         if(is_valid_rccl_dispatch_table)
         {
             // needed for anytime initialization. If this is the first time the dispatch table is
@@ -2030,11 +2222,12 @@ rocprofiler_set_api_table(const char* name,
         // forward the table to the relevant code sections, then move on
         rocprofiler::code_object::initialize(rocattach_api);
         rocprofiler::hsa::queue_controller_init(rocattach_api);
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
-#endif
+#        endif
         rocprofiler::thread_trace::code_object::initialize(rocattach_api);
     }
+#    endif  // !_WIN32
     else
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -2046,5 +2239,6 @@ rocprofiler_set_api_table(const char* name,
     (void) num_tables;
 
     return 0;
+#endif
 }
 }

@@ -60,10 +60,10 @@ typedef rocprofiler_status_t (*rocprofiler_available_dimensions_cb_t)(
  */
 ROCPROFILER_SDK_DEPRECATED("Information now available in rocprofiler_counter_info_v1_t. "
                            "This function will be removed in the future.")
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
                                        rocprofiler_available_dimensions_cb_t info_cb,
-                                       void* user_data) ROCPROFILER_API;
+                                       void*                                 user_data);
 
 /**
  * @brief (deprecated) This call returns the number of instances specific counter contains.
@@ -77,10 +77,9 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
  */
 ROCPROFILER_SDK_DEPRECATED("Information now available in rocprofiler_counter_info_v1_t. "
                            "This function will be removed in the future.")
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
                                          rocprofiler_counter_id_t counter_id,
-                                         size_t*                  instance_count) ROCPROFILER_API
-    ROCPROFILER_NONNULL(3);
+                                         size_t* instance_count) ROCPROFILER_NONNULL(3);
 
 ROCPROFILER_EXTERN_C_FINI

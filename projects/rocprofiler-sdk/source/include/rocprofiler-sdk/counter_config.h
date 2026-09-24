@@ -57,12 +57,11 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_ERROR if config could not be created
  *
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_create_counter_config(rocprofiler_agent_id_t           agent_id,
                                   rocprofiler_counter_id_t*        counters_list,
                                   size_t                           counters_count,
-                                  rocprofiler_counter_config_id_t* config_id) ROCPROFILER_API
+                                  rocprofiler_counter_config_id_t* config_id)
     ROCPROFILER_NONNULL(4);
 
 /**
@@ -73,9 +72,8 @@ rocprofiler_create_counter_config(rocprofiler_agent_id_t           agent_id,
  * @retval ROCPROFILER_STATUS_SUCCESS if config destroyed
  * @retval ROCPROFILER_STATUS_ERROR if config could not be destroyed
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
-rocprofiler_destroy_counter_config(rocprofiler_counter_config_id_t config_id) ROCPROFILER_API;
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+rocprofiler_destroy_counter_config(rocprofiler_counter_config_id_t config_id);
 
 /** @} */
 

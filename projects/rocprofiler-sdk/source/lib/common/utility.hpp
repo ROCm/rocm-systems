@@ -25,9 +25,20 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
-#include <sys/syscall.h>
-#include <sys/utsname.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <sys/syscall.h>
+#    include <sys/utsname.h>
+#    include <unistd.h>
+#else
+#    include <process.h>
+#    include <windows.h>
+// Windows shims for POSIX clock/pid types
+using pid_t     = int;
+using clockid_t = int;
+#    define CLOCK_BOOTTIME  6
+#    define CLOCK_MONOTONIC 1
+#    define CLOCK_REALTIME  0
+#endif
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -56,6 +67,7 @@ consume_args(Tp&&...)
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id);
 
+#if !defined(_WIN32)
 inline uint64_t
 get_tid()
 {
@@ -79,6 +91,42 @@ get_ticks(clockid_t clk_id_v) noexcept
 
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
 }
+#else
+inline uint64_t
+get_tid()
+{
+    static thread_local uint64_t _v = static_cast<uint64_t>(::GetCurrentThreadId());
+    return _v;
+}
+
+inline uint64_t
+get_qpc_frequency() noexcept
+{
+    // fixed for the life of the system, so query it once
+    static const uint64_t _v = []() {
+        auto _freq = LARGE_INTEGER{};
+        ::QueryPerformanceFrequency(&_freq);
+        return static_cast<uint64_t>(_freq.QuadPart);
+    }();
+    return _v;
+}
+
+inline uint64_t get_ticks(clockid_t /*clk_id_v*/) noexcept
+{
+    // Use QPC for high-resolution monotonic timestamps on Windows
+    auto _count = LARGE_INTEGER{};
+    ::QueryPerformanceCounter(&_count);
+
+    constexpr uint64_t nanosec = std::nano::den;
+
+    const auto _ticks = static_cast<uint64_t>(_count.QuadPart);
+    const auto _freq  = get_qpc_frequency();
+
+    // QPC counts from boot at ~1e7 Hz, so ticks * nanosec overflows uint64_t after roughly
+    // 31 minutes of uptime. Split into whole seconds plus remainder to keep the multiply small.
+    return ((_ticks / _freq) * nanosec) + (((_ticks % _freq) * nanosec) / _freq);
+}
+#endif
 
 static constexpr int default_clock_id = CLOCK_BOOTTIME;
 

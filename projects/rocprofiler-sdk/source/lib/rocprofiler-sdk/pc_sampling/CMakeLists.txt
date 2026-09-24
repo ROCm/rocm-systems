@@ -2,6 +2,13 @@
 # PC Sampling
 # - HSA support officially added in HSA-Runtime v1.14.0
 #
+if(WIN32)
+    # PC sampling delivers its samples through the KFD ioctl interface, which Windows
+    # reaches via D3DKMT instead; windows_stubs.cpp supplies the stand-in symbols.
+    target_sources(rocprofiler-sdk-object-library PRIVATE windows_stubs.cpp service.hpp)
+    return()
+endif()
+
 add_subdirectory(parser)
 
 if(hsa-runtime64_VERSION AND hsa-runtime64_VERSION VERSION_LESS 1.14.0)

@@ -32,6 +32,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <string>
 #include <type_traits>
 #include <vector>
 

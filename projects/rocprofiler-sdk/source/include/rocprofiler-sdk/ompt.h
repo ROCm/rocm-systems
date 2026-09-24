@@ -47,9 +47,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Always returns this value
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
-rocprofiler_ompt_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+rocprofiler_ompt_is_initialized(int* status) ROCPROFILER_NONNULL(1);
 
 /**
  * @brief (experimental) Query whether rocprofiler-sdk OMPT implementation has invoked ompt_finalize
@@ -59,9 +58,8 @@ rocprofiler_ompt_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Always returns this value
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
-rocprofiler_ompt_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+rocprofiler_ompt_is_finalized(int* status) ROCPROFILER_NONNULL(1);
 
 /**
  * @brief (experimental) If a tool which contains a "ompt_start_tool" function which is invoked by
@@ -72,9 +70,8 @@ rocprofiler_ompt_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1
  * @param [in] runtime_version  Refer to OpenMP OMPT docs for more information
  * @return ompt_start_tool_result_t*
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-ompt_start_tool_result_t*
-rocprofiler_ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_API;
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL ompt_start_tool_result_t*
+rocprofiler_ompt_start_tool(unsigned int omp_version, const char* runtime_version);
 
 ROCPROFILER_EXTERN_C_FINI
 

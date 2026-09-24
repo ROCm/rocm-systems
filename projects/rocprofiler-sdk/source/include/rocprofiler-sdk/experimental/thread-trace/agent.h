@@ -57,14 +57,14 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid
  * rocprofiler_thread_trace_parameter_t
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_configure_device_thread_trace_service(
     rocprofiler_context_id_t                        context_id,
     rocprofiler_agent_id_t                          agent_id,
     rocprofiler_thread_trace_parameter_t*           parameters,
     size_t                                          num_parameters,
     rocprofiler_thread_trace_shader_data_callback_t shader_callback,
-    rocprofiler_user_data_t                         callback_userdata) ROCPROFILER_API;
+    rocprofiler_user_data_t                         callback_userdata);
 
 /** @} */
 

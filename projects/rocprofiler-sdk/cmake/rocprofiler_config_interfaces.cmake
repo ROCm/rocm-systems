@@ -18,8 +18,12 @@ target_include_directories(
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 target_compile_definitions(
-    rocprofiler-sdk-headers INTERFACE $<BUILD_INTERFACE:AMD_INTERNAL_BUILD=1>
-                                      $<BUILD_INTERFACE:__HIP_PLATFORM_AMD__=1>)
+    rocprofiler-sdk-headers
+    INTERFACE $<BUILD_INTERFACE:AMD_INTERNAL_BUILD=1>
+              $<BUILD_INTERFACE:__HIP_PLATFORM_AMD__=1>
+              $<$<BOOL:${WIN32}>:WIN32_LEAN_AND_MEAN>
+              $<$<BOOL:${WIN32}>:NOMINMAX>
+              $<$<BOOL:${WIN32}>:VC_EXTRA_LEAN>)
 
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")
@@ -48,23 +52,29 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-set(CMAKE_THREAD_PREFER_PTHREAD ON)
-set(THREADS_PREFER_PTHREAD_FLAG OFF)
+if(NOT WIN32)
+    set(CMAKE_THREAD_PREFER_PTHREAD ON)
+    set(THREADS_PREFER_PTHREAD_FLAG OFF)
 
-find_library(pthread_LIBRARY NAMES pthread pthreads)
-find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
+    find_library(pthread_LIBRARY NAMES pthread pthreads)
+    find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
 
-find_library(pthread_LIBRARY NAMES pthread pthreads)
-find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
+    find_library(pthread_LIBRARY NAMES pthread pthreads)
+    find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
 
-if(pthread_LIBRARY)
-    target_link_libraries(rocprofiler-sdk-threading INTERFACE ${pthread_LIBRARY})
-else()
-    find_package(Threads ${rocprofiler_FIND_QUIETLY} ${rocprofiler_FIND_REQUIREMENT})
+    if(pthread_LIBRARY)
+        target_link_libraries(rocprofiler-sdk-threading INTERFACE ${pthread_LIBRARY})
+    else()
+        find_package(Threads ${rocprofiler_FIND_QUIETLY} ${rocprofiler_FIND_REQUIREMENT})
 
-    if(Threads_FOUND)
-        target_link_libraries(rocprofiler-sdk-threading INTERFACE Threads::Threads)
+        if(Threads_FOUND)
+            target_link_libraries(rocprofiler-sdk-threading INTERFACE Threads::Threads)
+        endif()
     endif()
+else()
+    # On Windows std::thread uses the Win32 thread API directly; no pthreads needed.
+    find_package(Threads REQUIRED)
+    target_link_libraries(rocprofiler-sdk-threading INTERFACE Threads::Threads)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -73,14 +83,19 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-foreach(_LIB dl rt)
-    find_library(${_LIB}_LIBRARY NAMES ${_LIB})
-    find_package_handle_standard_args(${_LIB}-library REQUIRED_VARS ${_LIB}_LIBRARY)
+if(NOT WIN32)
+    foreach(_LIB dl rt)
+        find_library(${_LIB}_LIBRARY NAMES ${_LIB})
+        find_package_handle_standard_args(${_LIB}-library REQUIRED_VARS ${_LIB}_LIBRARY)
 
-    if(${_LIB}_LIBRARY)
-        target_link_libraries(rocprofiler-sdk-threading INTERFACE ${${_LIB}_LIBRARY})
-    endif()
-endforeach()
+        if(${_LIB}_LIBRARY)
+            target_link_libraries(rocprofiler-sdk-threading INTERFACE ${${_LIB}_LIBRARY})
+        endif()
+    endforeach()
+else()
+    # On Windows the psapi import library provides EnumProcessModules.
+    target_link_libraries(rocprofiler-sdk-threading INTERFACE psapi)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -174,27 +189,45 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(
-    hsa-runtime64
-    1.14
-    REQUIRED
-    CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH})
+if(NOT WIN32)
+    find_package(
+        hsa-runtime64
+        1.14
+        REQUIRED
+        CONFIG
+        HINTS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATHS
+        ${rocm_version_DIR}
+        ${ROCM_PATH})
 
-string(REPLACE "." ";" HSA_RUNTIME_VERSION "${hsa-runtime64_VERSION}")
+    string(REPLACE "." ";" HSA_RUNTIME_VERSION "${hsa-runtime64_VERSION}")
 
-# the following values are encoded into version.h
-list(GET HSA_RUNTIME_VERSION 0 HSA_RUNTIME_VERSION_MAJOR)
-list(GET HSA_RUNTIME_VERSION 1 HSA_RUNTIME_VERSION_MINOR)
+    # the following values are encoded into version.h
+    list(GET HSA_RUNTIME_VERSION 0 HSA_RUNTIME_VERSION_MAJOR)
+    list(GET HSA_RUNTIME_VERSION 1 HSA_RUNTIME_VERSION_MINOR)
 
-target_link_libraries(rocprofiler-sdk-hsa-runtime INTERFACE hsa-runtime64::hsa-runtime64)
-rocprofiler_config_nolink_target(rocprofiler-sdk-hsa-runtime-nolink
-                                 hsa-runtime64::hsa-runtime64)
+    target_link_libraries(rocprofiler-sdk-hsa-runtime
+                          INTERFACE hsa-runtime64::hsa-runtime64)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hsa-runtime-nolink
+                                     hsa-runtime64::hsa-runtime64)
+else()
+    # On Windows the HSA runtime is bundled with amdhip64; headers are in
+    # ${ROCM_PATH}/include
+    if(NOT TARGET hsa-runtime64::hsa-runtime64)
+        add_library(hsa-runtime64::hsa-runtime64 INTERFACE IMPORTED GLOBAL)
+        target_include_directories(
+            hsa-runtime64::hsa-runtime64 SYSTEM INTERFACE "${ROCM_PATH}/include"
+                                                          "${ROCM_PATH}/include/hsa")
+    endif()
+    set(HSA_RUNTIME_VERSION_MAJOR 1)
+    set(HSA_RUNTIME_VERSION_MINOR 14)
+    target_link_libraries(rocprofiler-sdk-hsa-runtime
+                          INTERFACE hsa-runtime64::hsa-runtime64)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hsa-runtime-nolink
+                                     hsa-runtime64::hsa-runtime64)
+endif()
 
 rocprofiler_parse_hsa_api_table_versions(rocprofiler-sdk-hsa-runtime-nolink)
 
@@ -233,12 +266,14 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(LibElf QUIET)
-if(LibElf_FOUND)
-    target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
-else()
-    find_package(libelf REQUIRED)
-    target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+if(NOT WIN32)
+    find_package(LibElf QUIET)
+    if(LibElf_FOUND)
+        target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
+    else()
+        find_package(libelf REQUIRED)
+        target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+    endif()
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -247,8 +282,10 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(libdw REQUIRED)
-target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
+if(NOT WIN32)
+    find_package(libdw REQUIRED)
+    target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -256,7 +293,7 @@ target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
 #
 # ----------------------------------------------------------------------------------------#
 
-if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+if(NOT ROCPROFILER_BUILD_AQLPROFILE AND NOT WIN32)
     find_library(
         hsa-amd-aqlprofile64_library
         NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile REQUIRED
@@ -275,21 +312,23 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(
-    hsakmt
-    REQUIRED
-    CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATH_SUFFIXES
-    lib/cmake/hsakmt)
+if(NOT WIN32)
+    find_package(
+        hsakmt
+        REQUIRED
+        CONFIG
+        HINTS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATHS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATH_SUFFIXES
+        lib/cmake/hsakmt)
 
-target_link_libraries(rocprofiler-sdk-hsakmt INTERFACE hsakmt::hsakmt)
-rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
+    target_link_libraries(rocprofiler-sdk-hsakmt INTERFACE hsakmt::hsakmt)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -297,49 +336,52 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(PkgConfig)
+if(NOT WIN32)
+    find_package(PkgConfig)
 
-if(PkgConfig_FOUND)
-    pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-    pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+        pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
-    target_include_directories(rocprofiler-sdk-drm SYSTEM
-                               INTERFACE ${DRM_INCLUDE_DIRS} ${DRM_AMDGPU_INCLUDE_DIRS})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
-                                                        PkgConfig::DRM_AMDGPU)
-else()
-    find_path(
-        drm_INCLUDE_DIR
-        NAMES drm.h
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+        target_include_directories(
+            rocprofiler-sdk-drm SYSTEM INTERFACE ${DRM_INCLUDE_DIRS}
+                                                 ${DRM_AMDGPU_INCLUDE_DIRS})
+        target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
+                                                            PkgConfig::DRM_AMDGPU)
+    else()
+        find_path(
+            drm_INCLUDE_DIR
+            NAMES drm.h
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
 
-    find_path(
-        xf86drm_INCLUDE_DIR
-        NAMES xf86drm.h
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+        find_path(
+            xf86drm_INCLUDE_DIR
+            NAMES xf86drm.h
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
 
-    find_library(
-        drm_LIBRARY
-        NAMES drm
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+        find_library(
+            drm_LIBRARY
+            NAMES drm
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
 
-    find_library(
-        drm_amdgpu_LIBRARY
-        NAMES drm_amdgpu
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+        find_library(
+            drm_amdgpu_LIBRARY
+            NAMES drm_amdgpu
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
 
-    target_include_directories(rocprofiler-sdk-drm SYSTEM
-                               INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
-                                                        ${drm_amdgpu_LIBRARY})
+        target_include_directories(rocprofiler-sdk-drm SYSTEM
+                                   INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
+        target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
+                                                            ${drm_amdgpu_LIBRARY})
+    endif()
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -350,7 +392,9 @@ endif()
 
 # get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
 # target_include_directories(rocprofiler-sdk-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
-target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
+if(NOT WIN32)
+    target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

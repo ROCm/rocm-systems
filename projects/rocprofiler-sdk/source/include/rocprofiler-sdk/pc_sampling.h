@@ -118,15 +118,14 @@ ROCPROFILER_EXTERN_C_INIT
  * already configured by a different context
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with an invalid argument
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
                                           rocprofiler_agent_id_t           agent_id,
                                           rocprofiler_pc_sampling_method_t method,
                                           rocprofiler_pc_sampling_unit_t   unit,
                                           uint64_t                         interval,
                                           rocprofiler_buffer_id_t          buffer_id,
-                                          int                              flags) ROCPROFILER_API;
+                                          int                              flags);
 
 /**
  * @brief (experimental) Enumeration describing values of flags of
@@ -212,12 +211,11 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_query_pc_sampling_agent_configurations(
     rocprofiler_agent_id_t                                agent_id,
     rocprofiler_available_pc_sampling_configurations_cb_t cb,
-    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3);
+    void*                                                 user_data) ROCPROFILER_NONNULL(2, 3);
 
 /**
  * @brief (experimental) Information about the GPU part where wave was executing
@@ -520,9 +518,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_inval
  * value is provided.
  */
 ROCPROFILER_SDK_EXPERIMENTAL
-const char*
+ROCPROFILER_API const char*
 rocprofiler_get_pc_sampling_instruction_type_name(
-    rocprofiler_pc_sampling_instruction_type_t instruction_type) ROCPROFILER_API;
+    rocprofiler_pc_sampling_instruction_type_t instruction_type);
 
 /**
  * @brief (experimental) Return the string encoding of
@@ -531,9 +529,10 @@ rocprofiler_get_pc_sampling_instruction_type_name(
  * @return Will return a nullptr if invalid/unsupported
  * ::rocprofiler_pc_sampling_instruction_not_issued_reason_t value is provided.
  */
-ROCPROFILER_SDK_EXPERIMENTAL const char*
+ROCPROFILER_SDK_EXPERIMENTAL
+ROCPROFILER_API const char*
 rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
-    rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason) ROCPROFILER_API;
+    rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason);
 
 /** @} */
 

@@ -102,7 +102,7 @@ perform_reduction_to_single_instance(ReduceOperation                            
                                              .dispatch_id   = input_array->begin()->dispatch_id,
                                              .user_data     = input_array->begin()->user_data,
                                              .agent_id      = input_array->begin()->agent_id},
-                [](auto& a, auto& b) {
+                [](const auto& a, const auto& b) {
                     return rocprofiler_counter_record_t{
                         .id            = a.id,
                         .counter_value = a.counter_value + b.counter_value,
@@ -771,6 +771,11 @@ EvaluateAST::read_special_counters(
 std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>
 EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket& pkt)
 {
+#if defined(_WIN32)
+    (void) pkt_gen;
+    (void) pkt;
+    return {};
+#else
     struct it_data
     {
         std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>* data;
@@ -814,6 +819,7 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
         ROCP_ERROR << "AqlProfile could not decode packet";
     }
     return ret;
+#endif
 }
 
 void

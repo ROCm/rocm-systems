@@ -736,12 +736,12 @@ typedef int (*rocprofiler_buffer_tracing_kind_operation_cb_t)(
  * ::rocprofiler_buffer_tracing_kind_t kind was found
  *
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t               context_id,
                                              rocprofiler_buffer_tracing_kind_t      kind,
                                              const rocprofiler_tracing_operation_t* operations,
                                              size_t                  operations_count,
-                                             rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
+                                             rocprofiler_buffer_id_t buffer_id);
 
 /**
  * @brief Query the name of the buffer tracing kind. The name retrieved from this function is a
@@ -759,10 +759,10 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if a valid domain, regardless if there is a
  * constant string or not.
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_query_buffer_tracing_kind_name(rocprofiler_buffer_tracing_kind_t kind,
                                            const char**                      name,
-                                           uint64_t* name_len) ROCPROFILER_API;
+                                           uint64_t*                         name_len);
 
 /**
  * @brief Query the name of the buffer tracing kind. The name retrieved from this function is a
@@ -785,11 +785,11 @@ rocprofiler_query_buffer_tracing_kind_name(rocprofiler_buffer_tracing_kind_t kin
  * @retval ::ROCPROFILER_STATUS_SUCCESS Valid domain and operation, regardless of whether there is a
  * constant string or not.
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_kind_t kind,
                                                      rocprofiler_tracing_operation_t   operation,
                                                      const char**                      name,
-                                                     uint64_t* name_len) ROCPROFILER_API;
+                                                     uint64_t*                         name_len);
 
 /**
  * @brief Iterate over all the buffer tracing kinds and invokes the callback for each buffer tracing
@@ -803,9 +803,9 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
  * @param [in] data User data passed back into the callback
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t
-rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t callback,
-                                         void* data) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t callback, void* data)
+    ROCPROFILER_NONNULL(1);
 
 /**
  * @brief Iterates over all the operations for a given @ref
@@ -819,11 +819,11 @@ rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t ca
  * @param [in] data User data passed back into the callback
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_iterate_buffer_tracing_kind_operations(
     rocprofiler_buffer_tracing_kind_t              kind,
     rocprofiler_buffer_tracing_kind_operation_cb_t callback,
-    void*                                          data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
+    void*                                          data) ROCPROFILER_NONNULL(2);
 
 /**
  * @brief Callback function for iterating over the function arguments to a traced function.
@@ -867,11 +867,11 @@ typedef int (*rocprofiler_buffer_tracing_operation_args_cb_t)(
  * @param [in] user_data Data to be passed to each invocation of the callback
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_iterate_buffer_tracing_record_args(
     rocprofiler_record_header_t                    record,
     rocprofiler_buffer_tracing_operation_args_cb_t callback,
-    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
+    void*                                          user_data) ROCPROFILER_NONNULL(2);
 
 /** @} */
 

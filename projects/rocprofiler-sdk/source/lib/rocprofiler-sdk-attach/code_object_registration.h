@@ -41,20 +41,18 @@ typedef void (*rocprofiler_attach_code_object_cb_t)(hsa_executable_t,
                                                     rocprofiler_attach_code_object_phase_t,
                                                     void*);
 
-int
-rocprofiler_attach_iterate_all_code_objects(rocprof_attach_code_object_iterator_t func,
-                                            void* data) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data);
 
-int
-rocprofiler_attach_add_code_object_cb(rocprofiler_attach_code_object_cb_t cb,
-                                      void*                               data) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data);
 
-int
-rocprofiler_attach_remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb);
 
-int
+ROCPROFILER_API int
 rocprofiler_attach_lookup_memory_codeobj_data(hsa_loaded_code_object_t loaded_code_object,
                                               const void**             data_out,
-                                              uint64_t*                size_out) ROCPROFILER_API;
+                                              uint64_t*                size_out);
 
 ROCPROFILER_EXTERN_C_FINI

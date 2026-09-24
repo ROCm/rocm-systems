@@ -27,11 +27,11 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-rocprofiler_status_t
-rocprofiler_attach(void) ROCPROFILER_API;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_attach(void);
 
-rocprofiler_status_t
-rocprofiler_detach(void) ROCPROFILER_API;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_detach(void);
 
 rocprofiler_status_t
 rocprofiler_attach(void)

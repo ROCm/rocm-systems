@@ -203,6 +203,11 @@ target_include_directories(
 set_target_properties(
     rocprofiler-sdk-perfetto-static-library
     PROPERTIES POSITION_INDEPENDENT_CODE ON OUTPUT_NAME rocprofiler-sdk-perfetto)
+if(WIN32)
+    target_compile_definitions(rocprofiler-sdk-perfetto-static-library
+                               PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(rocprofiler-sdk-perfetto-static-library PRIVATE /bigobj)
+endif()
 target_link_libraries(
     rocprofiler-sdk-perfetto
     INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk-perfetto-static-library>)
@@ -232,7 +237,11 @@ endif()
 #
 # OTF2
 #
-if(ROCPROFILER_BUILD_OTF2)
+if(WIN32)
+    # OTF2 uses autotools; not available on Windows — provide an empty stub
+    add_library(otf2 INTERFACE)
+    add_library(otf2::otf2 ALIAS otf2)
+elseif(ROCPROFILER_BUILD_OTF2)
     add_subdirectory(otf2)
 else()
     find_package(PkgConfig REQUIRED)
@@ -265,7 +274,9 @@ endif()
 #
 # SQLite3
 #
-if(ROCPROFILER_BUILD_SQLITE3)
+if(WIN32)
+    # SQLite3 is used only by rocprofiler-sdk-tool/output which are not built on Windows
+elseif(ROCPROFILER_BUILD_SQLITE3)
     # checkout submodule if not already checked out or clone repo if no .gitmodules file
     rocprofiler_checkout_git_submodule(
         RECURSIVE

@@ -3,28 +3,48 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(ROCPROFILER_LIB_HEADERS
-    agent.hpp buffer.hpp external_correlation.hpp intercept_table.hpp
-    internal_threading.hpp ompt.hpp registration.hpp runtime_initialization.hpp)
-set(ROCPROFILER_LIB_SOURCES
-    agent.cpp
-    attach.cpp
-    buffer.cpp
-    buffer_tracing.cpp
-    callback_tracing.cpp
-    context.cpp
-    counter_config.cpp
-    counters.cpp
-    device_counting_service.cpp
-    dispatch_counting_service.cpp
-    external_correlation.cpp
-    intercept_table.cpp
-    internal_threading.cpp
-    ompt.cpp
-    pc_sampling.cpp
-    registration.cpp
-    rocprofiler.cpp
-    runtime_initialization.cpp)
+if(WIN32)
+    # Windows builds compile only the core subset that does not require Linux-specific
+    # headers (ELF/DWARF, DRM, KFD ioctl, dlfcn, pthreads) or complex C++ patterns
+    # (std::integer_sequence<enum>) that MSVC rejects or ICEs on.
+    set(ROCPROFILER_LIB_HEADERS agent.hpp buffer.hpp external_correlation.hpp
+                                internal_threading.hpp registration.hpp)
+    set(ROCPROFILER_LIB_SOURCES
+        agent.cpp
+        agent_windows.cpp
+        buffer.cpp
+        context.cpp
+        counter_config.cpp
+        counters.cpp
+        dispatch_counting_service.cpp
+        external_correlation.cpp
+        internal_threading.cpp
+        registration.cpp
+        rocprofiler.cpp)
+else()
+    set(ROCPROFILER_LIB_HEADERS
+        agent.hpp buffer.hpp external_correlation.hpp intercept_table.hpp
+        internal_threading.hpp ompt.hpp registration.hpp runtime_initialization.hpp)
+    set(ROCPROFILER_LIB_SOURCES
+        agent.cpp
+        attach.cpp
+        buffer.cpp
+        buffer_tracing.cpp
+        callback_tracing.cpp
+        context.cpp
+        counter_config.cpp
+        counters.cpp
+        device_counting_service.cpp
+        dispatch_counting_service.cpp
+        external_correlation.cpp
+        intercept_table.cpp
+        internal_threading.cpp
+        ompt.cpp
+        pc_sampling.cpp
+        registration.cpp
+        rocprofiler.cpp
+        runtime_initialization.cpp)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -39,46 +59,67 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-object-library ALIAS
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                                       ${ROCPROFILER_LIB_HEADERS})
-add_subdirectory(hsa)
-add_subdirectory(hip)
-add_subdirectory(hipfile)
-add_subdirectory(code_object)
-add_subdirectory(context)
+
 add_subdirectory(counters)
-add_subdirectory(aql)
-add_subdirectory(pc_sampling)
-add_subdirectory(marker)
-add_subdirectory(thread_trace)
-add_subdirectory(spm)
-add_subdirectory(tracing)
-add_subdirectory(kernel_dispatch)
-add_subdirectory(kernel_replay)
-add_subdirectory(kfd)
-add_subdirectory(rccl)
-add_subdirectory(rocdecode)
-add_subdirectory(rocjpeg)
-add_subdirectory(rocshmem)
-add_subdirectory(details)
+add_subdirectory(context)
 add_subdirectory(platform)
-add_subdirectory(ompt)
+add_subdirectory(hsa)
+
+add_subdirectory(hip)
+
+# Subsystems reached from code that does build on Windows. Each one's CMakeLists selects a
+# windows_stubs.cpp in place of its Linux sources, so the call sites in the shared code
+# stay identical across platforms and the stub file is deleted wholesale when the real
+# port lands.
+add_subdirectory(aql)
+add_subdirectory(kernel_replay)
 add_subdirectory(registration)
+add_subdirectory(spm)
+add_subdirectory(thread_trace)
+
+# Subsystems that are still Linux-only: they depend on ELF/DWARF, ptrace, dlfcn, or
+# runtime API tables that have no Windows equivalent yet.
+if(NOT WIN32)
+    add_subdirectory(tracing)
+    add_subdirectory(kernel_dispatch)
+    add_subdirectory(details)
+    add_subdirectory(hipfile)
+    add_subdirectory(code_object)
+    add_subdirectory(marker)
+    add_subdirectory(rccl)
+    add_subdirectory(rocdecode)
+    add_subdirectory(rocjpeg)
+    add_subdirectory(rocshmem)
+    add_subdirectory(ompt)
+endif()
+
+if(ROCPROFILER_BUILD_KFD OR WIN32)
+    add_subdirectory(kfd)
+endif()
+
+if(ROCPROFILER_BUILD_PC_SAMPLING OR WIN32)
+    add_subdirectory(pc_sampling)
+endif()
 
 target_link_libraries(
     rocprofiler-sdk-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-sanitizer
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-aqlprofile
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-rocprof-trace-decoder)
+    PRIVATE
+        rocprofiler-sdk::rocprofiler-sdk-build-flags
+        rocprofiler-sdk::rocprofiler-sdk-sanitizer
+        rocprofiler-sdk::rocprofiler-sdk-common-library
+        rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+        $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-aqlprofile>
+        $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-drm>
+        $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-dw>
+        $<$<NOT:$<BOOL:${WIN32}>>:rocprofiler-sdk::rocprofiler-sdk-rocprof-trace-decoder>)
 
 target_compile_definitions(
     rocprofiler-sdk-object-library
     PRIVATE rocprofiler_EXPORTS=1
-            $<$<BOOL:${ROCPROFILER_BUILD_AQLPROFILE}>:ROCPROFILER_BUILD_AQLPROFILE=1>)
+            $<$<BOOL:${ROCPROFILER_BUILD_AQLPROFILE}>:ROCPROFILER_BUILD_AQLPROFILE=1>
+            $<$<BOOL:${ROCPROFILER_BUILD_KFD}>:ROCPROFILER_BUILD_KFD=1>
+            $<$<BOOL:${ROCPROFILER_BUILD_PC_SAMPLING}>:ROCPROFILER_BUILD_PC_SAMPLING=1>)
 
 set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPENDENT_CODE
                                                                 ON)
@@ -175,17 +216,33 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-static-library ALIAS
 
 target_sources(rocprofiler-sdk-static-library
                PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>)
-target_link_libraries(
-    rocprofiler-sdk-static-library
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-aqlprofile>
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-object-library)
+if(WIN32)
+    target_link_libraries(
+        rocprofiler-sdk-static-library
+        PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+                rocprofiler-sdk::rocprofiler-sdk-object-library)
+else()
+    target_link_libraries(
+        rocprofiler-sdk-static-library
+        PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
+               $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>
+               $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-aqlprofile>
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+                rocprofiler-sdk::rocprofiler-sdk-object-library)
+endif()
 
-set_target_properties(
-    rocprofiler-sdk-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk
-                                              DEFINE_SYMBOL rocprofiler_EXPORTS)
+if(WIN32)
+    # On Windows, the DLL's import lib is also named rocprofiler-sdk.lib — use a distinct
+    # name to avoid the Ninja "multiple rules generate" collision.
+    set_target_properties(
+        rocprofiler-sdk-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk-static
+                                                  DEFINE_SYMBOL rocprofiler_EXPORTS)
+else()
+    set_target_properties(
+        rocprofiler-sdk-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk
+                                                  DEFINE_SYMBOL rocprofiler_EXPORTS)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -197,4 +254,6 @@ if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-add_subdirectory(rocprofiler-avail)
+if(NOT WIN32)
+    add_subdirectory(rocprofiler-avail)
+endif()

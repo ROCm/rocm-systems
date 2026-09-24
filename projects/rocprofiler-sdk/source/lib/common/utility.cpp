@@ -25,7 +25,9 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#endif
 #include <cerrno>
 #include <cstring>
 #include <ctime>
@@ -40,11 +42,12 @@ namespace common
 {
 namespace
 {
+#if !defined(_WIN32)
 std::string_view
 get_clock_name(clockid_t _id)
 {
-#define CLOCK_NAME_CASE_STATEMENT(NAME)                                                            \
-    case NAME: return #NAME;
+#    define CLOCK_NAME_CASE_STATEMENT(NAME)                                                        \
+        case NAME: return #NAME;
     switch(_id)
     {
         CLOCK_NAME_CASE_STATEMENT(CLOCK_REALTIME)
@@ -61,8 +64,9 @@ get_clock_name(clockid_t _id)
         default: break;
     }
     return "CLOCK_UNKNOWN";
-#undef CLOCK_NAME_CASE_STATEMENT
+#    undef CLOCK_NAME_CASE_STATEMENT
 }
+#endif
 
 auto _process_init_ns = timestamp_ns();
 }  // namespace
@@ -70,6 +74,7 @@ auto _process_init_ns = timestamp_ns();
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id)
 {
+#if !defined(_WIN32)
     constexpr auto nanosec = std::nano::den;
 
     struct timespec ts;
@@ -89,12 +94,20 @@ get_clock_period_ns_impl(clockid_t _clk_id)
     }
 
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
+#else
+    (void) _clk_id;
+    return 1;  // QPC already returns ns in get_ticks; period = 1 ns
+#endif
 }
 
 uint64_t
 get_process_start_time_ns(pid_t _pid)
 {
+#if !defined(_WIN32)
     if(_pid == getpid()) return _process_init_ns;
+#else
+    if(_pid == static_cast<pid_t>(::_getpid())) return _process_init_ns;
+#endif
     return 0;
 }
 
@@ -102,6 +115,7 @@ std::vector<std::string>
 read_command_line(pid_t _pid)
 {
     auto _cmdline = std::vector<std::string>{};
+#if !defined(_WIN32)
     auto fcmdline = std::stringstream{};
     fcmdline << "/proc/" << _pid << "/cmdline";
     auto ifs = std::ifstream{fcmdline.str().c_str()};
@@ -127,7 +141,9 @@ read_command_line(pid_t _pid)
         }
         ifs.close();
     }
-
+#else
+    (void) _pid;
+#endif
     return _cmdline;
 }
 }  // namespace common

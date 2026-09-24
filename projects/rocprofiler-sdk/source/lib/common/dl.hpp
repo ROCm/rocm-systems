@@ -28,9 +28,11 @@
 #include <string_view>
 #include <vector>
 
-#include <dlfcn.h>
-#include <sys/types.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 
 namespace rocprofiler
 {
