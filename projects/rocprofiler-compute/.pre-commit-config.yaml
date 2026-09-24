@@ -93,6 +93,28 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: memory chart layout validation (schema + metric alignment)
+  - repo: local
+    hooks:
+      - id: layout-validation
+        name: Memory chart layout validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_layout_schema.py'
+        language: system
+        files: ^projects/rocprofiler-compute/(src/memory_chart/layouts/.*\.json|src/rocprof_compute_soc/analysis_configs/.*/0300_memory_chart\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+
+  # Local hook: memory chart manifest hash check
+  - repo: local
+    hooks:
+      - id: layout-manifest-check
+        name: Memory chart layout manifest check
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/generate_layout_manifest.py --check'
+        language: system
+        files: ^projects/rocprofiler-compute/src/memory_chart/layouts/.*\.json$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: YAML and metric equation formatting
   - repo: local
     hooks:
