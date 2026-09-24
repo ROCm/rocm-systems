@@ -249,6 +249,21 @@ TEST(ConSanPublicationTest, DecodeRetainsGuestObservationAndIdentity) {
   before.domain.cluster_workgroup = after.domain.cluster_workgroup = 4;
   EXPECT_EQ(publication_orders(before, after, decoded.events, true), Result::Ordered);
 }
+TEST(ConSanPublicationTest, RuntimeDispatchIsIndependentOfReportAllocationIdentity) {
+  auto header = publication_header();
+  header.dispatch_id = 999; // Automatic report allocation is keyed by reader.
+  std::array records{record(0, 10, 0, 1), record(1, 20, 1, 2)};
+  auto decoded = decode_publications(header, records);
+  ASSERT_EQ(decoded.status, PublicationDecodeStatus::Complete);
+  ASSERT_EQ(decoded.events.size(), 2);
+  EXPECT_EQ(decoded.events[0].point.domain.dispatch, 19);
+  header.publication_flags = kPublicationTraceEnabled;
+  decoded = decode_publications(header, records);
+  EXPECT_EQ(decoded.status, PublicationDecodeStatus::Incomplete);
+  EXPECT_EQ(decoded.events.size(), 2); // Diagnostics only; no ordering proof.
+  EXPECT_EQ(publication_orders(point(0, 1), point(1, 30), decoded.events, false),
+            Result::Incomplete);
+}
 TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
   for (unsigned defect = 0; defect < 12; ++defect) {
     SCOPED_TRACE(defect);
@@ -257,7 +272,7 @@ TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
     if (defect == 0)
       ++r.generation;
     if (defect == 1)
-      ++r.dispatch_id;
+      r.dispatch_id = 0;
     if (defect == 2)
       r.state = 0;
     if (defect == 3)

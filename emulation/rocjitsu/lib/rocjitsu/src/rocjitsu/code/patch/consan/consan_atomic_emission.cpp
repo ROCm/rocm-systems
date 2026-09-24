@@ -422,6 +422,181 @@ struct AtomicPreludeState {
   return true;
 }
 
+bool publication_observation_supported(const AtomicEvidenceSourceView &source) {
+  const auto &site = source.site;
+  const bool operation =
+      site.mnemonic == "global_atomic_add_u32" || site.mnemonic == "flat_atomic_add_u32" ||
+      site.mnemonic == "global_atomic_or_b32" || site.mnemonic == "flat_atomic_or_b32";
+  return source.sequence && source.is_rmw() && !source.relocates_polling_loop() && operation &&
+         site.width_bits == 32 && site.returns_old_value.value_or(false) && site.data_vgpr &&
+         site.destination_vgpr && *site.data_vgpr != *site.destination_vgpr && site.scope;
+}
+
+std::optional<std::vector<uint32_t>>
+build_publication_cave_words(std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,
+                             const AtomicLoweringForm &lowering_form,
+                             uint64_t owner_descriptor_file_offset,
+                             const AtomicAddressPlan &address_plan, const SyncEmissionPlan &plan,
+                             const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill,
+                             const PrivateStateLayout *private_layout, rj_code_arch_t arch,
+                             const ReportBufferLayout &layout, std::vector<std::string> &errors,
+                             uint32_t *guest_instruction_offset, uint32_t *emitted_guest_size) {
+  const auto *target = target_profile(arch);
+  if (!publication_observation_supported(source) || !target || !plan.exec_save_sgpr ||
+      !plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch ||
+      !layout.publication_event_capacity ||
+      layout.publication_event_capacity >
+          std::numeric_limits<uint32_t>::max() / sizeof(PublicationRecord) ||
+      static_cast<uint32_t>(plan.scratch_vgpr) + atomic_scratch_count() > kMaxVgprs ||
+      !address_plan.supported() || source.site.file_offset > bytes.size() ||
+      source.site.size > bytes.size() - source.site.file_offset)
+    return std::nullopt;
+  const auto scope = sync_scope(*source.site.scope);
+  if (!scope)
+    return std::nullopt;
+  const uint16_t base = plan.scratch_vgpr;
+  const uint16_t ticket = base + AtomicScratchLayout::kValue;
+  const uint16_t observed = base + AtomicScratchLayout::kCasCompare;
+  const uint16_t written = base + AtomicScratchLayout::kCasResult;
+  const uint16_t index = base + AtomicScratchLayout::kBank;
+  const uint16_t address = base + AtomicScratchLayout::kSavedAddress;
+  const uint16_t saved_exec = *plan.exec_save_sgpr + 6u;
+  const uint16_t temporary_exec = *plan.exec_save_sgpr;
+  const uint64_t report = plan.supercollider_report_buffer_address;
+  std::vector<uint32_t> words;
+  InstructionSequence sequence(words);
+  AtomicPreludeState prelude;
+  if (!append_atomic_prelude(words, bytes, source, lowering_form, owner_descriptor_file_offset,
+                             address_plan, plan, spill, scalar_spill, private_layout, arch, address,
+                             false, prelude, errors, guest_instruction_offset, {}, {},
+                             emitted_guest_size))
+    return std::nullopt;
+  // The guest has completed, and its operands are still available either in
+  // registers or in the post-guest spill. Capture both before scratch reuse.
+  bool loaded_private = false;
+  const auto snapshot = [&](uint16_t destination, uint16_t guest) {
+    if (spill)
+      return append_atomic_snapshot_word(words, *spill, destination, guest, arch, loaded_private);
+    words.push_back(build_v_mov_b32_e32(destination, vector_source_vgpr(guest), arch));
+    return true;
+  };
+  sequence.require(snapshot(observed, *source.site.destination_vgpr))
+      .require(snapshot(written, *source.site.data_vgpr))
+      .require(append_atomic_snapshot_wait(words, loaded_private, arch))
+      .require(append_save_special_state(words, plan.special_state, arch))
+      .append(instrumentation::build_s_mov_b64(saved_exec, kAmdGpuExecLo, arch));
+  if (source.site.mnemonic.find("_add_") != std::string::npos)
+    sequence.append(
+        instrumentation::build_v_add_u32(written, vector_source_vgpr(observed), written, arch));
+  else {
+    // a | b = ~(~a & ~b), using the shared target-normalized VALU builders.
+    sequence.append(
+        instrumentation::build_v_xor_b32(ticket, kScalarInlineNegativeOneOperand, observed, arch),
+        instrumentation::build_v_xor_b32(written, kScalarInlineNegativeOneOperand, written, arch),
+        instrumentation::build_v_and_b32(written, vector_source_vgpr(ticket), written, arch),
+        instrumentation::build_v_xor_b32(written, kScalarInlineNegativeOneOperand, written, arch));
+  }
+  // Every active guest lane gets its own immutable record. Slot allocation is
+  // not modification order; old/new observations reconstruct that on the host.
+  sequence
+      .require(append_atomic_fetch_add_one_u32(
+          words, report + offsetof(ReportHeader, publication_event_count), index, base, arch))
+      .append(instrumentation::build_v_cmp_gt_u32_literal_vcc(layout.publication_event_capacity,
+                                                              index, arch),
+              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
+  const auto overflow = sequence.make_label();
+  const auto finish = sequence.make_label();
+  sequence.branch(overflow, InstructionSequence::BranchKind::ExecZero)
+      .require(append_publication_ticket(words, report + offsetof(ReportHeader, publication_clock),
+                                         ticket, base, arch))
+      .require(append_indexed_address(words,
+                                      {.table_address = report + layout.publication_events_offset,
+                                       .stride_bytes = sizeof(PublicationRecord),
+                                       .address_vgpr = base,
+                                       .index_vgpr = index},
+                                      *target));
+  RecordEmitter record(words, base, ticket, arch);
+  sequence.require(record.store_vgpr(offsetof(PublicationRecord, sequence), ticket))
+      .require(record.store_vgpr(offsetof(PublicationRecord, sequence) + 4u, ticket + 1u))
+      .require(record.store_vgpr(offsetof(PublicationRecord, observed), observed))
+      .require(record.store_vgpr(offsetof(PublicationRecord, written), written))
+      .require(record.store_vgpr(offsetof(PublicationRecord, address), address))
+      .require(record.store_vgpr(offsetof(PublicationRecord, address) + 4u, address + 1u))
+      .require(record.store_literal(offsetof(PublicationRecord, observed) + 4u, 0u))
+      .require(record.store_literal(offsetof(PublicationRecord, written) + 4u, 0u))
+      .require(record.store_literal(offsetof(PublicationRecord, generation),
+                                    static_cast<uint32_t>(plan.report_generation)))
+      .require(record.store_literal(offsetof(PublicationRecord, generation) + 4u,
+                                    static_cast<uint32_t>(plan.report_generation >> 32)))
+      .require(append_store_report_dispatch_id_pair(record, plan.dispatch_id,
+                                                    offsetof(PublicationRecord, dispatch_id)))
+      .require(record.store_workgroup(offsetof(PublicationRecord, workgroup_x),
+                                      plan.workgroup_sources.x,
+                                      RecordEmitter::MissingWorkgroupSource::StoreZero))
+      .require(record.store_workgroup(offsetof(PublicationRecord, workgroup_y),
+                                      plan.workgroup_sources.y,
+                                      RecordEmitter::MissingWorkgroupSource::StoreZero))
+      .require(record.store_workgroup(offsetof(PublicationRecord, workgroup_z),
+                                      plan.workgroup_sources.z,
+                                      RecordEmitter::MissingWorkgroupSource::StoreZero))
+      .require(record.store_workgroup(offsetof(PublicationRecord, cluster_workgroup_id),
+                                      plan.workgroup_sources.cluster_workgroup_id,
+                                      RecordEmitter::MissingWorkgroupSource::StoreZero))
+      .require(
+          record.store_vgpr(offsetof(PublicationRecord, owner_id), *plan.owner_epoch_vgprs.owner))
+      .require(record.store_vgpr(offsetof(PublicationRecord, epoch), *plan.owner_epoch_vgprs.epoch))
+      .require(record.store_literal(offsetof(PublicationRecord, byte_count), 4u));
+  const auto memory_role = source.sequence->memory_role;
+  const bool release = source.sequence->lds_release_wait_text_offset.has_value();
+  const bool acquire =
+      memory_role == SyncMemoryRole::Acquire || memory_role == SyncMemoryRole::AcquireRelease;
+  sequence
+      .require(record.store_literal(offsetof(PublicationRecord, roles),
+                                    kPublicationObserved | (release ? kPublicationRelease : 0u) |
+                                        (acquire ? kPublicationAcquire : 0u)))
+      .require(
+          record.store_literal(offsetof(PublicationRecord, scope), static_cast<uint32_t>(*scope)))
+      .require(record.store_literal(offsetof(PublicationRecord, operation),
+                                    static_cast<uint32_t>(PublicationRecordOperation::Rmw)))
+      .append(instrumentation::build_v_mbcnt_lo_u32_b32(ticket, 0xc1u,
+                                                        scalar_positive_inline_u32(0u), arch),
+              instrumentation::build_v_mbcnt_hi_u32_b32(ticket, 0xc1u, vector_source_vgpr(ticket),
+                                                        arch))
+      .require(record.store_vgpr(offsetof(PublicationRecord, lane_id), ticket))
+      .append(instrumentation::build_s_wait_flat_store0(arch))
+      .require(record.store_literal(offsetof(PublicationRecord, state), kPublicationReady));
+  // Overflow is sticky even if an extremely long execution wraps the slot
+  // counter. No out-of-range lane may address the bounded record allocation.
+  sequence.bind_label(overflow)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch),
+              instrumentation::build_v_cmp_gt_u32_literal_vcc(layout.publication_event_capacity,
+                                                              index, arch),
+              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, saved_exec, kAmdGpuVccLo, arch))
+      .branch(finish, InstructionSequence::BranchKind::ExecZero)
+      .require(
+          record.materialize_address(report + offsetof(ReportHeader, publication_dropped_count)))
+      .append(instrumentation::build_v_mov_b32_literal(ticket, 1u, arch),
+              instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
+                                                        kAmdGpuScopeDevice, arch))
+      .require(append_global_atomic_wait(words, arch));
+  sequence.bind_label(finish)
+      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch))
+      .require(record.materialize_address(report + offsetof(ReportHeader, publication_flags)))
+      .append(instrumentation::build_v_mov_b32_literal(ticket, kPublicationTraceEnabled, arch),
+              instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
+                                                        kAmdGpuScopeDevice, arch))
+      .require(append_global_atomic_wait(words, arch))
+      .require(append_restore_special_state(words, plan.special_state, arch));
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->restore_words.begin(),
+                 scalar_spill->restore_words.end());
+  if (spill)
+    words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  if (!sequence.finish(arch))
+    return std::nullopt;
+  return words;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_pending_acquire_cave_words(
     std::span<const uint8_t> bytes, const AtomicEvidenceSourceView &source,
     const AtomicLoweringForm &lowering_form, uint64_t owner_descriptor_file_offset,

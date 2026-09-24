@@ -977,280 +977,298 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     return;
   }
 
-  struct Window {
-    uint32_t slot = 0;
-    uint32_t bank_count = 1;
-    const StaticAccessMapping *mapping = nullptr;
-    LdsAccessKind access_kind = LdsAccessKind::Other;
-    uint64_t owner_descriptor_file_offset = 0;
-  };
-  std::vector<Window> windows;
-  windows.reserve(selected_window_count);
-  bool has_multi_range_window = false;
+  const size_t static_patch_budget = std::min<size_t>(options.max_patches, candidates.size());
+  const auto sync_events = result.program_inventory.sync().sync_events;
+  const size_t rmw_count = std::ranges::count_if(
+      sync_events, [](const SyncEvent &event) { return event.kind == SyncKind::Atomic; });
+  // Capture every native RMW as one object-level transaction. This does not
+  // yet assert trace completeness: stores that can modify the same object
+  // also need accounting. Window associations cannot provide that proof.
+  const bool publication_trace =
+      arch == ROCJITSU_CODE_ARCH_RDNA4 && layout.publication_event_capacity != 0u &&
+      rmw_count == candidates.size() && static_patch_budget == candidates.size() &&
+      std::ranges::all_of(candidates, [](const Candidate &candidate) {
+        return publication_observation_supported(candidate.source);
+      });
+  if (!publication_trace) {
+    struct Window {
+      uint32_t slot = 0;
+      uint32_t bank_count = 1;
+      const StaticAccessMapping *mapping = nullptr;
+      LdsAccessKind access_kind = LdsAccessKind::Other;
+      uint64_t owner_descriptor_file_offset = 0;
+    };
+    std::vector<Window> windows;
+    windows.reserve(selected_window_count);
+    bool has_multi_range_window = false;
 
-  for (const StaticAccessMapping &mapping : runtime_mapping) {
-    if (mapping.access_kind != LdsAccessKind::Read && mapping.access_kind != LdsAccessKind::Write &&
-        mapping.access_kind != LdsAccessKind::Atomic)
-      continue;
-    has_multi_range_window |= mapping.range_count > 1u;
-    for (const ProgramContainer &kernel : result.program_inventory.kernels()) {
-      if (!resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
+    for (const StaticAccessMapping &mapping : runtime_mapping) {
+      if (mapping.access_kind != LdsAccessKind::Read &&
+          mapping.access_kind != LdsAccessKind::Write &&
+          mapping.access_kind != LdsAccessKind::Atomic)
         continue;
-      const auto &owners = mapping.access.execution_owner_kernel_ids;
-      const bool owns_mapping =
-          owners.empty()
-              ? kernel.has_text_range &&
-                    mapping.access.original_site.original_text_offset >= kernel.entry_text_offset &&
-                    mapping.access.original_site.original_text_offset - kernel.entry_text_offset <
-                        kernel.code_size
-              : std::ranges::find(owners, kernel.id) != owners.end();
-      if (!owns_mapping)
-        continue;
-      // One physical access in a shared helper is one sampled slot, but it has
-      // an independent causal view in every kernel that can execute it. Those
-      // owners are mutually exclusive dispatches, so each may safely attach
-      // one synchronization edge to the same metadata slot.
-      windows.push_back({mapping.first_slot, mapping.bank_count, &mapping, mapping.access_kind,
-                         kernel.descriptor_file_offset});
-    }
-  }
-
-  if (has_multi_range_window) {
-    result.warnings.emplace_back(
-        "ConSan atomic sync currently attaches only the first logical range of a "
-        "multi-range access");
-  }
-
-  struct Association {
-    enum class Side : uint8_t { Release, Acquire };
-
-    size_t candidate_index = 0;
-    size_t window_index = 0;
-    CfgDistance distance;
-    Side side = Side::Release;
-  };
-  std::vector<Association> proposed;
-  const auto owner_executes_candidate = [&](uint64_t owner_descriptor_file_offset,
-                                            const Candidate &candidate) {
-    const ProgramContainer *owner =
-        result.program_inventory.find_kernel_by_descriptor(owner_descriptor_file_offset);
-    const ProgramSite *site = result.program_inventory.program_site(candidate.atomic.source_site);
-    return owner != nullptr && site != nullptr &&
-           std::ranges::find(site->execution_owners, owner->id, &ExecutionOwner::kernel) !=
-               site->execution_owners.end();
-  };
-  for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
-    const Window &window = windows[window_index];
-    std::optional<Association> best;
-    bool ambiguous = false;
-    for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-      const Candidate &candidate = candidates[candidate_index];
-      if (!owner_executes_candidate(window.owner_descriptor_file_offset, candidate))
-        continue;
-      const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
-      const bool release_side = (window.access_kind == LdsAccessKind::Write ||
-                                 window.access_kind == LdsAccessKind::Atomic) &&
-                                (semantic_role & static_cast<uint32_t>(SyncRole::Release)) != 0u;
-      const bool acquire_side = (window.access_kind == LdsAccessKind::Read ||
-                                 window.access_kind == LdsAccessKind::Atomic) &&
-                                (semantic_role & static_cast<uint32_t>(SyncRole::Acquire)) != 0u;
-      std::optional<CfgDistance> distance;
-      Association::Side side = Association::Side::Release;
-      if (release_side) {
-        distance = cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
-                                        window.mapping->access.original_site.original_text_offset,
-                                        candidate.source.site.text_offset);
-      } else if (acquire_side) {
-        side = Association::Side::Acquire;
-        distance = cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
-                                        candidate.source.site.text_offset,
-                                        window.mapping->access.original_site.original_text_offset);
-      }
-      if (!distance)
-        continue;
-      Association current{candidate_index, window_index, *distance, side};
-      if (!best || current.distance < best->distance) {
-        best = current;
-        ambiguous = false;
-      } else if (current.distance == best->distance) {
-        ambiguous = true;
+      has_multi_range_window |= mapping.range_count > 1u;
+      for (const ProgramContainer &kernel : result.program_inventory.kernels()) {
+        if (!resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
+          continue;
+        const auto &owners = mapping.access.execution_owner_kernel_ids;
+        const bool owns_mapping =
+            owners.empty()
+                ? kernel.has_text_range &&
+                      mapping.access.original_site.original_text_offset >=
+                          kernel.entry_text_offset &&
+                      mapping.access.original_site.original_text_offset - kernel.entry_text_offset <
+                          kernel.code_size
+                : std::ranges::find(owners, kernel.id) != owners.end();
+        if (!owns_mapping)
+          continue;
+        // One physical access in a shared helper is one sampled slot, but it has
+        // an independent causal view in every kernel that can execute it. Those
+        // owners are mutually exclusive dispatches, so each may safely attach
+        // one synchronization edge to the same metadata slot.
+        windows.push_back({mapping.first_slot, mapping.bank_count, &mapping, mapping.access_kind,
+                           kernel.descriptor_file_offset});
       }
     }
-    if (best && !ambiguous)
-      proposed.push_back(*best);
-  }
 
-  // Each directional half may order only one selected access window. Resolve
-  // that constraint before assigning CFG-disconnected fallbacks: the raw
-  // window-first search intentionally proposes every window for which one
-  // candidate is nearest, and most of those windows become free here.
-  std::vector<bool> rejected(proposed.size(), false);
-  for (size_t i = 0; i < proposed.size(); ++i) {
-    for (size_t j = i + 1u; j < proposed.size(); ++j) {
-      if (rejected[i] || rejected[j] ||
-          proposed[i].candidate_index != proposed[j].candidate_index ||
-          proposed[i].side != proposed[j].side)
-        continue;
-      const Window &lhs = windows[proposed[i].window_index];
-      const Window &rhs = windows[proposed[j].window_index];
-      if (lhs.mapping == rhs.mapping && lhs.slot == rhs.slot) {
-        // The same physical access and atomic in a shared helper appear once
-        // per owning kernel CFG. They need one physical patch, not competing
-        // duplicate attachments.
-        rejected[j] = true;
-        continue;
-      }
-      if (proposed[i].distance < proposed[j].distance)
-        rejected[j] = true;
-      else if (proposed[j].distance < proposed[i].distance)
-        rejected[i] = true;
-      else
-        rejected[i] = rejected[j] = true;
+    if (has_multi_range_window) {
+      result.warnings.emplace_back(
+          "ConSan atomic sync currently attaches only the first logical range of a "
+          "multi-range access");
     }
-  }
-  std::vector<Association> resolved;
-  resolved.reserve(proposed.size());
-  for (size_t index = 0; index < proposed.size(); ++index) {
-    if (!rejected[index])
-      resolved.push_back(proposed[index]);
-  }
-  proposed = std::move(resolved);
 
-  // Generic access and atomic helpers can both have recovered kernel owners
-  // without an interprocedural CFG edge connecting their reusable bodies.
-  // The emitted probe still validates dispatch, workgroup, owner, epoch,
-  // Ready-window identity, and watchpoint state before it publishes. Assign
-  // each otherwise-unmatched directional half to the closest compatible
-  // window that is still unclaimed after the stronger CFG associations above.
-  // This is a deterministic one-to-one fallback, rather than choosing an
-  // already-claimed nearest window and dropping the synchronization site.
-  for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-    const Candidate &candidate = candidates[candidate_index];
-    for (const Association::Side missing_side :
-         {Association::Side::Release, Association::Side::Acquire}) {
-      if (std::ranges::any_of(proposed, [&](const Association &association) {
-            return association.candidate_index == candidate_index &&
-                   association.side == missing_side;
-          }))
-        continue;
-      const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
-      const bool role_has_side =
-          (semantic_role & static_cast<uint32_t>(missing_side == Association::Side::Release
-                                                     ? SyncRole::Release
-                                                     : SyncRole::Acquire)) != 0u;
-      if (!role_has_side)
-        continue;
+    struct Association {
+      enum class Side : uint8_t { Release, Acquire };
+
+      size_t candidate_index = 0;
+      size_t window_index = 0;
+      CfgDistance distance;
+      Side side = Side::Release;
+    };
+    std::vector<Association> proposed;
+    const auto owner_executes_candidate = [&](uint64_t owner_descriptor_file_offset,
+                                              const Candidate &candidate) {
+      const ProgramContainer *owner =
+          result.program_inventory.find_kernel_by_descriptor(owner_descriptor_file_offset);
+      const ProgramSite *site = result.program_inventory.program_site(candidate.atomic.source_site);
+      return owner != nullptr && site != nullptr &&
+             std::ranges::find(site->execution_owners, owner->id, &ExecutionOwner::kernel) !=
+                 site->execution_owners.end();
+    };
+    for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
+      const Window &window = windows[window_index];
       std::optional<Association> best;
-      std::optional<size_t> displaced;
-      for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
-        const Window &window = windows[window_index];
+      bool ambiguous = false;
+      for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+        const Candidate &candidate = candidates[candidate_index];
         if (!owner_executes_candidate(window.owner_descriptor_file_offset, candidate))
           continue;
-        const bool window_has_side = missing_side == Association::Side::Release
-                                         ? window.access_kind == LdsAccessKind::Write ||
-                                               window.access_kind == LdsAccessKind::Atomic
-                                         : window.access_kind == LdsAccessKind::Read ||
-                                               window.access_kind == LdsAccessKind::Atomic;
-        if (!window_has_side)
+        const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
+        const bool release_side = (window.access_kind == LdsAccessKind::Write ||
+                                   window.access_kind == LdsAccessKind::Atomic) &&
+                                  (semantic_role & static_cast<uint32_t>(SyncRole::Release)) != 0u;
+        const bool acquire_side = (window.access_kind == LdsAccessKind::Read ||
+                                   window.access_kind == LdsAccessKind::Atomic) &&
+                                  (semantic_role & static_cast<uint32_t>(SyncRole::Acquire)) != 0u;
+        std::optional<CfgDistance> distance;
+        Association::Side side = Association::Side::Release;
+        if (release_side) {
+          distance = cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
+                                          window.mapping->access.original_site.original_text_offset,
+                                          candidate.source.site.text_offset);
+        } else if (acquire_side) {
+          side = Association::Side::Acquire;
+          distance =
+              cfg_forward_distance(resource_state, window.owner_descriptor_file_offset,
+                                   candidate.source.site.text_offset,
+                                   window.mapping->access.original_site.original_text_offset);
+        }
+        if (!distance)
           continue;
-        const uint64_t text_distance =
-            window.mapping->access.original_site.original_text_offset <
-                    candidate.source.site.text_offset
-                ? candidate.source.site.text_offset -
-                      window.mapping->access.original_site.original_text_offset
-                : window.mapping->access.original_site.original_text_offset -
-                      candidate.source.site.text_offset;
-        Association current{candidate_index,
-                            window_index,
-                            {std::numeric_limits<uint32_t>::max(), text_distance},
-                            missing_side};
-        const auto incumbent = std::ranges::find_if(proposed, [&](const Association &association) {
-          return association.window_index == window_index;
-        });
-        std::optional<size_t> displaced_index;
-        if (incumbent != proposed.end()) {
-          const size_t incumbent_index =
-              static_cast<size_t>(std::distance(proposed.begin(), incumbent));
-          const bool incumbent_has_opposite_side =
-              std::ranges::any_of(proposed, [&](const Association &association) {
-                return association.candidate_index == incumbent->candidate_index &&
-                       association.side != incumbent->side;
-              });
-          const bool candidate_has_opposite_side =
-              std::ranges::any_of(proposed, [&](const Association &association) {
-                return association.candidate_index == candidate_index &&
-                       association.side != missing_side;
-              });
-          if (!incumbent_has_opposite_side || candidate_has_opposite_side)
-            continue;
-          displaced_index = incumbent_index;
-        }
-        if (!best || (displaced && !displaced_index) ||
-            (displaced.has_value() == displaced_index.has_value() &&
-             current.distance < best->distance)) {
+        Association current{candidate_index, window_index, *distance, side};
+        if (!best || current.distance < best->distance) {
           best = current;
-          displaced = displaced_index;
+          ambiguous = false;
+        } else if (current.distance == best->distance) {
+          ambiguous = true;
         }
       }
-      if (best) {
-        if (displaced)
-          proposed.erase(proposed.begin() + static_cast<ptrdiff_t>(*displaced));
+      if (best && !ambiguous)
         proposed.push_back(*best);
+    }
+
+    // Each directional half may order only one selected access window. Resolve
+    // that constraint before assigning CFG-disconnected fallbacks: the raw
+    // window-first search intentionally proposes every window for which one
+    // candidate is nearest, and most of those windows become free here.
+    std::vector<bool> rejected(proposed.size(), false);
+    for (size_t i = 0; i < proposed.size(); ++i) {
+      for (size_t j = i + 1u; j < proposed.size(); ++j) {
+        if (rejected[i] || rejected[j] ||
+            proposed[i].candidate_index != proposed[j].candidate_index ||
+            proposed[i].side != proposed[j].side)
+          continue;
+        const Window &lhs = windows[proposed[i].window_index];
+        const Window &rhs = windows[proposed[j].window_index];
+        if (lhs.mapping == rhs.mapping && lhs.slot == rhs.slot) {
+          // The same physical access and atomic in a shared helper appear once
+          // per owning kernel CFG. They need one physical patch, not competing
+          // duplicate attachments.
+          rejected[j] = true;
+          continue;
+        }
+        if (proposed[i].distance < proposed[j].distance)
+          rejected[j] = true;
+        else if (proposed[j].distance < proposed[i].distance)
+          rejected[i] = true;
+        else
+          rejected[i] = rejected[j] = true;
       }
     }
-  }
+    std::vector<Association> resolved;
+    resolved.reserve(proposed.size());
+    for (size_t index = 0; index < proposed.size(); ++index) {
+      if (!rejected[index])
+        resolved.push_back(proposed[index]);
+    }
+    proposed = std::move(resolved);
 
-  std::vector<Candidate> associated;
-  // One physical atomic patch can carry both directional associations.
-  const size_t static_patch_budget = std::min<size_t>(options.max_patches, candidates.size());
-  associated.reserve(static_patch_budget);
-  for (size_t candidate_index = 0;
-       candidate_index < candidates.size() && associated.size() < static_patch_budget;
-       ++candidate_index) {
-    std::optional<size_t> release_association;
-    std::optional<size_t> acquire_association;
-    for (size_t i = 0; i < proposed.size(); ++i) {
-      if (proposed[i].candidate_index != candidate_index)
-        continue;
-      if (proposed[i].side == Association::Side::Release)
-        release_association = i;
-      else
-        acquire_association = i;
+    // Generic access and atomic helpers can both have recovered kernel owners
+    // without an interprocedural CFG edge connecting their reusable bodies.
+    // The emitted probe still validates dispatch, workgroup, owner, epoch,
+    // Ready-window identity, and watchpoint state before it publishes. Assign
+    // each otherwise-unmatched directional half to the closest compatible
+    // window that is still unclaimed after the stronger CFG associations above.
+    // This is a deterministic one-to-one fallback, rather than choosing an
+    // already-claimed nearest window and dropping the synchronization site.
+    for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+      const Candidate &candidate = candidates[candidate_index];
+      for (const Association::Side missing_side :
+           {Association::Side::Release, Association::Side::Acquire}) {
+        if (std::ranges::any_of(proposed, [&](const Association &association) {
+              return association.candidate_index == candidate_index &&
+                     association.side == missing_side;
+            }))
+          continue;
+        const uint32_t semantic_role = static_cast<uint32_t>(candidate.semantics.role);
+        const bool role_has_side =
+            (semantic_role & static_cast<uint32_t>(missing_side == Association::Side::Release
+                                                       ? SyncRole::Release
+                                                       : SyncRole::Acquire)) != 0u;
+        if (!role_has_side)
+          continue;
+        std::optional<Association> best;
+        std::optional<size_t> displaced;
+        for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
+          const Window &window = windows[window_index];
+          if (!owner_executes_candidate(window.owner_descriptor_file_offset, candidate))
+            continue;
+          const bool window_has_side = missing_side == Association::Side::Release
+                                           ? window.access_kind == LdsAccessKind::Write ||
+                                                 window.access_kind == LdsAccessKind::Atomic
+                                           : window.access_kind == LdsAccessKind::Read ||
+                                                 window.access_kind == LdsAccessKind::Atomic;
+          if (!window_has_side)
+            continue;
+          const uint64_t text_distance =
+              window.mapping->access.original_site.original_text_offset <
+                      candidate.source.site.text_offset
+                  ? candidate.source.site.text_offset -
+                        window.mapping->access.original_site.original_text_offset
+                  : window.mapping->access.original_site.original_text_offset -
+                        candidate.source.site.text_offset;
+          Association current{candidate_index,
+                              window_index,
+                              {std::numeric_limits<uint32_t>::max(), text_distance},
+                              missing_side};
+          const auto incumbent =
+              std::ranges::find_if(proposed, [&](const Association &association) {
+                return association.window_index == window_index;
+              });
+          std::optional<size_t> displaced_index;
+          if (incumbent != proposed.end()) {
+            const size_t incumbent_index =
+                static_cast<size_t>(std::distance(proposed.begin(), incumbent));
+            const bool incumbent_has_opposite_side =
+                std::ranges::any_of(proposed, [&](const Association &association) {
+                  return association.candidate_index == incumbent->candidate_index &&
+                         association.side != incumbent->side;
+                });
+            const bool candidate_has_opposite_side =
+                std::ranges::any_of(proposed, [&](const Association &association) {
+                  return association.candidate_index == candidate_index &&
+                         association.side != missing_side;
+                });
+            if (!incumbent_has_opposite_side || candidate_has_opposite_side)
+              continue;
+            displaced_index = incumbent_index;
+          }
+          if (!best || (displaced && !displaced_index) ||
+              (displaced.has_value() == displaced_index.has_value() &&
+               current.distance < best->distance)) {
+            best = current;
+            displaced = displaced_index;
+          }
+        }
+        if (best) {
+          if (displaced)
+            proposed.erase(proposed.begin() + static_cast<ptrdiff_t>(*displaced));
+          proposed.push_back(*best);
+        }
+      }
     }
-    const std::optional<size_t> primary =
-        acquire_association ? acquire_association : release_association;
-    if (!primary) {
-      const size_t proposed_count =
-          std::ranges::count_if(proposed, [&](const Association &association) {
-            return association.candidate_index == candidate_index;
-          });
-      result.warnings.emplace_back(
-          "ConSan atomic sync has no surviving causal-window association at text " +
-          std::to_string(candidates[candidate_index].source.site.text_offset) +
-          " (proposed=" + std::to_string(proposed_count) + ")");
-      continue;
-    }
-    Candidate candidate = candidates[candidate_index];
-    const Window &primary_window = windows[proposed[*primary].window_index];
-    candidate.selected_slot = primary_window.slot;
-    candidate.bank_count = primary_window.bank_count;
-    candidate.deferred_acquire = acquire_association.has_value();
-    if (candidate.deferred_acquire && release_association) {
-      const Window &release_window = windows[proposed[*release_association].window_index];
-      if (release_window.bank_count == candidate.bank_count)
-        candidate.release_selected_slot = release_window.slot;
-      else
+
+    std::vector<Candidate> associated;
+    // One physical atomic patch can carry both directional associations.
+    associated.reserve(static_patch_budget);
+    for (size_t candidate_index = 0;
+         candidate_index < candidates.size() && associated.size() < static_patch_budget;
+         ++candidate_index) {
+      std::optional<size_t> release_association;
+      std::optional<size_t> acquire_association;
+      for (size_t i = 0; i < proposed.size(); ++i) {
+        if (proposed[i].candidate_index != candidate_index)
+          continue;
+        if (proposed[i].side == Association::Side::Release)
+          release_association = i;
+        else
+          acquire_association = i;
+      }
+      const std::optional<size_t> primary =
+          acquire_association ? acquire_association : release_association;
+      if (!primary) {
+        const size_t proposed_count =
+            std::ranges::count_if(proposed, [&](const Association &association) {
+              return association.candidate_index == candidate_index;
+            });
         result.warnings.emplace_back(
-            "ConSan acquire-release edge has incompatible access-window banks");
+            "ConSan atomic sync has no surviving causal-window association at text " +
+            std::to_string(candidates[candidate_index].source.site.text_offset) +
+            " (proposed=" + std::to_string(proposed_count) + ")");
+        continue;
+      }
+      Candidate candidate = candidates[candidate_index];
+      const Window &primary_window = windows[proposed[*primary].window_index];
+      candidate.selected_slot = primary_window.slot;
+      candidate.bank_count = primary_window.bank_count;
+      candidate.deferred_acquire = acquire_association.has_value();
+      if (candidate.deferred_acquire && release_association) {
+        const Window &release_window = windows[proposed[*release_association].window_index];
+        if (release_window.bank_count == candidate.bank_count)
+          candidate.release_selected_slot = release_window.slot;
+        else
+          result.warnings.emplace_back(
+              "ConSan acquire-release edge has incompatible access-window banks");
+      }
+      associated.push_back(std::move(candidate));
     }
-    associated.push_back(std::move(candidate));
-  }
-  std::ranges::sort(associated, {}, &Candidate::selected_slot);
-  candidates = std::move(associated);
-  if (candidates.empty()) {
-    result.warnings.emplace_back(
-        "ConSan atomic sync found no unambiguous owner/CFG-associated edge");
-    return;
+    std::ranges::sort(associated, {}, &Candidate::selected_slot);
+    candidates = std::move(associated);
+    if (candidates.empty()) {
+      result.warnings.emplace_back(
+          "ConSan atomic sync found no unambiguous owner/CFG-associated edge");
+      return;
+    }
   }
 
   struct Planned : PlannedProbeResources {
@@ -1424,6 +1442,10 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
                         std::move(candidate_point), polling_loop_entry_vgpr_bank_mode,
                         composed_access_fragment != result.staged_text_fragments.end()});
   }
+  if (publication_trace && selected.size() != candidates.size()) {
+    result.warnings.emplace_back("ConSan publication trace could not capture every atomic site");
+    return;
+  }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan atomic sync found no patchable sequence");
     return;
@@ -1452,7 +1474,15 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     emission_plan->polling_loop_entry_vgpr_bank_mode = planned.polling_loop_entry_vgpr_bank_mode;
     uint32_t guest_instruction_offset = 0u;
     uint32_t emitted_guest_size = 0u;
-    auto words = planned.candidate.deferred_acquire
+    auto words = publication_trace
+                     ? build_publication_cave_words(
+                           bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
+                           planned.owner_descriptor_file_offset, planned.address_plan,
+                           *emission_plan, planned.spill ? &*planned.spill : nullptr,
+                           planned.scalar_spill ? &*planned.scalar_spill : nullptr,
+                           planned.private_layout ? &*planned.private_layout : nullptr, arch,
+                           layout, result.errors, &guest_instruction_offset, &emitted_guest_size)
+                 : planned.candidate.deferred_acquire
                      ? build_pending_acquire_cave_words(
                            bytes, planned.candidate.source, planned.candidate.atomic.lowering_form,
                            planned.owner_descriptor_file_offset, planned.address_plan,

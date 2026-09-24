@@ -40,6 +40,21 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
   const ReportPipelineInput &input = render_input.pipeline;
   const DecodedReport &decoded = render_input.decoded;
   const ReportSummary &summary = render_input.summary;
+  // Valid observations from a deliberately incomplete trace remain useful
+  // diagnostics, but are never promoted to ordering evidence.
+  for (size_t i = 0; i < std::min<size_t>(decoded.publications.events.size(), 64u); ++i) {
+    const auto &event = decoded.publications.events[i];
+    append(ReportDiagnosticKind::Detail,
+           "ConSan publication event reader=%llu index=%zu sequence=%llu owner=%u lane=%u "
+           "address=0x%llx bytes=%u observed=%llu written=%llu release=%s acquire=%s complete=%s",
+           static_cast<unsigned long long>(input.reader), i,
+           static_cast<unsigned long long>(event.point.sequence), event.point.owner,
+           event.point.lane, static_cast<unsigned long long>(event.address), event.bytes,
+           static_cast<unsigned long long>(event.observed),
+           static_cast<unsigned long long>(event.written), event.release ? "true" : "false",
+           event.acquire ? "true" : "false",
+           decoded.publications.status == PublicationDecodeStatus::Complete ? "true" : "false");
+  }
   if (!decoded.complete()) {
     const ReportHeader &invalid_header = decoded.header;
     if (decoded.failure == ReportDecodeFailure::InvalidHeader) {
@@ -58,8 +73,12 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
     } else if (decoded.failure == ReportDecodeFailure::PublicationEvidenceInvalid) {
       append(
           kFailure,
-          "ConSan auto report reader=%llu has incomplete or malformed atomic publication evidence",
-          static_cast<unsigned long long>(input.reader));
+          "ConSan auto report reader=%llu has incomplete or malformed atomic publication evidence "
+          "flags=%u events=%u capacity=%u dropped=%u clock=%llu",
+          static_cast<unsigned long long>(input.reader), invalid_header.publication_flags,
+          invalid_header.publication_event_count, invalid_header.publication_event_capacity,
+          invalid_header.publication_dropped_count,
+          static_cast<unsigned long long>(invalid_header.publication_clock));
     } else if (decoded.failure == ReportDecodeFailure::LayoutMismatch) {
       append(kFailure, "ConSan auto report reader=%llu has inconsistent ABI-v%u layout",
              static_cast<unsigned long long>(input.reader), kReportAbiVersion);

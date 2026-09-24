@@ -255,12 +255,48 @@ and branch boundaries. All 22 selected synchronization-analysis tests pass
 (`lds-completion-tests.log`). Device publication capture must consume this
 LDS-only fact explicitly; legacy synchronization attachment is unchanged.
 
-Atomic observations are not yet captured and the publication trace remains
-disabled, so the current red cells are unchanged. Remaining work is device
-atomic-observation capture, consumption of the LDS completion facts, and the
-clean/fault qualification matrix above.
-The device capture must establish the complete-transition precondition; setting
-that flag on the existing address/role metadata would be unsound.
+Device capture now journals returning 32-bit add/OR operations when every
+native RMW in the object has a supported capture path. It preserves the guest
+operands/result, captures every active lane, and records the observed transition,
+lane/owner identity, access-order ticket, and LDS-release/acquire roles. This
+path bypasses the single-window association. Unsupported RMW forms still use
+the earlier path; the original Stream-K/tree cells have not been requalified.
+
+Physical gfx1201 inspection runs establish:
+
+- The one-value probe records `0 → 1 → 2` and passes numerically.
+- Separate 32-lane add and OR arms each record 64 transitions, with the correct
+  per-lane address and old/new values, and pass numerically. The OR run exercised
+  wave 1 publishing first (`0 → 2 → 3`). Native controls also pass.
+- An overflow arm records 2,048 attempted events against capacity 800, sets the
+  sticky dropped-record flag, and passes numerically while the detector rejects
+  its trace as incomplete.
+
+These are **inspection results, not clean qualifications**. The emitter sets
+`kPublicationTraceEnabled` but deliberately leaves `kPublicationTraceComplete`
+clear. Capturing every RMW alone cannot exclude a store to the same object that
+breaks a release sequence. Those possible modifications must be accounted for
+before the journal may suppress a conflict. The incomplete status propagates to
+the analysis verdict. Valid observations remain visible for diagnosis.
+
+The physical run also corrected a decoder assumption: automatic report headers
+carry the code-object reader identity, whereas event/window dispatch identities
+come from runtime dispatches. Events retain their actual dispatch identity and
+are checked against each other in the proof, rather than against that header
+fallback. All 268 hook tests and 101 selected atomic/publication/layout patcher
+tests pass. The current strict one-value run exits 90 for incomplete evidence.
+
+Evidence: `journal-publication-1-inspect.log`,
+`journal-{add,or}-lanes-{native,inspect}.log`,
+`journal-overflow-{native,inspect}.log`, `journal-publication-1-strict.log`,
+`journal-patch-tests.log`, and `journal-host-tests.log` in the
+artifact directory. The inspection runs permit incomplete reports only to
+check guest numerical behavior; they do not change validation's clean gate.
+
+Remaining work includes non-returning OR capture, other atomic forms and
+modifications that could break release sequences, completeness and cross-domain
+checks, and the original clean/fault qualification matrix. Setting the complete
+flag before these conditions hold would be unsound.
 
 ## Reproducing the minimal probe
 
@@ -280,7 +316,7 @@ RJ_CONSAN_KERNEL_ALLOWLIST=_Z11publicationPiS_ \
 RJ_CONSAN_FORBID_DIAGNOSTICS=1 /tmp/consan-publication
 ```
 
-The current strict detector run exits 89 with a conflict. Recompile with
+The current strict one-value journal run is rejected as incomplete. Recompile with
 `-DCOUNT=8 -DBARRIER=1` for the clean barrier control or `-DCOUNT=8 -DRELAXED=1`
 for the deliberately weakened ordering control. This is a manual regression
 probe, not a passing test added to the default test suite.

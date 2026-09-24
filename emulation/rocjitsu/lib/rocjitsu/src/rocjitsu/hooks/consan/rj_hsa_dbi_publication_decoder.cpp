@@ -21,16 +21,17 @@ DecodedPublications decode_publications(const ReportHeader &header,
   }
   if (records.size() != header.publication_event_capacity ||
       header.publication_event_count > header.publication_event_capacity ||
-      header.publication_dropped_count || !(header.publication_flags & kPublicationTraceComplete))
+      header.publication_dropped_count)
     return {.status = Status::Incomplete};
-  DecodedPublications result{.status = Status::Complete};
+  DecodedPublications result{.status = (header.publication_flags & kPublicationTraceComplete)
+                                           ? Status::Complete
+                                           : Status::Incomplete};
   std::vector<uint64_t> sequences;
   for (uint32_t i = 0; i < header.publication_event_count; ++i) {
     const auto &record = records[i];
     if (record.state != kPublicationReady)
       return {.status = Status::Incomplete};
-    if (record.generation != header.generation || !record.dispatch_id ||
-        (header.dispatch_id && record.dispatch_id != header.dispatch_id) || !record.sequence ||
+    if (record.generation != header.generation || !record.dispatch_id || !record.sequence ||
         record.sequence > header.publication_clock || record.owner_id >= 32 ||
         record.lane_id >= 64 || !record.byte_count || record.byte_count > 8 ||
         (record.byte_count & (record.byte_count - 1)) ||
