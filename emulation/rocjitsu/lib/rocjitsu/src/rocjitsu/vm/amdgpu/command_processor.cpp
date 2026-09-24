@@ -668,13 +668,14 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
-    // Round the per-wave region to the 1 KB COMPUTE_TMPRING_SIZE.WAVESIZE granule
+    // Round the per-wave region to the ISA's COMPUTE_TMPRING_SIZE.WAVESIZE granule
     // so that each wave's base equals scratch_pool + scoreboard_id * wavesize,
     // which is exactly what rocm-dbgapi computes to locate a wave's private
     // memory (rocdbgapi architecture.cpp scratch_memory_region).
     const uint64_t raw_per_wave =
         static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
-    const uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
+    const uint64_t granule = isa_properties(cu->arch()).compute_tmpring_wavesize_granule;
+    const uint64_t per_wave_size = ((raw_per_wave + granule - 1) / granule) * granule;
     const uint64_t wg_total_size = static_cast<uint64_t>(pkt.workgroup_size_x) *
                                    std::max<uint16_t>(1, pkt.workgroup_size_y) *
                                    std::max<uint16_t>(1, pkt.workgroup_size_z);
@@ -3181,7 +3182,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       const auto properties = isa_properties(arch);
       const uint32_t wavesize_mask = util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
       const uint64_t raw_per_wave = static_cast<uint64_t>(private_segment_fixed_size) * wave_size;
-      const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
+      const uint64_t granule = properties.compute_tmpring_wavesize_granule;
+      const uint64_t per_wave_stride = ((raw_per_wave + granule - 1) / granule) * granule;
       const uint64_t required_wavesize =
           per_wave_stride / properties.compute_tmpring_wavesize_granule;
       const auto scratch_wave_limit = [&](uint32_t tmpring_size) -> std::optional<uint32_t> {
@@ -3453,12 +3455,11 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
           !cus_.empty() && !scratch_uses_alternate) {
         uint64_t per_wave_bytes =
             static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
-        // setup_wavefront() allocates scratch slots at a 1 KiB boundary. Encode
-        // that actual stride, rather than merely rounding to the register's
-        // unit, so flat_scratch agrees with rocm-dbgapi for every scoreboard
-        // slot after slot zero.
-        const uint64_t per_wave_stride = ((per_wave_bytes + 1023) / 1024) * 1024;
+        // Match setup_wavefront()'s ISA-specific slot stride so flat_scratch
+        // agrees with rocm-dbgapi for every scoreboard slot after slot zero.
         const auto properties = isa_properties(arch);
+        const uint64_t granule = properties.compute_tmpring_wavesize_granule;
+        const uint64_t per_wave_stride = ((per_wave_bytes + granule - 1) / granule) * granule;
         const uint32_t wavesize_unit = properties.compute_tmpring_wavesize_granule;
         assert(wavesize_unit != 0 && properties.compute_tmpring_wavesize_bits != 0);
         const uint32_t wavesize_field = static_cast<uint32_t>(per_wave_stride / wavesize_unit);

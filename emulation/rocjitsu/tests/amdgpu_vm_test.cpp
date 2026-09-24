@@ -3732,8 +3732,8 @@ TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPack
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 19;
-  constexpr uint32_t kFirstPrivateBytes = 288;
-  constexpr uint32_t kSecondPrivateBytes = 1056;
+  constexpr uint32_t kFirstPrivateBytes = 8;
+  constexpr uint32_t kSecondPrivateBytes = 40;
   constexpr uint32_t kThirdPrivateBytes = 10272;
   constexpr uint64_t kRing = 0xF0000000;
   constexpr uint64_t kQueueDescriptor = 0xF0010000;
@@ -3831,9 +3831,10 @@ TEST_P(DynamicScratchTest, KfdQueueRequestsResizesAndReclaimsBeforeConsumingPack
                                    : scratch_requests == 2 ? kSecondPrivateBytes
                                                            : kThirdPrivateBytes;
     const uint64_t raw_per_wave = static_cast<uint64_t>(private_bytes) * 32;
-    const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
     const uint32_t wavesize_granule =
         isa_properties(ROCJITSU_CODE_ARCH_CDNA5).compute_tmpring_wavesize_granule;
+    const uint64_t per_wave_stride =
+        ((raw_per_wave + wavesize_granule - 1) / wavesize_granule) * wavesize_granule;
     const uint32_t provisioned_wavesize = static_cast<uint32_t>(per_wave_stride / wavesize_granule);
     fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_t, compute_tmpring_size),
                            1u | (provisioned_wavesize << kWaveSizeFieldShift));

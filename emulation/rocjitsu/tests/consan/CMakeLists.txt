@@ -4,6 +4,7 @@
 # ConSan's unit, fuzzing, and live-GPU test registration lives here so the
 # shared rocjitsu test manifest remains independent of ConSan's growth.
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
     NAME ConSanCheckedRunnerUnitTest
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/test_checked_runner.py"
