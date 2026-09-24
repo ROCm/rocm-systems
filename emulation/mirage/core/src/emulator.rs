@@ -54,6 +54,50 @@ pub struct EmulatorDef {
     pub topology: MaybeRef<TopologyDef>,
 }
 
+impl EmulatorDef {
+    /// The agent every GPU in this system instantiates, when this
+    /// definition is resolved.
+    ///
+    /// `None` while either reference is still a name. Resolving one means
+    /// reading the on-disk stores, which is [`Self::resolve_refs`]'s job
+    /// and not something an accessor should do behind a caller's back —
+    /// an accessor that silently hit the filesystem would also silently
+    /// pick up an edit made after bring-up, which is the whole class of
+    /// bug a session snapshot exists to prevent.
+    #[must_use]
+    pub fn agent(&self) -> Option<&crate::agent::AgentDef> {
+        match &self.topology {
+            MaybeRef::Owned(topology) => match &topology.agent {
+                MaybeRef::Owned(agent) => Some(agent),
+                MaybeRef::Ref(_) => None,
+            },
+            MaybeRef::Ref(_) => None,
+        }
+    }
+
+    /// Follow every by-name reference in this definition, in place, so
+    /// that afterwards [`Self::agent`] answers.
+    ///
+    /// Done once, when a session is created, so the rest of that
+    /// session's life reads documents nothing can edit underneath it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a topology or agent reference names a
+    /// document that does not exist or does not parse.
+    pub fn resolve_refs(&mut self) -> Result<()> {
+        let mut topology = match &self.topology {
+            MaybeRef::Owned(topology) => topology.clone(),
+            MaybeRef::Ref(name) => crate::store::topology_get(name)?,
+        };
+        if let MaybeRef::Ref(name) = &topology.agent {
+            topology.agent = MaybeRef::Owned(crate::agent::store::get(name)?);
+        }
+        self.topology = MaybeRef::Owned(topology);
+        Ok(())
+    }
+}
+
 /// Whether the host's hardware/environment can actually run an
 /// emulator. This is distinct from [`EmulatorBackend::installed`]:
 /// an emulator can be installed yet unsupported (e.g. HotSwap installed
@@ -231,12 +275,51 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// runtime is present and responsive.
     fn health(&self, ctx: &SessionContext) -> SessionHealth;
 
+    /// Whether this backend stands up a synthetic GPU whose ISA the
+    /// workload's own ROCm runtime has to recognise.
+    ///
+    /// `false` — the default — for a backend that retargets code onto the
+    /// host's real GPU. Such a backend still has an agent, and that agent
+    /// still names a device, but ROCr is never asked to enumerate it, so
+    /// the ISA says nothing about whether the session will work. A new
+    /// backend therefore gets silence without having to know that the
+    /// preflight in [`crate::rocr`] exists.
+    fn presents_emulated_device(&self) -> bool {
+        false
+    }
+
+    /// Reconcile `profile` with configuration only this backend can read,
+    /// so that the profile describes the machine the session will really
+    /// stand up.
+    ///
+    /// Called once, on an already-resolved profile, before a session
+    /// freezes it. The case it exists for is a drop-in emulator config
+    /// file: the file describes a device of its own, and without this the
+    /// profile's agent would still name the device the profile was
+    /// written around — a device that is not the one about to exist.
+    /// Rather than reporting the real device separately and leaving two
+    /// answers in play, a backend corrects the agent here and everything
+    /// downstream keeps reading the one document.
+    ///
+    /// A backend that cannot tell what the file describes must clear the
+    /// agent's `gfx_target_version` rather than leave a stale value: no
+    /// answer is a verdict the preflight handles, and a confident wrong
+    /// one is not.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when the profile is unusable — not when the
+    /// backend simply has nothing to correct, which is the default.
+    fn reconcile_profile(&self, profile: &mut ProfileDef) -> Result<()> {
+        let _ = profile;
+        Ok(())
+    }
+
     /// Compute the env vars / `LD_PRELOAD` / files to inject into a
-    /// workload run under this emulator, plus any emulated ISA metadata
-    /// derived from the exact configuration materialised here. Returns
-    /// an error when the emulator is selected but its runtime library or
-    /// assets are missing, so a misconfigured session fails loudly
-    /// instead of silently running unemulated.
+    /// workload run under this emulator. Returns an error when the
+    /// emulator is selected but its runtime library or assets are
+    /// missing, so a misconfigured session fails loudly instead of
+    /// silently running unemulated.
     ///
     /// `ctx` carries the session's resolved profile and a scratch
     /// directory the backend may materialise runtime assets in.

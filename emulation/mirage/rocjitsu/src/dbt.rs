@@ -28,8 +28,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use mirage_core::agent::AgentDef;
-use mirage_core::common::{MaybeRef, SimpleValue};
+use mirage_core::common::SimpleValue;
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch, RuntimeLocation};
 use mirage_core::emulator::{
@@ -42,7 +41,6 @@ use mirage_core::hardware::{gfx_name, gpu_gfx_versions};
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
 use mirage_core::session::{SessionContext, SessionHealth};
-use mirage_core::topology::TopologyDef;
 
 /// The canonical name the DBT backend registers under (the value stored
 /// in [`mirage_core::emulator::EmulatorDef::emulator`]).
@@ -272,7 +270,6 @@ impl RocjitsuDbt {
             ld_preload: None,
             files: Default::default(),
             env,
-            emulated_isa: None,
             mounts,
             libraries: Default::default(),
             // DBT runs the translated code on the host's physical GPU, so
@@ -348,18 +345,17 @@ fn supported_isa_list() -> String {
 }
 
 /// Resolve the guest GPU's `gfx_target_version` from `def` by following
-/// its topology + agent references. Mirrors the resolution
-/// [`crate::kmd_config`] performs.
+/// its topology + agent references.
+///
+/// Through [`EmulatorDef::resolve_refs`] rather than a walk of its own:
+/// the agent is where the target is written down, and a second copy of
+/// the route to it is a second thing to keep in step with the stores.
 fn guest_gfx_version(def: &EmulatorDef) -> Result<u32> {
-    let topology: TopologyDef = match &def.topology {
-        MaybeRef::Owned(t) => t.clone(),
-        MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
-    };
-    let agent: AgentDef = match &topology.agent {
-        MaybeRef::Owned(a) => a.clone(),
-        MaybeRef::Ref(name) => mirage_core::agent::store::get(name)?,
-    };
-    Ok(agent.vm.gpu.device.gfx_target_version)
+    let mut def = def.clone();
+    def.resolve_refs()?;
+    Ok(def
+        .agent()
+        .map_or(0, |agent| agent.vm.gpu.device.gfx_target_version))
 }
 
 /// How the ISA resolvers read environment overrides.
@@ -532,8 +528,10 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use mirage_core::common::SimpleValue;
+    use mirage_core::agent::AgentDef;
+    use mirage_core::common::{MaybeRef, SimpleValue};
     use mirage_core::emulator::ExecMode;
+    use mirage_core::topology::TopologyDef;
 
     #[test]
     fn the_installed_flag_and_the_located_library_are_one_answer() {
@@ -571,6 +569,40 @@ mod tests {
         let backend = mirage_core::emulator::get_emulator_backend(NAME)
             .expect("rocjitsu-dbt backend must be registered");
         assert_eq!(backend.description().name, NAME);
+    }
+
+    /// A backend that retargets onto the host's real GPU reports no
+    /// emulated target, however specific its agent is.
+    ///
+    /// DBT translates the guest's code to run on a physical card, so ROCr
+    /// is never asked to enumerate the agent's device — and a warning
+    /// that its ISA is unsupported would be about a GPU nothing is
+    /// standing up. The agent still names one, which is exactly why the
+    /// question is asked of the backend rather than of the agent alone.
+    #[test]
+    fn a_retargeting_backend_emulates_no_device() {
+        let mut agent = AgentDef::default();
+        agent.vm.gpu.device.gfx_target_version = 90500;
+        let profile = ProfileDef {
+            name: "dbt".to_string(),
+            description: None,
+            emulator: def_with(MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Owned(agent),
+            })),
+            containerize: None,
+        };
+
+        assert!(
+            profile.agent().and_then(AgentDef::gfx_target).is_some(),
+            "the fixture's agent must name a device for the test to mean anything"
+        );
+        assert_eq!(
+            profile.emulated_gfx_target(),
+            None,
+            "DBT runs on a real GPU, so its agent's ISA is not a target to check"
+        );
     }
 
     /// An environment containing exactly the given pairs.
