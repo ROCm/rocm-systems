@@ -210,6 +210,17 @@ The original matrix above remains the pre-repair baseline.
   `$ORIGIN` RPATH from silently selecting the old SDK ROCr. The SDK libraries
   themselves are unchanged; no new leak suppressions were added.
 
-The complete ASan/UBSan rerun is underway (`sanitizers-full1.log`), with 24 CPU
-workers and all physical GPU tests serialized by the shared lock. The original
-baseline above is retained separately from these repair results.
+The first sanitizer rerun (`sanitizers-full1.log`) was interrupted after exposing
+RDNA scratch resize loops: the emulator demanded 1 KiB alignment while ROCr
+provisions 256-byte units on RDNA. `b4517a899ef` uses the ISA's scratch granule
+consistently, tests small allocations, and fixes the checked runner's Python
+registration. All 152 focused scratch tests pass in UBSan and GCC. The shell
+spawn fixture now uses builtin `printf`, preserving its process/pipe assertions
+without testing Rust coreutils' allocator lifetime.
+
+The uninterrupted rerun is `sanitizers-full2.log`, with 24 CPU workers and all
+physical GPU tests serialized by the shared lock. UBSan has completed with
+11,423 passes, zero failures, 30 runtime skips, and one disabled test. All 2,010
+ConSan emulator and 447 physical gfx1201 cases passed. The disabled instruction
+timing test passed separately in both sanitizer builds. ASan is still running.
+The original baseline above is retained separately from these repair results.
