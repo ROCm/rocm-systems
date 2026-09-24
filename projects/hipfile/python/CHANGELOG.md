@@ -4,6 +4,16 @@ All notable changes to the hipFile Python bindings will be documented in this fi
 
 ## [0.6.0.dev0]
 
+### Added
+
+- System tests (`tests/test_system_*.py`) that exercise the real compiled
+  extension against a GPU and an AIS-capable filesystem. Run them with
+  `pytest . --system --ais-capable-dir <path>`; see `tests/README.md`.
+
+### Removed
+
+- `main.py`. Its round-trip check is now `tests/test_system_roundtrip.py`.
+
 ## [0.5.0.dev0]
 
 ## [0.4.0.dev0]

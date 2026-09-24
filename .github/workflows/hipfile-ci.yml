@@ -55,6 +55,12 @@ jobs:
       cxx_standard: ${{ inputs.cxx_standard }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
+      # The Python system tests are an end-to-end hardware exercise of the
+      # bindings, and are platform/compiler/standard independent, so run them
+      # once on an AIS runner for a single representative leg rather than
+      # fanning them out. This is the same ubuntu-7.14.0 leg that
+      # codeql/sanitizers/clang_tidy target.
+      run_system_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == '7.14.0' }}
 
   AIS_system_tests:
     needs: [build_and_test]

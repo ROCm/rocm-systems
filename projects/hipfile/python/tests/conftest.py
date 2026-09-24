@@ -10,8 +10,22 @@ extension ``hipfile._hipfile``: ``hipfile/__init__.py`` imports names from it at
 import time, and it in turn needs the hipFile C library plus the HIP runtime. To
 keep the suite hermetic -- no GPU, no AIS-capable storage, no build step -- we
 register a pure-Python fake ``hipfile._hipfile`` in ``sys.modules`` *before* any
-test module imports ``hipfile``. Because pytest imports this file during
-collection, the injection below runs first.
+test module imports ``hipfile``. ``pytest_configure`` below is that window: it
+runs after option parsing and before any test module is imported.
+
+The suite therefore has two mutually exclusive modes, selected by ``--system``:
+
+* **hermetic (default)** -- resolve ``hipfile`` from the source tree one
+  directory up and fake the extension. Runs anywhere; every ``system``-marked
+  test is skipped.
+* **``--system``** -- inject nothing and touch nothing, so ``import hipfile``
+  finds the *installed* package with its real compiled extension. Only
+  ``system``-marked tests run; they need a GPU and an AIS-capable filesystem
+  (see ``--ais-capable-dir``).
+
+The modes cannot share a process: the fake lives in ``sys.modules`` for the
+whole session, so a mixed run would be collection-order dependent. That is why
+the flag deselects the other half of the suite rather than merely adding to it.
 
 Why a fake (real ints + lambdas) rather than ``Mock``/``MagicMock`` for this
 module-level substrate:
@@ -36,11 +50,6 @@ import types
 from pathlib import Path
 
 import pytest
-
-# The pure-Python ``hipfile`` package lives one directory up (``python/``).
-# Put it on sys.path so ``import hipfile`` resolves without an editable install
-# (which would require building the Cython extension we are deliberately faking).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # --- Fake extension construction ------------------------------------------
 
@@ -202,10 +211,116 @@ def _build_fake_hipfile():
     return mod
 
 
-# Inject BEFORE any test imports hipfile. The ``not in sys.modules`` guard only
-# avoids clobbering the module if something imported it first.
-if "hipfile._hipfile" not in sys.modules:
-    sys.modules["hipfile._hipfile"] = _build_fake_hipfile()
+# --- Mode selection --------------------------------------------------------
+#
+# Flag names and defaults mirror the GTest system suite so the two suites are
+# driven the same way: see test/common/test-options.h (--ais-capable-dir,
+# default /tmp, fed from the CMake AIS_CAPABLE_DIR cache variable) and
+# test/system/amd/io.cpp (--allow-skip-fastpath).
+
+
+def pytest_addoption(parser):
+    """Register the system-test options."""
+    group = parser.getgroup("hipfile")
+    group.addoption(
+        "--system",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the system tests against the real installed hipfile extension "
+            "instead of the hermetic fake. Requires a GPU and an AIS-capable "
+            "filesystem. Deselects the hermetic unit tests."
+        ),
+    )
+    group.addoption(
+        "--ais-capable-dir",
+        default="/tmp",
+        help=(
+            "Directory on an AIS-capable filesystem to do system-test IO in "
+            "(default: /tmp). Matches the GTest suite's --ais-capable-dir."
+        ),
+    )
+    group.addoption(
+        "--allow-skip-fastpath",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip rather than fail the system tests when the AIS fastpath is "
+            "unavailable. Matches HIPFILE_ALLOW_SKIP_FASTPATH_TESTS."
+        ),
+    )
+
+
+def pytest_configure(config):
+    """Install the fake extension unless we were asked for the real one.
+
+    Runs after option parsing and before any test module is imported, which is
+    the only window in which ``sys.modules`` can still be primed.
+    """
+    config.addinivalue_line(
+        "markers",
+        "system: needs a real GPU and an AIS-capable filesystem; run with --system",
+    )
+
+    if config.getoption("--system"):
+        # Leave sys.path and sys.modules alone so ``import hipfile`` finds the
+        # installed package and its compiled extension -- but check that it is
+        # really there, and really compiled, before collection starts. A bare
+        # ModuleNotFoundError from every module is a poor error message, and a
+        # fake reaching a hardware test would pass silently, which is the exact
+        # failure this mode exists to rule out.
+        try:
+            from hipfile import _hipfile as extension  # pylint: disable=C0415
+        except ImportError as exc:
+            raise pytest.UsageError(
+                f"--system needs the hipfile package installed with its "
+                f"compiled extension, but importing it failed: {exc}"
+            ) from exc
+        origin = getattr(extension, "__file__", None) or "<none>"
+        if not origin.endswith((".so", ".pyd")):
+            raise pytest.UsageError(
+                f"--system loaded hipfile._hipfile from {origin}, which is not "
+                f"a compiled extension. Refusing to run hardware tests against "
+                f"a stub."
+            )
+        return
+
+    # The pure-Python ``hipfile`` package lives one directory up (``python/``).
+    # Put it on sys.path so ``import hipfile`` resolves without an editable
+    # install (which would require building the extension we are faking).
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    # setdefault, not assignment: don't clobber the module if something
+    # imported it first.
+    sys.modules.setdefault("hipfile._hipfile", _build_fake_hipfile())
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Under ``--system``, don't even import the hermetic ``test_*`` modules.
+
+    Deselecting them after collection is too late: collection *imports* them,
+    and in this mode ``import hipfile`` resolves to the installed package, so
+    six modules would be imported against the real extension purely to be
+    skipped. The file-name prefix ``test_system_`` is the selector.
+
+    The opposite direction is deliberately not handled here -- the system
+    modules are safe to import without hardware, so letting them collect in the
+    default mode means their tests report as SKIPPED rather than vanishing.
+    """
+    if not config.getoption("--system"):
+        return None
+    if collection_path.suffix == ".py" and collection_path.name.startswith("test_"):
+        return not collection_path.name.startswith("test_system_")
+    return None
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip the hardware tests unless ``--system`` was given."""
+    if config.getoption("--system"):
+        return
+    skip_system = pytest.mark.skip(reason="needs hardware; run with --system")
+    for item in items:
+        if item.get_closest_marker("system") is not None:
+            item.add_marker(skip_system)
 
 
 # --- Fixtures --------------------------------------------------------------

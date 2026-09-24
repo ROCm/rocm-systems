@@ -10,6 +10,8 @@ env:
   AIS_INPUT_HIPFILE_PKG_FILENAME: ${{ inputs.ais_hipfile_pkg_filename }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  # Host path of the AIS-capable filesystem the hardware test does its IO on.
+  AIS_MOUNT_PATH: /mnt/ais/ext4
   AIS_PKG_MGR: >-
     ${{
       startsWith(inputs.platform, 'rocky') && 'dnf' ||
@@ -44,6 +46,16 @@ on:
         description: "Target ROCm MAJOR.MINOR.PATCH Version"
         required: true
         type: string
+      run_system_test:
+        description: >-
+          Run the Python binding system tests against real hardware on an AIS
+          runner. Off by default: they need a GPU and an AIS-capable
+          filesystem, and they are platform/compiler independent, so the caller
+          enables this for a single representative matrix leg rather than all
+          of them.
+        required: false
+        default: false
+        type: boolean
     outputs:
       hipfile_python_sdist_filename:
         description: "Filename of the hipFile Python sdist artifact"
@@ -216,3 +228,145 @@ jobs:
           else
             echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
           fi
+
+  # End-to-end exercise of the *real* Cython extension. The same suite runs in
+  # build_python_bindings above, but in its default hermetic mode, where
+  # conftest.py fakes hipfile._hipfile so nothing touches a GPU or AIS storage.
+  # `--system` flips that: it selects the installed extension and runs only the
+  # hardware-marked tests, which is why this job needs an AIS runner.
+  run_system_tests:
+    if: ${{ inputs.run_system_test }}
+    needs: [build_python_bindings]
+    runs-on: [AIS]
+    env:
+      AIS_INPUT_HIPFILE_PYTHON_SDIST_FILENAME: ${{ needs.build_python_bindings.outputs.hipfile_python_sdist_filename }}
+    steps:
+      - name: Set AIS CI container name
+        run: |
+          AIS_PR_NUMBER="$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')"
+          AIS_SAFE_COMPILER_NAME="$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:-${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: rocm-systems
+          sparse-checkout: projects/hipfile/python
+      - name: Download hipFile runtime package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.ais_hipfile_pkg_filename }}
+      - name: Download hipFile development package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.ais_hipfile_pkg_dev_filename }}
+      - name: Download hipFile Python sdist
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build_python_bindings.outputs.hipfile_python_sdist_filename }}
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --device=/dev/kfd \
+            --device=/dev/dri \
+            --security-opt seccomp=unconfined \
+            --pull always \
+            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            -v "${AIS_MOUNT_PATH}:/mnt/ais-fs" \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Copy the hipFile packages into the container
+        run: |
+          docker cp \
+            "${GITHUB_WORKSPACE}/${AIS_INPUT_HIPFILE_PKG_FILENAME}" \
+            "${AIS_CONTAINER_NAME}:/root"
+          docker cp \
+            "${GITHUB_WORKSPACE}/${AIS_INPUT_HIPFILE_PKG_DEV_FILENAME}" \
+            "${AIS_CONTAINER_NAME}:/root"
+      - name: Install the hipFile packages
+        run: |
+          docker exec \
+            -t \
+            -w /root \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ${{
+                format(
+                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
+                    'echo "Unknown platform."; exit 1',
+                  inputs.ais_hipfile_pkg_filename,
+                  inputs.ais_hipfile_pkg_dev_filename
+                )
+              }}
+              ldconfig
+            '
+      # The sdist and the checkout both arrive via the read-only workspace
+      # bind-mount, so nothing needs copying into the container: the venv lives
+      # in /root, and under --system the tests import the *installed* hipfile
+      # package rather than anything from the checkout.
+      - name: Create Python virtual environment and install the hipFile sdist
+        run: |
+          docker exec \
+            -t \
+            -e "_AIS_SDIST=/mnt/ais/${AIS_INPUT_HIPFILE_PYTHON_SDIST_FILENAME}" \
+            -w /root \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              python3.12 -m venv .venv
+              .venv/bin/pip install --upgrade pip
+              .venv/bin/pip install pytest "${_AIS_SDIST}"
+            '
+      # The test path must come first: --system and --ais-capable-dir are
+      # registered by tests/conftest.py, which pytest only loads once an
+      # argument points at that directory.
+      #
+      # -p no:cacheprovider is required, not cosmetic -- the checkout is on the
+      # read-only /mnt/ais bind mount, so pytest writing .pytest_cache into
+      # rootdir would fail the run.
+      - name: Run the Python binding system tests against AIS hardware
+        run: |
+          docker exec \
+            -t \
+            -e "_AIS_IO_DIR=/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -w /root \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              set -e
+              mkdir -p "${_AIS_IO_DIR}"
+              .venv/bin/python -m pytest \
+                /mnt/ais/rocm-systems/projects/hipfile/python/tests \
+                --system \
+                --ais-capable-dir "${_AIS_IO_DIR}" \
+                -p no:cacheprovider \
+                -v
+            '
+      - name: Destroy hipfile IO test directory
+        if: ${{ always() }}
+        run: |
+          docker exec -t "${AIS_CONTAINER_NAME}" /bin/bash -c "rm -fr /mnt/ais-fs/${AIS_CONTAINER_NAME}"
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi
+      - name: Cleanup self-hosted runner workspace
+        if: ${{ always() }}
+        shell: bash
+        # ${VAR:?} aborts if GITHUB_WORKSPACE is unset/empty, so a missing value
+        # can never let the glob expand to `/*` and wipe the persistent runner.
+        run: |
+          shopt -s dotglob
+          rm -rf "${GITHUB_WORKSPACE:?}"/*
