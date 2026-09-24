@@ -38,7 +38,7 @@
 #include "lib/rocprofiler-sdk/kfd/stream_geometry.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-// Active (profiler ABI v6, stream ABI v3) dispatch-log UAPI. Must be the ONLY kfd
+// Active (profiler ABI v6, stream ABI v4) dispatch-log UAPI. Must be the ONLY kfd
 // ioctl header in this TU (it conflicts with lib/rocprofiler-sdk/details/kfd_ioctl.h).
 #include "lib/rocprofiler-sdk/kfd/kfd_dlog_uapi.h"
 
@@ -309,18 +309,18 @@ struct reader_state
     reader_state() = default;
     ~reader_state();
 
-    reader_state(const reader_state&) = delete;
+    reader_state(const reader_state&)            = delete;
     reader_state& operator=(const reader_state&) = delete;
 };
 
-// gpu_id -> (overruns, untrusted_records, overflow_peak) last reported, so an
-// unchanged tuple stays quiet.
-using overrun_report_map = std::unordered_map<uint32_t, std::array<uint64_t, 3>>;
+// gpu_id -> last-reported processor backlog peak, so an unchanged value stays
+// quiet. ABI v4 has no reader-side ring-overrun telemetry (a lap is undetectable).
+using backlog_report_map = std::unordered_map<uint32_t, uint64_t>;
 
-overrun_report_map&
-overrun_reported()
+backlog_report_map&
+backlog_reported()
 {
-    static auto*& _v = common::static_object<overrun_report_map>::construct();
+    static auto*& _v = common::static_object<backlog_report_map>::construct();
     return *_v;
 }
 
@@ -421,8 +421,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
                                                                 s->info.buffer_size,
                                                                 s->info.mmap_size,
                                                                 s->info.records_offset,
-                                                                s->info.wptr_offset,
-                                                                s->info.rptr_offset},
+                                                                s->info.wptr_offset},
                                                 buf_bytes,
                                                 page_size());
     if(!_geom.ok)
@@ -430,7 +429,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
         ROCP_WARNING << fmt::format(
             "KFD dispatch-log: stream geometry mismatch ({}) (num_regions={} "
             "region_record_count={} buffer_size={} requested={} mmap_size={} records_offset={} "
-            "wptr_offset={} rptr_offset={})",
+            "wptr_offset={})",
             geometry_reason_name(_geom.reason),
             s->info.num_regions,
             s->info.region_record_count,
@@ -438,14 +437,15 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
             buf_bytes,
             s->info.mmap_size,
             s->info.records_offset,
-            s->info.wptr_offset,
-            s->info.rptr_offset);
+            s->info.wptr_offset);
         if(permanent) *permanent = true;  // ABI disagreement: retrying cannot help
         return false;
     }
     s->smap_len = static_cast<size_t>(_geom.mmap_len);
 
-    s->smap = mmap(nullptr, s->smap_len, PROT_READ | PROT_WRITE, MAP_SHARED, s->stream_fd, 0);
+    // ABI v4: the BO is mapped READ-ONLY (the kernel rejects PROT_WRITE). The read
+    // cursor lives in the session's local ring_cursors, never in the mapping.
+    s->smap = mmap(nullptr, s->smap_len, PROT_READ, MAP_SHARED, s->stream_fd, 0);
     if(s->smap == MAP_FAILED)
     {
         ROCP_WARNING << fmt::format(
@@ -457,6 +457,18 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s, bool* permanent = nullp
             s->info.num_regions,
             s->info.region_record_count);
         return false;
+    }
+
+    // Prime the read cursor SYNCHRONOUSLY here, before the session is published as
+    // ready, so any backlog present at attach is discarded on the setup thread and
+    // never by the reader thread's first lazy pass. A fast workload that finishes
+    // before the reader's first drain would otherwise have all its records counted
+    // as backlog and dropped. Records produced AFTER this snapshot drain normally.
+    {
+        const auto* wptr_base = static_cast<const uint8_t*>(s->smap) + s->info.wptr_offset;
+        for(uint32_t r = 0; r < s->info.num_regions; ++r)
+            s->cursors.rptr[r] = load_wptr_low32(wptr_base, 0, r);
+        s->cursors.rptr_init = true;
     }
 
     ROCP_INFO << fmt::format(
@@ -475,9 +487,9 @@ void
 teardown_session(dlog_session* s)
 {
     // Reset every per-session drain cursor so a slot reused after stop/restart
-    // starts from a clean state. Leaving cursors set would carry rptr_init=true
-    // and a stale rptr[] into the new (zeroed) stream, and copy_pipes() would then
-    // skip the first-drain resync and drain nothing -- silent total data loss.
+    // starts from a clean state. Leaving cursors set would carry rptr_init=true and
+    // a stale local rptr[] into the new stream, and copy_pipes() would then skip the
+    // first-drain prime (rptr:=wptr) and mis-count against a stale cursor.
     s->cursors = {};
     // The reader drains every overflow batch into the pipe before publishing
     // reader_done, so a non-empty deque here means a copied batch is about to be
@@ -544,10 +556,9 @@ copy_records(reader_state& st)
         auto& _s = st.sessions[i];
         if(!_s.ready.load(std::memory_order_acquire) || _s.quarantined) continue;
 
-        auto* base     = static_cast<uint8_t*>(_s.smap);
-        auto* recs     = base + _s.info.records_offset;
-        auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s.info.wptr_offset);
-        auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + _s.info.rptr_offset);
+        auto* base      = static_cast<uint8_t*>(_s.smap);
+        auto* recs      = base + _s.info.records_offset;
+        auto* wptr_base = base + _s.info.wptr_offset;
 
         // Only take a slot when nothing is queued ahead of this batch, or it would
         // reach the processor before the older ones.
@@ -560,8 +571,7 @@ copy_records(reader_state& st)
         const auto _copied = copy_pipes(recs,
                                         _s.info.num_regions,
                                         _s.info.region_record_count,
-                                        wptr_arr,
-                                        rptr_arr,
+                                        wptr_base,
                                         _s.cursors,
                                         _batch->records,
                                         &st.reader_copied_unpublished);
@@ -602,16 +612,17 @@ bool
 session_has_pending(const dlog_session& s)
 {
     if(s.smap == MAP_FAILED) return false;
-    const auto* base     = static_cast<const uint8_t*>(s.smap);
-    const auto* wptr_arr = reinterpret_cast<const volatile uint64_t*>(base + s.info.wptr_offset);
-    const auto* rptr_arr = reinterpret_cast<const volatile uint64_t*>(base + s.info.rptr_offset);
+    const auto* base      = static_cast<const uint8_t*>(s.smap);
+    const auto* wptr_base = base + s.info.wptr_offset;
 
-    // setup_session() rejects num_regions > kMaxRegions permanently, so a live
-    // session's count is always in range -- no clamp needed here.
+    // ABI v4: the read cursor is consumer-private (s.cursors), not in the BO. A
+    // region has pending records when the firmware wptr differs from our local
+    // rptr. Before the first drain rptr_init is false and rptr[] is 0; treat that
+    // as "not yet primed", so a fresh (zeroed wptr) stream reads as not pending.
     for(uint32_t r = 0; r < s.info.num_regions; ++r)
     {
-        const uint64_t w = __atomic_load_n(&wptr_arr[r], __ATOMIC_ACQUIRE);
-        const uint64_t c = __atomic_load_n(&rptr_arr[r], __ATOMIC_ACQUIRE);
+        const uint32_t w = load_wptr_low32(wptr_base, 0, r);
+        const uint32_t c = s.cursors.rptr[r];
         if(w != c) return true;
     }
     return false;
@@ -644,8 +655,6 @@ process_batch(processor_state& proc, const record_batch& batch)
         _pairing,
         batch.now_ns,
         [_gpu](const drained_record& rec) {
-            // Torn records were dropped at the top of pair_records, so
-            // every record here is trusted; no drain_loss_free gate remains.
             // gpu_id stamped from the ring this record came from: a record can only
             // ever match a dispatch enqueued on the same GPU. No generation.
             auto key =
@@ -664,49 +673,30 @@ process_batch(processor_state& proc, const record_batch& batch)
         });
 }
 
-// Two distinct conditions, reported separately so a growing processor backlog is
-// never mislabelled as a ring lap. A ring overrun is a real, bounded data loss:
-// the firmware lapped records the reader had not copied. A backlog peak is not a
-// loss: those batches were copied out of the ring and are delivered to the
-// processor as slots free -- it only signals the processor briefly fell behind.
-// Each is rate-limited on its own last-reported value. Reader thread only, so the
-// statics need no lock.
+// A processor backlog peak is not a loss: those batches were copied out of the
+// ring and are delivered to the processor as slots free -- it only signals the
+// processor briefly fell behind. ABI v4 has no ring-lap detection, so there is no
+// overrun to report here. Rate-limited on the last-reported value. Reader thread
+// only, so the static needs no lock.
 void
-report_overrun(uint32_t gpu_id, const ring_cursors& c, uint64_t overflow_peak)
+report_backlog(uint32_t gpu_id, uint64_t overflow_peak)
 {
-    // Per GPU: one ring lapping (or one GPU's processor backlog) says nothing
-    // about another's. .first tracks laps, .second tracks the backlog peak.
-    auto& _prev = overrun_reported()[gpu_id];
-
-    // An untrusted record is dropped downstream, so it is real coverage loss even
-    // when nothing was lapped (exactly-full, overruns==0) -- report it too.
-    if((c.overruns > 0 || c.untrusted_records > 0) &&
-       (c.overruns != _prev[0] || c.untrusted_records != _prev[1]))
-        ROCP_WARNING << fmt::format(
-            "KFD dispatch-log (gpu_id={}): ring overrun -- {} lap(s) so far, at least {} "
-            "record(s) lost, {} record(s) untrusted (dropped). Those dispatches have no "
-            "dispatch-log timestamps; everything else is unaffected and collection continues. "
-            "Raise the ring with ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB if this repeats.",
-            gpu_id,
-            c.overruns,
-            c.lost_records,
-            c.untrusted_records);
-
-    if(overflow_peak > 0 && overflow_peak != _prev[2])
+    auto& _prev = backlog_reported()[gpu_id];
+    if(overflow_peak > 0 && overflow_peak != _prev)
         ROCP_INFO << fmt::format(
             "KFD dispatch-log (gpu_id={}): processor backlog peaked at {} batch(es); the "
             "processor briefly fell behind. No records are lost -- backlogged batches are "
             "delivered as it catches up.",
             gpu_id,
             overflow_peak);
-
-    _prev = {c.overruns, c.untrusted_records, overflow_peak};
+    _prev = overflow_peak;
 }
 
 // KFD_DLOG_STREAM_OP_STATUS is DIAGNOSTICS ONLY: the kernel's counters are logged
-// but never gate a data decision (wptr is the design's sole overrun authority).
-// The status word is used only to describe a terminal stream when quarantining
-// it, never to decide whether to drain.
+// but never gate a data decision (wptr, the firmware's wrapping per-pipe cursor, is
+// the design's sole drain target). ABI v4 cannot detect overruns -- an overwritten
+// record is indistinguishable from a fresh one -- so the status word is used only to
+// describe a terminal stream when quarantining it, never to decide whether to drain.
 void
 log_stream_status(const dlog_session& s)
 {
@@ -986,10 +976,45 @@ drain_sessions_bounded(reader_state& st)
         if(_copied == 0) break;
     }
     for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
-        report_overrun(st.sessions[i].gpu_id,
-                       st.sessions[i].cursors,
-                       st.overflow_peak.load(std::memory_order_relaxed));
+        report_backlog(st.sessions[i].gpu_id, st.overflow_peak.load(std::memory_order_relaxed));
     return seen;
+}
+
+// Consume the kernel's per-stream notify count after a POLLIN wake. The kernel
+// reports EPOLLIN level-triggered while notify_count != 0 and only read() clears
+// it, so a wake that is not answered by a read() re-reports EPOLLIN forever and
+// spins the reader. read(fd,&u64,8) returns 8 and zeroes the count, or -1/EAGAIN
+// when it is already 0 (a benign race: another consumer path, or our own prior
+// read, drained it); the count VALUE is discarded because wptr, not the count, is
+// the drain target. Any other errno is a real fd fault: log it once (matching the
+// poll-error path) so it is not swallowed, and let the terminal-revents scan below
+// quarantine the stream on the HUP/ERR the same fault will raise. `pollerr_active`
+// doubles as the once-per-episode latch so a persistently faulting fd does not spam
+// the log every pass.
+void
+read_stream_notify_count(dlog_session& s)
+{
+    uint64_t _count = 0;
+    for(;;)
+    {
+        const ssize_t _n = ::read(s.stream_fd, &_count, sizeof(_count));
+        if(_n == static_cast<ssize_t>(sizeof(_count))) return;  // count consumed
+        if(_n < 0 && errno == EINTR) continue;
+        if(_n < 0 && errno == EAGAIN) return;  // already 0: nothing to consume
+        // A short read or an unexpected errno is a real fault. Warn once (latched
+        // on pollerr_active, cleared by the poll loop when a clean poll follows).
+        if(!s.pollerr_active)
+        {
+            ROCP_WARNING << fmt::format(
+                "KFD dispatch-log: gpu_id={} notify-count read failed (rc={} errno={}); the "
+                "terminal-revents scan will quarantine the stream if the fault persists",
+                s.gpu_id,
+                _n,
+                _n < 0 ? errno : 0);
+            s.pollerr_active = true;
+        }
+        return;
+    }
 }
 
 // Rebuild the pollfds: the control eventfd first, then one entry per live,
@@ -1088,16 +1113,31 @@ reader_loop()
         {
             uint64_t v = 0;
             while(::read(fds[kControlPollSlot].fd, &v, sizeof(v)) == sizeof(v))
-            {}
+            {
+            }
         }
 
-        // A wake or timeout both trigger a full scan: the kernel's level trigger,
-        // not the poll revents, is the readiness authority, so a timeout (the
-        // sparse-tail and lost-interrupt watchdog) drains exactly like an interrupt
-        // would. Hitting the pass cap with records still pending needs no self-nudge:
-        // the stream fd stays readable (wptr != rptr), so poll() re-triggers on its
-        // own -- the backstop below bounds the case where it re-triggers but the
-        // drain still copies nothing.
+        // Consume each woken stream's kernel notify count BEFORE draining. The
+        // kernel's EPOLLIN is level-triggered while notify_count != 0 and only the
+        // read() clears it, so skipping this leaves poll() ready forever and spins
+        // the reader; doing it before the drain re-arms readiness for a notify that
+        // lands mid-drain. HUP/ERR-only wakes carry no POLLIN and are left to the
+        // terminal-revents scan below -- reading them would only churn EAGAIN or,
+        // on a torn-down fd, noise. A backstop-tripped pass polls only the control
+        // fd, so the stream revents are zero and this loop is a no-op there.
+        for(size_t k = kFirstStreamPollSlot; k < fds.size(); ++k)
+        {
+            if(!stream_wake_wants_notify_read(fds[k].revents)) continue;
+            read_stream_notify_count(st.sessions[slot_of[k - kFirstStreamPollSlot]]);
+        }
+
+        // A wake or timeout both trigger a full scan: the drain always targets the
+        // observed wptr, so a timeout (the sparse-tail and lost-interrupt watchdog)
+        // picks up records below one notify interval exactly like an interrupt would.
+        // Hitting the pass cap with records still pending needs no self-nudge: any
+        // notify not yet consumed keeps the kernel's EPOLLIN asserted, so poll() re-
+        // triggers on its own -- the backstop below bounds the case where it re-
+        // triggers (count still set) but the drain copies nothing.
 
         if(st.any_session_ready.load(std::memory_order_acquire))
         {
@@ -1147,10 +1187,9 @@ reader_loop()
         // produce again, so it is drained first (above), then -- only once it is
         // level-dry -- logged and quarantined out of the poll set via a generation
         // bump, so no final record is dropped and a sticky HUP cannot spin poll().
-        // POLLERR alone is a recoverable reset: the stream node survives (the reset
-        // zeroed wptr[], which copy_pipes() reconciles), so it is logged but NOT
-        // quarantined. A HUP still pending records defers to the next pass -- the fd
-        // stays readable, so poll() re-triggers.
+        // POLLERR alone is a recoverable reset: the stream node survives, so it is
+        // logged but NOT quarantined. A HUP still pending records defers to the next
+        // pass -- the fd stays readable, so poll() re-triggers.
         bool _quarantined_any = false;
         for(size_t k = kFirstStreamPollSlot; k < fds.size(); ++k)
         {
@@ -1282,9 +1321,7 @@ reader_loop()
         total_seen += copy_records(st);
         for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
         {
-            report_overrun(st.sessions[i].gpu_id,
-                           st.sessions[i].cursors,
-                           st.overflow_peak.load(std::memory_order_relaxed));
+            report_backlog(st.sessions[i].gpu_id, st.overflow_peak.load(std::memory_order_relaxed));
             log_stream_status(st.sessions[i]);
         }
     }
@@ -1321,28 +1358,12 @@ reader_loop()
     ROCP_INFO << fmt::format("KFD dispatch-log reader: loop exited, total pairs seen = {}",
                              total_seen);
 
-    // Silent unless signal-less is active, so the default path logs exactly what
-    // it did before. The chain itself is summarised once, by teardown.
-    uint64_t _ring_overruns  = 0;
-    uint64_t _ring_lost      = 0;
-    uint64_t _ring_untrusted = 0;
-    for(size_t i = 0, _n = st.session_count.load(std::memory_order_acquire); i < _n; ++i)
-    {
-        _ring_overruns += st.sessions[i].cursors.overruns;
-        _ring_lost += st.sessions[i].cursors.lost_records;
-        _ring_untrusted += st.sessions[i].cursors.untrusted_records;
-    }
-
+    // Silent unless signal-less is active, so the default path logs exactly what it
+    // did before. ABI v4 has no ring-lap telemetry; only the backlog peak remains.
     ROCP_WARNING_IF(signal_less_feature_enabled() &&
-                    (_ring_overruns > 0 || _ring_lost > 0 || _ring_untrusted > 0))
-        << fmt::format(
-               "KFD dispatch-log ring: {} lap(s), {} record(s) lost to laps, {} record(s) "
-               "untrusted (dropped), processor backlog peaked at {} batch(es) -- a lost or "
-               "untrusted record is a lost START, which shows up as a start-unknown no-timing",
-               _ring_overruns,
-               _ring_lost,
-               _ring_untrusted,
-               st.overflow_peak.load(std::memory_order_relaxed));
+                    st.overflow_peak.load(std::memory_order_relaxed) > 0)
+        << fmt::format("KFD dispatch-log ring: processor backlog peaked at {} batch(es)",
+                       st.overflow_peak.load(std::memory_order_relaxed));
 }
 }  // namespace
 
@@ -1417,13 +1438,13 @@ start_kfd_reader()
     // Force-construct the singletons the reader/processor hot paths touch here,
     // BEFORE the worker threads exist, so a first-use allocation cannot stall the
     // ring read and turn into an overrun. state() was already constructed at the
-    // top of this function; overrun_reported() is the other one on the drain path.
+    // top of this function; backlog_reported() is the other one on the drain path.
     // Doing it from this one thread before the workers start also means their init
     // needs no cross-thread barrier -- construction strictly happens-before either
     // worker runs. (The downstream signal-less singletons the processor reaches on
     // a proven completion are constructed lazily, but they run off the pipe, not
     // the ring, so a first-use allocation there cannot cause an overrun.)
-    overrun_reported();
+    backlog_reported();
 
     // Same reasoning for the env-backed knobs: each caches its read in a
     // function-local static on first use, and common::get_env* scans `environ`,

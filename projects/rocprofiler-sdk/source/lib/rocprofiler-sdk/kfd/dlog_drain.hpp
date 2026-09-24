@@ -26,9 +26,16 @@
 // unit-tested against an in-memory buffer without a GPU or the reader's
 // singletons.
 //
-// Ring geometry: `num_regions` regions, each with its own wptr[i]/rptr[i] and
-// `region_record_count` slots (a power of two). Multiple queues can multiplex
-// into one region; records carry their own (doorbell_off, dispatch_id).
+// Ring geometry: `num_regions` regions, each with its own firmware wptr[i] and a
+// consumer-private rptr[i], and `region_record_count` slots (a power of two).
+// Multiple queues can multiplex into one region; records carry their own
+// (doorbell_off, dispatch_id).
+//
+// ABI v4: wptr[i] is the firmware-written WRAPPING 32-bit slot index in [0,N-1]
+// (N == region_record_count). rptr[i] lives in local memory only (the BO carries
+// no rptr[] and is mapped read-only). Readiness is wptr!=rptr; unread ==
+// (wptr - rptr) & (N-1) in u32 arithmetic. A full lap between reads is
+// undetectable and exactly-full looks empty -- accepted, documented limits.
 
 #include <algorithm>
 #include <atomic>
@@ -52,15 +59,16 @@ constexpr uint32_t kMaxRegions = 8;
 // Dispatch-log ring size, overridable via ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB.
 //
 // OPEN_STREAM only accepts buffer_size == num_regions * 20 * region_record_count
-// with region_record_count a power of two <= 2^24, and num_regions is ASIC-fixed
-// but not reported until STREAM_OP_INFO, i.e. AFTER the size must be chosen.
-// 80 * 2^k satisfies the rule at both 2 and 4 regions, so it needs no advance
-// knowledge. k is capped at 23, making 640 MiB the largest accepted size.
-// Requests are snapped DOWN onto this lattice so a reasonable-looking value can
-// never become an EINVAL that disables the feature.
+// with region_record_count a power of two, and num_regions is ASIC-fixed but not
+// reported until STREAM_OP_INFO, i.e. AFTER the size must be chosen. 80 * 2^k
+// satisfies the rule at both 2 and 4 regions, so it needs no advance knowledge.
+// The kernel caps buffer_size at 16 MiB (KFD_DISPATCH_LOG_MAX_BUFFER_SIZE); the
+// largest lattice value <= 16 MiB is 80 KiB << 7 == 10 MiB. Requests are snapped DOWN
+// onto this lattice so a reasonable-looking value can never become an EINVAL that
+// disables the feature.
 constexpr uint64_t kDlogMinRingBytes     = 80ull << 10;           // 80 KiB floor
-constexpr uint64_t kDlogDefaultRingBytes = 80ull << 17;           // 10 MiB (on the 80*2^k lattice)
-constexpr uint64_t kDlogMaxRingBytes     = 80ull << 23;           // 640 MiB
+constexpr uint64_t kDlogDefaultRingBytes = 80ull << 15;           // 2.5 MiB (on the 80*2^k lattice)
+constexpr uint64_t kDlogMaxRingBytes     = 80ull << 17;           // 10 MiB (largest <= 16 MiB cap)
 constexpr uint64_t kDlogMaxRingKb        = 0xFFFFFFFFull / 1024;  // parse domain (uint32 field)
 
 // Snap `want` down onto the 80 * 2^k lattice, clamped to
@@ -91,6 +99,21 @@ dlog_ring_bytes_from_kb_str(std::string_view v)
     return kb * 1024;
 }
 
+// The BO carries one 8-byte wptr slot per region (u64 wptr[num_regions]); firmware
+// writes only the low 32 bits, the high word stays zero. Address slot `region` by
+// its BYTE offset (base + wptr_offset + region * 8), then acquire-load the low word
+// at that address (little-endian: the low word is AT the slot base, not +4). Indexing
+// the array as a packed uint32_t* would use a 4-byte stride and read region i's slot
+// from the wrong place -- every wptr read must go through this helper.
+inline uint32_t
+load_wptr_low32(const volatile void* base, uint64_t wptr_offset, uint32_t region)
+{
+    const auto* slot = reinterpret_cast<const volatile uint32_t*>(
+        static_cast<const volatile uint8_t*>(base) + wptr_offset +
+        static_cast<uint64_t>(region) * sizeof(uint64_t));
+    return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+}
+
 constexpr uint32_t kRecPadding = 0;
 constexpr uint32_t kRecStart   = 1;  // dispatch_start
 constexpr uint32_t kRecEop     = 2;  // end-of-pipe (completion)
@@ -109,10 +132,6 @@ static_assert(sizeof(fw_record) == kFwRecBytes,
 // `start_known` distinguishes the two EOP shapes: a matched START+EOP pair, and
 // an EOP whose START was lost to a ring overwrite -- which still proves the
 // kernel completed but carries no interval.
-//
-// `loss_free` false means the producer lapped the reader before or during the
-// scan, so records around the collision may be torn and nothing may be
-// published from them.
 struct drained_record
 {
     uint32_t doorbell_off = 0;
@@ -120,52 +139,25 @@ struct drained_record
     uint64_t start_ticks  = 0;
     uint64_t end_ticks    = 0;
     bool     start_known  = false;
-    // No loss_free field: a torn/lossy record is dropped at the top of pair_records
-    // (the !copied_record.loss_free guard), so every record that reaches here is
-    // trusted by construction. The loss verdict lives on the copy side
-    // (copied_record.loss_free and the ring_cursors counts), not per drained record.
 };
 
-// Carries the copier's loss verdict, since pairing happens on another thread.
+// One record copied out of the ring. `region` is the source region. ABI v4 has no
+// reader-side loss detection (a ring lap is undetectable by contract), so there is
+// no per-record loss verdict to carry.
 struct copied_record
 {
-    fw_record rec       = {};
-    uint32_t  region    = 0;
-    bool      loss_free = true;
+    fw_record rec    = {};
+    uint32_t  region = 0;
 };
 
-// Reader-side state: ring cursors and loss counters. Touched ONLY by the
-// ring-copier thread, so it needs no lock.
+// Reader-side state: the consumer-private ring cursors. Touched ONLY by the
+// ring-copier thread, so it needs no lock. rptr[] lives here (local memory), not
+// in the read-only BO. ABI v4 has no producer-visible read cursor, so there is
+// no overrun/loss telemetry: a lap between reads is undetectable by contract.
 struct ring_cursors
 {
-    uint64_t rptr[kMaxRegions] = {};     // consumer read pos per region
-    bool     rptr_init         = false;  // zero rptr[] on first drain (both local and shared)
-
-    // Overrun telemetry. Exclusive-end contract: the producer has LAPPED us only
-    // once `w - rptr` EXCEEDS region_slots (== region_slots is merely exactly full).
-    // overruns/lost_records are written ONLY by note_overrun.
-    uint64_t overruns     = 0;  // laps observed
-    uint64_t lost_records = 0;  // records the producer advanced past
-
-    // Records copied while an aliasing producer write may have been in progress,
-    // distinct from `lost` -- at exactly-full there is no overrun and no
-    // loss, yet the oldest copied index may be torn. These are dropped downstream,
-    // so they are real coverage loss even when nothing was lapped.
-    uint64_t untrusted_records = 0;
-
-    // wptr regressions observed (w < rptr): a stream reset that zeroed wptr[]
-    // without zeroing our rptr[]. rptr is forced back to wptr so readiness
-    // (wptr != rptr) converges instead of reporting ready forever with the drain
-    // (w > rptr) refusing to advance.
-    uint64_t wptr_regressions = 0;
-
-    bool note_overrun(uint64_t dist, uint32_t region_slots)
-    {
-        if(dist <= region_slots) return false;  // == is exactly-full, not an overrun
-        ++overruns;
-        lost_records += dist - region_slots;
-        return true;
-    }
+    uint32_t rptr[kMaxRegions] = {};     // consumer read slot index per region
+    bool     rptr_init         = false;  // prime rptr[i]=wptr[i] on first drain
 };
 
 // Processor-side state: start/eop pairing. Touched ONLY by the processor thread,
@@ -261,25 +253,25 @@ struct pair_state
     }
 };
 
-// STAGE 1 (reader thread): copy raw records out of the shared ring, as fast as
-// possible and touching nothing else. This is the only code reading the volatile
-// mapping, and the time spent there is the window in which the producer can lap
-// us -- so NO lock, no map, no pairing or timestamp math. Returns the number
-// copied, or 0 on invalid geometry.
+// STAGE 1 (reader thread): copy raw records out of the read-only ring, as fast
+// as possible and touching nothing else. This is the only code reading the
+// volatile mapping -- so NO lock, no map, no pairing or timestamp math. Returns
+// the number copied, or 0 on invalid geometry.
 //
-// ORDERING: a region's slots are copied BEFORE the release-store publishing the
-// new rptr, so the kernel cannot see the slots as free while we are reading.
+// ABI v4: wptr[i] is a wrapping 32-bit slot index; the consumer read cursor rptr[i]
+// is local-only (no shared rptr[] to publish). On the first drain rptr is primed to
+// the current wptr (discard backlog). Unread == (w - r) & (N-1) in u32 arithmetic;
+// the same math handles a legacy free-running u32 producer, since only the masked
+// slot and the masked delta are used. A full lap between reads is undetectable and
+// exactly-full (N unread) looks empty -- accepted, documented limits.
 template <typename OutT>
 uint64_t
-copy_pipes(const uint8_t*           records_base,
-           uint32_t                 num_regions,
-           uint32_t                 region_record_count,
-           const volatile uint64_t* wptr_arr,
-           // rptr_arr is written via __atomic_store_n, which the const check does not model.
-           // NOLINTNEXTLINE(readability-non-const-parameter)
-           volatile uint64_t* rptr_arr,
-           ring_cursors&      cursors,
-           OutT&              out,
+copy_pipes(const uint8_t*       records_base,
+           uint32_t             num_regions,
+           uint32_t             region_record_count,
+           const volatile void* wptr_base,
+           ring_cursors&        cursors,
+           OutT&                out,
            // Reserved per region before the first memcpy so a record is counted
            // from the instant it leaves the ring into `out`. nullptr in tests.
            std::atomic<uint64_t>* inflight = nullptr)
@@ -288,103 +280,47 @@ copy_pipes(const uint8_t*           records_base,
 
     const uint32_t region_slots = region_record_count;
     if(region_slots == 0 || (region_slots & (region_slots - 1)) != 0) return 0;
+    const uint32_t mask = region_slots - 1;
 
     if(!cursors.rptr_init)
     {
+        // Prime each read cursor to the current producer index: discard any backlog
+        // present at attach (a fresh KFD stream is zeroed, so this is 0 there).
         for(uint32_t p = 0; p < num_regions; ++p)
-        {
-            cursors.rptr[p] = 0;
-            __atomic_store_n(&rptr_arr[p], 0, __ATOMIC_RELEASE);
-        }
+            cursors.rptr[p] = load_wptr_low32(wptr_base, 0, p);
         cursors.rptr_init = true;
     }
 
     uint64_t copied = 0;
     for(uint32_t p = 0; p < num_regions; ++p)
     {
-        const uint64_t w    = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
-        uint64_t       scan = cursors.rptr[p];
-        if(w < scan)
-        {
-            // wptr < rptr. Per the driver contract (kfd_dlog_stream.c): wptr is
-            // monotonic within a stream's lifetime -- it is zeroed only once at
-            // setup, before firmware arms, and a GPU reset sets the fatal latch
-            // (EPOLLERR) WITHOUT regressing wptr. So a live stream cannot legitimately
-            // move wptr backwards; observing it here means a torn/corrupt read of the
-            // volatile mapping (F5/F12), not a reset generation. The safe response is
-            // to drop this region's un-drained span rather than trust a rewound
-            // window that could mis-publish stale slots as fresh: snap rptr up to the
-            // observed wptr (in both the local cursor and the shared rptr[] so
-            // wptr!=rptr readiness agrees) and skip it. No new-generation drain is
-            // attempted because that mid-stream reset-with-wptr-rewind state cannot
-            // occur under the driver contract.
-            ++cursors.wptr_regressions;
-            cursors.rptr[p] = w;
-            __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);
-            continue;
-        }
-        if(w == scan) continue;
+        const uint32_t w = load_wptr_low32(wptr_base, 0, p);
+        const uint32_t r = cursors.rptr[p];
+        if(w == r) continue;
 
-        // The producer lapped us once dist EXCEEDS region_slots; note_overrun
-        // records overruns/lost. Skip the overwritten prefix: scan = w - slots
-        // (NOT w - slots + 1, which skipped one valid record).
-        cursors.note_overrun(w - scan, region_slots);
-        if(w - scan > region_slots) scan = w - region_slots;
+        // Unread count in the [0,N-1] wrapping domain. Wraps (w < r numerically)
+        // and the N-1 -> 0 boundary are handled by the mask; exactly-full aliases
+        // to empty and is indistinguishable, per the ABI's documented limits.
+        const uint32_t unread = (w - r) & mask;
 
         // Reserve BEFORE the first memcpy: from that instant these records live in
-        // `out` and will be processed while the pipe still reads empty. `w - scan`
-        // is exact here (post-clamp) and is exactly what the batch's publish
-        // fetch_sub removes. Release pairs with the GC gate's acquire load.
-        if(inflight != nullptr) inflight->fetch_add(w - scan, std::memory_order_release);
+        // `out` and will be processed while the pipe still reads empty. This is
+        // exactly what the batch's publish fetch_sub removes. Release pairs with
+        // the GC gate's acquire load.
+        if(inflight != nullptr) inflight->fetch_add(unread, std::memory_order_release);
 
-        // Every copied record starts loss_free = true; the region-wide
-        // verdict is gone. The untrusted back-patch below is per-record.
-        const size_t region_begin = out.size();
-        for(uint64_t idx = scan; idx != w; ++idx)
+        for(uint32_t k = 0; k < unread; ++k)
         {
-            const uint64_t slot =
-                static_cast<uint64_t>(p) * region_slots + (idx & (region_slots - 1));
-            auto _out = copied_record{};
+            const uint32_t idx  = (r + k) & mask;
+            const uint64_t slot = static_cast<uint64_t>(p) * region_slots + idx;
+            auto           _out = copied_record{};
             std::memcpy(&_out.rec, records_base + slot * kFwRecBytes, sizeof(_out.rec));
             _out.region = p;
             out.emplace_back(_out);
             ++copied;
         }
 
-        // reload wptr AFTER the copy. The producer may have advanced while
-        // we memcpy'd, so any copied index the producer's next write target now
-        // aliases is untrusted. w is exclusive, so index w2 aliases w2 - slots
-        // (power-of-two mask); the boundary the drain sits on when it just keeps up
-        // is exactly the one an acquire load of w2 cannot certify -- hence `<=`.
-        //
-        // Acquire fence pairing the plain payload memcpy above with the w2 acquire
-        // load below: the memcpy reads are non-atomic, and an acquire load only
-        // orders operations that follow it, not ones that precede it. Without this
-        // fence a weak-memory CPU (aarch64) could satisfy a payload read AFTER
-        // observing w2, so the untrusted back-patch would test a stale w2 against a
-        // read that actually raced the producer's overwrite. The fence keeps every
-        // memcpy read sequenced before the w2 observation, so the `idx <=
-        // untrusted_upto` test certifies exactly the slots that were read clean.
-        std::atomic_thread_fence(std::memory_order_acquire);
-        const uint64_t w2 = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
-        if(w2 >= region_slots)
-        {
-            const uint64_t untrusted_upto = w2 - region_slots;
-            size_t         k              = region_begin;
-            for(uint64_t idx = scan; idx != w; ++idx, ++k)
-            {
-                if(idx <= untrusted_upto)
-                {
-                    out[k].loss_free = false;
-                    ++cursors.untrusted_records;
-                }
-            }
-        }
-
-        // Release: every memcpy above is ordered before the kernel can see these
-        // slots as consumed.
         cursors.rptr[p] = w;
-        __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);
     }
     return copied;
 }
@@ -421,10 +357,6 @@ pair_records(const copied_record* records,
     {
         const auto& rec = records[i].rec;
         if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
-        // a torn record's doorbell_off/dispatch_id are as suspect as its tick, so
-        // it must never bind a START or claim an EOP. A torn START is thus never
-        // retained; its later intact EOP arrives start-unknown.
-        if(!records[i].loss_free) continue;
         if(rec.record_type != kRecStart && rec.record_type != kRecEop) continue;
 
         const uint64_t ts =
