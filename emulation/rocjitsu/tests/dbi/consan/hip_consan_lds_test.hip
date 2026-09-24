@@ -996,6 +996,8 @@ TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {
   const hipError_t sync = hipDeviceSynchronize();
   if (expect_dbi_trap()) {
     EXPECT_NE(sync, hipSuccess) << "expected DBI-injected s_trap to fail the dispatch";
+    if (sync != hipSuccess)
+      std::fprintf(stderr, "CONSAN_EXPECTED_DEVICE_TRAP\n");
     free_device_ptr(d_out);
     return;
   }

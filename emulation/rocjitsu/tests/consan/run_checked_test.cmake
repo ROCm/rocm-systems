@@ -48,7 +48,17 @@ if(DEFINED RJ_EXPECTED_EXIT)
 else()
     set(_expected_result "0")
 endif()
-if(NOT "${_result}" STREQUAL "${_expected_result}")
+set(_combined_output "${_stdout}\n${_stderr}")
+if(_expected_result STREQUAL "gpu-trap")
+    # HIP may return a dispatch error or abort in its asynchronous queue-error
+    # callback. Accept only those outcomes, with the required trap text below.
+    if(NOT "${_result}" MATCHES "^(0|134|Subprocess aborted)$")
+        message(FATAL_ERROR "unexpected device-trap test exit: ${_result}")
+    endif()
+    if(_combined_output MATCHES "ERROR: (AddressSanitizer|LeakSanitizer)|UndefinedBehaviorSanitizer|runtime error:")
+        message(FATAL_ERROR "host sanitizer failure is not an expected device trap")
+    endif()
+elseif(NOT "${_result}" STREQUAL "${_expected_result}")
     message(
         FATAL_ERROR
         "test command exited with ${_result}, expected ${_expected_result}"

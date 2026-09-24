@@ -4,6 +4,11 @@
 # ConSan's unit, fuzzing, and live-GPU test registration lives here so the
 # shared rocjitsu test manifest remains independent of ConSan's growth.
 
+add_test(
+    NAME ConSanCheckedRunnerUnitTest
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/test_checked_runner.py"
+)
+
 set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
     ""
     CACHE PATH
@@ -4227,6 +4232,9 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_lds_test
                 FILTER "${RJ_CONSAN_LDS_RACY_TEST}"
                 TIMEOUT 30
+                EXPECTED_EXIT gpu-trap
+                PASS_REGEX "CONSAN_EXPECTED_DEVICE_TRAP|HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION"
+                ALSO_PASS_REGEX "ConSan inventory[^\n]*modified=true"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=supercollider"
