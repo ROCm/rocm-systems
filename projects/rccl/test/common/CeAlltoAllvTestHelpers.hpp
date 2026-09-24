@@ -52,9 +52,9 @@ struct CeAlltoAllvMockComm
     }
 
     // Multi-node local-only LSA so ncclHierCeAvailable can pass (bigSize skips CUDA init).
-    // Default nNodes matches src/init.cc, which only builds hierarchical sub-comms
-    // at nNodes >= 8 with uniform local ranks.
-    void configureHierEligible(int nNodes = 8, int localRanks = 4)
+    // Hierarchical CE does not use hierarchicalIntra/Inter sub-comms, so this
+    // mock stays at nNodes=2 and does not set hierarchicalCommsInitialized.
+    void configureHierEligible(int nNodes = 2, int localRanks = 4)
     {
         comm.nNodes           = nNodes;
         comm.nRanks           = nNodes * localRanks;
@@ -70,10 +70,6 @@ struct CeAlltoAllvMockComm
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm.config.numRmaCtx = 1;
         comm.maxLocalRanks    = localRanks;
-        comm.minLocalRanks    = localRanks;
-        // The mock does not actually split hierarchicalIntra/Inter comms, but
-        // ncclHierCeAvailable requires this flag, which init sets after the split.
-        comm.hierarchicalCommsInitialized = true;
         comm.devrState.bigSize = 1;
         comm.devrState.lsaSize = localRanks;
         comm.devrState.lsaSelf = 0;
