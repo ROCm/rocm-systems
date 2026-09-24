@@ -136,6 +136,8 @@ NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 // [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
 // Data Mover on gfx1250. Still opt-in while the gfx1250 path is being brought up.
+// 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
+// measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
@@ -145,6 +147,11 @@ bool ncclSymkTmaAvailable(struct ncclComm* comm) {
 #else
   return comm->minCompCap >= 100;
 #endif
+}
+
+bool ncclSymkTmaForced(struct ncclComm* comm) {
+  // Availability still gates it: an arch that emitted no Tma kernels has none to force to.
+  return ncclParamSymTmaEnable() >= 2 && ncclSymkTmaAvailable(comm);
 }
 
 static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;
@@ -354,6 +361,9 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
 
   if (!ncclSymkTmaAvailable(comm)) kmask &= ~kernelMask_Tma;
   if (!symAligned16B) kmask &= ~kernelMask_Tma;
+  // Force leaves the tuner nothing else to pick. Conditional so that a collective with no surviving
+  // Tma kernel degrades to normal selection instead of ending up with an empty mask.
+  if (ncclSymkTmaForced(comm) && (kmask & kernelMask_Tma) != 0) kmask &= kernelMask_Tma;
 
   bool hasGin = ncclParamSymGinKernelsEnable() != 0;
   if (!hasGin) kmask &= ~kernelMask_Gin;

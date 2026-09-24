@@ -665,7 +665,8 @@ if(BUILD_TESTS)
     add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
     target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
-      ${RCCL_COMMON_INCLUDE_DIRS})
+      ${RCCL_COMMON_INCLUDE_DIRS}
+      ${PROJECT_BINARY_DIR}/hipify/src/device)  # sym_kernels.cc includes "tdm/tdmCopy.h"
     target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
@@ -1374,6 +1375,7 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
   target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_INCLUDE_DIRS}
+    ${RCCL_HIPIFY_DIR}/src/device  # sym_kernels.cc includes "tdm/tdmCopy.h"
   )
 
   target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE

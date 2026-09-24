@@ -325,6 +325,11 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
         INFO(NCCL_TUNING,
              "NCCL_SYM_KERNEL set to %s. At largest grouped work size %zu Bytes, kernel will not exercise TMA paths.",
              symKernelIdEnv, maxWorkBytes);
+      } else if (ncclSymkTmaForced(comm)) {
+        INFO(NCCL_TUNING,
+             "NCCL_SYM_TMA_ENABLE=2 forces %s. At largest grouped work size %zu Bytes, kernel will not exercise TMA "
+             "paths.",
+             ncclSymkKernelIdToString(k), maxWorkBytes);
       } else {
         *nBlocks = -1;
         return;
@@ -414,7 +419,7 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   if (rcclSymkKernelIdIsLL(tuning->symKernelId)) {
     tuning->nWarps = ncclSymkMaxThreads / inputs->comm->WarpSize;
   } else {
-    tuning->nWarps = 16;
+    tuning->nWarps = ncclSymkWarpsPerBlock;
   }
   return ret;
 }

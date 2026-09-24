@@ -276,8 +276,7 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
 
-  // True only where the deep loop really stages through a DMA engine: EnableTma names a
-  // kernel that can, ncclSymkAsyncTile says whether this pass has an engine to do it with.
+  // True only where the deep loop really stages through a TDM engine.
   constexpr bool AsyncTile = ncclSymkAsyncTile && EnableTma;
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
@@ -292,9 +291,8 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
                   UnrollPacks = AsyncTile ? ncclSymkDeepUnrollPacks(sizeof(T)) : ncclSymkUnrollPacks,
                   UnrollPeers = 2;
 
-    // Derived from UnrollPacks, not picked alongside it: a pass compiled for a Tma kernel
-    // without an async-tile engine takes the vector unroll, and a chunk wider than what
-    // reduceDeep() then reduces would leave the difference unreduced.
+    // Derived from UnrollPacks so the two cannot disagree: a chunk wider than what reduceDeep()
+    // reduces would leave the difference unreduced.
     constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);

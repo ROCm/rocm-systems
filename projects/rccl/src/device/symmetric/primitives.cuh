@@ -52,11 +52,8 @@
 #define NCCL_SYMK_TILE_TDM 0
 #endif
 #define NCCL_SYMK_ASYNC_TILE (NCCL_SYMK_TILE_TMA || NCCL_SYMK_TILE_TDM)
-// The same answer as the macro, but usable in an ordinary constant expression. EnableTma
-// names a kernel that CAN stage tiles; this says whether the pass being compiled has an
-// engine to do it with. The loop bodies have to be under #if because the engine's API is
-// only declared there, but the tiling arithmetic around them does not, and it has to agree
-// with the bodies -- so both derive from this.
+// The macro's answer as a constant expression, for the tiling arithmetic around the #if blocks:
+// EnableTma names a kernel that CAN stage tiles, this says whether the pass has an engine.
 #if NCCL_SYMK_ASYNC_TILE
 constexpr bool ncclSymkAsyncTile = true;
 #else
@@ -518,14 +515,11 @@ struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> {
 #endif
 
 #if NCCL_SYMK_ASYNC_TILE
-// This warp's tile staging window inside the block's dynamic LDS. That the block's grant
-// covers one of these per warp is not checkable here -- the warp count is a launch
-// parameter -- so ncclSymmetricTaskScheduler() checks it before the launch.
+// This warp's tile staging window in the block's dynamic LDS. That the grant covers one per warp is
+// checked by ncclSymmetricTaskScheduler(), since the warp count is a launch parameter.
 template <typename SmemStruct>
 static __device__ __forceinline__ SmemStruct* ncclSymkTileSmem(int lw) {
   constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-  // An overrun lands in warp lw+1's tile, which is then DMA'd out to every peer, so pin the
-  // layout here rather than trusting the tile constants and the window to stay in step.
   static_assert(sizeof(SmemStruct) <= smemSizePerWarp, "staged tile does not fit its per-warp LDS window");
   extern __shared__ char smemScratch[];
   return reinterpret_cast<SmemStruct*>(smemScratch + lw * smemSizePerWarp);
