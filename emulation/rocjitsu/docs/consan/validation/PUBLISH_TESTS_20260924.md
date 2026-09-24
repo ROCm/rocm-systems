@@ -253,3 +253,11 @@ overlay therefore includes a copy of `librccl.so.1` with RUNPATH, as well as HIP
 `ldd` confirms that the RCCL client resolves HIP and ROCr through the overlay.
 The final rerun is pending these repairs; the 18 failures are not counted as
 resolved by diagnostic timeout overrides alone.
+
+The direct-query change is committed as `3e95f0a7926`. All 149 focused ASan
+memory/cache tests pass, and all five RCCL tests pass concurrently within their
+existing deadlines (81 seconds wall time), with leak checking enabled and the
+corrected runtime overlay. GCC also passes the final 135-test memory/cache/
+scratch selection. A fresh complete ASan/UBSan run is in progress in
+`sanitizers-final.log`; its results supersede earlier repaired attempts only
+once it completes.
