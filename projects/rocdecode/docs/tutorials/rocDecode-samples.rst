@@ -30,6 +30,8 @@ To build and run samples on Windows:
 
 .. code:: bat
 
+  set ROCM_PATH=<path-to-rocm-installation>
+  set FFMPEG_ROOT=<path-to-ffmpeg>
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release

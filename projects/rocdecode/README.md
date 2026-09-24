@@ -136,16 +136,19 @@ sudo make install
 git clone https://github.com/ROCm/rocm-systems.git
 cd rocm-systems\projects\rocdecode
 mkdir build && cd build
-cmake .. -DROCM_PATH=<path-to-TheRock-build>
+set ROCM_PATH=<path-to-TheRock-build>
+cmake .. -DROCM_PATH=%ROCM_PATH%
 cmake --build . --config Release
 cmake --install . --config Release
 ```
 
 > [!NOTE]
-> * Set `ROCM_PATH` to the TheRock build output directory. The VA-API headers and import
->   libraries are found there at build time, and libva uses it at run time to locate the
->   VA-API driver.
-> * To include FFmpeg support, add `-DFFMPEG_ROOT=<path-to-ffmpeg>`.
+> * Set `ROCM_PATH` as an environment variable, not only on the `cmake` command line, and use the
+>   same command prompt for the steps below. The VA-API headers and import libraries are found
+>   there at build time, libva reads it at run time to locate the VA-API driver, and the test and
+>   sample commands below expand `%ROCM_PATH%`.
+> * To include FFmpeg support, set `FFMPEG_ROOT=<path-to-ffmpeg>` the same way and add
+>   `-DFFMPEG_ROOT=%FFMPEG_ROOT%`.
 
 ### Run tests
 
