@@ -30,8 +30,10 @@ of scope and is not rerun. Existing green rows are not part of this calibration.
 | `d128-block` | reads | Pass | 0/8 | Below 6/8 |
 | `d128-pressure` | all | Pass | 0/8 | Below 6/8 |
 | `d128-pressure` | reads | Pass | 0/8 | Below 6/8 |
+| `wmma-attention` | all | Pass | 0/8 | Below 6/8 |
+| `wmma-attention` | reads | Pass | 0/8 | Below 6/8 |
 
-Completed 20 batches. Full results and frozen prospective specifications:
+Completed 22 batches. Full results and frozen prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-sweep-20260924`.
 
 The companion `results.json` records coverage/health/control audits and paths to raw
