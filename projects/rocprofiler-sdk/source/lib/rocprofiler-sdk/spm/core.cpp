@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_set>
 #include <vector>
@@ -329,6 +330,15 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
                     size_t                        num_agents)
 {
     if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Held across the active-context check and the assignment below. start_context() reads this
+    // set to scope enable_serialization() and stop_context() reads it again to scope the matching
+    // disable_serialization(); if the set changed in between, the per-agent refcount for an agent
+    // that was enabled but not disabled never returns to zero and serialization stays on for the
+    // life of the process. The same mutex is what start_context() takes, so holding it here makes
+    // "the context is not active" and "the agent set is now this" one indivisible step.
+    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
+    context::wait_for_stopping_contexts(_lk);
 
     auto* ctx_p = context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
