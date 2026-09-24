@@ -79,9 +79,7 @@ class TestCpuBenchmark(unittest.TestCase):
             self.common.amdsmi_smart_init()
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()
             self.processors = (
-                cpu_handles["processor_handles"]
-                if isinstance(cpu_handles, dict)
-                else cpu_handles
+                cpu_handles["processor_handles"] if isinstance(cpu_handles, dict) else cpu_handles
             )
         except Exception as e:
             self.common.print(f"Warning: Failed to initialize AMDSMI: {e}")
