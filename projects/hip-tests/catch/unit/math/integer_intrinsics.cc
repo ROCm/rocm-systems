@@ -779,7 +779,7 @@ HIP_TEST_CASE(Unit_Device___byte_perm_Sanity_Positive) {
  * Host reference model for `__byte_perm(x, y, s)`.
  *
  * byte_perm_ref is written as an independent function rather than a copy of
- * the device implementation, so that it provides a independent reference and
+ * the device implementation, so that it provides an independent reference and
  * doesn't reinforce any bugs in the existing implementation.
  */
 static unsigned int byte_perm_ref(unsigned int x, unsigned int y, unsigned int s) {
