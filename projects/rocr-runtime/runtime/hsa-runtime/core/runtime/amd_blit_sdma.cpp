@@ -1957,10 +1957,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBatchCopyRectCommand(
     const hsa_amd_memory_copy_rect_entry_t& entry = entries[i];
     // Throws on invalid geometry, which unwinds out of the API entry point before anything
     // has been written to the ring, so a rejected batch submits nothing.
-    ValidateAndBuildCopyRect(append, &entry.dst, &entry.dst_offset, &entry.src,
-                             &entry.src_offset, &entry.range);
-    size += static_cast<uint64_t>(entry.range.x) * static_cast<uint64_t>(entry.range.y) *
-            entry.range.z;
+    ValidateAndBuildCopyRect(append, entry.dst, entry.dst_offset, entry.src, entry.src_offset,
+                             entry.range);
+    size += static_cast<uint64_t>(entry.range->x) * static_cast<uint64_t>(entry.range->y) *
+            entry.range->z;
   }
 
   std::vector<core::Signal*> gang_signals(0);

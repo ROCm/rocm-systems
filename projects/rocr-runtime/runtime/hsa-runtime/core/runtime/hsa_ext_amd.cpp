@@ -723,13 +723,18 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint32_t d = 0; d < op.num_entries; ++d) {
         const hsa_amd_memory_copy_rect_entry_t& entry = op.rect_list[d];
-        IS_BAD_PTR(entry.src.base);
-        IS_BAD_PTR(entry.dst.base);
+        IS_BAD_PTR(entry.dst);
+        IS_BAD_PTR(entry.dst_offset);
+        IS_BAD_PTR(entry.src);
+        IS_BAD_PTR(entry.src_offset);
+        IS_BAD_PTR(entry.range);
+        IS_BAD_PTR(entry.src->base);
+        IS_BAD_PTR(entry.dst->base);
         // Unlike hsa_amd_memory_async_copy_rect, a degenerate range cannot be silently
         // turned into a no-op: every entry has to contribute at least one packet for the
         // submission to keep a one-to-one entry/packet mapping.  Callers must filter
         // empty copies out.
-        if (entry.range.x == 0 || entry.range.y == 0 || entry.range.z == 0)
+        if (entry.range->x == 0 || entry.range->y == 0 || entry.range->z == 0)
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
       break;

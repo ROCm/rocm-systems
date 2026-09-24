@@ -12,6 +12,7 @@
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace amd::roc {
@@ -414,22 +415,42 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
     return copyPerOp();
   }
 
+  // num_entries is a uint16_t.  A narrowing conversion here must not silently describe
+  // only a prefix of the batch; preserve correctness by using the existing per-op path.
+  if (copyOps.size() > std::numeric_limits<uint16_t>::max()) {
+    return copyPerOp();
+  }
+
   gpu().releaseGpuMemoryFence(kSkipCpuWait);
 
+  // The public rect entry contains pointers so callers can reuse the same geometry passed
+  // to hsa_amd_memory_async_copy_rect.  Size this backing vector before taking addresses;
+  // ROCR consumes the descriptors and lowers them to SDMA packets before the API returns.
+  struct RectEntryStorage {
+    hsa_pitched_ptr_t dst{};
+    hsa_dim3_t dst_offset{};
+    hsa_pitched_ptr_t src{};
+    hsa_dim3_t src_offset{};
+    hsa_dim3_t range{};
+  };
+  std::vector<RectEntryStorage> entryStorage(copyOps.size());
   std::vector<hsa_amd_memory_copy_rect_entry_t> entries(copyOps.size());
   for (size_t i = 0; i < copyOps.size(); ++i) {
     const amd::BatchCopyRectOp& op = copyOps[i];
     address src = reinterpret_cast<address>(gpuMem(*srcMemories[i]).getDeviceMemory());
     address dst = reinterpret_cast<address>(gpuMem(*dstMemories[i]).getDeviceMemory());
 
-    entries[i].src = {src + op.srcRect.offset(0, 0, 0), op.srcRect.rowPitch_,
-                      op.srcRect.slicePitch_};
-    entries[i].dst = {dst + op.dstRect.offset(0, 0, 0), op.dstRect.rowPitch_,
-                      op.dstRect.slicePitch_};
-    entries[i].src_offset = {0, 0, 0};
-    entries[i].dst_offset = {0, 0, 0};
-    entries[i].range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
-                        static_cast<uint32_t>(op.size[2])};
+    RectEntryStorage& storage = entryStorage[i];
+    storage.src = {src + op.srcRect.offset(0, 0, 0), op.srcRect.rowPitch_,
+                   op.srcRect.slicePitch_};
+    storage.dst = {dst + op.dstRect.offset(0, 0, 0), op.dstRect.rowPitch_,
+                   op.dstRect.slicePitch_};
+    storage.src_offset = {0, 0, 0};
+    storage.dst_offset = {0, 0, 0};
+    storage.range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
+                     static_cast<uint32_t>(op.size[2])};
+    entries[i] = {&storage.dst, &storage.dst_offset, &storage.src, &storage.src_offset,
+                  &storage.range};
   }
 
   const HwQueueEngine engine =

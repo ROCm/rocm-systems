@@ -2203,14 +2203,16 @@ typedef struct hsa_pitched_ptr_s {
 [Provisional API]
 One rect (3D) region pair of a HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT operation.  Fields carry
 the same meaning as the corresponding arguments of hsa_amd_memory_async_copy_rect: offsets
-and range carry x in bytes, y in rows and z in layers.
+and range carry x in bytes, y in rows and z in layers.  Every pointer must be non-NULL.  The
+runtime reads but does not modify the caller-owned descriptors; they must remain valid and
+unmodified until hsa_amd_memory_async_batch_copy returns.
 */
 typedef struct hsa_amd_memory_copy_rect_entry_s {
-  hsa_pitched_ptr_t dst;
-  hsa_dim3_t dst_offset;
-  hsa_pitched_ptr_t src;
-  hsa_dim3_t src_offset;
-  hsa_dim3_t range;
+  hsa_pitched_ptr_t* dst;
+  hsa_dim3_t* dst_offset;
+  hsa_pitched_ptr_t* src;
+  hsa_dim3_t* src_offset;
+  hsa_dim3_t* range;
 } hsa_amd_memory_copy_rect_entry_t;
 
 /**
@@ -2364,14 +2366,18 @@ typedef enum {
  *   rect_list       -- caller-owned array of num_entries rect region pairs.  Each entry
  *                      must individually satisfy every requirement of
  *                      hsa_amd_memory_async_copy_rect, and the rects of different entries
- *                      must not overlap.  Entries are lowered to SDMA packets in array
- *                      order and issued as one submission, so they execute in order on the
- *                      copy engine, but no ordering is observable between them.
+ *                      must not overlap.  Every pointer field in each entry must be
+ *                      non-NULL.  The array and the caller-owned descriptors it points to
+ *                      must remain valid and unmodified until
+ *                      hsa_amd_memory_async_batch_copy returns.  Entries
+ *                      are lowered to SDMA packets in array order and issued as one
+ *                      submission, so they execute in order on the copy engine, but no
+ *                      ordering is observable between them.
  *   src_agent       -- source agent, common to all entries
  *   dst_agent       -- destination agent, common to all entries.  The pair selects the copy
  *                      direction: CPU -> GPU is host-to-device, anything else is routed
  *                      over the device-to-host engine.  CPU -> CPU is rejected.
- *   num_entries     -- number of entries (>= 1); there is no scalar form
+ *   num_entries     -- number of entries (>= 1 and <= 65535); there is no scalar form
  *   dst             -- must be NULL
  *   size            -- must be 0
  *   unused_size     -- must be 0
