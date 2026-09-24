@@ -13,14 +13,15 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
   using Result = PublicationOrdering;
   if (!(before.domain == after.domain))
     return Result::Unordered;
-  if (!complete || before.sequence == 0 || after.sequence == 0)
+  if (!complete || before.sequence == 0 || after.sequence == 0 || before.lane >= 64 ||
+      after.lane >= 64)
     return Result::Incomplete;
   std::vector<const PublicationEvent *> events;
   for (const auto &event : input) {
     if (!(event.point.domain == before.domain))
       continue;
-    if (!event.observation_valid || event.point.sequence == 0 || event.bytes == 0 ||
-        event.bytes > 8 || (event.bytes & (event.bytes - 1)) != 0 ||
+    if (!event.observation_valid || event.point.sequence == 0 || event.point.lane >= 64 ||
+        event.bytes == 0 || event.bytes > 8 || (event.bytes & (event.bytes - 1)) != 0 ||
         event.address > std::numeric_limits<uint64_t>::max() - event.bytes ||
         (event.operation != PublicationOperation::Read &&
          event.operation != PublicationOperation::Rmw) ||
@@ -41,7 +42,7 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
   std::vector<std::vector<size_t>> edges(points.size());
   for (size_t i = 0; i < points.size(); ++i) {
     for (size_t j = i + 1; j < points.size(); ++j) {
-      if (points[i].owner != points[j].owner)
+      if (points[i].owner != points[j].owner || points[i].lane != points[j].lane)
         continue;
       if (points[i].sequence == points[j].sequence)
         return Result::Incomplete;
@@ -99,6 +100,7 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
         continue;
       if ((predecessor[j] == count && events[i]->observed != events[j]->observed) ||
           (events[i]->point.owner == events[j]->point.owner &&
+           events[i]->point.lane == events[j]->point.lane &&
            events[j]->point.sequence < events[i]->point.sequence))
         return Result::Incomplete;
     }
@@ -111,6 +113,7 @@ PublicationOrdering publication_orders(const PublicationPoint &before,
       if (++traversed > count)
         return Result::Incomplete;
       if (events[current]->point.owner == events[i]->point.owner &&
+          events[current]->point.lane == events[i]->point.lane &&
           events[current]->point.sequence >= events[i]->point.sequence)
         return Result::Incomplete;
       scopes_cover &= events[current]->covers_workgroup;

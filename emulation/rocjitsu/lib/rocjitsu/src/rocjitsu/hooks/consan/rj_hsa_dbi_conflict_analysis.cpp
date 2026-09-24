@@ -77,16 +77,20 @@ ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
         continue;
       if (publications != nullptr) {
         const auto point = [](const Evidence &entry) {
-          return PublicationPoint{.domain = {.generation = entry.generation,
-                                             .dispatch = entry.dispatch_id,
-                                             .workgroup_x = entry.workgroup_x,
-                                             .workgroup_y = entry.workgroup_y,
-                                             .workgroup_z = entry.workgroup_z,
-                                             .cluster_workgroup = entry.cluster_workgroup_id},
-                                  .owner = entry.entry.owner_id,
-                                  .sequence = entry.publication_sequence};
+          return PublicationPoint{
+              .domain = {.generation = entry.generation,
+                         .dispatch = entry.dispatch_id,
+                         .workgroup_x = entry.workgroup_x,
+                         .workgroup_y = entry.workgroup_y,
+                         .workgroup_z = entry.workgroup_z,
+                         .cluster_workgroup = entry.cluster_workgroup_id},
+              .owner = entry.entry.owner_id,
+              .sequence = entry.publication_sequence,
+              .lane = static_cast<uint32_t>(std::countr_zero(entry.exact_lane_mask))};
         };
-        const bool complete = synchronization_evidence_complete &&
+        const bool complete = std::has_single_bit(prior.exact_lane_mask) &&
+                              std::has_single_bit(current.exact_lane_mask) &&
+                              synchronization_evidence_complete &&
                               publications->status == PublicationDecodeStatus::Complete;
         const auto forward =
             publication_orders(point(prior), point(current), publications->events, complete);

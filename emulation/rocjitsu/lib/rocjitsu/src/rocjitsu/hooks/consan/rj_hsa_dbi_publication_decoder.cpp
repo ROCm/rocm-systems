@@ -31,8 +31,8 @@ DecodedPublications decode_publications(const ReportHeader &header,
       return {.status = Status::Incomplete};
     if (record.generation != header.generation || !record.dispatch_id ||
         (header.dispatch_id && record.dispatch_id != header.dispatch_id) || !record.sequence ||
-        record.sequence > header.publication_clock || record.owner_id >= 32 || record.reserved ||
-        !record.byte_count || record.byte_count > 8 ||
+        record.sequence > header.publication_clock || record.owner_id >= 32 ||
+        record.lane_id >= 64 || !record.byte_count || record.byte_count > 8 ||
         (record.byte_count & (record.byte_count - 1)) ||
         record.address > std::numeric_limits<uint64_t>::max() - record.byte_count ||
         record.scope == 0 || record.scope > 5 ||
@@ -56,7 +56,8 @@ DecodedPublications decode_publications(const ReportHeader &header,
                                                   .workgroup_z = record.workgroup_z,
                                                   .cluster_workgroup = record.cluster_workgroup_id},
                                        .owner = record.owner_id,
-                                       .sequence = record.sequence},
+                                       .sequence = record.sequence,
+                                       .lane = record.lane_id},
                              .address = record.address,
                              .bytes = record.byte_count,
                              .observed = record.observed,

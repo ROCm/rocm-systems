@@ -214,7 +214,7 @@ and checks per-owner dynamic access order. Missing observations, duplicate
 values/ABA, disconnected modification chains, overlapping object identities,
 and inconsistent execution order return explicit incomplete evidence.
 
-The report ABI is now version 16: it has a bounded publication-record region,
+The report ABI is now version 17: it has a bounded publication-record region,
 a monotone observation clock, and per-access sequence identities. Record decoding
 rejects missing/partial observations, invalid domains, duplicate sequence tickets,
 and overflow. The report pipeline now passes validated publication evidence into
@@ -233,6 +233,17 @@ one-value case and twenty for the eight-value cases, with no malformed snapshots
 and the expected 1/2/2 conflicts for one-value/eight-value/relaxed publication.
 The clock does not establish cross-owner synchronization by itself. Evidence:
 `tickets-publication-{1,8,relaxed}.log` and `ticket-host-tests.log`.
+
+Program-order edges now require the same lane as well as the same wave owner.
+ABI v17 records atomic lane identity, and sampled accesses retain their exact
+publishing lane mask. Unknown or multiple access lanes do not qualify for this
+publication proof. This prevents a lane-zero atomic from silently ordering an
+unrelated lane's access. All 267 hook tests pass, including negative tests for
+cross-lane and cross-lane transitive publication. Inspection reruns pass
+numerically and report lane mask `1` on both sides of the minimal conflicts;
+only the one-value probe has complete static atomic coverage. The eight-value
+and relaxed probes retain their existing unpatched atomic sites. Evidence:
+`lane-host-tests.log` and `lanes-publication-{1,8,relaxed}-inspect.log`.
 
 Atomic observations are not yet captured and the publication trace remains
 disabled, so the current red cells are unchanged. Remaining work is device

@@ -606,11 +606,13 @@ using detail::WorkitemOwnerDerivationPlan;
                                  plan.workgroup_sources.cluster_workgroup_id),
       "ConSan probe could not publish causal window metadata");
 
-  if (plan.uniform_lds_address) {
+  if (plan.uniform_lds_address || plan.record_publication_sequence) {
+    // Uniform ranges describe all original lanes; an ordinary sampled range
+    // describes only the currently selected publishing lane.
+    const uint16_t lane_mask = plan.uniform_lds_address ? original_exec_save_sgpr : kAmdGpuExecLo;
     require_emission(
-        record.store_sgpr(offsetof(CausalWindow, exact_lane_mask), original_exec_save_sgpr) &&
-            record.store_sgpr(offsetof(CausalWindow, exact_lane_mask) + 4u,
-                              original_exec_save_sgpr + 1u),
+        record.store_sgpr(offsetof(CausalWindow, exact_lane_mask), lane_mask) &&
+            record.store_sgpr(offsetof(CausalWindow, exact_lane_mask) + 4u, lane_mask + 1u),
         "ConSan probe could not publish its exact lane mask");
   }
 

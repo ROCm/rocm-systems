@@ -25,7 +25,7 @@ enum class AtomicEventKind : uint32_t {
 };
 
 inline constexpr uint32_t kReportMagic = 0x494f4d43u; // "CMOI" little-endian.
-inline constexpr uint32_t kReportAbiVersion = 16;
+inline constexpr uint32_t kReportAbiVersion = 17;
 struct alignas(8) ReportHeader {
   uint32_t magic = kReportMagic;
   uint32_t abi_version = kReportAbiVersion;
@@ -133,7 +133,7 @@ struct alignas(8) PublicationRecord {
   uint32_t scope = 0;
   PublicationRecordOperation operation = PublicationRecordOperation::Read;
   uint32_t state = 0;
-  uint32_t reserved = 0;
+  uint32_t lane_id = 0;
 };
 
 static_assert(sizeof(ReportHeader) == 120);

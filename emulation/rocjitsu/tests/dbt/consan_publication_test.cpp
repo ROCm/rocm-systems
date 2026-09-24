@@ -147,6 +147,27 @@ TEST(ConSanPublicationTest, OverlappingAtomicObjectsAreIncomplete) {
   std::array events{rmw(0, 10, 0, 1), rmw(1, 10, 1, 2, true, true, 0x1002)};
   EXPECT_EQ(publication_orders(point(0, 1), point(1, 20), events, true), Result::Incomplete);
 }
+TEST(ConSanPublicationTest, ProgramOrderDoesNotCrossLanesOfOneWave) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 2)};
+  auto before = point(0, 1);
+  auto after = point(1, 30);
+  EXPECT_EQ(publication_orders(before, after, events, true), Result::Ordered);
+  before.lane = 1;
+  EXPECT_EQ(publication_orders(before, after, events, true), Result::Unordered);
+  before.lane = 0;
+  after.lane = 1;
+  EXPECT_EQ(publication_orders(before, after, events, true), Result::Unordered);
+  after.lane = 0;
+  events[0].point.lane = 1;
+  EXPECT_EQ(publication_orders(before, after, events, true), Result::Unordered);
+}
+TEST(ConSanPublicationTest, TransitivePublicationRequiresSameIntermediateLane) {
+  std::array events{rmw(0, 10, 0, 1), rmw(1, 20, 1, 2), rmw(1, 30, 0, 1, true, true, 0x2000),
+                    rmw(2, 40, 1, 2, true, true, 0x2000)};
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 50), events, true), Result::Ordered);
+  events[2].point.lane = 1;
+  EXPECT_EQ(publication_orders(point(0, 1), point(2, 50), events, true), Result::Unordered);
+}
 TEST(ConSanPublicationTest, ConflictAnalysisUsesObservationProofAndFailsClosed) {
   Evidence writer;
   writer.generation = 7;
@@ -156,6 +177,7 @@ TEST(ConSanPublicationTest, ConflictAnalysisUsesObservationProofAndFailsClosed) 
   writer.entry.byte_count = 4;
   writer.entry.owner_id = 0;
   writer.publication_sequence = 1;
+  writer.exact_lane_mask = 1;
   Evidence reader = writer;
   reader.entry.kind = ShadowAccessKind::Read;
   reader.entry.owner_id = 1;
@@ -166,6 +188,15 @@ TEST(ConSanPublicationTest, ConflictAnalysisUsesObservationProofAndFailsClosed) 
   const auto ordered = analyze_conflicts(accesses, true, 8, false, &publications);
   EXPECT_EQ(ordered.conflict_count, 0);
   EXPECT_EQ(ordered.ordered_publication_pairs, 1);
+  for (const uint64_t lanes : {uint64_t{0}, uint64_t{3}}) {
+    accesses[1].exact_lane_mask = lanes;
+    const auto missing_lane = analyze_conflicts(accesses, true, 8, false, &publications);
+    EXPECT_EQ(missing_lane.conflict_count, 1);
+    EXPECT_EQ(missing_lane.incomplete_publication_pairs, 1);
+  }
+  accesses[1].exact_lane_mask = 2;
+  EXPECT_EQ(analyze_conflicts(accesses, true, 8, false, &publications).conflict_count, 1);
+  accesses[1].exact_lane_mask = 1;
   publications.events[1].acquire = false;
   EXPECT_EQ(analyze_conflicts(accesses, true, 8, false, &publications).conflict_count, 1);
   publications.events[1].acquire = true;
@@ -242,7 +273,7 @@ TEST(ConSanPublicationTest, DecodeRejectsStalePartialAndMissingObservations) {
     if (defect == 8)
       r.owner_id = 32;
     if (defect == 9)
-      r.reserved = 1;
+      r.lane_id = 64;
     if (defect == 10)
       r.byte_count = 3;
     if (defect == 11)
