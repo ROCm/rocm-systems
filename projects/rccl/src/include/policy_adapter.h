@@ -71,6 +71,13 @@ bool rcclPolicyAllToAllUsesSendRecvPath(
 
 // Resolves a P2P task's policy once and stores it on the task.
 void rcclPolicyResolveP2pTask(struct ncclComm* comm, struct ncclTaskP2p* task);
+// Runs after P2P connectors are set up and before registration or planning.
+// A policy whose connectors are not connected on every channel of its pool is
+// dropped whole, so the task runs exactly as it would without a policy. Peers
+// see the same connection state and reach the same verdict.
+void rcclPolicyValidateP2pTask(
+  struct ncclComm* comm, struct ncclTaskP2p* task, bool isSendNotRecv);
+void rcclPolicyValidateP2pTasks(struct ncclComm* comm);
 
 // One P2P work item; index 0 is receive and 1 is send.
 struct rcclP2pPolicyWorkPlan {
@@ -84,7 +91,7 @@ void rcclPolicyPlanP2pWork(
   struct rcclP2pPolicyWorkPlan* plan);
 int rcclPolicyP2pWorkConnectorIndex(
   const struct ncclComm* comm, const struct rcclP2pPolicyWorkPlan* plan, int dir,
-  int channelId, int peer, int defaultConnIndex);
+  const int* channelIds, int nChannelIds, int peer, int defaultConnIndex);
 int rcclPolicyP2pWorkProtocol(
   const struct rcclP2pPolicyWorkPlan* plan, int dir, int selectedProtocol,
   bool useLL128, bool latencyBufferAvailable);
