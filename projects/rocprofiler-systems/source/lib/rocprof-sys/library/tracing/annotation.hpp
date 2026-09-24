@@ -19,9 +19,7 @@
 
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using perfetto_event_context_t = ::perfetto::EventContext;
 
@@ -188,14 +186,11 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
 void
 add_perfetto_annotation(perfetto_event_context_t&      ctx,
                         const rocprofsys_annotation_t& _annotation);
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing
 
 #include <timemory/operations/types/annotate.hpp>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t;
 
@@ -261,5 +256,4 @@ struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
         return base_type::operator()(obj, _ctx);
     }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation

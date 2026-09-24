@@ -17,9 +17,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 /// provides an alternative thread index for when using threading::get_id() is not
 /// desirable
@@ -245,5 +243,4 @@ parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
                                                                     const std::string&,
                                                                     long);
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

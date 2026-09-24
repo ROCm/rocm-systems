@@ -37,9 +37,7 @@
 #    define NUM_ROCPROFSYS_MPIP_WRAPPERS 500
 #endif
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 //
 //--------------------------------------------------------------------------------------//
@@ -139,8 +137,8 @@ private:
 //
 //======================================================================================//
 //
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
+
 //
 //======================================================================================//
 //
