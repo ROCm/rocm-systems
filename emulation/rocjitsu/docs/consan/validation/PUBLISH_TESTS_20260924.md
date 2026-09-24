@@ -82,3 +82,21 @@ The focused rerun is recorded in `focused.log` and `focused.xml`; additional
 atomic and coverage diagnostics are in `atomic-full-events.log` and
 `coverage-debug.log`. Temporary expanded event logging was reverted before the
 full rerun. No test oracle has been relaxed.
+
+### Progress checkpoint
+
+At the user's commit checkpoint, 28,224 of 34,346 cases had completed (82%).
+Four additional ASan-only assertion failures reproduced in a serial, isolated
+rerun; the same cases passed with GCC and UBSan:
+
+- `L2CacheTest.LinkedHierarchyCachesOnlyAccessibleBytesOfIncompleteLines`
+- `LegacySubPageCacheTest.VectorAccessCachesOnlyAccessibleBytesOfIncompleteLine`
+- `LegacySubPageCacheTest.ScalarAccessCachesOnlyAccessibleBytesOfIncompleteLine`
+- `KfdIoctlTest.DbgTrapUnpublishableStopRollsBackInsteadOfStrandingTheWave`
+
+These are assertion failures, not ASan memory-error reports. Evidence is in
+`asan-assertion-rerun.log` and `asan-assertion-rerun.xml`. The normally disabled
+`SimdCoverage.InstructionTimings` test was explicitly run separately and passed
+in all three builds (`timing-opt-in.xml`); its timings are not performance data.
+Eight further gfx1201 emulator preset/selection cases also overflow publication
+buffers, in addition to the top-k cases described above.
