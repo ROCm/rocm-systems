@@ -6,85 +6,96 @@
 (function () {
   "use strict";
 
-  var nameTooltipOffset = 14;
-  var nameTooltipDelayMs = 2000;
-
-  var nameTooltip = null;
-  var nameTooltipTimer = null;
-
   function clamp(value, minimum, maximum) {
     return Math.min(Math.max(value, minimum), maximum);
   }
 
-  function ensureNameTooltip() {
-    if (!nameTooltip) {
-      nameTooltip = document.createElement("div");
-      nameTooltip.className = "roofline-name-tooltip";
-      nameTooltip.setAttribute("role", "tooltip");
-      document.body.appendChild(nameTooltip);
+  class RooflineKernelNameTooltip {
+    constructor() {
+      this.offset = 14;
+      this.delayMs = 2000;
+      this.element = null;
+      this.timer = null;
     }
-    return nameTooltip;
-  }
 
-  function positionNameTooltip(x, y) {
-    var tooltip = nameTooltip;
-    if (!tooltip) {
-      return;
-    }
-    var maxLeft = Math.max(4, window.innerWidth - tooltip.offsetWidth - 4);
-    var maxTop = Math.max(4, window.innerHeight - tooltip.offsetHeight - 4);
-    tooltip.style.left = clamp(x + nameTooltipOffset, 4, maxLeft) + "px";
-    tooltip.style.top = clamp(y + nameTooltipOffset, 4, maxTop) + "px";
-  }
-
-  function showNameTooltip(text, x, y) {
-    var tooltip = ensureNameTooltip();
-    tooltip.textContent = text;
-    tooltip.classList.add("visible");
-    positionNameTooltip(x, y);
-  }
-
-  function scheduleNameTooltip(text, getPosition) {
-    clearTimeout(nameTooltipTimer);
-    nameTooltipTimer = setTimeout(function () {
-      var position = getPosition();
-      showNameTooltip(text, position.x, position.y);
-    }, nameTooltipDelayMs);
-  }
-
-  function hideNameTooltip() {
-    clearTimeout(nameTooltipTimer);
-    if (nameTooltip) {
-      nameTooltip.classList.remove("visible");
-    }
-  }
-
-  function attach(label, action, title) {
-    var lastMousePosition = { x: 0, y: 0 };
-    label.addEventListener("mouseenter", function (event) {
-      lastMousePosition = { x: event.clientX, y: event.clientY };
-      scheduleNameTooltip(title, function () {
-        return lastMousePosition;
-      });
-    });
-    label.addEventListener("mousemove", function (event) {
-      lastMousePosition = { x: event.clientX, y: event.clientY };
-      if (nameTooltip && nameTooltip.classList.contains("visible")) {
-        positionNameTooltip(event.clientX, event.clientY);
+    createElement() {
+      if (!this.element) {
+        this.element = document.createElement("div");
+        this.element.className = "roofline-name-tooltip";
+        this.element.setAttribute("role", "tooltip");
+        document.body.appendChild(this.element);
       }
-    });
-    label.addEventListener("mouseleave", hideNameTooltip);
-    action.addEventListener("focus", function () {
-      var rect = label.getBoundingClientRect();
-      scheduleNameTooltip(title, function () {
-        return { x: rect.left, y: rect.bottom };
+      return this.element;
+    }
+
+    position(x, y) {
+      var tooltip = this.element;
+      if (!tooltip) {
+        return;
+      }
+      var maxLeft = Math.max(4, window.innerWidth - tooltip.offsetWidth - 4);
+      var maxTop = Math.max(4, window.innerHeight - tooltip.offsetHeight - 4);
+      tooltip.style.left = clamp(x + this.offset, 4, maxLeft) + "px";
+      tooltip.style.top = clamp(y + this.offset, 4, maxTop) + "px";
+    }
+
+    show(text, x, y) {
+      var tooltip = this.createElement();
+      tooltip.textContent = text;
+      tooltip.classList.add("visible");
+      this.position(x, y);
+    }
+
+    showWithDelay(text, getPosition) {
+      var self = this;
+      clearTimeout(this.timer);
+      this.timer = setTimeout(function () {
+        var position = getPosition();
+        self.show(text, position.x, position.y);
+      }, this.delayMs);
+    }
+
+    hide() {
+      clearTimeout(this.timer);
+      if (this.element) {
+        this.element.classList.remove("visible");
+      }
+    }
+
+    attach(label, action, title) {
+      var self = this;
+      var lastMousePosition = { x: 0, y: 0 };
+      label.addEventListener("mouseenter", function (event) {
+        lastMousePosition = { x: event.clientX, y: event.clientY };
+        self.showWithDelay(title, function () {
+          return lastMousePosition;
+        });
       });
-    });
-    action.addEventListener("blur", hideNameTooltip);
+      label.addEventListener("mousemove", function (event) {
+        lastMousePosition = { x: event.clientX, y: event.clientY };
+        if (self.element && self.element.classList.contains("visible")) {
+          self.position(event.clientX, event.clientY);
+        }
+      });
+      label.addEventListener("mouseleave", function () {
+        self.hide();
+      });
+      action.addEventListener("focus", function () {
+        var rect = label.getBoundingClientRect();
+        self.showWithDelay(title, function () {
+          return { x: rect.left, y: rect.bottom };
+        });
+      });
+      action.addEventListener("blur", function () {
+        self.hide();
+      });
+    }
   }
+
+  var tooltip = new RooflineKernelNameTooltip();
 
   window.RooflineKernelListTooltip = {
-    attach: attach,
-    hide: hideNameTooltip,
+    attach: tooltip.attach.bind(tooltip),
+    hide: tooltip.hide.bind(tooltip),
   };
 })();
