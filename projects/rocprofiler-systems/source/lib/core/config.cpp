@@ -2115,7 +2115,7 @@ print_banner(std::ostream& _os)
                                { "tag", ROCPROFSYS_GIT_DESCRIBE },
                                { "", ROCPROFSYS_LIBRARY_ARCH },
                                { "compiler", ROCPROFSYS_COMPILER_STRING },
-                               { "rocm", ROCPROFSYS_ROCM_VERSION_COMPAT_STRING } });
+                               { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING } });
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
