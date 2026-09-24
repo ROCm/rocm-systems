@@ -44,7 +44,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS hip-streams-per-thread
     TIMEOUT 60
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-streams-per-thread
     DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
 

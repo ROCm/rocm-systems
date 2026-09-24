@@ -31,9 +31,6 @@ find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
 set(HIPFILE_TRACE_ENVIRONMENT)
 if(DEFINED ROCM_PATH AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
     set(HIPFILE_SYSDEPS_LIBRARY_DIR "${ROCM_PATH}/lib/rocm_sysdeps/lib")
@@ -68,7 +65,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=hipfile-tracing-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=HIPFILE_API_CALLBACK HIPFILE_API_BUFFERED HIPFILE_API_EXT_BUFFERED"

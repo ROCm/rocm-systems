@@ -49,7 +49,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-cli-multipass)
 
 rocprofiler_add_integration_validate_test(
@@ -71,7 +71,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-cli-multipass-json)
 
 rocprofiler_add_integration_validate_test(
@@ -92,7 +92,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-cli-multipass-yaml)
 
 rocprofiler_add_integration_validate_test(
@@ -114,7 +114,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-cli-multipass-combined)
 
 rocprofiler_add_integration_validate_test(
@@ -138,7 +138,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "multiple --pmc flags\\) is not compatible with attach mode")
 
 # multiple --pmc with --collection-period
@@ -150,7 +150,7 @@ rocprofiler_add_integration_execute_test(
         -f csv -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "multiple --pmc flags\\) is not compatible with --collection-period")
 
@@ -164,7 +164,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "Cannot specify both --pmc and \\(input file\\) pmc_groups")
 
 # input-file multi-pass (>1 job) with --pid

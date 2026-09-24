@@ -62,7 +62,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocjpeg-demo
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocjpeg-tracing
     DISABLED "${IS_DISABLED}")
 

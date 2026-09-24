@@ -167,7 +167,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -180,7 +179,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION
         "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
@@ -195,7 +193,6 @@ rocprofiler_add_integration_execute_test(
         "ROCPROFILER_LIBRARY_CTOR=0"
         "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: equivalent ROCPROFILER_REGISTER_LIBRARY alias accepted"
     FAIL_REGULAR_EXPRESSION
@@ -210,7 +207,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${DEFAULT_TOOL_SONAME_TEST_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "Tool library path: librocprofiler-sdk-tool\\.so\\.[0-9]+"
     FAIL_REGULAR_EXPRESSION "Test FAILED")
 
@@ -224,7 +220,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "is absolute but is not visible"
     FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
 
@@ -236,7 +231,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "does not refer to a regular file"
     FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
 
@@ -248,7 +242,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "Tool library path must not be empty"
     FAIL_REGULAR_EXPRESSION "Expected ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT")
 
@@ -263,7 +256,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "Attachment test process [0-9]+ received signal 28"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -283,7 +275,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -312,7 +303,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     LABELS "attachment"
-    PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${rocattach-without-env-test-env}"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: attach failed gracefully without crashing target"
@@ -326,7 +316,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     LABELS "attachment"
-    PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${rocattach-without-env-test-env}"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: attach failed gracefully without crashing target"

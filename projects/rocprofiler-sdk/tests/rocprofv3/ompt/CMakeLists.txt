@@ -80,8 +80,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-target
     TIMEOUT 240
     LABELS "integration-tests;openmp-target"
-    ENVIRONMENT "${ompt-tracing-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-tracing-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-tracing
     DISABLED "${IS_DISABLED}")
 
@@ -115,8 +114,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-target
     TIMEOUT 100
     LABELS "integration-tests;openmp-target"
-    ENVIRONMENT "${ompt-tracing-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-tracing-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-granular-target
     DISABLED "${IS_DISABLED}")
 
@@ -148,8 +146,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-host
     TIMEOUT 100
     LABELS "integration-tests;openmp-host"
-    ENVIRONMENT "${ompt-host-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-host-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-host
     DISABLED "${IS_HOST_DISABLED}")
 
@@ -178,8 +175,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-host
     TIMEOUT 100
     LABELS "integration-tests;openmp-host"
-    ENVIRONMENT "${ompt-host-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-host-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-host-parallel
     DISABLED "${IS_HOST_DISABLED}")
 
@@ -216,8 +212,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-host
     TIMEOUT 100
     LABELS "integration-tests;openmp-host"
-    ENVIRONMENT "${ompt-host-task-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-host-task-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-host-task
     DISABLED "${IS_HOST_DISABLED}")
 
@@ -245,8 +240,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-target
     TIMEOUT 100
     LABELS "integration-tests;openmp-target"
-    ENVIRONMENT "${ompt-tracing-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-tracing-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-all
     DISABLED "${IS_DISABLED}")
 
@@ -277,8 +271,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS openmp-host
     TIMEOUT 100
     LABELS "integration-tests;openmp-host"
-    ENVIRONMENT "${ompt-host-env}"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${ompt-host-env}" "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-sys-trace
     DISABLED "${IS_HOST_DISABLED}")
 

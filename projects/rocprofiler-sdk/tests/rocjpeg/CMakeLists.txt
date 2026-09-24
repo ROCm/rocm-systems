@@ -31,9 +31,6 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocjpeg)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
 set(rocjpeg_IMAGE_DIR "${rocjpeg_ROOT_DIR}/share/rocjpeg/images")
 if(TARGET rocjpeg-demo AND NOT EXISTS "${rocjpeg_IMAGE_DIR}")
     message(
@@ -54,7 +51,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocjpeg-tracing-test.json"
     FIXTURES_SETUP rocjpeg-tracing)
 

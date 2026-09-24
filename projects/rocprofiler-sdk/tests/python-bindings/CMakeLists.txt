@@ -27,8 +27,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;python-bindings"
-    PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT
+        "${PRELOAD_ENV}"
         "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_SETUP roctx-python-bindings)
 
