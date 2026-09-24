@@ -21,8 +21,10 @@ of scope and is not rerun. Existing green rows are not part of this calibration.
 | `pytorch-rdna4-compiled-softmax` | reads | Pass | 3/8 | Below 6/8 |
 | `pytorch-rdna4-llm-topk` | all | Pass | 0/8 | Below 6/8 |
 | `pytorch-rdna4-llm-topk` | reads | Pass | 0/8 | Below 6/8 |
+| `tp2-family` | all | Pass | 0/8 | Below 6/8 |
+| `tp2-family` | reads | Pass | 0/8 | Below 6/8 |
 
-Completed 11 batches. Full results and frozen prospective specifications:
+Completed 13 batches. Full results and frozen prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-sweep-20260924`.
 
 The companion `results.json` records coverage/health/control audits and paths to raw
