@@ -25,8 +25,9 @@ of scope and is not rerun. Existing green rows are not part of this calibration.
 | `tp2-family` | reads | Pass | 0/8 | Below 6/8 |
 | `pytorch-torch-histc` | all | Pass | 0/8 | Below 6/8 |
 | `pytorch-torch-histc` | reads | Pass | 0/8 | Below 6/8 |
+| `llama-rdna4-rms-norm` | all | Pass | 8/8 | Green |
 
-Completed 15 batches. Full results and frozen prospective specifications:
+Completed 16 batches. Full results and frozen prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-sweep-20260924`.
 
 The companion `results.json` records coverage/health/control audits and paths to raw
