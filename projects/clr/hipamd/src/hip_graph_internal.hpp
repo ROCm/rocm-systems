@@ -232,6 +232,15 @@ class GraphSignalManager : public amd::ReferenceCountedObject {
   std::unordered_map<amd::Device*, std::vector<std::vector<void*>>> free_sets_;
 };
 
+//! Records one signal set borrowed by a root or child graph during a launch.
+//! The root completion callback collects these records across the hierarchy and
+//! returns each set to the GraphSignalManager that owns it.
+struct GraphLaunchSignalSet {
+  GraphSignalManager* manager;
+  amd::Device* device;
+  std::vector<void*> signals;
+};
+
 class GraphNode : public hipGraphNodeDOTAttribute {
  protected:
   /// Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -1172,8 +1181,6 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
     return hipSuccess;
   }
-  //! Recycle HW event signals borrowed for a launch. No-op on classic path.
-  virtual void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) {}
 
  protected:
   uint64_t flags_ = 0;
@@ -1243,12 +1250,6 @@ class GraphExecSegmented : public GraphExecBase {
   void EndAQLPacketUpdates() override;
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) override;
-  //! Recycle HW event signals borrowed for a launch back to the signal pool.
-  void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) override {
-    if (signalManager_ != nullptr && !signal_set.empty()) {
-      signalManager_->ReleaseSet(device, signal_set);
-    }
-  }
   // Kernel arg manager is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
@@ -1259,16 +1260,15 @@ class GraphExecSegmented : public GraphExecBase {
   hipError_t CaptureAndFormPacketsForGraph(bool reuseKernargSlots = true);
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
-  //! out_signal_set, when non-null, marks the top-level launch path: signals
-  //! are taken from the per-graph pool and returned via this out-parameter so
-  //! the completion callback can re-arm and recycle them. When null (legacy /
-  //! recursive child-graph path), signals are created locally and destroyed by
-  //! the AccumulateCommand destructor.
+  //! All signal sets borrowed by the root and child graphs are collected for
+  //! recycling by the root launch-completion callback.
   amd::Command* EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr,
-                                      std::vector<void*>* out_signal_set = nullptr);
+                                      std::vector<GraphLaunchSignalSet>* signal_sets = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
+                            const std::vector<hip::Stream*>& streams,
+                            std::vector<GraphLaunchSignalSet>* signal_sets,
                             amd::AccumulateCommand* accumulate);
 
   //! Find the number of streams required per device for packet engine mode
@@ -1411,10 +1411,6 @@ class GraphExecSegmented : public GraphExecBase {
   };
 
   SyncPlan sync_plan_;
-
-  //! Set by BuildSyncPlan's collapse pass when the barrier-ROI heuristic folds
-  //! the graph onto a single stream. Read by Init() to size stream creation.
-  bool collapsed_to_single_stream_ = false;
 
   void BuildSyncPlan();
   void RebuildAQLPacketBatch(PacketBatch& packetBatch);
