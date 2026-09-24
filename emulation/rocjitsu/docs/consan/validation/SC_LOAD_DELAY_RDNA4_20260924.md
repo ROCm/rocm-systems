@@ -22,3 +22,18 @@ a stronger historical measurement at another setting; the status table keeps the
 strongest qualified clean comparison, with a link to this complete sweep.
 
 Hook SHA-256: `359c3f22adb001e185f67026211c204e369c7d36c6744c0601915e1d59522e17`.
+
+## Conclusion
+
+Neither prospective follow-up qualifies: compiled softmax detected **3/8** and
+TP1 decode **0/8**. Both clean comparators passed, all 16 trials were admitted
+and reached, and completeness/health checks passed. The table retains the
+stronger historical observations of 4/8 and 2/8 respectively. These results do
+not establish a sensitivity gain from the new opt-in load-only delay; it remains
+an experimental control, disabled by default.
+
+The frozen specification and plan were prepared before either run. Compiled
+softmax uses the existing same-value-write allowance in both clean and fault
+runs; TP1 decode does not. The implementation, test results, broader sweep,
+and two new wave-delay qualifications are documented in the
+[main sweep report](SC_SWEEP_RDNA4_20260924.md).

@@ -60,7 +60,7 @@ SuperCollider to seven green rows. Thirteen in-scope rows remain yellow, plus
 the out-of-scope scatter-reduce row.
 
 All 28 configurations passed their matching clean runs and coverage/health
-checks. The 224 fault trials were admitted and reached; the recorded detection
+checks. The 224 main-sweep fault trials were admitted and reached; the recorded detection
 counts were independently checked against the individual trial results.
 These are sensitivity misses, not rejected runs. Existing stronger historical
 results remain visible in the status table.
@@ -74,8 +74,9 @@ wave-dependent sleep it produced **no additional green rows**. Compiled softmax
 observed 3/8 versus 1/8 with delays on both kinds of access; that small difference
 alone does not establish a reliable improvement.
 
-Two prospectively specified follow-ups use uniform sleep=1 on loads only for
-compiled softmax and TP1 decode. This gives every load replay a nonzero delay,
+Two prospectively specified follow-ups used uniform sleep=1 on loads only for
+compiled softmax and TP1 decode. They finished at **3/8** and **0/8**, respectively,
+with passing clean comparators and complete, healthy evidence. Neither qualifies. This gives every load replay a nonzero delay,
 including waves assigned zero by the wave-dependent setting. See the
 [uniform load-delay follow-up](SC_LOAD_DELAY_RDNA4_20260924.md).
 
@@ -96,3 +97,8 @@ For the two new qualifying rows, run a `supercollider` clean comparator with
 `-sweep-wave15-all` fault variant. The frozen `plan.json`, `spec.json`, and
 `run_sweep.py` preserve the full sweep, including unsuccessful settings. Use
 fresh artifact directories for reruns rather than overwriting this evidence.
+
+Including the follow-ups, this pass completed **30 matching clean runs and 240
+fault trials**. No setting produced a rejected clean run. The opt-in load-only
+delay did not add a qualification, so there is no evidence here to recommend it
+as a new default. The two green promotions use the existing wave-delay mechanism.
