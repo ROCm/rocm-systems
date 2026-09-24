@@ -837,9 +837,11 @@ def filter_forest_by_backends(
 ) -> dict[str, list[CallTreeNode]]:
     """Copy a forest, keeping ``backends`` nodes and their ancestors.
 
-    ``backends=[]`` keeps every node, including ``user``. Inclusive GPU
-    stats on each copy are recomputed from the kernels and children that
-    remain, so a dropped sibling does not stay in the parent's totals.
+    ``backends=[]`` keeps every node, including ``user``. Ancestors kept
+    only as scaffolding have their own kernels cleared, so a torch parent
+    of a triton child does not contribute GPU time or kernel lines to a
+    triton listing. Inclusive stats on each copy are recomputed from the
+    kernels and children that remain.
     """
     if not backends:
         return forest
@@ -854,6 +856,8 @@ def filter_forest_by_backends(
             return None
         copied_node = clone_call_tree_node(node)
         copied_node.children = kept_children
+        if node.backend not in backends:
+            copied_node.kernels = {}
         rollup_node_stats(copied_node)
         return copied_node
 
