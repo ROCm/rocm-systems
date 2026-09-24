@@ -22,6 +22,9 @@ TEST(ConSan, PublicationStoreCaptureRemovesMemoryClauseWithoutOrderingSequence) 
                                              // observation
       0xbf850001u, // s_clause 1: two ordinary global stores, no release/acquire
       0xee068002u, 0x00000000u, 0x00000020u, 0xee068002u, 0x00800000u, 0x00008020u,
+      // A real publication observer makes both unqualified stores relevant.
+      0xBFC60000u, 0xBFC10000u,              // LDS and global store completion
+      0xEE0D400Cu, 0x01980002u, 0x00000002u, // returning global atomic add
       build_s_endpgm(arch)};
   const auto bytes = make_rdna4_lds_code_object(words, "publication_store_clause");
   TestOptions options = test_options();
@@ -33,7 +36,7 @@ TEST(ConSan, PublicationStoreCaptureRemovesMemoryClauseWithoutOrderingSequence) 
   capacity.range_bank_count = 8;
   capacity.sync_slot_count = 10;
   capacity.watchpoint_count = 10;
-  capacity.atomic_event_count = 2;
+  capacity.atomic_event_count = 3;
   const auto plan = plan_auto_report(capacity);
   ASSERT_TRUE(plan.complete());
   options.report_buffer_address = 0x123456780000ull;
@@ -43,7 +46,7 @@ TEST(ConSan, PublicationStoreCaptureRemovesMemoryClauseWithoutOrderingSequence) 
   ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, PatchKind::TrampolineSyncMetadata, &PatchInfo::kind),
-            2u);
+            3u);
   EXPECT_EQ(
       std::ranges::count(result.patches, PatchKind::InlineScalarClauseNopRewrite, &PatchInfo::kind),
       1u);

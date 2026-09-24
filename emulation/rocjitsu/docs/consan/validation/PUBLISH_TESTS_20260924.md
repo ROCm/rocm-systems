@@ -140,3 +140,41 @@ Machine-readable results are `results.xml`, `summary.json`, `failures.json`,
 and `skips.json`. `failures.json` retains every failing test's output. All 469
 physical GPU tests per build completed under the shared lock; the 22 outside
 ConSan passed in every build.
+
+## GCC repair pass (in progress)
+
+The [other host's report](https://gist.github.com/bjacob/e96ca161cf0623a2824a96a140b18095)
+reproduces the same 21 gfx1201 emulator failures. Repairs are being completed
+with GCC before moving to UBSan and ASan. Evidence is retained locally in
+`/home/benoit/workspace/consan-validation/publish-fixes-20260924/`.
+
+- Python 3.10 Tensile launches no longer require `-P`; 37 Tensile tests pass,
+  including import-path isolation. The three torch-dependent Aorta oracle
+  tests also pass in the PyTorch venv.
+- Five legacy gfx950 physical tests now have physical labels and resource locks.
+- Publication logging is limited to kernels with publication observers. All
+  modifications in participating kernels remain subject to completeness checks.
+  This clears 24 original GCC failures across emulator and physical gfx1201.
+- HIP custom commands now track included headers through compiler depfiles.
+- Identity RMWs can acquire an existing proven release sequence; their own
+  ambiguous release is not used to establish outgoing ordering.
+- Several fixture LDS writes were invisible to compiler wait-counter insertion.
+  Compiler-visible stores and explicit LDS waits in assembly publication helpers
+  fix their missing LDS completion before release.
+- Aliased atomic input/output registers survive publication capture and spilling.
+  Mutation validation accepts the precise composed observation rewrite.
+- Qualified release stores and CAS outcomes are captured. Stores break preceding
+  release sequences; failed CAS cannot publish. Hardware owner IDs are opaque
+  equality keys, not bounded wave ordinals.
+- The many-owner fixture retains eight kernel owners and two conflicting waves,
+  with one workgroup per kernel to avoid incidental sampling competition.
+  The physical incorrect case passed 20 consecutive repetitions.
+- A matching `rocm-sdk-device-gfx950==10.2.0a20260915` wheel was obtained from
+  AMD's nightly index; only its RCCL code pack was added to this host's SDK.
+  All five RCCL tests now pass.
+
+The first complete GCC rerun (`gcc-full1.xml`) reduced failures to five.
+All five are now fixed in the focused 97-test run (`gcc-focused12.xml`),
+including paired incorrect controls, all-architecture many-owner cases,
+and host publication tests. A second complete GCC run is underway.
+Sanitizer repair and qualification remain pending until GCC is resolved.

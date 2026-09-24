@@ -18,7 +18,15 @@ constexpr uint32_t kWaveSize = 32u;
 constexpr uint32_t kWaveSize = 64u;
 #endif
 constexpr uint32_t kThreadCount = 2u * kWaveSize;
+#if defined(RJ_CONSAN_MANY_OWNER_ONLY)
+// This fixture stresses eight kernel owners and their resource plans. Keep
+// one workgroup per owner so unrelated workgroups cannot occupy different
+// first-writer sampling buckets at the two sites of the required witness.
+// The sparse-spill fixture below retains its two-workgroup selection contract.
+constexpr uint32_t kWorkgroupCount = 1u;
+#else
 constexpr uint32_t kWorkgroupCount = 2u;
+#endif
 constexpr uint32_t kManyOwnerCount = 8u;
 
 #if defined(RJ_CONSAN_SPARSE_SPILL_MODERN_LDS)
