@@ -1634,6 +1634,10 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    if (!AllRanksSupportUd()) {
+        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1710,6 +1714,10 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    if (!AllRanksSupportUd()) {
+        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
+    }
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -1945,6 +1953,10 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    if (!AllRanksSupportUd()) {
+        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
+    }
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Found " << totalDevs << " physical devices.";
@@ -2106,6 +2118,10 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    if (!AllRanksSupportUd()) {
+        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
+    }
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -2350,6 +2366,10 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    if (!AllRanksSupportUd()) {
+        GTEST_SKIP() << "adapter cannot create a UD queue pair, which port recovery needs";
+    }
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {

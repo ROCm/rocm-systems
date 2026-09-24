@@ -279,6 +279,22 @@ protected:
         return net_->getProperties(dev, props);
     }
 
+    // If the query fails, assume UD works so the test runs as before.
+    ncclIbCastDeviceCaps QueryDeviceCaps(int dev = 0) {
+        ncclIbCastDeviceCaps caps;
+        caps.hasUd = true;
+        (void)ncclIbCastGetDeviceCaps(dev, &caps);
+        return caps;
+    }
+
+    // All ranks must skip together; call before any per-connection MPI op.
+    bool AllRanksSupportUd(int dev = 0) {
+        int local = QueryDeviceCaps(dev).hasUd ? 1 : 0;
+        int all = 0;
+        MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        return all != 0;
+    }
+
     // Helper: Create listen comm
     ncclResult_t CreateListenComm(int dev, ncclNetHandle_t* handle, void** listenComm) {
         return net_->listen(initCtx_, dev, handle, listenComm);
