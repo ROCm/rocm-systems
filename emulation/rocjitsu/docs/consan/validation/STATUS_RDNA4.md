@@ -19,7 +19,7 @@ historical color changes and audits the current clean controls.
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); [latest recheck](HISTC_RDNA4_ANALYSIS.md) | 🟩 wave-dependent sleep, max=15: clean pass; fault 8/8 (bar 6/8); [experiment](SC_SENSITIVITY_RDNA4_20260924.md) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 wave-dependent sleep, max=15: clean pass; fault 7/8 (bar 6/8); [experiment](SC_SENSITIVITY_RDNA4_20260924.md) |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); [post-fix recheck](../benchmark/SANITY_GFX1201_20260924.md) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); [post-fix recheck](../benchmark/SANITY_GFX1201_20260924.md) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 2/8 (bar 6/8) |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=1: clean pass; fault 2/8 (bar 6/8) |
