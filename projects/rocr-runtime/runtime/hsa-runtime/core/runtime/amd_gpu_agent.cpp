@@ -3794,6 +3794,8 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
   pcs_data->use_pm4_fallback = !LargeBarEnabled();
 
+  if (is_gfx1250()) pcs_data->use_pm4_fallback = true;
+
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
   pcs_data->xcc_data = new per_xcc_pcs_data_t[pcs_data->num_xcc]();
@@ -4844,10 +4846,14 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
 
-  // WAIT_REG_MEM: Wait for trap handler to finish writing samples
+  // WAIT_REG_MEM: Wait for trap handler to finish writing samples.
+  // The completion counter must be polled with GREATER-OR-EQUAL, not strict EQUAL.
+  // The trap-handler counter atomics run at SYSTEM scope, so the completion value is
+  // already visible to the CP past GL2; an overshoot past the armed reference still
+  // satisfies the poll instead of hanging on a value that is never matched exactly.
   cmd_data[i++] =
       PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
+  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_GREATER_OR_EQUAL_REF |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW2_MEM_POLL_ADDR_LO(buf_written_val_addr[which_buffer]);
