@@ -1295,6 +1295,21 @@ typedef struct
     AMD_DBGAPI_HANDLE_LITERAL (amd_dbgapi_architecture_id_t, 0)
 
 /**
+ * Cluster support.
+ */
+typedef enum
+{
+  /**
+   * Clusters are not supported.
+   */
+  AMD_DBGAPI_CLUSTERS_UNSUPPORTED = 0,
+  /**
+   * Clusters are supported.
+   */
+  AMD_DBGAPI_CLUSTERS_SUPPORTED = 1,
+} amd_dbgapi_cluster_support_t;
+
+/**
  * Architecture queries that are supported by
  * ::amd_dbgapi_architecture_get_info.
  *
@@ -1352,7 +1367,18 @@ typedef enum
    * Return the register handle for the PC for the architecture.  The type of
    * this attribute is ::amd_dbgapi_register_id_t.
    */
-  AMD_DBGAPI_ARCHITECTURE_INFO_PC_REGISTER = 8
+  AMD_DBGAPI_ARCHITECTURE_INFO_PC_REGISTER = 8,
+  /**
+   * Return if this architecture supports clusters.  The type of this
+   * attribute is ::amd_dbgapi_cluster_support_t.  If the architecture
+   * does not support clusters, the cluster-related queries in
+   * ::amd_dbgapi_cluster_get_info, ::amd_dbgapi_workgroup_info_t,
+   * ::amd_dbgapi_wave_info_t, and the
+   * ::AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES query of
+   * ::amd_dbgapi_dispatch_info_t behave as if each workgroup belongs
+   * to a single-workgroup cluster.
+   */
+  AMD_DBGAPI_ARCHITECTURE_INFO_CLUSTERS_SUPPORTED = 9,
 } amd_dbgapi_architecture_info_t;
 
 /**
@@ -3197,6 +3223,23 @@ typedef struct
     AMD_DBGAPI_HANDLE_LITERAL (amd_dbgapi_dispatch_id_t, 0)
 
 /**
+ * Cluster mode.
+ *
+ * The cluster mode is enabled or disabled at the dispatch level.
+ */
+typedef enum
+{
+  /**
+   * Cluster mode is disabled.
+   */
+  AMD_DBGAPI_CLUSTER_MODE_DISABLED = 0,
+  /**
+   * Cluster mode is enabled.
+   */
+  AMD_DBGAPI_CLUSTER_MODE_ENABLED = 1,
+} amd_dbgapi_cluster_mode_t;
+
+/**
  * Dispatch queries that are supported by ::amd_dbgapi_dispatch_get_info.
  *
  * Each query specifies the type of data returned in the \p value argument to
@@ -3294,7 +3337,23 @@ typedef enum
    * not define a completion event, then ::amd_dbgapi_dispatch_get_info will
    * return ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED.
    */
-  AMD_DBGAPI_DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS = 17
+  AMD_DBGAPI_DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS = 17,
+  /**
+   * Return if the dispatch is in cluster mode.  The type of this
+   * attribute is \p uint32_t with the values defined by
+   * ::amd_dbgapi_cluster_mode_t.  If the cluster mode is disabled,
+   * the cluster-related queries in ::amd_dbgapi_cluster_get_info,
+   * ::amd_dbgapi_workgroup_info_t, ::amd_dbgapi_wave_info_t, and the
+   * ::AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES query of
+   * ::amd_dbgapi_dispatch_info_t behave as if each workgroup belongs
+   * to a single-workgroup cluster.
+   */
+  AMD_DBGAPI_DISPATCH_INFO_CLUSTER_MODE = 18,
+  /**
+   * Return the dispatch cluster size (work-items) in the X, Y, and Z
+   * dimensions.  The type of this attribute is \p uint32_t[3].
+   */
+  AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES = 19,
 } amd_dbgapi_dispatch_info_t;
 
 /**
@@ -3340,7 +3399,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_dispatch_get_info (
     amd_dbgapi_dispatch_id_t dispatch_id, amd_dbgapi_dispatch_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_54;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_82;
 
 /**
  * Dispatch barrier.

@@ -643,8 +643,10 @@ private:
       return *m_kernel_descriptor;
     }
 
+    bool in_cluster_mode () const;
     uint32_t grid_dimensions () const;
     std::array<uint32_t, 3> grid_sizes () const;
+    std::array<uint32_t, 3> cluster_sizes () const;
     std::array<uint16_t, 3> workgroup_sizes () const;
 
     void get_info (amd_dbgapi_dispatch_info_t query, size_t value_size,
@@ -742,6 +744,25 @@ aql_queue_t::aql_dispatch_t::aql_dispatch_t (
     std::visit ([] (auto &&p) { return p.kernel_object; }, m_packet));
 }
 
+bool
+aql_queue_t::aql_dispatch_t::in_cluster_mode () const
+{
+  return std::visit (
+    [] (auto &&p) -> bool
+    {
+      using T = std::decay_t<decltype (p)>;
+      if constexpr (std::is_same_v<hsa_kernel_dispatch_packet_t, T>)
+        return false;
+      else
+        {
+          /* If not in cluster mode, cluster size is 1,1,1.  */
+          return !(p.cluster_size_x == 1 && p.cluster_size_y == 1
+                   && p.cluster_size_z == 1);
+        }
+    },
+    m_packet);
+}
+
 uint32_t
 aql_queue_t::aql_dispatch_t::grid_dimensions () const
 {
@@ -771,6 +792,30 @@ aql_queue_t::aql_dispatch_t::grid_sizes () const
                  static_cast<uint32_t> (p.cluster_count_y * p.cluster_size_y
                                         * p.workgroup_size_y),
                  static_cast<uint32_t> (p.cluster_count_z * p.cluster_size_z
+                                        * p.workgroup_size_z) };
+    },
+    m_packet);
+}
+
+std::array<uint32_t, 3>
+aql_queue_t::aql_dispatch_t::cluster_sizes () const
+{
+  return std::visit (
+    [] (auto &&p) -> std::array<uint32_t, 3>
+    {
+      using T = std::decay_t<decltype (p)>;
+      if constexpr (std::is_same_v<hsa_kernel_dispatch_packet_t, T>)
+        {
+          /* Behave as if it is a single-workgroup cluster.  */
+          return { p.workgroup_size_x, p.workgroup_size_y,
+                   p.workgroup_size_z };
+        }
+      else
+        return { static_cast<uint32_t> (p.cluster_size_x
+                                        * p.workgroup_size_x),
+                 static_cast<uint32_t> (p.cluster_size_y
+                                        * p.workgroup_size_y),
+                 static_cast<uint32_t> (p.cluster_size_z
                                         * p.workgroup_size_z) };
     },
     m_packet);
@@ -900,6 +945,17 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
       utils::get_info (
         value_size, value,
         std::visit ([] (auto &&p) { return p.completion_signal; }, m_packet));
+      return;
+
+    case AMD_DBGAPI_DISPATCH_INFO_CLUSTER_MODE:
+      utils::get_info (value_size, value,
+                       (in_cluster_mode ()
+                        ? AMD_DBGAPI_CLUSTER_MODE_ENABLED
+                        : AMD_DBGAPI_CLUSTER_MODE_DISABLED));
+      return;
+
+    case AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES:
+      utils::get_info (value_size, value, cluster_sizes ());
       return;
     }
 

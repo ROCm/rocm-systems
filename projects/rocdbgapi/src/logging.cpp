@@ -386,6 +386,7 @@ to_string (amd_dbgapi_architecture_info_t architecture_info)
       CASE (ARCHITECTURE_INFO_BREAKPOINT_INSTRUCTION);
       CASE (ARCHITECTURE_INFO_BREAKPOINT_INSTRUCTION_PC_ADJUST);
       CASE (ARCHITECTURE_INFO_PC_REGISTER);
+      CASE (ARCHITECTURE_INFO_CLUSTERS_SUPPORTED);
     }
   return to_string (make_hex (architecture_info));
 }
@@ -413,6 +414,9 @@ to_string (detail::query_ref<amd_dbgapi_architecture_info_t> ref)
     case AMD_DBGAPI_ARCHITECTURE_INFO_PC_REGISTER:
       return to_string (
         make_ref (static_cast<const amd_dbgapi_register_id_t *> (value)));
+    case AMD_DBGAPI_ARCHITECTURE_INFO_CLUSTERS_SUPPORTED:
+      return to_string (
+        make_ref (static_cast<const amd_dbgapi_cluster_support_t *> (value)));
     }
   fatal_error ("unhandled amd_dbgapi_architecture_info_t query (%s)",
                to_cstring (query));
@@ -989,6 +993,8 @@ to_string (amd_dbgapi_dispatch_info_t dispatch_info)
       CASE (DISPATCH_INFO_KERNEL_DESCRIPTOR_ADDRESS);
       CASE (DISPATCH_INFO_KERNEL_CODE_ENTRY_ADDRESS);
       CASE (DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS);
+      CASE (DISPATCH_INFO_CLUSTER_MODE);
+      CASE (DISPATCH_INFO_CLUSTER_SIZES);
     }
   return to_string (make_hex (dispatch_info));
 }
@@ -1027,7 +1033,11 @@ to_string (detail::query_ref<amd_dbgapi_dispatch_info_t> ref)
     case AMD_DBGAPI_DISPATCH_INFO_WORKGROUP_SIZES:
       return to_string (make_ref (static_cast<const uint16_t *> (value), 3));
     case AMD_DBGAPI_DISPATCH_INFO_GRID_SIZES:
+    case AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES:
       return to_string (make_ref (static_cast<const uint32_t *> (value), 3));
+    case AMD_DBGAPI_DISPATCH_INFO_CLUSTER_MODE:
+      return to_string (
+        make_ref (static_cast<const amd_dbgapi_cluster_mode_t *> (value)));
     case AMD_DBGAPI_DISPATCH_INFO_PRIVATE_SEGMENT_SIZE:
     case AMD_DBGAPI_DISPATCH_INFO_GROUP_SEGMENT_SIZE:
       return to_string (

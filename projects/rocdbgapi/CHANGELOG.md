@@ -19,6 +19,15 @@ Full documentation for AMD Debugger API is available at
   of a wave, and a query named `AMD_DBGAPI_WAVE_INFO_CLUSTER` to get the
   cluster a wave's workgroup belongs to.
 
+- `amd_dbgapi_dispatch_get_info` adds a query named
+  `AMD_DBGAPI_DISPATCH_INFO_CLUSTER_MODE` to get the cluster mode of
+  a dispatch and another query named `AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES`
+  to get the cluster sizes in work-items.
+
+- `amd_dbgapi_architecture_get_info` adds a query named
+  `AMD_DBGAPI_ARCHITECTURE_INFO_CLUSTERS_SUPPORTED` to get if an
+  architecture supports clusters.
+
 ## rocm-dbgapi-0.81
 ### Changed
 - Add `process_id` argument to `amd_dbgapi_convert_address_space`.
