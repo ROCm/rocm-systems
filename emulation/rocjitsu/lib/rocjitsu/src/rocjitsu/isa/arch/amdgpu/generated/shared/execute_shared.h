@@ -11,6 +11,8 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
@@ -10589,6 +10591,30 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
+    if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {
+      if (amdgpu::dot2_src_needs_half_replication(inst.inst_.src0))
+        raw0 = (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) >> 16) * 0x10001u;
+      if (amdgpu::dot2_src_needs_half_replication(inst.inst_.src1))
+        raw1 = (amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) >> 16) * 0x10001u;
+      uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+      uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+      uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+      uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+      if (inst.inst_.neg & 1)
+        a0 ^= 0x8000u;
+      if (inst.inst_.neg & 2)
+        b0 ^= 0x8000u;
+      if (inst.inst_.neg_hi & 1)
+        a1 ^= 0x8000u;
+      if (inst.inst_.neg_hi & 2)
+        b1 ^= 0x8000u;
+      uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+      if (inst.inst_.neg & 4)
+        acc ^= 0x80000000u;
+      uint32_t result = amdgpu::gfx11_dot2_f32<true>(a0, b0, a1, b1, acc);
+      sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
+      continue;
+    }
     float a0 = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
     float a1 = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
     float b0 = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
@@ -10628,6 +10654,26 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
+    if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {
+      uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+      uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+      uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+      uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+      if (inst.inst_.neg & 1)
+        a0 ^= 0x8000u;
+      if (inst.inst_.neg & 2)
+        b0 ^= 0x8000u;
+      if (inst.inst_.neg_hi & 1)
+        a1 ^= 0x8000u;
+      if (inst.inst_.neg_hi & 2)
+        b1 ^= 0x8000u;
+      uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+      if (inst.inst_.neg & 4)
+        acc ^= 0x80000000u;
+      uint32_t result = amdgpu::gfx11_dot2_f32<false>(a0, b0, a1, b1, acc);
+      sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
+      continue;
+    }
     float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
     float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
@@ -10719,6 +10765,14 @@ inline void execute_v_dot2acc_f32_f16_vop2([[maybe_unused]] Inst &inst,
     uint32_t a = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t b = amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);
+    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+        a = util::f32_to_f16(std::bit_cast<float>(a));
+      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);
+      sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(inst, wf, inst.vdst, lane, acc);
+      continue;
+    }
     float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
@@ -10741,6 +10795,14 @@ inline void execute_v_dot2c_f32_f16_vop2([[maybe_unused]] Inst &inst,
     uint32_t a = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t b = amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);
+    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+        a = util::f32_to_f16(std::bit_cast<float>(a));
+      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);
+      sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(inst, wf, inst.vdst, lane, acc);
+      continue;
+    }
     float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
@@ -10763,6 +10825,14 @@ inline void execute_v_dot2c_f32_f16_vop3([[maybe_unused]] Inst &inst,
     uint32_t a = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t b = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);
+    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+        a = util::f32_to_f16(std::bit_cast<float>(a));
+      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);
+      sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(inst, wf, inst.vdst, lane, acc);
+      continue;
+    }
     float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));

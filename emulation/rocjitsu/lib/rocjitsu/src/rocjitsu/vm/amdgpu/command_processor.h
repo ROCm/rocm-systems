@@ -124,7 +124,7 @@ public:
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
     // maintenance does not flush the same L2 twice.
-    if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
+    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end())
       l2_caches_.push_back(l2);
   }
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
@@ -337,7 +337,7 @@ public:
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == aql_queues_.end() ? std::nullopt
@@ -351,7 +351,7 @@ public:
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == aql_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
@@ -446,7 +446,7 @@ public:
   [[nodiscard]] bool queue_debug_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     std::vector<AqlQueueRecord>::iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue != aql_queues_.end() && queue->debug_suspended;
@@ -455,7 +455,7 @@ public:
   [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     std::vector<AqlQueueRecord>::iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue != aql_queues_.end() && queue->runtime_suspended;
