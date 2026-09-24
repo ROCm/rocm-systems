@@ -265,7 +265,7 @@ ProgramInventory build_atomic_inventory(
   }
   for (ProgramSite &site : builder.program_sites()) {
     if (std::ranges::find(unowned_offsets, site.text_offset()) == unowned_offsets.end())
-      site.execution_owners.push_back({});
+      site.execution_owners.push_back({.kernel = site.container});
   }
   for (const SyncEvent &event : events) {
     if (!event.source_site.valid() || event.source_site.ordinal >= builder.program_sites().size())
@@ -325,7 +325,7 @@ ordinary_fence_inventory(FenceAssociation association = FenceAssociation::Qualif
 AtomicFencePolicyRequest atomic_request(Mode mode) {
   static constexpr std::array kWindows = {
       DirectionalAccessAvailability{
-          .owner = ProgramContainerId{},
+          .owner = ProgramContainerId{0},
           .read = true,
           .write = true,
       },
@@ -433,7 +433,7 @@ TEST(ConSanAtomicFencePolicy, RequestExclusionsRemainTypedAndDoNotCreateIntents)
 TEST(ConSanAtomicFencePolicy, ExcludesReleaseWithoutOwnerLocalWriteWindow) {
   static constexpr std::array kReadOnlyWindows = {
       DirectionalAccessAvailability{
-          .owner = ProgramContainerId{},
+          .owner = ProgramContainerId{0},
           .read = true,
           .write = false,
       },
@@ -496,10 +496,10 @@ TEST(ConSanAtomicFencePolicy, AssembledPolicyDerivesDirectionalOwnerLocalWindows
   EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ProbeIntentKind::Access,
                                &ProbeIntent::kind),
             1u);
-  EXPECT_EQ(read_only.plan().probe_intents.size(), 3u);
+  EXPECT_EQ(read_only.plan().probe_intents.size(), 1u);
   EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents,
                                ProbeIntentKind::PublicationModification, &ProbeIntent::kind),
-            1);
+            0);
   EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ProbeIntentKind::AtomicOrdering,
                                &ProbeIntent::kind),
             0);
@@ -978,8 +978,13 @@ TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) 
   const ProgramInventory inventory =
       build_atomic_inventory(std::move(events), std::move(sequences),
                              {make_global_atomic_site(), std::move(conflicting_site)});
-  const AtomicFencePolicyResult policy =
-      plan_atomic_fence_observation(inventory, atomic_request(Mode::Default));
+  auto request = atomic_request(Mode::Default);
+  const std::array windows{DirectionalAccessAvailability{
+                               .owner = inventory.kernels()[0].id, .read = true, .write = true},
+                           DirectionalAccessAvailability{
+                               .owner = inventory.kernels()[1].id, .read = true, .write = true}};
+  request.directional_access_windows = windows;
+  const auto policy = plan_atomic_fence_observation(inventory, request);
   EXPECT_FALSE(policy.valid());
   EXPECT_EQ(policy.atomic_errors, (std::vector{AtomicPolicyReason::ConflictingPhysicalAliases}));
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
@@ -1015,14 +1020,9 @@ TEST(ConSanAtomicFencePolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInve
   EXPECT_EQ(sequence_identities_after, sequence_identities_before);
 }
 
-TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizationSequences) {
-  auto atomic = make_global_atomic_site();
-  atomic.scope.reset();
-  auto store = make_global_store_site({}, 64);
-  store.scope.reset();
-  store.width_bits = 128;
-  store.mnemonic = "global_store_b128";
-  const auto inventory = build_atomic_inventory({}, {}, {atomic}, {store});
+TEST(ConSanAtomicFencePolicy, NoPublicationModificationLogWithoutPublicationObservers) {
+  const auto inventory =
+      build_atomic_inventory({}, {}, {make_global_atomic_site()}, {make_global_store_site({}, 64)});
   auto request = atomic_request(Mode::Default);
   request.publication_modifications_enabled = true;
   const std::array windows{DirectionalAccessAvailability{
@@ -1030,9 +1030,33 @@ TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizatio
   request.directional_access_windows = windows;
   const auto policy = plan_atomic_fence_observation(inventory, request);
   ASSERT_TRUE(policy.valid());
-  ASSERT_EQ(policy.plan.probe_intents.size(), 4u);
+  EXPECT_TRUE(policy.plan.probe_intents.empty());
+}
+
+TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizationSequences) {
+  auto atomic = make_global_atomic_site({}, 128);
+  atomic.scope.reset();
+  auto store = make_global_store_site({}, 64);
+  store.scope.reset();
+  store.width_bits = 128;
+  store.mnemonic = "global_store_b128";
+  const auto event = make_atomic_event(32);
+  const auto inventory = build_atomic_inventory({event}, {make_atomic_sequence(event)},
+                                                {make_global_atomic_site(), atomic}, {store});
+  auto request = atomic_request(Mode::Default);
+  request.publication_modifications_enabled = true;
+  const std::array windows{DirectionalAccessAvailability{
+      .owner = inventory.kernels().front().id, .read = true, .write = true}};
+  request.directional_access_windows = windows;
+  const auto policy = plan_atomic_fence_observation(inventory, request);
+  ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted)
+      << static_cast<int>(policy.plan.atomic_site_decisions.front().reason);
+  EXPECT_EQ(std::ranges::count(policy.plan.probe_intents, ProbeIntentKind::PublicationModification,
+                               &ProbeIntent::kind),
+            2);
   std::vector<std::string> errors;
-  const auto plans = detail::build_atomic_evidence_site_plans(
+  auto plans = detail::build_atomic_evidence_site_plans(
       inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
   ASSERT_TRUE(errors.empty());
   ASSERT_EQ(plans.size(), 2u);
@@ -1046,21 +1070,24 @@ TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizatio
     EXPECT_FALSE(source->relocates_polling_loop());
     EXPECT_FALSE(policy.plan.intent(plan.evidence_intent)->synchronization_association);
   }
-  EXPECT_TRUE(detail::resolve_atomic_evidence_source(inventory, plans[0])->is_rmw());
-  EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, plans[1])->is_rmw());
-  EXPECT_EQ(plans[1].lowering_form.data_register_count, 4u);
-  EXPECT_EQ(plans[1].lowering_form.destination_register_count, 0u);
+  EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, plans[0])->is_rmw());
+  EXPECT_TRUE(detail::resolve_atomic_evidence_source(inventory, plans[1])->is_rmw());
+  EXPECT_EQ(plans[0].lowering_form.data_register_count, 4u);
+  EXPECT_EQ(plans[0].lowering_form.destination_register_count, 0u);
+  const auto observations = detail::build_atomic_evidence_site_plans(
+      inventory, policy.plan, ProbeIntentKind::AtomicOrdering, errors);
+  plans.insert(plans.begin(), observations.begin(), observations.end());
   const auto coverage = detail::publication_modification_coverage(inventory, plans);
   EXPECT_TRUE(coverage.complete());
-  EXPECT_EQ(coverage.required, 2u);
-  EXPECT_EQ(coverage.covered, 2u);
+  EXPECT_EQ(coverage.required, 3u);
+  EXPECT_EQ(coverage.covered, 3u);
   const auto omitted = detail::publication_modification_coverage(
-      inventory, std::span<const detail::AtomicEvidenceSitePlan>(plans).first(1));
+      inventory, std::span<const detail::AtomicEvidenceSitePlan>(plans).first(2));
   EXPECT_FALSE(omitted.complete());
-  EXPECT_EQ(omitted.required, 2u);
-  EXPECT_EQ(omitted.covered, 1u);
+  EXPECT_EQ(omitted.required, 3u);
+  EXPECT_EQ(omitted.covered, 2u);
   ASSERT_EQ(omitted.missing.size(), 1u);
-  EXPECT_EQ(omitted.missing.front(), plans[1].source_site);
+  EXPECT_EQ(omitted.missing.front(), plans[2].source_site);
 
   const std::vector<std::string> excluded{"another_kernel"};
   request.kernel_name_allowlist = excluded;
@@ -1070,7 +1097,10 @@ TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizatio
 TEST(ConSanAtomicFencePolicy, PublicationCompletenessIncludesUnclassifiableStores) {
   auto store = make_global_store_site({}, 64);
   store.data_vgpr.reset();
-  const auto inventory = build_atomic_inventory({}, {}, {make_global_atomic_site()}, {store});
+  const auto event = make_atomic_event(32);
+  const auto inventory = build_atomic_inventory(
+      {event}, {make_atomic_sequence(event)},
+      {make_global_atomic_site(), make_global_atomic_site({}, 128)}, {store});
   auto request = atomic_request(Mode::Default);
   request.publication_modifications_enabled = true;
   const std::array windows{DirectionalAccessAvailability{
@@ -1078,16 +1108,21 @@ TEST(ConSanAtomicFencePolicy, PublicationCompletenessIncludesUnclassifiableStore
   request.directional_access_windows = windows;
   const auto policy = plan_atomic_fence_observation(inventory, request);
   ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted)
+      << static_cast<int>(policy.plan.atomic_site_decisions.front().reason);
   std::vector<std::string> errors;
-  const auto plans = detail::build_atomic_evidence_site_plans(
+  auto plans = detail::build_atomic_evidence_site_plans(
       inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
   ASSERT_TRUE(errors.empty());
   ASSERT_EQ(plans.size(), 1u);
+  const auto observations = detail::build_atomic_evidence_site_plans(
+      inventory, policy.plan, ProbeIntentKind::AtomicOrdering, errors);
+  plans.insert(plans.begin(), observations.begin(), observations.end());
   const auto coverage = detail::publication_modification_coverage(inventory, plans);
   EXPECT_TRUE(coverage.valid);
   EXPECT_FALSE(coverage.complete());
-  EXPECT_EQ(coverage.required, 2u);
-  EXPECT_EQ(coverage.covered, 1u);
+  EXPECT_EQ(coverage.required, 3u);
+  EXPECT_EQ(coverage.covered, 2u);
   ASSERT_EQ(coverage.missing.size(), 1u);
   EXPECT_EQ(inventory.program_site(coverage.missing.front())->text_offset(), 64u);
 }

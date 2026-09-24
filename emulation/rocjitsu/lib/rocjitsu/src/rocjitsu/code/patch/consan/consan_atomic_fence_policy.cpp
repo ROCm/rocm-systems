@@ -505,6 +505,22 @@ AtomicFencePolicyResult plan_atomic_fence_observation(const ProgramInventory &in
 
   if (request.publication_modifications_enabled && request.tracking_enabled &&
       request.mode == Mode::Default && inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    // Opaque writes only matter for dispatches that can consume a publication
+    // proof. Logging unrelated global traffic can exhaust the bounded event
+    // buffer even when all LDS ordering comes from barriers. Retain every
+    // possible interfering modification in each participating execution owner.
+    std::vector<ProgramContainerId> publication_owners;
+    for (const ProbeIntent &intent : result.plan.probe_intents) {
+      if (intent.kind != ProbeIntentKind::AtomicAddressCapture)
+        continue;
+      const ProgramSite *site = inventory.program_site(intent.source_site);
+      if (!site)
+        continue;
+      for (ProgramContainerId owner : inventory.execution_owner_kernels(*site)) {
+        if (std::ranges::find(publication_owners, owner) == publication_owners.end())
+          publication_owners.push_back(owner);
+      }
+    }
     std::vector<PhysicalSiteId> covered;
     for (const ProgramSite &source : inventory.program_sites()) {
       const auto *atomic = source.get_if<AtomicSite>();
@@ -520,7 +536,9 @@ AtomicFencePolicyResult plan_atomic_fence_observation(const ProgramInventory &in
       const bool has_access_windows = std::ranges::any_of(kernels, [&](ProgramContainerId kernel) {
         return std::ranges::any_of(request.directional_access_windows,
                                    [&](const DirectionalAccessAvailability &availability) {
-                                     return availability.owner == kernel &&
+                                     return std::ranges::find(publication_owners, kernel) !=
+                                                publication_owners.end() &&
+                                            availability.owner == kernel &&
                                             (availability.read || availability.write);
                                    });
       });
