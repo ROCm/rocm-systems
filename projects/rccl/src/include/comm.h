@@ -575,6 +575,7 @@ struct ncclKernelPlanner {
         int p2pEpoch;
         int p2pRounds[NCCL_MAX_DEV_WORK_P2P_PER_BATCH]; // which rounds are present in this batch.
         bool batchP2P; // whether this batch is eligible for batching multiple p2p operations.
+        uint16_t lastP2pPairId; // plan->p2pPairCounter of the last p2p work added.
       } wipBatch; // work-in-progress batch which will be next tail of workBatchQueue
       int nWorkBatchesP2p; // number of p2p batches for this channel.
       int nWorkBatchesBcast; // number of bcast batches for this channel.

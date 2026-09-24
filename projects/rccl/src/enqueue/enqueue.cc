@@ -245,7 +245,7 @@ static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelP
 
 static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
                                enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pRound = -1,
-                               bool batchP2P = false) {
+                               bool batchP2P = false, uint16_t p2pPairId = 0, uint16_t p2pSiblingPairId = 0) {
   ncclKernelPlanner::WipPlan::Channel* chan = &comm->planner.wipPlan.channels[channelId];
   size_t workSize = ncclDevWorkSize(workType);
   // Conditions causing us to create a new blank batch.
@@ -260,7 +260,13 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // account for all extension batches being fused together which is why
     // wipBatch.workBytes and wipBatch.nP2ps aren't reset to 0 for a new extension
     // batch further down.
-    if (workType == ncclDevWorkTypeP2p) {
+    // The single-direction halves of a split send/recv pair use disjoint
+    // connectors and must share a batch wherever their channels overlap, so
+    // they progress concurrently like the combined work they replace.
+    bool joinSibling = workType == ncclDevWorkTypeP2p && p2pSiblingPairId != 0 &&
+                       chan->wipBatch.lastP2pPairId == p2pSiblingPairId && chan->wipBatch.nP2ps == 1 &&
+                       chan->wipBatch.p2pRounds[0] == p2pRound;
+    if (workType == ncclDevWorkTypeP2p && !joinSibling) {
       newBatch |= !chan->wipBatch.batchP2P;
       newBatch |= (comm->nNodes > 2 && batchP2P) ? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) :
                                                    (chan->wipBatch.nP2ps == 1);
@@ -322,6 +328,7 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // We need to ensure that a single batch doesn't have multiple p2p's
     // of the same round since they would use the same connections.
     chan->wipBatch.p2pRounds[chan->wipBatch.nP2ps++] = p2pRound;
+    chan->wipBatch.lastP2pPairId = p2pPairId;
   }
   if (workType == ncclDevWorkTypeBcast) {
     chan->wipBatch.nBcasts += 1;
@@ -1344,7 +1351,8 @@ static bool rcclInfoBuffersOverlap(const struct ncclInfo* info, ncclFunc_t collA
 static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin, int nChannelsMax,
                                  int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
                                  void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
-                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
+                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks,
+                                 uint16_t siblingPairId = 0) {
   ncclResult_t ret = ncclSuccess;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
@@ -1670,7 +1678,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   maxConcurrent = activeP2pChannels / nChannelsMax * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
   concurrentTasks[0] = std::min(planTotalTasks[0], maxConcurrent);
   concurrentTasks[1] = std::min(planTotalTasks[1], maxConcurrent);
-  ++plan->p2pPairCounter;
+  if (++plan->p2pPairCounter == 0) ++plan->p2pPairCounter;
   for (int i = 0; i < 2; i++) {
     if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
   }
@@ -1688,7 +1696,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
       return ncclInvalidUsage;
     }
-    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
+    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P,
+                       plan->p2pPairCounter, siblingPairId);
     // Add proxy ops.
     for (int dir = 0; dir < nProxyOps; dir++) {
       // Partition steps across channels.
@@ -1815,15 +1824,30 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         comm->planner.nTasksP2pSend -= 1;
         comm->planner.nTasksP2pRecv -= 1;
       } else {
-        // Ensure room for worst case of one new batch per channel.
-        if (!ncclTestBudget(budget, plan->nWorkBatches + nChannelsMax,
-                            plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
+        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
+        // Each direction keeps its own policy channel pool so it matches the
+        // peer's opposite direction; differing pools need one work item each.
+        bool splitDirections = rcclPolicyP2pWorkSplitsDirections(comm, p2pTasks, sendRank);
+        int nWorks = splitDirections ? 2 : 1;
+        // Ensure room for worst case of one new batch per channel. Both halves
+        // of a split pair must land in the same plan.
+        if (!ncclTestBudget(budget, plan->nWorkBatches + nWorks * nChannelsMax,
+                            plan->workBytes + nWorks * sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
-        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
-        NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
-                               recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
-                               planTotalTasks, p2pTasks));
+        if (splitDirections) {
+          struct ncclTaskP2p* recvOnly[2] = {recv, nullptr};
+          struct ncclTaskP2p* sendOnly[2] = {nullptr, send};
+          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, nullptr, -1, recvRank,
+                                 recvBuff, recvBytes, 0, recv->opCount, planTotalTasks, recvOnly));
+          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
+                                 recvRank, nullptr, -1, send->opCount, 0, planTotalTasks, sendOnly,
+                                 /*siblingPairId=*/plan->p2pPairCounter));
+        } else {
+          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
+                                 recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
+                                 planTotalTasks, p2pTasks));
+        }
         if (send != nullptr) {
           ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
           // Profiler - We can overwrite groupAPI event handles here since all operations here belong to the same group

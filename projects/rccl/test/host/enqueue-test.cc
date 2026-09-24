@@ -1974,7 +1974,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_DataDerivedRulesRequireMeasur
   EXPECT_EQ(0, rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, /*p2pDisabled=*/false));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CapsOnlyUniformMappedWorkItems) {
+TEST_F(EnqueueMicrotest, P2pExecutionPolicy_EachDirectionKeepsItsOwnPool) {
   ncclComm comm{};
   char arch[] = "gfx1201";
   comm.archName = arch;
@@ -1994,14 +1994,26 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CapsOnlyUniformMappedWorkItems) {
     rcclPolicyResolveP2pTask(&comm, &send);
     rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
     EXPECT_EQ(2, plan.activeChannels) << "collType=" << static_cast<int>(collType);
+    EXPECT_FALSE(rcclPolicyP2pWorkSplitsDirections(&comm, tasks, /*sendRank=*/1));
   }
 
+  // A capped AllToAll receive paired with an ordinary Send keeps its own pool,
+  // matching the peer's AllToAll send, so the pair is planned as two items.
   recv.collAPI = ncclFuncAlltoAll;
   send.collAPI = ncclFuncSend;
   rcclPolicyResolveP2pTask(&comm, &recv);
   rcclPolicyResolveP2pTask(&comm, &send);
-  rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
+  EXPECT_EQ(2, rcclPolicyP2pTaskPool(&comm, &recv));
+  EXPECT_EQ(4, rcclPolicyP2pTaskPool(&comm, &send));
+  EXPECT_TRUE(rcclPolicyP2pWorkSplitsDirections(&comm, tasks, /*sendRank=*/1));
+  EXPECT_FALSE(rcclPolicyP2pWorkSplitsDirections(&comm, tasks, /*sendRank=*/comm.rank));
+  ncclTaskP2p* recvOnly[2] = {&recv, nullptr};
+  ncclTaskP2p* sendOnly[2] = {nullptr, &send};
+  rcclPolicyPlanP2pWork(&comm, recvOnly, /*logSelection=*/false, &plan);
+  EXPECT_EQ(2, plan.activeChannels);
+  rcclPolicyPlanP2pWork(&comm, sendOnly, /*logSelection=*/false, &plan);
   EXPECT_EQ(4, plan.activeChannels);
+  EXPECT_FALSE(rcclPolicyP2pWorkSplitsDirections(&comm, recvOnly, /*sendRank=*/1));
 }
 
 TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xMixedDirectionsKeepFullPoolAndLocalCap) {
@@ -4030,6 +4042,27 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pTwoNodesOrFewer_CapsAtOnePerBatch) {
   addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength()) << "nNodes<=2 allows only one p2p per batch";
+}
+
+TEST_F(EnqueueMicrotest, AddWorkBatch_P2pSplitSiblingJoinsItsHalfOnly) {
+  // Single-node batches hold one p2p, but the second half of a split send/recv
+  // pair must join the first half's batch so both progress concurrently.
+  BatchPlanComm bp(/*nNodes=*/1);
+  const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/3, false,
+                     /*p2pPairId=*/5);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), /*p2pRound=*/3, false,
+                     /*p2pPairId=*/6, /*p2pSiblingPairId=*/5);
+  EXPECT_EQ(1, bp.queueLength()) << "split halves share one batch";
+  EXPECT_EQ(2, bp.chan()->wipBatch.nP2ps);
+
+  // Any other work, including one naming a stale sibling, keeps the cap.
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(2 * ws), /*p2pRound=*/3, false,
+                     /*p2pPairId=*/7, /*p2pSiblingPairId=*/5);
+  EXPECT_EQ(2, bp.queueLength());
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(3 * ws), /*p2pRound=*/4, false,
+                     /*p2pPairId=*/8, /*p2pSiblingPairId=*/7);
+  EXPECT_EQ(3, bp.queueLength()) << "a sibling from another round must not join";
 }
 
 TEST_F(EnqueueMicrotest, AddWorkBatch_P2pRecordsRoundAndBatchEligibility) {

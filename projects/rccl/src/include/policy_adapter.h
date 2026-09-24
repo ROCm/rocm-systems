@@ -79,12 +79,20 @@ void rcclPolicyValidateP2pTask(
   struct ncclComm* comm, struct ncclTaskP2p* task, bool isSendNotRecv);
 void rcclPolicyValidateP2pTasks(struct ncclComm* comm);
 
+// Channel pool a P2P task's direction is mapped onto. It depends only on the
+// task, so a send and the peer's matching receive always share one pool.
+int rcclPolicyP2pTaskPool(const struct ncclComm* comm, const struct ncclTaskP2p* task);
+// True when a send/recv pair (index 0 receive, 1 send) needs different pools
+// and must be planned as two single-direction work items.
+bool rcclPolicyP2pWorkSplitsDirections(
+  const struct ncclComm* comm, struct ncclTaskP2p* const tasks[2], int sendRank);
+
 // One P2P work item; index 0 is receive and 1 is send.
 struct rcclP2pPolicyWorkPlan {
   bool matched[2];
   struct rcclCollectiveExecutionPolicy policy[2];
   int channels[2];    // Per-direction channel cap; -1 keeps runtime selection.
-  int activeChannels; // Channel pool shared by both directions.
+  int activeChannels; // Channel pool of the work item's directions.
 };
 void rcclPolicyPlanP2pWork(
   const struct ncclComm* comm, struct ncclTaskP2p* const tasks[2], bool logSelection,
