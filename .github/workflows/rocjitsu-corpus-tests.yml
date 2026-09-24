@@ -85,10 +85,10 @@ jobs:
             run_simulator_corpus: true
             # Each simulator process can use many host threads. Bound Release
             # fanout so long FPSAN cases do not starve under runner load.
-            corpus_worker_limit: 4
-            corpus_soft_timeout: 360
-            corpus_hard_timeout: 600
-            corpus_rerun_timeout: 600
+            corpus_worker_limit: 8
+            corpus_soft_timeout: 60
+            corpus_hard_timeout: 120
+            corpus_rerun_timeout: 300
             corpus_sanitizer: none
           - name: asan-ubsan
             allow_failure: true
@@ -106,10 +106,10 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
-            corpus_worker_limit: 4
+            corpus_worker_limit: 8
             corpus_soft_timeout: 240
-            corpus_hard_timeout: 480
-            corpus_rerun_timeout: 1200
+            corpus_hard_timeout: 360
+            corpus_rerun_timeout: 720
             corpus_sanitizer: clang-asan
           - name: tsan
             allow_failure: false
@@ -148,10 +148,10 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
-            corpus_worker_limit: 4
+            corpus_worker_limit: 8
             corpus_soft_timeout: 240
-            corpus_hard_timeout: 480
-            corpus_rerun_timeout: 1200
+            corpus_hard_timeout: 360
+            corpus_rerun_timeout: 720
             corpus_sanitizer: none
 
     steps:
