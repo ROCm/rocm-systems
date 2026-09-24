@@ -156,36 +156,6 @@ static inline bool isGenericTarget(const void* image) {
   return getGenericVersion(image) >= EF_AMDGPU_GENERIC_VERSION_MIN;
 }
 
-bool UnbundleBitCode(std::string_view bundled_llvm_bitcode, const std::string& isa,
-                     size_t& co_offset, size_t& co_size) {
-  std::string_view magic = bundled_llvm_bitcode.substr(0, bundle_magic_string_size);
-  if (magic.compare(CLANG_OFFLOAD_BUNDLER_MAGIC_STR)) {
-    // Handle case where the whole file is unbundled
-    return true;
-  }
-
-  const void* data = static_cast<const void*>(bundled_llvm_bitcode.data());
-  const auto obheader = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
-  const auto* desc = &obheader->desc[0];
-  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects;
-       ++idx, desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
-                  reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) + desc->bundleEntryIdSize)) {
-    const void* image =
-        reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) + desc->offset);
-    const size_t image_size = desc->size;
-    std::string bundleEntryId{desc->bundleEntryId, desc->bundleEntryIdSize};
-
-    // Check if the device id and code object id are compatible
-    unsigned genericVersion = getGenericVersion(image);
-    if (isCodeObjectCompatibleWithDevice(bundleEntryId, isa, genericVersion)) {
-      co_offset = (reinterpret_cast<uintptr_t>(image) - reinterpret_cast<uintptr_t>(data));
-      co_size = image_size;
-      break;
-    }
-  }
-  return true;
-}
-
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type) {
   comgr_helper::ComgrDataUniqueHandle data;
