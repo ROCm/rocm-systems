@@ -39,6 +39,11 @@
 #include <unordered_map>
 #include <utility>
 
+// linux/fs.h exports BLOCK_SIZE, which collides with util's arena constants.
+#pragma push_macro("BLOCK_SIZE")
+#include <linux/fs.h>
+#pragma pop_macro("BLOCK_SIZE")
+
 #if defined(__SANITIZE_ADDRESS__)
 #define RJ_GPU_MEMORY_WITH_ASAN 1
 #elif defined(__has_feature)
@@ -2262,6 +2267,30 @@ private:
     const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
     if (fd < 0)
       return PageWritability::Indeterminate;
+
+#if defined(PROCMAP_QUERY)
+    // Linux 6.11+ can query the covering VMA directly. ASan creates many VMAs;
+    // rescanning their textual table for every GPU store dominates execution.
+    // This still asks the kernel on every access, so mprotect/munmap cannot
+    // leave stale permissions in a userspace cache. Older kernels, headers,
+    // and sandbox policies retain the textual fallback below.
+    procmap_query query{};
+    query.size = sizeof(query);
+    query.query_addr = address;
+    long query_result;
+    do {
+      query_result = ::syscall(SYS_ioctl, static_cast<int>(fd), PROCMAP_QUERY, &query);
+    } while (query_result < 0 && errno == EINTR);
+    if (query_result == 0 || errno == ENOENT) {
+      const auto answer = query_result != 0 ? PageWritability::Inaccessible
+                          : query.vma_flags & PROCMAP_QUERY_VMA_WRITABLE ? PageWritability::Writable
+                          : query.vma_flags & PROCMAP_QUERY_VMA_READABLE
+                              ? PageWritability::ReadOnly
+                              : PageWritability::Inaccessible;
+      ::syscall(SYS_close, static_cast<int>(fd));
+      return answer;
+    }
+#endif
 
     // Parsed incrementally: the table can be large, and a line may straddle
     // reads, so keep any partial tail and prepend it to the next chunk.

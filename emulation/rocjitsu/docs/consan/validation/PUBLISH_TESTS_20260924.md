@@ -224,3 +224,32 @@ physical GPU tests serialized by the shared lock. UBSan has completed with
 ConSan emulator and 447 physical gfx1201 cases passed. The disabled instruction
 timing test passed separately in both sanitizer builds. ASan is still running.
 The original baseline above is retained separately from these repair results.
+
+### Follow-up ASan findings
+
+The first uninterrupted repaired run completed with 11,416 ASan passes, 18
+failures, 33 skips, and one disabled test. All 447 physical ConSan cases passed.
+The failures were 13 emulator stress timeouts and five RCCL rank timeouts.
+All 13 stress cases passed unchanged correctness checks in a four-worker
+600-second diagnostic run, taking 37–107 seconds. The three affected workload
+families now receive 300 seconds in ASan emulator configurations; physical and
+other compiler limits are unchanged.
+
+A new VM regression also found that cache validation refused valid client-owned
+memory without local mappings. `b23e53c1289` validates through the existing client
+read conduit; inaccessible client memory reports a fault instead of retrying
+forever. All 77 focused VM/cache cases pass after this fix.
+
+RCCL's longer diagnostic completed its numerical checks but exposed the main
+ASan slowdown: the daemon repeatedly parsed the entire textual VMA table to
+check write permissions. A direct, uncached
+[PROCMAP_QUERY](https://docs.kernel.org/filesystems/proc.html) query avoids that
+scan on Linux 6.11+; the existing parser remains the fallback for older headers,
+kernels, or policies that reject the ioctl. Mapping protection is still checked
+on every access.
+
+RCCL also has its own RPATH selecting the SDK's old ROCr. The isolated ASan
+overlay therefore includes a copy of `librccl.so.1` with RUNPATH, as well as HIP.
+`ldd` confirms that the RCCL client resolves HIP and ROCr through the overlay.
+The final rerun is pending these repairs; the 18 failures are not counted as
+resolved by diagnostic timeout overrides alone.
