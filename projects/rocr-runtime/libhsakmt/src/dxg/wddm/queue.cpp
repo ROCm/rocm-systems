@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
@@ -205,8 +206,16 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   std::chrono::steady_clock::time_point start_time, time;
   // Set the polling timeout value for 2 seconds
   const std::chrono::milliseconds kMaxElapsed(2000);
+  // Device enqueue bumps the write index from the GPU and rings a software doorbell that is a
+  // plain memory write, so nothing notifies us; poll instead of waiting forever. Back off while
+  // nothing moves so an idle queue does not wake up thousands of times per second.
+  constexpr std::chrono::microseconds kPollMin(50);
+  constexpr std::chrono::microseconds kPollMax(2000);
+  auto poll_interval = kPollMin;
   uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
+  // Last reported {wptr, rptr, gpu fence} so the idle log only fires on real progress.
+  uint64_t last_wait_state[3] = {~0ull, ~0ull, ~0ull};
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
@@ -236,9 +245,17 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     if (queue->GetRingWptr()->load() <= queue->GetRingRptr()->load() ||
         (sleep && queue->IsInvalidPacket())) {
       if (queue->thread_stop_) break;
-      pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", queue->ring,
-               queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
-      queue->thread_cond_.wait(lock);
+      const uint64_t state[3] = {queue->GetRingWptr()->load(), queue->GetRingRptr()->load(),
+                                 *queue->sync_addr};
+      if (memcmp(state, last_wait_state, sizeof(state))) {
+        pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 " fence=%" PRIx64 "\n", queue->ring,
+                 state[0], state[1], state[2]);
+        memcpy(last_wait_state, state, sizeof(state));
+        poll_interval = kPollMin;
+      } else {
+        poll_interval = std::min(poll_interval * 2, kPollMax);
+      }
+      queue->thread_cond_.wait_for(lock, poll_interval);
     }
   }
 
@@ -279,17 +296,18 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   bool ret = device->CreateQueue(this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
+  // Device-side enqueue rings this doorbell straight from the shader, so it must be GPU
+  // visible; the host path goes through hsaKmtQueueRingDoorbell and never reads it.
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
   create_info.domain = Wkmi::kSystem;
-  GpuMemory* gpu_mem = nullptr;
-  auto code = device->CreateGpuMemory(create_info, &gpu_mem);
+  GpuMemory* doorbell_mem = nullptr;
+  auto code = device->CreateGpuMemory(create_info, &doorbell_mem);
   assert(code == ErrorCode::Success);
-  amd_queue_mem_ = gpu_mem->GetGpuMemoryHandle();
-  amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
+  doorbell_mem_ = doorbell_mem->GetGpuMemoryHandle();
+  doorbell_ptr_ = reinterpret_cast<uint64_t*>(doorbell_mem->GpuAddress());
+  *doorbell_ptr_ = 0;
 
-  amd_queue_rocr_ =
-      (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
   // Native AQL submission bypasses the PM4 translation thread.
   if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
@@ -310,8 +328,6 @@ ComputeQueue::~ComputeQueue() {
     aql_to_pm4_thread_.join();
   }
 
-  // doorbell_signal_->Release();
-
   device->DestroyQueue(this);
 
   if (scratch_base_) {
@@ -319,8 +335,8 @@ ComputeQueue::~ComputeQueue() {
     delete scratch_gpu_mem;
   }
 
-  auto amd_queue_gpu_mem = GpuMemory::Convert(amd_queue_mem_);
-  delete amd_queue_gpu_mem;
+  auto doorbell_gpu_mem = GpuMemory::Convert(doorbell_mem_);
+  delete doorbell_gpu_mem;
 }
 
 void ComputeQueue::InitScratchSRD() {
@@ -429,47 +445,38 @@ void ComputeQueue::InitScratchSRD() {
   }
 
   // Update Queue's Scratch descriptor's property
-  amd_queue_->scratch_resource_descriptor[0] = srd0.u32All;
-  amd_queue_->scratch_resource_descriptor[1] = srd1_u32;
-  amd_queue_->scratch_resource_descriptor[2] = srd2.u32All;
-  amd_queue_->scratch_resource_descriptor[3] = srd3_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[0] = srd0.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[1] = srd1_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[2] = srd2.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[3] = srd3_u32;
 
-  // Populate flat scratch parameters in amd_queue_.
-  amd_queue_->scratch_backing_memory_location = scratch_base;
+  // Populate flat scratch parameters in amd_queue_rocr_.
+  amd_queue_rocr_->scratch_backing_memory_location = scratch_base;
 
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
   // then the effective size for a 64 lane wave is halved.
-  amd_queue_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
+  amd_queue_rocr_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
 
   if (device->Major() < 11) {
     COMPUTE_TMPRING_SIZE tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / 1024;
     tmpring_size.bits.WAVES = scratch_waves_;
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else if (device->Major() == 11) {
     COMPUTE_TMPRING_SIZE_GFX11 tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else {
     COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   }
-
-  // Update the amd_queue_rocr_
-  amd_queue_rocr_->compute_tmpring_size = amd_queue_->compute_tmpring_size;
-  amd_queue_rocr_->scratch_resource_descriptor[0] = amd_queue_->scratch_resource_descriptor[0];
-  amd_queue_rocr_->scratch_resource_descriptor[1] = amd_queue_->scratch_resource_descriptor[1];
-  amd_queue_rocr_->scratch_resource_descriptor[2] = amd_queue_->scratch_resource_descriptor[2];
-  amd_queue_rocr_->scratch_resource_descriptor[3] = amd_queue_->scratch_resource_descriptor[3];
-  amd_queue_rocr_->scratch_backing_memory_location = amd_queue_->scratch_backing_memory_location;
-  amd_queue_rocr_->scratch_wave64_lane_byte_size = amd_queue_->scratch_wave64_lane_byte_size;
 
   return;
 }
@@ -648,6 +655,9 @@ hsa_status_t ComputeQueue::Submit(void) {
   hsa_status_t ret = PreSubmit();
   if (ret) return HSA_STATUS_ERROR;
 
+  pr_debug("submit %p ib=%" PRIx64 " size=%" PRIx64 " wi=%" PRIx64 " fence=%" PRIx64 "\n", ring,
+           (uint64_t)ib_start_addr, (uint64_t)ib_size, cmdbuf_aql_frame_write_index, *sync_addr);
+
   ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, cmdbuf_aql_frame_write_index)
                 : SwsSubmit(ib_start_addr, ib_size, cmdbuf_aql_frame_write_index);
   if (ret) return HSA_STATUS_ERROR;
@@ -724,7 +734,9 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
   info.pEntry = entry;
   info.pKernelObject = kernel_object;
   info.ldsBlks = lds_blks;
-  info.pAmdQueue = amd_queue_;
+  // Must be ROCr's queue header: it is what the QUEUE_PTR SGPR exposes to the kernel, and
+  // device-side enqueue requires host and kernel to share the same header.
+  info.pAmdQueue = amd_queue_rocr_;
   info.wave32 = wave32;
   info.srd = UpdateIndexStride(info.pAmdQueue->scratch_resource_descriptor[3], wave32);
   info.pScratchBase = ScratchBase();
@@ -818,9 +830,16 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
     for (int i = 0; i < 5; i++) {
       if (!packet->dep_signal[i].handle) continue;
 
-      hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
-          packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-      assert(value == 0);
+      // Sliced wait so a reset GPU, which will never signal this dependency, is noticed.
+      constexpr uint64_t kWaitSlice = 100000000;
+      while (hsakmt_hsa_signal_wait_relaxed(packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0,
+                                            kWaitSlice, HSA_WAIT_STATE_BLOCKED) != 0) {
+        if (IsDeviceLost()) {
+          pr_err("dep[%d] %#" PRIx64 " abandoned, device lost, rptr=%" PRIx64 "\n", i,
+                 packet->dep_signal[i].handle, ring_rptr->load());
+          break;
+        }
+      }
     }
   }
 
@@ -1002,8 +1021,9 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       // 2) The cmdbuf_aql_frame_write_index reaches the end of cmdbuf
       // 3) The HW queue is empty now, submit the packet right now.
       // 4) The AQL queue is empty now, submit the packet right now.
+      // sync_point is 0 until the first submission, when the HW queue is trivially empty.
       if (!(aql_packet->completion_signal.handle) &&
-          (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) &&
+          (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) && sync_point &&
           (*sync_addr != sync_point) && (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
         return HSA_STATUS_SUCCESS;
 
@@ -1042,6 +1062,12 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
 
 hsa_status_t ComputeQueue::Process(void) {
   while (cmdbuf_aql_frame_write_index < ring_wptr->load() && !IsInvalidPacket()) {
+    if (IsDeviceLost()) {
+      pr_err("queue %p device lost, fence abandoned at wi=%" PRIx64 " rptr=%" PRIx64 "\n", ring,
+             cmdbuf_aql_frame_write_index, ring_rptr->load());
+      return HSA_STATUS_ERROR_EXCEPTION;
+    }
+
     pr_debug("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, ring_wptr->load(),
              ring_rptr->load());
 
