@@ -2058,6 +2058,7 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     [
         ('V_SWMMAC_I32_16X16X32_IU8', 'exec_swmmac_i32'),
         ('V_SWMMAC_F32_16X16X32_F16', 'exec_swmmac_f32'),
+        ('V_SWMMAC_BF16F32_16X16X64_BF16', 'exec_swmmac_bf16f32'),
     ],
 )
 @pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
@@ -2250,6 +2251,12 @@ def _generated_matrix_call(body: str, callee: str) -> str:
         ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
         ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
         ('V_SWMMAC_BF16_16X16X32_BF16', 'cdna5', 'exec_swmmac_bf16', True),
+        (
+            'V_SWMMAC_BF16F32_16X16X64_BF16',
+            'cdna5',
+            'exec_swmmac_bf16f32',
+            True,
+        ),
         # Runtime-wave sparse float result variants.
         ('V_SWMMAC_F32_16X16X32_F16', 'rdna4', 'exec_swmmac_f32', True),
         ('V_SWMMAC_F16_16X16X32_F16', 'rdna4', 'exec_swmmac_f16', True),
