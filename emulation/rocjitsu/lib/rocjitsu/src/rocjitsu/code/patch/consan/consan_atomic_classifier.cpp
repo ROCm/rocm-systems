@@ -64,10 +64,6 @@ using Reason = AtomicClassifierReason;
     return Reason::UnsupportedAddressSource;
   if (form.value_width_bits != 32u && form.value_width_bits != 64u)
     return Reason::InvalidAccessWidth;
-  if ((form.kind == AtomicLoweringFormKind::FlatVectorAddress ||
-       form.kind == AtomicLoweringFormKind::FlatScalarVectorAddress) &&
-      form.signed_byte_offset != 0)
-    return Reason::NonzeroImmediateOffset;
   if (form.compare_exchange && site.returns_old_value && !*site.returns_old_value)
     return Reason::CompareExchangeOutcomeUnavailable;
   if (form.compare_exchange && !site.destination_vgpr)
@@ -213,9 +209,11 @@ AtomicLoweringClassification classify_atomic_lowering(const AtomicSite &site, rj
   if (*site.raw_saddr == vector_only_saddr) {
     if (*site.address_vgpr >= 255u)
       return reject(Reason::UnsupportedInputWidth);
-    if (flat && *site.raw_ioffset != 0)
+    // GFX12 FLAT has a signed immediate displacement, including vector-only
+    // addresses. Earlier FLAT encodings retain their zero-offset contract.
+    if (flat && memory.instruction_word_count != 3u && *site.raw_ioffset != 0)
       return reject(Reason::UnsupportedOffset);
-    if (global && (*site.raw_ioffset < offset_min || *site.raw_ioffset > offset_max))
+    if (*site.raw_ioffset < offset_min || *site.raw_ioffset > offset_max)
       return reject(Reason::UnsupportedOffset);
     kind = flat ? AtomicLoweringFormKind::FlatVectorAddress
                 : AtomicLoweringFormKind::GlobalVectorAddress;

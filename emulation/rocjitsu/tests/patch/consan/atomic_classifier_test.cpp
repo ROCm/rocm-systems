@@ -164,6 +164,39 @@ TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) 
   }
 }
 
+TEST(ConSanAtomicClassifier, FlatDisplacementsAreMaterializedOnlyForExtendedEncodings) {
+  for (const auto &target : kAtomicTargets) {
+    SCOPED_TRACE(target.arch);
+    for (const int32_t offset : {-(1 << 23), -12, 12, (1 << 23) - 1}) {
+      SCOPED_TRACE(offset);
+      for (const bool rmw : {false, true}) {
+        auto site = exact_flat_atomic(target);
+        site.raw_ioffset = offset;
+        if (!rmw) {
+          site.mnemonic = "flat_store_b32";
+          site.returns_old_value = false;
+          site.destination_vgpr.reset();
+        }
+        const auto classification = classify_atomic_lowering(site, target.arch, rmw);
+        if (target.instruction_size != 12u) {
+          EXPECT_FALSE(classification.address_available());
+          continue;
+        }
+        ASSERT_TRUE(classification.exact_ordering_available());
+        ASSERT_TRUE(classification.form);
+        const auto plan = plan_atomic_address(*classification.form, 32u, 7u,
+                                              RegisterAllocationSource::DescriptorGrowth);
+        ASSERT_TRUE(plan.supported());
+        EXPECT_EQ(plan.kind, AtomicAddressKind::FlatGuestPairMaterialized);
+        EXPECT_EQ(plan.signed_byte_offset, offset);
+        EXPECT_EQ(plan.input_address_vgpr, 3u);
+        EXPECT_EQ(plan.result_address_vgpr, 37u);
+        EXPECT_TRUE(build_atomic_address_materialization(plan, 82u, 84u, target.arch));
+      }
+    }
+  }
+}
+
 TEST(ConSanAtomicClassifier, ExactOperationRejectionsRemainTypedAfterNormalization) {
   const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
   AtomicSite site = exact_flat_atomic(target);
@@ -182,7 +215,7 @@ TEST(ConSanAtomicClassifier, ExactOperationRejectionsRemainTypedAfterNormalizati
   EXPECT_EQ(wave_scope.exact_ordering_reason, AtomicClassifierReason::UnsupportedScope);
 
   site = exact_flat_atomic(target);
-  site.raw_ioffset = 4;
+  site.raw_ioffset = 1 << 23;
   const AtomicLoweringClassification nonzero = classify_atomic_lowering(site, target.arch);
   EXPECT_FALSE(nonzero.normalized());
   EXPECT_EQ(nonzero.normalization_reason, AtomicClassifierReason::UnsupportedOffset);

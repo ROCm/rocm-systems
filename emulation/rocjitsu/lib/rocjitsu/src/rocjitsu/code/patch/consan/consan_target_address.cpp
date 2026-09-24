@@ -159,18 +159,20 @@ AtomicAddressPlan plan_atomic_address(const AtomicLoweringForm &form, uint16_t s
   }
 
   if (form.kind == AtomicLoweringFormKind::FlatVectorAddress) {
-    const uint16_t minimum_scratch_count = returned_value_aliases_address ? 5u : 3u;
+    const bool requires_materialization =
+        form.signed_byte_offset != 0 || returned_value_aliases_address;
+    const uint16_t minimum_scratch_count = requires_materialization ? 5u : 3u;
     if (!valid_scratch(minimum_scratch_count))
       return reject(AtomicAddressSupport::UnsupportedScratchShape);
     if (!allow_post_guest_spill_operand_overlap && overlaps_operands(scratch_vgpr_count, true))
       return reject(AtomicAddressSupport::ScratchOperandAlias);
-    plan.kind = returned_value_aliases_address ? AtomicAddressKind::FlatGuestPairMaterialized
-                                               : AtomicAddressKind::FlatGuestPair;
+    plan.kind = requires_materialization ? AtomicAddressKind::FlatGuestPairMaterialized
+                                         : AtomicAddressKind::FlatGuestPair;
     plan.support = AtomicAddressSupport::Supported;
     plan.input_address_vgpr = form.address_vgpr;
     plan.input_address_vgpr_count = form.address_vgpr_count;
-    plan.signed_byte_offset = 0;
-    plan.result_address_vgpr = returned_value_aliases_address
+    plan.signed_byte_offset = form.signed_byte_offset;
+    plan.result_address_vgpr = requires_materialization
                                    ? static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u)
                                    : form.address_vgpr;
     plan.result_address_vgpr_count = 2u;
