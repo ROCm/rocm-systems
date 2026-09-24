@@ -339,7 +339,8 @@ template <bool Extended, typename Slot>
     if (slot.op == 0)
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
-        slot.op == 9 ? (slot.uses_vcc ? wf.vcc() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
+        slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask(exec) : read_wave_mask_scalar(*slot.src2, wf))
+                     : 0;
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;

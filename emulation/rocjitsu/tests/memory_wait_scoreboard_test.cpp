@@ -1506,6 +1506,61 @@ TEST(MemoryWaitExecutionTest, VopdMoveChecksOnlyItsConsumedSources) {
   }
 }
 
+TEST(MemoryWaitExecutionTest, VopdCndmaskChecksPendingVccOnlyForActiveLanes) {
+  // v_dual_cndmask_b32 v0, v4, v6 :: v_dual_mov_b32 v1, v5
+  const uint32_t words[] = {0xca500d04u, 0x00000105u};
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool active : {false, true}) {
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(static_cast<unsigned>(arch));
+        SCOPED_TRACE(active);
+        SCOPED_TRACE(waited);
+        GpuMemory memory("vopd_vcc_memory");
+        L2Cache l2("vopd_vcc_l2");
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 32;
+        config.lds_size_kb = 64;
+        auto cu = ComputeUnitCore::create("vopd_vcc_cu", config, &memory, &l2);
+        auto *wf = cu->dispatch_wf(0, 0x200, 128, 32, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(active ? 1 : 0);
+        wf->set_vcc(1);
+        cu->write_vgpr(wf->vgpr_alloc().base + 6, 0, 17);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        std::vector<MemoryWaitScoreboard::Hazard> hazards;
+        state.bind(wf->pc, &hazards, [](void *p, const auto &hazard) {
+          static_cast<decltype(hazards) *>(p)->push_back(hazard);
+        });
+        state.add({state.issue(WaitCounterKind::Ds, true),
+                   0x100,
+                   ~uint64_t{0},
+                   {RegClass::VCC, 0, 1},
+                   WaitCounterKind::Ds,
+                   0xf});
+        if (waited)
+          state.wait(WaitCounterKind::Ds, 0);
+        auto decoder = Decoder::create(arch);
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        {
+          ScopedMemoryWaitCheck check(&state);
+          auto &inst = *decoded.value();
+          inst.execute(inst, wf);
+        }
+        EXPECT_EQ(hazards.size(), active && !waited ? 1u : 0u);
+        if (active)
+          EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), 17u);
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
   for (unsigned opcode : {24u, 25u, 36u, 37u}) {
     const bool high = opcode >= 36;
