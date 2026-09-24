@@ -1420,7 +1420,7 @@
     label.className = opts.labelClass || "roofline-panel-name";
     label.textContent = opts.label;
     if (opts.title) {
-      RooflineKernelListTooltip.attach(label, action, opts.title);
+      RooflineKernelListTooltip.attachTooltipToKernelRow(action, label, opts.title);
     }
 
     action.appendChild(swatch);
