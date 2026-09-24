@@ -14,8 +14,8 @@ Testcase Scenarios :
     add another empty node with dependencies on the 3 kernel nodes and
     add 3 independent memcpy_d2h nodes with dependencies on previous empty
     node. Execute the graph and validate the results.
- 4) Launch a graph in which an independent empty node is the sole node of a
-    leaf segment and verify the launch completes.
+ 4) Launch a multi-stream graph in which an independent empty node is the sole
+    node of a leaf segment and verify the launch completes.
 */
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -230,25 +230,43 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
+static __global__ void emptyLeafTestKernel() {}
+
 /**
  * An empty node emits no packets, so when it is the only node of a leaf segment
- * there is nothing to carry that segment's completion signal. The event nodes
- * split the graph into more than one segment, which is what enables the leaf
- * synchronization that waits on those signals.
+ * there is nothing to carry that segment's completion signal.
+ *
+ * Each independent node becomes its own leaf segment, and a multi-segment graph
+ * waits on every leaf's completion signal. Graphs with little parallel work are
+ * collapsed onto a single stream (DEBUG_HIP_GRAPH_MIN_OVERLAP), which skips those
+ * signals and would hide the bug, so the two kernels are sized to many passes over
+ * the whole device to keep the graph multi-stream on any GPU.
  */
 HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_IndependentLeafNode) {
+  constexpr unsigned kPassesPerKernel = 16;
+  constexpr unsigned kThreadsPerBlock = 256;
   hipGraph_t graph{};
   hipStream_t stream{};
-  hipEvent_t event{};
   hipGraphExec_t graphExec{nullptr};
-  hipGraphNode_t emptyNode{}, eventRecordNode{}, eventWaitNode{};
+  hipGraphNode_t kernelNode1{}, kernelNode2{}, emptyNode{};
+
+  int device{}, numCUs{}, maxThreadsPerCU{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&numCUs, hipDeviceAttributeMultiprocessorCount, device));
+  HIP_CHECK(hipDeviceGetAttribute(&maxThreadsPerCU, hipDeviceAttributeMaxThreadsPerMultiProcessor,
+                                  device));
+  const size_t threads = static_cast<size_t>(kPassesPerKernel) * numCUs * maxThreadsPerCU;
+
+  hipKernelNodeParams kernelParams{};
+  kernelParams.func = reinterpret_cast<void*>(emptyLeafTestKernel);
+  kernelParams.gridDim = dim3(static_cast<unsigned>(threads / kThreadsPerBlock));
+  kernelParams.blockDim = dim3(kThreadsPerBlock);
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipEventCreate(&event));
 
-  HIP_CHECK(hipGraphAddEventRecordNode(&eventRecordNode, graph, nullptr, 0, event));
-  HIP_CHECK(hipGraphAddEventWaitNode(&eventWaitNode, graph, nullptr, 0, event));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode1, graph, nullptr, 0, &kernelParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode2, graph, nullptr, 0, &kernelParams));
   HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -256,7 +274,6 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_IndependentLeafNode) {
   HIP_CHECK(hipStreamSynchronize(stream));
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphDestroy(graph));
 }
