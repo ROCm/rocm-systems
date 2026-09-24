@@ -1976,10 +1976,9 @@ public:
         merged->dependencies.insert(merged->dependencies.end(), fence->dependencies.begin(),
                                     fence->dependencies.end());
     }
-    std::sort(merged->dependencies.begin(), merged->dependencies.end());
-    merged->dependencies.erase(
-        std::unique(merged->dependencies.begin(), merged->dependencies.end()),
-        merged->dependencies.end());
+    std::ranges::sort(merged->dependencies);
+    merged->dependencies.erase(std::ranges::unique(merged->dependencies).begin(),
+                               merged->dependencies.end());
     const int result = create_sync_file_locked(merged);
     if (result < 0)
       return result;
@@ -2565,8 +2564,8 @@ public:
         retained->handles.push_back(buffer.bo_handle);
       if (user_fence)
         retained->handles.push_back(user_fence->handle);
-      std::sort(retained->handles.begin(), retained->handles.end());
-      retained->handles.erase(std::unique(retained->handles.begin(), retained->handles.end()),
+      std::ranges::sort(retained->handles);
+      retained->handles.erase(std::ranges::unique(retained->handles).begin(),
                               retained->handles.end());
       std::shared_ptr<PrivateDrmFd> fence_fd;
       uint64_t sequence, queue_key;
@@ -2894,8 +2893,7 @@ public:
       return -ENOENT;
     GemEntry &gem = it->second;
     const GemMapping range{va_address, map_size};
-    if (std::find(gem.installed_vas.begin(), gem.installed_vas.end(), range) ==
-        gem.installed_vas.end())
+    if (std::ranges::find(gem.installed_vas, range) == gem.installed_vas.end())
       return -EINVAL; // This handle does not own the exact range — do not touch PTEs.
     if (!drv->gem_va_unmap(va_address, map_size))
       return -EINVAL;

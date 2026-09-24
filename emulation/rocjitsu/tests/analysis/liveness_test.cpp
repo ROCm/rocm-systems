@@ -6780,7 +6780,7 @@ constexpr uint32_t kVop3DppFi = 1u << 18;
 // decode when a caller supplies fewer words than the decoded length.
 std::unique_ptr<Instruction> decode_rdna4(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
@@ -7044,14 +7044,14 @@ TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
 // stays 0 (v0).
 std::unique_ptr<Instruction> decode_cdna3(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
 
 std::unique_ptr<Instruction> decode_cdna1(std::initializer_list<uint32_t> words) {
   std::array<uint32_t, 4> buf{};
-  std::copy(words.begin(), words.end(), buf.begin());
+  std::ranges::copy(words, buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }

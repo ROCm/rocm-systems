@@ -768,7 +768,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
     if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
       if (observes_memory_routing_) {
-        std::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
+        std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
@@ -1171,7 +1171,7 @@ template <bool EnableAsync>
       may_submit = false;
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
-        std::copy_n(words, first.size(), first.begin());
+        std::ranges::copy_n(words, first.size(), first.begin());
         issuer =
             admission->inspect(*decoder_, inst_cache_, *memory_, vm_access ? &*vm_access : nullptr,
                                active->pc, vmid, active->num_vgprs(), storage->has_accvgprs, first);

@@ -162,19 +162,19 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
   const auto *original_text_bytes = reinterpret_cast<const uint8_t *>(original_text->data());
   const auto *translated_text_bytes = reinterpret_cast<const uint8_t *>(translated_text->data());
   const auto original_text_end = original_text_bytes + original_text->size();
-  const auto first_text_diff =
-      std::mismatch(original_text_bytes, original_text_end, translated_text_bytes);
-  EXPECT_EQ(first_text_diff.first, original_text_end)
+  const auto translated_text_end = translated_text_bytes + translated_text->size();
+  const auto first_text_diff = std::ranges::mismatch(original_text_bytes, original_text_end,
+                                                     translated_text_bytes, translated_text_end);
+  EXPECT_EQ(first_text_diff.in1, original_text_end)
       << "The vector-add gfx950 and gfx942 codegen is byte-identical; CDNA4→CDNA3 DBT should "
          "leave the instruction stream unchanged for this kernel. First differing byte offset is "
-      << std::distance(original_text_bytes, first_text_diff.first) << ", original word 0x"
-      << std::hex
+      << std::distance(original_text_bytes, first_text_diff.in1) << ", original word 0x" << std::hex
       << reinterpret_cast<const uint32_t *>(
-             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.first) /
+             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
                                   sizeof(uint32_t)]
       << ", translated word 0x"
       << reinterpret_cast<const uint32_t *>(
-             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.first) /
+             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.in1) /
                                     sizeof(uint32_t)]
       << std::dec;
 
@@ -245,10 +245,10 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
 
   const auto translations = translator.translate_image(
       image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-  const auto translated = std::find_if(translations.begin(), translations.end(),
-                                       [kd_file_off](const auto &translation) {
-                                         return translation.descriptor_file_offset == kd_file_off;
-                                       });
+  const auto translated =
+      std::ranges::find_if(translations, [kd_file_off](const auto &translation) {
+        return translation.descriptor_file_offset == kd_file_off;
+      });
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
@@ -282,10 +282,9 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
@@ -309,10 +308,9 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreE
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->prologue_words.empty());
 
@@ -346,10 +344,9 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
 
     const auto translations =
         translate_mutable_descriptor(fixture, guest_arch, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto translated =
-        std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-          return translation.descriptor_file_offset == fixture.kd_file_off;
-        });
+    const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+      return translation.descriptor_file_offset == fixture.kd_file_off;
+    });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->accvgpr_base, 64u);
     // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
@@ -378,10 +375,9 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
   options.minimum_vgprs = 128;
   const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
                                                          ROCJITSU_CODE_ARCH_CDNA3, options);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_EQ(translated->accvgpr_base, 96u);
   EXPECT_EQ(translated->target_accvgpr_base, 128u);
@@ -421,10 +417,9 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgp
   options.minimum_vgprs = 104;
   const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
                                                          ROCJITSU_CODE_ARCH_CDNA3, options);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_EQ(translated->accvgpr_base, 96u);
   EXPECT_EQ(translated->target_accvgpr_base, 104u);
@@ -457,10 +452,9 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAll
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->supported);
   EXPECT_EQ(translated->target_vgpr_count, 256u);
@@ -481,10 +475,9 @@ TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRound
 
   const auto translations =
       translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  const auto translated =
-      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
-        return translation.descriptor_file_offset == fixture.kd_file_off;
-      });
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
   ASSERT_NE(translated, translations.end());
   EXPECT_TRUE(translated->supported);
   EXPECT_EQ(translated->guest_sgpr_count, 112u);
@@ -531,10 +524,10 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
     rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA1, host_arch);
     const auto translations = translator.translate_image(
         image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-    const auto translated = std::find_if(translations.begin(), translations.end(),
-                                         [kd_file_off](const auto &translation) {
-                                           return translation.descriptor_file_offset == kd_file_off;
-                                         });
+    const auto translated =
+        std::ranges::find_if(translations, [kd_file_off](const auto &translation) {
+          return translation.descriptor_file_offset == kd_file_off;
+        });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->target_wave_size, 64);
     EXPECT_EQ(translated->target_vgpr_count, 128u);
@@ -583,7 +576,7 @@ TEST(BinaryTranslatorE2E,
   const auto translated_infos = translated_parser.translate_image(
       {translated_image, translated_co.image_size()}, translated_text->sectionOffset(),
       translated_text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
-  const auto translated_info = std::find_if(
+  const auto translated_info = std::ranges::find_if(
       translated_infos.begin(), translated_infos.end(),
       [kd_file_off](const auto &info) { return info.descriptor_file_offset == kd_file_off; });
   ASSERT_NE(translated_info, translated_infos.end());

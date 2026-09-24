@@ -2138,7 +2138,7 @@ TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
                                                   0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47};
 
   std::array<uint8_t, KfdProcess::kPageSize> second_page{};
-  std::copy(kReadData.begin() + 8, kReadData.end(), second_page.begin());
+  std::ranges::copy(std::span(kReadData).subspan(8), second_page.begin());
   KfdProcess::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[1] = {second_page.data(), amdgpu::Mtype::RW};
@@ -2153,7 +2153,8 @@ TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
   mem.write_block(kAddr, std::span<const uint8_t>(kWriteData), kVmid);
   for (size_t i = 0; i < 8; ++i)
     EXPECT_EQ(mem.read8(kAddr + i, kVmid), kWriteData[i]);
-  EXPECT_TRUE(std::equal(kWriteData.begin() + 8, kWriteData.end(), second_page.begin()));
+  EXPECT_TRUE(std::ranges::equal(std::span(kWriteData).subspan(8),
+                                 std::span(second_page).first(kWriteData.size() - 8)));
 }
 
 TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) {
@@ -2184,14 +2185,14 @@ TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) 
       amdgpu::CopyOutcome::Complete);
   std::vector<uint8_t> gpu_result(kSize);
   mem.read_block(kGpuAddr, std::span<uint8_t>(gpu_result), kVmid);
-  EXPECT_TRUE(std::equal(source.begin(), source.end(), gpu_result.begin()));
+  EXPECT_TRUE(std::ranges::equal(source, gpu_result));
 
   std::vector<uint8_t> host_destination(kSize + 23, 0);
   auto destination = std::span<uint8_t>(host_destination).subspan(13, kSize);
   ASSERT_EQ(mem.copy_block(reinterpret_cast<uint64_t>(destination.data()), kGpuAddr,
                            destination.size(), kVmid),
             amdgpu::CopyOutcome::Complete);
-  EXPECT_TRUE(std::equal(source.begin(), source.end(), destination.begin()));
+  EXPECT_TRUE(std::ranges::equal(source, destination));
 }
 
 TEST(GpuMemoryTest, AuthorizedProcMemAccessesAnonymousTargetMemory) {
@@ -6524,7 +6525,7 @@ void expect_element_lane_masks(const amdgpu::ElementLaneMasks &masks,
                                std::initializer_list<uint64_t> expected) {
   const auto actual = masks.view();
   ASSERT_EQ(actual.size(), expected.size());
-  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+  EXPECT_TRUE(std::ranges::equal(actual, expected));
 }
 
 TEST(AmdgpuElementLaneMasksTest, UsesInlineWidthAndPreservesLargerFallback) {
@@ -6541,8 +6542,8 @@ TEST(AmdgpuElementLaneMasksTest, UsesInlineWidthAndPreservesLargerFallback) {
   masks[31] = 0x7u;
   const auto overflow_view = masks.view();
   ASSERT_EQ(overflow_view.size(), 32u);
-  EXPECT_TRUE(std::all_of(overflow_view.begin(), overflow_view.end() - 1,
-                          [](uint64_t mask) { return mask == 0x5u; }));
+  EXPECT_TRUE(std::ranges::all_of(overflow_view.first(overflow_view.size() - 1),
+                                  [](uint64_t mask) { return mask == 0x5u; }));
   EXPECT_EQ(overflow_view.back(), 0x7u);
 
   masks.assign(amdgpu::ElementLaneMasks::kInlineCapacity, 0x9u);

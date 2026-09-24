@@ -731,13 +731,13 @@ public:
       if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
         throw std::logic_error("partial-byte VgprReadRegion cannot copy raw words");
       if (!valid_ || !observed_) {
-        std::fill(destination.begin(), destination.end(), 0);
+        std::ranges::fill(destination, 0);
         return;
       }
       size_t copied = 0;
       for_each([&](std::span<const uint32_t> lanes) {
         const size_t count = std::min(lanes.size(), destination.size() - copied);
-        std::copy_n(lanes.begin(), count, destination.begin() + copied);
+        std::ranges::copy_n(lanes.begin(), count, destination.begin() + copied);
         copied += count;
       });
     }
@@ -1153,7 +1153,7 @@ public:
   void read_chunk(const Operand &op, uint32_t lane_base, uint32_t count, uint32_t *out) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1)) {
-      std::fill_n(out, count, 0u);
+      std::ranges::fill_n(out, count, 0u);
       return;
     }
     op.read_lane_chunk(wf, lane_base, count, out);

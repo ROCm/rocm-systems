@@ -76,7 +76,7 @@ public:
     cu->write_vgpr(base + 2, 0, c);
     cu->write_vgpr(base + 6, 0, 0xfacebeef);
     std::array<uint32_t, 4> padded{};
-    std::copy(words.begin(), words.end(), padded.begin());
+    std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder->decode(padded.data());
     if (decoded.failed())
       throw std::runtime_error("Instruction encoding rejected by decoder");
@@ -961,7 +961,7 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
           GetParam() == ROCJITSU_CODE_ARCH_RDNA1
               ? rdna1::build_mubuf(rdna1::kBufferAtomicFcmpswapX2Mubuf, {.glc = 1})
               : rdna2::build_mubuf(rdna2::kBufferAtomicFcmpswapX2Mubuf, {.glc = 1});
-      std::copy(wide_words.begin(), wide_words.end(), words.begin());
+      std::ranges::copy(wide_words, words.begin());
     }
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
     ASSERT_NE(instruction, nullptr);

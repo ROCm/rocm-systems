@@ -2060,11 +2060,11 @@ int SimulatedKfd::get_tile_config_ioctl(void *arg) {
   // a simulator consumer needs their packed register encodings.
   if (args->tile_config_ptr && tile_write_count > 0) {
     auto *tile_config = reinterpret_cast<uint32_t *>(args->tile_config_ptr);
-    std::fill_n(tile_config, tile_write_count, 0u);
+    std::ranges::fill_n(tile_config, tile_write_count, 0u);
   }
   if (args->macro_tile_config_ptr && macro_write_count > 0) {
     auto *macro_tile_config = reinterpret_cast<uint32_t *>(args->macro_tile_config_ptr);
-    std::fill_n(macro_tile_config, macro_write_count, 0u);
+    std::ranges::fill_n(macro_tile_config, macro_write_count, 0u);
   }
 
   args->num_tile_configs = tile_write_count;
@@ -3310,7 +3310,7 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
 }
 
 void prepare_cwsr_wave_states(std::vector<kmd::CwsrWaveState> &waves) {
-  std::sort(waves.begin(), waves.end(), [](const auto &lhs, const auto &rhs) {
+  std::ranges::sort(waves, [](const auto &lhs, const auto &rhs) {
     if (lhs.queue_packet_id != rhs.queue_packet_id)
       return lhs.queue_packet_id < rhs.queue_packet_id;
     if (lhs.group_ids != rhs.group_ids)
@@ -4155,7 +4155,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
             pread(target_mem.get(), bytes.data(), bytes.size(), static_cast<off_t>(address));
         if (bytes_read != static_cast<ssize_t>(bytes.size())) {
           read_ok = false;
-          std::fill(bytes.begin(), bytes.end(), 0);
+          std::ranges::fill(bytes, 0);
           util::Logger::warn("CWSR target read failed: addr=0x", std::hex, address,
                              " pid=", std::dec, proc->client_pid(), " rc=", bytes_read,
                              " errno=", errno);
