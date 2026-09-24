@@ -1101,6 +1101,82 @@ HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
   }
 }
 
+/* Page table update fence for the GEM_VA timeline.
+ *
+ * vm_timeline_syncobj_out and vm_timeline_point are recent additions at the
+ * tail of struct drm_amdgpu_gem_va, and drm_ioctl() zeroes whatever the running
+ * module is too old to know about. Such a module accepts the map but installs
+ * no fence, so the point is never signalled and waiting on it blocks forever.
+ * A module that does support it calls drm_syncobj_add_point() inside the GEM_VA
+ * ioctl, so the point is already submitted once the ioctl returns. One probe on
+ * the first map therefore tells the two apart for the life of the process.
+ */
+enum {
+	VM_TIMELINE_UNKNOWN = -1,
+	VM_TIMELINE_ABSENT,
+	VM_TIMELINE_PRESENT,
+};
+
+static int vm_timeline_state = VM_TIMELINE_UNKNOWN;
+
+static int probe_vm_timeline(int drm_fd, uint32_t syncobj, uint64_t point, const char *op)
+{
+	uint64_t submitted = 0;
+	int state, ret;
+
+	ret = drmSyncobjQuery2(drm_fd, &syncobj, &submitted, 1,
+				DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED);
+	if (ret) {
+		/* Stay unknown so a later map retries rather than caching a guess. */
+		pr_warn("[%s] syncobj query failed after %s: %d, skipping wait\n",
+			__func__, op, ret);
+		return VM_TIMELINE_UNKNOWN;
+	}
+
+	state = submitted >= point ? VM_TIMELINE_PRESENT : VM_TIMELINE_ABSENT;
+	if (state == VM_TIMELINE_ABSENT)
+		pr_warn("[%s] kernel installs no VM page table fence, skipping timeline waits\n",
+			__func__);
+	else
+		pr_debug("[%s] VM page table fences available\n", __func__);
+
+	__atomic_store_n(&vm_timeline_state, state, __ATOMIC_RELAXED);
+	return state;
+}
+
+static HSAKMT_STATUS wait_vm_timeline_point(int drm_fd, uint32_t syncobj,
+						uint64_t point, const char *op)
+{
+	int state, ret;
+
+	if (!syncobj)
+		return HSAKMT_STATUS_SUCCESS;
+
+	state = __atomic_load_n(&vm_timeline_state, __ATOMIC_RELAXED);
+	if (state == VM_TIMELINE_UNKNOWN)
+		state = probe_vm_timeline(drm_fd, syncobj, point, op);
+
+	if (state != VM_TIMELINE_PRESENT)
+		return HSAKMT_STATUS_SUCCESS;
+
+	struct drm_syncobj_timeline_wait tw;
+	memset(&tw, 0, sizeof(tw));
+	tw.handles = (uintptr_t)&syncobj;
+	tw.points = (uintptr_t)&point;
+	tw.count_handles = 1;
+	tw.timeout_nsec = INT64_MAX;
+	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+
+	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
+	if (ret) {
+		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after %s: %d\n",
+			__func__, op, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 						HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
 						HsaMemoryMapFlags flags, HSAuint32 NodeId)
@@ -1142,21 +1218,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 	}
 
 	// Wait on timeline syncobj to indicate page table update completion
-	struct drm_syncobj_timeline_wait tw;
-	memset(&tw, 0, sizeof(tw));
-	tw.handles = (uintptr_t)&vm_timeline_syncobj;
-	tw.points = (uintptr_t)&vm_timeline_seqnum;
-	tw.count_handles = 1;
-	tw.timeout_nsec = INT64_MAX;
-	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
-
-	if (ret) {
-		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after MAP: %d\n", __func__, ret);
-		return HSAKMT_STATUS_ERROR;
-	}
-
-	return HSAKMT_STATUS_SUCCESS;
+	return wait_vm_timeline_point(drm_fd, vm_timeline_syncobj, vm_timeline_seqnum, "MAP");
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
@@ -1200,21 +1262,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 	}
 
 	// Wait on timeline syncobj to indicate page table update completion
-	struct drm_syncobj_timeline_wait tw;
-	memset(&tw, 0, sizeof(tw));
-	tw.handles = (uintptr_t)&vm_timeline_syncobj;
-	tw.points = (uintptr_t)&vm_timeline_seqnum;
-	tw.count_handles = 1;
-	tw.timeout_nsec = INT64_MAX;
-	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
-
-	if (ret) {
-		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after UNMAP: %d\n", __func__, ret);
-		return HSAKMT_STATUS_ERROR;
-	}
-
-	return HSAKMT_STATUS_SUCCESS;
+	return wait_vm_timeline_point(drm_fd, vm_timeline_syncobj, vm_timeline_seqnum, "UNMAP");
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
