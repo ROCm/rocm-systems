@@ -46,6 +46,17 @@ function(rccl_apply_hip_compile_only _tgt)
   endforeach()
 endfunction()
 
+# Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach these
+# micro targets. Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE
+# to 1, which pulls in rocSHMEM's sdma device headers. Only meaningful in-build
+# where ENABLE_ROCSHMEM_GIN exists (standalone never defines it, so the guard is
+# simply false there).
+function(rccl_apply_rocshmem_gin_optout _tgt)
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(${_tgt} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+  endif()
+endfunction()
+
 # Checked against the original sources because hipify output does not exist yet
 # at configure time. Paths are relative to this file, so the same checks cover
 # the in-build and standalone contexts.
@@ -145,12 +156,7 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-  # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
-  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
-  # in rocSHMEM's sdma device headers.
-  if(ENABLE_ROCSHMEM_GIN)
-    target_compile_definitions(rccl-UnitTestsMicro PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-  endif()
+  rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicro)
 
   # HIP compile requirements without linking the runtime.
   rccl_apply_hip_compile_only(rccl-UnitTestsMicro)
@@ -302,9 +308,7 @@ if(BUILD_TESTS)
     ALLGATHERV_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/allgatherv_sched_tmp.cc"
     SYMMETRIC_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/symmetric_sched.cc")
 
-  if(ENABLE_ROCSHMEM_GIN)
-    target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-  endif()
+  rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicroWarpSpeed)
 
   # HIP compile requirements without linking the runtime.
   rccl_apply_hip_compile_only(rccl-UnitTestsMicroWarpSpeed)
@@ -429,9 +433,7 @@ if(BUILD_TESTS)
     # init.cc), so hipify keeps its name -- no _tmp suffix.
     target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_INIT_COMPILE_DEFS}
       INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
-    if(ENABLE_ROCSHMEM_GIN)
-      target_compile_definitions(${_init_tgt} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-    endif()
+    rccl_apply_rocshmem_gin_optout(${_init_tgt})
     if(_variant STREQUAL "-uncached")
       target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
     elseif(_variant STREQUAL "-faultinj")
@@ -565,12 +567,7 @@ if(BUILD_TESTS)
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc")
 
-  # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
-  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
-  # in rocSHMEM's sdma device headers.
-  if(ENABLE_ROCSHMEM_GIN)
-    target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-  endif()
+  rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicroEnqueue)
 
   # HIP compile requirements without linking the runtime.
   rccl_apply_hip_compile_only(rccl-UnitTestsMicroEnqueue)
@@ -656,9 +653,7 @@ if(BUILD_TESTS)
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
       SYM_KERNELS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/sym_kernels.cc")
-    if(ENABLE_ROCSHMEM_GIN)
-      target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-    endif()
+    rccl_apply_rocshmem_gin_optout(rccl-UnitTestsMicroSymKernels)
     # HIP compile requirements without linking the runtime.
     rccl_apply_hip_compile_only(rccl-UnitTestsMicroSymKernels)
     target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE ${MICRO_TEST_LINK_LIBS})
