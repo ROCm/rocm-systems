@@ -104,7 +104,8 @@ public:
       unavailable_read_call = 0;
       return amdgpu::VmAccessOutcome::Unavailable;
     }
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -120,7 +121,7 @@ public:
       unavailable_write_call = 0;
       return amdgpu::VmAccessOutcome::Unavailable;
     }
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return amdgpu::VmAccessOutcome::Complete;
   }
 
@@ -537,7 +538,7 @@ TEST(GpuVmPipeline, TranslatedScalarReadAndWriteResumeWithoutReplayingCompletedC
   store->addr = kStoreAddress;
   store->num_dwords = 2;
   store->is_load = false;
-  std::copy(kStored.begin(), kStored.end(), store->store_data);
+  std::ranges::copy(kStored, store->store_data);
   EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(store)), *context.wf),
             amdgpu::VmAccessOutcome::Complete);
   EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);

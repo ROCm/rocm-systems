@@ -219,17 +219,22 @@ void SoC::set_arch(rj_code_arch_t arch) {
   arch_ = arch;
 }
 
-std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t queue_ordinal) {
-  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(queue_ordinal);
+std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_ordinal*/) {
+  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
   if (owner == nullptr)
     return std::nullopt;
+  // The PCI discovery profile currently exposes one graphics instance even
+  // when the simulation config contains additional XCDs. A MES-created queue
+  // must therefore stay on its selected owner: fanning it out would execute on
+  // XCDs the guest did not size resources such as scratch for. The simulated
+  // KFD path enables fan-out separately when it publishes every XCD.
   return amdgpu::ComputeQueueBindingPlan{.factory = amdgpu::make_aql_queue_binding_factory(*owner),
-                                         .xcd_fanout = true};
+                                         .xcd_fanout = false};
 }
 
-std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t queue_ordinal,
+std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_ordinal*/,
                                                              amdgpu::Pm4PacketCallbacks callbacks) {
-  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(queue_ordinal);
+  amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
   if (owner == nullptr)
     return std::nullopt;
   return amdgpu::ComputeQueueBindingPlan{
@@ -307,7 +312,7 @@ void SoC::initialize() {
       } else {
         cps.push_back(nullptr);
       }
-    if (std::find(cps.begin(), cps.end(), nullptr) == cps.end()) {
+    if (std::ranges::find(cps, nullptr) == cps.end()) {
       for (uint32_t i = 0; i < cps.size(); ++i)
         cps[i]->set_xcd_topology(i, cps);
     }

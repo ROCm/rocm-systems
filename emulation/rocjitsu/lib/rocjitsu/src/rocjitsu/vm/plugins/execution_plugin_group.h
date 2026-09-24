@@ -207,6 +207,15 @@ public:
     });
   }
 
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &inst, amdgpu::Wavefront &wf) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        if (entry.observes_memory_routing)
+          entry.plugin->onAmdgpuMemoryAccessRouted(access, inst, wf);
+    });
+  }
+
   void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) {
     dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)

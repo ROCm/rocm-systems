@@ -129,6 +129,7 @@
           "name": "BarrierSession_LsaOnly", "description": "ncclBarrierSession LSA-only (2 ranks/node, non-trivial LSA team)", "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly",
           "num_ranks": 4, "num_gpus": 2
         },
+        { "name": "WindowRegister_AfterDevCommCreate", "description": "Symmetric window register after ncclDevCommCreate (AICOMRCCL-2241)", "test_filter": "GinMPIDeviceTests.WindowRegister_AfterDevCommCreate" },
         {
           "name": "BarrierSession_Hybrid", "description": "ncclBarrierSession hybrid inner-LSA + outer rail-GIN (2 ranks/node)", "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
           "num_ranks": 4, "num_gpus": 2
@@ -185,7 +186,14 @@
         {
           "name": "ReduceScatter_Symmetric_Avg", "description": "Symmetric-memory ReduceScatter avg (2 ranks/node)", "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric_Avg",
           "num_ranks": 4, "num_gpus": 2
-        }
+        },
+        { "name": "BarrierFence_PutMakesInboundPutVisible", "description": "Put-fenced barrier makes inbound put visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutMakesInboundPutVisible_SingleNode" },
+        { "name": "BarrierFence_PutIncludesSelfPut", "description": "Put-fenced barrier covers self-put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutIncludesSelfPut_SingleNode" },
+        { "name": "BarrierFence_GetMakesLocalGetVisible", "description": "Get-fenced barrier makes local get visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_GetMakesLocalGetVisible_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesGet", "description": "Default fence covers local get (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesGet_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesPut", "description": "Default fence covers inbound put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsPut", "description": "Put-fenced AllContexts barrier (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" }
       ]
     },
     "gin_devmpi_gda": {
@@ -204,6 +212,7 @@
       },
       "tests": [
         { "name": "BarrierSession_LsaOnly",      "num_gpus": 4 },
+        { "name": "WindowRegister_AfterDevCommCreate" },
         { "name": "BarrierSession_Hybrid",       "num_gpus": 4 },
         { "name": "BarrierPools_NoCrossTalk",    "num_gpus": 4 },
         { "name": "AlltoallHybrid_Reference",    "num_gpus": 4 },

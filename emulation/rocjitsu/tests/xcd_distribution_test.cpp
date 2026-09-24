@@ -44,6 +44,7 @@ RJ_DIAGNOSTIC_POP
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -54,14 +55,17 @@ namespace {
 using namespace rocjitsu;
 
 const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CDNA5_CONFIG_PATH = test::config_path("gfx1250_mi455x.json");
 
 constexpr uint32_t kTotalXcds = 8;
 constexpr uint32_t kCusPerXcd = 36; // 4 SEs x 9 CUs
 constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint64_t kKdAddr = 0x10000;
 constexpr uint64_t kScratchKdAddr = 0x20000;
+constexpr uint64_t kCdna5ScratchKdAddr = 0x30000;
 constexpr uint64_t kDefaultScratchPool = 0x1'0000'0000ULL;
 constexpr uint32_t kWavefrontSize = 64;
+constexpr uint32_t kCdna5WavefrontSize = 32;
 
 /// How many worker threads the fixture's engine runs on.
 enum class Threading {
@@ -113,6 +117,34 @@ struct XcdDistributionFixture {
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
     memory->write32(kKdAddr + sizeof(kernel_descriptor_t),
                     build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  }
+};
+
+/// A loaded gfx1250 SoC with a private-segment kernel used to verify that the
+/// physical XCD topology also defines the device-wide scratch layout.
+struct Cdna5ScratchTopologyFixture {
+  config::LoadedConfig loaded;
+  std::unique_ptr<simdojo::SimulationEngine> engine;
+  SoC *soc = nullptr;
+  amdgpu::GpuMemory *memory = nullptr;
+
+  Cdna5ScratchTopologyFixture()
+      : loaded(config::load_config(CDNA5_CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+    soc = loaded.soc();
+    memory = loaded.memory();
+    loaded.engine_config.num_threads = 1;
+    engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
+    engine->topology().set_root(loaded.take_root());
+    loaded.wire_links(engine->topology());
+    engine->create();
+
+    using namespace rocr::llvm::amdhsa;
+    kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+    kd.private_segment_fixed_size = 64;
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5ScratchKdAddr);
+    memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t),
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
   }
 };
 
@@ -179,8 +211,8 @@ public:
     std::vector<uint32_t> ids;
     for (const auto &[id, step] : first_dispatched_)
       ids.push_back(id);
-    std::sort(ids.begin(), ids.end(),
-              [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
+    std::ranges::sort(
+        ids, [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
     return ids;
   }
 
@@ -278,6 +310,24 @@ private:
   mutable std::mutex mutex_;
   bool retained_ = true;
   uint32_t workgroups_ = 0;
+};
+
+/// Records the scratch base assigned to the first wave of each workgroup.
+class ScratchAddressPlugin : public ExecutionPlugin {
+public:
+  ScratchAddressPlugin() : ExecutionPlugin("xcd-scratch-address") {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    ASSERT_EQ(waves.size(), 1u);
+    if (!waves.empty())
+      scratch_bases_[wg_id] = waves.front()->scratch_base();
+  }
+
+  const std::map<uint32_t, uint64_t> &scratch_bases() const { return scratch_bases_; }
+
+private:
+  std::map<uint32_t, uint64_t> scratch_bases_;
 };
 
 /// Identity translator and transport adapter used only to put the ordinary
@@ -1419,6 +1469,51 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
 
   EXPECT_EQ(requests.size(), 1u)
       << "the shared GPUVM mapping should prevent per-XCD scratch reprovisioning";
+}
+
+// Every CP learns its fan-out rank from SoC::initialize(). Scratch addressing
+// must consume that same immutable topology: keeping a separate frontend-owned
+// XCC identity lets PCI/MES queues leave every CP at the default XCC zero and
+// aliases corresponding wave slots across all eight XCDs.
+TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
+  Cdna5ScratchTopologyFixture fx;
+  ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
+
+  auto plugin = std::make_unique<ScratchAddressPlugin>();
+  auto *addresses = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+  ASSERT_NE(cp, nullptr);
+  auto queue = test::make_fanout_queue(fx.memory, cp);
+  queue->dispatch(kCdna5ScratchKdAddr, kTotalXcds * kCdna5WavefrontSize, kCdna5WavefrontSize);
+
+  fx.engine->run();
+
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), kTotalXcds);
+  for (uint32_t xcc = 0; xcc < kTotalXcds; ++xcc)
+    EXPECT_EQ(counts[xcc], 1u) << "xcd" << xcc;
+
+  ASSERT_EQ(addresses->scratch_bases().size(), kTotalXcds);
+  const auto *xcd = fx.soc->xcd(0);
+  ASSERT_EQ(xcd->num_shader_engines(), 2u);
+  const auto *se = xcd->shader_engine(0);
+  ASSERT_EQ(se->num_compute_units(), 16u);
+  constexpr uint64_t kPerWave = 64 * kCdna5WavefrontSize;
+  const uint64_t waves_per_se =
+      static_cast<uint64_t>(se->num_compute_units()) * se->compute_unit(0)->num_wf_slots();
+  const uint64_t xcc_stride = xcd->num_shader_engines() * waves_per_se * kPerWave;
+  std::set<uint64_t> unique_bases;
+  for (const auto &[workgroup, scratch_base] : addresses->scratch_bases()) {
+    EXPECT_EQ(scratch_base, kDefaultScratchPool + workgroup * xcc_stride)
+        << "workgroup " << workgroup << " must use its physical XCC scratch offset";
+    unique_bases.insert(scratch_base);
+  }
+  EXPECT_EQ(unique_bases.size(), kTotalXcds)
+      << "corresponding wave slots on different XCDs shared private memory";
 }
 
 TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {

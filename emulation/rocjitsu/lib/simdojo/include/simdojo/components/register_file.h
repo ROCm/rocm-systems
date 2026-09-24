@@ -37,7 +37,7 @@ public:
   void init(uint32_t count) { data_.assign(count, RegType{}); }
 
   void reset(uint32_t base, uint32_t count) {
-    std::fill(data_.begin() + base, data_.begin() + base + count, RegType{});
+    std::ranges::fill(data_.begin() + base, data_.begin() + base + count, RegType{});
   }
 
   RegType &operator[](uint32_t idx) { return data_[idx]; }
@@ -131,9 +131,9 @@ public:
       if (clear_begin == chunk_base && clear_end == valid_chunk_end) {
         chunk.reset();
       } else {
-        std::fill(chunk->registers.begin() + static_cast<ptrdiff_t>(clear_begin - chunk_base),
-                  chunk->registers.begin() + static_cast<ptrdiff_t>(clear_end - chunk_base),
-                  RegType{});
+        std::ranges::fill(
+            chunk->registers.begin() + static_cast<ptrdiff_t>(clear_begin - chunk_base),
+            chunk->registers.begin() + static_cast<ptrdiff_t>(clear_end - chunk_base), RegType{});
       }
     }
   }
@@ -147,8 +147,8 @@ public:
   /// @brief Count chunks with materialized register storage.
   /// @returns Number of currently materialized chunks.
   [[nodiscard]] size_t materialized_chunk_count() const noexcept {
-    return static_cast<size_t>(std::count_if(chunks_.begin(), chunks_.end(),
-                                             [](const auto &chunk) { return chunk != nullptr; }));
+    return static_cast<size_t>(
+        std::ranges::count_if(chunks_, [](const auto &chunk) { return chunk != nullptr; }));
   }
 
   RegType &operator[](uint32_t idx) {
@@ -241,8 +241,7 @@ public:
         base, source.size(),
         [&](size_t chunk_idx, size_t chunk_offset, size_t run_size, size_t source_offset) {
           const auto run = source.subspan(source_offset, run_size);
-          if (std::all_of(run.begin(), run.end(),
-                          [](std::byte value) { return value == std::byte{}; }))
+          if (std::ranges::all_of(run, [](std::byte value) { return value == std::byte{}; }))
             return;
           auto &chunk = chunks_[chunk_idx];
           if (!chunk)
@@ -371,8 +370,8 @@ public:
       // whole-file reset so their boundary chunks can also be released.
       const bool independently_reclaimable = data_.can_reclaim_independently(regs_per_block_);
       const bool all_blocks_free =
-          !independently_reclaimable && std::all_of(free_blocks_.begin(), free_blocks_.end(),
-                                                    [](bool is_free) { return is_free; });
+          !independently_reclaimable &&
+          std::ranges::all_of(free_blocks_, [](bool is_free) { return is_free; });
       if (all_blocks_free) {
         data_.reset(0, total_regs_);
       } else {
