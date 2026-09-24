@@ -1690,6 +1690,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
  * \brief Calculate exponential 2 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp2(const __hip_bfloat16 h) {
+#if __has_builtin(__builtin_amdgcn_exp2_bf16)
+  // V_EXP_BF16 computes 2^x with bf16 in and out, so this is the whole function with no scaling.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_exp2_bf16))
+    return __hip_bfloat16(__builtin_amdgcn_exp2_bf16(static_cast<__bf16>(h)));
+#endif
   // FIXME: Manual promotion to float unnecessary
   return __float2bfloat16(__builtin_elementwise_exp2(__bfloat162float(h)));
 }
@@ -1707,6 +1712,15 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hfloor(const __hip_bfloat16 h) {
  * \brief Calculate natural log of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog(const __hip_bfloat16 h) {
+#if __has_builtin(__builtin_amdgcn_log_bf16)
+  // There is no natural-log instruction, so scale the base-2 one. Scaling the *result* only costs
+  // one extra rounding, which keeps this within 1 ULP of bf16 over the whole domain. (Scaling an
+  // argument instead, as exp(x) = exp2(x * log2e) would need, is not accurate enough to do here.)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_log_bf16))
+    return __float2bfloat16(
+        __bfloat162float(__hip_bfloat16(__builtin_amdgcn_log_bf16(static_cast<__bf16>(h)))) *
+        0x1.62e43p-1f);  // ln(2)
+#endif
   return __float2bfloat16(__builtin_elementwise_log(__bfloat162float(h)));
 }
 
@@ -1723,6 +1737,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog10(const __hip_bfloat16 h) {
  * \brief Calculate log 2 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog2(const __hip_bfloat16 h) {
+#if __has_builtin(__builtin_amdgcn_log_bf16)
+  // V_LOG_BF16 is a base-2 logarithm, like v_log_f32, so it is hlog2 rather than hlog.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_log_bf16))
+    return __hip_bfloat16(__builtin_amdgcn_log_bf16(static_cast<__bf16>(h)));
+#endif
   return __float2bfloat16(__builtin_elementwise_log2(__bfloat162float(h)));
 }
 
@@ -1747,6 +1766,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hrint(const __hip_bfloat16 h) {
  * \brief Reciprocal square root
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hrsqrt(const __hip_bfloat16 h) {
+#if __has_builtin(__builtin_amdgcn_rsq_bf16)
+  // V_RSQ_BF16 computes 1/sqrt(x) with bf16 in and out, so this is the whole function.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_rsq_bf16))
+    return __hip_bfloat16(__builtin_amdgcn_rsq_bf16(static_cast<__bf16>(h)));
+#endif
   return __float2bfloat16(__ocml_rsqrt_f32(__bfloat162float(h)));
 }
 
@@ -1763,6 +1787,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hsin(const __hip_bfloat16 h) {
  * \brief Calculate sqrt of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hsqrt(const __hip_bfloat16 h) {
+#if __has_builtin(__builtin_amdgcn_sqrt_bf16)
+  // V_SQRT_BF16 computes sqrt(x) with bf16 in and out, so this is the whole function.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_sqrt_bf16))
+    return __hip_bfloat16(__builtin_amdgcn_sqrt_bf16(static_cast<__bf16>(h)));
+#endif
   // FIXME: Just directly use elementwise sqrt on the bfloat value
   // and don't promote
   return __float2bfloat16(__builtin_elementwise_sqrt(__bfloat162float(h)));
