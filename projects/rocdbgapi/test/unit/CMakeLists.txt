@@ -24,3 +24,8 @@
 # GPU.  Anything that touches the kernel driver belongs under
 # ../feature/.
 
+# Toolchain smoke test.  Confirms that GoogleTest is wired up on the
+# host platform.  Uses the add_dbgapi_unit_test() helper which applies
+# the standard labels ("dbgapi", "unit", OS label), C++17 settings,
+# GTest/GMock linkage, and CTest working directory.
+add_dbgapi_unit_test(dbgapi_smoke_test SOURCES smoke_test.cpp)
