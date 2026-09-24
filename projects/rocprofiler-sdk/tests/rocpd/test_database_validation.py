@@ -485,6 +485,36 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                 [(1, self.GUIDS[0], f"value-{self.UUIDS[0]}")],
             )
 
+    def test_non_utf8_text_values_are_copied_verbatim(self):
+        # rocprofv3 can store raw argument bytes that are not valid UTF-8.
+        source = self.directory / "non-utf8.db"
+        destination = self.directory / "non-utf8-output.db"
+        self.create_database(source)
+        raw = b"\xffw\xee\x18"
+        table = f"rocpd_string{self.UUIDS[0]}"
+        with closing(sqlite3.connect(str(source))) as connection, connection:
+            connection.execute(
+                f'INSERT INTO "{table}" (guid, string) VALUES (?, CAST(? AS TEXT))',
+                (self.GUIDS[0], raw),
+            )
+        merge_sqlite_dbs([str(source)], str(destination))
+        with closing(sqlite3.connect(str(destination))) as connection:
+            connection.text_factory = bytes
+            self.assertIn(
+                (raw,),
+                connection.execute(f'SELECT string FROM "{table}"').fetchall(),
+            )
+        imported = RocpdImportData(str(destination), skip_auto_merge=True)
+        try:
+            self.assertEqual(
+                imported.connection.execute(
+                    "SELECT COUNT(*) FROM rocpd_string"
+                ).fetchone(),
+                (2,),
+            )
+        finally:
+            imported.connection.close()
+
     def test_duplicate_required_metadata_is_rejected(self):
         source = self.directory / "duplicate-metadata.db"
         self.create_database(source)
