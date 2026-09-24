@@ -3668,7 +3668,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                     /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
                     /*num_shader_engines=*/2);
   fixture.cp()->set_scratch_wave_divisor(2);
-  fixture.cp()->set_scratch_xcc_layout(kXccId, kXccCount);
+  fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
   const uint32_t code[] = {SOPP_S_ENDPGM};
   const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
   fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),

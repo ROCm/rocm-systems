@@ -19,6 +19,10 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 extern int rcclTestHipMemAddressFreeCount;
+extern int rcclTestHipMemMapCount;
+extern int rcclTestHipMemUnmapCount;
+extern "C" void DevRuntimeTests_SetGinRegisterFail(int fail);
+extern "C" struct ncclDevrMemory* DevRuntimeTests_GinRegisterMemHeadAtCall();
 
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
@@ -108,6 +112,56 @@ TEST_F(SymMemoryObtainTest, DestroyIsIdempotentWhileAnotherMemoryIsLinked) {
   EXPECT_EQ(second->next, nullptr);
 
   symMemoryDestroy(comm, second);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+// symMemoryObtain links mem onto memHead before GIN registration. If registration
+// fails after that point, fail_mem_space_teams must unlink it again.
+TEST_F(SymMemoryObtainTest, ObtainFailureUnlinksMemHeadWhenGinRegisterFails) {
+  comm->devrState.ginEnabled = true;
+  DevRuntimeTests_SetGinRegisterFail(1);
+
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+  struct ncclDevrMemory* mem = nullptr;
+
+  EXPECT_NE(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  EXPECT_NE(DevRuntimeTests_GinRegisterMemHeadAtCall(), nullptr);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+
+  DevRuntimeTests_SetGinRegisterFail(0);
+}
+
+// fail_mem_space_teams must unmap LSA-flat slices before ncclSpaceFree, matching
+// symMemoryDestroy. Otherwise a later obtain remaps the same offset while the
+// previous VA is still mapped.
+TEST_F(SymMemoryObtainTest, ObtainFailureUnmapsLsaSlicesWhenGinRegisterFails) {
+  comm->devrState.ginEnabled = true;
+  DevRuntimeTests_SetGinRegisterFail(1);
+  rcclTestHipMemMapCount = 0;
+  rcclTestHipMemUnmapCount = 0;
+
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+  struct ncclDevrMemory* mem = nullptr;
+
+  EXPECT_NE(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  EXPECT_GT(rcclTestHipMemMapCount, 0);
+  EXPECT_GE(rcclTestHipMemUnmapCount, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+
+  DevRuntimeTests_SetGinRegisterFail(0);
+  rcclTestHipMemMapCount = 0;
+  rcclTestHipMemUnmapCount = 0;
+
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  EXPECT_GT(rcclTestHipMemMapCount, 0);
+  symMemoryDestroy(comm, mem);
+  EXPECT_GE(rcclTestHipMemUnmapCount, 1);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
