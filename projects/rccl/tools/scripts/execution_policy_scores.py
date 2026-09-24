@@ -149,6 +149,23 @@ def can_match_same_input(a, b):
             and (a.arch.startswith(b.arch) or b.arch.startswith(a.arch)))
 
 
+def merge_adjacent(chunks):
+    """Merge consecutive entries that differ only in adjacent byte ranges, so
+    boundaries left by a removed rule disappear. A comment or blank line
+    between entries keeps them separate."""
+    merged = []
+    for kind, value in chunks:
+        if kind == "rule" and merged and merged[-1][0] == "rule":
+            prev = merged[-1][1]
+            same = [f for i, f in enumerate(prev.match_fields) if i != 3] == \
+                   [f for i, f in enumerate(value.match_fields) if i != 3] and prev.profile == value.profile
+            if same and prev.hi != SIZE_MAX and prev.hi + 1 == value.lo:
+                merged[-1] = ("rule", prev.piece(prev.lo, value.hi))
+                continue
+        merged.append((kind, value))
+    return merged
+
+
 def align(pieces):
     """Split [(slot, rule)] until co-matching pieces share identical or disjoint
     byte ranges, and a placement-specific rule never shares inputs with an
@@ -275,6 +292,60 @@ def report(pieces):
     print(f"{count} misordered rule pairs", file=sys.stderr)
 
 
+def first_match(rules, scope, coll, size, placement, transports):
+    for rule in rules:
+        if rule.scope == scope and rule.coll == coll and rule.matches(
+                SWEEP_ARCH, SWEEP_NODES, SWEEP_RANKS, SWEEP_CHANNELS, size, placement, transports):
+            return rule
+    return None
+
+
+def crossovers(pieces, sweep_dirs, peak):
+    """Print size ranges where AUTO's first-match transport is measurably
+    slower than the other transport's forced result. These are the ranges
+    whose rule boundaries or order need retuning."""
+    rules = [rule for _, rule in pieces]
+    seen = set()
+    total = 0
+    for rule in rules:
+        key = (rule.scope, rule.coll)
+        if rule.coll not in COLL_FILES or key in seen:
+            continue
+        seen.add(key)
+        name, multiplier = COLL_FILES[rule.coll]
+        if (name, rule.scope) in seen:
+            continue
+        seen.add((name, rule.scope))
+        curves = {t: load_sweep(sweep_dirs[t], name, multiplier, peak) for t in ("IPC", "SHM")}
+        for placement in ("out", "in"):
+            run = None
+            for size in sorted(set(curves["IPC"]) & set(curves["SHM"])):
+                chosen = first_match(rules, rule.scope, rule.coll, size, placement, ("IPC", "SHM"))
+                bw = {t: curves[t][size].get(placement) for t in curves}
+                mismatch = None
+                if chosen is not None and all(bw.values()):
+                    other = "SHM" if chosen.transport == "IPC" else "IPC"
+                    if bw[other] > bw[chosen.transport] * MARGIN:
+                        mismatch = (chosen.transport, other)
+                if run and (mismatch != run[0]):
+                    total += 1
+                    print(f"{rule.scope} {name} {placement} [{run[1]}, {run[2]}]: AUTO picks {run[0][0]}, "
+                          f"{run[0][1]} faster: " + ", ".join(run[3]))
+                    run = None
+                if mismatch:
+                    point = f"{size}B {bw[mismatch[0]]:.1f}/{bw[mismatch[1]]:.1f}"
+                    if run:
+                        run[2] = size
+                        run[3].append(point)
+                    else:
+                        run = [mismatch, size, size, [point]]
+            if run:
+                total += 1
+                print(f"{rule.scope} {name} {placement} [{run[1]}, {run[2]}]: AUTO picks {run[0][0]}, "
+                      f"{run[0][1]} faster: " + ", ".join(run[3]))
+    print(f"{total} size ranges where AUTO's transport is measurably slower", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("rules_cc")
@@ -283,6 +354,8 @@ def main():
     parser.add_argument("--peak-name", default="kGfx120xPeakBusBwGBps")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--report", action="store_true")
+    parser.add_argument("--crossovers", action="store_true",
+                        help="list size ranges where AUTO's first-match transport is measurably slower")
     args = parser.parse_args()
 
     source = open(args.rules_cc).read()
@@ -303,6 +376,7 @@ def main():
             chunks.append(("rule", Rule(code.strip().rstrip(","))))
             entry = None
     assert entry is None, "unterminated rule entry"
+    chunks = merge_adjacent(chunks)
 
     pieces = [(slot, rule) for slot, (kind, rule) in enumerate(chunks) if kind == "rule"]
     pieces = align(pieces)
@@ -315,6 +389,8 @@ def main():
 
     if args.report:
         report(pieces)
+    if args.crossovers:
+        crossovers(pieces, sweep_dirs, peak)
     out = []
     for slot, (kind, value) in enumerate(chunks):
         if kind == "text":
