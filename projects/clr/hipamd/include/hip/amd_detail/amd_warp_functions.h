@@ -149,6 +149,12 @@ __device__ static inline unsigned int __lane_id() {
 }
 
 __device__ inline int __shfl(MAYBE_UNDEF int var, int src_lane, int width = warpSize) {
+#if __has_builtin(__builtin_amdgcn_permlane_bcast)
+  // v_permlane_bcast_b32 reads VGPR[laneGroupBase + (src_lane[5:0] & (width - 1))], which is the
+  // index computed below. width is only masked to 6 bits, and width - 1 is never wider than that.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane_bcast))
+    return __builtin_amdgcn_permlane_bcast(var, src_lane, width);
+#endif
   int self = __lane_id();
   int index = (src_lane & (width - 1)) + (self & ~(width - 1));
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
@@ -271,6 +277,14 @@ __device__ inline unsigned long long __shfl(MAYBE_UNDEF unsigned long long var, 
 
 __device__ inline int __shfl_up(MAYBE_UNDEF int var, unsigned int lane_delta,
                                 int width = warpSize) {
+#if __has_builtin(__builtin_amdgcn_permlane_up)
+  // v_permlane_up_b32 returns the lane's own value when its position in the lane group is below
+  // lane_delta, which is the same select as below. It additionally clamps lane_delta to the group
+  // width, so an out-of-range delta yields the lane's own value rather than the wrapped index the
+  // unsigned arithmetic below produces; that input is outside the shuffle contract either way.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane_up))
+    return __builtin_amdgcn_permlane_up(var, lane_delta, width);
+#endif
   int self = __lane_id();
   int index = self - lane_delta;
   index = (index < (self & ~(width - 1))) ? self : index;
@@ -397,6 +411,13 @@ __device__ inline unsigned long long __shfl_up(MAYBE_UNDEF unsigned long long va
 
 __device__ inline int __shfl_down(MAYBE_UNDEF int var, unsigned int lane_delta,
                                   int width = warpSize) {
+#if __has_builtin(__builtin_amdgcn_permlane_down)
+  // v_permlane_down_b32 returns the lane's own value when its position in the lane group plus
+  // lane_delta reaches the group width, which is the same select as below. As with __shfl_up it
+  // clamps lane_delta to the group width, so an out-of-range delta yields the lane's own value.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane_down))
+    return __builtin_amdgcn_permlane_down(var, lane_delta, width);
+#endif
   int self = __lane_id();
   int index = self + lane_delta;
   index = (int)((self & (width - 1)) + lane_delta) >= width ? self : index;
@@ -519,6 +540,14 @@ __device__ inline unsigned long long __shfl_down(MAYBE_UNDEF unsigned long long 
 }
 
 __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width = warpSize) {
+#if __has_builtin(__builtin_amdgcn_permlane_xor)
+  // v_permlane_xor_b32 computes (lane ^ lane_mask) and falls back to the lane's own value when
+  // that leaves the lane group, which is the same select as below. Its extra
+  // lane_mask >= wavefrontSize case also yields the lane's own value, matching the select below
+  // because width never exceeds the wavefront size.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_permlane_xor))
+    return __builtin_amdgcn_permlane_xor(var, lane_mask, width);
+#endif
   int self = __lane_id();
   int index = self ^ lane_mask;
   index = index >= ((self + width) & ~(width - 1)) ? self : index;
