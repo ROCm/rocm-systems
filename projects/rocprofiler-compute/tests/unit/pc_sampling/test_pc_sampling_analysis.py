@@ -2254,7 +2254,6 @@ def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
                 load_table_data(
                     workload=workload,
                     dir_path="dir",
-                    is_gui=False,
                     args=args,
                     dfs_expressions={},
                     pc_sampling_tool_data=sentinel,

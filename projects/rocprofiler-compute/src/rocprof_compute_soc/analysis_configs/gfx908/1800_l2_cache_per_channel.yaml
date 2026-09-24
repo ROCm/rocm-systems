@@ -32,7 +32,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1803
       title: L2 Requests (per normUnit)
@@ -45,7 +44,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1804
       title: L2 Requests (per normUnit)
@@ -62,7 +60,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
-      tui_style: simple_multiple_bar
   - metric_table:
       id: 1805
       title: L2-Fabric Requests (per normUnit)
@@ -79,7 +76,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
-      tui_style: simple_multiple_bar
   - metric_table:
       id: 1806
       title: L2-Fabric Read Latency (Cycles)
@@ -92,7 +88,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1807
       title: L2-Fabric Write and Atomic Latency (Cycles)
@@ -105,7 +100,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1808
       title: L2-Fabric Atomic Latency (Cycles)
@@ -118,7 +112,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1809
       title: L2-Fabric Read Stall (Cycles per normUnit)
@@ -135,7 +128,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
-      tui_style: simple_multiple_bar
   - metric_table:
       id: 1810
       title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
@@ -154,7 +146,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
-      tui_style: simple_multiple_bar
   - metric_table:
       id: 1812
       title: L2-Fabric (128B read requests per normUnit)
@@ -167,7 +158,6 @@ Panel Config:
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
-      tui_style: simple_box
   metrics_description:
     L2 Cache Hit Rate: The percent of total number of requests to the L2 from all
       clients that hit in the cache. As noted in the Speed-of-Light section, this
