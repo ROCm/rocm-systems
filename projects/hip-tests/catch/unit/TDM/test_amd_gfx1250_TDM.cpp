@@ -196,23 +196,26 @@ __global__ void TDM_stride_encoding_tester(uint32_t* out, uint64_t dim0_stride,
     }
 }
 
-static void SkipIfNotTDMCapable(const char* test_name) {
+static bool IsTDMCapable() {
 #if HT_AMD
     int device = 0;
     HIP_CHECK(hipGetDevice(&device));
     hipDeviceProp_t props{};
     HIP_CHECK(hipGetDeviceProperties(&props, device));
     const std::string arch(props.gcnArchName);
-    if (arch.find("gfx1250") == std::string::npos && arch.find("gfx1251") == std::string::npos) {
-        HIP_SKIP_TEST((std::string(test_name) + " requires gfx1250 or gfx1251").c_str());
-        return;
-    }
+    return arch.find("gfx1250") != std::string::npos ||
+           arch.find("gfx1251") != std::string::npos;
+#else
+    return false;
 #endif
 }
 
 TEST_CASE("test_amd_gfx1250_TDM_2d")
 {
-    SkipIfNotTDMCapable("test_amd_gfx1250_TDM_2d");
+    if (!IsTDMCapable()) {
+        HIP_SKIP_TEST("test_amd_gfx1250_TDM_2d requires gfx1250 or gfx1251");
+        return;
+    }
     constexpr int kAllocSize = 10 * 10;
     const auto alloc_size = kAllocSize * sizeof(int);
 
@@ -243,7 +246,10 @@ template <int Rank, int TotalElems>
 static void RunTdmNdTest(const char* test_name, int e0, int e1, int e2 = 1, int e3 = 1,
                          int e4 = 1)
 {
-    SkipIfNotTDMCapable(test_name);
+    if (!IsTDMCapable()) {
+        HIP_SKIP_TEST((std::string(test_name) + " requires gfx1250 or gfx1251").c_str());
+        return;
+    }
     const auto alloc_size = TotalElems * sizeof(int);
 
     LinearAllocGuard<int> input_dev(LinearAllocs::hipMalloc, alloc_size);
@@ -287,7 +293,10 @@ TEST_CASE("test_amd_gfx1250_TDM_5d")
 
 TEST_CASE("TDM_Gather_load_16bit_indices")
 {
-    SkipIfNotTDMCapable("TDM_Gather_load_16bit_indices");
+    if (!IsTDMCapable()) {
+        HIP_SKIP_TEST("TDM_Gather_load_16bit_indices requires gfx1250 or gfx1251");
+        return;
+    }
 
     constexpr int kSourceElems = kGatherNumRows * kGatherRowWidth;
     constexpr int kResultElems = kGatherNumIndices * kGatherRowWidth;
@@ -322,7 +331,10 @@ TEST_CASE("TDM_Gather_load_16bit_indices")
 
 TEST_CASE("TDM_Stride_Encoding")
 {
-    SkipIfNotTDMCapable("TDM_Stride_Encoding");
+    if (!IsTDMCapable()) {
+        HIP_SKIP_TEST("TDM_Stride_Encoding requires gfx1250 or gfx1251");
+        return;
+    }
 
     // dim0/dim2/dim3 strides split as 32-bit lo + 16-bit hi: exceed UINT32_MAX so the hi
     // half is exercised. dim1 stride splits as 16-bit lo + 32-bit hi: exceed UINT16_MAX.
