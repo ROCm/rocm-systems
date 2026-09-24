@@ -15,6 +15,8 @@ from dash import dcc, html
 
 from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
+    DispatchCounts,
+    DurationStats,
     build_compute_peak_hover,
     build_kernel_hover_template,
     build_roof_hover,
@@ -453,11 +455,12 @@ class Roofline:
                         name_html=wrap_hover_name(truncate_kernel_name(kernel_name)),
                         limiter=limiter,
                         limiter_category=limiter_category,
-                        kernel_dispatches_count=count_val,
-                        total_dispatches_count=total_dispatches,
-                        total_time=time_val,
-                        time_unit=time_unit,
-                        pct_runtime=pct_val,
+                        dispatches=DispatchCounts(
+                            kernel=count_val, total=total_dispatches
+                        ),
+                        duration=DurationStats(
+                            total=time_val, pct_runtime=pct_val, unit=time_unit
+                        ),
                         ops_flops=ops_flops,
                     ),
                 )

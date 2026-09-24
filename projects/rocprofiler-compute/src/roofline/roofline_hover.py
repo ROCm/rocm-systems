@@ -4,7 +4,7 @@
 """Plotly hover-tooltip HTML for the roofline figure."""
 
 import html
-from typing import Optional
+from typing import NamedTuple, Optional
 
 KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
@@ -36,35 +36,33 @@ def wrap_hover_name(name: str) -> str:
     )
 
 
+class DispatchCounts(NamedTuple):
+    """Per-kernel and total dispatch counts for the tooltip's count ratio."""
+
+    kernel: Optional[float]
+    total: Optional[float]
+
+
+class DurationStats(NamedTuple):
+    """Per-kernel duration, its share of total runtime, and the time unit."""
+
+    total: Optional[float]
+    pct_runtime: Optional[float]
+    unit: str
+
+
 def build_kernel_hover_template(
     name_html: str,
     limiter: str,
     limiter_category: str,
-    kernel_dispatches_count: Optional[float],
-    total_dispatches_count: Optional[float],
-    total_time: Optional[float],
-    time_unit: str,
-    pct_runtime: Optional[float],
+    dispatches: DispatchCounts,
+    duration: DurationStats,
     ops_flops: str,
 ) -> str:
     """Kernel hover template; per-point values come from customdata."""
     unit = f"G{ops_flops}s/s"
-    kernel_time_txt = format_hover_number(total_time, ",.0f")
-    total_app_time = (
-        total_time / (pct_runtime / 100.0)
-        if total_time is not None and pct_runtime
-        else None
-    )
-    total_app_time_txt = format_hover_number(total_app_time, ",.0f")
-    pct_runtime_txt = format_hover_number(pct_runtime, ",.2f")
-    pct_dispatches = (
-        100.0 * kernel_dispatches_count / total_dispatches_count
-        if kernel_dispatches_count is not None and total_dispatches_count
-        else None
-    )
-    pct_dispatches_txt = format_hover_number(pct_dispatches, ",.2f")
-    count_txt = _format_integer(kernel_dispatches_count)
-    total_dispatches_txt = _format_integer(total_dispatches_count)
+    total_app_time = _invert_percent(duration.total, duration.pct_runtime)
+    pct_dispatches = _percent_of(dispatches.kernel, dispatches.total)
     return _hover(
         name_html,
         [
@@ -75,10 +73,11 @@ def build_kernel_hover_template(
             "",
             "<b>Details</b>",
             "%{customdata[2]}",
-            f"Dispatch Count: {pct_dispatches_txt}% "
-            f"({count_txt} / {total_dispatches_txt})",
-            f"Duration: {pct_runtime_txt}% "
-            f"({kernel_time_txt} / {total_app_time_txt} {time_unit})",
+            f"Dispatch Count: {format_hover_number(pct_dispatches, ',.2f')}% "
+            f"({_format_integer(dispatches.kernel)} / {_format_integer(dispatches.total)})",
+            f"Duration: {format_hover_number(duration.pct_runtime, ',.2f')}% "
+            f"({format_hover_number(duration.total, ',.0f')} / "
+            f"{format_hover_number(total_app_time, ',.0f')} {duration.unit})",
         ],
     )
 
@@ -137,6 +136,20 @@ def _format_integer(value: object) -> str:
     """Thousands-separated integer for the tooltip, or N/A when missing."""
     parsed = _safe_float(value)
     return f"{int(round(parsed)):,}" if parsed is not None else "N/A"
+
+
+def _percent_of(part: Optional[float], whole: Optional[float]) -> Optional[float]:
+    """100 * part / whole, or None if not computable."""
+    if part is None or not whole:
+        return None
+    return 100.0 * part / whole
+
+
+def _invert_percent(value: Optional[float], pct: Optional[float]) -> Optional[float]:
+    """The whole that `value` is `pct` percent of, or None if not computable."""
+    if value is None or not pct:
+        return None
+    return value * 100.0 / pct
 
 
 def _hover(header: str, rows: list[str]) -> str:
