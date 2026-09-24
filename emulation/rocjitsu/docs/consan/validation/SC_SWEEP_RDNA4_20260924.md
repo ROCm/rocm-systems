@@ -12,8 +12,10 @@ of scope and is not rerun. Existing green rows are not part of this calibration.
 | --- | --- | --- | ---: | --- |
 | `qwen-prefill` | all | Pass | 0/8 | Below 6/8 |
 | `qwen-prefill` | reads | Pass | 0/8 | Below 6/8 |
+| `pytorch-torch-mode` | all | Pass | 0/8 | Below 6/8 |
+| `pytorch-torch-mode` | reads | Pass | 0/8 | Below 6/8 |
 
-Completed 2 batches. Full results and frozen prospective specifications:
+Completed 4 batches. Full results and frozen prospective specifications:
 `/home/benoit/workspace/consan-validation/sc-sweep-20260924`.
 
 The companion `results.json` records coverage/health/control audits and paths to raw
