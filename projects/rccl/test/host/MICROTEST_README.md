@@ -213,9 +213,10 @@ test:
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
-   `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
-   target's `test/test_categories_micro*.yaml` so CTest runs it.
+   `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`
+   (`TEST_MICRO_SOURCE_FILES` for `rccl-UnitTestsMicro`), which both build paths
+   share. If you add a new gtest suite, add its pattern to the target's
+   `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a

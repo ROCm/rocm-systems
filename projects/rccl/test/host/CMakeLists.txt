@@ -21,47 +21,48 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
 unset(_rccl_src_root)
 
-set(RCCL_MICRO_TEST_SOURCES
-  p2p-test.cc
-  rma-proxy-progress-test.cc
-  gin-plugin-init-test.cc
-  rma-test.cc
-  rma-ce-test.cc
-  ras-test.cc
-  tuning-general-test.cc
-  ras-client-test.cc
-  group-test.cc
-  devcomm-test.cc
-  wrap-test.cc
-  dev-runtime-test.cc
-  # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
-  fakes/dev_runtime_micro_fakes.cc
-  fakes/nccl_fakes.cc
-  fakes/libc_fakes.cc
-  fakes/ras_param_fakes.cc
-  fakes/rma_fakes.cc
-  fakes/comm_fakes.cc
-  fakes/recorder_fakes.cc
-  fakes/utils_fakes.cc
-  fakes/collective_stubs.cc
-  fakes/devcomm_fakes.cc
-  fakes/hip_fakes.cc
-  fakes/env_fakes.cc
-  fakes/ce_fakes.cc
-  fakes/collectives_fakes.cc
-  fakes/dda_fakes.cc
-  fakes/rccl_arch_thresholds_fakes.cc
-  fakes/strongstream_stubs.cc
-  fakes/sym_kernels_fakes.cc
-  fakes/transport_stubs.cc
-  fakes/tuning_fakes.cc
-  fakes/wrap_fakes.cc
-  ../common/main_altrsmi.cpp
-  ../common/ProcessIsolatedTestRunner.cpp
-)
-
 # Define the per-target micro-test source lists shared by BOTH build paths.
 function(rccl_define_micro_source_lists)
+  # rccl-UnitTestsMicro -- the broad-coverage micro binary.
+  set(TEST_MICRO_SOURCE_FILES
+    p2p-test.cc
+    rma-proxy-progress-test.cc
+    gin-plugin-init-test.cc
+    rma-test.cc
+    rma-ce-test.cc
+    ras-test.cc
+    tuning-general-test.cc
+    ras-client-test.cc
+    group-test.cc
+    devcomm-test.cc
+    wrap-test.cc
+    dev-runtime-test.cc
+    # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
+    fakes/dev_runtime_micro_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/ras_param_fakes.cc
+    fakes/rma_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/utils_fakes.cc
+    fakes/collective_stubs.cc
+    fakes/devcomm_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/env_fakes.cc
+    fakes/ce_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/dda_fakes.cc
+    fakes/rccl_arch_thresholds_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/transport_stubs.cc
+    fakes/tuning_fakes.cc
+    fakes/wrap_fakes.cc
+    ../common/main_altrsmi.cpp
+    ../common/ProcessIsolatedTestRunner.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroWarpSpeed -- scheduler UUTs under ENABLE_WARP_SPEED.
   set(TEST_MICRO_SCHEDULER_SOURCE_FILES
     scheduler-test.cc
@@ -678,7 +679,7 @@ rccl_mark_oracle_tus_generated(${RCCL_HOST_HIPIFY_DIR} argcheck archinfo utils)
 # rccl-UnitTestsMicro
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicro NO_PIE
-  SOURCES ${RCCL_MICRO_TEST_SOURCES}
+  SOURCES ${TEST_MICRO_SOURCE_FILES}
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
