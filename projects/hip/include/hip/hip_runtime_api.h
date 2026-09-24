@@ -8780,9 +8780,10 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
  * @brief Ends capture on a stream, returning the captured graph.
  *
  * @param [in] stream - Stream to end capture.
- * @param [out] pGraph - Captured graph.
+ * @param [out] pGraph - Captured graph. Set to NULL on every error.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureInvalidated,
+ * #hipErrorStreamCaptureUnjoined
  *
  */
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
@@ -8839,7 +8840,8 @@ hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCap
  * @param [in] numDependencies  Size of the dependencies array.
  * @param [in] flags  Flag to update dependency set. Should be one of the values
  * in enum #hipStreamUpdateCaptureDependenciesFlags.
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState,
+ * #hipErrorStreamCaptureInvalidated
  *
  */
 hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,

@@ -1088,6 +1088,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_Positive_CaptureTeardownDestroys
   }
 
   HIP_CHECK_ERROR(hipGraphDestroy(graph), hipErrorInvalidValue);
+  (void)hipGetLastError();
 }
 
 /**

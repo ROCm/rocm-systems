@@ -1696,6 +1696,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
     // An unjoined capture produces no graph.
     HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
     REQUIRE(graph == nullptr);
+    (void)hipGetLastError();
   }
 }
 
@@ -1729,6 +1730,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyOriginStreamDuringCaptu
 
   HIP_CHECK(hipStreamDestroy(captureStream));
   HIP_CHECK_ERROR(hipGraphDestroy(captureGraph), hipErrorInvalidValue);
+  (void)hipGetLastError();
 }
 #endif
 
@@ -1801,6 +1803,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStr
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
+  (void)hipGetLastError();
 }
 
 /**
@@ -1968,6 +1971,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected) {
   REQUIRE(graph == nullptr);
   HIP_CHECK_ERROR(hipStreamEndCapture(secondOrigin, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
+  (void)hipGetLastError();
 }
 
 /**
@@ -2366,6 +2370,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapt
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
+  (void)hipGetLastError();
 }
 
 /**
