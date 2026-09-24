@@ -69,6 +69,8 @@ public:
 
   const auto &group_ids () const { return m_group_ids; }
 
+  std::optional<const std::array<uint32_t, 3>> group_ids_in_cluster () const;
+
   epoch_t mark () const { return m_mark; }
   void set_mark (epoch_t mark) { m_mark = mark; }
 
