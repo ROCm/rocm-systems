@@ -864,15 +864,15 @@ rocpd merge - Database merging tool
 
 - Database consolidation: Combines multiple ``rocpd`` databases into a single unified database file.
 
-- Schema integrity: Validates input database objects and physical table layouts against a supported ROCpd schema version. All input databases must use the same version.
+- Schema integrity: Validates that every table of a supported ROCpd schema version is present as a regular table with the expected columns. All input databases must use the same version.
 
-- Trusted schema reconstruction: Copies profiling rows into canonical tables and rebuilds indexes and views from the installed, versioned ROCpd schemas. Additional metadata key/value rows are preserved. Custom persistent tables, indexes, views, and triggers are not supported.
+- Trusted schema reconstruction: Copies profiling rows into canonical tables created from the installed, versioned ROCpd schemas, which enforce the schema's constraints on every copied row, and rebuilds indexes and views from the same schemas. Schema SQL stored in input databases is never executed. Additional metadata key/value rows are preserved.
 
-- Input compatibility: Canonical views and standalone indexes may be missing from input databases. Merge reconstructs them from trusted schemas, and the importer builds trusted temporary analysis views. Required physical tables and their constraints remain validated, including CHECK expressions (ignoring whitespace, comments, and keyword case); canonical indexes that are present must match the expected structure.
+- Input compatibility: Canonical views and indexes may be missing from input databases; merge rebuilds them, and the importer builds trusted temporary analysis views. Custom tables, indexes, views, and triggers in an input database are ignored with a warning and are not copied into the merged output.
 
 - Data aggregation: Creates UNION views that automatically aggregate data from all merged sources.
 
-- Integrity handling: Checks foreign-key relationships and database integrity before atomically publishing the completed output. Failed merges preserve an existing destination.
+- Integrity handling: Reports foreign-key violations in the merged data as a warning, then atomically publishes the completed output. Failed merges preserve an existing destination.
 
 **Command-line options:**
 

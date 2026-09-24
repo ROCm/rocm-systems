@@ -29,19 +29,22 @@ from contextlib import closing
 import os
 import sqlite3
 import stat
+import sys
 import tempfile
 import time
 
 from typing import List, Dict, Iterable, Optional, Callable, Any
 
 from .database import (
+    RocpdSourceSet,
     attach_readonly,
+    column_list,
     configure_untrusted_schema,
     create_union_views,
     detach_database,
     inspect_attached_rocpd,
-    qualified_identifier,
     quote_identifier,
+    select_table,
     validate_merge_destination,
 )
 from .schema import RocpdSchema
@@ -73,11 +76,15 @@ def merge_sqlite_dbs(
     if not sources:
         raise ValueError("No source databases provided")
 
-    source_paths = [
-        os.path.realpath(os.path.abspath(os.path.expanduser(src))) for src in sources
-    ]
-    destination = os.path.realpath(os.path.abspath(dest_path))
-    if destination in source_paths:
+    def same_file(a: str, b: str) -> bool:
+        try:
+            return os.path.samefile(a, b)
+        except OSError:
+            return False
+
+    # Publication is atomic, so this is not a safety check; it catches a likely
+    # user mistake. samefile() also detects hard links and symlinks.
+    if any(same_file(os.path.expanduser(src), dest_path) for src in sources):
         raise ValueError("The destination database must not also be an input database")
     validate_merge_destination(dest_path)
 
@@ -103,11 +110,10 @@ def merge_sqlite_dbs(
             configure_untrusted_schema(conn)
             conn.execute("PRAGMA journal_mode = DELETE")
             conn.execute("PRAGMA synchronous = NORMAL")
-            conn.execute("PRAGMA foreign_keys = OFF")
 
-            schema_version = None
-            seen_uuids = set()
+            source_set = RocpdSourceSet()
             union_tables = defaultdict(list)
+            union_columns = {}
 
             for i, src in enumerate(sources, 1):
                 alias = f"src{i}"
@@ -116,20 +122,7 @@ def merge_sqlite_dbs(
                 log(f"Attached {resolved_source} AS {alias}")
 
                 source = inspect_attached_rocpd(conn, alias, resolved_source)
-                if schema_version is None:
-                    schema_version = source.version
-                elif source.version != schema_version:
-                    raise RuntimeError(
-                        "Multiple schema versions found: "
-                        f"{sorted({schema_version, source.version})}"
-                    )
-                duplicate_uuids = seen_uuids.intersection(source.uuids)
-                if duplicate_uuids:
-                    raise ValueError(
-                        "Duplicate rocPD UUID across merge inputs: "
-                        f"{sorted(duplicate_uuids)!r}"
-                    )
-                seen_uuids.update(source.uuids)
+                source_set.add(source)
 
                 # Only trusted, bundled DDL is executed. Input sqlite_master SQL
                 # is inspected for validation but is never replayed.
@@ -143,13 +136,16 @@ def merge_sqlite_dbs(
                 table_count = sum(len(names) for names in source.tables.values())
                 print(f"Tables found: {table_count}")
                 for base, tables in sorted(source.tables.items()):
+                    columns = source.columns[base]
+                    union_columns[base] = columns
                     for table in tables:
                         log(f"Inserting rows into {table} from {alias}.{table}")
                         conn.execute(
                             f"INSERT INTO {quote_identifier(table)} "
-                            f"SELECT * FROM {qualified_identifier(alias, table)}"
+                            f"({column_list(columns)}) "
+                            f"{select_table(alias, table, columns)}"
                         )
-                        union_tables[base].append(("", table))
+                        union_tables[base].append((None, table))
 
                 for schema in source.schemas:
                     conn.executescript(schema.indexes)
@@ -157,28 +153,22 @@ def merge_sqlite_dbs(
                 detach_database(conn, alias)
                 log(f"Detached {alias}")
 
-            if schema_version is None:
-                raise ValueError("No source databases provided")
-
-            create_union_views(conn, union_tables)
+            create_union_views(conn, union_tables, union_columns)
 
             # The base UNION views already exist, so the trusted rocpd view DDL
             # skips them and creates only the canonical data and summary views.
-            trusted_views = RocpdSchema(version=schema_version).views
+            trusted_views = RocpdSchema(version=source_set.version).views
             conn.executescript(trusted_views)
             conn.commit()
 
-            conn.execute("PRAGMA foreign_keys = ON")
-            foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchmany(10)
-            if foreign_key_errors:
-                raise sqlite3.IntegrityError(
-                    f"Merged rocPD database failed foreign-key validation: "
-                    f"{foreign_key_errors!r}"
-                )
-            quick_check = conn.execute("PRAGMA quick_check").fetchall()
-            if quick_check != [("ok",)]:
-                raise sqlite3.IntegrityError(
-                    f"Merged rocPD database failed integrity validation: {quick_check!r}"
+            # Row values come from the inputs and the rocPD writer does not
+            # enforce foreign keys, so dangling references are reported only.
+            violations = conn.execute("PRAGMA foreign_key_check").fetchmany(10)
+            if violations:
+                print(
+                    "Warning: merged rocPD database has foreign-key violations "
+                    f"(showing up to 10): {violations!r}",
+                    file=sys.stderr,
                 )
 
         if destination_mode is not None:

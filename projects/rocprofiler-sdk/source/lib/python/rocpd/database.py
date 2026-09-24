@@ -25,19 +25,31 @@
 
 """Validation boundary for attaching and inspecting rocPD databases.
 
-Input databases are data, not SQL sources. This module is the only place where
-the merge and import paths inspect their schemas. It validates object names and
-physical table layouts against a supported :class:`RocpdSchema`. Canonical
-views and standalone indexes may be absent from the input. Input view bodies
-are discarded, and SQL stored in an input database's ``sqlite_master`` table
-is never replayed.
+Input databases are data, not SQL sources. SQL stored in an input database's
+``sqlite_master`` table is never replayed. Validation establishes only what the
+merge and import paths rely on: every table of the trusted, versioned
+:class:`RocpdSchema` is a regular table with the expected columns, and all
+reads name those columns explicitly. Row values remain untrusted; merged output
+enforces constraints through the trusted DDL. Other schema objects in an input
+database are never read and are skipped with a warning.
 """
 
 from pathlib import Path
 import os
 import re
 import sqlite3
-from typing import Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Tuple
+import sys
+from typing import (
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from .schema import RocpdSchema, query_supported_schema_versions
 
@@ -50,17 +62,18 @@ REGULAR_TABLE_SQL = re.compile(
     flags=re.IGNORECASE,
 )
 METADATA_TABLE = re.compile(r"^rocpd_metadata(?P<uuid>_[A-Za-z0-9_]+)$")
-_SQL_TOKEN = re.compile(
-    r"--[^\r\n]*|/\*[\s\S]*?\*/|"
-    r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|`(?:[^`]|``)*`|\[[^\]]*\]|"
-    r"[A-Za-z_][A-Za-z0-9_$]*|[^\s]"
+METADATA_COLUMNS = ("id", "tag", "value")
+REQUIRED_METADATA = (
+    "uuid",
+    "guid",
+    "schema_version",
+    "schema_version_major",
+    "schema_version_minor",
+    "schema_version_patch",
 )
 
-_METADATA_COLUMNS = (
-    (0, "id", "INTEGER", 1, None, 1, 0),
-    (1, "tag", "TEXT", 1, None, 0, 0),
-    (2, "value", "TEXT", 1, None, 0, 0),
-)
+# name -> (type, sql) for the user objects of one database
+SchemaObjects = Mapping[str, Tuple[str, Optional[str]]]
 
 
 class RocpdSourceSchema(NamedTuple):
@@ -70,8 +83,36 @@ class RocpdSourceSchema(NamedTuple):
     alias: str
     version: str
     uuids: Tuple[str, ...]
+    # base table name -> physical (UUID-suffixed) table names
     tables: Mapping[str, Tuple[str, ...]]
+    # base table name -> trusted column names, in schema order
+    columns: Mapping[str, Tuple[str, ...]]
     schemas: Tuple[RocpdSchema, ...]
+    # input objects that are not part of the trusted schema and are not read
+    ignored: Tuple[str, ...]
+
+
+class RocpdSourceSet:
+    """Check that validated sources can be combined into one data set."""
+
+    def __init__(self) -> None:
+        self.version: Optional[str] = None
+        self.uuids: Set[str] = set()
+
+    def add(self, source: RocpdSourceSchema) -> None:
+        if self.version is None:
+            self.version = source.version
+        elif source.version != self.version:
+            raise ValueError(
+                "Multiple schema versions found: "
+                f"{sorted({self.version, source.version})}"
+            )
+        duplicates = self.uuids.intersection(source.uuids)
+        if duplicates:
+            raise ValueError(
+                f"Duplicate rocPD UUID across inputs: {sorted(duplicates)!r}"
+            )
+        self.uuids.update(source.uuids)
 
 
 def quote_identifier(name: str) -> str:
@@ -88,6 +129,17 @@ def quote_identifier(name: str) -> str:
 
 def qualified_identifier(database: str, name: str) -> str:
     return f"{quote_identifier(database)}.{quote_identifier(name)}"
+
+
+def column_list(columns: Sequence[str]) -> str:
+    return ", ".join(quote_identifier(column) for column in columns)
+
+
+def select_table(alias: Optional[str], table: str, columns: Sequence[str]) -> str:
+    """Build a SELECT of the trusted *columns* of *table* in database *alias*."""
+
+    source = qualified_identifier(alias, table) if alias else quote_identifier(table)
+    return f"SELECT {column_list(columns)} FROM {source}"
 
 
 def validate_merge_destination(path: str) -> None:
@@ -108,9 +160,15 @@ def validate_merge_destination(path: str) -> None:
             )
 
 
-def readonly_database_uri(path: str) -> str:
-    """Return an absolute, read-only and immutable SQLite URI."""
+def attach_readonly(connection: sqlite3.Connection, path: str, alias: str) -> str:
+    """Attach *path* read-only and immutable, returning its resolved path.
 
+    The path is bound as a parameter rather than interpolated into SQL.
+    Immutable attachment ignores journals, so inputs with uncheckpointed
+    journal content are rejected instead of silently losing committed rows.
+    """
+
+    quoted_alias = quote_identifier(alias)
     source = Path(os.fspath(path)).expanduser().resolve(strict=True)
     if not source.is_file():
         raise ValueError(f"Input database is not a regular file: {path!r}")
@@ -120,19 +178,11 @@ def readonly_database_uri(path: str) -> str:
             raise ValueError(
                 f"Input database has an uncheckpointed SQLite journal: {sidecar!s}"
             )
-    return f"{source.as_uri()}?mode=ro&immutable=1"
-
-
-def attach_readonly(connection: sqlite3.Connection, path: str, alias: str) -> str:
-    """Attach *path* without interpolating it into SQL."""
-
-    quoted_alias = quote_identifier(alias)
-    uri = readonly_database_uri(path)
     connection.execute(
         f"ATTACH DATABASE ? AS {quoted_alias}",
-        (uri,),
+        (f"{source.as_uri()}?mode=ro&immutable=1",),
     )
-    return str(Path(os.fspath(path)).expanduser().resolve(strict=True))
+    return str(source)
 
 
 def detach_database(connection: sqlite3.Connection, alias: str) -> None:
@@ -143,190 +193,97 @@ def configure_untrusted_schema(connection: sqlite3.Connection) -> None:
     """Disable SQLite's use of application-defined functions in schemas."""
 
     # Unknown pragmas are ignored by older SQLite versions, while read-only URI
-    # attachment and strict object validation still provide the core boundary.
+    # attachment and explicit table reads still provide the core boundary.
     connection.execute("PRAGMA trusted_schema = OFF")
 
 
-def _master_objects(
-    connection: sqlite3.Connection, alias: str
-) -> List[Tuple[str, str, str, Optional[str]]]:
-    quoted_alias = quote_identifier(alias)
-    rows = connection.execute(
-        f"""
-        SELECT type, name, tbl_name, sql
-        FROM {quoted_alias}.sqlite_master
+def _schema_objects(connection: sqlite3.Connection, alias: str) -> SchemaObjects:
+    rows = connection.execute(f"""
+        SELECT type, name, sql
+        FROM {quote_identifier(alias)}.sqlite_master
         WHERE name NOT GLOB 'sqlite_*'
-        ORDER BY type, name
-        """
-    ).fetchall()
-    result = []
-    for kind, name, table_name, sql in rows:
-        quote_identifier(name)
-        quote_identifier(table_name)
-        result.append((kind, name, table_name, sql))
-    return result
-
-
-def _pragma(
-    connection: sqlite3.Connection,
-    alias: str,
-    pragma: str,
-    name: str,
-) -> List[Tuple]:
-    if pragma not in {
-        "foreign_key_list",
-        "index_list",
-        "index_xinfo",
-        "table_info",
-        "table_xinfo",
-    }:
-        raise ValueError(f"Unsupported schema pragma: {pragma!r}")
-    return connection.execute(
-        f"PRAGMA {quote_identifier(alias)}.{pragma}({quote_identifier(name)})"
-    ).fetchall()
+        """).fetchall()
+    return {name: (kind, sql) for kind, name, sql in rows}
 
 
 def _table_columns(
     connection: sqlite3.Connection, alias: str, table: str
-) -> Tuple[Tuple, ...]:
-    rows = _pragma(connection, alias, "table_xinfo", table)
-    if not rows:
-        # table_xinfo was added after the oldest SQLite versions supported by
-        # Python 3.6. Those versions cannot contain generated/hidden columns,
-        # so table_info plus a zero hidden-column flag is equivalent.
-        rows = [
-            tuple(row) + (0,) for row in _pragma(connection, alias, "table_info", table)
-        ]
-    return tuple(tuple(row) for row in rows)
+) -> Tuple[Tuple[str, int], ...]:
+    """Return ``(name, hidden)`` per column; *hidden* is non-zero for
+    generated and hidden columns."""
+
+    target = f"{quote_identifier(alias)}.%s({quote_identifier(table)})"
+    rows = connection.execute(f"PRAGMA {target % 'table_xinfo'}").fetchall()
+    if rows:
+        return tuple((row[1], row[6]) for row in rows)
+    # table_xinfo was added after the oldest SQLite versions supported by
+    # Python 3.6. Those versions cannot contain generated/hidden columns.
+    rows = connection.execute(f"PRAGMA {target % 'table_info'}").fetchall()
+    return tuple((row[1], 0) for row in rows)
 
 
-def _foreign_keys(
-    connection: sqlite3.Connection, alias: str, table: str
-) -> Tuple[Tuple, ...]:
-    return tuple(
-        tuple(row) for row in _pragma(connection, alias, "foreign_key_list", table)
-    )
-
-
-def _index_signatures(
-    connection: sqlite3.Connection, alias: str, table: str
-) -> Tuple[Tuple, ...]:
-    signatures = []
-    for _, index_name, unique, origin, partial in _pragma(
-        connection, alias, "index_list", table
-    ):
-        quote_identifier(index_name)
-        columns = tuple(
-            tuple(row[1:])
-            for row in _pragma(connection, alias, "index_xinfo", index_name)
-        )
-        signatures.append((unique, origin, partial, columns))
-    return tuple(sorted(signatures, key=repr))
-
-
-def _check_constraints(sql: str) -> Tuple[Tuple[str, ...], ...]:
-    """Extract CHECK expression tokens without evaluating source SQL.
-
-    PRAGMAs do not expose CHECK clauses. Compare their tokens to the trusted
-    schema, ignoring comments, whitespace, keyword case and constraint order.
-    Quoted tokens are preserved so literal contents and parentheses inside
-    strings cannot change or disguise a constraint.
-    """
-
-    checks = []
-    expression = None
-    depth = 0
-    for match in _SQL_TOKEN.finditer(sql):
-        token = match.group()
-        if token.startswith(("--", "/*")):
-            continue
-        if token[0] not in "'\"`[":
-            token = token.lower()
-        if expression is None:
-            if token == "check":
-                expression = []
-            continue
-        if not expression and token != "(":
-            raise ValueError("Invalid CHECK constraint")
-        expression.append(token)
-        if token == "(":
-            depth += 1
-        elif token == ")":
-            depth -= 1
-            if depth == 0:
-                checks.append(tuple(expression))
-                expression = None
-    if expression is not None:
-        raise ValueError("Unterminated CHECK constraint")
-    return tuple(sorted(checks))
-
-
-def _table_signature(
-    connection: sqlite3.Connection, alias: str, table: str
-) -> Tuple[Tuple, Tuple, Tuple]:
-    return (
-        _table_columns(connection, alias, table),
-        _foreign_keys(connection, alias, table),
-        _index_signatures(connection, alias, table),
-    )
-
-
-def _metadata_candidates(
-    objects: Sequence[Tuple[str, str, str, Optional[str]]],
+def _check_table(
+    connection: sqlite3.Connection,
+    alias: str,
+    objects: SchemaObjects,
+    table: str,
+    expected_columns: Sequence[str],
     source_path: str,
-) -> List[Tuple[str, str]]:
-    candidates = []
-    for kind, name, _, sql in objects:
-        match = METADATA_TABLE.fullmatch(name)
-        if kind == "table" and match:
-            if not isinstance(sql, str) or not REGULAR_TABLE_SQL.match(sql):
-                raise ValueError(
-                    f"Refusing non-table rocPD metadata object in {source_path!r}"
-                )
-            candidates.append((name, match.group("uuid")))
+) -> None:
+    """Require *table* to be a regular table with exactly the expected columns."""
 
-    if not candidates:
+    kind, sql = objects.get(table, (None, None))
+    if kind is None:
+        raise ValueError(f"Missing rocPD table {table!r} in {source_path!r}")
+    if kind != "table" or not isinstance(sql, str) or not REGULAR_TABLE_SQL.match(sql):
         raise ValueError(
-            f"Expected at least one physical rocPD metadata table in {source_path!r}"
+            f"rocPD object {table!r} is not a regular table in {source_path!r}"
         )
-    return candidates
+    columns = _table_columns(connection, alias, table)
+    names = [name for name, _ in columns]
+    if any(hidden for _, hidden in columns) or sorted(names) != sorted(expected_columns):
+        raise ValueError(
+            f"rocPD table {table!r} columns do not match the trusted schema in "
+            f"{source_path!r}: {names!r}"
+        )
+
+
+def _metadata_tables(objects: SchemaObjects, source_path: str) -> List[Tuple[str, str]]:
+    candidates = []
+    for name in objects:
+        match = METADATA_TABLE.fullmatch(name) if isinstance(name, str) else None
+        if match:
+            candidates.append((name, match.group("uuid")))
+    if not candidates:
+        raise ValueError(f"Expected at least one rocPD metadata table in {source_path!r}")
+    return sorted(candidates)
 
 
 def _metadata_values(
     connection: sqlite3.Connection,
     alias: str,
+    objects: SchemaObjects,
     metadata_table: str,
     table_uuid: str,
     source_path: str,
 ) -> Tuple[str, str, str]:
-    columns = _table_columns(connection, alias, metadata_table)
-    if columns != _METADATA_COLUMNS:
-        raise ValueError(
-            f"Invalid rocPD metadata table schema in {source_path!r}: {columns!r}"
-        )
-
-    required = (
-        "uuid",
-        "guid",
-        "schema_version",
-        "schema_version_major",
-        "schema_version_minor",
-        "schema_version_patch",
+    _check_table(
+        connection, alias, objects, metadata_table, METADATA_COLUMNS, source_path
     )
-    placeholders = ", ".join("?" for _ in required)
+
+    placeholders = ", ".join("?" for _ in REQUIRED_METADATA)
     # Read only required metadata, with one extra row to detect duplicates.
     # Additional metadata remains in the source and is copied by merge.
     rows = connection.execute(
         f"SELECT tag, value FROM {qualified_identifier(alias, metadata_table)} "
         f"WHERE tag COLLATE BINARY IN ({placeholders})",
-        required,
-    ).fetchmany(len(required) + 1)
+        REQUIRED_METADATA,
+    ).fetchmany(len(REQUIRED_METADATA) + 1)
     values: Dict[str, List[str]] = {}
     for tag, value in rows:
-        if isinstance(tag, str):
-            values.setdefault(tag, []).append(value)
+        values.setdefault(tag, []).append(value)
 
-    if any(len(values.get(key, [])) != 1 for key in required):
+    if any(len(values.get(key, [])) != 1 for key in REQUIRED_METADATA):
         raise ValueError(
             f"Invalid or duplicate required rocPD metadata in {source_path!r}"
         )
@@ -345,11 +302,8 @@ def _metadata_values(
     if not isinstance(version, str) or not SCHEMA_VERSION.fullmatch(version):
         raise ValueError(f"Invalid rocPD schema version in {source_path!r}: {version!r}")
 
-    version_parts = version.split(".")
-    for index, key in enumerate(
-        ("schema_version_major", "schema_version_minor", "schema_version_patch")
-    ):
-        if len(values.get(key, [])) != 1 or str(values[key][0]) != version_parts[index]:
+    for key, part in zip(REQUIRED_METADATA[3:], version.split(".")):
+        if str(values[key][0]) != part:
             raise ValueError(
                 f"Inconsistent {key} metadata in input database {source_path!r}"
             )
@@ -363,20 +317,26 @@ def _metadata_values(
     return uuid, guid, version
 
 
-def _reference_schema(
-    uuid: str, guid: str, version: str
-) -> Tuple[RocpdSchema, sqlite3.Connection]:
-    schema = RocpdSchema(uuid=uuid, guid=guid, version=version)
+def _trusted_objects(
+    schema: RocpdSchema,
+) -> Tuple[Dict[str, Tuple[str, ...]], Set[str]]:
+    """Return the trusted table columns and all object names of *schema*."""
+
     reference = sqlite3.connect(":memory:")
     try:
         configure_untrusted_schema(reference)
         reference.executescript(schema.tables)
         reference.executescript(schema.indexes)
         reference.executescript(schema.views)
-    except BaseException:
+        objects = _schema_objects(reference, "main")
+        tables = {
+            name: tuple(column for column, _ in _table_columns(reference, "main", name))
+            for name, (kind, _) in objects.items()
+            if kind == "table"
+        }
+        return tables, set(objects)
+    finally:
         reference.close()
-        raise
-    return schema, reference
 
 
 def inspect_attached_rocpd(
@@ -387,34 +347,17 @@ def inspect_attached_rocpd(
     """Validate an attached database against its trusted versioned schema."""
 
     quote_identifier(alias)
-    objects = _master_objects(connection, alias)
-    metadata = _metadata_candidates(objects, source_path)
-    actual_by_kind = {
-        kind: {name for obj_kind, name, _, _ in objects if obj_kind == kind}
-        for kind in ("table", "index", "view", "trigger")
-    }
-    unsupported_kinds = {kind for kind, _, _, _ in objects} - {
-        "table",
-        "index",
-        "view",
-        "trigger",
-    }
-    if unsupported_kinds:
-        raise ValueError(
-            f"Unsupported database objects in {source_path!r}: "
-            f"{sorted(unsupported_kinds)!r}"
-        )
-
-    object_sql = {name: sql for kind, name, _, sql in objects if kind == "table"}
-    expected_by_kind = {kind: set() for kind in ("table", "index", "view", "trigger")}
+    objects = _schema_objects(connection, alias)
+    known: Set[str] = set()
     tables: Dict[str, List[str]] = {}
+    columns: Dict[str, Tuple[str, ...]] = {}
     schemas = []
     uuids = []
     version = None
 
-    for metadata_table, table_uuid in metadata:
+    for metadata_table, table_uuid in _metadata_tables(objects, source_path):
         uuid, guid, partition_version = _metadata_values(
-            connection, alias, metadata_table, table_uuid, source_path
+            connection, alias, objects, metadata_table, table_uuid, source_path
         )
         if version is None:
             version = partition_version
@@ -424,78 +367,33 @@ def inspect_attached_rocpd(
                 f"{sorted({version, partition_version})!r}"
             )
 
-        schema, reference = _reference_schema(uuid, guid, partition_version)
-        try:
-            expected_objects = _master_objects(reference, "main")
-            expected_table_sql = {
-                name: sql for kind, name, _, sql in expected_objects if kind == "table"
-            }
-            partition_expected = {
-                kind: {
-                    name for obj_kind, name, _, _ in expected_objects if obj_kind == kind
-                }
-                for kind in ("table", "index", "view", "trigger")
-            }
-            expected_by_kind["table"].update(partition_expected["table"])
-            expected_by_kind["index"].update(partition_expected["index"])
-            expected_by_kind["view"].update(partition_expected["view"])
-            expected_by_kind["trigger"].update(partition_expected["trigger"])
-
-            # Standalone indexes are rebuilt from trusted DDL and need not be
-            # present in the source. Drop only absent canonical indexes from
-            # this private reference before comparing table signatures. Keep
-            # implicit PRIMARY KEY/UNIQUE indexes and validate present indexes.
-            for index in partition_expected["index"] - actual_by_kind["index"]:
-                reference.execute(f"DROP INDEX {quote_identifier(index)}")
-
-            for table in sorted(partition_expected["table"]):
-                sql = object_sql.get(table)
-                if not isinstance(sql, str) or not REGULAR_TABLE_SQL.match(sql):
-                    raise ValueError(
-                        f"Refusing non-table object {table!r} in {source_path!r}"
-                    )
-                if _check_constraints(sql) != _check_constraints(
-                    expected_table_sql[table]
-                ):
-                    raise ValueError(
-                        f"rocPD table {table!r} CHECK constraints do not match schema "
-                        f"version {partition_version} in {source_path!r}"
-                    )
-                if _table_signature(connection, alias, table) != _table_signature(
-                    reference, "main", table
-                ):
-                    raise ValueError(
-                        f"rocPD table {table!r} does not match schema version "
-                        f"{partition_version} in {source_path!r}"
-                    )
-                if not table.endswith(uuid):
-                    raise ValueError(
-                        f"rocPD table {table!r} has an invalid UUID suffix in "
-                        f"{source_path!r}"
-                    )
-                base = table[: -len(uuid)]
-                quote_identifier(base)
-                tables.setdefault(base, []).append(table)
-        finally:
-            reference.close()
+        schema = RocpdSchema(uuid=uuid, guid=guid, version=partition_version)
+        trusted_tables, trusted_names = _trusted_objects(schema)
+        known.update(trusted_names)
+        for table, expected in sorted(trusted_tables.items()):
+            if not table.endswith(uuid):
+                raise ValueError(f"Trusted rocPD table {table!r} lacks UUID {uuid!r}")
+            _check_table(connection, alias, objects, table, expected, source_path)
+            base = table[: -len(uuid)]
+            tables.setdefault(base, []).append(table)
+            columns[base] = expected
 
         uuids.append(uuid)
         schemas.append(schema)
 
-    for kind in ("table", "index", "view", "trigger"):
-        unexpected = actual_by_kind[kind] - expected_by_kind[kind]
-        # Views and standalone indexes are optional on input, but unfamiliar
-        # persistent objects are still rejected rather than silently discarded.
-        missing = (
-            expected_by_kind[kind] - actual_by_kind[kind]
-            if kind not in ("view", "index")
-            else set()
+    # Custom objects are never read or replayed. Canonical views and indexes
+    # are rebuilt from trusted DDL, so their source definitions are ignored too.
+    ignored = tuple(
+        f"{objects[name][0]} {name!r}"
+        for name in sorted(objects, key=repr)
+        if name not in known
+    )
+    if ignored:
+        print(
+            f"Warning: ignoring unsupported objects in {source_path!r}: "
+            f"{', '.join(ignored)}",
+            file=sys.stderr,
         )
-        if unexpected or missing:
-            raise ValueError(
-                f"Invalid rocPD {kind} objects in {source_path!r}; "
-                f"unexpected={sorted(unexpected)!r}, missing={sorted(missing)!r}"
-            )
 
     return RocpdSourceSchema(
         path=source_path,
@@ -503,28 +401,27 @@ def inspect_attached_rocpd(
         version=version,
         uuids=tuple(uuids),
         tables={base: tuple(names) for base, names in tables.items()},
+        columns=columns,
         schemas=tuple(schemas),
+        ignored=ignored,
     )
 
 
 def create_union_views(
     connection: sqlite3.Connection,
-    tables: Mapping[str, Iterable[Tuple[str, str]]],
+    tables: Mapping[str, Iterable[Tuple[Optional[str], str]]],
+    columns: Mapping[str, Sequence[str]],
     *,
     temporary: bool = False,
 ) -> None:
-    """Create base-table UNION views from validated table mappings."""
+    """Create base-table UNION views over validated ``(alias, table)`` pairs.
+
+    An alias of ``None`` refers to a table in the connection's own database.
+    """
 
     prefix = "CREATE TEMPORARY VIEW" if temporary else "CREATE VIEW"
     for base, sources in sorted(tables.items()):
-        selects = [
-            (
-                f"SELECT * FROM {qualified_identifier(alias, table)}"
-                if alias
-                else f"SELECT * FROM {quote_identifier(table)}"
-            )
-            for alias, table in sources
-        ]
+        selects = [select_table(alias, table, columns[base]) for alias, table in sources]
         if not selects:
             raise ValueError(f"No tables available for rocPD view {base!r}")
         connection.execute(

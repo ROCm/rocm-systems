@@ -23,13 +23,14 @@
 # THE SOFTWARE.
 ###############################################################################
 
+import io
 import os
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
-from contextlib import closing
+from contextlib import closing, redirect_stderr
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -209,52 +210,130 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                 ),
             )
 
-    def test_trigger_is_rejected_without_replacing_destination(self):
+    def test_trigger_is_ignored_and_not_replayed(self):
         source = self.directory / "trigger.db"
         destination = self.directory / "existing.db"
         self.create_database(source)
         destination.write_bytes(b"existing destination")
 
         with closing(sqlite3.connect(str(source))) as connection, connection:
-            connection.execute(
-                f"""
+            connection.execute(f"""
                 CREATE TRIGGER attacker_trigger
                 AFTER INSERT ON "rocpd_metadata{self.UUIDS[0]}"
                 BEGIN
                     DELETE FROM "rocpd_metadata{self.UUIDS[0]}";
                 END
-                """
+                """)
+
+        with redirect_stderr(io.StringIO()) as stderr:
+            merge_sqlite_dbs([str(source)], str(destination))
+        self.assertIn("attacker_trigger", stderr.getvalue())
+        with closing(sqlite3.connect(str(destination))) as connection, connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='trigger'"
+                ).fetchall(),
+                [],
+            )
+            # Writes to the merged output are unaffected by the source trigger.
+            connection.execute(
+                f'INSERT INTO "rocpd_metadata{self.UUIDS[0]}" (tag, value) '
+                "VALUES ('after-merge', 'kept')"
+            )
+            self.assertGreater(
+                connection.execute("SELECT COUNT(*) FROM rocpd_metadata").fetchone()[0],
+                1,
             )
 
-        with self.assertRaisesRegex(ValueError, "trigger"):
-            merge_sqlite_dbs([str(source)], str(destination))
-        self.assertEqual(destination.read_bytes(), b"existing destination")
-
-    def test_unexpected_tables_views_and_schema_changes_are_rejected(self):
+    def test_unfamiliar_objects_are_ignored_and_not_copied(self):
         mutations = {
-            "table": "CREATE TABLE rocpd_attacker_controlled (payload TEXT)",
-            "sqlite_prefix": "CREATE TABLE sqliteXattacker (payload TEXT)",
-            "view": "CREATE VIEW attacker_view AS SELECT 1",
+            "table": ("CREATE TABLE rocpd_attacker_controlled (payload TEXT)",),
+            "sqlite_prefix": ("CREATE TABLE sqliteXattacker (payload TEXT)",),
+            "view": ("CREATE VIEW attacker_view AS SELECT randomblob(1000000)",),
             "index": (
                 f'CREATE INDEX attacker_index ON "rocpd_string{self.UUIDS[0]}" '
-                "(string)"
-            ),
-            "missing_table": f'DROP TABLE "rocpd_arg{self.UUIDS[0]}"',
-            "column": (
-                f'ALTER TABLE "rocpd_string{self.UUIDS[0]}" '
-                "ADD COLUMN attacker_value TEXT"
+                "(string)",
             ),
         }
-        for name, statement in mutations.items():
+        for name, statements in mutations.items():
             with self.subTest(name=name):
                 source = self.directory / f"{name}.db"
                 destination = self.directory / f"{name}-merged.db"
                 self.create_database(source)
                 with closing(sqlite3.connect(str(source))) as connection, connection:
-                    connection.execute(statement)
-                with self.assertRaises(ValueError):
+                    for statement in statements:
+                        connection.execute(statement)
+                with closing(sqlite3.connect(":memory:", uri=True)) as connection:
+                    attach_readonly(connection, str(source), "source")
+                    with redirect_stderr(io.StringIO()):
+                        inspected = inspect_attached_rocpd(
+                            connection, "source", str(source)
+                        )
+                self.assertEqual(len(inspected.ignored), 1)
+                with redirect_stderr(io.StringIO()):
+                    merge_sqlite_dbs([str(source)], str(destination))
+                with closing(sqlite3.connect(str(destination))) as connection:
+                    names = {
+                        row[0]
+                        for row in connection.execute("SELECT name FROM sqlite_master")
+                    }
+                self.assertFalse(
+                    names
+                    & {
+                        "rocpd_attacker_controlled",
+                        "sqliteXattacker",
+                        "attacker_view",
+                        "attacker_index",
+                    }
+                )
+
+    def test_required_table_changes_are_rejected(self):
+        table = f"rocpd_string{self.UUIDS[0]}"
+        mutations = {
+            "missing_table": (f'DROP TABLE "rocpd_arg{self.UUIDS[0]}"',),
+            "added_column": (f'ALTER TABLE "{table}" ADD COLUMN attacker_value TEXT',),
+            "renamed_column": (
+                # Skip rewriting the canonical views, which are optional.
+                "PRAGMA legacy_alter_table = ON",
+                f'ALTER TABLE "{table}" RENAME COLUMN string TO text',
+            ),
+            "generated_column": (
+                f'ALTER TABLE "{table}" ADD COLUMN generated '
+                "TEXT GENERATED ALWAYS AS (upper(string)) VIRTUAL",
+            ),
+        }
+        for name, statements in mutations.items():
+            with self.subTest(name=name):
+                source = self.directory / f"{name}.db"
+                destination = self.directory / f"{name}-merged.db"
+                self.create_database(source)
+                with closing(sqlite3.connect(str(source))) as connection, connection:
+                    for statement in statements:
+                        connection.execute(statement)
+                with self.assertRaisesRegex(ValueError, "rocPD table"):
                     merge_sqlite_dbs([str(source)], str(destination))
                 self.assertFalse(destination.exists())
+                with self.assertRaisesRegex(ValueError, "rocPD table"):
+                    imported = RocpdImportData(str(source), skip_auto_merge=True)
+                    imported.connection.close()
+
+    def test_view_in_place_of_required_table_is_rejected(self):
+        source = self.directory / "view-as-table.db"
+        destination = self.directory / "view-as-table-merged.db"
+        self.create_database(source)
+        table = f"rocpd_arg{self.UUIDS[0]}"
+        with closing(sqlite3.connect(str(source))) as connection, connection:
+            columns = [
+                row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')
+            ]
+            connection.execute(f'DROP TABLE "{table}"')
+            connection.execute(
+                f'CREATE VIEW "{table}" AS SELECT '
+                + ", ".join(f'NULL AS "{column}"' for column in columns)
+            )
+        with self.assertRaisesRegex(ValueError, "not a regular table"):
+            merge_sqlite_dbs([str(source)], str(destination))
+        self.assertFalse(destination.exists())
 
     def test_missing_source_views_are_rebuilt_for_merge_and_import(self):
         for version in query_supported_schema_versions():
@@ -307,7 +386,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                         imported.connection.close()
                 self.assertEqual(source.read_bytes(), before)
 
-    def test_canonical_indexes_are_optional_but_validated_when_present(self):
+    def test_indexes_are_rebuilt_from_trusted_schema(self):
         source = self.directory / "no-index.db"
         destination = self.directory / "rebuilt-index.db"
         self.create_database(source)
@@ -317,127 +396,106 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         # trusted reference so this test exercises real index reconstruction.
         def indexed_schema(**kwargs):
             schema = RocpdSchema(**kwargs)
-            uuid = kwargs["uuid"]
-            schema.indexes += (
-                f'\nCREATE INDEX "rocpd_string{uuid}_test_idx" '
-                f'ON "rocpd_string{uuid}" (string);'
-            )
+            uuid = kwargs.get("uuid", "")
+            if uuid:
+                schema.indexes += (
+                    f'\nCREATE INDEX "rocpd_string{uuid}_test_idx" '
+                    f'ON "rocpd_string{uuid}" (string);'
+                )
             return schema
 
+        # A familiar name must not carry an altered definition into the output.
+        with closing(sqlite3.connect(str(source))) as connection:
+            connection.execute(
+                f'CREATE INDEX "{index}" ON "rocpd_string{self.UUIDS[0]}" (guid)'
+            )
         with mock.patch.object(
             database_module, "RocpdSchema", side_effect=indexed_schema
-        ):
-            imported = RocpdImportData(str(source), skip_auto_merge=True)
-            imported.connection.close()
+        ), mock.patch.object(merge_module, "RocpdSchema", side_effect=indexed_schema):
             merge_sqlite_dbs([str(source)], str(destination))
-            with closing(sqlite3.connect(str(destination))) as connection:
-                self.assertEqual(
-                    connection.execute(f'PRAGMA index_info("{index}")').fetchall(),
-                    [(0, 2, "string")],
-                )
-            imported = RocpdImportData(str(destination), skip_auto_merge=True)
-            imported.connection.close()
+        with closing(sqlite3.connect(str(destination))) as connection:
+            self.assertEqual(
+                connection.execute(f'PRAGMA index_info("{index}")').fetchall(),
+                [(0, 2, "string")],
+            )
 
-            # A familiar name must not disguise an altered index definition.
-            with closing(sqlite3.connect(str(source))) as connection:
-                connection.execute(
-                    f'CREATE INDEX "{index}" ON "rocpd_string{self.UUIDS[0]}" (guid)'
-                )
-            before = destination.read_bytes()
-            with self.assertRaisesRegex(ValueError, "does not match schema"):
-                merge_sqlite_dbs([str(source)], str(destination))
-            self.assertEqual(destination.read_bytes(), before)
-            with self.assertRaisesRegex(ValueError, "does not match schema"):
-                imported = RocpdImportData(str(source), skip_auto_merge=True)
-                imported.connection.close()
-
-    def test_implicit_unique_index_is_still_required(self):
-        source = self.directory / "missing-unique.db"
-        destination = self.directory / "missing-unique-output.db"
-        self.create_database(source)
-        table = f"rocpd_string{self.UUIDS[0]}"
-        with closing(sqlite3.connect(str(source))) as connection:
-            table_sql = connection.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone()[0]
-            without_unique = table_sql.replace("UNIQUE ON CONFLICT ABORT", "")
-            self.assertNotEqual(without_unique, table_sql)
-            connection.execute(f'DROP TABLE "{table}"')
-            connection.execute(without_unique)
-
-        with self.assertRaisesRegex(ValueError, "does not match schema"):
-            merge_sqlite_dbs([str(source)], str(destination))
-        self.assertFalse(destination.exists())
-        with self.assertRaisesRegex(ValueError, "does not match schema"):
-            imported = RocpdImportData(str(source), skip_auto_merge=True)
-            imported.connection.close()
-
-    def test_check_constraints_cannot_be_removed_modified_or_commented_out(self):
-        constraint = "CHECK (\"storage_type\" IN ('FILE', 'MEMORY'))"
-        for name, replacement in (
-            ("removed", ""),
-            ("modified", constraint.replace("'MEMORY'", "'OTHER'")),
-            ("commented", f"/* {constraint} */"),
-        ):
-            with self.subTest(mutation=name):
-                source = self.directory / f"check-{name}.db"
-                destination = self.directory / f"check-{name}-output.db"
-                self.create_database(source)
-                table = f"rocpd_info_code_object{self.UUIDS[0]}"
-                with closing(sqlite3.connect(str(source))) as connection:
-                    table_sql = connection.execute(
-                        "SELECT sql FROM sqlite_master WHERE name=?", (table,)
-                    ).fetchone()[0]
-                    self.assertIn(constraint, table_sql)
-                    connection.execute(f'DROP TABLE "{table}"')
-                    connection.execute(table_sql.replace(constraint, replacement))
-                with self.assertRaisesRegex(ValueError, "CHECK constraints"):
-                    imported = RocpdImportData(str(source), skip_auto_merge=True)
-                    imported.connection.close()
-                with self.assertRaisesRegex(ValueError, "CHECK constraints"):
-                    merge_sqlite_dbs([str(source)], str(destination))
-                self.assertFalse(destination.exists())
-
-    def test_check_constraint_formatting_is_accepted(self):
-        # Quoted keywords and parentheses in escaped literals are not clauses
-        # or nesting delimiters; literal case changes must remain significant.
-        sql = (
-            "CREATE TABLE t (\"check\" TEXT DEFAULT 'CHECK (0)', "
-            "x TEXT CHECK ((length(x) > 0) AND x NOT IN ('a)''b', 'CHECK(0)')))"
-        )
-        checks = database_module._check_constraints(sql)
-        self.assertEqual(len(checks), 1)
-        self.assertEqual(
-            database_module._check_constraints(
-                sql.replace("CHECK ((", "check /* ) CHECK(0) */ ((").replace(
-                    " AND ", " and -- ) CHECK(0)\n "
-                )
-            ),
-            checks,
-        )
-        self.assertNotEqual(
-            database_module._check_constraints(sql.replace("'a)''b'", "'A)''b'")),
-            checks,
-        )
-        source = self.directory / "formatted-check.db"
-        destination = self.directory / "formatted-check-output.db"
-        self.create_database(source)
+    def test_merge_enforces_trusted_constraints_on_untrusted_rows(self):
+        # Schema text cannot vouch for row values: a constraint can be hidden
+        # in a trailing unterminated comment, or bypassed while writing.
         table = f"rocpd_info_code_object{self.UUIDS[0]}"
         constraint = "CHECK (\"storage_type\" IN ('FILE', 'MEMORY'))"
-        formatted = (
-            "check /* CHECK (ignored) */ (\n \"storage_type\" in ('FILE', 'MEMORY'))"
+        rows = (
+            f'INSERT INTO "{table}" (guid, nid, pid, uri, storage_type) '
+            "VALUES (?, 1, 1, 'uri', 'EVIL')"
         )
-        with closing(sqlite3.connect(str(source))) as connection:
+
+        def hidden_check(connection):
             table_sql = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE name=?", (table,)
             ).fetchone()[0]
             self.assertIn(constraint, table_sql)
-            connection.execute(f'DROP TABLE "{table}"')
-            connection.execute(table_sql.replace(constraint, formatted))
+            connection.execute("PRAGMA writable_schema = ON")
+            connection.execute(
+                "UPDATE sqlite_master SET sql=? WHERE name=?",
+                (table_sql.replace(constraint, "") + f" /* {constraint}", table),
+            )
+            connection.commit()
+
+        def ignored_check(connection):
+            connection.execute("PRAGMA ignore_check_constraints = ON")
+
+        for name, mutate in (("hidden", hidden_check), ("ignored", ignored_check)):
+            with self.subTest(mutation=name):
+                source = self.directory / f"check-{name}.db"
+                destination = self.directory / f"check-{name}-output.db"
+                self.create_database(source)
+                with closing(sqlite3.connect(str(source))) as connection:
+                    mutate(connection)
+                with closing(sqlite3.connect(str(source))) as connection:
+                    connection.execute("PRAGMA ignore_check_constraints = ON")
+                    connection.execute("PRAGMA foreign_keys = OFF")
+                    connection.execute(rows, (self.GUIDS[0],))
+                    connection.commit()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "CHECK"):
+                    merge_sqlite_dbs([str(source)], str(destination))
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(self.directory.glob(f".{destination.name}.*")), [])
+
+    def test_merge_does_not_depend_on_source_column_order(self):
+        source = self.directory / "reordered.db"
+        destination = self.directory / "reordered-output.db"
+        self.create_database(source)
+        table = f"rocpd_string{self.UUIDS[0]}"
+        with closing(sqlite3.connect(str(source))) as connection, connection:
+            connection.execute(f'ALTER TABLE "{table}" RENAME TO old_string')
+            connection.execute(
+                f'CREATE TABLE "{table}" (string TEXT, guid TEXT, id INTEGER)'
+            )
+            connection.execute(
+                f'INSERT INTO "{table}" (id, guid, string) '
+                "SELECT id, guid, string FROM old_string"
+            )
+            connection.execute("DROP TABLE old_string")
         merge_sqlite_dbs([str(source)], str(destination))
-        for path in (source, destination):
-            imported = RocpdImportData(str(path), skip_auto_merge=True)
-            imported.connection.close()
+        with closing(sqlite3.connect(str(destination))) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT id, guid, string FROM rocpd_string"
+                ).fetchall(),
+                [(1, self.GUIDS[0], f"value-{self.UUIDS[0]}")],
+            )
+
+    def test_duplicate_required_metadata_is_rejected(self):
+        source = self.directory / "duplicate-metadata.db"
+        self.create_database(source)
+        with closing(sqlite3.connect(str(source))) as connection, connection:
+            connection.execute(
+                f'INSERT INTO "rocpd_metadata{self.UUIDS[0]}" (tag, value) '
+                "VALUES ('uuid', ?)",
+                (self.UUIDS[0],),
+            )
+        with self.assertRaisesRegex(ValueError, "duplicate required"):
+            merge_sqlite_dbs([str(source)], str(self.directory / "output.db"))
 
     def test_merge_accepts_generator_sources(self):
         sources = self.create_batch_sources()
@@ -451,7 +509,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                 sorted((f"value-{uuid}",) for uuid in self.UUIDS),
             )
 
-    def test_identifier_breakout_is_rejected(self):
+    def test_identifier_breakout_is_never_interpolated(self):
         source = self.directory / "identifier.db"
         destination = self.directory / "identifier-merged.db"
         payload = self.directory / "payload.db"
@@ -463,9 +521,17 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
             quoted_name = '"' + injected_name.replace('"', '""') + '"'
             connection.execute(f"CREATE TABLE {quoted_name} (value INTEGER)")
 
-        with self.assertRaisesRegex(ValueError, "identifier"):
+        with redirect_stderr(io.StringIO()) as stderr:
             merge_sqlite_dbs([str(source)], str(destination))
+        self.assertIn("ignoring unsupported objects", stderr.getvalue())
         self.assertFalse(payload.exists())
+        with closing(sqlite3.connect(str(destination))) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name FROM sqlite_master WHERE name=?", (injected_name,)
+                ).fetchall(),
+                [],
+            )
 
     def test_import_uses_read_only_tables_and_trusted_views(self):
         source = self.directory / "source'with-quote.db"
@@ -478,8 +544,8 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
 
         with closing(sqlite3.connect(":memory:", uri=True)) as connection, connection:
             configure_untrusted_schema(connection)
-            table_info = _create_temp_views(connection, [str(source)])
-            _create_meta_views(connection, table_info.schema_version)
+            _, schema_version = _create_temp_views(connection, [str(source)])
+            _create_meta_views(connection, schema_version)
             view_sql = connection.execute(
                 "SELECT sql FROM sqlite_temp_master "
                 "WHERE type='view' AND name='processes'"
@@ -531,7 +597,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                 guid=self.GUIDS[1],
                 version=other_version,
             )
-            with self.assertRaisesRegex(RuntimeError, "Multiple schema versions"):
+            with self.assertRaisesRegex(ValueError, "Multiple schema versions"):
                 merge_sqlite_dbs([str(first), str(second)], str(destination))
 
     def test_additional_metadata_is_preserved(self):
@@ -558,93 +624,24 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         finally:
             imported.connection.close()
 
-    def test_metadata_validation_limits_rows_and_preserves_extra_metadata(self):
-        source = self.directory / "many-metadata.db"
-        destination = self.directory / "many-metadata-output.db"
-        self.create_database(source)
-        table = f"rocpd_metadata{self.UUIDS[0]}"
-        with closing(sqlite3.connect(str(source))) as connection, connection:
-            connection.executemany(
-                f'INSERT INTO "{table}" (tag, value) VALUES (?, ?)',
-                (("custom_metadata", "x" * 1024) for _ in range(1000)),
-            )
-
-        required = {
-            "uuid",
-            "guid",
-            "schema_version",
-            "schema_version_major",
-            "schema_version_minor",
-            "schema_version_patch",
-        }
-        for duplicate in (False, True):
-            with self.subTest(duplicate=duplicate):
-                if duplicate:
-                    with closing(sqlite3.connect(str(source))) as connection, connection:
-                        connection.executemany(
-                            f'INSERT INTO "{table}" (tag, value) VALUES (?, ?)',
-                            (("uuid", self.UUIDS[0]) for _ in range(1000)),
-                        )
-                rows_read = []
-
-                def track_rows(cursor, row):
-                    if len(row) == 2:
-                        rows_read.append(row[0])
-                    return row
-
-                with closing(sqlite3.connect(":memory:", uri=True)) as connection:
-                    connection.row_factory = track_rows
-                    configure_untrusted_schema(connection)
-                    attach_readonly(connection, str(source), "source")
-                    if duplicate:
-                        with self.assertRaisesRegex(ValueError, "duplicate required"):
-                            inspect_attached_rocpd(connection, "source", str(source))
-                    else:
-                        inspect_attached_rocpd(connection, "source", str(source))
-                self.assertTrue(set(rows_read).issubset(required))
-                self.assertLessEqual(len(rows_read), 7)
-                if not duplicate:
-                    self.assertEqual(set(rows_read), required)
-                    merge_sqlite_dbs([str(source)], str(destination))
-                    with closing(sqlite3.connect(str(destination))) as connection:
-                        self.assertEqual(
-                            connection.execute(
-                                "SELECT COUNT(*), SUM(length(value)) FROM rocpd_metadata "
-                                "WHERE tag='custom_metadata'"
-                            ).fetchone(),
-                            (1000, 1024000),
-                        )
-
-    def test_foreign_key_diagnostics_limit_rows_and_preserve_destination(self):
+    def test_foreign_key_violations_are_reported_not_fatal(self):
         source = self.directory / "invalid-relationships.db"
-        destination = self.directory / "existing-output.db"
+        destination = self.directory / "invalid-relationships-output.db"
         self.create_database(source)
-        destination.write_bytes(b"existing destination")
         table = f"rocpd_event{self.UUIDS[0]}"
         with closing(sqlite3.connect(str(source))) as connection, connection:
             connection.executemany(
                 f'INSERT INTO "{table}" (category_id) VALUES (?)',
                 ((1000 + index,) for index in range(100)),
             )
-        rows_read = []
-        connect = sqlite3.connect
-
-        def track_rows(cursor, row):
-            if len(row) == 4 and row[0] == table:
-                rows_read.append(row)
-            return row
-
-        def tracked_connection(*args, **kwargs):
-            connection = connect(*args, **kwargs)
-            connection.row_factory = track_rows
-            return connection
-
-        with mock.patch.object(sqlite3, "connect", side_effect=tracked_connection):
-            with self.assertRaisesRegex(sqlite3.IntegrityError, "foreign-key validation"):
-                merge_sqlite_dbs([str(source)], str(destination))
-        self.assertEqual(len(rows_read), 10)
-        self.assertEqual(destination.read_bytes(), b"existing destination")
-        self.assertEqual(list(self.directory.glob(f".{destination.name}.*")), [])
+        with redirect_stderr(io.StringIO()) as stderr:
+            merge_sqlite_dbs([str(source)], str(destination))
+        self.assertIn("foreign-key violations", stderr.getvalue())
+        with closing(sqlite3.connect(str(destination))) as connection:
+            self.assertEqual(
+                connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone(),
+                (100,),
+            )
 
     def test_all_supported_schemas_pass_validation(self):
         for version_index, version in enumerate(query_supported_schema_versions()):
@@ -713,6 +710,16 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "must not also be an input"):
                         merge_sqlite_dbs([input_path], str(source))
                     self.assertEqual(source.read_bytes(), before)
+
+    @unittest.skipUnless(hasattr(os, "link"), "Requires hard links")
+    def test_destination_cannot_alias_input_through_hard_link(self):
+        source = self.directory / "source.db"
+        destination = self.directory / "linked.db"
+        self.create_database(source)
+        os.link(source, destination)
+        with self.assertRaisesRegex(ValueError, "must not also be an input"):
+            merge_sqlite_dbs([str(source)], str(destination))
+        self.assertTrue(os.path.samefile(source, destination))
 
     def test_destination_wal_is_preserved_until_recovered(self):
         source = self.directory / "source.db"
@@ -875,10 +882,14 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
     def test_auto_merge_singleton_validates_schema_and_rebuilds_views(self):
         sources = self.create_batch_sources()
         singleton = sources[-1]
+        table = f"rocpd_arg{self.UUIDS[-1]}"
         with closing(sqlite3.connect(singleton)) as connection:
-            connection.execute("CREATE TABLE unexpected_table (value TEXT)")
+            table_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name=?", (table,)
+            ).fetchone()[0]
+            connection.execute(f'DROP TABLE "{table}"')
         before = Path(singleton).read_bytes()
-        with self.assertRaisesRegex(ValueError, "table objects"):
+        with self.assertRaisesRegex(ValueError, "Missing rocPD table"):
             imported = self.import_batched_sources(sources)
             imported.connection.close()
         self.assertEqual(Path(singleton).read_bytes(), before)
@@ -886,13 +897,15 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
             list((self.directory / "batched.rpdb").glob("merged_db_1_*.db")), []
         )
 
-        # Once the unexpected object is removed, the singleton can be published,
-        # but its source-controlled view definition must still be replaced.
+        # Once the table is restored, the singleton can be published, but its
+        # source-controlled view definition and custom objects are not copied.
         with closing(sqlite3.connect(singleton)) as connection:
-            connection.execute("DROP TABLE unexpected_table")
+            connection.execute(table_sql)
+            connection.execute("CREATE TABLE unexpected_table (value TEXT)")
             connection.execute("DROP VIEW processes")
             connection.execute("CREATE VIEW processes AS SELECT randomblob(1000000)")
-        imported = self.import_batched_sources(sources)
+        with redirect_stderr(io.StringIO()):
+            imported = self.import_batched_sources(sources)
         try:
             self.assertEqual(len(imported.databases), 2)
             self.assertEqual(
@@ -909,6 +922,12 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                 "SELECT sql FROM sqlite_master WHERE name='processes'"
             ).fetchone()[0]
             self.assertNotIn("randomblob", view_sql.lower())
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name FROM sqlite_master WHERE name='unexpected_table'"
+                ).fetchall(),
+                [],
+            )
             inspected = inspect_attached_rocpd(connection, "main", singleton_output)
             self.assertEqual(inspected.uuids, (self.UUIDS[-1],))
 
