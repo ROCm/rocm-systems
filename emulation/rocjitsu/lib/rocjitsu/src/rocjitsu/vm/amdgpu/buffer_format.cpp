@@ -155,6 +155,51 @@ double filter_float_texels(std::array<double, 4> channels, const std::array<doub
          channels[3] * weights[3];
 }
 
+/// The floating-point footprint accumulator aligns signed operands to 35 bits
+/// before each addition. A carry increases its exponent; cancellation does not
+/// decrease it. Final rounding must retain that exponent as well.
+class ImageFilterAccumulator {
+public:
+  explicit ImageFilterAccumulator(double first) : value(first) {
+    if (std::isfinite(first) && first != 0) {
+      std::frexp(first, &exponent);
+      has_exponent = true;
+    }
+  }
+
+  void add(double term) {
+    if (!std::isfinite(value) || !std::isfinite(term)) {
+      value += term;
+      if (std::isnan(value))
+        value = kFilterNan;
+      return;
+    }
+    if (term != 0) {
+      int term_exponent;
+      std::frexp(term, &term_exponent);
+      exponent = has_exponent ? std::max(exponent, term_exponent) : term_exponent;
+      has_exponent = true;
+    }
+    if (!has_exponent) {
+      value = 0; // Weighted sums of zeros are positive, including only negative zeros.
+      return;
+    }
+    double mantissa =
+        std::floor(std::ldexp(value, 35 - exponent)) + std::floor(std::ldexp(term, 35 - exponent));
+    if (std::abs(mantissa) >= 0x1p35) {
+      mantissa = std::floor(mantissa / 2);
+      ++exponent;
+    }
+    value = std::ldexp(mantissa, exponent - 35);
+  }
+
+  double value;
+  int exponent = 0;
+
+private:
+  bool has_exponent = false;
+};
+
 uint32_t read_bits(std::span<const uint8_t> bytes, uint32_t offset, uint32_t width) {
   uint64_t value = 0;
   for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i)
@@ -467,6 +512,7 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         };
         const uint32_t filter_count = d.image_sample->filter_counts[lane];
         double filtered;
+        int accumulation_exponent = 0;
         if (filter_count > 1) {
           const auto weighted_filter = [&](uint32_t index) {
             const double value =
@@ -478,8 +524,16 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
                           : value;
           };
           filtered = weighted_filter(0);
-          for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
-            filtered += weighted_filter(filter_index);
+          if (unorm8) {
+            for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+              filtered += weighted_filter(filter_index);
+          } else {
+            ImageFilterAccumulator accumulator(filtered);
+            for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+              accumulator.add(weighted_filter(filter_index));
+            filtered = accumulator.value;
+            accumulation_exponent = accumulator.exponent;
+          }
         } else {
           filtered = filter_sample(0);
         }
@@ -501,19 +555,25 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
             normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
           filtered = std::ldexp(static_cast<double>(normalized), static_cast<int>(shift) - 34);
         } else if (std::isfinite(filtered) && filtered != 0) {
+          const int exponent =
+              filter_count > 1 ? accumulation_exponent : 1 + std::ilogb(std::abs(filtered));
           if (format.number == Number::Float && format.widths[0] == 32) {
             // FP32 filtering retains 35 signed significant bits before the
             // final rounding. Discarding signed low bits rounds downward.
-            const double scale = std::ldexp(1.0, 34 - std::ilogb(std::abs(filtered)));
+            const double scale = std::ldexp(1.0, 35 - exponent);
             filtered = std::floor(filtered * scale) / scale;
           }
           // The floating-point filter rounds its result to 29 significant
           // bits before conversion to FP32. This intermediate rounding can
           // turn a value on either side of an FP32 midpoint into an exact tie.
-          const double scale = std::ldexp(1.0, 28 - std::ilogb(std::abs(filtered)));
+          const double scale = std::ldexp(1.0, 29 - exponent);
           filtered = round_even(filtered * scale) / scale;
         }
         values[c] = std::bit_cast<uint32_t>(static_cast<float>(filtered));
+        // Sampling flushes FP32 underflow at the output as well as the input.
+        if (format.number == Number::Float && format.widths[0] == 32 &&
+            (values[c] & 0x7fffffffu) < 0x00800000u)
+          values[c] &= 0x80000000u;
       }
     }
     for (uint32_t reg = 0; reg < registers; ++reg) {

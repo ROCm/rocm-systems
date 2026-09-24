@@ -94,7 +94,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   height = mip->height;
   bool normalized = true, seamless_cube = false;
   uint32_t min_filter = 0, mag_filter = 0, mip_filter = 0, max_anisotropy = 1;
-  uint32_t aniso_threshold = 0, aniso_bias = 0;
+  uint32_t aniso_threshold = 0, aniso_bias = 0, perf_mip = 0;
   double min_lod = 0, max_lod = 0, lod_bias = 0;
   const bool g16 = sample_mode == ImageSampleMode::Derivatives16;
   const bool derivatives = g16 || sample_mode == ImageSampleMode::Derivatives;
@@ -122,6 +122,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     max_anisotropy = 1u << ratio;
     aniso_threshold = (s[0] >> 16) & 7;
     aniso_bias = (s[0] >> 21) & 63;
+    perf_mip = gfx12 ? ((s[2] >> 30) | ((s[3] & 3) << 2)) : (s[1] >> 24) & 15;
     const auto supported_wrap = [](uint32_t wrap) { return wrap <= 3 || wrap == 6; };
     if (!supported_wrap(wrap_x) || !supported_wrap(wrap_y) ||
         (s[0] & ((7u << 12) | (3u << 29) | (3u << 19))) || (s[2] & (3u << 24)) || mip_filter > 2)
@@ -135,9 +136,12 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     d.image_srgb &= !(s[0] & (1u << 31));
     min_lod = (s[1] & (gfx12 ? 0x1fff : 0xfff)) / 256.0;
     max_lod = ((s[1] >> (gfx12 ? 13 : 12)) & (gfx12 ? 0x1fff : 0xfff)) / 256.0;
-    // The two signed bias fields must be sign-extended separately.
-    lod_bias = (int32_t((s[2] & 0x3fff) ^ 0x2000) - 0x2000) / 256.0 +
-               (int32_t(((s[2] >> 14) & 0x3f) ^ 0x20) - 0x20) / 16.0;
+    // Sign-extend before scaling the secondary bias, retaining signed floor
+    // rounding in its four fractional bits.
+    const int32_t primary_bias = int32_t((s[2] & 0x3fff) ^ 0x2000) - 0x2000;
+    const int32_t secondary_bias = int32_t(((s[2] >> 14) & 0x3f) ^ 0x20) - 0x20;
+    lod_bias = primary_bias / 256.0 +
+               ((secondary_bias * int32_t(image_perf_scales[perf_mod])) >> 4) / 16.0;
     // RGBA8 UNORM/sRGB and one-, two- or four-component floating-point filtering.
     const bool filterable = format == 42 || format == 13 || format == 29 || format == 57 ||
                             format == 22 || format == 50 || format == 63;
@@ -256,9 +260,11 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       uint32_t filter_count = 1;
       double sample_step_u = 0, sample_step_v = 0;
       if (sample_mode == ImageSampleMode::Explicit) {
-        lod = read(coordinate_offset + 2 + (dim == 5 || dim == 3), lane);
-      } else if (sample_mode != ImageSampleMode::Zero &&
-                 (max_level || min_filter != mag_filter || (min_filter & 2) || (mag_filter & 2))) {
+        lod = round_sample_fixed8(read(coordinate_offset + 2 + (dim == 5 || dim == 3), lane)) +
+              lod_bias;
+      } else if (sample_mode == ImageSampleMode::Zero) {
+        lod = lod_bias;
+      } else if (max_level || min_filter != mag_filter || (min_filter & 2) || (mag_filter & 2)) {
         double dxu, dxv, dyu, dyv;
         bool unbounded_cube_footprint = false;
         if (derivatives) {
@@ -305,52 +311,40 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             direction[face / 2] = sign;
             return image_cube_project(face, direction);
           };
-          const uint32_t left = lane & ~1u, top = lane & ~2u;
-          const auto l = unfolded(left), r = unfolded(left + 1);
-          const auto t = unfolded(top), b = unfolded(top + 2);
-          if (!l || !r || !t || !b)
+          // Implicit sampling uses the top and left edges of the whole quad,
+          // even when this lane is on its bottom or right edge.
+          const uint32_t origin = lane & ~3u;
+          const auto tl = unfolded(origin), tr = unfolded(origin + 1), bl = unfolded(origin + 2);
+          if (!tl || !tr || !bl)
             return unsupported();
-          dxu = (*r)[0] - (*l)[0];
-          dxv = (*r)[1] - (*l)[1];
-          dyu = (*b)[0] - (*t)[0];
-          dyv = (*b)[1] - (*t)[1];
+          dxu = (*tr)[0] - (*tl)[0];
+          dxv = (*tr)[1] - (*tl)[1];
+          dyu = (*bl)[0] - (*tl)[0];
+          dyv = (*bl)[1] - (*tl)[1];
         }
         if (!std::isfinite(dxu) || !std::isfinite(dxv) || !std::isfinite(dyu) ||
             !std::isfinite(dyv))
           return unsupported();
-        const double sx = normalized ? width : 1, sy = normalized ? height : 1;
-        const double xu = dxu * sx, xv = dxv * sy, yu = dyu * sx, yv = dyv * sy;
-        double rho = std::max(std::hypot(xu, xv), std::hypot(yu, yv));
+        const auto footprint_axes =
+            image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1, normalized ? height : 1);
+        const auto [major_lod, minor_lod] = footprint_axes.lods;
         if ((min_filter & 2) || (mag_filter & 2)) {
-          // The ellipse axes determine the mip footprint and the direction
-          // along which additional filtered samples cover the major axis.
-          const double a = xu * xu + yu * yu, b = xu * xv + yu * yv;
-          const double c = xv * xv + yv * yv;
-          const double spread = std::hypot(a - c, 2 * b);
-          const double major = std::sqrt(std::max(0.0, (a + c + spread) * 0.5));
-          const double minor = std::sqrt(std::max(0.0, (a + c - spread) * 0.5));
-          rho = std::max(minor, major / max_anisotropy);
-          const double footprint = std::max(1.0, rho);
-          const double geometric_ratio = std::clamp(major / footprint, 1.0, double(max_anisotropy));
-          filter_count = image_anisotropic_filter_count(major, minor, max_anisotropy,
+          lod = std::max(minor_lod, major_lod - std::countr_zero(max_anisotropy) * 256) / 256.0;
+          filter_count = image_anisotropic_filter_count(footprint_axes, max_anisotropy,
                                                         aniso_threshold, aniso_bias, perf_mod);
           if (filter_count > 1) {
-            double direction_u = b, direction_v = major * major - a;
-            if (b == 0) {
-              direction_u = a >= c ? 1 : 0;
-              direction_v = a >= c ? 0 : 1;
-            }
-            const double direction_length = std::hypot(direction_u, direction_v);
-            double spacing = major / filter_count;
-            // Spacing still uses the geometric footprint; its hardware
-            // quantization is separate from the count controls above.
-            if (geometric_ratio <= 2)
-              spacing = footprint * std::clamp(2 * (geometric_ratio - 1), 0.0, 1.0);
-            sample_step_u = direction_u / direction_length * spacing / sx;
-            sample_step_v = direction_v / direction_length * spacing / sy;
+            const auto [direction_u, direction_v] =
+                footprint_axes.direction(normalized ? width : 1, normalized ? height : 1);
+            const auto unbiased_count = image_anisotropic_filter_count(
+                footprint_axes, max_anisotropy, aniso_threshold, 0, perf_mod);
+            const double spacing = image_anisotropic_filter_step(
+                footprint_axes, max_anisotropy, filter_count, unbiased_count, mip_filter == 2);
+            sample_step_u = image_filter_step_truncate(direction_u * spacing);
+            sample_step_v = image_filter_step_truncate(direction_v * spacing);
           }
+        } else {
+          lod = major_lod / 256.0;
         }
-        lod = rho > 0 ? std::log2(rho) : -32;
         lod += lod_bias;
         if (sample_mode == ImageSampleMode::Bias)
           lod += read(0, lane);
@@ -401,7 +395,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
         const auto fraction = [](double value) {
           return static_cast<float>(round_sample_fixed8(value));
         };
-        access.mip_fractions[lane] = fraction(lod - std::floor(lod));
+        access.mip_fractions[lane] =
+            image_mip_fraction(static_cast<uint32_t>((lod - std::floor(lod)) * 256), perf_mip,
+                               perf_mod) /
+            256.0f;
         access.filter_counts[lane] = filter_count;
         access.filters.resize(std::max(access.filters.size(), size_t(filter_count)));
         access.tap_count = std::max(access.tap_count, filter_count * access.taps_per_filter);
@@ -420,8 +417,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
           if (!selected)
             return unsupported();
           const double offset = double(filter_index) - 0.5 * (filter_count - 1);
-          const double sample_u = u + offset * sample_step_u;
-          const double sample_v = v + offset * sample_step_v;
+          const double sample_u = image_sample_coordinate(u, offset * sample_step_u);
+          const double sample_v = image_sample_coordinate(v, offset * sample_step_v);
           double px = sample_u * (normalized ? selected->width : 1) - (linear ? 0.5 : 0);
           double py = sample_v * (normalized ? selected->height : 1) - (linear ? 0.5 : 0);
           // Clamp to texel centers before generating weights. This preserves

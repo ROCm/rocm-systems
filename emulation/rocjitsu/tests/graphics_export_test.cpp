@@ -3369,25 +3369,23 @@ TEST_P(GraphicsExportTest, NearestSamplingAndImageLoadsUseDistinctFloatRules) {
 TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t colors[] = {0xff000000, 0xff0000ff, 0xff00ff00, 0xffff0000};
-  for (uint32_t level = 0; level < 4; ++level) {
-    const auto mip = amdgpu::image_mip_layout(gfx12, 0, 4, 8, 8, 4, level);
-    ASSERT_TRUE(mip);
-    for (uint32_t y = 0; y < mip->height; ++y)
-      for (uint32_t x = 0; x < mip->width; ++x) {
-        const auto address =
-            gfx12 ? amdgpu::gfx12_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0)
-                  : amdgpu::gfx11_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0);
-        ASSERT_TRUE(address);
-        memory_.write32(*address, colors[level]);
-      }
-  }
   struct Case {
     const char *name;
-    uint32_t opcode, mip_filter, first_level;
-    float lod, min_lod, max_lod, coordinate_step;
+    uint32_t opcode, mip_filter, first_level = 0;
+    float lod, min_lod, max_lod, coordinate_step = 0;
     std::array<float, 4> expected;
     bool a16 = false;
+    std::optional<std::array<float, 4>> gradient = std::nullopt;
+    uint32_t width = 8, height = 8;
+    uint32_t perf_mip = 0, perf_mod = 0;
+    float sampler_bias = 0;
+    int32_t secondary_bias = 0;
+    uint32_t aniso_ratio = 0;
+    float diagonal_offset = 0;
   };
+  // Physical GFX11/12 mip weights, including a norm carry into the logarithm.
+  const std::array rotated_gradient{0x1.f6cp-3f, -0x1.1ap-3f, -0x1.d48p-3f, 0x1.338p-4f};
+  const std::array orthogonal_gradient{0.125f, 0.00250244140625f, -0.00250244140625f, 0.125f};
   const Case cases[] = {
       {"explicit nearest", 29, 1, 0, 1.25f, 0, 3, 0, {1, 0, 0, 1}},
       {"explicit rounded up", 29, 1, 0, 1.75f, 0, 3, 0, {0, 1, 0, 1}},
@@ -3402,6 +3400,36 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
       {"half derivatives", 57, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}},
       {"packed coordinates with half derivatives", 57, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}, true},
       {"implicit derivatives", 27, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}},
+      // Hardware keeps coarse derivatives when the fourth lane's coordinates
+      // are not affine. Fine derivatives would select the final blue mip.
+      {.name = "coarse implicit derivatives",
+       .opcode = 27,
+       .mip_filter = 1,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .coordinate_step = 0.25f,
+       .expected = {1, 0, 0, 1},
+       .diagonal_offset = 2},
+      {.name = "coarse packed implicit derivatives",
+       .opcode = 27,
+       .mip_filter = 1,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .coordinate_step = 0.25f,
+       .expected = {1, 0, 0, 1},
+       .a16 = true,
+       .diagonal_offset = 2},
+      {.name = "coarse biased derivatives",
+       .opcode = 30,
+       .mip_filter = 1,
+       .lod = 1,
+       .min_lod = 0,
+       .max_lod = 3,
+       .coordinate_step = 0.25f,
+       .expected = {0, 1, 0, 1},
+       .diagonal_offset = 2},
       {"shader bias", 30, 1, 0, 1, 0, 3, 0.25f, {0, 1, 0, 1}},
       {"forced zero", 31, 1, 0, 0, 0, 3, 0.5f, {0, 0, 0, 1}},
       {"packed explicit LOD", 29, 2, 0, 1.5f, 0, 3, 0, {0.5f, 0.5f, 0, 1}, true},
@@ -3409,35 +3437,357 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
       {"packed implicit coordinates", 27, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}, true},
       {"packed coordinates with full bias", 30, 1, 0, 1, 0, 3, 0.25f, {0, 1, 0, 1}, true},
       {"packed forced zero", 31, 1, 0, 0, 0, 3, 0.5f, {0, 0, 0, 1}, true},
+      {"axis logarithm", 28, 2, 0, 0, 0, 3, 0x1.1e3cb6p-1f, {0, 0.8359375f, 0.1640625f, 1}},
+      {"correlated derivatives",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0.83984375f, 0.16015625f, 0, 1},
+       false,
+       std::array{0.1875f, 0.0625f, 0.1875f, 0.0625f}},
+      {"rotated derivatives",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0.4375f, 0.5625f, 0, 1},
+       false,
+       rotated_gradient},
+      {"rotated half derivatives",
+       57,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0.4375f, 0.5625f, 0, 1},
+       false,
+       rotated_gradient},
+      {"rotated implicit derivatives",
+       27,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0.4375f, 0.5625f, 0, 1},
+       false,
+       rotated_gradient},
+      {"coordinate alignment", 28, 2, 0, 0, 0, 3, 0, {0, 0, 0, 1}, false, orthogonal_gradient},
+      {"half coordinate alignment", 57, 2, 0, 0, 0, 3, 0, {0, 0, 0, 1}, false, orthogonal_gradient},
+      {"implicit coordinate alignment",
+       27,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0, 0, 0, 1},
+       false,
+       orthogonal_gradient},
+      {"swapped coordinate exponents",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0, 0.53125f, 0.46875f, 1},
+       false,
+       std::array{0x1.90ef84p-4f, 0x1.30801p-1f, 0x1.30801p-1f, 0x1.90ef84p-4f}},
+      {"negative coordinate alignment",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0.2734375f, 0.7265625f, 0, 1},
+       false,
+       std::array{-0.1253662109375f, -0.25f, -0.235595703125f, -0.2083740234375f}},
+      {"non-power-of-two extents",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0, 0.70703125f, 0.29296875f, 1},
+       false,
+       std::array{-0x1.7b0788p-2f, 0x1.8f028cp-5f, -0x1.2460ecp-4f, -0x1.87502ap-2f},
+       13,
+       9},
+      {"extent multiplication carry",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0, 0.3828125f, 0.6171875f, 1},
+       false,
+       std::array{0x1.47e36ep-5f, 0x1.91f32ep-2f, 0x1.c3679p-2f, 0x1.bc721p-3f},
+       7,
+       13},
+      {"extent mantissa truncation",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0, 0.96875f, 0.03125f, 1},
+       false,
+       std::array{-0x1.119a6cp-13f, -0x1.35fd0ap-2f, -0x1.044334p-9f, 0x1.72db22p-5f},
+       2051,
+       9},
+      {"zero coordinate exponent",
+       28,
+       2,
+       0,
+       0,
+       0,
+       3,
+       0,
+       {0.2265625f, 0.7734375f, 0, 1},
+       false,
+       std::array{0x1.5b3cd2p-10f, 0.0f, -0x1.0a3806p-10f, 0.0f},
+       2051,
+       9},
+      {.name = "mip lower snap",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1.25f,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {1, 0, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 4,
+       .sampler_bias = 0,
+       .secondary_bias = 0},
+      {.name = "mip upper snap",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1.75f,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0, 1, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 4,
+       .sampler_bias = 0,
+       .secondary_bias = 0},
+      {.name = "mip fraction truncation",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1.49609375f,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.5078125f, 0.4921875f, 0, 1},
+       .perf_mip = 7,
+       .perf_mod = 4,
+       .sampler_bias = 0,
+       .secondary_bias = 0},
+      {.name = "maximum mip gain",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1.50390625f,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.453125f, 0.546875f, 0, 1},
+       .perf_mip = 15,
+       .perf_mod = 7,
+       .sampler_bias = 0,
+       .secondary_bias = 0},
+      {.name = "disabled mip modulation",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1.50390625f,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.49609375f, 0.50390625f, 0, 1},
+       .perf_mip = 15,
+       .perf_mod = 0,
+       .sampler_bias = 0,
+       .secondary_bias = 0},
+      {.name = "explicit rounding before bias",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1.001953125f,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.99609375f, 0.00390625f, 0, 1},
+       .sampler_bias = 0.00390625f},
+      {.name = "explicit sampler bias",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.75f, 0.25f, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 4,
+       .sampler_bias = 0.375f,
+       .secondary_bias = 0},
+      {.name = "negative explicit sampler bias",
+       .opcode = 29,
+       .mip_filter = 2,
+       .lod = 1,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.75f, 0, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 4,
+       .sampler_bias = -0.375f,
+       .secondary_bias = 0},
+      {.name = "zero sampler bias",
+       .opcode = 31,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.25f, 0, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 4,
+       .sampler_bias = 0.375f,
+       .secondary_bias = 0},
+      {.name = "bias bound before mip gain",
+       .opcode = 31,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0.375f,
+       .max_lod = 3,
+       .expected = {0.25f, 0, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 4,
+       .sampler_bias = -0.375f,
+       .secondary_bias = 0},
+      {.name = "nearest mip ignores gain",
+       .opcode = 29,
+       .mip_filter = 1,
+       .lod = 1,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0, 1, 0, 1},
+       .perf_mip = 15,
+       .perf_mod = 7,
+       .sampler_bias = 0.625f,
+       .secondary_bias = 0},
+      {.name = "negative secondary bias floor",
+       .opcode = 31,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.83203125f, 0.16796875f, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 1,
+       .sampler_bias = 1.375f,
+       .secondary_bias = -17},
+      {.name = "positive secondary bias floor",
+       .opcode = 31,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.109375f, 0.890625f, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 2,
+       .sampler_bias = 1.375f,
+       .secondary_bias = 23},
+      {.name = "disabled secondary modulation",
+       .opcode = 31,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.625f, 0.375f, 0, 1},
+       .perf_mip = 10,
+       .perf_mod = 0,
+       .sampler_bias = 1.375f,
+       .secondary_bias = 23},
+      {.name = "negative minor-axis difference",
+       .opcode = 28,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.49609375f, 0, 0, 1},
+       .gradient = std::array{-0x1.15654ap-1f, 0x1.00d27ep-3f, 0x1.982c54p-3f, 0x1.24184ep-3f},
+       .aniso_ratio = 2},
+      {.name = "positive minor-axis difference",
+       .opcode = 28,
+       .mip_filter = 2,
+       .lod = 0,
+       .min_lod = 0,
+       .max_lod = 3,
+       .expected = {0.39453125f, 0.60546875f, 0, 1},
+       .gradient = std::array{0x1.ea1552p-1f, -0x1.0b398ap-3f, -0x1.ad88b6p-1f, 0x1.53ed8ep-1f},
+       .aniso_ratio = 2},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.name);
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    for (uint32_t level = 0; level < 4; ++level) {
+      const auto mip = amdgpu::image_mip_layout(gfx12, 0, 4, test.width, test.height, 4, level);
+      ASSERT_TRUE(mip);
+      for (uint32_t y = 0; y < mip->height; ++y)
+        for (uint32_t x = 0; x < mip->width; ++x) {
+          const auto address =
+              gfx12 ? amdgpu::gfx12_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0)
+                    : amdgpu::gfx11_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0);
+          ASSERT_TRUE(address);
+          memory_.write32(*address, colors[level]);
+        }
+    }
     const std::array<uint32_t, 8> descriptor{
         0x1000,
-        (42u << (gfx12 ? 17 : 20)) | (3u << 30) | (3u << (gfx12 ? 12 : 16)) |
+        (42u << (gfx12 ? 17 : 20)) | (((test.width - 1) & 3u) << 30) | (3u << (gfx12 ? 12 : 16)) |
             (gfx12 ? test.first_level << 25 : 0),
-        1 | (7u << 14),
+        ((test.width - 1) >> 2) | ((test.height - 1) << 14),
         (9u << 28) | 0xfac | (3u << (gfx12 ? 15 : 16)) | (gfx12 ? 0 : test.first_level << 12),
         0,
-        0,
+        test.perf_mod << 20,
         0,
         0};
     for (uint32_t r = 0; r < descriptor.size(); ++r)
       wave_->debug_write_sgpr(8 + r, descriptor[r]);
-    wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+    wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6) | (test.aniso_ratio << 9));
     wave_->debug_write_sgpr(5, uint32_t(test.min_lod * 256) |
-                                   (uint32_t(test.max_lod * 256) << (gfx12 ? 13 : 12)));
-    wave_->debug_write_sgpr(6, test.mip_filter << 26);
-    wave_->debug_write_sgpr(7, 0);
+                                   (uint32_t(test.max_lod * 256) << (gfx12 ? 13 : 12)) |
+                                   (gfx12 ? 0 : test.perf_mip << 24));
+    wave_->debug_write_sgpr(6, (test.mip_filter << 26) | (test.aniso_ratio ? 15u << 20 : 0) |
+                                   (gfx12 ? (test.perf_mip & 3) << 30 : 0) |
+                                   (uint32_t(int32_t(test.sampler_bias * 256)) & 0x3fff) |
+                                   ((uint32_t(test.secondary_bias) & 63) << 14));
+    wave_->debug_write_sgpr(7, gfx12 ? test.perf_mip >> 2 : 0);
     wave_->set_exec(9);
+    const auto gradient =
+        test.gradient.value_or(std::array{test.coordinate_step, 0.0f, 0.0f, test.coordinate_step});
     // Populate inactive quad lanes as well: implicit derivatives consume them.
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
-      const float u = 0.25f + (lane & 1) * test.coordinate_step;
-      const float v = 0.25f + ((lane >> 1) & 1) * test.coordinate_step;
+      const float offset = (lane & 3) == 3 ? test.diagonal_offset : 0;
+      const float u = 0.25f + (lane & 1) * gradient[0] + ((lane >> 1) & 1) * gradient[2] + offset;
+      const float v = 0.25f + (lane & 1) * gradient[1] + ((lane >> 1) & 1) * gradient[3] + offset;
       const std::array<uint32_t, 6> address_regs{6, 0, 4, 8, 9, 10};
       std::array<float, 6> values{u, v, test.lod};
       if (test.opcode == 28)
-        values = {test.coordinate_step, 0, 0, test.coordinate_step, u, v};
+        values = {gradient[0], gradient[1], gradient[2], gradient[3], u, v};
       if (test.opcode == 57)
         values = {0, 0, u, v};
       if (test.opcode == 30)
@@ -3445,9 +3795,12 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
       for (uint32_t r = 0; r < values.size(); ++r)
         wave_->debug_write_vgpr(address_regs[r], lane, std::bit_cast<uint32_t>(values[r]));
       if (test.opcode == 57) {
-        wave_->debug_write_vgpr(address_regs[0], lane, util::f32_to_f16(test.coordinate_step));
+        wave_->debug_write_vgpr(address_regs[0], lane,
+                                util::f32_to_f16(gradient[0]) |
+                                    (uint32_t(util::f32_to_f16(gradient[1])) << 16));
         wave_->debug_write_vgpr(address_regs[1], lane,
-                                uint32_t(util::f32_to_f16(test.coordinate_step)) << 16);
+                                util::f32_to_f16(gradient[2]) |
+                                    (uint32_t(util::f32_to_f16(gradient[3])) << 16));
       }
       if (test.a16) {
         const uint32_t prefix = test.opcode == 28   ? 4
@@ -4341,8 +4694,8 @@ TEST(GraphicsImageFilterTest, AnisotropicDescriptorControlsMatchPhysicalFilterCo
   for (uint32_t perf = 0; perf < 8; ++perf)
     for (uint32_t bias = 0; bias < 64; ++bias)
       for (uint32_t i = 0; i < 512; ++i) {
-        const auto count =
-            amdgpu::image_anisotropic_filter_count(1.0 + i / 32.0, 1, 16, 0, bias, perf);
+        const auto count = amdgpu::image_anisotropic_filter_count(
+            amdgpu::image_footprint(1.0 + i / 32.0, 0, 0, 1, 1, 1), 16, 0, bias, perf);
         digest = (digest ^ count) * 1099511628211ull;
       }
   EXPECT_EQ(digest, 0x19dbaf1b0e5faf7cull);
@@ -4354,8 +4707,8 @@ TEST(GraphicsImageFilterTest, AnisotropicDescriptorControlsMatchPhysicalFilterCo
                                   {6, 0}, {7, 0}, {0, 4}, {2, 4}, {2, 32}, {2, 63}};
   for (const auto [threshold, bias] : controls)
     for (uint32_t i = 0; i < 4096; ++i) {
-      const auto count =
-          amdgpu::image_anisotropic_filter_count(1.0 + i / 256.0, 1, 16, threshold, bias, 4);
+      const auto count = amdgpu::image_anisotropic_filter_count(
+          amdgpu::image_footprint(1.0 + i / 256.0, 0, 0, 1, 1, 1), 16, threshold, bias, 4);
       digest = (digest ^ count) * 1099511628211ull;
     }
   EXPECT_EQ(digest, 0x435635cf362ec9fcull);
@@ -4378,11 +4731,270 @@ TEST(GraphicsImageFilterTest, AnisotropicTwoAxisCountsMatchPhysicalBoundaries) {
       {16.5f, 1, 16, 0, 32, 7, 10},
   };
   for (const auto &witness : witnesses)
-    EXPECT_EQ(amdgpu::image_anisotropic_filter_count(witness.major, witness.minor,
-                                                     witness.max_anisotropy, witness.threshold,
-                                                     witness.bias, witness.perf_mod),
+    EXPECT_EQ(amdgpu::image_anisotropic_filter_count(
+                  amdgpu::image_footprint(witness.major, 0, 0, witness.minor, 1, 1),
+                  witness.max_anisotropy, witness.threshold, witness.bias, witness.perf_mod),
               witness.expected)
         << witness.major << "," << witness.minor << "," << witness.max_anisotropy;
+}
+
+TEST_P(GraphicsExportTest, AnisotropicDirectionMatchesPhysicalMatricesAndSignedTies) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto layout = amdgpu::image_mip_layout(gfx12, 0, 16, 64, 16, 1, 0);
+  ASSERT_TRUE(layout);
+  for (uint32_t y = 0; y < 16; ++y)
+    for (uint32_t x = 0; x < 64; ++x) {
+      const auto address = gfx12
+                               ? amdgpu::gfx12_image_address(0x100000, x, y, layout->pitch, 16, 0)
+                               : amdgpu::gfx11_image_address(0x100000, x, y, layout->pitch, 16, 0);
+      ASSERT_TRUE(address);
+      const float channels[] = {float(std::max(int(x) - 32, 0)), float(std::max(32 - int(x), 0)),
+                                float(std::max(int(y) - 8, 0)), float(std::max(8 - int(y), 0))};
+      for (uint32_t c = 0; c < 4; ++c)
+        memory_.write32(*address + 4 * c, std::bit_cast<uint32_t>(channels[c]));
+    }
+  const std::array<uint32_t, 8> descriptor{0x1000,
+                                           (63u << (gfx12 ? 17 : 20)) | (3u << 30),
+                                           15 | (15u << 14),
+                                           (9u << 28) | 0xfac,
+                                           0,
+                                           4u << 20,
+                                           0,
+                                           0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(4, 0x92 | (1u << 9) | (1u << 27));
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22));
+  wave_->debug_write_sgpr(7, 0);
+  struct Witness {
+    std::array<uint32_t, 4> gradients;
+    int32_t phase;
+    std::array<uint32_t, 4> expected;
+  };
+  // Raw RGBA32F readbacks agree on physical GFX11 and GFX12. Independent
+  // full-rank matrices exercise exponent alignment; signed rank-one inputs
+  // distinguish positive and negative multiplication ties.
+  constexpr Witness witnesses[] = {
+      {{0x3ebb77fdu, 0xbf989c0du, 0x3f8c89d3u, 0xbf4c9a92u},
+       -31,
+       {0x3e1a0000u, 0x3e1e0000u, 0x3e4a0000u, 0x3e4e0000u}},
+      {{0x3f522dc4u, 0x3fbd8ef4u, 0x3d8169d0u, 0x3eef87e8u},
+       -15,
+       {0x3dec0000u, 0x3df00000u, 0x3e620000u, 0x3e640000u}},
+      {{0xbe1ce6acu, 0xbf01f41bu, 0x3fdeeb8au, 0xbdf3638du},
+       0,
+       {0x3e800000u, 0x3e800000u, 0x3c400000u, 0x3c400000u}},
+      {{0x3f9519dau, 0xbfa705a3u, 0x3ebafd2bu, 0x3e82c808u},
+       15,
+       {0x3e2e0000u, 0x3e2c0000u, 0x3e3e0000u, 0x3e3c0000u}},
+      {{0x3e403644u, 0x3ebd0003u, 0xbfd76762u, 0x3ef21fd3u},
+       31,
+       {0x3e7a0000u, 0x3e760000u, 0x3d880000u, 0x3d800000u}},
+      {{0xbf2945d5u, 0xbfc61554u, 0x3eb195cdu, 0x3ebe1816u},
+       -31,
+       {0x3dd00000u, 0x3dd80000u, 0x3e660000u, 0x3e6a0000u}},
+      {{0xbf436f54u, 0xbea8bed4u, 0x3fa85e58u, 0xbf898113u},
+       -15,
+       {0x3e560000u, 0x3e580000u, 0x3e0a0000u, 0x3e0c0000u}},
+      {{0x3f95559au, 0xbe76914bu, 0xbf2d37e2u, 0x3fade987u},
+       0,
+       {0x3e320000u, 0x3e320000u, 0x3e380000u, 0x3e380000u}},
+      {{0xbf9ec7cfu, 0x3f254c5fu, 0xbf95380bu, 0xbdfac4f5u},
+       15,
+       {0x3e7a0000u, 0x3e780000u, 0x3d800000u, 0x3d780000u}},
+      {{0xbecd11b6u, 0xbf8f3667u, 0x3fa9d804u, 0x3f1f6a0du},
+       31,
+       {0x3e400000u, 0x3e3c0000u, 0x3e2c0000u, 0x3e280000u}},
+      {{0x3f79806bu, 0x3f0e107fu, 0xbfb444cfu, 0x3f42b011u},
+       -31,
+       {0x3e760000u, 0x3e7a0000u, 0x3d680000u, 0x3d780000u}},
+      {{0x3f9f622cu, 0xbf9a4822u, 0x3e80e2b9u, 0xbdb67449u},
+       -15,
+       {0x3e380000u, 0x3e3a0000u, 0x3e300000u, 0x3e300000u}},
+      {{0x3f043c8cu, 0x3f8ee149u, 0xbfb354bau, 0xbed825efu},
+       0,
+       {0x3e500000u, 0x3e500000u, 0x3e140000u, 0x3e140000u}},
+      {{0xbf93ae2eu, 0xbf9c6d8eu, 0xbde404d2u, 0xbf0e3d26u},
+       15,
+       {0x3e280000u, 0x3e260000u, 0x3e420000u, 0x3e420000u}},
+      {{0xbe68e0cau, 0xbfc38c21u, 0x3f1c3262u, 0x3f34d3eau},
+       31,
+       {0x3d940000u, 0x3d8c0000u, 0x3e780000u, 0x3e740000u}},
+      {{0x3f26eb77u, 0x3fa1be1du, 0xbf11fb53u, 0x3f9a8c91u},
+       -31,
+       {0x3c600000u, 0x3c800000u, 0x3e7e0000u, 0x3e810000u}},
+      {{0x3fc00000u, 0x3d800000u, 0x00000000u, 0x00000000u},
+       6,
+       {0x3e800000u, 0x3e7e0000u, 0x3c400000u, 0x3c200000u}},
+      {{0xbfc00000u, 0x3d800000u, 0x00000000u, 0x00000000u},
+       6,
+       {0x3e800000u, 0x3e7e0000u, 0x3c400000u, 0x3c200000u}},
+      {{0x3fc00000u, 0xbd800000u, 0x00000000u, 0x00000000u},
+       6,
+       {0x3e800000u, 0x3e7e0000u, 0x3c400000u, 0x3c200000u}},
+      {{0xbfc00000u, 0xbd800000u, 0x00000000u, 0x00000000u},
+       6,
+       {0x3e800000u, 0x3e7e0000u, 0x3c400000u, 0x3c200000u}},
+  };
+  wave_->set_exec((1u << std::size(witnesses)) - 1);
+  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane) {
+    const auto &witness = witnesses[lane];
+    const float shift = witness.phase / 8192.0f;
+    const float values[] = {std::bit_cast<float>(witness.gradients[0]) / 64,
+                            std::bit_cast<float>(witness.gradients[1]) / 16,
+                            std::bit_cast<float>(witness.gradients[2]) / 64,
+                            std::bit_cast<float>(witness.gradients[3]) / 16,
+                            (32.5f + shift) / 64,
+                            (8.5f + shift) / 16};
+    for (uint32_t i = 0; i < std::size(values); ++i)
+      wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(values[i]));
+  }
+  wave_->debug_write_vgpr(12, 31, 0xdeadbeef);
+  ASSERT_NO_FATAL_FAILURE(sample(28, 1));
+  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane)
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witnesses[lane].expected[c])
+          << lane << ',' << c;
+  EXPECT_EQ(wave_->debug_read_vgpr(12, 31), 0xdeadbeefu);
+}
+
+TEST_P(GraphicsExportTest, AnisotropicCoordinatesMatchPhysicalExtentsAndAlignment) {
+  struct Witness {
+    uint32_t width, height;
+    bool repeat;
+    std::array<uint32_t, 6> values;
+    std::array<uint32_t, 4> expected;
+  };
+  // Raw gradient, coordinate and RGBA32F bits captured on GFX11 and GFX12.
+  // The controls cover exact-power norm reciprocals, 19x13 and 29x31 image
+  // reciprocals, and positive/negative coordinates near zero and repeat edges.
+  constexpr Witness witnesses[] = {
+      {64,
+       16,
+       false,
+       {0x3cd59b3du, 0xbca87c86u, 0x3c196de4u, 0x3d34550bu, 0x3f01fc80u, 0x3f07f200u},
+       {0x3e7e0000u, 0x3e810000u, 0x3c400000u, 0x3c600000u}},
+      {64,
+       16,
+       false,
+       {0x3cd59b3du, 0xbca87c86u, 0x3c196de4u, 0x3d34550bu, 0x3f0200a0u, 0x3f080280u},
+       {0x3e800000u, 0x3e800000u, 0x3c600000u, 0x3c400000u}},
+      {19,
+       13,
+       false,
+       {0xba537364u, 0x3cbe5c60u, 0xbdbb2f03u, 0x3cb61294u, 0x3effe86cu, 0x3effdd8au},
+       {0x3e7a0000u, 0x3e7e0000u, 0x3d280000u, 0x3d380000u}},
+      {19,
+       13,
+       false,
+       {0xbd591efdu, 0xbcc709eeu, 0x3d6b9cfeu, 0xbdb019e3u, 0x3effe6bdu, 0x3effdb14u},
+       {0x3e560000u, 0x3e5a0000u, 0x3e080000u, 0x3e0a0000u}},
+      {29,
+       31,
+       false,
+       {0x3d76f05fu, 0x3c463a5bu, 0xbc8d43d3u, 0x3c3ac217u, 0x3effee58u, 0x3effef7bu},
+       {0x3e7a0000u, 0x3e7e0000u, 0x3d100000u, 0x3d200000u}},
+      {29,
+       31,
+       false,
+       {0x3d6bb420u, 0xbc2debe5u, 0x3ca94d1fu, 0x3cba263du, 0x3f00088du, 0x3f000800u},
+       {0x3e810000u, 0x3e7e0000u, 0x3c600000u, 0x3c200000u}},
+      {19,
+       13,
+       true,
+       {0xbccb6817u, 0xbe0978ceu, 0x3a3d3244u, 0xbd096a13u, 0xbeffe5e5u, 0xbeffd9d8u},
+       {0x3d800000u, 0x3d780000u, 0x3e7a0000u, 0x3e760000u}},
+      {19,
+       13,
+       true,
+       {0xbcc1e249u, 0xbde508a5u, 0x3d09b8a9u, 0xbd61e869u, 0xbefffe51u, 0xbefffd89u},
+       {0x3cc00000u, 0x3cc00000u, 0x3e800000u, 0x3e800000u}},
+      {19,
+       13,
+       true,
+       {0x3dbc7413u, 0x3cec5947u, 0xbcd79d6au, 0x3cdeac58u, 0x3fbff943u, 0x3fbff628u},
+       {0x3e7a0000u, 0x3e7e0000u, 0x3d100000u, 0x3d200000u}},
+      {19,
+       13,
+       true,
+       {0x3db3e10bu, 0xbccf5e2fu, 0x3d01341eu, 0x3d5df284u, 0x3fc00687u, 0x3fc0098au},
+       {0x3e810000u, 0x3e7e0000u, 0x3c600000u, 0x3c200000u}},
+      {19,
+       13,
+       true,
+       {0x3d71969bu, 0x3d8f53d7u, 0xbd9169ccu, 0x3cb01940u, 0x30820000u, 0x30820000u},
+       {0x40900000u, 0x40900000u, 0x40400000u, 0x40400000u}},
+      {19,
+       13,
+       true,
+       {0x3d054cc6u, 0x3b07f324u, 0xbd5f5b14u, 0x3dd9ca9cu, 0x30a00000u, 0x30a00000u},
+       {0x40900000u, 0x40900000u, 0x40400000u, 0x40400000u}},
+      {19,
+       13,
+       true,
+       {0x3d71969bu, 0x3d8f53d7u, 0xbd9169ccu, 0x3cb01940u, 0xb0820000u, 0xb0820000u},
+       {0x40900000u, 0x40900000u, 0x40400000u, 0x40400000u}},
+      {19,
+       13,
+       true,
+       {0x3d054cc6u, 0x3b07f324u, 0xbd5f5b14u, 0x3dd9ca9cu, 0xb0a00000u, 0xb0a00000u},
+       {0x40900000u, 0x40900000u, 0x40400000u, 0x40400000u}},
+  };
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  wave_->set_exec(1);
+  for (const auto &witness : witnesses) {
+    SCOPED_TRACE(::testing::Message()
+                 << witness.width << ',' << witness.height << ',' << std::hex << witness.values[4]);
+    const auto layout = amdgpu::image_mip_layout(gfx12, 0, 16, witness.width, witness.height, 1, 0);
+    ASSERT_TRUE(layout);
+    for (uint32_t y = 0; y < witness.height; ++y)
+      for (uint32_t x = 0; x < witness.width; ++x) {
+        const auto address =
+            gfx12 ? amdgpu::gfx12_image_address(0x100000, x, y, layout->pitch, 16, 0)
+                  : amdgpu::gfx11_image_address(0x100000, x, y, layout->pitch, 16, 0);
+        ASSERT_TRUE(address);
+        const int dx = int(x) - int(witness.width / 2);
+        const int dy = int(y) - int(witness.height / 2);
+        const float channels[] = {float(std::max(dx, 0)), float(std::max(-dx, 0)),
+                                  float(std::max(dy, 0)), float(std::max(-dy, 0))};
+        for (uint32_t c = 0; c < 4; ++c)
+          memory_.write32(*address + 4 * c, std::bit_cast<uint32_t>(channels[c]));
+      }
+    const uint32_t width = witness.width - 1;
+    const std::array<uint32_t, 8> descriptor{0x1000,
+                                             (63u << (gfx12 ? 17 : 20)) | ((width & 3) << 30),
+                                             (width >> 2) | ((witness.height - 1) << 14),
+                                             (9u << 28) | 0xfac,
+                                             0,
+                                             4u << 20,
+                                             0,
+                                             0};
+    for (uint32_t i = 0; i < descriptor.size(); ++i)
+      wave_->debug_write_sgpr(8 + i, descriptor[i]);
+    wave_->debug_write_sgpr(4, (witness.repeat ? 0 : 0x92) | (1u << 9) | (1u << 27));
+    wave_->debug_write_sgpr(5, 0);
+    wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22));
+    wave_->debug_write_sgpr(7, 0);
+    for (uint32_t i = 0; i < witness.values.size(); ++i)
+      wave_->debug_write_vgpr(i, 0, witness.values[i]);
+    ASSERT_NO_FATAL_FAILURE(sample(28, 1));
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 0), witness.expected[c]) << c;
+  }
+}
+
+TEST(GraphicsImageFilterTest, AnisotropicNormalizationMatchesAllPhysicalMantissas) {
+  // Direction components inferred independently from cardinal phase captures
+  // below and above two texels. Compare the complete finite mantissa domain.
+  uint64_t digest = 14695981039346656037ull;
+  for (uint32_t i = 0; i < 1024; ++i) {
+    const double gradient = (1.0 + i / 1024.0) / 64;
+    const auto direction = amdgpu::image_footprint(gradient, 0, 0, 0, 64, 16).direction();
+    EXPECT_EQ(direction[1], 0);
+    digest = (digest ^ std::bit_cast<uint64_t>(direction[0])) * 1099511628211ull;
+  }
+  EXPECT_EQ(digest, 0x282fbe27df287325ull);
 }
 
 TEST_P(GraphicsExportTest, AnisotropicSamplingUsesPhysicalNonuniformWeights) {
@@ -4786,6 +5398,446 @@ TEST_P(GraphicsExportTest, Fp32FilteringMatchesPhysicalRoundingAndSpecialValues)
       for (uint32_t c = 0; c < 4; ++c)
         EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 0), witness.expected[c])
             << pattern << "," << witness.query << "," << c;
+    }
+  }
+}
+
+TEST_P(GraphicsExportTest, AnisotropicCountsAndSpacingMatchPhysicalReadbacks) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto layout = amdgpu::image_mip_layout(gfx12, 0, 16, 64, 64, 1, 0);
+  ASSERT_TRUE(layout);
+  for (uint32_t y = 0; y < 64; ++y)
+    for (uint32_t x = 0; x < 64; ++x) {
+      const auto address = gfx12
+                               ? amdgpu::gfx12_image_address(0x100000, x, y, layout->pitch, 16, 0)
+                               : amdgpu::gfx11_image_address(0x100000, x, y, layout->pitch, 16, 0);
+      ASSERT_TRUE(address);
+      const float channels[] = {float(std::max(int(x) - 32, 0)), float(std::max(32 - int(x), 0)),
+                                float(std::max(int(y) - 32, 0)), float(std::max(32 - int(y), 0))};
+      for (uint32_t c = 0; c < 4; ++c)
+        memory_.write32(*address + 4 * c, std::bit_cast<uint32_t>(channels[c]));
+    }
+  const std::array<uint32_t, 8> descriptor{0x1000,
+                                           (63u << (gfx12 ? 17 : 20)) | (3u << 30),
+                                           15 | (63u << 14),
+                                           (9u << 28) | 0xfac,
+                                           0,
+                                           4u << 20,
+                                           0,
+                                           0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22));
+  wave_->debug_write_sgpr(7, 0);
+  struct Witness {
+    uint32_t max_anisotropy, bias, threshold;
+    std::array<uint32_t, 4> gradients;
+    int32_t phase;
+    std::array<uint32_t, 4> expected;
+    uint32_t mip_filter = 0;
+  };
+  // Identical raw RGBA32F readbacks on physical GFX11 and GFX12. Rotated
+  // footprints cross a count boundary and exercise every even count, both
+  // reconstruction tables, and bias redistribution with threshold controls.
+  constexpr Witness witnesses[] = {
+      {16,
+       0,
+       0,
+       {0xbe940e97u, 0xbf7a0389u, 0x3e36996cu, 0xbf304c5fu},
+       -26,
+       {0x3c600000u, 0x3c800000u, 0x3dfc0000u, 0x3e000000u}},
+      {16,
+       0,
+       0,
+       {0x3e129a71u, 0xbfa7d059u, 0x3e9ec2fau, 0xbff798deu},
+       -20,
+       {0x3d280000u, 0x3d340000u, 0x3e960000u, 0x3e970000u}},
+      {16,
+       0,
+       0,
+       {0xbfdd0965u, 0x402879d4u, 0xc01d1f9bu, 0x3fcafaecu},
+       -14,
+       {0x3ebcc100u, 0x3ebcc100u, 0x3ec16a00u, 0x3ec21480u}},
+      {16,
+       0,
+       0,
+       {0x3e2c99a1u, 0x3ed1cb53u, 0xbfbc8651u, 0x40d63183u},
+       -8,
+       {0x3e3b0000u, 0x3e3d0000u, 0x3f574000u, 0x3f578000u}},
+      {16,
+       0,
+       0,
+       {0xc090a0f2u, 0xc0e23c12u, 0x4039b9cdu, 0x407fe00au},
+       -2,
+       {0x3f2c5d80u, 0x3f2c5d80u, 0x3f8265e0u, 0x3f82a5e0u}},
+      {16,
+       0,
+       0,
+       {0x403aa0e4u, 0xc0cae6ceu, 0xc03b9eecu, 0x40f3647bu},
+       4,
+       {0x3f046920u, 0x3f043e80u, 0x3f9eeaf0u, 0x3f9ed5a0u}},
+      {16,
+       0,
+       0,
+       {0xc0f7ff44u, 0x40d9d8f5u, 0xc0fa09a6u, 0x409b77a6u},
+       10,
+       {0x3fb077c0u, 0x3fb04a10u, 0x3f85a290u, 0x3f857df0u}},
+      {16,
+       0,
+       0,
+       {0xc03e060bu, 0x3cf68e78u, 0xc19962d1u, 0xc03d5fbeu},
+       16,
+       {0x401a0000u, 0x401a0000u, 0x3eb9e000u, 0x3eb8e000u}},
+      {4,
+       0,
+       0,
+       {0xbfa52c6cu, 0x3fe6900au, 0xbf8beb8du, 0xc033bf44u},
+       -31,
+       {0x3d140000u, 0x3d200000u, 0x3ed48000u, 0x3ed68000u}},
+      {16,
+       16,
+       0,
+       {0xc0f7ff44u, 0x40d9d8f5u, 0xc0fa09a6u, 0x409b77a6u},
+       1,
+       {0x3fafa560u, 0x3fafa560u, 0x3f84f3a0u, 0x3f84f3a0u}},
+      {16,
+       16,
+       0,
+       {0xbfdd0965u, 0x402879d4u, 0xc01d1f9bu, 0x3fcafaecu},
+       7,
+       {0x3ebd8000u, 0x3ebc8000u, 0x3ec20000u, 0x3ec20000u}},
+      {16,
+       16,
+       0,
+       {0xc06206b2u, 0x40ad7d2bu, 0xbfe6d7a8u, 0x3f9c226fu},
+       14,
+       {0x3efaac80u, 0x3ef9ac80u, 0x3f31c4c0u, 0x3f3144c0u}},
+      {16,
+       16,
+       0,
+       {0x3feb0040u, 0xc0b85fcau, 0x41312b68u, 0xc10a47e0u},
+       3,
+       {0x3faf2000u, 0x3faf2000u, 0x3fa0e000u, 0x3fa0a000u}},
+      {16,
+       16,
+       0,
+       {0xc089f1dbu, 0x4146bc0bu, 0xc083611du, 0x40e70d25u},
+       8,
+       {0x3f38a7e0u, 0x3f3874a0u, 0x3fe35280u, 0x3fe35280u}},
+      {16,
+       16,
+       0,
+       {0xbf7c5ad0u, 0x40026b1eu, 0xc00cf53fu, 0x3efd8518u},
+       3,
+       {0x3e900000u, 0x3e900000u, 0x3e660000u, 0x3e640000u}},
+      {16,
+       63,
+       0,
+       {0xc089f1dbu, 0x4146bc0bu, 0xc083611du, 0x40e70d25u},
+       -1,
+       {0x3f394240u, 0x3f394240u, 0x3fe3f3e0u, 0x3fe433e0u}},
+      {16,
+       63,
+       7,
+       {0xc089f1dbu, 0x4146bc0bu, 0xc083611du, 0x40e70d25u},
+       -1,
+       {0x3f36c300u, 0x3f36c300u, 0x3fe0f4e0u, 0x3fe134e0u}},
+      // Linear mip filtering retains finer span precision, including when
+      // both mip taps select this single-level image.
+      {2,
+       0,
+       0,
+       {0xbf82e328u, 0x40d08320u, 0x3ebc90a6u, 0xc0568304u},
+       -26,
+       {0x3e080000u, 0x3e0a0000u, 0x3f680000u, 0x3f690000u},
+       2},
+      {4,
+       0,
+       0,
+       {0x407ea1c2u, 0xc03d4ca7u, 0x40211620u, 0xbfc9eb88u},
+       15,
+       {0x3f170000u, 0x3f168000u, 0x3ed70000u, 0x3ed60000u},
+       2},
+      {8,
+       0,
+       0,
+       {0xc0ca76f8u, 0xc12aa528u, 0xbf84d27du, 0xc0a4fa45u},
+       15,
+       {0x3f47a000u, 0x3f472000u, 0x3fbca000u, 0x3fbc6000u},
+       2},
+      {16,
+       0,
+       0,
+       {0x3fd0c0bbu, 0xbed1ef98u, 0xc0301859u, 0x411b09a0u},
+       -7,
+       {0x3eb88000u, 0x3eb90000u, 0x3f9b9000u, 0x3f9bb000u},
+       2},
+      {4,
+       16,
+       0,
+       {0x407ea1c2u, 0xc03d4ca7u, 0x40211620u, 0xbfc9eb88u},
+       30,
+       {0x3f174000u, 0x3f164000u, 0x3ed70000u, 0x3ed58000u},
+       2},
+      {16,
+       16,
+       0,
+       {0x40c2c47cu, 0xbf2cb363u, 0x41830fbcu, 0x406e7efdu},
+       8,
+       {0x400c0000u, 0x400c0000u, 0x3ed48000u, 0x3ed40000u},
+       2},
+      {16,
+       0,
+       7,
+       {0x3fd0c0bbu, 0xbed1ef98u, 0xc0301859u, 0x411b09a0u},
+       -7,
+       {0x3eb88000u, 0x3eb90000u, 0x3f9b9000u, 0x3f9bb000u},
+       2},
+  };
+  wave_->set_exec(1);
+  for (const auto &witness : witnesses) {
+    wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22) | (witness.mip_filter << 26));
+    wave_->debug_write_sgpr(4, 0x92 | (std::countr_zero(witness.max_anisotropy) << 9) |
+                                   (witness.threshold << 16) | (witness.bias << 21) | (1u << 27));
+    for (uint32_t i = 0; i < 4; ++i)
+      wave_->debug_write_vgpr(
+          i, 0, std::bit_cast<uint32_t>(std::bit_cast<float>(witness.gradients[i]) / 64));
+    const float coordinate = (32.5f + witness.phase / 8192.0f) / 64;
+    wave_->debug_write_vgpr(4, 0, std::bit_cast<uint32_t>(coordinate));
+    wave_->debug_write_vgpr(5, 0, std::bit_cast<uint32_t>(coordinate));
+    ASSERT_NO_FATAL_FAILURE(sample(28, 1));
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 0), witness.expected[c])
+          << witness.max_anisotropy << ',' << witness.bias << ',' << witness.phase << ',' << c;
+  }
+}
+
+TEST_P(GraphicsExportTest, AnisotropicFloatingAccumulationMatchesPhysicalReadbacks) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  struct Witness {
+    uint32_t format, max_anisotropy, bias;
+    std::array<uint32_t, 4> gradients;
+    int32_t phase;
+    std::array<uint32_t, 4> expected;
+  };
+  // Raw physical GFX11/GFX12 results for a seeded texture. sRGB and FP16
+  // expose intermediate accumulation; FP32 cancellation also distinguishes
+  // operand alignment and retention of the accumulator exponent.
+  constexpr Witness witnesses[] = {
+      {66,
+       16,
+       0,
+       {0xc129dff5u, 0xc01193ceu, 0xc0d91b8fu, 0xc0884878u},
+       -29,
+       {0x3e877469u, 0x3e679331u, 0x3e3cad84u, 0x3eac1192u}},
+      {66,
+       16,
+       16,
+       {0xc129dff5u, 0xc01193ceu, 0xc0d91b8fu, 0xc0884878u},
+       -29,
+       {0x3e877469u, 0x3e679331u, 0x3e3cad84u, 0x3eac1192u}},
+      {57,
+       2,
+       0,
+       {0xc12fda97u, 0x41a04872u, 0xc1221509u, 0x415ec7cau},
+       1,
+       {0xc2fd81d6u, 0x40e16010u, 0x41b1f62cu, 0xc193d850u}},
+      {57,
+       4,
+       0,
+       {0xc03e060bu, 0x3cf68e78u, 0xc19962d1u, 0xc03d5fbeu},
+       -16,
+       {0xc39c9d75u, 0x409e393eu, 0xc2c4018cu, 0x42e95d51u}},
+      {57,
+       16,
+       16,
+       {0xc03e060bu, 0x3cf68e78u, 0xc19962d1u, 0xc03d5fbeu},
+       -29,
+       {0xc1eb252cu, 0x42966696u, 0xc2c9e0beu, 0x41e5f944u}},
+      {63,
+       2,
+       0,
+       {0xbf6dd938u, 0xbe93684bu, 0xbeae4847u, 0xbe863b6bu},
+       -29,
+       {0xc267165du, 0xc25ed558u, 0xc6c43c87u, 0xc1edd99cu}},
+      {63,
+       2,
+       0,
+       {0xc0c6768eu, 0xc085be2cu, 0x41e515d2u, 0x40c52df9u},
+       9,
+       {0xc561eb8bu, 0x3c42e800u, 0xc38770b3u, 0xc5383b8au}},
+      {63,
+       4,
+       0,
+       {0x3e129a71u, 0xbfa7d059u, 0x3e9ec2fau, 0xbff798deu},
+       9,
+       {0xc2f836e8u, 0x43f87c95u, 0xc6259cecu, 0xc532fdb2u}},
+      {63,
+       4,
+       0,
+       {0x3f533b6fu, 0x3ec0655du, 0xbf806c3bu, 0xbed562d0u},
+       20,
+       {0x3bd67940u, 0xc3c113b0u, 0xc637d948u, 0xc44d624fu}},
+      {63,
+       16,
+       0,
+       {0x3e129a71u, 0xbfa7d059u, 0x3e9ec2fau, 0xbff798deu},
+       9,
+       {0xc2f836e8u, 0x43f87c95u, 0xc6259cecu, 0xc532fdb2u}},
+      {63,
+       16,
+       0,
+       {0xc112e8d2u, 0xc12b9ff7u, 0x40a16424u, 0x40ae589cu},
+       3,
+       {0xc3faa53eu, 0xc201b8f1u, 0x3ef1d500u, 0x42afe091u}},
+      {63,
+       16,
+       16,
+       {0x3e129a71u, 0xbfa7d059u, 0x3e9ec2fau, 0xbff798deu},
+       9,
+       {0xc2f836e8u, 0x43f87c95u, 0xc6259cecu, 0xc532fdb2u}},
+      {63,
+       16,
+       16,
+       {0xc112e8d2u, 0xc12b9ff7u, 0x40a16424u, 0x40ae589cu},
+       3,
+       {0xc3faa53eu, 0xc201b8f1u, 0x3ef1d500u, 0x42afe091u}},
+  };
+  for (uint32_t format : {66u, 57u, 63u}) {
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    const uint32_t bytes = format == 66 ? 4 : format == 57 ? 8 : 16;
+    const auto layout = amdgpu::image_mip_layout(gfx12, 0, bytes, 64, 64, 1, 0);
+    ASSERT_TRUE(layout);
+    uint32_t state = 0x7941332d;
+    const auto next = [&]() {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      return state;
+    };
+    for (uint32_t y = 0; y < 64; ++y)
+      for (uint32_t x = 0; x < 64; ++x) {
+        const auto address =
+            gfx12 ? amdgpu::gfx12_image_address(0x100000, x, y, layout->pitch, bytes, 0)
+                  : amdgpu::gfx11_image_address(0x100000, x, y, layout->pitch, bytes, 0);
+        ASSERT_TRUE(address);
+        if (format == 66) {
+          memory_.write32(*address, next());
+          continue;
+        }
+        for (uint32_t c = 0; c < 4; ++c) {
+          const uint32_t bits = next();
+          if (format == 57)
+            memory_.write16(*address + c * 2, (bits & 0x83ff) | (((bits >> 10) % 24 + 3) << 10));
+          else
+            memory_.write32(*address + c * 4,
+                            (bits & 0x807fffff) | (((bits >> 23) % 32 + 111) << 23));
+        }
+      }
+    const std::array<uint32_t, 8> descriptor{0x1000,
+                                             (format << (gfx12 ? 17 : 20)) | (3u << 30),
+                                             15 | (63u << 14),
+                                             (9u << 28) | 0xfac,
+                                             0,
+                                             4u << 20,
+                                             0,
+                                             0};
+    for (uint32_t i = 0; i < descriptor.size(); ++i)
+      wave_->debug_write_sgpr(8 + i, descriptor[i]);
+    wave_->debug_write_sgpr(5, 0);
+    wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22));
+    wave_->debug_write_sgpr(7, 0);
+    wave_->set_exec(1);
+    for (const auto &witness : witnesses) {
+      if (witness.format != format)
+        continue;
+      wave_->debug_write_sgpr(4, 0x92 | (std::countr_zero(witness.max_anisotropy) << 9) |
+                                     (witness.bias << 21) | (1u << 27));
+      for (uint32_t i = 0; i < 4; ++i)
+        wave_->debug_write_vgpr(
+            i, 0, std::bit_cast<uint32_t>(std::bit_cast<float>(witness.gradients[i]) / 64));
+      const float coordinate = (32.5f + witness.phase / 8192.0f) / 64;
+      wave_->debug_write_vgpr(4, 0, std::bit_cast<uint32_t>(coordinate));
+      wave_->debug_write_vgpr(5, 0, std::bit_cast<uint32_t>(coordinate));
+      ASSERT_NO_FATAL_FAILURE(sample(28, 1));
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 0), witness.expected[c])
+            << format << ',' << witness.max_anisotropy << ',' << witness.bias << ','
+            << witness.phase << ',' << c;
+    }
+  }
+}
+
+TEST_P(GraphicsExportTest, AnisotropicFloatingSpecialValuesMatchPhysicalReadbacks) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t pairs[][2] = {
+      {0x00000000u, 0x00000000u}, {0x80000000u, 0x80000000u}, {0x00000000u, 0x80000000u},
+      {0x80000000u, 0x00000000u}, {0x3f800000u, 0xbf800000u}, {0x7f800000u, 0x3f800000u},
+      {0xff800000u, 0x3f800000u}, {0x7f800000u, 0x7f800000u}, {0xff800000u, 0xff800000u},
+      {0x7f800000u, 0xff800000u}, {0x7fc12345u, 0x3f800000u}, {0xffc12345u, 0x3f800000u},
+      {0x7f812345u, 0x00000000u}, {0x00000001u, 0x00000000u}, {0x80000001u, 0x00000000u},
+      {0x00800000u, 0x80800000u}, {0x3f800001u, 0xbf800000u}, {0x3f800000u, 0xbf800001u},
+      {0x3f800000u, 0x33800000u}, {0xbf800000u, 0x33800000u}, {0x40000000u, 0xbfffffffu},
+      {0x00800000u, 0x00000000u}, {0x80800000u, 0x00000000u}, {0x7f7fffffu, 0xff7fffffu},
+  };
+  // Linear and nearest anisotropic filters, captured on both physical targets.
+  // Include signed zeros, infinities, NaNs, cancellation and output underflow.
+  constexpr uint32_t expected[2][std::size(pairs)] = {
+      {0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x7f800000u,
+       0xff800000u, 0x7f800000u, 0xff800000u, 0xffc00000u, 0xffc00000u, 0xffc00000u,
+       0xffc00000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x33000000u, 0xb3000000u,
+       0x3e800000u, 0xbe7fffffu, 0x33000000u, 0x00000000u, 0x80000000u, 0x00000000u},
+      {0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0xbf000000u, 0x3f000000u,
+       0x3f000000u, 0x7f800000u, 0xff800000u, 0xff800000u, 0x3f000000u, 0x3f000000u,
+       0x00000000u, 0x00000000u, 0x00000000u, 0x80000000u, 0xbf000000u, 0xbf000001u,
+       0x33000000u, 0x33000000u, 0xbf7fffffu, 0x00000000u, 0x00000000u, 0xfeffffffu},
+  };
+  const auto layout = amdgpu::image_mip_layout(gfx12, 0, 16, 64, 64, 1, 0);
+  ASSERT_TRUE(layout);
+  for (uint32_t y = 0; y < 64; ++y)
+    for (uint32_t x = 0; x < 64; ++x) {
+      const auto address = gfx12
+                               ? amdgpu::gfx12_image_address(0x100000, x, y, layout->pitch, 16, 0)
+                               : amdgpu::gfx11_image_address(0x100000, x, y, layout->pitch, 16, 0);
+      ASSERT_TRUE(address);
+      for (uint32_t c = 0; c < 4; ++c) {
+        const auto &pair = pairs[(y + c) % std::size(pairs)];
+        const uint32_t value = x < 32   ? pair[0]
+                               : x > 32 ? pair[1]
+                                        : (pair[0] & pair[1] & 0x80000000u);
+        memory_.write32(*address + c * 4, value);
+      }
+    }
+  const std::array<uint32_t, 8> descriptor{0x1000,
+                                           (63u << (gfx12 ? 17 : 20)) | (3u << 30),
+                                           15 | (63u << 14),
+                                           (9u << 28) | 0xfac,
+                                           0,
+                                           4u << 20,
+                                           0,
+                                           0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(4, 0x92 | (1u << 9) | (1u << 27));
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(7, 0);
+  wave_->set_exec(1);
+  const float gradients[] = {2.0f / 64, 0, 0, 1.0f / 64};
+  for (uint32_t i = 0; i < 4; ++i)
+    wave_->debug_write_vgpr(i, 0, std::bit_cast<uint32_t>(gradients[i]));
+  wave_->debug_write_vgpr(4, 0, std::bit_cast<uint32_t>(32.5f / 64));
+  for (uint32_t nearest : {0u, 1u}) {
+    const uint32_t filter = nearest ? 2 : 3;
+    wave_->debug_write_sgpr(6, (filter << 20) | (filter << 22));
+    for (uint32_t row = 0; row < std::size(pairs); ++row) {
+      wave_->debug_write_vgpr(5, 0, std::bit_cast<uint32_t>((row + 0.5f) / 64));
+      ASSERT_NO_FATAL_FAILURE(sample(28, 1));
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 0),
+                  expected[nearest][(row + c) % std::size(pairs)])
+            << nearest << ',' << row << ',' << c;
     }
   }
 }
