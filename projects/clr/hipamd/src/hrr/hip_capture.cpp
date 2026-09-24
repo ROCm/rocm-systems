@@ -1592,7 +1592,7 @@ void hrr_install_clr_exception_handler() {
 }  // namespace
 
 void hip_capture_init() {
-  #if 0
+  #if defined(HIP_HRR_CAPTURE_ENABLED)
     if (!hip_capture_enabled()) return;
 
     // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
@@ -1632,6 +1632,12 @@ void hip_capture_init() {
     hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
 
     std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+  #else
+    // HRR capture is disabled
+    // below to avoid -Wunused-function / -Wunused-variable
+    (void)&record_fat_binary_blob;
+    (void)&hrr_install_clr_exception_handler;
+    (void)&g_hrr_atexit_once;
   #endif
 }
 
