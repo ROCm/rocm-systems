@@ -3597,6 +3597,29 @@ TEST(HsaHooksUnitTest, AutoReportSnapshotOwnsVisibilityAndCopyFailures) {
   EXPECT_EQ(failed.copy_status, 17);
 }
 
+TEST(HsaHooksUnitTest, PublicationCompletenessRequiresDispatchLifetimeWitness) {
+  AutoReportInventory inventory;
+  inventory.access_range_count = inventory.range_bank_count = inventory.watchpoint_count = 1;
+  inventory.atomic_event_count = 1;
+  const auto report = plan_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+  ReportPipelineInput input{.size = static_cast<size_t>(report.required_bytes),
+                            .layout = report.layout,
+                            .input_fingerprint = {},
+                            .expected_generation = 7};
+  ReportSnapshot snapshot;
+  snapshot.bytes.resize(report.required_bytes);
+  auto header = make_report_header_for_layout(7, 11, report.layout);
+  header.publication_flags = kPublicationTraceEnabled | kPublicationTraceComplete;
+  std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
+  EXPECT_TRUE(decode_report(input, snapshot, {}).complete());
+  input.publication_dispatches_isolated = false;
+  const auto decoded = decode_report(input, snapshot, {});
+  EXPECT_FALSE(decoded.complete());
+  EXPECT_EQ(decoded.failure, ReportDecodeFailure::PublicationEvidenceInvalid);
+  EXPECT_EQ(decoded.summary.incomplete_snapshot_count, 1u);
+}
+
 TEST(HsaHooksUnitTest, AutoReportDecoderRejectsStaleFullGenerationAcrossTagRollover) {
   AutoReportInventory inventory;
   inventory.access_range_count = inventory.range_bank_count = inventory.watchpoint_count = 1;

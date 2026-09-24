@@ -56,6 +56,9 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
            event.acquire ? "true" : "false",
            decoded.publications.status == PublicationDecodeStatus::Complete ? "true" : "false");
   }
+  if (!input.publication_dispatches_isolated &&
+      (decoded.header.publication_flags & kPublicationTraceEnabled))
+    append(kFailure, "ConSan publication trace lacks isolated dispatch lifetime evidence");
   if (!decoded.complete()) {
     const ReportHeader &invalid_header = decoded.header;
     if (decoded.failure == ReportDecodeFailure::InvalidHeader) {

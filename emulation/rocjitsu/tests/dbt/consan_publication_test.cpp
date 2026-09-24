@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_conflict_analysis.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_publication.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_publication_dispatch.h"
 #include <algorithm>
 #include <array>
 #include <gtest/gtest.h>
@@ -388,4 +389,76 @@ TEST(ConSanPublicationTest, DecodeRequiresCompleteBoundedTrace) {
   EXPECT_EQ(decode_publications(header, records).status, PublicationDecodeStatus::Malformed);
 }
 } // namespace
+TEST(ConSanPublicationDispatch, RejectsOverlapIncludingUninstrumentedKernels) {
+  auto pending = [](uint64_t) -> std::optional<int64_t> { return 1; };
+  PublicationDispatchIsolation state;
+  EXPECT_FALSE(state.isolated());
+  state.note(1, true, 10, true, pending);
+  EXPECT_TRUE(state.isolated());
+  state.note(2, false, 20, false, pending);
+  EXPECT_FALSE(state.isolated());
+  state.reset();
+  state.note(1, false, 0, false, pending);
+  state.note(2, false, 20, true, pending);
+  EXPECT_FALSE(state.isolated());
+}
+
+TEST(ConSanPublicationDispatch, CompletionAndQueueOrderingProveSerialExecution) {
+  int64_t value = 1;
+  auto load = [&](uint64_t) -> std::optional<int64_t> { return value; };
+  PublicationDispatchIsolation state;
+  state.note(1, true, 10, true, load);
+  state.note(1, true, 20, true, load);
+  EXPECT_TRUE(state.isolated());
+  value = 0;
+  state.note(2, false, 30, true, load);
+  EXPECT_TRUE(state.isolated());
+}
+
+TEST(ConSanPublicationDispatch, OrderingSuccessorRetainsPriorInstrumentedLifetime) {
+  auto pending = [](uint64_t) -> std::optional<int64_t> { return 1; };
+  PublicationDispatchIsolation state;
+  state.note(1, false, 0, true, pending);
+  state.note(1, true, 20, false, pending); // Barrier or an uninstrumented successor.
+  EXPECT_TRUE(state.isolated());
+  state.note(2, false, 30, false, pending);
+  EXPECT_FALSE(state.isolated());
+}
+
+TEST(ConSanPublicationDispatch, SignalDestructionDoesNotEraseUnfinishedWork) {
+  auto pending = [](uint64_t) -> std::optional<int64_t> { return 1; };
+  PublicationDispatchIsolation state;
+  state.note(1, false, 10, true, pending);
+  state.forget(10, pending);
+  bool destroyed_signal_read = false;
+  state.note(2, false, 20, false, [&](uint64_t signal) -> std::optional<int64_t> {
+    destroyed_signal_read |= signal == 10;
+    return 1;
+  });
+  EXPECT_FALSE(destroyed_signal_read);
+  EXPECT_FALSE(state.isolated());
+}
+
+TEST(ConSanPublicationDispatch, SharedCountdownRequiresEveryOrderedDispatchToComplete) {
+  int64_t value = 0;
+  auto load = [&](uint64_t) -> std::optional<int64_t> { return value; };
+  PublicationDispatchIsolation state;
+  state.note(1, false, 10, true, load);
+  state.note(1, true, 10, true, load);
+  value = -1; // Only the first of the two dispatched packets completed.
+  state.note(2, false, 20, false, load);
+  EXPECT_FALSE(state.isolated());
+}
+
+TEST(ConSanPublicationDispatch, CompletedUninstrumentedSetupDoesNotPoisonLaterCapture) {
+  int64_t value = 1;
+  auto load = [&](uint64_t) -> std::optional<int64_t> { return value; };
+  PublicationDispatchIsolation state;
+  state.note(1, false, 10, false, load);
+  state.note(2, false, 20, false, load);
+  value = 0;
+  state.note(3, false, 30, true, load);
+  EXPECT_TRUE(state.isolated());
+}
+
 } // namespace rocjitsu::consan::hook

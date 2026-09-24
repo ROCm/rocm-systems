@@ -49,6 +49,8 @@ struct ReportPipelineInput {
   bool allow_uniform_lds_stores = false;
   /// Allocation identity from host-owned registry state, not captured bytes.
   std::optional<uint64_t> expected_generation = std::nullopt;
+  /// Host lifetime witness: no potentially interfering concurrent dispatch.
+  bool publication_dispatches_isolated = true;
 };
 
 struct ReportPipelineResult {

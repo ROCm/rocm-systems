@@ -516,7 +516,16 @@ AtomicFencePolicyResult plan_atomic_fence_observation(const ProgramInventory &in
         continue;
       const auto names = inventory.source_container_names(source.physical_id);
       const auto owners = inventory.execution_owner_descriptors(source);
-      if (owners.empty() || !filter_matches(names, request.container_filter) ||
+      const auto kernels = inventory.execution_owner_kernels(source);
+      const bool has_access_windows = std::ranges::any_of(kernels, [&](ProgramContainerId kernel) {
+        return std::ranges::any_of(request.directional_access_windows,
+                                   [&](const DirectionalAccessAvailability &availability) {
+                                     return availability.owner == kernel &&
+                                            (availability.read || availability.write);
+                                   });
+      });
+      if (!has_access_windows || owners.empty() ||
+          !filter_matches(names, request.container_filter) ||
           !site_matches_kernel_allowlist(inventory, owners, names, request.kernel_name_allowlist) ||
           std::ranges::find(covered, source.physical_id) != covered.end() ||
           std::ranges::any_of(result.plan.probe_intents, [&](const ProbeIntent &intent) {

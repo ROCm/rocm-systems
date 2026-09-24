@@ -618,7 +618,11 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
   sequence.bind_label(finish)
       .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch))
       .require(record.materialize_address(report + offsetof(ReportHeader, publication_flags)))
-      .append(instrumentation::build_v_mov_b32_literal(ticket, kPublicationTraceEnabled, arch),
+      .append(instrumentation::build_v_mov_b32_literal(
+                  ticket,
+                  kPublicationTraceEnabled |
+                      (plan.publication_modifications_complete ? kPublicationTraceComplete : 0u),
+                  arch),
               instrumentation::build_flat_atomic_or_u32(base, ticket, ticket, false,
                                                         kAmdGpuScopeDevice, arch))
       .require(append_global_atomic_wait(words, arch))

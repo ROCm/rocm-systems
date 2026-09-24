@@ -54,6 +54,22 @@ struct AtomicEvidenceSourceView {
   }
 };
 
+/// Coverage of decoded modifications in every kernel owning a selected capture.
+/// This checks original sites against the actual lowering plans, including
+/// unsupported/excluded sites that contributed no observation intent.
+struct PublicationModificationCoverage {
+  uint32_t required = 0;
+  uint32_t covered = 0;
+  bool valid = false;
+  std::vector<ProgramSiteId> missing;
+
+  [[nodiscard]] bool complete() const { return valid && required != 0u && missing.empty(); }
+};
+
+[[nodiscard]] PublicationModificationCoverage
+publication_modification_coverage(const ProgramInventory &inventory,
+                                  std::span<const AtomicEvidenceSitePlan> captures);
+
 [[nodiscard]] std::optional<AtomicEventKind> atomic_event_kind(SyncMemoryRole role);
 
 [[nodiscard]] std::optional<AtomicEvidenceSourceView>

@@ -47,6 +47,9 @@ DecodedReport decode_report(const ReportPipelineInput &input, const ReportSnapsh
       snapshot.bytes.data() + expected_layout.publication_events_offset);
   result.publications =
       decode_publications(*header, {publications, expected_layout.publication_event_capacity});
+  if (result.publications.status == PublicationDecodeStatus::Complete &&
+      !input.publication_dispatches_isolated)
+    result.publications.status = PublicationDecodeStatus::Incomplete;
   if (result.publications.status == PublicationDecodeStatus::Malformed ||
       result.publications.status == PublicationDecodeStatus::Incomplete) {
     result.failure = ReportDecodeFailure::PublicationEvidenceInvalid;

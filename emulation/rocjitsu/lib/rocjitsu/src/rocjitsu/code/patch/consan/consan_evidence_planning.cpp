@@ -5,6 +5,9 @@
 
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 
+#include <algorithm>
+#include <set>
+
 namespace rocjitsu::consan::detail {
 
 const ProgramContainer *resolve_evidence_container(const ProgramInventory &inventory,
@@ -112,6 +115,46 @@ resolve_atomic_evidence_source(const ProgramInventory &inventory,
         sequence->end_text_offset - loop_header > std::numeric_limits<uint32_t>::max()) {
       return std::nullopt;
     }
+  }
+  return result;
+}
+
+PublicationModificationCoverage
+publication_modification_coverage(const ProgramInventory &inventory,
+                                  std::span<const AtomicEvidenceSitePlan> captures) {
+  PublicationModificationCoverage result;
+  std::set<uint64_t> owners;
+  for (const auto &capture : captures) {
+    if (!capture.is_well_formed() || !resolve_atomic_evidence_source(inventory, capture))
+      return result;
+    const auto descriptors = inventory.execution_owner_descriptors(capture.source_site);
+    if (descriptors.empty())
+      return result;
+    owners.insert(descriptors.begin(), descriptors.end());
+  }
+  if (owners.empty())
+    return result;
+  result.valid = true;
+  for (const auto &site : inventory.program_sites()) {
+    const auto *atomic = site.get_if<AtomicSite>();
+    const auto *ordinary = site.get_if<OrdinaryMemorySite>();
+    if ((!atomic && (!ordinary || ordinary->operation != OrdinaryMemoryOperation::Store)) ||
+        site.mnemonic_view().starts_with("ds_"))
+      continue;
+    const auto descriptors = inventory.execution_owner_descriptors(site);
+    if (!std::ranges::any_of(descriptors, [&](uint64_t owner) { return owners.contains(owner); }))
+      continue;
+    ++result.required;
+    const bool covered = std::ranges::any_of(captures, [&](const AtomicEvidenceSitePlan &capture) {
+      const auto *source = inventory.program_site(capture.source_site);
+      // Physical aliases only share a capture if their operand-rich decodes
+      // agree. Matching offsets alone could hide an unsupported alias.
+      return source && source->physical_id == site.physical_id && source->same_payload(site);
+    });
+    if (covered)
+      ++result.covered;
+    else
+      result.missing.push_back(site.id);
   }
   return result;
 }

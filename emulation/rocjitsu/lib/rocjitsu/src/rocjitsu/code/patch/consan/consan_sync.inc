@@ -938,8 +938,11 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
   }
   const bool capture_publications =
       arch == ROCJITSU_CODE_ARCH_RDNA4 && layout.publication_event_capacity != 0u &&
-      std::ranges::all_of(candidates,
-                          [](const Candidate &candidate) { return candidate.source.is_rmw(); });
+      std::ranges::all_of(candidates, [](const Candidate &candidate) {
+        return candidate.source.is_rmw() ||
+               (candidate.source.event &&
+                candidate.source.event->operation == SyncOperation::OrdinaryStore);
+      });
   if (capture_publications) {
     auto modifications =
         build_atomic_evidence_site_plans(result.program_inventory, result.observation_plan(),
@@ -1463,6 +1466,24 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     result.warnings.emplace_back("ConSan publication trace could not capture every atomic site");
     return;
   }
+  bool publication_modifications_complete = false;
+  if (publication_trace) {
+    std::vector<AtomicEvidenceSitePlan> captures;
+    for (const auto &capture : selected)
+      captures.push_back(capture.candidate.atomic);
+    const auto coverage = publication_modification_coverage(result.program_inventory, captures);
+    publication_modifications_complete = coverage.complete();
+    result.warnings.emplace_back(
+        "ConSan publication modification coverage required=" + std::to_string(coverage.required) +
+        " covered=" + std::to_string(coverage.covered) +
+        " complete=" + (coverage.complete() ? "true" : "false"));
+    for (const auto id : coverage.missing) {
+      const auto *site = result.program_inventory.program_site(id);
+      result.warnings.emplace_back("ConSan publication missing modification at text offset " +
+                                   std::to_string(site->text_offset()) + " (" +
+                                   std::string(site->mnemonic_view()) + ")");
+    }
+  }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan atomic sync found no patchable sequence");
     return;
@@ -1490,6 +1511,7 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
         /*transient_assignment_already_resolved=*/true, "sampled atomic sync", result.errors);
     if (!emission_plan)
       return;
+    emission_plan->publication_modifications_complete = publication_modifications_complete;
     emission_plan->polling_loop_entry_vgpr_bank_mode = planned.polling_loop_entry_vgpr_bank_mode;
     uint32_t guest_instruction_offset = 0u;
     uint32_t emitted_guest_size = 0u;

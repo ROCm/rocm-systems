@@ -21,6 +21,7 @@
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_transform_diagnostics.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_publication_dispatch.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 #include "rocjitsu/hooks/hsa_api_function_patch.h"
@@ -2069,6 +2070,11 @@ public:
 
   void forget_signal(hsa_signal_t signal, decltype(hsa_signal_load_scacquire) *load_signal) {
     std::lock_guard lock(mutex_);
+    publication_dispatch_isolation().forget(
+        signal.handle, [load_signal](uint64_t handle) -> std::optional<int64_t> {
+          return load_signal ? std::optional<int64_t>{load_signal(hsa_signal_t{handle})}
+                             : std::nullopt;
+        });
     const auto pending = std::ranges::find(pending_, signal.handle, &Pending::signal_handle);
     if (pending == pending_.end())
       return;
@@ -2082,6 +2088,7 @@ public:
     pending_.clear();
     queues_awaiting_completion_proxy_.clear();
     untrackable_dispatch_ = false;
+    publication_dispatch_isolation().reset();
   }
 
   void clear() {
@@ -2089,6 +2096,7 @@ public:
     pending_.clear();
     queues_awaiting_completion_proxy_.clear();
     untrackable_dispatch_ = false;
+    publication_dispatch_isolation().reset();
   }
 
 private:
@@ -3180,6 +3188,14 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
           reinterpret_cast<const hsa_barrier_and_packet_t *>(packet_bytes.bytes.data());
       const uint16_t barrier_bit =
           static_cast<uint16_t>((barrier->header >> HSA_PACKET_HEADER_BARRIER) & 1u);
+      if (barrier_bit != 0u)
+        publication_dispatch_isolation().note(
+            reinterpret_cast<uintptr_t>(data), true, barrier->completion_signal.handle, false,
+            [core](uint64_t signal) -> std::optional<int64_t> {
+              if (!core || !core->hsa_signal_load_scacquire_fn)
+                return std::nullopt;
+              return core->hsa_signal_load_scacquire_fn(hsa_signal_t{signal});
+            });
       ReportEpochRegistry::instance().note_ordering_barrier_locked(
           data, barrier_bit != 0u, barrier->completion_signal,
           core == nullptr ? nullptr : core->hsa_signal_load_scacquire_fn);
@@ -3188,6 +3204,16 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
       continue;
     const KernelPrivateDispatchRegistry::DispatchRequirements requirements =
         KernelPrivateDispatchRegistry::instance().note_and_query_dispatch(packet->kernel_object);
+    publication_dispatch_isolation().note(
+        reinterpret_cast<uintptr_t>(data),
+        ((packet->header >> HSA_PACKET_HEADER_BARRIER) & 1u) != 0u,
+        is_extended_dispatch ? extended_packet->completion_signal.handle
+                             : packet->completion_signal.handle,
+        requirements.instrumented, [core](uint64_t signal) -> std::optional<int64_t> {
+          if (!core || !core->hsa_signal_load_scacquire_fn)
+            return std::nullopt;
+          return core->hsa_signal_load_scacquire_fn(hsa_signal_t{signal});
+        });
     if (requirements.instrumented) {
       ReportEpochRegistry::instance().note_instrumented_dispatch_locked(
           data,

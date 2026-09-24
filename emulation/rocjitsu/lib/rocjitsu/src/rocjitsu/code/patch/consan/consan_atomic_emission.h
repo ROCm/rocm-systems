@@ -63,6 +63,7 @@ atomic_semantics_for_source(const AtomicEvidenceSourceView &source);
 struct SyncEmissionPlan {
   uint64_t supercollider_report_buffer_address = 0;
   uint64_t report_generation = 0;
+  bool publication_modifications_complete = false;
   std::optional<uint16_t> exec_save_sgpr;
   bool automatic_private_epoch = false;
   bool workitem_owner = false;

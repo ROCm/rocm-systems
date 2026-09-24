@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_publication_dispatch.h"
 
 #include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
@@ -621,7 +622,8 @@ private:
          .static_metadata = entry.static_metadata ? &*entry.static_metadata : nullptr,
          .conflict_example_limit = limit,
          .allow_uniform_lds_stores = allow_uniform_lds_stores_,
-         .expected_generation = entry.generation},
+         .expected_generation = entry.generation,
+         .publication_dispatches_isolated = publication_dispatch_isolation().isolated()},
         snapshot, summary);
     conflict_examples_remaining_ -=
         std::min(conflict_examples_remaining_, result.conflict_example_count);

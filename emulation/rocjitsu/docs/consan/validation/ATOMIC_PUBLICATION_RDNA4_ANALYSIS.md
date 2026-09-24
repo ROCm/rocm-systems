@@ -359,6 +359,37 @@ tests skipped; 273 host tests pass (`modifications-consan-tests.log` and
 contract (including unsupported modifications), followed by clean/fault
 qualification.
 
+## Complete publication proofs enabled
+
+The capture planner now audits every decoded non-LDS modification in the
+kernels owning its actual capture plans. Unsupported or omitted sites prevent
+completeness, and physical aliases must agree on their decoded operands. The
+original workloads cover 247/247 sites (Stream-K) and 262/262 (tree).
+
+The host also requires dispatch lifetime evidence. Queue interception tracks
+instrumented and uninstrumented dispatches; a possible overlapping dispatch
+invalidates publication proofs. Completion signals or queue ordering establish
+serial execution. An ordering successor retains the earlier instrumented
+kernel's lifetime until completion; destroying an unfinished signal does not
+make its dispatch disappear. This is intentionally conservative for concurrent
+kernels, including kernels captured in separate report buffers.
+
+With both checks, the one-value, eight-value, four-wave tree, and relaxed
+bookkeeping probes pass strict clean checks. Both unchanged original workloads
+also pass strict checks at `max`: zero conflicts, complete static and dynamic
+coverage, 40 visible access records in Stream-K and 64 in tree. Logs:
+`complete-*-strict.log`; hook hash and summary in `complete-clean-results.json`.
+The qualification runner accepts Stream-K clean controls at `default` and
+`high`, but their weakened-scope faults detect 0/8 each: these presets retain
+zero sampled access records for this micro-workload. Denser-preset qualification
+is in progress, and no cell is qualified green yet.
+
+The complete-path checks pass 974 ConSan tests (two benchmark tests skipped)
+and 280 host tests, including omitted/unclassifiable modification sites,
+concurrent dispatches, ordered successors, shared countdown signals, destroyed
+signals, and decoder rejection without the lifetime witness. Logs:
+`complete-consan-tests.log` and `complete-host-tests.log`.
+
 ## Reproducing the minimal probe
 
 Use the current ROCm environment, an artifact directory outside the source tree,

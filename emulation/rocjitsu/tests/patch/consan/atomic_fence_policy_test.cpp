@@ -1025,6 +1025,9 @@ TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizatio
   const auto inventory = build_atomic_inventory({}, {}, {atomic}, {store});
   auto request = atomic_request(Mode::Default);
   request.publication_modifications_enabled = true;
+  const std::array windows{DirectionalAccessAvailability{
+      .owner = inventory.kernels().front().id, .read = true, .write = true}};
+  request.directional_access_windows = windows;
   const auto policy = plan_atomic_fence_observation(inventory, request);
   ASSERT_TRUE(policy.valid());
   ASSERT_EQ(policy.plan.probe_intents.size(), 4u);
@@ -1047,9 +1050,46 @@ TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizatio
   EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, plans[1])->is_rmw());
   EXPECT_EQ(plans[1].lowering_form.data_register_count, 4u);
   EXPECT_EQ(plans[1].lowering_form.destination_register_count, 0u);
+  const auto coverage = detail::publication_modification_coverage(inventory, plans);
+  EXPECT_TRUE(coverage.complete());
+  EXPECT_EQ(coverage.required, 2u);
+  EXPECT_EQ(coverage.covered, 2u);
+  const auto omitted = detail::publication_modification_coverage(
+      inventory, std::span<const detail::AtomicEvidenceSitePlan>(plans).first(1));
+  EXPECT_FALSE(omitted.complete());
+  EXPECT_EQ(omitted.required, 2u);
+  EXPECT_EQ(omitted.covered, 1u);
+  ASSERT_EQ(omitted.missing.size(), 1u);
+  EXPECT_EQ(omitted.missing.front(), plans[1].source_site);
+
   const std::vector<std::string> excluded{"another_kernel"};
   request.kernel_name_allowlist = excluded;
   EXPECT_TRUE(plan_atomic_fence_observation(inventory, request).plan.probe_intents.empty());
+}
+
+TEST(ConSanAtomicFencePolicy, PublicationCompletenessIncludesUnclassifiableStores) {
+  auto store = make_global_store_site({}, 64);
+  store.data_vgpr.reset();
+  const auto inventory = build_atomic_inventory({}, {}, {make_global_atomic_site()}, {store});
+  auto request = atomic_request(Mode::Default);
+  request.publication_modifications_enabled = true;
+  const std::array windows{DirectionalAccessAvailability{
+      .owner = inventory.kernels().front().id, .read = true, .write = true}};
+  request.directional_access_windows = windows;
+  const auto policy = plan_atomic_fence_observation(inventory, request);
+  ASSERT_TRUE(policy.valid());
+  std::vector<std::string> errors;
+  const auto plans = detail::build_atomic_evidence_site_plans(
+      inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
+  ASSERT_TRUE(errors.empty());
+  ASSERT_EQ(plans.size(), 1u);
+  const auto coverage = detail::publication_modification_coverage(inventory, plans);
+  EXPECT_TRUE(coverage.valid);
+  EXPECT_FALSE(coverage.complete());
+  EXPECT_EQ(coverage.required, 2u);
+  EXPECT_EQ(coverage.covered, 1u);
+  ASSERT_EQ(coverage.missing.size(), 1u);
+  EXPECT_EQ(inventory.program_site(coverage.missing.front())->text_offset(), 64u);
 }
 
 } // namespace
