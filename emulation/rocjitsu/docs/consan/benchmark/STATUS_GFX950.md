@@ -1,5 +1,10 @@
 # ConSan `gfx950` benchmark status
 
+**Global-memory support:** TokenSpeed Gluon BF16 MoE has N/A SuperCollider cells
+because its selected kernels have no accesses covered by the current detector.
+See [SuperCollider for global memory](../SUPERCOLLIDER_GLOBAL_MEMORY.md) for the
+findings, implementation plan, and expected overhead.
+
 Historical evidence: this ledger was not requalified during the September 2026
 documentation audit. Existing results describe their recorded runs, not the
 current branch. Rerun the linked procedure after relevant changes.

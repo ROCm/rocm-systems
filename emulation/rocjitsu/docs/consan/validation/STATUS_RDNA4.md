@@ -1,5 +1,9 @@
 # ConSan validation on RDNA4 (gfx1201)
 
+**Global-memory support:** the yellow SuperCollider cell for `pytorch-scatter-reduce`
+reflects missing global-access coverage. See [SuperCollider for global memory](../SUPERCOLLIDER_GLOBAL_MEMORY.md)
+for the findings, implementation plan, and expected overhead.
+
 This table records the September 23–24, 2026 end-to-end ConSan revalidation of
 external workloads on this host’s gfx1201 GPU. **Default** names the sampling preset used by the
 Default engine; **SuperCollider** records its replay and timing-perturbation
