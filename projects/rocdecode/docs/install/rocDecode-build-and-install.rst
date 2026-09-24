@@ -117,7 +117,7 @@ Build and install rocDecode using the following commands:
 
    mkdir build && cd build
    set ROCM_PATH=<path-to-TheRock-build>
-   cmake .. -DROCM_PATH=%ROCM_PATH%
+   cmake .. -DROCM_PATH="%ROCM_PATH%"
    cmake --build . --config Release
    cmake --install . --config Release
 
@@ -130,7 +130,7 @@ Build and install rocDecode using the following commands:
    * FFmpeg, needed for the samples and the host decoder, is detected automatically when it is
      installed in a common location: on ``PATH``, under Chocolatey or scoop, in
      ``%ProgramFiles%\ffmpeg``, or in ``C:\ffmpeg``. Set ``FFMPEG_ROOT=<path-to-ffmpeg>`` the same
-     way as ``ROCM_PATH`` and add ``-DFFMPEG_ROOT=%FFMPEG_ROOT%`` only if it lives elsewhere, or to
+     way as ``ROCM_PATH`` and add ``-DFFMPEG_ROOT="%FFMPEG_ROOT%"`` only if it lives elsewhere, or to
      pin a specific build.
 
 To verify the build, build and run a sample from the installed location:
@@ -138,8 +138,8 @@ To verify the build, build and run a sample from the installed location:
 .. code-block:: bat
 
    mkdir rocdecode-sample && cd rocdecode-sample
-   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw -DROCM_PATH=%ROCM_PATH%
+   cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw" -DROCM_PATH="%ROCM_PATH%"
    cmake --build . --config Release
    set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%PATH%
-   Release\videodecoderaw.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265 -f 5
+   Release\videodecoderaw.exe -i "%ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265" -f 5
 

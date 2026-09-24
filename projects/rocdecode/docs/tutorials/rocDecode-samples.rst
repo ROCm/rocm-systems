@@ -34,9 +34,9 @@ To build and run samples on Windows:
   set FFMPEG_ROOT=<path-to-ffmpeg>
   set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-sample && cd rocdecode-sample
-  cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecode" -DROCM_PATH="%ROCM_PATH%" -DFFMPEG_ROOT="%FFMPEG_ROOT%"
   cmake --build . --config Release
-  Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
+  Release\videodecode.exe -i "%ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4"
 
 .. note::
 
