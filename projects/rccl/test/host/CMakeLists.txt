@@ -197,9 +197,8 @@ endfunction()
 #   REMOVE_DEFS     defines to drop from the mode baseline before EXTRA_DEFS are
 #                   added (init strips the three preprocessor-gated macros it sets
 #                   per variant so they are never inherited from the common set)
-#   NO_PIE          add -no-pie to the link (standalone only; see rccl-HostUnitTests)
 function(rccl_add_micro_binary _name)
-  cmake_parse_arguments(_ramb "NO_PIE" "CATEGORIES_YAML"
+  cmake_parse_arguments(_ramb "" "CATEGORIES_YAML"
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
 
   if(BUILD_TESTS)
@@ -213,7 +212,7 @@ function(rccl_add_micro_binary _name)
     target_compile_definitions(${_name} PRIVATE
       ${_ramb_base_defs} ${_ramb_EXTRA_DEFS})
     rccl_apply_rocshmem_gin_optout(${_name})
-    rccl_apply_hip_compile_only(${_name})   # HIP compile requirements, no runtime link
+    rccl_apply_hip_compile_only(${_name})
     target_link_libraries(${_name} PRIVATE ${MICRO_TEST_LINK_LIBS})
     add_dependencies(${_name} hipify_all copy_nccl_device_headers)
     rccl_apply_host_only_flags(${_name})
@@ -232,11 +231,8 @@ function(rccl_add_micro_binary _name)
       ${CMAKE_CURRENT_SOURCE_DIR} ${RCCL_INCLUDE_DIRS} ${_ramb_EXTRA_INCLUDES})
     target_compile_definitions(${_name} PRIVATE
       __HIP_PLATFORM_AMD__ NCCL_OS_LINUX ROCM_VERSION=70000 ${_ramb_EXTRA_DEFS})
-    if(_ramb_NO_PIE)
-      target_link_options(${_name} PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
-    else()
-      target_link_options(${_name} PRIVATE -no-hip-rt -Wl,--gc-sections)
-    endif()
+    # -no-pie in case the non-PIC RCCL-vendored libgtest.a is linked.
+    target_link_options(${_name} PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
     target_link_libraries(${_name} PRIVATE
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
@@ -244,24 +240,6 @@ endfunction()
 
 # =====================================================================
 # Standalone project setup (only used when NOT in an in-RCCL-build).
-#
-# Everything a standalone `cmake -B build` on this directory needs that is
-# NOT shared with the in-RCCL-build path: GTest/fmt resolution, the hipified
-# snapshot location, the amdsmi/HIP fabric probes, the production-.cc wrapper
-# library, and the rccl-HostUnitTests binary. It also exports the handful of
-# per-mode variables the shared micro-binary block below consumes:
-#   RCCL_HOST_HIPIFY_DIR      hipified-snapshot base dir
-#   RCCL_INCLUDE_DIRS         include dirs for the standalone micro binaries
-#   _MICRO_MODE_DEFS          defs the in-build path inherits from the rccl
-#                             target (USE_AMDSMI + the fabric probes); the
-#                             standalone project has no rccl target to read
-#   _ENQ_BUILD_DEVLINKER      build the shipping enqueue -devlinker arm too
-#   _MICRO_BUILD_SYM_KERNELS  sym-kernels sources are present
-#   HOST_TEST_BINARIES        coverage instruments every binary in this list
-#
-# When invoked directly (cmake -B build on this directory) BUILD_TESTS is
-# not defined, so we fall through to the standalone project that builds
-# rccl-HostUnitTests + rccl-UnitTestsMicro from a hipified snapshot.
 # =====================================================================
 function(rccl_standalone_setup)
   find_package(Threads REQUIRED)
@@ -539,23 +517,9 @@ function(rccl_standalone_setup)
   set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
 endfunction()
 
-# --- Coverage (all host-only standalone test binaries) ------------------
-# Single switch for the whole standalone build: llvm source-based coverage is
-# either on for every host-only test binary or off for all of them. Host-only
-# build, so no -Xarch_device split is needed -- --offload-host-only never runs
-# the amdgcn device pass (see CMAKE_CXX_FLAGS_INIT below). On by default so the
-# binaries always produce a profile; disable with -DHOST_TEST_COVERAGE=OFF.
-#
-# Applied uniformly, per target:
-#  - the -fprofile-instr-generate/-fcoverage-mapping instrumentation flags;
-#  - RCCL_TEST_CODE_COVERAGE=1, which is what makes process-isolated tests flush
-#    their counters in the forked child (common/ProcessIsolatedTestRunner.cpp).
-#    Without it those tests run but contribute nothing to the profile;
-#  - libdl, which the RCCL_TEST_CODE_COVERAGE dlsym() path in that runner needs
-#    (empty where libdl is folded into libc, glibc >= 2.34).
-# rccl-source-wrappers is a static library reached by rccl-HostUnitTests, so it
-# only takes the instrumentation flags -- mem_manager.cc reaches the binary
-# through it and otherwise disappears from the report entirely.
+# =====================================================================
+# Standalone Coverage
+# =====================================================================
 function(rccl_standalone_coverage)
   option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
   if(HOST_TEST_COVERAGE)
@@ -573,18 +537,6 @@ endfunction()
 
 # =====================================================================
 # Driver: pick the mode, then define the micro-test binaries ONCE.
-#
-# When this directory is pulled in via add_subdirectory(host) from
-# test/CMakeLists.txt (i.e. as part of ./install.sh -t), BUILD_TESTS is set and
-# the parent build has already established the toolchain, project(), and the
-# shared RCCL_COMMON_INCLUDE_DIRS / RCCL_COMMON_COMPILE_DEFS / MICRO_TEST_LINK_LIBS
-# variables; the rccl target supplies USE_AMDSMI, the fabric probes, and the
-# ENABLE_* variant defines, so the per-mode variables below are trivial.
-#
-# When invoked directly (cmake -B build on this directory) BUILD_TESTS is not
-# defined, so the standalone toolchain + project() are set up here and
-# rccl_standalone_setup() builds rccl-HostUnitTests + the wrapper library and
-# fills in the same per-mode variables the in-build branch sets inline.
 # =====================================================================
 if(BUILD_TESTS)
   set(RCCL_HOST_HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
@@ -661,14 +613,6 @@ endif()
 
 # =====================================================================
 # Shared micro-test binary definitions (identical for BOTH build paths).
-#
-# The only per-mode inputs are the variables set above:
-#   RCCL_HOST_HIPIFY_DIR / _MICRO_MODE_DEFS / _ENQ_BUILD_DEVLINKER /
-#   _MICRO_BUILD_SYM_KERNELS
-# plus the mode-specific include dirs / base defs / link libs applied inside
-# rccl_add_micro_binary() itself (BUILD_TESTS branch vs standalone branch).
-# CATEGORIES_YAML is honoured in-build and ignored standalone; NO_PIE is honoured
-# standalone and ignored in-build -- so both are passed unconditionally.
 # =====================================================================
 rccl_define_micro_source_lists()
 
@@ -680,7 +624,7 @@ rccl_mark_oracle_tus_generated(${RCCL_HOST_HIPIFY_DIR} argcheck archinfo utils)
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicro
 # ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicro NO_PIE
+rccl_add_micro_binary(rccl-UnitTestsMicro
   SOURCES ${TEST_MICRO_SOURCE_FILES}
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
@@ -721,7 +665,7 @@ endif()
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
 # ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed NO_PIE
+rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
   SOURCES ${TEST_MICRO_SCHEDULER_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
@@ -735,18 +679,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed NO_PIE
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroInit and variants
-#
-# Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
-# HIP_UNCACHED_MEMORY and, separately, ENABLE_FAULT_INJECTION at the preprocessor,
-# so each arm's code is absent from the object unless its macro is set. The two
-# macro pairs are lexically disjoint in init.cc, so base + -uncached + -faultinj
-# reaches every arm without a 2x2 cross product. In-build strips the three
-# inherited macros via REMOVE_DEFS (standalone's base defs never had them, so it
-# is a no-op there) and each variant sets its own below.
 # ---------------------------------------------------------------------------
 foreach(_variant "" "-uncached" "-faultinj")
   set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
-  rccl_add_micro_binary(${_init_tgt} NO_PIE
+  rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
     EXTRA_DEFS ${_MICRO_MODE_DEFS} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
@@ -760,11 +696,6 @@ endforeach()
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
-#
-# enqueue.cc gates rcclShmemDynamicSize at the PREPROCESSOR on RCCL_DEVICE_LINKER,
-# so a single compile only ever reaches one arm. In-build inherits RCCL_DEVICE_LINKER
-# (ENABLE_DEVICE_LINKER default ON) into the base binary; standalone has no rccl
-# target to read, so it also builds the -devlinker arm explicitly.
 # ---------------------------------------------------------------------------
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
@@ -778,8 +709,7 @@ set(_enq_common_args
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/enqueue.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml"
-  NO_PIE)
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue ${_enq_common_args})
 if(_ENQ_BUILD_DEVLINKER)
@@ -788,12 +718,10 @@ if(_ENQ_BUILD_DEVLINKER)
 endif()
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
-# Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this
-# binary's suites too.
+# rccl-UnitTestsMicroSymKernels
 # ---------------------------------------------------------------------------
 if(_MICRO_BUILD_SYM_KERNELS)
-  rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels NO_PIE
+  rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels
     SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
     EXTRA_DEFS
       ${_MICRO_MODE_DEFS}
@@ -812,9 +740,4 @@ if(BUILD_TESTS)
   return()
 endif()
 
-# NOTE: the standalone project intentionally does not register these binaries
-# with CTest (matching test/host from #9320); run them directly out of the build
-# directory. The binaries are recorded via add_test_executable() /
-# rccl_add_micro_binary() rather than a list repeated here, so the two cannot
-# drift.
 rccl_standalone_coverage()
