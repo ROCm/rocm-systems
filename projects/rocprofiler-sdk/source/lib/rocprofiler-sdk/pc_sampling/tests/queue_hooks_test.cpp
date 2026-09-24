@@ -22,6 +22,12 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 
+#include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#    include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#endif
+
 #include <gtest/gtest.h>
 
 namespace
@@ -55,4 +61,34 @@ TEST(pc_sampling_queue_hooks, exit_hook_null_session_is_noop)
 
     SUCCEED();
 }
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+// The unconfigured case above can only show the gate stays shut. Seed the two pieces of
+// state is_pc_sample_service_configured reads -- the HSA-init flag and the global session
+// map -- and the gate must open. Configuring a real service would take a GPU, but the map
+// lookup is a find(), so the session is never dereferenced and a null entry is enough.
+TEST(pc_sampling_queue_hooks, is_configured_on_agent_configured)
+{
+    rocprofiler_agent_id_t agent_id;
+    agent_id.handle = 424242;
+
+    auto&      hsa_ready  = rocprofiler::pc_sampling::is_hsa_initialized();
+    const bool prev_ready = hsa_ready.exchange(true);
+
+    rocprofiler::pc_sampling::get_global_pc_sampling_sessions().wlock(
+        [agent_id](auto& sessions) { sessions[agent_id] = nullptr; });
+
+    EXPECT_TRUE(rocprofiler::pc_sampling::is_configured_on_agent(agent_id));
+
+    // Drop the session but leave the HSA-init flag set, so this shows the session lookup is
+    // what closed the gate again rather than the flag doing all the work.
+    rocprofiler::pc_sampling::get_global_pc_sampling_sessions().wlock(
+        [agent_id](auto& sessions) { sessions.erase(agent_id); });
+
+    EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(agent_id));
+
+    // pcs-test runs every PC sampling suite in one process.
+    hsa_ready.store(prev_ready);
+}
+#endif
 }  // namespace
