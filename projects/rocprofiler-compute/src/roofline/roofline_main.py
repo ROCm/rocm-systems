@@ -14,8 +14,8 @@ import plotly.graph_objects as go
 
 from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
-    DispatchCounts,
-    DurationStats,
+    KernelDispatchStats,
+    KernelDurationStats,
     build_compute_peak_hover,
     build_kernel_hover_template,
     build_roof_hover,
@@ -454,11 +454,11 @@ class Roofline:
                         name_html=wrap_hover_name(truncate_kernel_name(kernel_name)),
                         limiter=limiter,
                         limiter_category=limiter_category,
-                        dispatches=DispatchCounts(
+                        dispatches=KernelDispatchStats(
                             kernel=count_val, total=total_dispatches
                         ),
-                        duration=DurationStats(
-                            total=time_val, pct_runtime=pct_val, unit=time_unit
+                        duration=KernelDurationStats(
+                            kernel=time_val, pct_runtime=pct_val, unit=time_unit
                         ),
                         ops_flops=ops_flops,
                     ),
