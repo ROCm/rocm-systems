@@ -39,6 +39,25 @@ if(ROCPROFILER_MEMCHECK)
     set(ROCPROFILER_BUILD_Find_Python3_COMPONENTS "Interpreter" "Development")
 endif()
 
+# sets _VAR to "<MAJOR>.<MINOR>" of the python executable _EXE, or empty on failure
+function(rocprofiler_get_python_executable_version _EXE _VAR)
+    execute_process(
+        COMMAND "${_EXE}" -c
+                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        OUTPUT_VARIABLE _EXE_VER
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _EXE_RESULT
+        ERROR_QUIET)
+
+    if(NOT _EXE_RESULT EQUAL 0)
+        set(_EXE_VER "")
+    endif()
+
+    set(${_VAR}
+        "${_EXE_VER}"
+        PARENT_SCOPE)
+endfunction()
+
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
@@ -51,17 +70,10 @@ macro(rocprofiler_find_python3 _VERSION)
         string(REGEX MATCH "^[0-9]+\\.[0-9]+" _rocprofiler_requested_major_minor
                      "${_VERSION}")
         foreach(_rocprofiler_candidate_exe IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
-            execute_process(
-                COMMAND
-                    "${_rocprofiler_candidate_exe}" -c
-                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-                OUTPUT_VARIABLE _rocprofiler_candidate_ver
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                RESULT_VARIABLE _rocprofiler_candidate_result
-                ERROR_QUIET)
-            if(_rocprofiler_candidate_result EQUAL 0
-               AND "${_rocprofiler_candidate_ver}" STREQUAL
-                   "${_rocprofiler_requested_major_minor}")
+            rocprofiler_get_python_executable_version("${_rocprofiler_candidate_exe}"
+                                                      _rocprofiler_candidate_ver)
+            if(_rocprofiler_candidate_ver AND "${_rocprofiler_candidate_ver}" STREQUAL
+                                              "${_rocprofiler_requested_major_minor}")
                 set(Python3_EXECUTABLE
                     "${_rocprofiler_candidate_exe}"
                     CACHE FILEPATH "" FORCE)
@@ -70,7 +82,6 @@ macro(rocprofiler_find_python3 _VERSION)
         endforeach()
         unset(_rocprofiler_candidate_exe)
         unset(_rocprofiler_candidate_ver)
-        unset(_rocprofiler_candidate_result)
         unset(_rocprofiler_requested_major_minor)
     endif()
 
@@ -111,21 +122,13 @@ function(get_default_python_versions _VAR)
     # it to version list
     if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
         foreach(_EXE IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
-            execute_process(
-                COMMAND
-                    "${_EXE}" -c
-                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-                OUTPUT_VARIABLE _EXE_VER
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                RESULT_VARIABLE _EXE_RESULT
-                ERROR_QUIET)
-            if(_EXE_RESULT EQUAL 0 AND NOT "${_EXE_VER}" IN_LIST _PYTHON_FOUND_VERSIONS)
+            rocprofiler_get_python_executable_version("${_EXE}" _EXE_VER)
+            if(_EXE_VER AND NOT "${_EXE_VER}" IN_LIST _PYTHON_FOUND_VERSIONS)
                 list(APPEND _PYTHON_FOUND_VERSIONS "${_EXE_VER}")
             endif()
         endforeach()
         unset(_EXE)
         unset(_EXE_VER)
-        unset(_EXE_RESULT)
     endif()
 
     # If none found, do one last check for 3.6 (no EXACT)
