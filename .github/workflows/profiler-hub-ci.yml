@@ -54,10 +54,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake \
             ${{ matrix.compiler.pkg }} \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
             libgtest-dev libgmock-dev libbenchmark-dev
+
+      - name: Pin cmake to the project's minimum
+        run: |
+          python3 -m pip install 'cmake==3.25'
+          # The runner image ships its own cmake in /usr/local/bin; prepend the
+          # pinned one so it wins regardless of the image's PATH order.
+          python3 -c 'import cmake; print(cmake.CMAKE_BIN_DIR)' >> "$GITHUB_PATH"
 
       - name: Configure
         working-directory: profilers/profiler-hub
