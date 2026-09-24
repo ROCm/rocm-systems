@@ -362,7 +362,10 @@ status at the runtime acknowledgment deadline is a failed delivery, so the
 exception remains available to a later debugger. When a debugger was attached at
 the send site, its retained queue status also survives a successful ROCr
 acknowledgment and becomes queryable when a matching exception bit is enabled.
-A debugger can recover a retained fatal stop through a valid CWSR suspend/resume. Successful recovery clears the
+A debugger can recover a retained fatal stop through a valid CWSR suspend/resume.
+While the runtime ownership result is pending, resume reports a queue error and
+preserves the stopped waves, saved CWSR image, and exception gate. Once the result
+is committed, the debugger can retry recovery. Successful recovery clears the
 exception gate on every replica, preserves independent runtime and debugger
 suspension reasons, and schedules deferred queue work when all gates open.
 

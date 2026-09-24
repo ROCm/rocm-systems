@@ -5021,6 +5021,13 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         continue;
       }
       const auto &info = queue->second;
+      // Completion releases the runtime reservation under this same lock.
+      // Until then, even a valid CWSR image cannot recover the fatal stop:
+      // publication may still fail, and its result does not stop waves again.
+      if (info.runtime_exception_pending_status != 0) {
+        queue_ids[index] |= kQueueError;
+        continue;
+      }
       queues.push_back({index, queue_id, info.ctx_save_restore_address,
                         info.ctx_save_restore_area_size, info.gpu_id});
     }
