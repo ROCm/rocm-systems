@@ -83,7 +83,16 @@ __device__ inline float unsafeAtomicAdd(float* addr, float value) {
  * @return Original value contained in \p addr.
  */
 __device__ inline float unsafeAtomicMax(float* addr, float val) {
-#if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__hip_atomic_fetch_max)
+  // gfx1250 is the first target with a floating point max atomic for f32; the generic builtin
+  // selects GLOBAL_ATOMIC_MAX_NUM_F32. That is IEEE maximumNumber, which differs from the CAS
+  // loop below in two cases: a NaN already in memory is replaced by val rather than left alone,
+  // and max(-0.0, +0.0) stores +0.0 rather than leaving -0.0. This matches the behaviour the
+  // gfx90a/gfx94plus arm of the double overloads below has always had.
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    return __hip_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  }
+#elif __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     float value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     bool done = false;
@@ -120,7 +129,12 @@ __device__ inline float unsafeAtomicMax(float* addr, float val) {
  * @return Original value contained in \p addr.
  */
 __device__ inline float unsafeAtomicMin(float* addr, float val) {
-#if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__hip_atomic_fetch_min)
+  // See unsafeAtomicMax(float*, float); this selects GLOBAL_ATOMIC_MIN_NUM_F32.
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    return __hip_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  }
+#elif __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     float value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     bool done = false;
@@ -214,6 +228,14 @@ __device__ inline double unsafeAtomicMax(double* addr, double val) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fmax_f64))
     return __builtin_amdgcn_flat_atomic_fmax_f64(addr, val);
   return 0.0;
+#elif (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__hip_atomic_fetch_max)
+  // gfx1250 has GLOBAL_ATOMIC_MAX_NUM_F64, but __builtin_amdgcn_flat_atomic_fmax_f64 above is not
+  // invocable there, so reach it through the generic builtin instead. Same IEEE maximumNumber
+  // semantics as that arm, which differ from the CAS loop below for a NaN already in memory and
+  // for max(-0.0, +0.0).
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    return __hip_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  }
 #else
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
@@ -270,6 +292,11 @@ __device__ inline double unsafeAtomicMin(double* addr, double val) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fmin_f64))
     return __builtin_amdgcn_flat_atomic_fmin_f64(addr, val);
   return 0.0;
+#elif (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__hip_atomic_fetch_min)
+  // See unsafeAtomicMax(double*, double); this selects GLOBAL_ATOMIC_MIN_NUM_F64.
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    return __hip_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  }
 #else
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
   __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
