@@ -269,6 +269,11 @@ TEST(ConSanPublicationTest, DecodeRequiresCompleteBoundedTrace) {
     EXPECT_NE(decode_publications(header, records).status, PublicationDecodeStatus::Complete);
   }
   EXPECT_EQ(decode_publications(ReportHeader{}, {}).status, PublicationDecodeStatus::Disabled);
+  ReportHeader disabled;
+  disabled.publication_clock = 123;
+  const auto decoded = decode_publications(disabled, {});
+  EXPECT_EQ(decoded.status, PublicationDecodeStatus::Disabled);
+  EXPECT_TRUE(decoded.events.empty());
   auto header = publication_header();
   header.publication_flags = 0;
   EXPECT_EQ(decode_publications(header, records).status, PublicationDecodeStatus::Malformed);

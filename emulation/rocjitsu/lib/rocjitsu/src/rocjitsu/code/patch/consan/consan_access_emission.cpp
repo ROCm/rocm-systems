@@ -614,6 +614,19 @@ using detail::WorkitemOwnerDerivationPlan;
         "ConSan probe could not publish its exact lane mask");
   }
 
+  if (plan.record_publication_sequence) {
+    require_emission(
+        detail::append_publication_ticket(words,
+                                          plan.supercollider_report_buffer_address +
+                                              offsetof(ReportHeader, publication_clock),
+                                          low_vgpr, plan.scratch_vgpr, arch) &&
+            append_banked_address(words, causal_window_address, sizeof(CausalWindow),
+                                  plan.window_bank_count, bank_vgpr, plan.scratch_vgpr, arch) &&
+            record.store_vgpr(offsetof(CausalWindow, publication_sequence), low_vgpr) &&
+            record.store_vgpr(offsetof(CausalWindow, publication_sequence) + 4u, high_vgpr),
+        "ConSan probe could not retain its publication sequence");
+  }
+
   require_emission.append("ConSan probe could not encode sampled entry low word",
                           instrumentation::build_v_mov_b32_literal(low_vgpr, low_literal, arch));
   if (plan.owner_epoch_vgprs.owner || derived_owner_vgpr)

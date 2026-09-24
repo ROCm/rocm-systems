@@ -14,6 +14,11 @@ namespace rocjitsu::consan::detail {
 [[nodiscard]] bool append_atomic_fetch_add_one_u32(std::vector<uint32_t> &words,
                                                    uint64_t counter_address, uint16_t result_vgpr,
                                                    uint16_t scratch_vgpr, rj_code_arch_t arch);
+// Allocates a nonzero 64-bit observation ticket. Requires one selected lane;
+// clobbers the address pair, result pair, and VCC. The caller saves guest state.
+[[nodiscard]] bool append_publication_ticket(std::vector<uint32_t> &words, uint64_t counter_address,
+                                             uint16_t result_vgpr, uint16_t address_vgpr,
+                                             rj_code_arch_t arch);
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
                                           uint16_t result_vgpr, rj_code_arch_t arch);
 /// Select the lowest lane named by an existing EXEC mask. The current EXEC is

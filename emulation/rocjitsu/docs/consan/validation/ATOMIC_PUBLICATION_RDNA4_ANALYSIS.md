@@ -227,9 +227,17 @@ run on ABI v16 retains its expected conflict with complete coverage and no
 malformed snapshots. Evidence: `integration-host-tests.log`,
 `abi-layout-tests.log`, and `abi16-publication-1.log` in the artifact directory.
 
-Device emitters do not yet populate or enable the new trace, so the current red
-cells are unchanged. Remaining work is device atomic-observation/access-sequence
-capture, completion recognition, and the clean/fault qualification matrix above.
+Sampled access emitters now retain nonzero 64-bit sequence tickets from a
+report-local device clock. Physical gfx1201 probes produce four tickets for the
+one-value case and twenty for the eight-value cases, with no malformed snapshots
+and the expected 1/2/2 conflicts for one-value/eight-value/relaxed publication.
+The clock does not establish cross-owner synchronization by itself. Evidence:
+`tickets-publication-{1,8,relaxed}.log` and `ticket-host-tests.log`.
+
+Atomic observations are not yet captured and the publication trace remains
+disabled, so the current red cells are unchanged. Remaining work is device
+atomic-observation capture, completion recognition, and the clean/fault
+qualification matrix above.
 The device capture must establish the complete-transition precondition; setting
 that flag on the existing address/role metadata would be unsound.
 

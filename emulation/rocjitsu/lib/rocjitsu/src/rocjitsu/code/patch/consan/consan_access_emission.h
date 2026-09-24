@@ -16,6 +16,7 @@ namespace rocjitsu::consan::detail {
 /// placement has committed to the body's size.
 struct AccessEmissionPlan {
   bool check = false;
+  bool record_publication_sequence = false;
   bool uniform_lds_address = false;
   SuperColliderDelayMode supercollider_delay_mode = SuperColliderDelayMode::Nop;
   uint32_t delay_count = 0;

@@ -12,9 +12,11 @@ DecodedPublications decode_publications(const ReportHeader &header,
   if (header.publication_flags & ~flags)
     return {.status = Status::Malformed};
   if (!(header.publication_flags & kPublicationTraceEnabled)) {
-    if (header.publication_flags || header.publication_event_count || header.publication_clock ||
+    if (header.publication_flags || header.publication_event_count ||
         header.publication_dropped_count)
       return {.status = Status::Malformed};
+    // Access sequence collection may precede atomic capture. A disabled trace
+    // never supplies ordering evidence, regardless of its clock value.
     return {};
   }
   if (records.size() != header.publication_event_capacity ||

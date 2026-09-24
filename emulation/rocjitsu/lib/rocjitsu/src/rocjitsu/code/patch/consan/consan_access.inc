@@ -229,6 +229,7 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
         prior_patch == planned_patches.rend() ? 0u : prior_patch->access_range_count;
     AccessEmissionPlan emission{
         .check = options.device_conflict_check,
+        .record_publication_sequence = layout.publication_event_capacity != 0u,
         .uniform_lds_address = candidate.site().uniform_lds_address,
         .supercollider_delay_mode = options.supercollider_delay_mode,
         .delay_count = options.supercollider_delay_nops,

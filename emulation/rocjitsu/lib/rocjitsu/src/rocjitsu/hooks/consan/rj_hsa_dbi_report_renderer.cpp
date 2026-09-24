@@ -80,6 +80,14 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
   const ConflictAnalysis &analysis = *render_input.conflict_analysis;
   constexpr ReportDiagnosticKind kEvidence = ReportDiagnosticKind::Evidence;
   constexpr ReportDiagnosticKind kDetail = ReportDiagnosticKind::Detail;
+  if (header.publication_clock || header.publication_flags || header.publication_event_count ||
+      header.publication_dropped_count)
+    append(kDetail,
+           "ConSan publication reader=%llu flags=%u clock=%llu events=%u capacity=%u dropped=%u",
+           static_cast<unsigned long long>(input.reader), header.publication_flags,
+           static_cast<unsigned long long>(header.publication_clock),
+           header.publication_event_count, header.publication_event_capacity,
+           header.publication_dropped_count);
   for (const EvidenceIssue &issue : records.issues) {
     switch (issue.reason) {
     case EvidenceReason::MalformedWindow:
@@ -185,7 +193,7 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
              "workgroup=(%u,%u,%u) cluster_workgroup=%u instruction=0x%llx trampoline=0x%llx "
              "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s "
              "sync_class=%u sync_kind=%u sync_role=%u sync_scope=%u sync_outcome=%u "
-             "sync_address=0x%llx sync_bytes=%u sync_epochs=%u/%u",
+             "sync_address=0x%llx sync_bytes=%u sync_epochs=%u/%u publication_sequence=%llu",
              static_cast<unsigned long long>(input.reader), entry.index,
              static_cast<uint32_t>(entry.entry.kind), entry.entry.owner_id, entry.entry.epoch,
              entry.entry.generation, entry.entry.start_byte,
@@ -204,7 +212,8 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
              static_cast<uint32_t>(entry.sync.metadata.outcome),
              static_cast<unsigned long long>(entry.sync.metadata.address),
              entry.sync.metadata.byte_count, entry.sync.metadata.epoch_before,
-             entry.sync.metadata.epoch_after)});
+             entry.sync.metadata.epoch_after,
+             static_cast<unsigned long long>(entry.publication_sequence))});
   }
   if (records.evidence.size() > kLogLimit) {
     rendered.push_back(

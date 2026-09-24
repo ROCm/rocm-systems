@@ -35,6 +35,26 @@ namespace {
                                                  *target);
 }
 
+bool append_publication_ticket(std::vector<uint32_t> &words, uint64_t counter_address,
+                               uint16_t result_vgpr, uint16_t address_vgpr, rj_code_arch_t arch) {
+  if (result_vgpr + 1u >= 256u || address_vgpr + 1u >= 256u ||
+      (result_vgpr <= address_vgpr + 1u && address_vgpr <= result_vgpr + 1u))
+    return false;
+  InstructionSequence sequence(words);
+  sequence
+      .append(instrumentation::build_v_mov_b32_literal(
+                  address_vgpr, static_cast<uint32_t>(counter_address), arch),
+              instrumentation::build_v_mov_b32_literal(
+                  address_vgpr + 1u, static_cast<uint32_t>(counter_address >> 32u), arch),
+              instrumentation::build_v_mov_b32_literal(result_vgpr, 1u, arch),
+              instrumentation::build_v_mov_b32_literal(result_vgpr + 1u, 0u, arch),
+              instrumentation::build_flat_atomic_add_u64(address_vgpr, result_vgpr, result_vgpr,
+                                                         true, kAmdGpuScopeDevice, arch))
+      .require(append_global_atomic_wait(words, arch))
+      .append(instrumentation::build_v_add_u64_literal(result_vgpr, 1u, arch));
+  return sequence.finish();
+}
+
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
                                           uint16_t result_vgpr, rj_code_arch_t arch) {
   const auto atomic_load = instrumentation::build_flat_atomic_add_u32(
