@@ -445,7 +445,8 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
                                                                rj_code_arch_t arch) {
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       (counter != WaitCounterKind::Load && counter != WaitCounterKind::Ds)) {
     return false;
   }
