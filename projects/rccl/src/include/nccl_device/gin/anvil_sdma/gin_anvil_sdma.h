@@ -9,6 +9,7 @@
 
 #include "../gin_device_common.h"
 #include "../../hip_compat.h"
+#include "../../coop.h"
 #include "gin_anvil_sdma_device_host_common.h"
 #include "gin_anvil_sdma_put_policy.h"
 #include "gin_anvil_ipc_copy.h"
@@ -99,6 +100,12 @@ NCCL_DEVICE_INLINE void markSdmaDirty(ncclGinAnvilSdmaGPUContext* rsCtx, int pee
   if (dirty == nullptr) return;
   const int bitIdx = peer * numCh + effCh;
   if (bitIdx < 0 || bitIdx >= kSdmaDirtyBitWidth) return;
+  uint64_t* epoch = loadConst(&rsCtx->sdmaEpoch);
+  // Epoch first so a Flush that already snapshotted the bit still sees a
+  // mismatch if this mark is a no-op fetch_or on an already-set bit.
+  if (epoch != nullptr) {
+    __scoped_atomic_fetch_add(epoch, 1ULL, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
   uint64_t bit = 1ULL << bitIdx;
   __scoped_atomic_fetch_or(dirty, bit, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
@@ -268,6 +275,10 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
             remoteSig = remoteSdmaFusedSignalAddr(rsCtx, peer, signal.indexedSignal.signalId);
             if (remoteSig != nullptr) sdmaFusedSignal = true;
           }
+          // Mark before the doorbell so a concurrent SignalInc cannot observe a
+          // clean bit while this put is already on the queue.
+          markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
+          issuedSdmaThisCall = true;
           __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
           // The SDMA linear-copy count field is 30 bits (max 1 GiB), and a single
           // fused copy+signal >=256 MiB stalls the engine on MI355X, so split any
@@ -289,8 +300,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
               ::sdma_anvil::put(*handle, segDst, segSrc, seg.bytes);
             }
           }
-          markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
-          issuedSdmaThisCall = true;
         }
       }
     }
@@ -376,14 +385,14 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
           remoteSig = remoteSdmaFusedSignalAddr(rsCtx, peer, signal.indexedSignal.signalId);
           if (remoteSig != nullptr) sdmaFusedSignal = true;
         }
+        markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
+        issuedSdmaThisCall = true;
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
         if (sdmaFusedSignal) {
           ::sdma_anvil::putSignal(*handle, dstAddr, (void*)&tmp, bytes, remoteSig);
         } else {
           ::sdma_anvil::put(*handle, dstAddr, (void*)&tmp, bytes);
         }
-        markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
-        issuedSdmaThisCall = true;
       }
     }
 
@@ -456,18 +465,19 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       return;
     }
     uint64_t* sdmaDirty = loadConst(&rsCtx->sdmaDirty);
+    uint64_t* sdmaEpoch = loadConst(&rsCtx->sdmaEpoch);
     uint64_t dirty = 0;
-    __shared__ uint64_t snap;
-    if (sdmaDirty != nullptr) {
-      // One snapshot for the whole coop. A per-thread load can see a later mask
-      // than the quiet loop used; fetch_and(~that) would clear a bit nobody
-      // quieted.
-      if (coop.thread_rank() == 0) {
-        snap = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    uint64_t epoch0 = 0;
+    if (coop.thread_rank() == 0 && sdmaDirty != nullptr) {
+      dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      if (sdmaEpoch != nullptr) {
+        epoch0 = __scoped_atomic_load_n(sdmaEpoch, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       }
-      coop.sync();
-      dirty = snap;
     }
+    // Typed coops stash by id (coop.h). ncclCoopAny size>1 only root keeps the
+    // value; barriers below stay outside `if (dirty)` so they cannot diverge.
+    dirty = ncclCoopBcast(coop, dirty, /*root=*/0);
+    epoch0 = ncclCoopBcast(coop, epoch0, /*root=*/0, /*entrySync=*/false);
     if (dirty != 0) {
       auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
       int nr = ctx.nRanks;
@@ -485,15 +495,23 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
           }
         }
       }
-      coop.sync();
-      // Clear only the bits this flush quieted. A concurrent CTA may mark new
-      // dirty bits during the quiet loop; a wholesale store to 0 would drop them
-      // and let a later SignalInc skip the quiet it still needs.
-      if (coop.thread_rank() == 0 && sdmaDirty != nullptr) {
+    }
+    coop.sync();
+    // Clear only if no mark ran during quiet. A concurrent put can fetch_or an
+    // already-set bit (no-op) after we quieted that queue; the epoch bump still
+    // lands, so we leave the snapshot bits set. Uncontended Flush is two extra
+    // relaxed loads on rank 0, no extra fence on the IPC SignalInc path.
+    if (coop.thread_rank() == 0 && dirty != 0 && sdmaDirty != nullptr) {
+      bool epochUnchanged = true;
+      if (sdmaEpoch != nullptr) {
+        uint64_t epoch1 = __scoped_atomic_load_n(sdmaEpoch, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        epochUnchanged = (epoch1 == epoch0);
+      }
+      if (epochUnchanged) {
         __scoped_atomic_fetch_and(sdmaDirty, ~dirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       }
-      coop.sync();
     }
+    coop.sync();
     __threadfence_system();
   }
 };
@@ -538,6 +556,7 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       return;
     }
 
+    markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
     const size_t segMax = gin_sdma::kGinPutSegBytes;
     const size_t nSeg = gin_sdma::ginPutSegmentCount(bytes, segMax);
@@ -547,7 +566,6 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       void* segSrc = static_cast<void*>(static_cast<char*>(remoteSrc) + seg.offset);
       ::sdma_anvil::put(*handle, segDst, segSrc, seg.bytes);
     }
-    markSdmaDirty(rsCtx, peer, loadConst(&rsCtx->numChannels), effectiveChannel(rsCtx, blockId));
   }
 };
 

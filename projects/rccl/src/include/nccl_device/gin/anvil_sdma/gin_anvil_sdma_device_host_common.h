@@ -15,7 +15,7 @@ struct ncclGinAnvilIpcBufEntry;
 #define NCCL_GIN_ANVIL_SDMA_NET_VERSION 115
 
 /** Must match host plugin and device kernel build; checked on device. */
-#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17111u
+#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17112u
 
 /** Default SDMA threshold (bytes). Transfers of at most this size use inlined IPC flat stores;
  *  larger transfers use direct Anvil SDMA. */
@@ -31,6 +31,7 @@ struct ncclGinAnvilSdmaGPUContext {
   uint32_t layoutMagic;  // NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC
   void** queueHandles;   // [local_pe * numChannels + ch] SdmaQueueDeviceHandle*
   uint64_t* sdmaDirty;   // GIN-owned dirty bitmask
+  uint64_t* sdmaEpoch;   // bumped on every mark; Flush skips clear if it changed
   uint64_t* signals;
   uint64_t* counters;
   uint32_t nSignals;

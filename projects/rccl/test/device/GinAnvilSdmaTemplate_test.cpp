@@ -257,7 +257,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SignalAndCounterIpc) {
   DeviceBuffer<uint64_t> d_signals(2);
   d_counters.zero();
   d_signals.zero();
-  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
@@ -267,10 +267,18 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SignalAndCounterIpc) {
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
   host.ctx.nCounters = 1;
+  mapIpcToTwo(&host, &d_entry, &d_dst, 32, &d_signals, 2 * sizeof(uint64_t));
   d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
   kernelPutSignalCounter<<<1, 1>>>(d_h.ptr);
   syncAndCheck();
   EXPECT_EQ(d_counters.download(), 1ULL);
+  EXPECT_EQ(d_signals.download(), 7ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+  // hasCounter keeps skipFenceBeforeSignal false, so fenceBeforeSignal plus
+  // signalPeer's pre-atomic fence both fire.
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
 }
 
 // H6: fused SDMA signal path when OSS7 + remote signal resolved.
@@ -792,8 +800,8 @@ TEST_P(GinAnvilSdmaStandaloneSignalQuietTest, ReadsSignaledPeerDirtyBit) {
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
-  // Production always allocates sdmaDirty. Peer 0 dirty + signal on peer 1
-  // proves the skip reads the mask for the signaled peer, not nullptr early-out.
+  // Production always allocates sdmaDirty, so both arms read a real mask rather
+  // than taking the nullptr early-out; the params pick which peer's bit is set.
   DeviceBuffer<uint64_t> d_dirty(1);
   d_dirty.copyFrom(&p.dirtyBits, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);

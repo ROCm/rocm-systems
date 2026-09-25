@@ -553,6 +553,16 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->gpuCtxHost.sdmaChannelStride = ctx->sdmaChannelStride;
   ctx->gpuCtxHost.queueHandles = ctx->gpu_queue_handles;
   ctx->gpuCtxHost.sdmaDirty = ctx->sdma_dirty_d;
+  ctx->gpuCtxHost.sdmaEpoch = nullptr;
+  if (hipExtMallocWithFlags((void**)&ctx->gpuCtxHost.sdmaEpoch, sizeof(uint64_t),
+                            hipDeviceMallocFinegrained) != hipSuccess) {
+    ret = ncclSystemError;
+    goto fail;
+  }
+  if (hipMemset(ctx->gpuCtxHost.sdmaEpoch, 0, sizeof(uint64_t)) != hipSuccess) {
+    ret = ncclSystemError;
+    goto fail;
+  }
   {
     const size_t thr = ginAnvilSdmaThresholdFromEnv();
     ctx->gpuCtxHost.sdmaThreshold =
@@ -612,6 +622,7 @@ fail:
       (void)ncclGinAnvilIpcTableUnregister(ctx->gpuCtxHost.signals);
     }
     if (ctx->signal_remote_addrs_dev) CUDACHECKIGNORE(hipFree(ctx->signal_remote_addrs_dev));
+    if (ctx->gpuCtxHost.sdmaEpoch) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.sdmaEpoch));
     if (ctx->gpuCtxHost.counters) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.counters));
     if (ctx->gpuCtxDev) CUDACHECKIGNORE(hipFree(ctx->gpuCtxDev));
     free(ctx->devHandle);
@@ -629,6 +640,7 @@ static ncclResult_t ginAnvilDestroyContext(void* ginCtx) {
     (void)ncclGinAnvilIpcTableUnregister(ctx->gpuCtxHost.signals);
   }
   if (ctx->signal_remote_addrs_dev) CUDACHECKIGNORE(hipFree(ctx->signal_remote_addrs_dev));
+  if (ctx->gpuCtxHost.sdmaEpoch) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.sdmaEpoch));
   if (ctx->gpuCtxHost.counters) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.counters));
   if (ctx->gpuCtxDev) CUDACHECKIGNORE(hipFree(ctx->gpuCtxDev));
   free(ctx->devHandle);
