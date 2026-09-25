@@ -1,0 +1,6 @@
+-r requirements-runtime.txt
+cmake>=3.24.0
+numpy
+perfetto
+pycobertura
+pytest
