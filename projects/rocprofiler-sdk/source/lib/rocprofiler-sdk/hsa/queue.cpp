@@ -45,7 +45,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
-#include "lib/rocprofiler-sdk/range_replay/executor.hpp"
+#include "lib/rocprofiler-sdk/range_replay/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -344,6 +344,10 @@ WriteInterceptor(const void* packets,
         (queue.get_notifiers() == 0 &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
+    // Unlike a service with a per-agent predicate, neither replay service can leave queues on other
+    // agents on the fast path. A range binds to an agent only when its first dispatch arrives, and
+    // a replay window's agent-wide drain and reader lock only see work that took the instrumented
+    // path, so a dispatch forwarded untouched just before or during a window would escape both.
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
     const bool has_range_replay  = range_replay::has_active_range_replay_contexts();
 
@@ -384,23 +388,9 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // Range replay: record this submission into the range open on this thread, or note that it
-    // breaks the isolation of a range open on another thread for the same agent. Recording happens
-    // before the packets are submitted, while their kernarg blocks still hold this launch's
-    // arguments. Skipped while this thread is itself replaying a range: those packets are the
-    // recording being re-submitted.
-    if(has_range_replay && range_replay::any_range_open() && !range_replay::this_thread_replaying())
-    {
-        if(auto* open_range = range_replay::current_range(); open_range != nullptr)
-        {
-            range_replay::note_submission(queue, packets_arr, pkt_count, graph_launch_active);
-            range_replay::ensure_entry_snapshot(*open_range, queue, writer);
-        }
-        else if(const auto* rocp_agent = queue.get_agent().get_rocp_agent(); rocp_agent != nullptr)
-        {
-            range_replay::note_foreign_dispatch(rocp_agent->id.handle);
-        }
-    }
+    // Must stay ahead of the graph-launch fast path below: see range_replay/queue_hooks.hpp.
+    if(has_range_replay)
+        range_replay::submission_hook(&queue, packets_arr, pkt_count, graph_launch_active, writer);
 
     if(has_kernel_replay)
     {
