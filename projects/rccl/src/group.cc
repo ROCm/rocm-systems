@@ -305,7 +305,7 @@ ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
 ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPrepareTasksAndCollPreconnectJob* job = (ncclPrepareTasksAndCollPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
-  bool needConnect;
+  bool needConnect = false;
   bool algoNeedConnect[NCCL_NUM_ALGORITHMS];
   memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
   CUDACHECK(cudaSetDevice(comm->cudaDev));
@@ -802,7 +802,12 @@ static void ncclGroupSymmetricJobFree(void* _job) {
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  if (ncclParamSingleProcMemRegEnable()) {
+  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
+  // When this process owns multiple ranks, prepare them concurrently so the
+  // first rank cannot block before its sibling ranks enter the same consensus.
+  bool const needsConcurrentSymmetricPrepare =
+    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+  if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
     job->base.func = ncclPrepareTasksAndCollPreconnectFunc;

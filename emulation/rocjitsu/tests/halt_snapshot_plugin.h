@@ -50,6 +50,7 @@ struct WavefrontSnapshot {
   uint64_t scratch_base = 0;   ///< Per-wave scratch base after dispatch setup.
   uint32_t scratch_scoreboard_id = 0;
   uint32_t shader_engine_id = 0;
+  uint32_t scratch_lane_size = 0;   ///< Private bytes per lane.
   simdojo::ComponentID cu_id = 0;   ///< Originating CU component id (for per-CU grouping).
   std::vector<uint32_t> sgprs;      ///< Full physical SGPR block (sgprs_per_wf).
   std::array<uint32_t, 16> ttmps{}; ///< Trap-temporary file (TTMP0-15).
@@ -131,6 +132,7 @@ public:
     s.scratch_base = wf.scratch_base();
     s.scratch_scoreboard_id = wf.scratch_scoreboard_id();
     s.shader_engine_id = wf.shader_engine_id();
+    s.scratch_lane_size = wf.scratch_lane_size();
     s.cu_id = wf.cu().id();
 
     // Read the live register file through the instruction-facing facade rather

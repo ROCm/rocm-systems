@@ -107,14 +107,11 @@ using namespace rocprofsys;
 
 //======================================================================================//
 
-namespace rocprofsys
-{
-namespace timeout
+namespace rocprofsys::timeout
 {
 void
 setup() ROCPROFSYS_INTERNAL_API;
 }
-}  // namespace rocprofsys
 
 namespace
 {

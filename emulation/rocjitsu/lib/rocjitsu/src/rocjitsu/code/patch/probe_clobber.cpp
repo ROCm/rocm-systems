@@ -68,8 +68,8 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
 // TODO: drop this name fallback once the operand-type modeling work lands.
 std::optional<RegClass> special_class_from_name(std::string_view name) {
   std::string lower(name);
-  std::transform(lower.begin(), lower.end(), lower.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::ranges::transform(lower, lower.begin(),
+                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   const std::string_view n = lower;
   auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
   if (starts_with("exec"))
@@ -140,7 +140,7 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
   // not truncated; this guards the independent decode here. See probe_callable.
   const size_t num_words = callable.body_words.size();
   std::vector<uint32_t> words(num_words + 1, 0);
-  std::copy(callable.body_words.begin(), callable.body_words.end(), words.begin());
+  std::ranges::copy(callable.body_words, words.begin());
 
   ProbeClobberSummary summary;
   // probe_callable rejects private/scratch access, so this stays false. Kept as

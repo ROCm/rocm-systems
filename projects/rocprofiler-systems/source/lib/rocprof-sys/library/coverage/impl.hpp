@@ -17,9 +17,7 @@
 #include <tuple>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace coverage
+namespace rocprofsys::coverage
 {
 namespace
 {
@@ -171,5 +169,4 @@ coverage_data::operator>=(const coverage_data& rhs) const
     return !(*this < rhs);
 }
 //
-}  // namespace coverage
-}  // namespace rocprofsys
+}  // namespace rocprofsys::coverage

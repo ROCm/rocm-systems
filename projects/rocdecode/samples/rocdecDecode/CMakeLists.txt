@@ -41,9 +41,11 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+if(NOT WIN32)
+  if (NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 project(rocdecdecode)
@@ -56,10 +58,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4 -Wall)
+if(NOT WIN32)
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4 -Wall -std=gnu++17)
+  else()
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC -Wall -std=gnu++17)
+  endif()
 else()
-  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC -Wall)
+  # MSVC supplies optimization and NDEBUG per configuration; these are the
+  # defines the sample sources need.
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -71,12 +79,12 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
     set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
-    if(HAS_ROCM_CHECK_TARGET_IDS)
+    if(HAS_ROCM_CHECK_TARGET_IDS AND NOT WIN32)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
         set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
     endif()
-    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1035;gfx1100;gfx1101;gfx1102;gfx1103;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
 endif()
 
 # Set AMD GPU_TARGETS
@@ -122,7 +130,9 @@ if(HIP_FOUND AND rocdecode_FOUND)
     endif()
 
     # STD Filesystem
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+    if(NOT WIN32)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+    endif()
 
     # rocdecode and utils
     include_directories(${rocdecode_INCLUDE_DIR} ${ROCM_PATH}/lib)
@@ -132,7 +142,7 @@ if(HIP_FOUND AND rocdecode_FOUND)
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecdecode.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS} -std=gnu++17)
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
     if(FFMPEG_FOUND AND rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
     else()
