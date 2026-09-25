@@ -23,7 +23,7 @@ namespace RcclUnitTesting
     SingleProcMemRegMode mode = SingleProcMemRegMode::Disabled;
     std::vector<ncclFunc_t> funcTypes;
     std::vector<ncclDataType_t> dataTypes;
-    std::vector<ncclRedOp_t> redOps;
+    std::vector<ncclRedOp_t> redOps = {ncclSum};
     std::vector<int> roots;
     std::vector<int> numElements;
     std::vector<bool> inPlaceList;
