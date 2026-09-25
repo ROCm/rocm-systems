@@ -444,11 +444,15 @@ public:
     auto replacement = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     if (plugin_group_.get() != replacement.get()) {
       // A resident wave's cached decisions belong to the group that observed
-      // its dispatch. A replacement group may have the same plugin count but
-      // different per-wave subscriptions, so force it onto the live-query path.
+      // its dispatch, as does every retained plugin-state slot. Slot indices
+      // restart in each group, so discard the old state before the replacement
+      // can query or populate the same index and force it onto the live-query
+      // path. Stateful replacement plugins remain unsubscribed from resident
+      // waves until a normal dispatch callback initializes their state.
       for (const auto &wf : wfs_) {
         if (!wf)
           continue;
+        wf->clear_plugin_states();
         wf->hot_hook_subscriptions_valid_ = false;
         wf->hot_hook_observer_count_ = 0;
       }
