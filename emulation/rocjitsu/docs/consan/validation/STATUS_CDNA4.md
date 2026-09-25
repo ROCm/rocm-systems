@@ -46,7 +46,7 @@ installation is used.
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 1/8 (bar 6/8); below bar |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 higher (lowest passing): clean pass; fault 7/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
-| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 max: clean pass; fault 0/8 (bar 6/8); below bar | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
+| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 max: clean pass; fault 0/8; fresh 64-bank trial 0/8, larger-bank search running | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | PyTorch | P2 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 Out of scope: numerical pass; traced global-atomic kernels have no applicable LDS/FLAT race coverage | 🟨 Out of scope: numerical pass; traced global-atomic kernels have no applicable LDS/FLAT race coverage |
 | PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟨 max: clean pass; fault 0/8 (bar 6/8); below bar | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 
@@ -83,7 +83,8 @@ allowlist. No previously green clean control has regressed
 - **Other below-bar Default cells:** prospective `max` watchpoint-bank searches
   are running for HipKittens BF16, Tensile, histc, and norm/softmax. HipKittens BF16 has passing clean controls but 0/8 detections at each of
   64, 128, 256, and 512 banks. Tensile also has passing clean controls and 0/8 detections at all four
-  bank counts. Only histc and norm/softmax searches remain running.
+  bank counts. Histc has a passing 64-bank clean control and 0/8 detections; its larger-bank
+  search and norm/softmax remain running.
 
 Current repair logs, clean results, and prospective specifications are under
 `/home/benjacob/consan-default-repairs-20260924/`. In particular, `cpu-v4.xml`,

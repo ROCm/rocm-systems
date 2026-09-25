@@ -89,6 +89,13 @@ representative. Therefore `max` and larger bank counts do not imply a complete d
 access history. The observed misses do not by themselves identify the precise lost pair;
 changing retention needs separate correctness and capacity qualification.
 
+For Tensile, the 256-bank fault log at the selected store `.text+0x142c`
+retains `[0,16)`, `[64,80)`, `[128,144)`, and `[192,208)` for wave owners 0–3.
+Those representative intervals are disjoint. The extracted records and log hash
+are in `tensile-retention-observation.json`; they show that extra banks did not
+add other lanes' addresses at this site. This is a retention limitation, not an
+admission or instrumentation failure.
+
 ## Evidence and verification
 
 Artifacts are retained under `/home/benjacob/consan-default-repairs-20260924/`. The
