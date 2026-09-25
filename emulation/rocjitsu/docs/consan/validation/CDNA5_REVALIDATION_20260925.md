@@ -725,3 +725,20 @@ completes eight admitted/reached prefill trials: zero detections and zero oracle
 manifestations. All eight have complete analysis and healthy before/after checks.
 All three family clean workloads passed previously. The next preset is `high`;
 decode/combined remain supporting clean runs, not independent injected faults.
+
+### torch.mode publication fault review
+
+The fresh native code dump `pytorch-torch-mode-review-images` and
+`mode-pristine.asm` show the maintained 1x128 case initializes shared input
+with 64 threads, confirmed by the matched rocprofv3 trace. Thread 16's first
+sorting load reads thread 32's published value, crossing a wave32 boundary.
+The two consecutive split barrier pairs at .text+0x2fcb8/0x2fcbc and
+0x2fcc0/0x2fcc4 jointly protect this publication; dropping only one leaves
+synchronization intact. The new `barrier-drop-input-publication-group` removes
+both and retains later sorting barriers. Eight trials per mode and six required
+detections are declared before outcomes. `mode-spec-tests.log`: 208 validation
+runner tests pass, including admission of every gfx1250 fault specification.
+
+The retained sparse ML client also passes numerically with marker zero after
+both address-bank fixes (`spmm-sc-saved-address-client.log`); full three-shard
+qualification remains required before changing its red cell.

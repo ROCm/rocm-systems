@@ -597,6 +597,57 @@
           }
         }
       ]
+    },
+    "pytorch-torch-mode": {
+      "faults": [
+        {
+          "id": "barrier-drop-input-publication-group",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh gfx1250 inventory ELF 61301b5560f43c2b compute_mode<int,128>, reviewed mode-pristine.asm. Matched rocprofv3 trace dispatches 64 threads (two wave32 waves) for the maintained 1x128 input. Original stores at VMA 0x685218/0x68526c fill addresses 4+4*tid and 4+4*(tid+64). Following ds_load_2addr_b32 at 0x6852d8 reads 4+8*tid and the next dword: thread 16 reads the value produced by thread 32, across waves. Drop both consecutive publication signal/wait pairs .text+0x2fcb8/0x2fcbc and 0x2fcc0/0x2fcc4; keeping either would preserve the synchronization. The nonempty row enters this unconditional initialization and first sorting stage; preserve all subsequent sorting barriers. Eight trials per mode, minimum six detections, predeclared before outcomes."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:61301b5560f43c2b|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|kind=barrier|pc=0x000000000002fcb8|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:61301b5560f43c2b|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x000000000002fcb8|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:61301b5560f43c2b|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x000000000002fcbc|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:61301b5560f43c2b|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|kind=barrier|pc=0x000000000002fcc0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:61301b5560f43c2b|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x000000000002fcc0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:61301b5560f43c2b|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x000000000002fcc4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
