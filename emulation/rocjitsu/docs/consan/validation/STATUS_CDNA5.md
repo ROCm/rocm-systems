@@ -35,7 +35,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 default: filtered clean pass; fault 1/8 on repeat; high clean hits 360 s deadline | 🟧 sleep=15: clean run hits 360 s deadline; delay-zero clean previously passed |
-| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 high: clean pass; fault 0/8; higher next | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher: filtered clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟨 high: prefill clean pass, fault 0/8; all 3 default clean runs pass; 256-bank trial next | 🟨 delay-zero: all 3 filtered clean runs pass; fault trials pending |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
@@ -50,7 +50,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 4 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 9 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 default: all 3 clean shards pass at 1800 s; tensor-DMA producer coverage under review | 🟧 delay-zero: 2/3 clean shards pass; third hits the 300 s client deadline |
-| Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟧 clean numerics pass; 54 tensor-DMA accesses lack modeled LDS ranges | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟨 default, 256 MiB report cap: all 6 clean shards pass; fault trials pending | 🟨 delay-zero: all 6 clean shards pass after address-bank fixes; fault trials pending |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |

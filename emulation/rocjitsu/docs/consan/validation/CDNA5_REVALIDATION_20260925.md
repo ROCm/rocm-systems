@@ -1328,3 +1328,21 @@ incomplete static coverage, totaling 190 unsupported tensor-DMA accesses
 (10–40 per object). The 1,610 supported accesses are patched and dynamic
 evidence is complete. Default changes to orange for missing range support,
 consistent with the explicit MXF4 and sparse-transpose audit results.
+
+### TP1 prefill qualifies at higher
+
+`tp1-cap-higher-clean` passes baseline and instrumented correctness with
+complete applicable analysis. `tp1-cap-higher-fault` detects all eight admitted
+and reached trials at recorded higher, with complete analysis and healthy
+pre/post checks. Every trial uses the same hook SHA-256 as the clean result.
+Higher is the lowest passing preset in this search: the completed high batch
+detected 0/8. The Default cell is now green at higher, reporting one preset.
+
+### MXFP8 tensor-DMA coverage audit
+
+`tdm-default-coverage-audit/tensile-sk-mxf8gemm-tdm` passes six numerical
+rows from one client and exits zero. Updated accounting reports 54 unsupported
+tensor-DMA accesses, alongside 992 supported/patched accesses, with complete
+dynamic evidence but incomplete static analysis. The Default cell is orange
+for missing LDS range support rather than awaiting a barrier-drop campaign
+whose producers the detector cannot yet model.
