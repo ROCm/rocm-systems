@@ -3077,12 +3077,10 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
     va_end(ap);
   }
 
-  assert(InterposerContext::real().ready());
-  // ready() first, as openat() and every other entry point does. owner_pid_ is zero
-  // until init() runs, so before the constructor rj_owns_interposer_state() is false
-  // for the OWNER too -- taking the child branch there would fail closed on an
-  // unresolved passthrough table and turn every open() in that window, GPU endpoint
-  // or not, into ENODEV.
+  // Other preload constructors can run before our eager libc table exists.
+  // Use a raw syscall without touching uninitialized context or lazy guards.
+  if (!InterposerContext::real().ready())
+    return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
   if (InterposerContext::real().ready() && !rj_owns_interposer_state()) {
     int refuse_errno = 0;
     if (rj_child_must_refuse_open(AT_FDCWD, path, &refuse_errno)) {
@@ -3166,6 +3164,8 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     va_end(ap);
   }
 
+  if (!InterposerContext::real().ready())
+    return static_cast<int>(syscall(SYS_openat, dirfd, path, flags, mode));
   if (InterposerContext::real().ready() && !rj_owns_interposer_state()) {
     int refuse_errno = 0;
     if (rj_child_must_refuse_open(dirfd, path, &refuse_errno)) {
@@ -3222,7 +3222,8 @@ RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
 }
 
 RJ_INTERPOSER_EXPORT int close(int fd) {
-  assert(InterposerContext::real().ready());
+  if (!InterposerContext::real().ready())
+    return static_cast<int>(syscall(SYS_close, fd));
   // A vfork child shares the parent's address space until exec/_exit but has a
   // separate descriptor table. Descriptor cleanup in that window must close the
   // child's fd without clearing the parent's KFD/DRM bookkeeping.

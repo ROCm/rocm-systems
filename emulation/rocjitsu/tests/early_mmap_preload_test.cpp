@@ -11,7 +11,6 @@
 #include <initializer_list>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 namespace {
@@ -28,7 +27,7 @@ __attribute__((constructor)) static void early_mmap_constructor() {
   // rocprofiler-sdk canonicalizes its library path in a preload constructor.
   // Its legacy stat calls must reach libc even before the eager alias table
   // has been initialized. Do not let successful ordinary stat hide this path.
-  const int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, "/dev/null", O_RDONLY, 0));
+  const int fd = open("/dev/null", O_RDONLY);
   if (fd < 0)
     fail("early preload: open failed\n");
   struct stat st{};
@@ -79,7 +78,14 @@ __attribute__((constructor)) static void early_mmap_constructor() {
   const int legacy_fd64_rc = fxstat64_fn(version, fd, &st64);
   check(legacy_fd64_rc, st64.st_mode);
 #endif
-  syscall(SYS_close, fd);
+  if (close(fd) != 0)
+    fail("early preload: close failed\n");
+  const int at_fd = openat(AT_FDCWD, "/dev/null", O_RDONLY);
+  if (at_fd < 0 || close(at_fd) != 0)
+    fail("early preload: openat/close failed\n");
+  errno = 0;
+  if (open("/rocjitsu-nonexistent-preload-test", O_RDONLY) != -1 || errno != ENOENT)
+    fail("early preload: missing open did not fail with ENOENT\n");
   errno = 0;
   if (mmap(nullptr, 0, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) != MAP_FAILED ||
       errno != EINVAL)
