@@ -118,10 +118,12 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Priority_OutOfRange) 
   val.priority = hi - 1;  // more urgent than hi — invalid
   REQUIRE(hipGraphKernelNodeSetAttribute(node, hipLaunchAttributePriority, &val)
           == hipErrorInvalidValue);
+  (void)hipGetLastError();  // clear sticky per-thread error
 
   val.priority = lo + 1;  // less urgent than lo — invalid
   REQUIRE(hipGraphKernelNodeSetAttribute(node, hipLaunchAttributePriority, &val)
           == hipErrorInvalidValue);
+  (void)hipGetLastError();  // clear sticky per-thread error
 
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(d));
@@ -300,9 +302,25 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodePriority_ForkJoinWithFlag) {
   hipGraphExec_t exec;
   hipError_t inst_status = hipGraphInstantiateWithFlags(
       &exec, graph, hipGraphInstantiateFlagUseNodePriority);
+
+  auto cleanup = [&]() {
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipEventDestroy(join_lo));
+    HIP_CHECK(hipEventDestroy(join_hi));
+    HIP_CHECK(hipEventDestroy(fork_lo));
+    HIP_CHECK(hipEventDestroy(fork_hi));
+    HIP_CHECK(hipStreamDestroy(s_lo));
+    HIP_CHECK(hipStreamDestroy(s_hi));
+    HIP_CHECK(hipStreamDestroy(s_main));
+    HIP_CHECK(hipFree(d_y));
+    HIP_CHECK(hipFree(d_x));
+  };
+
   if (inst_status == hipErrorNotSupported) {
-    // Classic/PAL path does not support this flag; skip rather than fail.
-    SKIP("hipGraphInstantiateFlagUseNodePriority not supported on this backend");
+    // Clear the sticky per-thread error before skipping.
+    (void)hipGetLastError();
+    cleanup();
+    HIP_SKIP_TEST("hipGraphInstantiateFlagUseNodePriority not supported on this backend");
   }
   HIP_CHECK(inst_status);
 
@@ -310,14 +328,5 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodePriority_ForkJoinWithFlag) {
   HIP_CHECK(hipStreamSynchronize(s_main));
 
   HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipEventDestroy(join_lo));
-  HIP_CHECK(hipEventDestroy(join_hi));
-  HIP_CHECK(hipEventDestroy(fork_lo));
-  HIP_CHECK(hipEventDestroy(fork_hi));
-  HIP_CHECK(hipStreamDestroy(s_lo));
-  HIP_CHECK(hipStreamDestroy(s_hi));
-  HIP_CHECK(hipStreamDestroy(s_main));
-  HIP_CHECK(hipFree(d_y));
-  HIP_CHECK(hipFree(d_x));
+  cleanup();
 }

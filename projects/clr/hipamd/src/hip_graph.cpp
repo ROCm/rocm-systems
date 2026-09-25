@@ -1673,9 +1673,8 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
   // DEBUG_HIP_GRAPH_CLASSIC_PATH=1 forces this path on Linux for testing without
   // enabling the full PAL backend.
   if (GPU_ENABLE_PAL != 0 || DEBUG_HIP_GRAPH_CLASSIC_PATH) {
-    if ((flags & hipGraphInstantiateFlagUseNodePriority) != 0) {
-      return hipErrorNotSupported;
-    }
+    // hipGraphInstantiateFlagUseNodePriority is a scheduling hint; CUDA never
+    // fails instantiation for it, so accept and ignore it here too.
     auto* classicExec = new hip::GraphExecClassic(flags);
     graph->clone(classicExec, true);
     hipError_t initStatus = validateClonedKernelNodes(static_cast<const hip::Graph*>(classicExec));

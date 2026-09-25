@@ -2122,6 +2122,8 @@ class GraphKernelNode : public GraphNode {
       }
       clusterDim_ = clusterDim;
       return hipSuccess;
+    } else {
+      return hipErrorInvalidValue;
     }
 
     return hipSuccess;
@@ -2142,6 +2144,8 @@ class GraphKernelNode : public GraphNode {
       params->clusterDim.x = clusterDim_.x;
       params->clusterDim.y = clusterDim_.y;
       params->clusterDim.z = clusterDim_.z;
+    } else {
+      return hipErrorInvalidValue;
     }
     return hipSuccess;
   }
@@ -4114,7 +4118,12 @@ class hipGraphBatchMemOpNode : public GraphNode {
 // Defined here so hip::GraphNode is complete.
 inline void hip::Stream::SetLastCapturedNode(hip::GraphNode* graphNode) {
   lastCapturedNodes_ = {graphNode};
-  graphNode->SetCapturedPriority(priority_);
+  // Only stamp priority on kernel nodes: this setter is also invoked for
+  // fork/join dependency propagation and event-wait fixups, where we must
+  // not overwrite the priority recorded when the node was created.
+  if (graphNode->GetType() == hipGraphNodeTypeKernel) {
+    graphNode->SetCapturedPriority(priority_);
+  }
 }
 
 }  // namespace hip
