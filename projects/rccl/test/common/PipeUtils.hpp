@@ -18,7 +18,8 @@ namespace RcclUnitTesting
     /**
      * @brief Reads exactly 'count' bytes from a file descriptor, handling partial
      * reads and signal interruptions (EINTR).
-     * @return 'count' on success, or -1 on error / premature EOF.
+     * @return 'count' on success, -1 on read error (errno is set), or the
+     *         number of bytes read before EOF (0 if the writer closed first).
      */
     inline ssize_t safe_pipe_read(int fd, void* buf, std::size_t count)
     {
@@ -35,7 +36,7 @@ namespace RcclUnitTesting
         }
         if (bytesRead == 0)
         {
-          return -1;                    // EOF: Pipe closed prematurely
+          return static_cast<ssize_t>(count - bytesLeft); // EOF: pipe closed prematurely
         }
         ptr += bytesRead;
         bytesLeft -= bytesRead;

@@ -278,6 +278,11 @@ namespace RcclUnitTesting
   {
     if (numBytes)
     {
+      if (userRegistered && useManagedMem)
+      {
+        TEST_ERROR("Managed memory cannot be combined with ncclMemAlloc (user-registered) allocation");
+        return TEST_FAIL;
+      }
       if (userRegistered)
       {
         if (ncclMemAlloc((void**)&I1, numBytes) != ncclSuccess)

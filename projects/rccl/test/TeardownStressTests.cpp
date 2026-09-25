@@ -158,11 +158,6 @@ namespace RcclUnitTesting
   // test initialized HIP in the parent process.
   TEST(Teardown, PoolAfterParentHipInitialization)
   {
-    ASSERT_EQ(hipSetDevice(0), hipSuccess);
-    void* parentAllocation = nullptr;
-    ASSERT_EQ(hipMalloc(&parentAllocation, 1), hipSuccess);
-    ASSERT_EQ(hipFree(parentAllocation), hipSuccess);
-
     TestBed testBed;
     if (!testBed.poolMode)
       GTEST_SKIP() << "Requires communicator pooling (UT_COMM_POOL=1)";
@@ -173,6 +168,13 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Teardown stress requires multi-process mode (UT_PROCESS_MASK)";
     if (!float32Supported(testBed))
       GTEST_SKIP() << "Teardown stress requires ncclFloat32 (excluded by UT_DATATYPES)";
+
+    // Initialize HIP only once the test will run, so a skipped run leaves the
+    // parent HIP-clean for later tests in this binary.
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    void* parentAllocation = nullptr;
+    ASSERT_EQ(hipMalloc(&parentAllocation, 1), hipSuccess);
+    ASSERT_EQ(hipFree(parentAllocation), hipSuccess);
 
     bool isCorrect = true;
     RunTeardownCycles(testBed, testBed.ev.maxGpus, /*useBlocking*/ true,

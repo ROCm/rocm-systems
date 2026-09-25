@@ -30,6 +30,7 @@ namespace RcclUnitTesting
     int                        numActiveChildren;     // List of active children (with usable RCCL comms)
     int                        numActiveRanks;        // Current # of ranks in use
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
+    MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
     EnvVars                    ev;                    // Environment variables
 
     // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
@@ -84,6 +85,8 @@ namespace RcclUnitTesting
     // Using collId = -1 (default) applies settings to all collectives in group
     // Using rank = -1 (default) applies settings to all ranks
     // Using groupIdx = -1 (default) applies setting to all groups
+    // With MEM_ALLOC_SYMMETRIC_WIN, rank must be -1: window registration is
+    // collective over the whole communicator.
     void AllocateMem(bool   const inPlace = false,
                      bool   const useManagedMem = false,
                      int    const groupId  = -1,
@@ -205,9 +208,14 @@ namespace RcclUnitTesting
     // runtime state from the test parent.
     bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);
 
+    // Reads one acknowledgement from each listed child (a child may appear once
+    // per command it was sent), then fails if any reported failure.
+    void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr);
+
     // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
-    // compatibility with existing tests, and extend registration for symmetric memory
-    void AllocateMemInternal(bool   const inPlace = false,
+    // compatibility with existing tests, and extend registration for symmetric memory.
+    // Returns false if any child failed, so registration can be skipped.
+    bool AllocateMemInternal(bool   const inPlace = false,
                                     bool   const useManagedMem = false,
                                     int    const groupId  = -1,
                                     int    const collId   = -1,

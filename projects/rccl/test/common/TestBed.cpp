@@ -32,7 +32,7 @@
       TEST_ERROR("Child %d pipe closed unexpectedly", childId);                            \
       exit(1);                                                                          \
     }                                                                                   \
-    else if (retval < sizeof(int))                                                      \
+    else if (retval < static_cast<ssize_t>(sizeof(val)))                                \
     {                                                                                   \
       TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, sizeof(val)); \
       exit(1);                                                                          \
@@ -212,6 +212,7 @@ namespace RcclUnitTesting
     }
 
     // Count up the total number of GPUs to use and track child/deviceId per rank
+    this->memAllocType = memAllocType;
     this->numActiveChildren = deviceIdsPerProcess.size();
     this->numActiveRanks = 0;
     this->numGroupCalls = numGroupCalls;
@@ -399,10 +400,10 @@ namespace RcclUnitTesting
 
     // Wait for child acknowledgement
     // This is done after previous loop to avoid deadlock as every rank needs to enter ncclInitCommRank
+    std::vector<int> ackChildIds;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
-    {
-      PIPE_CHECK(childId);
-    }
+      ackChildIds.push_back(childId);
+    CollectAcks(ackChildIds);
     InteractiveWait("Finishing InitComms");
   }
 
@@ -460,7 +461,32 @@ namespace RcclUnitTesting
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::AllocateMemInternal(bool   const inPlace,
+  void TestBed::CollectAcks(std::vector<int> const& childIds, bool* allSucceeded)
+  {
+    if (allSucceeded) *allSucceeded = false;
+
+    // Read every acknowledgement before failing: stopping at the first failure
+    // leaves the remaining acks queued, and the next command on those children
+    // would consume them as its own.
+    int numFailed = 0;
+    for (int childId : childIds)
+    {
+      int response = 0;
+      PIPE_READ(childId, response);
+      if (response != TEST_SUCCESS)
+      {
+        TEST_ERROR("Child %d reports failure", childId);
+        ++numFailed;
+      }
+    }
+    if (numFailed > 0)
+    {
+      FAIL() << numFailed << " of " << childIds.size() << " child acknowledgements reported failure";
+    }
+    if (allSucceeded) *allSucceeded = true;
+  }
+
+  bool TestBed::AllocateMemInternal(bool   const inPlace,
                                     bool   const useManagedMem,
                                     int    const groupId,
                                     int    const collId,
@@ -479,27 +505,33 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
-    // Loop over all ranks and send allocation command to appropriate child process
-    int const cmd = TestBedChild::CHILD_ALLOCATE_MEM;
-    std::vector<int> ackChildIds;
-    for (auto currGroup : groupList) {
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, collId);
-        PIPE_WRITE(childId, inPlace);
-        PIPE_WRITE(childId, useManagedMem);
-        PIPE_WRITE(childId, userRegistered);
-        PIPE_WRITE(childId, currGroup);
-        ackChildIds.push_back(childId);
+    // Loop over all ranks and send allocation command to appropriate child process.
+    // The lambda confines the early return of the ASSERT-based PIPE_WRITE.
+    bool allocated = false;
+    [&]()
+    {
+      int const cmd = TestBedChild::CHILD_ALLOCATE_MEM;
+      std::vector<int> ackChildIds;
+      for (auto currGroup : groupList) {
+        for (auto currRank : rankList)
+        {
+          int const childId = rankToChildMap[currRank];
+          PIPE_WRITE(childId, cmd);
+          PIPE_WRITE(childId, currRank);
+          PIPE_WRITE(childId, collId);
+          PIPE_WRITE(childId, inPlace);
+          PIPE_WRITE(childId, useManagedMem);
+          PIPE_WRITE(childId, userRegistered);
+          PIPE_WRITE(childId, currGroup);
+          ackChildIds.push_back(childId);
+        }
       }
-    }
-    // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
-    // acknowledgement from the child that received that command.
-    for (int childId : ackChildIds) PIPE_CHECK(childId);
+      // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
+      // acknowledgement from the child that received that command.
+      CollectAcks(ackChildIds, &allocated);
+    }();
     InteractiveWait("Finishing AllocateMemInternal");
+    return allocated;
   }
 
   void TestBed::RegisterMemInternal(int    const groupId,
@@ -538,9 +570,13 @@ namespace RcclUnitTesting
           PIPE_WRITE(childId, currRank);
       }
 
+      std::vector<int> ackChildIds;
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        if (!ranksPerChild[childId].empty()) PIPE_CHECK(childId);
+        if (!ranksPerChild[childId].empty()) ackChildIds.push_back(childId);
       }
+      bool allAcked = false;
+      CollectAcks(ackChildIds, &allAcked);
+      if (!allAcked) return;
     }
     InteractiveWait("Finishing RegisterMemInternal");
   }
@@ -552,7 +588,15 @@ namespace RcclUnitTesting
                             int    const rank,
                             bool   const userRegistered)
   {
-    this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,userRegistered);
+    // Symmetric window registration is collective over the whole communicator,
+    // so registering a subset of ranks would leave the others outside the
+    // barrier and hang.
+    if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN && rank != -1)
+    {
+      FAIL() << "Symmetric window registration requires all ranks (rank = -1), got rank " << rank;
+    }
+    if (!this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,userRegistered))
+      return;
     this->RegisterMemInternal(groupId,collId,rank);
   }
 
@@ -628,10 +672,14 @@ namespace RcclUnitTesting
         }
       }
 
+      std::vector<int> ackChildIds;
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
-        if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
+        if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) ackChildIds.push_back(childId);
       }
+      bool allAcked = false;
+      CollectAcks(ackChildIds, &allAcked);
+      if (!allAcked) return;
     }
 
     InteractiveWait("Finishing ExecuteCollectives");
@@ -666,7 +714,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, collId);
 
         int response = 0;
-        ASSERT_EQ(read(childList[childId]->parentReadFd, &response, sizeof(int)), sizeof(int));
+        PIPE_READ(childId, response);
         isCorrect &= (response == TEST_SUCCESS);
       }
     }
@@ -731,7 +779,7 @@ namespace RcclUnitTesting
     }
 
     // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-    for (int childId : ackChildIds) PIPE_CHECK(childId);
+    CollectAcks(ackChildIds);
 
     InteractiveWait("Finishing DeallocateMem");
   }
@@ -760,11 +808,10 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, cmd);
       }
       if (ev.verbose) waitStart = Clock::now();
+      std::vector<int> ackChildIds;
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
-      {
-        // Wait for child acknowledgement
-        PIPE_CHECK(childId);
-      }
+        ackChildIds.push_back(childId);
+      CollectAcks(ackChildIds);
 
       if (ev.verbose)
       {
@@ -809,11 +856,12 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, cmd);
         PIPE_WRITE(childId, currGroup);
       }
+      std::vector<int> ackChildIds;
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
-      {
-        // Wait for child acknowledgement
-        PIPE_CHECK(childId);
-      }
+        ackChildIds.push_back(childId);
+      bool allAcked = false;
+      CollectAcks(ackChildIds, &allAcked);
+      if (!allAcked) return;
     }
 
     InteractiveWait("Finishing DestroyGraphs");
@@ -908,11 +956,8 @@ namespace RcclUnitTesting
       }
       // Only a forked worker (pid > 0) has a reader on the pipe; skip the STOP write for a
       // never-forked entry. close(-1) on an unopened fd is a harmless no-op.
-      if (c->pid > 0)
-      {
-        ssize_t const w = write(c->parentWriteFd, &cmd, sizeof(cmd));
-        (void)w;
-      }
+      if (c->pid > 0 && c->parentWriteFd >= 0)
+        (void)RcclUnitTesting::detail::safe_pipe_write(c->parentWriteFd, &cmd, sizeof(cmd));
       close(c->parentWriteFd);
       close(c->parentReadFd);
     }
@@ -926,7 +971,11 @@ namespace RcclUnitTesting
       if (c->pid > 0)
       {
         int returnVal = 0;
-        waitpid(c->pid, &returnVal, 0);
+        pid_t waitResult = -1;
+        do
+        {
+          waitResult = waitpid(c->pid, &returnVal, 0);
+        } while (waitResult == -1 && errno == EINTR);
       }
       delete c;
     }
@@ -1075,6 +1124,11 @@ namespace RcclUnitTesting
     this->GetSupportedRedOps(redOps, tmpRedOps);
     if (redOps.empty()) {
       GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
+    }
+
+    if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN &&
+        std::find(managedMemList.begin(), managedMemList.end(), false) == managedMemList.end()) {
+      GTEST_SKIP() << "Skipping... symmetric window allocation does not support managed memory.";
     }
 
     bool isCorrect = true;

@@ -105,6 +105,8 @@ test_categories:
       - "GroupCall.*"
       - "NonBlocking.*"
       - "Standalone.*"
+      - "Fp8Validation.*"
+      - "Teardown.*"
       - "Register.*"
       - "Recorder.*"
       - "ProxyTraceTestFixture.*"
