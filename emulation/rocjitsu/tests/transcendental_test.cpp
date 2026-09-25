@@ -341,4 +341,26 @@ TEST(TranscendentalTest, HalfLogExpCompleteHardwareDigests) {
   }
 }
 
+TEST(TranscendentalTest, HalfRcpCompleteHardwareDigests) {
+  // FNV hashes of raw gfx1201 F16 captures over all 65536 input encodings.
+  // Both VOP3 forms produce these digests in every FP_ROUND setting.
+  const uint64_t captured[4][2] = {
+      {0x36cc4b30e45154f5ull, 0x3f3980121e8cbcf5ull},
+      {0x4e50e3da9892a3adull, 0x8db5cd8283d4aa91ull},
+      {0x2c71ffe256ab1945ull, 0x73ec6be1844d8945ull},
+      {0x0667b75d288e9039ull, 0xd9f89262db736b55ull},
+  };
+  for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode)
+    for (bool overflow : {false, true}) {
+      uint64_t digest = 14695981039346656037ull;
+      for (uint32_t input = 0; input < 65536; ++input) {
+        const float result =
+            rcp_f16(util::f16_to_f32(static_cast<uint16_t>(input)), denorm_mode, overflow);
+        digest = (digest ^ util::f32_to_f16(result)) * 1099511628211ull;
+      }
+      EXPECT_EQ(digest, captured[denorm_mode][overflow])
+          << "denorm=" << denorm_mode << " overflow=" << overflow;
+    }
+}
+
 } // namespace

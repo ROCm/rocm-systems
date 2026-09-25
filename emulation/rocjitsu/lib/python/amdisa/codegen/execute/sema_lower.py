@@ -9,7 +9,10 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+from amdisa.codegen.execute.floating_policy import (
+    FLUSH_NEAREST_F32_OPS,
+    ROUNDED_F16_CALLS,
+)
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
@@ -374,6 +377,11 @@ def _contains_call(node: SemaNode, call_name: str) -> bool:
     return (node.kind == SemaNodeKind.CALL and node.call_name == call_name) or any(
         _contains_call(child, call_name) for child in node.children
     )
+
+
+def _uses_rounded_f16_call(node: SemaNode) -> bool:
+    """Whether an F16 expression uses a helper that returns the rounded half."""
+    return any(_contains_call(node, call) for call in ROUNDED_F16_CALLS)
 
 
 def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
@@ -1126,7 +1134,11 @@ def _lower_dst_write(
             rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
         else:
             rhs = f'util::f32_to_f16({rhs})'
-        if _contains_call(rhs_node, 'apply_omod'):
+        # Scaling a rounded half already applies OMOD's zero and subnormal
+        # rules; an underflow produced by that scaling retains its sign.
+        if _contains_call(rhs_node, 'apply_omod') and not _uses_rounded_f16_call(
+            rhs_node
+        ):
             rhs = (
                 f'amdgpu::fp_mode::finalize_omod_f16({rhs}, '
                 'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
@@ -1966,6 +1978,12 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             f'amdgpu::transcendental::rsq_f16({args[0]}, '
             'wf.fp_denorm_mode_f16_f64())'
         )
+    # RCP also rounds to half, with its output policies, before OMOD.
+    if len(args) == 1 and callee == 'rcp' and node.ty == SemaType.F16:
+        return (
+            f'amdgpu::transcendental::rcp_f16({args[0]}, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())'
+        )
     if len(args) == 1 and callee in ('sin', 'cos') and node.ty == SemaType.F32:
         return (
             f'amdgpu::transcendental::{callee}_f32({args[0]}, '
@@ -2149,9 +2167,7 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
-    if node.ty == SemaType.F16 and any(
-        _contains_call(node.children[1], op) for op in ('log', 'log2', 'exp', 'exp2')
-    ):
+    if node.ty == SemaType.F16 and _uses_rounded_f16_call(node.children[1]):
         return f'amdgpu::fp_mode::apply_omod_f16({rhs}, {omod_expr}, wf.fp16_ovfl())'
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'

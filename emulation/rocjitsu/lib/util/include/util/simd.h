@@ -842,7 +842,8 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 /// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
 /// forced-scalar path on every lane. RCP, RSQ, LOG and EXP use shared integer
 /// hardware mappings; SQRT uses host arithmetic with explicit NaN and FTZ handling.
-/// F16 operations use promoted inputs; RSQ additionally applies the F16 input-denormal mode.
+/// F16 operations use promoted inputs; RSQ additionally applies the F16 input-denormal mode,
+/// and RCP returns its half result, rounded before output modifiers.
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
 // SQRT lanes to match the scalar reference.
@@ -856,6 +857,11 @@ inline native<float> rcp_f32_simd(native<float> a) {
 inline native<float> rsq_f32_simd(native<float> a) {
   return map_native_convert_scalar<float, float>(a,
                                                  [](float value) { return amdgpu_rsq_f32(value); });
+}
+
+inline native<float> rcp_f16_simd(native<float> a, uint32_t denorm_mode, bool fp16_ovfl) {
+  return map_native_convert_scalar<float, float>(
+      a, [=](float value) { return amdgpu_rcp_f16(value, denorm_mode, fp16_ovfl); });
 }
 
 inline native<float> rsq_f16_simd(native<float> a, uint32_t denorm_mode) {

@@ -2510,7 +2510,9 @@ template <typename Inst, typename UnOp>
 /// the true16 form selects the source half and writes the selected destination
 /// half per the ISA's op_sel[3] policy.
 /// With rounded_result, the operation supplies an architectural half and OMOD
-/// acts on that half before CLAMP. Other operations retain promoted arithmetic.
+/// acts on that half before CLAMP, including its zero and subnormal rules, so
+/// an underflow produced by scaling retains its sign. Other operations retain
+/// promoted arithmetic and finalize OMOD after narrowing.
 /// All steps bit-exact per the f16 VOP3 cmp slice's widening probe (f16_to_f32
 /// + f32_to_f16_mode verified against the scalar helper incl. NaN payload).
 template <bool True16, typename Inst, typename UnOp>
@@ -2525,6 +2527,7 @@ template <bool True16, typename Inst, typename UnOp>
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
   const uint32_t omod = effective_vop3_omod_f16(wf, inst.inst_.omod);
+  const uint32_t finalize_omod = rounded_result ? 0 : omod;
   const uint32_t clamp = inst.inst_.clamp;
   const auto modify_result = [&](util::native<float> value) {
     if (!rounded_result)
@@ -2553,7 +2556,7 @@ template <bool True16, typename Inst, typename UnOp>
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto r = modify_result(un_op(a));
       const auto out_half =
-          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod);
+          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), finalize_omod);
       auto prev = dst.template load_native<T>(base);
       auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
@@ -2571,9 +2574,9 @@ template <bool True16, typename Inst, typename UnOp>
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto r = modify_result(un_op(a));
-      const auto out =
-          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
-          util::broadcast<T>(0xffffu);
+      const auto out = finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()),
+                                                   finalize_omod) &
+                       util::broadcast<T>(0xffffu);
       dst.template store_native<T>(base, out, chunk);
     }
   }

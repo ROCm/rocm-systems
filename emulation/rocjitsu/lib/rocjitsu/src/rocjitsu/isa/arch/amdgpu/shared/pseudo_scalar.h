@@ -84,15 +84,8 @@ inline EvaluationResult evaluate(Operation operation, double value) {
       return {value, ResultProvenance::VALUE};
     return {std::log2(value), ResultProvenance::VALUE};
   case Operation::RCP:
-    // F16 uses this wide evaluation; F32 uses util::amdgpu_rcp_f32.
-    if (value == 0.0)
-      return {std::copysign(std::numeric_limits<double>::infinity(), value),
-              ResultProvenance::VALUE};
-    if (std::isinf(value))
-      return {std::copysign(0.0, value), ResultProvenance::VALUE};
-    return {1.0 / value, ResultProvenance::VALUE};
   case Operation::RSQ:
-    // Unreachable from execute_f32/execute_f16: both handle RSQ with the shared mapping.
+    // Unreachable from execute_f32/execute_f16: both handle RCP and RSQ with the shared mappings.
     break;
   case Operation::SQRT:
     if (value < 0.0)
@@ -356,7 +349,9 @@ inline uint32_t execute_f32(Operation operation, float source, bool absolute, bo
 /// and 3 for zero. Denormal mode bit 0 allows input denormals and bit 1 allows output denormals.
 /// FP16_OVFL clamps finite overflow to signed maximum finite F16 regardless of round mode, but does
 /// not clamp true infinity or divide-by-zero results. RSQ uses the shared approximation
-/// and nearest-even result rounding independently of the guest rounding mode.
+/// and nearest-even result rounding independently of the guest rounding mode. RCP also
+/// ignores guest rounding, but rounds to half before OMOD and saturates its divide-by-zero
+/// result under FP16_OVFL, as measured on physical gfx1201.
 /// @param operation Transcendental operation to execute.
 /// @param source F16 source value represented exactly as an F32 value.
 /// @param absolute Whether to clear the source sign bit before evaluation.
@@ -374,6 +369,17 @@ inline uint32_t execute_f16(Operation operation, float source, bool absolute, bo
   source = detail::apply_source_modifiers(source, absolute, negate);
   source = detail::flush_input_f16(source, denorm_mode);
   source = detail::quiet_nan(source);
+  if (operation == Operation::RCP) {
+    // OMOD scales the half result after flushing a subnormal and mapping zero to +0.
+    const float rounded = util::amdgpu_rcp_f16(source, denorm_mode, fp16_ovfl);
+    const bool tiny = (std::bit_cast<uint32_t>(rounded) & 0x7fffffffu) < 0x38800000u;
+    const detail::EvaluationResult value = detail::apply_output_modifiers(
+        {omod != 0 && tiny ? 0.0 : rounded, detail::ResultProvenance::VALUE}, omod, clamp);
+    uint16_t result = detail::round_f64_to_f16(value, 0, fp16_ovfl);
+    if (omod != 0 && (result & 0x7c00u) == 0)
+      result &= 0x8000u;
+    return result;
+  }
   const detail::EvaluationResult evaluated =
       operation == Operation::RSQ
           ? detail::EvaluationResult{util::amdgpu_rsq_f16(source, denorm_mode),

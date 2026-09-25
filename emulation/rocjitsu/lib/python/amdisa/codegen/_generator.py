@@ -23,7 +23,10 @@ Execution semantics are provided by ``SemanticsSpec`` from
 
 import cgen
 
-from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+from amdisa.codegen.execute.floating_policy import (
+    FLUSH_NEAREST_F32_OPS,
+    ROUNDED_F16_OPS,
+)
 import textwrap
 import re
 import os
@@ -12475,7 +12478,7 @@ class CodeGenerator:
                             _local_body = self._apply_sdwa_f16_omod(
                                 _local_body,
                                 '*this',
-                                rounded_result=sem.name in ('V_LOG_F16', 'V_EXP_F16'),
+                                rounded_result=sem.name in ROUNDED_F16_OPS,
                             )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
@@ -13905,7 +13908,7 @@ class CodeGenerator:
                 prefixed_body = self._apply_sdwa_f16_omod(
                     prefixed_body,
                     'inst',
-                    rounded_result=sem.name in ('V_LOG_F16', 'V_EXP_F16'),
+                    rounded_result=sem.name in ROUNDED_F16_OPS,
                 )
             if sem.data_type == 'f16':
                 for result_format in ('F16', 'PK_F16'):

@@ -28,7 +28,10 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+from amdisa.codegen.execute.floating_policy import (
+    FLUSH_NEAREST_F32_OPS,
+    ROUNDED_F16_OPS,
+)
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 
@@ -715,12 +718,14 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' return util::f32_to_f16_simd(f - util::floor_simd(f)); }',
     ),
     # f16 transcendentals operate on promoted inputs. RSQ applies the F16
-    # input-denormal policy; the other operations reuse the F32 helpers.
+    # input-denormal policy; RCP returns its rounded half result. The other
+    # operations reuse the F32 helpers.
     'v_rcp_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::rcp_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) {'
+        ' return util::f32_to_f16_simd(util::rcp_f16_simd(util::f16_to_f32_simd(a),'
+        ' wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())); }',
     ),
     'v_rsq_f16_vop1': (
         'uint32_t',
@@ -2039,7 +2044,10 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
         ' util::stdx::where(a < 0.0f, r) = std::numeric_limits<float>::quiet_NaN();'
         ' return r; }'
     ),
-    'v_rcp_f16_vop3': '[](auto a) { return util::rcp_f32_simd(a); }',
+    'v_rcp_f16_vop3': (
+        '[&wf](auto a) { return util::rcp_f16_simd(a, wf.fp_denorm_mode_f16_f64(),'
+        ' wf.fp16_ovfl()); }'
+    ),
     'v_rsq_f16_vop3': (
         '[&wf](auto a) { return util::rsq_f16_simd(a, wf.fp_denorm_mode_f16_f64()); }'
     ),
@@ -3040,7 +3048,9 @@ def _simd_probe_line(
             else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
         )
         rounded = (
-            ', true' if template_name in ('v_log_f16_vop3', 'v_exp_f16_vop3') else ''
+            ', true'
+            if template_name.removesuffix('_vop3').upper() in ROUNDED_F16_OPS
+            else ''
         )
         return f'  {macro}({spec3unaf16}{rounded});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
