@@ -495,6 +495,8 @@ struct DispatchState {
   bool begun = false;
   bool ended = false;
   bool selected = true;
+  bool direct_forwarded = false;
+  bool backend_begun = false;
   std::atomic<bool> supported{true};
   std::mutex rejection_mutex;
   bool diagnostic_emitted = false;
@@ -576,6 +578,18 @@ struct PerfsimPlugin::Impl {
       throw std::runtime_error(
           std::format("Perfsim backend rejected supported FFM API versions {} through {}",
                       kOldestCompatibleApiVersion, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
+
+    const auto get_capabilities = util::lookup_symbol<FfmObserverPluginGetCapabilitiesFn>(
+        library.get(), "ffm_observer_plugin_get_capabilities");
+    if (get_capabilities)
+      backend_capabilities = invoke_foreign_abi(get_capabilities, negotiated_api_version);
+    discard_dispatch = util::lookup_symbol<FfmObserverPluginDiscardDispatchFn>(
+        library.get(), "ffm_observer_plugin_discard_dispatch");
+    const uint64_t direct_capabilities =
+        FFM_OBSERVER_CAP_CONCURRENT_HOT_CALLBACKS | FFM_OBSERVER_CAP_DISCARD_DISPATCH;
+    transactional_direct_forwarding =
+        negotiated_api_version >= 13 &&
+        (backend_capabilities & direct_capabilities) == direct_capabilities && discard_dispatch;
 
     require_callback(api.on_init, "on_init");
     require_callback(api.on_dispatch_begin, "on_dispatch_begin");
@@ -683,8 +697,17 @@ struct PerfsimPlugin::Impl {
         incomplete_dispatches.push_back(dispatch_id);
     for (uint32_t dispatch_id : incomplete_dispatches)
       reject(dispatch_id, "dispatch was incomplete at plugin shutdown");
-    replay_blockers.clear();
-    drain_epoch(/*shutdown=*/true);
+    if (active_direct_dispatch) {
+      const auto iter = dispatches.find(*active_direct_dispatch);
+      if (iter != dispatches.end() && iter->second.backend_begun)
+        invoke_foreign_abi(discard_dispatch, static_cast<EntityId>(*active_direct_dispatch));
+    }
+    {
+      std::lock_guard lock(staging_mutex);
+      active_direct_dispatch.reset();
+      replay_blockers.clear();
+      drain_epoch(/*shutdown=*/true);
+    }
     physical_waves.clear();
 
     if (initialized)
@@ -710,13 +733,27 @@ struct PerfsimPlugin::Impl {
     auto &state = dispatches[dispatch_id];
     if (!mark_rejected(state, std::move(reason)))
       return;
+    if (state.direct_forwarded)
+      return;
+    std::lock_guard lock(staging_mutex);
     replay_blockers.erase(dispatch_id);
     purge_events(dispatch_id);
     drain_epoch(/*shutdown=*/false);
   }
 
   void reject_wave(PerfsimWavefrontState *wave, uint32_t dispatch_id, std::string reason) {
-    (void)wave;
+    if (transactional_direct_forwarding && wave && wave->dispatch_state) {
+      DispatchState &state = *wave->dispatch_state;
+      if (!mark_rejected(state, std::move(reason)))
+        return;
+      if (state.direct_forwarded)
+        return;
+      std::lock_guard lock(staging_mutex);
+      replay_blockers.erase(dispatch_id);
+      purge_events(dispatch_id);
+      drain_epoch(/*shutdown=*/false);
+      return;
+    }
     reject(dispatch_id, std::move(reason));
   }
 
@@ -788,9 +825,8 @@ struct PerfsimPlugin::Impl {
         event.payload);
   }
 
-  bool can_stage(uint32_t dispatch_id, size_t bytes) {
-    const auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !supported(iter->second))
+  bool can_stage(DispatchState &state, uint32_t dispatch_id, size_t bytes) {
+    if (!supported(state))
       return false;
     if (bytes > config.max_staged_bytes || staged_bytes > config.max_staged_bytes - bytes) {
       reject(dispatch_id,
@@ -805,7 +841,8 @@ struct PerfsimPlugin::Impl {
            event_chunks.back().events.size() < event_chunks.back().events.capacity();
   }
 
-  bool can_stage_event(uint32_t dispatch_id, size_t dynamic_bytes) {
+  bool can_stage_event(DispatchState &state, uint32_t dispatch_id, size_t dynamic_bytes) {
+    std::lock_guard lock(staging_mutex);
     const size_t slot_bytes = has_staging_slot() ? 0 : sizeof(StagedEvent);
     if (slot_bytes > config.max_staged_bytes ||
         dynamic_bytes > config.max_staged_bytes - slot_bytes) {
@@ -813,12 +850,20 @@ struct PerfsimPlugin::Impl {
              std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
       return false;
     }
-    return can_stage(dispatch_id, slot_bytes + dynamic_bytes);
+    return can_stage(state, dispatch_id, slot_bytes + dynamic_bytes);
   }
 
-  bool record_event(OrderedEvent event) {
+  bool record_event(DispatchState &state, OrderedEvent event) {
+    if (state.direct_forwarded) {
+      if (!supported(state))
+        return false;
+      replay(event);
+      return true;
+    }
+
+    std::lock_guard lock(staging_mutex);
     const size_t dynamic_bytes = staged_dynamic_size(event);
-    if (!can_stage_event(event.dispatch_id, dynamic_bytes))
+    if (!can_stage_event(state, event.dispatch_id, dynamic_bytes))
       return false;
 
     if (has_staging_slot()) {
@@ -895,29 +940,10 @@ struct PerfsimPlugin::Impl {
   }
 
   void drain_epoch(bool shutdown) {
-    if (!replay_blockers.empty())
+    if (active_direct_dispatch || !replay_blockers.empty())
       return;
 
-    size_t event_count = 0;
-    for (const EventChunk &chunk : event_chunks)
-      event_count += chunk.events.size();
-    std::vector<StagedEvent *> replay_order;
-    replay_order.reserve(event_count);
-    for (EventChunk &chunk : event_chunks)
-      for (StagedEvent &event : chunk.events)
-        replay_order.push_back(&event);
-    // The host provides no causal order between callbacks from different
-    // waves, so callback-mutex acquisition order is scheduler-dependent. Give
-    // the backend a canonical cross-wave order instead. stable_sort preserves
-    // each wave's program order and keeps every instruction adjacent to its
-    // memory/TDM records.
-    std::stable_sort(replay_order.begin(), replay_order.end(),
-                     [](const StagedEvent *left, const StagedEvent *right) {
-                       return canonical_replay_less(left->event, right->event);
-                     });
-
-    for (StagedEvent *staged : replay_order) {
-      OrderedEvent &event = staged->event;
+    const auto replay_if_accepted = [&](const OrderedEvent &event) {
       const auto iter = dispatches.find(event.dispatch_id);
       if (iter != dispatches.end() && supported(iter->second) && iter->second.ended) {
         replay(event);
@@ -926,18 +952,55 @@ struct PerfsimPlugin::Impl {
           write_sink(
               std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n", event.dispatch_id));
       }
-    }
+    };
 
-    for (const EventChunk &chunk : event_chunks) {
-      assert(chunk.capacity_bytes <= staged_bytes);
-      staged_bytes -= chunk.capacity_bytes;
-      for (const StagedEvent &staged : chunk.events) {
-        assert(staged.dynamic_bytes <= staged_bytes);
-        staged_bytes -= staged.dynamic_bytes;
+    if (transactional_direct_forwarding) {
+      // A backend need not accept two dispatch transactions at once merely
+      // because its hot callbacks are concurrent. Replay overlap fallbacks as
+      // complete dispatches in begin order while retaining per-wave order.
+      for (uint32_t dispatch_id : staged_dispatch_order) {
+        for (const EventChunk &chunk : event_chunks)
+          for (const StagedEvent &staged : chunk.events)
+            if (staged.event.dispatch_id == dispatch_id)
+              replay_if_accepted(staged.event);
       }
+      event_chunks.clear();
+      staged_dispatch_order.clear();
+      staged_bytes = 0;
+    } else {
+      size_t event_count = 0;
+      for (const EventChunk &chunk : event_chunks)
+        event_count += chunk.events.size();
+      std::vector<StagedEvent *> replay_order;
+      replay_order.reserve(event_count);
+      for (EventChunk &chunk : event_chunks)
+        for (StagedEvent &event : chunk.events)
+          replay_order.push_back(&event);
+      // The host provides no causal order between callbacks from different
+      // waves, so callback-mutex acquisition order is scheduler-dependent. Give
+      // legacy backends a canonical cross-wave order instead. stable_sort
+      // preserves each wave's program order and keeps every instruction
+      // adjacent to its memory/TDM records.
+      std::stable_sort(replay_order.begin(), replay_order.end(),
+                       [](const StagedEvent *left, const StagedEvent *right) {
+                         return canonical_replay_less(left->event, right->event);
+                       });
+
+      for (const StagedEvent *staged : replay_order)
+        replay_if_accepted(staged->event);
+
+      for (const EventChunk &chunk : event_chunks) {
+        assert(chunk.capacity_bytes <= staged_bytes);
+        staged_bytes -= chunk.capacity_bytes;
+        for (const StagedEvent &staged : chunk.events) {
+          assert(staged.dynamic_bytes <= staged_bytes);
+          staged_bytes -= staged.dynamic_bytes;
+        }
+      }
+      event_chunks.clear();
+      assert(staged_bytes == 0);
+      staged_dispatch_order.clear();
     }
-    event_chunks.clear();
-    assert(staged_bytes == 0);
 
     for (auto &[dispatch_id, state] : dispatches) {
       if (!supported(state) && !state.diagnostic_emitted) {
@@ -973,7 +1036,7 @@ struct PerfsimPlugin::Impl {
     const bool is_atomic = access.atomic_op != amdgpu::AtomicOp::NONE;
     event.flags =
         encode_memory_flags(is_atomic, access.is_load || is_atomic, !access.is_load || is_atomic);
-    record_event({access.dispatch_id, std::move(event)});
+    record_event(*wave.dispatch_state, {access.dispatch_id, std::move(event)});
   }
 
   bool record_local_memory(PerfsimWavefrontState &wave,
@@ -1247,7 +1310,9 @@ struct PerfsimPlugin::Impl {
       reject_wave(wave, access.dispatch_id, "tensor-DMA address payload is too large");
       return;
     }
-    if (!can_stage_event(access.dispatch_id, access.addresses.size() * sizeof(uint64_t))) {
+    if (!dispatch->direct_forwarded &&
+        !can_stage_event(*dispatch, access.dispatch_id,
+                         access.addresses.size() * sizeof(uint64_t))) {
       return;
     }
 
@@ -1269,7 +1334,7 @@ struct PerfsimPlugin::Impl {
     event.tensor_dim1_stride = access.tensor_dim1_stride;
     event.is_read = is_load;
     event.is_write = is_store;
-    record_event({access.dispatch_id, std::move(event)});
+    record_event(*dispatch, {access.dispatch_id, std::move(event)});
   }
 
   PerfsimPlugin &owner;
@@ -1278,14 +1343,20 @@ struct PerfsimPlugin::Impl {
   RetainedSharedLibrary library;
   FfmObserverPluginApiPrefix api{};
   uint32_t negotiated_api_version = 0;
+  uint64_t backend_capabilities = 0;
+  FfmObserverPluginDiscardDispatchFn discard_dispatch = nullptr;
+  bool transactional_direct_forwarding = false;
   bool initialized = false;
   bool shutdown_called = false;
+  std::optional<uint32_t> active_direct_dispatch;
   std::unordered_map<uint32_t, DispatchState> dispatches;
   // Only supported in-flight dispatches block ordered replay. Rejected
   // dispatch state remains until its real end callback, but it retains no
   // events and cannot indefinitely hold completed supported work.
   std::unordered_set<uint32_t> replay_blockers;
+  std::vector<uint32_t> staged_dispatch_order;
   std::unordered_map<uint64_t, PerfsimWavefrontState *> physical_waves;
+  std::recursive_mutex staging_mutex;
   std::deque<EventChunk> event_chunks;
   size_t staged_bytes = 0;
 };
@@ -1299,9 +1370,12 @@ void PerfsimPlugin::onInit() { impl_->init(); }
 
 void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
 
-// Recording mutates shared staging and per-wave state. This lock provides
-// mutual exclusion; drain_epoch() independently canonicalizes replay order.
-bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
+// Legacy backends retain globally ordered host callbacks. A backend may opt in
+// to direct concurrent delivery only when it can both capture independent
+// waves concurrently and discard a dispatch that fails validation after begin.
+bool PerfsimPlugin::requires_serial_hot_hooks() const {
+  return !impl_->transactional_direct_forwarding;
+}
 
 bool PerfsimPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
   return wf != nullptr && wavefront_state<PerfsimWavefrontState>(*wf) != nullptr;
@@ -1336,8 +1410,23 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   state.ended = false;
   if (!Impl::supported(state))
     return;
-  impl_->replay_blockers.insert(dispatch_id);
-  impl_->record_event({dispatch_id, BeginEvent{state.metadata}});
+  {
+    std::lock_guard lock(impl_->staging_mutex);
+    if (impl_->transactional_direct_forwarding && !impl_->active_direct_dispatch &&
+        impl_->replay_blockers.empty() && impl_->event_chunks.empty()) {
+      state.direct_forwarded = true;
+      impl_->active_direct_dispatch = dispatch_id;
+    } else {
+      impl_->replay_blockers.insert(dispatch_id);
+      impl_->staged_dispatch_order.push_back(dispatch_id);
+    }
+  }
+  if (state.direct_forwarded) {
+    invoke_foreign_abi(impl_->api.on_dispatch_begin, &state.metadata);
+    state.backend_begun = true;
+    return;
+  }
+  impl_->record_event(state, {dispatch_id, BeginEvent{state.metadata}});
 }
 
 void PerfsimPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
@@ -1354,9 +1443,37 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   if (state.live_waves != 0)
     impl_->reject(dispatch_id, "dispatch ended with live wavefronts");
   state.ended = true;
+  if (state.direct_forwarded) {
+    if (state.backend_begun) {
+      if (Impl::supported(state)) {
+        invoke_foreign_abi(impl_->api.on_dispatch_end, &state.metadata);
+        if (impl_->config.dispatch_name && state.selected)
+          impl_->write_sink(
+              std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n", dispatch_id));
+      } else {
+        invoke_foreign_abi(impl_->discard_dispatch, static_cast<EntityId>(dispatch_id));
+      }
+    }
+    if (!Impl::supported(state) && !state.diagnostic_emitted) {
+      impl_->write_sink(std::format("[rocjitsu:perfsim] skipped dispatch {}: {}\n", dispatch_id,
+                                    state.rejection_reason));
+      state.diagnostic_emitted = true;
+    }
+    {
+      std::lock_guard lock(impl_->staging_mutex);
+      if (impl_->active_direct_dispatch && *impl_->active_direct_dispatch == dispatch_id)
+        impl_->active_direct_dispatch.reset();
+      impl_->dispatches.erase(iter);
+      impl_->drain_epoch(/*shutdown=*/false);
+    }
+    return;
+  }
+  std::lock_guard lock(impl_->staging_mutex);
   impl_->replay_blockers.erase(dispatch_id);
   if (Impl::supported(state))
-    impl_->record_event({dispatch_id, EndEvent{state.metadata}});
+    impl_->record_event(state, {dispatch_id, EndEvent{state.metadata}});
+  else
+    impl_->purge_events(dispatch_id);
   impl_->drain_epoch(/*shutdown=*/false);
 }
 
@@ -1537,7 +1654,7 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   wave->has_current_instruction = true;
   wave->saw_instruction = true;
   wave->last_instruction_terminates = static_info.terminates;
-  impl_->record_event({wf.dispatch_id(), std::move(event)});
+  impl_->record_event(*wave->dispatch_state, {wf.dispatch_id(), std::move(event)});
 }
 
 void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) {

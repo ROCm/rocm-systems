@@ -489,6 +489,130 @@ TEST_F(PerfsimPluginTest, CanonicalizesConcurrentWaveInstructionOrder) {
   EXPECT_TRUE(trace[cursor].starts_with("end 46 "));
 }
 
+TEST_F(PerfsimPluginTest, TransactionalBackendForwardsHotHooksConcurrently) {
+  WaveFixture fixture(4);
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_transactional", 1);
+
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  EXPECT_FALSE(plugin->requires_serial_hot_hooks());
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  group.onInit();
+
+  KernelDispatchInfo info = dispatch_info(47);
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  std::array<Wavefront *, 4> waves{};
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    waves[i] = &fixture.wave(info.dispatch_id, i, {i, 0, 0}, 0);
+    group.onAmdgpuWavefrontDispatched(*waves[i]);
+  }
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  std::vector<std::thread> workers;
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    workers.emplace_back(
+        [&, i]() { group.onAmdgpuBeforeExecuteInstruction(0x5000 + i * 4, end, *waves[i]); });
+  }
+  for (auto &worker : workers)
+    worker.join();
+
+  for (Wavefront *wave : waves)
+    group.onAmdgpuWavefrontHalted(*wave);
+  group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_NE(std::find(trace.begin(), trace.end(), "concurrent_instruction_callbacks"), trace.end());
+  EXPECT_EQ(
+      std::count_if(trace.begin(), trace.end(),
+                    [](const std::string &line) { return line.starts_with("instruction 47 "); }),
+      4);
+  EXPECT_NE(line_with_prefix(trace, "begin 47 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 47 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "discard 47"), trace.size());
+}
+
+TEST_F(PerfsimPluginTest, TransactionalBackendDiscardsLateRejectedDispatch) {
+  WaveFixture fixture;
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_transactional", 1);
+  testing::internal::CaptureStderr();
+  {
+    PerfsimPlugin plugin(plugin_config().c_str());
+    plugin.onInit();
+
+    const KernelDispatchInfo info = dispatch_info(48);
+    plugin.onAmdgpuDispatchPacketProcessed(info);
+    plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(wave);
+
+    const std::array<uint32_t, 1> words{0x7E000200};
+    SyntheticInstruction add("v_add_f32", words);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x6000, add, wave);
+    SyntheticInstruction scratch("scratch_load_dword", words, MEMORY_OP);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x6004, scratch, wave);
+    plugin.onAmdgpuWavefrontHalted(wave);
+    plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("dedicated SCRATCH instructions are not FFM-compatible"),
+            std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_NE(line_with_prefix(trace, "begin 48 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "instruction 48 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "discard 48"), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 48 "), trace.size());
+}
+
+TEST_F(PerfsimPluginTest, TransactionalBackendStagesOverlappingDispatch) {
+  WaveFixture fixture;
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_transactional", 1);
+  PerfsimPlugin plugin(plugin_config().c_str());
+  plugin.onInit();
+
+  for (uint32_t id : {49u, 50u}) {
+    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
+    plugin.onAmdgpuDispatchExecutionBegin(id);
+  }
+  Wavefront &first = fixture.wave(49, 0, {0, 0, 0}, 0);
+  Wavefront &second = fixture.wave(50, 1, {1, 0, 0}, 0);
+  plugin.onAmdgpuWavefrontDispatched(first);
+  plugin.onAmdgpuWavefrontDispatched(second);
+
+  const std::array<uint32_t, 1> words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x7000, end, first);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x8000, end, second);
+  plugin.onAmdgpuWavefrontHalted(first);
+  plugin.onAmdgpuWavefrontHalted(second);
+
+  plugin.onAmdgpuDispatchExecutionEnd(50);
+  EXPECT_EQ(line_with_prefix(lines(read_file(trace_.path())), "begin 50 "),
+            lines(read_file(trace_.path())).size());
+  plugin.onAmdgpuDispatchExecutionEnd(49);
+  plugin.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  const size_t begin_first = line_with_prefix(trace, "begin 49 ");
+  const size_t end_first = line_with_prefix(trace, "end 49 ");
+  const size_t begin_second = line_with_prefix(trace, "begin 50 ");
+  const size_t instruction_second = line_with_prefix(trace, "instruction 50 ");
+  const size_t end_second = line_with_prefix(trace, "end 50 ");
+  ASSERT_LT(begin_first, trace.size());
+  ASSERT_LT(end_first, trace.size());
+  ASSERT_LT(begin_second, trace.size());
+  ASSERT_LT(instruction_second, trace.size());
+  ASSERT_LT(end_second, trace.size());
+  EXPECT_LT(begin_first, end_first);
+  EXPECT_LT(end_first, begin_second);
+  EXPECT_LT(begin_second, instruction_second);
+  EXPECT_LT(instruction_second, end_second);
+}
+
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
   WaveFixture fixture(1);
   testing::internal::CaptureStderr();
