@@ -6,6 +6,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.11.0 for ROCm 10.3 (unreleased)
 
+### Added
+
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
+
 ### Resolved issues
 
 - Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
