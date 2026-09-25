@@ -50,11 +50,26 @@ template <typename Tp>
 bool
 ignore_setting(const Tp& _v, const format_options& fmt_opts)
 {
-    if(_v->get_hidden()) return true;
-    if(exclude_setting(_v->get_env_name())) return true;
-    if(_v->get_config_updated() || _v->get_environ_updated()) return false;
-    if(!is_selected(_v->get_env_name()) && !is_selected(_v->get_name())) return true;
-    if(fmt_opts.available_only && !_v->get_enabled()) return true;
+    if(_v->get_hidden())
+    {
+        return true;
+    }
+    if(exclude_setting(_v->get_env_name()))
+    {
+        return true;
+    }
+    if(_v->get_config_updated() || _v->get_environ_updated())
+    {
+        return false;
+    }
+    if(!is_selected(_v->get_env_name()) && !is_selected(_v->get_name()))
+    {
+        return true;
+    }
+    if(fmt_opts.available_only && !_v->get_enabled())
+    {
+        return true;
+    }
     if(!category_view.empty())
     {
         bool _found = false;
@@ -67,16 +82,23 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
                 break;
             }
         }
-        if(!_found) return true;
+        if(!_found)
+        {
+            return true;
+        }
     }
     if(category_view.count("deprecated") == 0 &&
        category_view.count("settings::deprecated") == 0 &&
        _v->get_categories().count("deprecated") > 0)
+    {
         return true;
+    }
     if(!fmt_opts.print_advanced && category_view.count("advanced") == 0 &&
        category_view.count("settings::advanced") == 0 &&
        _v->get_categories().count("advanced") > 0)
+    {
         return true;
+    }
     return false;
 }
 }  // namespace
@@ -109,13 +131,18 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
         static_assert(concepts::is_output_archive<ArchiveT>::value,
                       "Requires an output archive");
 
-        if(ignore_setting(&_val, *custom_setting_serializer::fmt)) return;
+        if(ignore_setting(&_val, *custom_setting_serializer::fmt))
+        {
+            return;
+        }
 
         auto _save = std::shared_ptr<value_type>{};
         if constexpr(concepts::is_string_type<Tp>::value)
         {
             if(_val.get_name() != "time_format")
+            {
                 _val.set(settings::format(_val.get(), settings::instance()->get_tag()));
+            }
             if(_val.get_name() == "config_file")
             {
                 _save = std::make_shared<value_type>(_val);
@@ -135,15 +162,24 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
             _ar(cereal::make_nvp("name", _val.get_name()));
             _ar(cereal::make_nvp("value", _v));
             if(custom_setting_serializer::options[DESC])
+            {
                 _ar(cereal::make_nvp("description", _val.get_description()));
+            }
             if(custom_setting_serializer::options[CATEGORY])
+            {
                 _ar(cereal::make_nvp("description", _val.get_categories()));
+            }
             if(custom_setting_serializer::options[VAL])
+            {
                 _ar(cereal::make_nvp("choices", _val.get_choices()));
+            }
             _ar.finishNode();
         }
 
-        if(_save) _val.set(_save->get());
+        if(_save)
+        {
+            _val.set(_save->get());
+        }
     }
 };
 }  // namespace tim::operation
@@ -205,21 +241,31 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     std::string _txt_ext = ".cfg";
     for(const std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
-        if(_config_file.length() <= itr.length()) continue;
+        if(_config_file.length() <= itr.length())
+        {
+            continue;
+        }
         if(_config_file.ends_with(itr))
         {
-            if(itr == ".cfg" || itr == ".txt") _txt_ext = itr;
+            if(itr == ".cfg" || itr == ".txt")
+            {
+                _txt_ext = itr;
+            }
             _fmts.emplace(itr.substr(1));
             _config_file = _config_file.substr(0, _config_file.length() - itr.length());
         }
     }
 
     if(_fmts.empty() && _config_fmts.size() == 1)
+    {
         _fmts = _config_fmts;
+    }
     else if(!_fmts.empty())
     {
         for(auto& itr : _config_fmts)
+        {
             _fmts.emplace(itr);
+        }
     }
 
     update_choices(_settings);
@@ -250,8 +296,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if(fmt_opts.force_config)
             {
                 if(settings::verbose() >= 1)
+                {
                     std::cout << "[rocprof-sys-avail] File '" << _fname
                               << "' exists. Overwrite force...\n";
+                }
             }
             else
             {
@@ -317,10 +365,15 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
         // Add metadata
         auto preset_name = fmt_opts.preset_name;
-        if(preset_name.empty()) preset_name = _config_file;
+        if(preset_name.empty())
+        {
+            preset_name = _config_file;
+        }
         preset_json["metadata"]["name"] = preset_name;
         if(!fmt_opts.preset_description.empty())
+        {
             preset_json["metadata"]["description"] = fmt_opts.preset_description;
+        }
 
         auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
                                                         true, _output_dir);
@@ -347,25 +400,44 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         std::vector<std::shared_ptr<tim::vsettings>> _data{};
         for(const auto& itr : *_settings)
         {
-            if(exclude_setting(itr.second->get_env_name())) continue;
+            if(exclude_setting(itr.second->get_env_name()))
+            {
+                continue;
+            }
             for(const auto& citr : itr.second->get_categories())
-                if(citr == "deprecated") continue;
-            if(ignore_setting(itr.second, fmt_opts)) continue;
+            {
+                if(citr == "deprecated")
+                {
+                    continue;
+                }
+            }
+            if(ignore_setting(itr.second, fmt_opts))
+            {
+                continue;
+            }
             _data.emplace_back(itr.second);
         }
 
         if(fmt_opts.alphabetical)
+        {
             std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
                 return _lhs->get_name() < _rhs->get_name();
             });
+        }
         else
         {
             _settings->ordering();
             std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
                 auto _lomni = _lhs->get_categories().count("rocprofsys") > 0;
                 auto _romni = _rhs->get_categories().count("rocprofsys") > 0;
-                if(_lomni && !_romni) return true;
-                if(_romni && !_lomni) return false;
+                if(_lomni && !_romni)
+                {
+                    return true;
+                }
+                if(_romni && !_lomni)
+                {
+                    return false;
+                }
                 namespace env_vars = rocprofsys::env_vars;
                 for(const auto* itr :
                     { env_vars::CONFIG, env_vars::MODE, env_vars::TRACE,
@@ -410,12 +482,18 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
         for(const auto& itr : _data)
         {
-            if(exclude_setting(itr->get_env_name())) continue;
+            if(exclude_setting(itr->get_env_name()))
+            {
+                continue;
+            }
 
             auto _has_info = (fmt_opts.all_info || _options[DESC] || _options[CATEGORY] ||
                               _options[VAL]);
 
-            if(_has_info) _ss << "\n# name:\n#    " << itr->get_name() << "\n#\n";
+            if(_has_info)
+            {
+                _ss << "\n# name:\n#    " << itr->get_name() << "\n#\n";
+            }
 
             if(_options[DESC] || fmt_opts.all_info)
             {
@@ -433,14 +511,18 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     _line << " " << _str;
                 };
                 for(auto& iitr : _desc)
+                {
                     _write(iitr);
+                }
                 _ss << _line.str() << "\n#\n";
             }
             if(_options[CATEGORY] || fmt_opts.all_info)
             {
                 _ss << "# categories:\n";
                 for(const auto& iitr : itr->get_categories())
+                {
                     _ss << "#    " << iitr << "\n";
+                }
                 _ss << "#\n";
             }
             if((_options[VAL] || fmt_opts.all_info) && !itr->get_choices().empty())
@@ -452,16 +534,26 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 {
                     _ss << "# choices:\n";
                     for(const auto& iitr : _choices)
+                    {
                         _ss << "#    " << iitr << "\n";
+                    }
                     _ss << "#\n";
                 }
             }
-            if(_has_info) _ss << "\n";
+            if(_has_info)
+            {
+                _ss << "\n";
+            }
             _ss << std::left << std::setw(_w + 10) << itr->get_env_name() << " = ";
             auto _v = itr->as_string();
-            if(itr->get_name() == "config_file") _v = {};
+            if(itr->get_name() == "config_file")
+            {
+                _v = {};
+            }
             if(!_v.empty() && fmt_opts.expand_keys && itr->get_name() != "time_format")
+            {
                 _v = settings::format(_v, _settings->get_tag());
+            }
             _ss << _v << "\n";
         }
         auto _fname = settings::compose_output_filename(_config_file, _txt_ext, false, -1,
@@ -486,11 +578,16 @@ update_choices(const std::shared_ptr<settings>& _settings)
     std::vector<info_type> _info = get_component_info<TIMEMORY_NATIVE_COMPONENTS_END>();
 
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
+    {
         printf("[rocprof-sys-avail] # of component found: %zu\n", _info.size());
+    }
 
     _info.erase(std::remove_if(_info.begin(), _info.end(),
                                [](const auto& itr) {
-                                   if(!itr.is_available()) return true;
+                                   if(!itr.is_available())
+                                   {
+                                       return true;
+                                   }
                                    // NOLINTNEXTLINE
                                    for(const auto& nitr :
                                        { "cuda", "cupti", "nvtx", "roofline", "_bundle",
@@ -498,7 +595,9 @@ update_choices(const std::shared_ptr<settings>& _settings)
                                          "printer" })
                                    {
                                        if(itr.name().find(nitr) != std::string::npos)
+                                       {
                                            return true;
+                                       }
                                    }
                                    return false;
                                }),
@@ -507,10 +606,14 @@ update_choices(const std::shared_ptr<settings>& _settings)
     std::vector<std::string> _component_choices = {};
     _component_choices.reserve(_info.size());
     for(const auto& itr : _info)
+    {
         _component_choices.emplace_back(itr.id_type());
+    }
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
+    {
         printf("[rocprof-sys-avail] # of component choices: %zu\n",
                _component_choices.size());
+    }
     _settings->find(std::string{ rocprofsys::env_vars::TIMEMORY_COMPONENTS })
         ->second->set_choices(_component_choices);
 }

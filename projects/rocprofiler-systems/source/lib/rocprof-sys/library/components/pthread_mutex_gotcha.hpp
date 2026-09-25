@@ -42,7 +42,10 @@ struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>,
     static void configure()
     {
         Policy::gotcha_t::get_initializer() = []() {
-            if(!Policy::settings_enabled() || Policy::get_use_causal()) return;
+            if(!Policy::settings_enabled() || Policy::get_use_causal())
+            {
+                return;
+            }
 
             if(Policy::get_trace_locks())
             {
@@ -119,7 +122,10 @@ struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>,
 private:
     static bool is_disabled()
     {
-        if(s_is_paused.load(std::memory_order_relaxed)) return true;
+        if(s_is_paused.load(std::memory_order_relaxed))
+        {
+            return true;
+        }
         return Policy::is_disabled_check();
     }
 

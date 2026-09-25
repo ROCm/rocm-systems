@@ -22,7 +22,10 @@ per_pid_file_sink::per_pid_file_sink(pid_t parent_pid, output_file_registry& reg
 void
 per_pid_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
 {
-    if(bytes.empty()) return;
+    if(bytes.empty())
+    {
+        return;
+    }
 
     const auto pid = static_cast<pid_t>(source_id);
     auto       filename =
