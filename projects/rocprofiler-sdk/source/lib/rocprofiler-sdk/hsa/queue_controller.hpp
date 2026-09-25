@@ -198,7 +198,10 @@ queue_controller_init(HsaApiTable* table);
 void
 queue_controller_fini();
 
-void
+// Best-effort drain of every intercepted queue. Returns false if any queue's drain timed out with
+// kernels still active, so callers that tear state down behind the drain can say so; callers that
+// only want a fence may ignore it.
+bool
 queue_controller_sync();
 
 void

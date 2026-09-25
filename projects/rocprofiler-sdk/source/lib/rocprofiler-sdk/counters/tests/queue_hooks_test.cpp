@@ -393,4 +393,81 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
     registration::set_init_status(1);
     registration::finalize();
 }
+
+// The stop-time drain is BOUNDED: Queue::sync() gives up after one slice. queue_controller_sync()
+// used to discard that result, so counters::stop_context could not tell a completed drain from a
+// timeout and the comments around it claimed more than the code delivered.
+//
+// The timeout is driven deterministically here by leaving one async packet outstanding on a
+// registered queue -- async_started() with no matching async_complete() -- so the signal wait
+// cannot be satisfied and can only end by elapsing. Two independent things are asserted:
+//
+//  1. queue_controller_sync() reports false instead of returning as though it had drained.
+//  2. stop_context still finishes: serialization is released and the context leaves the active
+//     list. This is the more important half. Refusing to complete the stop would be worse than a
+//     late completion, because the context would stay in the stopping set and block every other
+//     context lifecycle call in the process.
+//
+// This test costs roughly two drain slices in wall time, which is inherent to exercising a real
+// timeout rather than a mocked one.
+TEST(counters_queue_hooks, stop_context_completes_when_queue_drain_times_out)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    auto* controller = hsa::get_queue_controller();
+    ASSERT_NE(controller, nullptr);
+
+    auto agents = controller->get_supported_agents();
+    ASSERT_FALSE(agents.empty());
+    const auto& [_, agent] = *agents.begin();
+    ASSERT_TRUE(agent.get_rocp_agent());
+    const auto agent_id = agent.get_rocp_agent()->id;
+
+    // Registered with the controller, because queue_controller_sync() only reaches queues in its
+    // map. is_compute is false so the opt-in signal-less bookkeeping stays out of this entirely.
+    auto  fake_hsa_queue = hsa_queue_t{};
+    auto  fq     = std::make_unique<hsa::QueueHooksFakeQueue>(agent, rocprofiler_queue_id_t{77});
+    auto* fq_raw = fq.get();
+    controller->add_queue(
+        &fake_hsa_queue, std::move(fq), /*is_compute=*/false, /*is_attach=*/false);
+
+    // One dispatch that never completes, so _active_kernels never returns to zero.
+    fq_raw->async_started();
+    ASSERT_EQ(fq_raw->active_async_packets(), 1);
+
+    EXPECT_FALSE(hsa::queue_controller_sync())
+        << "a queue with an outstanding async packet must report an incomplete drain";
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
+                         get_client_ctx(), user_dispatch_cb, nullptr, user_record_cb, nullptr),
+                     "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    ASSERT_TRUE(rocprofiler::counters::is_any_active());
+    ASSERT_TRUE(controller->is_serialization_enabled(agent_id));
+
+    // Runs the same drain internally, and it times out the same way.
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    EXPECT_FALSE(rocprofiler::counters::is_any_active())
+        << "stop must leave the active list even when the drain timed out";
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_id))
+        << "stop must release serialization even when the drain timed out";
+
+    // Retire the outstanding packet before teardown: ~Queue() syncs as well, and would otherwise
+    // pay another full slice.
+    fq_raw->async_complete();
+    controller->destroy_queue(&fake_hsa_queue);
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    get_client_ctx() = rocprofiler_context_id_t{0};
+}
 }  // namespace

@@ -189,8 +189,15 @@ stop_context(const context::context* ctx)
     {
         // Drain in-flight dispatches before anything else is torn down. The review of #8891
         // accepted provenance-based completion routing on the condition that the callback thread
-        // and the counter_callback_info objects stay alive until in-flight dispatches drain, so the
-        // drain is what makes that condition hold literally rather than by argument.
+        // and the counter_callback_info objects stay alive until in-flight dispatches drain.
+        //
+        // The drain is BOUNDED -- Queue::sync() gives up after one slice -- so it can return
+        // without having drained, and teardown below must stay correct for a completion that
+        // arrives afterwards rather than assuming none can. It does: the context and its
+        // counter_callback_info objects stay registered, the exit hook routes by packet
+        // provenance rather than by activeness, and disable_serialization() leaves a transition
+        // barrier for work that is still serialized. So a straggler is delivered late, not
+        // dropped or mishandled.
         //
         // context::stop_context calls this function while the context is still in the active list,
         // which is what keeps the service visible for the duration of the drain: the enter hook
@@ -198,7 +205,14 @@ stop_context(const context::context* ctx)
         // serialized->unserialized transition stays coordinated until disable_serialization() runs
         // below. That ordering is why no separate "draining" flag is needed -- but it only works
         // because the drain happens here, before the slot is cleared.
-        hsa::queue_controller_sync();
+        if(!hsa::queue_controller_sync())
+        {
+            ROCP_WARNING << fmt::format(
+                "counter collection: queue drain timed out while stopping context {}; in-flight "
+                "dispatches will be delivered late and serialization is released before they "
+                "finish",
+                ctx->context_idx);
+        }
         controller->disable_serialization(ctx->dispatch_counter_collection->agents);
         // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
         // dispatch_counter_collection is disabled above.
