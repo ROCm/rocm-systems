@@ -499,8 +499,6 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     }
     // TODO: Get external
 
-    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
-
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
     auto it = agents.find(queue.get_agent().get_rocp_agent()->id);
@@ -509,6 +507,12 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
+
+    // stop_context() clears enabled before it drops the serialization reference, and the context
+    // stays in the active array until both are done. A dispatch in that window is treated like an
+    // untraced one: with SERIALIZE_ALL it must still take the barriers, or it overlaps a traced
+    // dispatch that is still running. Once serialization is disabled the serializer ignores it.
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, parameters.bSerialize};
 
     // Kernel-replay localized context control: a replay pass may disable this ATT context for the
     // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
