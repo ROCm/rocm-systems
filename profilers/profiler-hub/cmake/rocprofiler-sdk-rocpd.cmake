@@ -142,13 +142,10 @@ set(ROCPD_SCHEMA_SDK_SUBDIR
     "Path (within the cloned repo) to the rocprofiler-sdk-rocpd schema files"
 )
 
-get_filename_component(_ROCPD_SCHEMA_VERSION "${ROCPD_SCHEMA_SDK_SUBDIR}" NAME)
-message(
-    STATUS
-    "[profiler-hub] profiler-hub version : ${PROJECT_VERSION} (schema version: ${_ROCPD_SCHEMA_VERSION})"
-)
-
 rocpd_clone_rocpd_schema_files(_ROCPD_SCHEMA_DIR)
+
+get_filename_component(_ROCPD_SCHEMA_VERSION "${ROCPD_SCHEMA_SDK_SUBDIR}" NAME)
+message(STATUS "[profiler-hub] rocpd schema version: ${_ROCPD_SCHEMA_VERSION}")
 
 rocpd_configure_rocpd_schema_files(
     ${_ROCPD_SCHEMA_DIR}
