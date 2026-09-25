@@ -37,6 +37,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <algorithm>
 #include <vector>
@@ -193,15 +194,20 @@ static std::atomic<bool> g_capture_incomplete{false};
 // crash-callback <-> writer coordination point.
 static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
 
+// Raise g_buf_busy for a thread that already holds g_file_mu. Writers are
+// serialized by the mutex, so the flag can only be up already because the crash
+// callback is flushing g_buf; wait for it rather than mutating under it.
+static void claim_buf_locked() {
+  while (g_buf_busy.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+}
+
 // RAII for writer threads: take the thread<->thread mutex AND raise g_buf_busy so
 // the crash callback can tell a g_buf mutation is in flight. Member order
 // matters: the mutex locks first and unlocks last, with the busy window nested
 // strictly inside it.
 struct BufWriteGuard {
   std::lock_guard<std::mutex> lk_;
-  BufWriteGuard() : lk_(g_file_mu) {
-    g_buf_busy.test_and_set(std::memory_order_acquire);
-  }
+  BufWriteGuard() : lk_(g_file_mu) { claim_buf_locked(); }
   ~BufWriteGuard() { g_buf_busy.clear(std::memory_order_release); }
 };
 
@@ -444,13 +450,29 @@ static void index_existing_blobs_locked() {
 }
 
 #ifndef _WIN32
+// Both writer mutexes are held across fork(): a child must not inherit one that
+// a thread which does not exist in the child had locked, because the child
+// reopens its archive under them.
 static void atfork_prepare() {
-  BufWriteGuard lk;
+  g_blob_mu.lock();
+  g_file_mu.lock();
+  claim_buf_locked();
   if (g_events_fd >= 0)
     flush_buffer_locked();
+  g_buf_busy.clear(std::memory_order_release);
+}
+
+static void atfork_parent() {
+  g_file_mu.unlock();
+  g_blob_mu.unlock();
 }
 
 static void atfork_child() {
+  g_file_mu.unlock();
+  g_blob_mu.unlock();
+  // A crash callback on another thread can raise g_buf_busy after
+  // atfork_prepare clears it, and that thread does not exist in the child.
+  g_buf_busy.clear(std::memory_order_release);
   std::string dir;
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
@@ -465,8 +487,8 @@ static void atfork_child() {
     // pid-<pid> sub-archive.
     dir = g_base_dir;
   }
-  // NOTE: this is hrr_cap::writer::open(const char*) — the writer's archive-open
-  // routine — NOT POSIX ::open(). It runs fs::create_directories / fopen,
+  // NOTE: this is hrr_cap::writer::open(const char*), the writer's archive-open
+  // routine, NOT POSIX ::open(). It creates directories and opens files,
   // which are not async-signal-safe in general, but pthread_atfork's child
   // handler runs in the (single-threaded) child immediately after fork() with no
   // mutex held, so these calls are safe here. We deliberately do NOT call this
@@ -478,7 +500,7 @@ static void atfork_child() {
 static void install_atfork_handlers_once() {
   static std::once_flag once;
   std::call_once(once, [] {
-    pthread_atfork(atfork_prepare, nullptr, atfork_child);
+    pthread_atfork(atfork_prepare, atfork_parent, atfork_child);
   });
 }
 #endif
@@ -843,10 +865,19 @@ void emergency_finalize(bool clean_shutdown) {
   // complete:true (the trailer is present); a crash writes complete:false — its
   // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
+  // Concurrent crash callbacks (or a crash overlapping clean shutdown) must not
+  // share the emergency buffer. A second entrant skips the manifest.
+  static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
+  if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
   bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
-  if (mfd < 0) return;
-  char buf[kEmergencyManifestMax];
+  if (mfd < 0) {
+    g_emergency_manifest_busy.clear(std::memory_order_release);
+    return;
+  }
+  // Static, not on the stack: the crash handler can run on a thread with little
+  // stack left.
+  static char buf[kEmergencyManifestMax];
   size_t p = 0;
   p = append_lit(buf, p,
                  "{\n"
@@ -873,6 +904,7 @@ void emergency_finalize(bool clean_shutdown) {
   write_all_fd(mfd, buf, p);
   HRR_FSYNC(mfd);
   HRR_CLOSE(mfd);
+  g_emergency_manifest_busy.clear(std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
