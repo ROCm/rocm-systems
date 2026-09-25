@@ -430,3 +430,13 @@ Stream-K Default qualifies at high with 8/8 detections, matching accepted
 clean, complete analysis and healthy admitted/reached trials
 (`streamk-lifetime-high-*`). Default was 0/8. The release-weakening fault remains
 observable with the acquire edge retained.
+
+### Remaining workload inventory refresh
+
+All 13 serial inventory runs under `remaining-lifetime-inventory` are accepted:
+Qwen, TP1 prefill and decode/combined, all three TP2 IDs, CLIP, PyTorch cluster
+load, mode, topk, sort, histc, and norm/softmax. The old Qwen/TP1/TP2 fault
+site identities do not occur in these current inventories, so they cannot be
+reused without review. TP2 decode and combined expose no sites in this barrier
+inventory; that is not by itself evidence of absent applicable memory accesses.
+The remaining rows need source/ISA dependency review and fault qualification.
