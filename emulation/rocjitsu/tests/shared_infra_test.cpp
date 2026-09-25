@@ -8065,4 +8065,46 @@ TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
   EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
 }
 
+TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
+  struct Case {
+    uint32_t lhs;
+    uint32_t rhs;
+    float scale;
+    uint32_t causes;
+  };
+  constexpr Case cases[] = {
+      {0x3f800000, 0x40000000, 4.0f, 0},
+      {0x3f800001, 0x3f800001, 1.0f, 1u << 5},
+      {0x00800000, 0x3f800000, 0.5f, 1u << 4},
+      {0x00800000, 0x00800000, 1.0f, (1u << 4) | (1u << 5)},
+      {0x00000001, 0x3f800000, 1.0f, (1u << 1) | (1u << 4)},
+      {0x00000001, 0x7f000000, 4.0f, 1u << 1},
+  };
+  for (uint32_t round = 0; round < 4; ++round) {
+    const amdgpu::fp_mode::ScopedEnvironment environment(round);
+    for (const auto &sample : cases) {
+      SCOPED_TRACE(testing::Message() << "round " << round << " lhs " << sample.lhs << " rhs "
+                                      << sample.rhs << " scale " << sample.scale);
+      volatile float lhs = std::bit_cast<float>(sample.lhs);
+      volatile float rhs = std::bit_cast<float>(sample.rhs);
+      EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, sample.scale), sample.causes);
+    }
+    volatile float largest = std::bit_cast<float>(0x7f7fffffu);
+    // Directed rounding toward a finite result still reports INEXACT.
+    EXPECT_EQ(amdgpu::classify_mul_f32(largest, 2.0f), (1u << 5) | (round < 2 ? 1u << 3 : 0u));
+  }
+}
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+TEST(AluExceptionTest, HostDazPreservesExactSubnormalOutputClassification) {
+  const amdgpu::fp_mode::ScopedEnvironment environment(0);
+  _mm_setcsr(_mm_getcsr() | (1u << 6));
+  volatile float lhs = std::bit_cast<float>(0x00800000u);
+  volatile float rhs = 1.0f;
+  // OMOD produces an exact subnormal. Widening that result through a host
+  // conversion would flush it and falsely report INEXACT.
+  EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, 0.5f), 1u << 4);
+}
+#endif
+
 } // namespace
