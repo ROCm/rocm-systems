@@ -154,21 +154,49 @@
     "d128-block": {
       "faults": [
         {
-          "id": "barrier-drop",
+          "id": "barrier-drop-k-publication-group",
           "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine gfx1250 ELF fnv1a64:0af8dc50a065142d, FastContextPolicy D128 block dispatch. Source 011_gfx1250_d128_attention_block_test.hip:289 publishes K fragments from subgroup zero. Final ISA .text+0x61e34/0x61e40 stores LDS, restores EXEC at 0x61e48, then unconditional signal/wait pairs 0x61e50/0x61e58 and 0x61e5c/0x61e60 precede peer LDS loads 0x61ff8/0x62000. Remove both physical pairs implementing the one logical publication; retain following reuse barriers. Disassembly uses VMA .text=0x2400. Evidence: cdna5-20260925/d128-isa/original.asm and unfiltered-inventory/d128-block/inventory. Eight independent trials per profile precommitted at delay zero/default; numerical manifestations retained independently."
+          },
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:9c0ba0babb69dfd2|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:9c0ba0babb69dfd2|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:9c0ba0babb69dfd2|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009190|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:0af8dc50a065142d|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000061e50|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:0af8dc50a065142d|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000061e50|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:0af8dc50a065142d|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000061e58|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:0af8dc50a065142d|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000061e5c|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:0af8dc50a065142d|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000061e5c|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:0af8dc50a065142d|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000061e60|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }
