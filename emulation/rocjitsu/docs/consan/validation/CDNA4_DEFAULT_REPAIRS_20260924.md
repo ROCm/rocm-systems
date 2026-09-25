@@ -87,11 +87,14 @@ been weakened. Evidence: `tree-debug/regression-{before,after}.log` and
 
 ## Remaining sampling searches
 
-The fixed reviewed mutations are also being tested at `max` with 64, 128, 256, and 512
+The fixed reviewed mutations were also tested at `max` with 64, 128, 256, and 512
 banks, each with its own clean comparator and prospective 6/8 contract. HipKittens BF16
 has completed all four settings: clean passes, 0/8 detections at each. Tensile has
-completed all four bank counts with the same result; histc and norm/softmax
-are still running.
+completed all four bank counts with the same result, as have histc and
+norm/softmax. All sixteen bank-search batches have passing clean controls, eight
+admitted/reached trials, complete coverage, healthy GPU probes, and zero
+detections. The audit of these sixteen batches plus the three Stream-K arrival
+presets reports no gate or provenance errors (`qualification-audit.json`).
 
 Larger bank counts only address competition between retained wave/workgroup
 representatives. The [selection and retention
