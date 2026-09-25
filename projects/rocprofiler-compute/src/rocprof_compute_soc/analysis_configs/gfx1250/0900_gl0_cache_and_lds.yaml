@@ -72,17 +72,17 @@ Panel Config:
           min: MIN(TX_VMW_VMW_LATENCY_sum / TX_VMW_REQ_sum)
           max: MAX(TX_VMW_VMW_LATENCY_sum / TX_VMW_REQ_sum)
           unit: Cycles
-        Total Requests - Sectors:
+        Total GL0 Sectors:
           avg: SUM(TX_VMW_SECTORS_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_sum / $denom)
           max: MAX(TX_VMW_SECTORS_sum / $denom)
           unit: (Count + $normUnit)
-        Total Requests - Sector Reads:
+        GL0 Read Sectors:
           avg: SUM(TX_VMW_SECTORS_READ_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_READ_sum / $denom)
           max: MAX(TX_VMW_SECTORS_READ_sum / $denom)
           unit: (Count + $normUnit)
-        Total Requests - Sector Writes:
+        GL0 Write Sectors:
           avg: SUM(TX_VMW_SECTORS_WRITE_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_WRITE_sum / $denom)
           max: MAX(TX_VMW_SECTORS_WRITE_sum / $denom)
@@ -532,13 +532,13 @@ Panel Config:
     Request Latency: >-
       Average GL0 cache request latency.
 
-    Total Requests - Sectors: >-
+    Total GL0 Sectors: >-
       Total cache sectors involved in GL0 requests.
 
-    Total Requests - Sector Reads: >-
+    GL0 Read Sectors: >-
       Number of GL0 cache sectors read.
 
-    Total Requests - Sector Writes: >-
+    GL0 Write Sectors: >-
       Number of GL0 cache sectors written.
 
     Cache Lookup Hit Rate: >-
