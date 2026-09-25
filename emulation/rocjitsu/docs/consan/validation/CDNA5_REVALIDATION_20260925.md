@@ -1443,3 +1443,16 @@ between the maximum store (VMA 0x231e4) and peer load (0x231fc), with producer
 retirement preserved and no remaining barrier between them after mutation.
 The next campaign `tp2-lanes-higher` increases sampling to higher with ordinary
 eight-bank capacity and checks all three clean workloads before prefill faults.
+
+### F8 high faults pass; full high clean gate remains
+
+`f8gemm-exact-high-clean-retry` passes baseline and high for the exact fault
+shard. All eight high fault trials are admitted/reached and detect the race,
+with complete analysis, healthy checks and hook hashes matching clean. This
+is 8/8 at high after default's 0/8.
+
+The full nine-shard clean sweep completed earlier was at default. Before
+qualifying the whole row at high, `f8gemm-full-high-clean` runs all nine
+instrumented shards at high with 1800 s inner / 2100 s outer deadlines.
+The table records the successful fault result while keeping the full clean
+gate explicit; no green qualification is claimed prematurely.
