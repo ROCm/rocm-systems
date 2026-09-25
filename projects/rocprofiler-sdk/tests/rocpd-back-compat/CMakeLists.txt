@@ -89,8 +89,12 @@ execute_process(
     OUTPUT_QUIET ERROR_QUIET)
 if(_otf2_import_result EQUAL 0)
     set(ROCPD_BACK_COMPAT_OTF2_DISABLED OFF)
+    set(ROCPD_BACK_COMPAT_OTF2_VALIDATE_ARGS)
 else()
     set(ROCPD_BACK_COMPAT_OTF2_DISABLED ON)
+    # Without OTF2 output the OTF2 validators must skip, even when the otf2 package is
+    # importable in the test environment.
+    set(ROCPD_BACK_COMPAT_OTF2_VALIDATE_ARGS --otf2-disabled)
     message(
         STATUS
             "rocpd-back-compat: otf2 Python package not found — OTF2 generation tests disabled"
@@ -216,6 +220,6 @@ rocprofiler_add_integration_validate_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     ARGS --output-root ${ROCPD_BACK_COMPAT_OUTPUT_DIR} --tested-schemas
          ${ROCPD_COMPAT_TESTED_SCHEMAS} --old-schemas ${ROCPD_OLD_SCHEMAS} --latest-schema
-         ${ROCPD_LATEST_SCHEMA}
+         ${ROCPD_LATEST_SCHEMA} ${ROCPD_BACK_COMPAT_OTF2_VALIDATE_ARGS}
     DISCOVERY_ARGS --tested-schemas ${ROCPD_COMPAT_TESTED_SCHEMAS} --old-schemas
                    ${ROCPD_OLD_SCHEMAS} --latest-schema ${ROCPD_LATEST_SCHEMA})

@@ -44,6 +44,10 @@ Options
 
 --latest-schema
     The newest supported schema version (has graph-launch tables).
+
+--otf2-disabled
+    Passed when CMake disabled the OTF2 conversion tests, so no OTF2 output
+    exists to validate.
 """
 
 from pathlib import Path
@@ -80,6 +84,28 @@ def pytest_addoption(parser):
         default=None,
         help="Latest (newest) supported schema version",
     )
+    parser.addoption(
+        "--otf2-disabled",
+        action="store_true",
+        default=False,
+        help="OTF2 conversion tests were disabled at configure time",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip OTF2 validation when CMake did not generate OTF2 output.
+
+    The otf2 package may be importable while these tests run even though it was
+    not found when CMake configured the conversion tests.
+    """
+    if not config.getoption("--otf2-disabled"):
+        return
+    skip = pytest.mark.skip(
+        reason="OTF2 conversion tests were disabled at configure time"
+    )
+    for item in items:
+        if item.name.startswith("test_otf2"):
+            item.add_marker(skip)
 
 
 # ---------------------------------------------------------------------------
