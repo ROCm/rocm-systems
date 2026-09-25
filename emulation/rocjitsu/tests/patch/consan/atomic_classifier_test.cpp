@@ -3,11 +3,73 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/targets/cdna4/consan_atomic_observation.h"
+#include "rocjitsu/code/patch/consan/targets/cdna5/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 namespace rocjitsu::consan {
 namespace {
+
+TEST(ConSan, Cdna5PublicationObservationPreservesScaledAddressAndScope) {
+  for (uint32_t family : {0xecu, 0xeeu})
+    for (uint32_t op :
+         {cdna5::kFlatStoreB32Vflat, cdna5::kFlatAtomicAddU32Vflat, cdna5::kFlatAtomicOrB32Vflat})
+      for (uint32_t scale : {0u, 1u})
+        for (uint32_t scope : {0u, 1u, 2u, 3u}) {
+          cdna5::VflatMachineInst raw{};
+          raw.encoding = family;
+          raw.op = op;
+          raw.saddr = 6;
+          raw.vaddr = 17;
+          raw.vsrc = 23;
+          raw.ioffset = 0xfffffcu;
+          raw.scale_offset = scale;
+          raw.scope = scope;
+          raw.nv = 1;
+          raw.vdst = 255;
+          const bool store = op == cdna5::kFlatStoreB32Vflat;
+          const auto result = detail::build_cdna5_publication_observation(
+              {reinterpret_cast<const uint8_t *>(&raw), sizeof(raw)}, 42, store);
+          ASSERT_TRUE(result);
+          auto expected = raw;
+          expected.th = 1;
+          expected.vdst = 42;
+          if (store)
+            expected.op = cdna5::kFlatAtomicSwapB32Vflat;
+          EXPECT_EQ(std::memcmp(result->data(), &expected, sizeof(expected)), 0);
+        }
+}
+
+TEST(ConSan, Cdna5PublicationObservationRejectsUnsupportedForms) {
+  cdna5::VflatMachineInst original{};
+  original.encoding = 0xee;
+  original.op = cdna5::kFlatAtomicOrB32Vflat;
+  original.scale_offset = 1;
+  const auto build = [&](const auto &raw, uint16_t destination = 42, bool store = false) {
+    return detail::build_cdna5_publication_observation(
+        {reinterpret_cast<const uint8_t *>(&raw), sizeof(raw)}, destination, store);
+  };
+  ASSERT_TRUE(build(original));
+  EXPECT_FALSE(build(original, 256));
+  EXPECT_FALSE(build(original, 42, true));
+  for (uint32_t policy : {1u, 2u, 3u, 4u, 5u, 6u, 7u}) {
+    auto raw = original;
+    raw.th = policy;
+    EXPECT_FALSE(build(raw));
+  }
+  for (uint32_t bit : {8u, 22u, 24u, 40u, 63u}) {
+    std::array<uint32_t, 3> words;
+    std::memcpy(words.data(), &original, sizeof(original));
+    words[bit / 32u] ^= 1u << (bit % 32u);
+    EXPECT_FALSE(detail::build_cdna5_publication_observation(
+        {reinterpret_cast<const uint8_t *>(words.data()), sizeof(words)}, 42, false));
+  }
+  auto load = original;
+  load.op = cdna5::kFlatLoadB32Vflat;
+  EXPECT_FALSE(build(load));
+  EXPECT_FALSE(build(load, 42, true));
+  EXPECT_FALSE(detail::build_cdna5_publication_observation({}, 42, false));
+}
 
 TEST(ConSan, Cdna4PublicationObservationPreservesEncoding) {
   for (uint32_t segment : {0u, 2u})
