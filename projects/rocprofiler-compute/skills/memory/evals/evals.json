@@ -1,0 +1,79 @@
+{
+  "evaluations": [
+    {
+      "id": "mem-access-inefficiency",
+      "skill_should_trigger": true,
+      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture",
+      "expected_behavior": [
+        "reads the memory chart before opening an individual cache level",
+        "cites hit rates or request counts from the report",
+        "ties any coalescing or tiling advice to those numbers"
+      ],
+      "unexpected_behavior": [
+        "recommends an optimization without citing a metric from the report"
+      ],
+      "logs_contain": ["-b memchart"]
+    },
+    {
+      "id": "mem-cache-hit-rates",
+      "skill_should_trigger": true,
+      "prompt": "what are my L2 and vL1D hit rates for this kernel and are they bad?",
+      "expected_behavior": [
+        "opens the l2 and vl1d blocks for a single kernel id",
+        "judges the rates against what the algorithm should do rather than a fixed cutoff"
+      ],
+      "unexpected_behavior": [
+        "applies a remembered threshold such as L2 below 50% being bad, as if the tool defined one"
+      ],
+      "logs_contain": ["-b"]
+    },
+    {
+      "id": "mem-lds-bank-conflicts",
+      "skill_should_trigger": true,
+      "prompt": "does my kernel have LDS bank conflicts?",
+      "expected_behavior": [
+        "opens the lds block for the selected kernel",
+        "reads the bank conflict counters from the report"
+      ],
+      "logs_contain": ["lds"]
+    },
+    {
+      "id": "mem-bandwidth-bound",
+      "skill_should_trigger": true,
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?",
+      "expected_behavior": [
+        "walks the hierarchy from the memory chart down to the level responsible",
+        "distinguishes traffic that caches absorbed from traffic that reached HBM"
+      ],
+      "logs_contain": ["memchart"]
+    },
+    {
+      "id": "mem-membw-analysis-gfx950",
+      "skill_should_trigger": true,
+      "prompt": "run the guided memory bandwidth analysis on my MI350 workload",
+      "expected_behavior": [
+        "uses --experimental --membw-analysis",
+        "notes that the analysis is experimental and shipped for gfx950",
+        "reports the guidance the tool produced rather than substituting its own cutoffs"
+      ],
+      "logs_contain": ["--membw-analysis"]
+    },
+    {
+      "id": "mem-host-memory",
+      "skill_should_trigger": false,
+      "note": "Memory question, but host-side allocation is not GPU counter analysis.",
+      "prompt": "my application is leaking host memory, help me find it"
+    },
+    {
+      "id": "mem-cuda-memory",
+      "skill_should_trigger": false,
+      "prompt": "analyze the memory throughput of my CUDA kernel with Nsight"
+    },
+    {
+      "id": "mem-gpu-oom",
+      "skill_should_trigger": false,
+      "note": "About allocation failure, not bandwidth or cache behaviour.",
+      "prompt": "why does my model run out of GPU memory during training?"
+    }
+  ]
+}
