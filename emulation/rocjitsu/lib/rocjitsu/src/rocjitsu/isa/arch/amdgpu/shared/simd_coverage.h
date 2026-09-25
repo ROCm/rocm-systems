@@ -369,10 +369,10 @@ template <bool Extended, typename Slot>
         result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
         break;
       case 3:
-        result = std::bit_cast<U>(af * bf);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::MUL>(af, bf, wf));
         break;
       case 4:
-        result = std::bit_cast<U>(af + bf);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
         result = std::bit_cast<U>(af - bf);

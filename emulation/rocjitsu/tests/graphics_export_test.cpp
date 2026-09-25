@@ -4696,6 +4696,102 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
   }
 }
 
+TEST_P(GraphicsExportTest, DepthMipAndArrayViewsPreserveOtherSubresources) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t width = 64, levels = 7;
+  constexpr uint64_t base = 0x200000;
+  for (uint32_t bytes : {2u, 4u}) {
+    const uint32_t swizzle = gfx12 ? 3 : 28;
+    for (uint32_t level : {0u, 1u, 3u, 6u}) {
+      for (const auto &[first, relative] : {std::pair{0u, 0u}, {2u, 1u}, {2049u, 1u}, {2u, 2u}}) {
+        SCOPED_TRACE(testing::Message()
+                     << bytes << ',' << level << ',' << first << ',' << relative);
+        const uint32_t last = first + 1;
+        const auto address = [&](uint32_t mip, uint32_t layer, uint32_t x, uint32_t y) {
+          const auto layout =
+              amdgpu::image_mip_layout(gfx12, swizzle, bytes, width, width, levels, mip);
+          const uint64_t layer_base = amdgpu::image_layer_base(
+              gfx12, base + layout->offset, layout->slice_size, layer, bytes, swizzle);
+          return gfx12 ? amdgpu::gfx12_image_address(layer_base, x + layout->tail_x,
+                                                     y + layout->tail_y, layout->pitch, bytes,
+                                                     swizzle)
+                       : amdgpu::gfx11_image_address(layer_base, x + layout->tail_x,
+                                                     y + layout->tail_y, layout->pitch, bytes,
+                                                     swizzle);
+        };
+        // Populate each mip in and around the view. Only the selected subresource
+        // may change, including when the view uses GFX11's high slice bits.
+        for (uint32_t mip = 0; mip < levels; ++mip)
+          for (uint32_t layer = first; layer <= last + 1; ++layer)
+            for (uint32_t y = 0; y < std::min(4u, width >> mip); ++y)
+              for (uint32_t x = 0; x < std::min(4u, width >> mip); ++x) {
+                const uint32_t value = bytes == 2 ? 65535 : std::bit_cast<uint32_t>(1.0f);
+                ASSERT_TRUE(address(mip, layer, x, y));
+                memory_.write_block(*address(mip, layer, x, y),
+                                    {reinterpret_cast<const uint8_t *>(&value), bytes});
+              }
+        amdgpu::Pm4QueueState state;
+        state.num_instances = 1;
+        state.uconfig_registers[0x242] = 17;
+        auto &ctx = state.context_registers;
+        ctx[gfx12 ? 5 : 7] = (width - 1) | ((width - 1) << 16);
+        ctx[gfx12 ? 6 : 0x10] =
+            (bytes == 2 ? 1 : 3) | (swizzle << 4) | ((levels - 1) << (gfx12 ? 15 : 16));
+        if (gfx12) {
+          ctx[1] = first | (last << 16);
+          ctx[2] = level << 26;
+          ctx[8] = ctx[10] = base >> 8;
+        } else {
+          ctx[2] = first | ((last & 0x7ff) << 13) | ((last >> 11) << 30) | (level << 26);
+          ctx[0x12] = ctx[0x14] = base >> 8;
+        }
+        ctx[gfx12 ? 0x1c : 0x200] = 6 | (7 << 4); // ALWAYS, write enabled.
+        ctx[gfx12 ? 0x198 : 0x1b4] = 2;
+        ctx[0x2f9] = 0x2d;
+        ctx[0x30e] = ctx[0x30f] = 0xffffffffu;
+        ctx[gfx12 ? 0x205 : 0x206] = 0x43f;
+        ctx[gfx12 ? 0x206 : 0x207] = 1u << 18; // Layer export enabled.
+        const float half_extent = float(width >> level) * 0.5f;
+        ctx[0x10f] = ctx[0x110] = ctx[0x111] = ctx[0x112] = std::bit_cast<uint32_t>(half_extent);
+        ctx[0x113] = ctx[gfx12 ? 0x116 : 0xb5] = std::bit_cast<uint32_t>(1.0f);
+        ctx[0x204] = (1u << 26) | (1u << 27);
+        const uint32_t end = std::min(4u, width >> level) - gfx12;
+        ctx[0x91] = end | (end << 16);
+        auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+        for (uint32_t i = 0; i < 3; ++i) {
+          draw->export_lane(*wave_, i, 12, 15,
+                            {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(0.25f), std::bit_cast<uint32_t>(1.0f)});
+          draw->export_lane(*wave_, i, 13, 4, {0, 0, relative, 0});
+        }
+        draw->export_lane(*wave_, 0, 20, 1,
+                          {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+        const auto dispatch = draw->advance(*access_);
+        ASSERT_EQ(bool(dispatch), relative <= last - first);
+        if (dispatch) {
+          EXPECT_FALSE(draw->advance(*access_));
+        }
+        for (uint32_t mip = 0; mip < levels; ++mip)
+          for (uint32_t layer = first; layer <= last + 1; ++layer)
+            for (uint32_t y = 0; y < std::min(4u, width >> mip); ++y)
+              for (uint32_t x = 0; x < std::min(4u, width >> mip); ++x) {
+                uint32_t actual = 0;
+                ASSERT_EQ(access_->read(*address(mip, layer, x, y),
+                                        {reinterpret_cast<std::byte *>(&actual), bytes}),
+                          amdgpu::VmAccessOutcome::Complete);
+                const bool changed =
+                    relative <= last - first && mip == level && layer == first + relative;
+                const uint32_t expected = bytes == 2
+                                              ? (changed ? 16384 : 65535)
+                                              : std::bit_cast<uint32_t>(changed ? 0.25f : 1.0f);
+                EXPECT_EQ(actual, expected) << mip << ',' << layer << ',' << x << ',' << y;
+              }
+      }
+    }
+  }
+}
+
 TEST_P(GraphicsExportTest, HardwareInterpolationEncodingUsesVgprSelectors) {
   // RADV's triangle fragment shader uses this word pair on both physical cards.
   const std::array<uint32_t, 4> words{0xcd000205, 0x040a0102, 0, 0};

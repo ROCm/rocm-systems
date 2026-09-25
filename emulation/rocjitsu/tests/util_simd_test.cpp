@@ -443,14 +443,8 @@ TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
   ::dlclose(module);
 }
 
-// Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
-// v_log_f32 (stdx::log2). Those VOP1 kernels take the SIMD path whenever
-// `util::has_stdx_simd`, with no runtime value check — so the vector libm
-// MUST be bit-identical to the scalar std::* used by the generated body, or
-// the fast path silently returns wrong results. These tests sweep full-range
-// random bit patterns (covering NaN/Inf/denormal/negative) and fail loudly if
-// any lane diverges, blocking a divergent toolchain at CI time. If one fails,
-// drop the corresponding row from SIMD_VOP1_UNARY rather than ship wrong math.
+// Compare scalar and SIMD paths over full-range random encodings, including
+// NaN payloads. LOG and EXP use the shared hardware mappings in both paths.
 template <class ScalarFn, class VectorFn>
 void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
@@ -474,14 +468,18 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
 
 TEST(UtilSimd, Exp2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::exp2(x); },
-                        [](util::native<float> v) { return util::stdx::exp2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_exp_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::exp_f32_simd(v, quiet_snan); });
 }
 
 TEST(UtilSimd, Log2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::log2(x); },
-                        [](util::native<float> v) { return util::stdx::log2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_log_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::log_f32_simd(v, quiet_snan); });
 }
 
 // Toolchain guard for the ternary VOP2 FMA/MAC/MAD SIMD fast path
@@ -750,6 +748,8 @@ TEST(UtilSimd, F16ToF32_VectorMatchesScalar_Exhaustive) {
 
 TEST(UtilSimd, F16RoundTripPreservesEveryEncoding) {
   SKIP_IF_NO_SIMD();
+  RestoreEnvironment environment;
+  std::feclearexcept(FE_ALL_EXCEPT);
   using V = util::native<uint32_t>;
   constexpr std::size_t W = util::native_width_v<uint32_t>;
   for (uint32_t base = 0; base < 65536u; base += static_cast<uint32_t>(W)) {
@@ -765,6 +765,9 @@ TEST(UtilSimd, F16RoundTripPreservesEveryEncoding) {
       ASSERT_EQ(truncated[i], input[i]);
     }
   }
+  // Discarded lanes in the subnormal paths must still have valid shift counts.
+  // Some SIMD backends implement variable shifts with floating conversions.
+  EXPECT_EQ(std::fetestexcept(FE_INVALID), 0);
 }
 
 TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {

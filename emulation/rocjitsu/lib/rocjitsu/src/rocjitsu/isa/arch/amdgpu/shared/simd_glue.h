@@ -89,11 +89,15 @@ inline bool floating_clamp_nan_to_zero(const Wavefront &wf) {
 /// @brief Clamp one floating result with an explicit NaN conversion policy.
 template <typename T> inline T clamp_floating_result(T value, bool clamp_nan_to_zero) {
   static_assert(std::is_floating_point_v<T>);
-  if (std::isnan(value))
+  using U = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
+  constexpr U sign = U(1) << (sizeof(T) * 8 - 1);
+  const U bits = std::bit_cast<U>(value);
+  const U magnitude = bits & ~sign;
+  if (magnitude > std::bit_cast<U>(std::numeric_limits<T>::infinity()))
     return clamp_nan_to_zero ? T(0) : value;
-  if (value <= T(0))
+  if ((bits & sign) || magnitude == 0)
     return T(0);
-  if (value > T(1))
+  if (magnitude > std::bit_cast<U>(T(1)))
     return T(1);
   return value;
 }
@@ -783,6 +787,22 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
                                      wf.fp_denorm_mode_f32(), omod != 0);
   // FMA's subnormal intermediate is flushed before OMOD can scale it normal.
   return flush_output ? util::flush_denorm_f32_simd(result) : result;
+}
+
+/// ADD and MUL share FMA's NaN and pre-packing tininess policy. The exact
+/// transforms retain binary arithmetic's zero signs in every rounding mode.
+template <fp_mode::Arithmetic operation>
+inline util::native<float> binary_f32_simd(util::native<float> a, util::native<float> b,
+                                           const Wavefront &wf, uint32_t omod = 0) {
+  static_assert(operation == fp_mode::Arithmetic::ADD || operation == fp_mode::Arithmetic::MUL);
+  if constexpr (operation == fp_mode::Arithmetic::ADD)
+    return fma_f32_simd(a, util::native<float>(1.0f), b, wf, omod);
+  else {
+    using U = util::native<uint32_t>;
+    auto zero = std::bit_cast<util::native<float>>((std::bit_cast<U>(a) ^ std::bit_cast<U>(b)) &
+                                                   U(0x80000000u));
+    return fma_f32_simd(a, b, zero, wf, omod);
+  }
 }
 
 /// DX9 accumulator and three-source forms share the scalar flushing, zero-product,
@@ -2462,11 +2482,14 @@ template <typename Inst, typename UnOp>
 /// form reads the low source half and zero-extends the full destination dword;
 /// the true16 form selects the source half and writes the selected destination
 /// half per the ISA's op_sel[3] policy.
+/// With rounded_result, the operation supplies an architectural half and OMOD
+/// acts on that half before CLAMP. Other operations retain promoted arithmetic.
 /// All steps bit-exact per the f16 VOP3 cmp slice's widening probe (f16_to_f32
 /// + f32_to_f16_mode verified against the scalar helper incl. NaN payload).
 template <bool True16, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
+[[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op,
+                                                           bool rounded_result = false) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
@@ -2476,6 +2499,14 @@ template <bool True16, typename Inst, typename UnOp>
   const uint32_t neg = inst.inst_.neg;
   const uint32_t omod = effective_vop3_omod_f16(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
+  const auto modify_result = [&](util::native<float> value) {
+    if (!rounded_result)
+      return apply_vop3_dst_mod_f32(value, omod, clamp, floating_clamp_nan_to_zero(wf));
+    return util::map_native_convert_scalar<float, float>(value, [&](float lane) {
+      lane = fp_mode::apply_omod_f16(lane, omod, wf.fp16_ovfl());
+      return clamp ? clamp_floating_result(lane, wf) : lane;
+    });
+  };
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -2493,7 +2524,7 @@ template <bool True16, typename Inst, typename UnOp>
       raw = select_vop3_true16_src(raw, opsel, 0);
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
-      const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf));
+      const auto r = modify_result(un_op(a));
       const auto out_half =
           finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod);
       auto prev = dst.template load_native<T>(base);
@@ -2512,7 +2543,7 @@ template <bool True16, typename Inst, typename UnOp>
       auto raw = src0.template load_native<T>(base) & util::broadcast<T>(0xffffu);
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
-      const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf));
+      const auto r = modify_result(un_op(a));
       const auto out =
           finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
           util::broadcast<T>(0xffffu);
@@ -2524,7 +2555,7 @@ template <bool True16, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f16 unary path; see the binary-path note.
 template <bool True16, typename Inst, typename UnOp>
-[[nodiscard]] bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp, bool = false) {
   return false;
 }
 
@@ -3288,13 +3319,14 @@ template <typename Inst, typename Op>
 /// bit-exact, so the fast path stays correct with modifiers set; no bail.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
+[[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &inst, Wavefront &wf, UnOp un_op,
+                                                         bool force_output_flush = false) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod, force_output_flush);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<Tout>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3315,7 +3347,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f32 unary path.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
-[[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp, bool = false) {
   return false;
 }
 

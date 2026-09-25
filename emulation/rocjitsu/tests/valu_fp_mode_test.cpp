@@ -1000,6 +1000,62 @@ std::vector<ArithmeticCase> dx9_fma_cases() {
   return cases;
 }
 
+std::vector<ArithmeticCase> binary_f32_policy_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+        ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool rdna_encoding = arch >= ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool always_quiets = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    for (bool multiply : {false, true})
+      for (bool e64 : {false, true})
+        for (uint32_t denorm = 0; denorm < 4; ++denorm)
+          for (uint32_t rounding = 0; rounding < 4; ++rounding)
+            for (bool ieee : {false, true}) {
+              // Assembled for each target with llvm-mc. Expected raw bits were
+              // captured on gfx1100/gfx1201; the shared MODE policy also applies
+              // to earlier RDNA/CDNA arithmetic and CDNA5's always-quiet policy.
+              const uint32_t first = e64 ? (rdna_encoding ? (multiply ? 0xd5080006u : 0xd5030006u)
+                                                          : (multiply ? 0xd1050006u : 0xd1010006u))
+                                         : (rdna_encoding ? (multiply ? 0x100c0300u : 0x060c0300u)
+                                                          : (multiply ? 0x0a0c0300u : 0x020c0300u));
+              const std::array<uint32_t, 3> words{
+                  first, e64 ? (rdna_encoding ? 0x02020300u : 0x00020300u) : 0u, 0u};
+              const std::string prefix = "Arch" + std::to_string(arch) +
+                                         (multiply ? "Mul" : "Add") + (e64 ? "E64" : "E32") +
+                                         "Denorm" + std::to_string(denorm) + "Round" +
+                                         std::to_string(rounding) + "Ieee" + std::to_string(ieee);
+              auto add = [&](const char *name, uint32_t a, uint32_t b, uint32_t expected) {
+                cases.push_back({prefix + name,
+                                 arch,
+                                 words,
+                                 {{0, a}, {1, b}},
+                                 {{6, expected}},
+                                 (uint32_t(ieee) << 9) | (denorm << 4) | rounding,
+                                 FE_UPWARD});
+              };
+              const uint32_t nan = ieee || always_quiets ? 0x7fc01abcu : 0x7f801abcu;
+              add("FirstNan", 0x7f801abcu, 0xffc00222u, nan);
+              add("SecondNan", 0x3f800000u, 0x7f801abcu, nan);
+              add("ZeroSign", 0x80000000u, multiply ? 0x3f800000u : 0x80000000u, 0x80000000u);
+              add("OppositeZeros", 0u, 0x80000000u, multiply || rounding == 2 ? 0x80000000u : 0u);
+              if (multiply) {
+                const uint32_t positive = !(denorm & 2u) ? 0u
+                                          : rounding < 2 ? 0x00800000u
+                                                         : 0x007fffffu;
+                const uint32_t negative = !(denorm & 2u)                   ? 0x80000000u
+                                          : rounding == 0 || rounding == 2 ? 0x80800000u
+                                                                           : 0x807fffffu;
+                add("PositiveTinySignificand", 0x00800000u, 0x3f7fffffu, positive);
+                add("NegativeTinySignificand", 0x80800000u, 0x3f7fffffu, negative);
+              }
+            }
+  }
+  return cases;
+}
+
 std::vector<ArithmeticCase> omod_underflow_cases() {
   std::vector<ArithmeticCase> cases;
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
@@ -1356,11 +1412,363 @@ std::vector<ArithmeticCase> trig_fp_cases() {
                               : 0x80000000u,
                 mode);
           }
-        if (target.arch == ROCJITSU_CODE_ARCH_RDNA3 || target.arch == ROCJITSU_CODE_ARCH_RDNA4)
-          for (uint32_t rounding = 0; rounding < 4; ++rounding)
+        if (target.arch == ROCJITSU_CODE_ARCH_RDNA3 || target.arch == ROCJITSU_CODE_ARCH_RDNA4) {
+          for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             add("CapturedOctant" + std::to_string(rounding), 0x3e000000u,
                 cosine ? 0x3f3504f3u : 0x3f3504f4u, 240u | rounding);
+            // Raw captures distinguish the quadratic stages and the
+            // normalized/reflected boundaries in both instruction encodings.
+            const uint32_t captured[][3] = {
+                {0x3aab9885u, 0x3c06c500u, 0x3f7ffdc8u}, {0x3d2001fbu, 0x3e78d2d0u, 0x3f7853c7u},
+                {0x3dc084adu, 0x3f0e9072u, 0x3f54a13bu}, {0x3e7fff08u, 0x3f800000u, 0x37c2c761u},
+                {0x3e7ffa50u, 0x3f800000u, 0x390ef149u},
+            };
+            for (const auto &sample : captured)
+              add("CapturedStages" + std::to_string(sample[0]) + "Round" + std::to_string(rounding),
+                  sample[0], sample[cosine + 1], 240u | rounding);
+          }
+        }
       }
+  return cases;
+}
+
+std::vector<ArithmeticCase> log_exp_policy_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+        ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                     arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    for (bool logarithm : {false, true})
+      for (bool e64 : {false, true}) {
+        // Assembled independently for all ten profiles with llvm-mc.
+        std::array<uint32_t, 3> words{};
+        if (e64) {
+          words[0] =
+              (gcn ? 0xd1600006u : 0xd5a50006u) + (logarithm ? (gcn ? 0x10000u : 0x20000u) : 0u);
+          words[1] = gcn ? 0x00000100u : 0x02010100u;
+        } else {
+          words[0] = (gcn ? 0x7e0c4100u : 0x7e0c4b00u) + (logarithm ? (gcn ? 0x200u : 0x400u) : 0u);
+        }
+        for (uint32_t ieee = 0; ieee < 2; ++ieee)
+          for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+            const uint32_t mode = 240u | (ieee << 9) | rounding;
+            const std::string prefix = "Arch" + std::to_string(arch) + (logarithm ? "Log" : "Exp") +
+                                       (e64 ? "E64" : "E32") + "Mode" + std::to_string(mode);
+            const auto add = [&](const char *name, uint32_t input, uint32_t expected) {
+              // Preserve flags and FTZ/DAZ under upward rounding, with the
+              // host invalid-operation trap enabled.
+              cases.push_back({prefix + name,
+                               arch,
+                               words,
+                               {{0, input}},
+                               {{6, expected}},
+                               mode,
+                               FE_UPWARD,
+                               0x9fc0u,
+                               0x9f60u});
+            };
+            const bool quiet =
+                ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+            add("SignalingNan", 0x7f812345u, quiet ? 0x7fc12345u : 0x7f812345u);
+            add("NegativeSignalingNan", 0xff812345u, quiet ? 0xffc12345u : 0xff812345u);
+            add("QuietNan", 0xffc12345u, 0xffc12345u);
+            add("Negative", 0xbf800000u, logarithm ? 0xffc00000u : 0x3f000000u);
+            add("NegativeInfinity", 0xff800000u, logarithm ? 0xffc00000u : 0u);
+            add("NegativeSubnormal", 0x80000001u, logarithm ? 0xff800000u : 0x3f800000u);
+            if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4)
+              add("CapturedRounding", logarithm ? 0x3f174424u : 0x3f0567ecu,
+                  logarithm ? 0xbf425164u : 0x3fb7b03du);
+            if (!logarithm &&
+                (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4)) {
+              const uint32_t captured[][2] = {
+                  {0x337fffffu, 0x3f800000u}, {0x33800000u, 0x3f800000u},
+                  {0x33800001u, 0x3f800000u}, {0xb37fffffu, 0x3f800000u},
+                  {0xb3800000u, 0x3f7fffffu}, {0xb3800001u, 0x3f7fffffu},
+                  {0x42ffffffu, 0x7f7fffa7u}, {0x43000000u, 0x7f800000u},
+                  {0xc2fc0000u, 0x00800000u}, {0xc2fc0001u, 0x00000000u},
+                  {0x3f0567ecu, 0x3fb7b03du}, {0xc114ed44u, 0x3acecc1eu},
+                  {0x35500000u, 0x3f800004u}, {0x3e000090u, 0x3f8b95d0u},
+                  {0x3e80001eu, 0x3f9837f6u}, {0x3ec0001au, 0x3fa5fedcu},
+                  {0x3f000013u, 0x3fb504fcu}, {0x3f20002au, 0x3fc56740u},
+                  {0x3f40006fu, 0x3fd7453eu}, {0x3f600022u, 0x3feac0dcu},
+              };
+              for (const auto &sample : captured) {
+                const std::string name = "CapturedExp" + std::to_string(sample[0]);
+                add(name.c_str(), sample[0], sample[1]);
+              }
+            }
+            if (logarithm && e64) {
+              // LOG always disables output denormals, so preservation MODE
+              // cannot suppress scaling. IEEE mode still gates older profiles.
+              for (uint32_t omod : {1u, 2u, 3u}) {
+                auto scaled_words = words;
+                scaled_words[1] |= omod << 27;
+                const bool active =
+                    !ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+                const uint32_t scaled[] = {0x40000000u, 0x40800000u, 0x41000000u, 0x3f800000u};
+                for (uint32_t denorm = 0; denorm < 4; ++denorm)
+                  cases.push_back({prefix + "LogScale" + std::to_string(omod) + "Denorm" +
+                                       std::to_string(denorm),
+                                   arch,
+                                   scaled_words,
+                                   {{0, 0x40800000u}},
+                                   {{6, scaled[active ? omod : 0]}},
+                                   192u | (ieee << 9) | (denorm << 4) | rounding,
+                                   FE_UPWARD,
+                                   0x9fc0u,
+                                   0x9f60u});
+              }
+              // Modifiers run after the integer LOG mapping. Exercise both
+              // preserved signaling NaNs and invalid-operation results while
+              // host invalid traps, flags, rounding and flush controls persist.
+              for (uint32_t dx10 : {0u, 1u})
+                for (uint32_t modifier : {0u, 1u, 2u, 3u, 4u}) {
+                  auto modified_words = words;
+                  if (modifier == 4)
+                    modified_words[0] |= 0x8000u;
+                  else
+                    modified_words[1] |= modifier << 27;
+                  const bool nan_to_zero =
+                      modifier == 4 && (dx10 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                                        arch == ROCJITSU_CODE_ARCH_CDNA5);
+                  for (uint32_t input : {0xbf800000u, 0x7f800123u}) {
+                    const uint32_t result = input == 0xbf800000u ? 0xffc00000u
+                                            : quiet              ? 0x7fc00123u
+                                                                 : 0x7f800123u;
+                    cases.push_back({prefix + "LogModifier" + std::to_string(modifier) + "Dx10" +
+                                         std::to_string(dx10) + "Input" + std::to_string(input),
+                                     arch,
+                                     modified_words,
+                                     {{0, input}},
+                                     {{6, nan_to_zero ? 0u : result}},
+                                     mode | (dx10 << 8),
+                                     FE_UPWARD,
+                                     0x9fc0u,
+                                     0x9f60u});
+                  }
+                }
+            }
+            if (!logarithm && e64) {
+              // OMOD overflows after EXP returns. Its rounding and exception
+              // flags must remain independent of the host environment.
+              for (uint32_t omod : {1u, 2u, 3u}) {
+                auto scaled_words = words;
+                scaled_words[1] |= omod << 27;
+                for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+                  const bool active =
+                      !ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+                  const uint32_t unscaled = omod == 3 ? 0x00800000u : 0x7f000000u;
+                  const uint32_t expected = active ? (omod == 3 ? 0u : 0x7f800000u) : unscaled;
+                  for (int host_round : {FE_DOWNWARD, FE_UPWARD})
+                    cases.push_back({prefix + "Scale" + std::to_string(omod) + "Denorm" +
+                                         std::to_string(denorm) + "Host" +
+                                         std::to_string(host_round),
+                                     arch,
+                                     scaled_words,
+                                     {{0, omod == 3 ? 0xc2fc0000u : 0x42fe0000u}},
+                                     {{6, expected}},
+                                     192u | (ieee << 9) | (denorm << 4) | rounding,
+                                     host_round,
+                                     0x9fc0u,
+                                     0x9b60u});
+                }
+              }
+            }
+            {
+              std::array<uint32_t, 3> half_words{};
+              if (e64) {
+                half_words[0] = gcn ? (logarithm ? 0xd1800006u : 0xd1810006u)
+                                    : (logarithm ? 0xd5d70006u : 0xd5d80006u);
+                half_words[1] = gcn ? 0x00000100u : 0x02010100u;
+              } else {
+                half_words[0] = gcn ? (logarithm ? 0x7e0c8100u : 0x7e0c8300u)
+                                    : (logarithm ? 0x7e0caf00u : 0x7e0cb100u);
+              }
+              const bool preserves_high_half =
+                  !gcn && arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2;
+              const uint32_t half_cases[][2] = {
+                  {0x7c01u, quiet ? 0x7e01u : 0x7c01u},
+                  {0xfc01u, quiet ? 0xfe01u : 0xfc01u},
+                  {0xbc00u, logarithm ? 0xfe00u : 0x3800u},
+                  {0xfc00u, logarithm ? 0xfe00u : 0u},
+              };
+              for (bool fp16_ovfl : {false, true})
+                for (const auto &sample : half_cases)
+                  cases.push_back({prefix + "Half" + std::to_string(sample[0]) + "Ovfl" +
+                                       std::to_string(fp16_ovfl),
+                                   arch,
+                                   half_words,
+                                   {{0, sample[0]}},
+                                   {{6, sample[1] | (preserves_high_half ? 0xdead0000u : 0u)}},
+                                   mode | (fp16_ovfl ? (1u << 23) : 0u),
+                                   FE_UPWARD,
+                                   0x9fc0u,
+                                   0x9f60u});
+            }
+          }
+      }
+  }
+  return cases;
+}
+
+std::vector<ArithmeticCase> sdwa_log_exp_policy_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    const bool gcn = arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2;
+    // The older manuals specify SDWA OMOD by reference to VOP3. These exact
+    // values test that shared policy, not unmeasured hardware approximations.
+    // The SDWA words were assembled independently for each profile with llvm-mc.
+    for (bool logarithm : {false, true})
+      for (uint32_t ieee = 0; ieee < 2; ++ieee)
+        for (uint32_t denorm = 0; denorm < 4; ++denorm)
+          for (uint32_t rounding = 0; rounding < 4; ++rounding)
+            for (uint32_t omod : {1u, 2u, 3u}) {
+              const uint32_t mode = 192u | (ieee << 9) | (denorm << 4) | rounding;
+              const uint32_t opcode = gcn ? (logarithm ? 0x7e0c42f9u : 0x7e0c40f9u)
+                                          : (logarithm ? 0x7e0c4ef9u : 0x7e0c4af9u);
+              const std::array<uint32_t, 3> words{opcode, 0x00060600u | (omod << 14), 0};
+              const uint32_t log_results[] = {0x40000000u, 0x40800000u, 0x41000000u, 0x3f800000u};
+              const uint32_t input = logarithm   ? 0x40800000u
+                                     : omod == 3 ? 0xc2fc0000u
+                                                 : 0x42fe0000u;
+              const uint32_t unscaled = omod == 3 ? 0x00800000u : 0x7f000000u;
+              const uint32_t expected = logarithm   ? log_results[ieee ? 0 : omod]
+                                        : ieee      ? unscaled
+                                        : omod == 3 ? 0u
+                                                    : 0x7f800000u;
+              for (bool nan : {false, true})
+                for (int host_round : {FE_DOWNWARD, FE_UPWARD})
+                  cases.push_back({"Arch" + std::to_string(arch) + (logarithm ? "Log" : "Exp") +
+                                       "Mode" + std::to_string(mode) + "Omod" +
+                                       std::to_string(omod) + "Nan" + std::to_string(nan) + "Host" +
+                                       std::to_string(host_round),
+                                   arch,
+                                   words,
+                                   {{0, nan ? 0x7f812345u : input}},
+                                   {{6, nan ? (ieee ? 0x7fc12345u : 0x7f812345u) : expected}},
+                                   mode,
+                                   host_round,
+                                   0x9fc0u,
+                                   0x9b60u});
+            }
+  }
+  return cases;
+}
+
+std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
+  struct Captured {
+    const char *name;
+    bool logarithm;
+    uint32_t source;
+    uint32_t mode;
+    uint32_t modifier;
+    uint32_t rdna3;
+    uint32_t rdna4;
+  };
+  // Raw gfx1100/gfx1201 captures. Modifier 4 is CLAMP; 1..3 are OMOD.
+  const Captured captured[] = {
+      {"LogPreserveInput", true, 0x0001u, 240u, 0u, 0xce00u, 0xce00u},
+      {"LogFlushInput", true, 0x0001u, 48u, 0u, 0xfc00u, 0xfc00u},
+      {"LogFlushSaturate", true, 0x0001u, 8388656u, 0u, 0xfbffu, 0xfbffu},
+      {"LogZeroSaturate", true, 0x0000u, 8388848u, 0u, 0xfbffu, 0xfbffu},
+      {"LogInputInfinity", true, 0x7c00u, 8388848u, 0u, 0x7c00u, 0x7c00u},
+      {"ExpFiniteOverflow", false, 0x4c00u, 8388848u, 0u, 0x7bffu, 0x7bffu},
+      {"ExpInputInfinity", false, 0x7c00u, 8388848u, 0u, 0x7c00u, 0x7c00u},
+      {"ExpPreserveOutput", false, 0xcb80u, 240u, 0u, 0x0200u, 0x0200u},
+      {"ExpFlushOutput", false, 0xcb80u, 112u, 0u, 0x0000u, 0x0000u},
+      {"ExpScaleFlushedResult", false, 0xcb80u, 240u, 2u, 0x0200u, 0x0000u},
+      {"ExpScaleSaturatedResult", false, 0x4c00u, 8388656u, 3u, 0x77ffu, 0x77ffu},
+      {"ExpScaleOverflow", false, 0x4c00u, 48u, 3u, 0x7c00u, 0x7c00u},
+      {"ExpScaleMode", false, 0x4c00u, 8388848u, 3u, 0x7bffu, 0x77ffu},
+      {"LogNanClamp", true, 0xfc01u, 48u, 4u, 0xfc01u, 0x0000u},
+      {"ExpNanScale", false, 0x7c01u, 48u, 1u, 0x7c01u, 0x7e01u},
+      {"LogInvalidClamp", true, 0xbc00u, 48u, 4u, 0xfe00u, 0x0000u},
+      {"ExpSingleRounding", false, 0x11c5u, 240u, 0u, 0x3c01u, 0x3c01u},
+  };
+  std::vector<ArithmeticCase> cases;
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+        ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                     arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const bool true16 =
+        !gcn && arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2;
+    const bool always_omod = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    for (const auto &sample : captured) {
+      // Other profiles check exact values and MODE policy, not unmeasured finite approximations.
+      if (sample.source == 0x11c5u && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+          arch != ROCJITSU_CODE_ARCH_RDNA4)
+        continue;
+      for (bool e64 : {false, true}) {
+        if (!e64 && sample.modifier != 0)
+          continue;
+        std::array<uint32_t, 3> words{};
+        if (e64) {
+          words[0] = gcn ? (sample.logarithm ? 0xd1800006u : 0xd1810006u)
+                         : (sample.logarithm ? 0xd5d70006u : 0xd5d80006u);
+          words[1] = gcn ? 0x00000100u : 0x02010100u;
+          if (sample.modifier == 4)
+            words[0] |= 0x8000u;
+          else
+            words[1] |= sample.modifier << 27;
+        } else {
+          words[0] = gcn ? (sample.logarithm ? 0x7e0c8100u : 0x7e0c8300u)
+                         : (sample.logarithm ? 0x7e0caf00u : 0x7e0cb100u);
+        }
+        for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+          const uint32_t expected =
+              (always_omod ? sample.rdna4 : sample.rdna3) | (true16 ? 0xdead0000u : 0u);
+          cases.push_back({"Arch" + std::to_string(arch) + sample.name + (e64 ? "E64" : "E32") +
+                               "Round" + std::to_string(rounding),
+                           arch,
+                           words,
+                           {{0, sample.source}},
+                           {{6, expected}},
+                           sample.mode | (rounding << 2),
+                           FE_UPWARD,
+                           0x9fc0u,
+                           0x9f60u});
+        }
+      }
+    }
+    if (gcn || arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+      // Assembled SDWA forms select the high source and destination halves.
+      // MODE and register-placement contracts also apply on these older profiles.
+      for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+        for (bool signaling_nan : {false, true}) {
+          const uint32_t source = signaling_nan ? 0x7c01u : 0x3c00u;
+          const uint32_t result = signaling_nan ? 0x7c01u : 0x4400u;
+          cases.push_back({"Arch" + std::to_string(arch) + "SdwaExpNan" +
+                               std::to_string(signaling_nan) + "Round" + std::to_string(rounding),
+                           arch,
+                           {gcn ? 0x7e0c82f9u : 0x7e0cb0f9u, 0x00055500u},
+                           {{0, (source << 16) | 0x1234u}},
+                           {{6, (result << 16) | 0xbeefu}},
+                           48u | (rounding << 2),
+                           FE_UPWARD,
+                           0x9fc0u,
+                           0x9f60u});
+        }
+        cases.push_back(
+            {"Arch" + std::to_string(arch) + "SdwaLogClampRound" + std::to_string(rounding),
+             arch,
+             {gcn ? 0x7e0c80f9u : 0x7e0caef9u, 0x00053500u},
+             {{0, 0x7c011234u}},
+             {{6, 0x0000beefu}},
+             304u | (rounding << 2),
+             FE_UPWARD,
+             0x9fc0u,
+             0x9f60u});
+      }
+    }
+  }
   return cases;
 }
 
@@ -1450,6 +1858,22 @@ INSTANTIATE_TEST_SUITE_P(Trigonometry, ValuFpModeTest, testing::ValuesIn(trig_fp
                            return info.param.name;
                          });
 
+INSTANTIATE_TEST_SUITE_P(LogExp, ValuFpModeTest, testing::ValuesIn(log_exp_policy_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(SdwaLogExp, ValuFpModeTest, testing::ValuesIn(sdwa_log_exp_policy_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(HalfLogExp, ValuFpModeTest,
+                         testing::ValuesIn(half_log_exp_arithmetic_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
 INSTANTIATE_TEST_SUITE_P(Adjacent, ValuFpModeTest, testing::ValuesIn(adjacent_fp_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
@@ -1461,6 +1885,11 @@ INSTANTIATE_TEST_SUITE_P(LdexpF16, ValuFpModeTest, testing::ValuesIn(ldexp_f16_m
                          });
 
 INSTANTIATE_TEST_SUITE_P(Dx9Fma, ValuFpModeTest, testing::ValuesIn(dx9_fma_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(BinaryF32, ValuFpModeTest, testing::ValuesIn(binary_f32_policy_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

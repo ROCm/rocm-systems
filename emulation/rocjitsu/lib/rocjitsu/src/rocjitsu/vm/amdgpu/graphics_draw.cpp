@@ -384,12 +384,13 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
     sh_[0x84] = state.sh_registers[0x88];
     sh_[0x85] = state.sh_registers[0x89];
     context_[5] = (ctx[7] & 0x3fff) | (((ctx[7] >> 16) & 0x3fff) << 16);
-    context_[6] = ctx[0x10];
+    // MAXMIP moves from bits 16:19 to 15:19 on GFX12.
+    context_[6] = (ctx[0x10] & ~0xf8000u) | ((ctx[0x10] & 0xf0000u) >> 1);
     context_[8] = ctx[0x12];
     context_[9] = ctx[0x1a];
     context_[10] = ctx[0x14];
     context_[11] = ctx[0x1c];
-    context_[1] = ctx[2] & 0xc0ffffff;
+    context_[1] = (ctx[2] & 0x1fff) | (((ctx[2] >> 13) & 0x7ff) << 16) | ((ctx[2] >> 30) << 27);
     context_[2] = ctx[2] & 0x3f000000;
   }
   if (!indices_.empty() && indices_.size() != total_vertices_)
@@ -765,22 +766,38 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
 
   if (depth_control_ & 2) {
     const uint32_t zinfo = context_[6];
-    depth_width_ = (context_[5] & 0xffff) + 1;
-    depth_height_ = (context_[5] >> 16) + 1;
+    const uint32_t base_width = (context_[5] & 0xffff) + 1;
+    const uint32_t base_height = (context_[5] >> 16) + 1;
     depth_swizzle_ = (zinfo >> 4) & 31;
     depth_bytes_ = (zinfo & 3) == 1 ? 2 : 4;
+    depth_first_layer_ = context_[1] & 0x3fff;
+    depth_last_layer_ = (context_[1] >> 16) & 0x3fff;
     depth_base_ =
         addr_calc::buffer_virtual_address(((uint64_t{context_[9] & 255} << 32) | context_[8]) << 8);
     const uint64_t write_base = addr_calc::buffer_virtual_address(
         ((uint64_t{context_[11] & 255} << 32) | context_[10]) << 8);
     util::Logger::cp("graphics depth info=", std::hex, zinfo, " view=", context_[1], ",",
                      context_[2], " base=", depth_base_, " write=", write_base, std::dec);
-    if (((zinfo & 15) != 3 && (zinfo & 15) != 1) || (zinfo & (31u << 15)) ||
-        !(gfx12 ? gfx12_image_offset(0, 0, depth_width_, depth_bytes_, depth_swizzle_)
-                : gfx11_image_offset(0, 0, depth_width_, depth_bytes_, depth_swizzle_)) ||
-        context_[1] || (context_[2] & 0x7c000000u) ||
+    if (((zinfo & 15) != 3 && (zinfo & 15) != 1) || depth_first_layer_ > depth_last_layer_ ||
+        (context_[1] & 0xc000c000u) ||
         ((depth_control_ & 4) && ((context_[2] & (1u << 24)) || depth_base_ != write_base)))
-      throw std::runtime_error("unsupported graphics depth surface");
+      throw std::runtime_error(
+          std::format("unsupported graphics depth surface info={:#x} view={:#x},{:#x} size={}x{} "
+                      "base={:#x} write={:#x} control={:#x}",
+                      zinfo, context_[1], context_[2], base_width, base_height, depth_base_,
+                      write_base, depth_control_));
+    const uint32_t max_mip = (zinfo >> 15) & 31, level = (context_[2] >> 26) & 31;
+    const auto mip = image_mip_layout(gfx12, depth_swizzle_, depth_bytes_, base_width, base_height,
+                                      max_mip + 1, level);
+    if (!mip || (depth_metadata_ && (max_mip || depth_last_layer_)))
+      throw std::runtime_error("unsupported graphics depth mip or metadata layout");
+    depth_width_ = mip->width;
+    depth_height_ = mip->height;
+    depth_pitch_ = mip->pitch;
+    depth_tail_x_ = mip->tail_x;
+    depth_tail_y_ = mip->tail_y;
+    depth_slice_size_ = mip->slice_size;
+    depth_base_ += mip->offset;
     if (!color_enabled_) {
       width_ = depth_width_;
       height_ = depth_height_;
@@ -899,9 +916,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           return color.write_mask && relative_layer <= color.last_layer - color.first_layer;
         }))
       continue;
-    // Depth still has a single slice; color attachments have independent array views.
-    if ((depth_control_ & 2) && relative_layer)
-      throw std::runtime_error("graphics layered depth attachments are not implemented");
+    if ((depth_control_ & 2) && relative_layer > depth_last_layer_ - depth_first_layer_)
+      continue;
     if (nonpositive_w == 3 || outside_near == 3 || outside_far == 3)
       continue;
     // Clip coverage in homogeneous coordinates and carry the original
@@ -1244,8 +1260,11 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
       if (!f.covered)
         continue;
       if (depth_control_ & 2) {
-        const auto address =
-            image_address(depth_base_, f.x, f.y, depth_width_, depth_bytes_, depth_swizzle_);
+        const uint64_t layer_base = image_layer_base(
+            arch_ == ROCJITSU_CODE_ARCH_RDNA4, depth_base_, depth_slice_size_,
+            depth_first_layer_ + batch.relative_layer, depth_bytes_, depth_swizzle_);
+        const auto address = image_address(layer_base, f.x + depth_tail_x_, f.y + depth_tail_y_,
+                                           depth_pitch_, depth_bytes_, depth_swizzle_);
         uint32_t previous_bits = 0;
         if (!address || memory.read(*address, {reinterpret_cast<std::byte *>(&previous_bits),
                                                depth_bytes_}) != VmAccessOutcome::Complete)

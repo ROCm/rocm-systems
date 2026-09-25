@@ -105,7 +105,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMulF32: {
     float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
         std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32());
+        wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMulDx9ZeroF32: {
@@ -118,7 +118,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdAddF32: {
     float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
         std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32());
+        wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubF32: {

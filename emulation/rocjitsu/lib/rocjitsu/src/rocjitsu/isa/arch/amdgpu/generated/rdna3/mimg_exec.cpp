@@ -386,8 +386,11 @@ void ImageGather4CLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGetLodMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_image_lod(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.vdata,
+                            {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+                             inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+                            inst_.dim, inst_.dmask, inst_.d16,
+                            inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe, inst_.a16);
 }
 
 void ImageSampleDG16Mimg::execute_impl(amdgpu::Wavefront &wf) {

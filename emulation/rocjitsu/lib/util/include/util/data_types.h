@@ -142,7 +142,8 @@ inline uint16_t f32_to_f16(float val) {
 /// clamped to signed MAX_FP16; true infinities remain infinities.
 inline uint16_t f32_to_f16_mode(float val, bool fp16_ovfl) {
   uint16_t result = f32_to_f16(val);
-  if (fp16_ovfl && std::isfinite(val) && (result & 0x7FFFu) == 0x7C00u)
+  const bool finite = (std::bit_cast<uint32_t>(val) & 0x7fffffffu) < 0x7f800000u;
+  if (fp16_ovfl && finite && (result & 0x7FFFu) == 0x7C00u)
     return static_cast<uint16_t>((result & 0x8000u) | 0x7BFFu);
   return result;
 }
