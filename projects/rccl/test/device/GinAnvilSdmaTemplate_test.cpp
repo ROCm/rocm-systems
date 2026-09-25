@@ -15,8 +15,8 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 
 #if NCCL_GIN_ANVIL_SDMA_ENABLE
-// Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
-// Override must precede gin_anvil_sdma.h so the templates expand our counter.
+// Count invocations of NCCL_GIN_THREADFENCE_SYSTEM (Put/PutValue/Wait and
+// signalPeer's pre-atomic release). Override must precede gin_anvil_sdma.h.
 __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
@@ -32,6 +32,15 @@ namespace RcclUnitTesting
 #if NCCL_GIN_ANVIL_SDMA_ENABLE
 
 class GinAnvilSdmaTemplateTest : public DeviceTestBase {};
+
+struct StandaloneSignalQuietParam {
+  uint64_t dirtyBits;
+  unsigned long long expectQuiet;
+  unsigned long long expectFence;
+};
+
+class GinAnvilSdmaStandaloneSignalQuietTest : public DeviceTestBase,
+                                              public ::testing::WithParamInterface<StandaloneSignalQuietParam> {};
 
 struct TemplateHarness {
   ncclGinAnvilSdmaGPUContext ctx;
@@ -777,7 +786,8 @@ __global__ void kernelPutSignalQuiesce(TemplateHarness* h, bool hasWins, size_t 
       nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalSkipsQuietWhenClean) {
+TEST_P(GinAnvilSdmaStandaloneSignalQuietTest, ReadsSignaledPeerDirtyBit) {
+  const StandaloneSignalQuietParam p = GetParam();
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<uint64_t> d_signals(2);
@@ -785,8 +795,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalSkipsQuietWhenClean) {
   // Production always allocates sdmaDirty. Peer 0 dirty + signal on peer 1
   // proves the skip reads the mask for the signaled peer, not nullptr early-out.
   DeviceBuffer<uint64_t> d_dirty(1);
-  uint64_t peer0Bit = 1ULL << 0;  // peer 0, channel 0, numChannels=1
-  d_dirty.copyFrom(&peer0Bit, 1);
+  d_dirty.copyFrom(&p.dirtyBits, 1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
@@ -803,10 +812,16 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalSkipsQuietWhenClean) {
   kernelPutSignalQuiesce<<<1, 1>>>(d_h.ptr, /*hasWins=*/false, /*bytes=*/0);
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
-  EXPECT_EQ(readQuietCount(), 0ULL);
-  // fenceBeforeSignal is skipped; signalPeer still system-fences (not via the stub).
-  EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  EXPECT_EQ(readQuietCount(), p.expectQuiet);
+  EXPECT_EQ(readThreadfenceCount(), p.expectFence);
 }
+
+INSTANTIATE_TEST_SUITE_P(CleanAndDirtyPeer, GinAnvilSdmaStandaloneSignalQuietTest,
+                         ::testing::Values(
+                             // peer 0 dirty, signal peer 1: skip quiet; signalPeer system-fences once
+                             StandaloneSignalQuietParam{1ULL << 0, 0ULL, 1ULL},
+                             // peer 1 dirty: quiet + fenceBeforeSignal + signalPeer
+                             StandaloneSignalQuietParam{1ULL << 1, 1ULL, 2ULL}));
 
 TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenClean) {
   constexpr int kN = 64;
@@ -838,7 +853,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalSkipsQuietWhenCle
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
-  EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
   auto got = d_dst.copyTo();
   for (int i = 0; i < kN; ++i) {
     EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
@@ -894,35 +909,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutQuietsWhenPeerDirty) {
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 1ULL);
-  EXPECT_EQ(readThreadfenceCount(), 1ULL);
-}
-
-TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalQuietsWhenPeerDirty) {
-  DeviceBuffer<uint8_t> d_src(1);
-  DeviceBuffer<uint8_t> d_dst(1);
-  DeviceBuffer<uint64_t> d_signals(2);
-  d_signals.zero();
-  DeviceBuffer<uint64_t> d_dirty(1);
-  uint64_t peer1Bit = 1ULL << 1;  // peer 1, channel 0, numChannels=1
-  d_dirty.copyFrom(&peer1Bit, 1);
-  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
-  DeviceBuffer<TemplateHarness> d_h(1);
-  TemplateHarness host{};
-  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
-  host.ctx.signals = d_signals.ptr;
-  host.ctx.nSignals = 2;
-  host.ctx.sdmaDirty = d_dirty.ptr;
-  mapIpcTo(&host, &d_entry, &d_signals, 2 * sizeof(uint64_t));
-  d_h.upload(host);
-  resetQuietCount();
-  resetThreadfenceCount();
-  kernelPutSignalQuiesce<<<1, 1>>>(d_h.ptr, /*hasWins=*/false, /*bytes=*/0);
-  syncAndCheck();
-  EXPECT_EQ(d_signals.download(), 1ULL);
-  EXPECT_EQ(readQuietCount(), 1ULL);
-  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 2ULL);
 }
 
 // H23: windowed PutValue with a strong signal also skips quiet on a clean queue.
@@ -1015,7 +1002,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalSkipsQuietWh
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
-  EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
   auto got = d_dst.copyTo();
   uint64_t landed = 0;
   std::memcpy(&landed, got.data(), sizeof(landed));
