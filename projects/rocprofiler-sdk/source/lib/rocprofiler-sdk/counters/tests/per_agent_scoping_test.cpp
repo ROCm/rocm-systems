@@ -36,6 +36,9 @@
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 
+#include <atomic>
+#include <functional>
+#include <thread>
 #include <vector>
 
 using namespace rocprofiler::counters::test_constants;
@@ -417,6 +420,114 @@ TEST(counters_per_agent, repeated_service_start_does_not_pin_serialization)
     // An unmatched stop must not release a reference it does not hold.
     counters::stop_context(ctx_p);
     EXPECT_FALSE(controller->is_serialization_enabled(agent_a));
+}
+
+TEST(counters_per_agent, concurrent_context_start_stop_does_not_pin_serialization)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first) GTEST_SKIP() << "no GPU agent available";
+
+    auto  agent_a    = agents.first->get_rocp_agent()->id;
+    auto* controller = hsa::get_queue_controller();
+    auto  queue_a    = hsa::PerAgentFakeQueue{*agents.first, {.handle = 152}};
+    controller->serializer(&queue_a);
+
+    auto ctx = make_counter_context();
+    ASSERT_EQ(rocprofiler_dispatch_counting_service_set_agents(ctx, &agent_a, 1),
+              ROCPROFILER_STATUS_SUCCESS);
+
+    auto unexpected = std::atomic<int>{0};
+    auto go         = std::atomic<bool>{false};
+    auto worker     = [&]() {
+        while(!go.load(std::memory_order_acquire))
+            std::this_thread::yield();
+
+        for(int i = 0; i < 64; ++i)
+        {
+            if(rocprofiler_start_context(ctx) != ROCPROFILER_STATUS_SUCCESS)
+                unexpected.fetch_add(1, std::memory_order_relaxed);
+
+            auto status = rocprofiler_stop_context(ctx);
+            if(status != ROCPROFILER_STATUS_SUCCESS &&
+               status != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND)
+                unexpected.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    auto first  = std::thread{worker};
+    auto second = std::thread{worker};
+    go.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+
+    (void) rocprofiler_stop_context(ctx);
+    EXPECT_EQ(unexpected.load(std::memory_order_relaxed), 0);
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_a));
+
+    const auto* ctx_p = context::get_registered_context(ctx);
+    ASSERT_TRUE(ctx_p && ctx_p->dispatch_counter_collection);
+    bool enabled = true;
+    ctx_p->dispatch_counter_collection->enabled.rlock([&](const auto& value) { enabled = value; });
+    EXPECT_FALSE(enabled);
+}
+
+TEST(counters_per_agent, concurrent_overlapping_context_starts_admit_exactly_one)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first) GTEST_SKIP() << "no GPU agent available";
+
+    auto  agent_a    = agents.first->get_rocp_agent()->id;
+    auto* controller = hsa::get_queue_controller();
+    auto  queue_a    = hsa::PerAgentFakeQueue{*agents.first, {.handle = 153}};
+    controller->serializer(&queue_a);
+
+    auto first_ctx  = make_counter_context();
+    auto second_ctx = make_counter_context();
+    ASSERT_EQ(rocprofiler_dispatch_counting_service_set_agents(first_ctx, &agent_a, 1),
+              ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_dispatch_counting_service_set_agents(second_ctx, &agent_a, 1),
+              ROCPROFILER_STATUS_SUCCESS);
+
+    for(int iteration = 0; iteration < 32; ++iteration)
+    {
+        auto ready         = std::atomic<int>{0};
+        auto go            = std::atomic<bool>{false};
+        auto first_status  = ROCPROFILER_STATUS_ERROR;
+        auto second_status = ROCPROFILER_STATUS_ERROR;
+        auto start         = [&](rocprofiler_context_id_t context, rocprofiler_status_t& status) {
+            ready.fetch_add(1, std::memory_order_release);
+            while(!go.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            status = rocprofiler_start_context(context);
+        };
+
+        auto first  = std::thread{start, first_ctx, std::ref(first_status)};
+        auto second = std::thread{start, second_ctx, std::ref(second_status)};
+        while(ready.load(std::memory_order_acquire) != 2)
+            std::this_thread::yield();
+        go.store(true, std::memory_order_release);
+        first.join();
+        second.join();
+
+        const auto first_won  = first_status == ROCPROFILER_STATUS_SUCCESS;
+        const auto second_won = second_status == ROCPROFILER_STATUS_SUCCESS;
+        EXPECT_NE(first_won, second_won);
+        EXPECT_TRUE(first_status == ROCPROFILER_STATUS_SUCCESS ||
+                    first_status == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+        EXPECT_TRUE(second_status == ROCPROFILER_STATUS_SUCCESS ||
+                    second_status == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+
+        auto winner = first_won ? first_ctx : second_ctx;
+        ASSERT_EQ(rocprofiler_stop_context(winner), ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_FALSE(controller->is_serialization_enabled(agent_a));
+        EXPECT_FALSE(counters::is_any_active());
+    }
 }
 
 // Counter collection, thread trace and SPM each enable serialization independently. Without

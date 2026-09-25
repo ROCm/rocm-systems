@@ -162,10 +162,11 @@ struct registry_state
     // static teardown gives them the lifetime they had when the registry stored the contexts
     // by value, which is the lifetime all of those callers were written against.
     std::vector<context_ptr_t> retired = {};
-    // Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across
-    // the GPU drain, so for that window the context is still in the active array with no lock
-    // held. This set is what keeps start_context() and a second stop_context() from acting on
-    // that half-stopped state. Guarded by get_contexts_mutex().
+    // Context ids whose start or stop is in progress. stop_context() releases get_contexts_mutex()
+    // across the GPU drain, and start_context() releases it before publishing the active slot and
+    // starting the queue-interposed services, so in both windows the context is half-started or
+    // half-stopped with no lock held. This set is what keeps the other lifecycle callers from
+    // acting on that state. Guarded by get_contexts_mutex().
     std::unordered_set<uint64_t> stopping = {};
     std::condition_variable      cv       = {};
 };
@@ -564,7 +565,26 @@ start_context(rocprofiler_context_id_t context_id)
         }
 
         get_num_active_contexts().fetch_add(1, std::memory_order_release);
+
+        // Once the lock drops, the slot is reserved but not yet published and the services are not
+        // yet started. Without this marker a concurrent start of an overlapping context scans past
+        // this one, set_dispatch_agents() rewrites the agent set that counters::start_context() is
+        // about to read, and stop_context() can tear the services down before they have started,
+        // leaving serialization and the callback thread held by a stopped context.
+        if(auto* _pending = get_stopping_contexts()) _pending->emplace(context_id.handle);
     }
+
+    bool _pending_released = false;
+    auto _release_pending  = [&context_id, &_pending_released]() {
+        if(_pending_released) return;
+        _pending_released = true;
+        {
+            auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+            if(auto* _pending = get_stopping_contexts()) _pending->erase(context_id.handle);
+        }
+        if(auto* _cv = get_contexts_cv()) _cv->notify_all();
+    };
+    auto _pending_guard = common::scope_destructor{[&_release_pending]() { _release_pending(); }};
 
     rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
 
@@ -593,6 +613,12 @@ start_context(rocprofiler_context_id_t context_id)
     if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
+
+    // Released before the services below: start_agent_ctx() calls the tool's profile callback
+    // synchronously, and a tool that calls back into the lifecycle API from there would wait on
+    // this marker forever.
+    _release_pending();
+
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
