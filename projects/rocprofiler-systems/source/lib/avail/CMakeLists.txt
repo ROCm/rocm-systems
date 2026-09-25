@@ -12,6 +12,8 @@ target_sources(
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/catalog.cpp
         ${CMAKE_CURRENT_LIST_DIR}/catalog.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/cpu.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
         ${CMAKE_CURRENT_LIST_DIR}/devices.cpp
         ${CMAKE_CURRENT_LIST_DIR}/devices.hpp
         ${CMAKE_CURRENT_LIST_DIR}/gpu_counters.cpp
@@ -35,7 +37,9 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-avail-library
-    PUBLIC rocprofiler-systems::rocprofiler-systems-amd-smi-backend
+    PUBLIC
+        rocprofiler-systems::rocprofiler-systems-amd-smi-backend
+        rocprofiler-systems::rocprofiler-systems-procfs-backend
     PRIVATE
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-compile-options
