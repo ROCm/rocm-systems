@@ -374,18 +374,12 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
   constexpr uint32_t kMaxEntries = 65535;
   struct RectGroup {
     hsa_agent_t src_agent;
-    std::vector<hsa_amd_memory_copy_rect_t> rects;
+    std::vector<hsa_amd_memory_copy_rect_ptr_t> srcs;
+    std::vector<hsa_amd_memory_copy_rect_ptr_t> dsts;
+    std::vector<hsa_dim3_t> ranges;
     std::vector<hsa_agent_t> dst_agents;
-  };
-  struct LinearGroup {
-    hsa_agent_t src_agent;
-    std::vector<void*> srcs;
-    std::vector<void*> dsts;
-    std::vector<hsa_agent_t> dst_agents;
-    std::vector<size_t> sizes;
   };
   std::vector<RectGroup> rect_groups;
-  std::vector<LinearGroup> linear_groups;
 
   const hsa_agent_t cpu_agent = dev().getCpuAgent();
   const hsa_agent_t backend_device = dev().getBackendDevice();
@@ -415,65 +409,33 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
     hsa_dim3_t range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
                         static_cast<uint32_t>(op.size[2])};
 
-    const bool dword_aligned = (reinterpret_cast<uintptr_t>(src_pitched.base) % 4) == 0 &&
-                               (reinterpret_cast<uintptr_t>(dst_pitched.base) % 4) == 0 &&
-                               (src_pitched.pitch % 4) == 0 && (dst_pitched.pitch % 4) == 0 &&
-                               (src_pitched.slice % 4) == 0 && (dst_pitched.slice % 4) == 0;
-
-    if (dword_aligned) {
-      if (rect_groups.empty() || rect_groups.back().src_agent.handle != src_agent.handle ||
-          rect_groups.back().rects.size() == kMaxEntries) {
-        rect_groups.push_back(RectGroup{src_agent, {}, {}});
-      }
-      hsa_dim3_t origin = {0, 0, 0};
-      rect_groups.back().rects.push_back(
-          hsa_amd_memory_copy_rect_t{dst_pitched, origin, src_pitched, origin, range});
-      rect_groups.back().dst_agents.push_back(dst_agent);
-    } else {
-      for (size_t z = 0; z < op.size[2]; ++z) {
-        for (size_t y = 0; y < op.size[1]; ++y) {
-          if (linear_groups.empty() || linear_groups.back().src_agent.handle != src_agent.handle ||
-              linear_groups.back().sizes.size() == kMaxEntries) {
-            linear_groups.push_back(LinearGroup{src_agent, {}, {}, {}, {}});
-          }
-          linear_groups.back().srcs.push_back(src_base + op.src_rect.offset(0, y, z));
-          linear_groups.back().dsts.push_back(dst_base + op.dst_rect.offset(0, y, z));
-          linear_groups.back().dst_agents.push_back(dst_agent);
-          linear_groups.back().sizes.push_back(op.size[0]);
-        }
-      }
+    if (rect_groups.empty() || rect_groups.back().src_agent.handle != src_agent.handle ||
+        rect_groups.back().srcs.size() == kMaxEntries) {
+      rect_groups.push_back(RectGroup{src_agent, {}, {}, {}, {}});
     }
+    hsa_dim3_t origin = {0, 0, 0};
+    rect_groups.back().srcs.push_back(hsa_amd_memory_copy_rect_ptr_t{src_pitched, origin});
+    rect_groups.back().dsts.push_back(hsa_amd_memory_copy_rect_ptr_t{dst_pitched, origin});
+    rect_groups.back().ranges.push_back(range);
+    rect_groups.back().dst_agents.push_back(dst_agent);
   }
 
   std::vector<hsa_signal_t> wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
   std::vector<ProfilingSignal*> group_signals;
   std::vector<hsa_amd_memory_copy_op_t> final_ops;
-  final_ops.reserve(rect_groups.size() + linear_groups.size());
+  final_ops.reserve(rect_groups.size());
 
   for (RectGroup& group : rect_groups) {
     hsa_amd_memory_copy_op_t rect_op = {};
     rect_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
     rect_op.type = HSA_AMD_MEMORY_COPY_OP_RECT;
-    rect_op.num_entries = static_cast<uint16_t>(group.rects.size());
-    rect_op.rect_list = group.rects.data();
+    rect_op.num_entries = static_cast<uint16_t>(group.srcs.size());
+    rect_op.rect_src = group.srcs.data();
+    rect_op.rect_dst = group.dsts.data();
+    rect_op.range_list = group.ranges.data();
     rect_op.src_agent = group.src_agent;
     rect_op.dst_agent_list = group.dst_agents.data();
-    rect_op.dst = nullptr;
-    rect_op.size = 0;
-    rect_op.unused_size = 0;
     final_ops.push_back(rect_op);
-  }
-  for (LinearGroup& group : linear_groups) {
-    hsa_amd_memory_copy_op_t linear_op = {};
-    linear_op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-    linear_op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-    linear_op.num_entries = static_cast<uint16_t>(group.sizes.size());
-    linear_op.src_list = group.srcs.data();
-    linear_op.src_agent = group.src_agent;
-    linear_op.dst_list = group.dsts.data();
-    linear_op.dst_agent_list = group.dst_agents.data();
-    linear_op.size_list = group.sizes.data();
-    final_ops.push_back(linear_op);
   }
 
   for (hsa_amd_memory_copy_op_t& copy_op : final_ops) {
@@ -498,6 +460,7 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
     gpu().Barriers().AddExternalSignal(group_signals[signal_index]);
   }
 
+  gpu().addSystemScope();
   gpu().setFenceDirty(false);
   return true;
 }
@@ -2256,20 +2219,42 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
 
 // ================================================================================================
 bool KernelBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
-  if (dev().info().pcie_atomics_) {
-    return DmaBlitManager::CopyBufferRectBatch(copy_ops);
+  if (!dev().info().pcie_atomics_) {
+    return HostBlitManager::CopyBufferRectBatch(copy_ops);
   }
+
+  std::vector<amd::BatchCopyRectOp> dma_copy_ops;
+  std::vector<amd::BatchCopyRectOp> sequential_copy_ops;
+  dma_copy_ops.reserve(copy_ops.size());
+  sequential_copy_ops.reserve(copy_ops.size());
 
   for (const amd::BatchCopyRectOp& op : copy_ops) {
     device::Memory* src_dev_mem =
         op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
     device::Memory* dst_dev_mem =
         op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]);
-    if (!copyBufferRect(*src_dev_mem, *dst_dev_mem, op.src_rect, op.dst_rect, op.size)) {
-      return false;
+    const address src =
+        gpuMem(*src_dev_mem).getDeviceMemory() + op.src_rect.offset(0, 0, 0);
+    const address dst =
+        gpuMem(*dst_dev_mem).getDeviceMemory() + op.dst_rect.offset(0, 0, 0);
+    const bool dword_aligned =
+        (reinterpret_cast<uintptr_t>(src) % 4) == 0 &&
+        (reinterpret_cast<uintptr_t>(dst) % 4) == 0 && (op.src_rect.rowPitch_ % 4) == 0 &&
+        (op.src_rect.slicePitch_ % 4) == 0 && (op.dst_rect.rowPitch_ % 4) == 0 &&
+        (op.dst_rect.slicePitch_ % 4) == 0;
+    if (dword_aligned) {
+      dma_copy_ops.push_back(op);
+    } else {
+      sequential_copy_ops.push_back(op);
     }
   }
-  return true;
+
+  if (!dma_copy_ops.empty() && !DmaBlitManager::CopyBufferRectBatch(dma_copy_ops)) {
+    sequential_copy_ops.insert(sequential_copy_ops.begin(), dma_copy_ops.begin(),
+                               dma_copy_ops.end());
+  }
+
+  return HostBlitManager::CopyBufferRectBatch(sequential_copy_ops);
 }
 
 // ================================================================================================
