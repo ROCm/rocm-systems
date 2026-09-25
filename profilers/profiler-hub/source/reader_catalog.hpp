@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -36,6 +37,41 @@ struct topology_key_hash_t
         h ^= std::hash<size_t>{}(k.tid) + 0x9e3779b9 + (h << 6) + (h >> 2);
         return h;
     }
+};
+
+/** @brief Accumulated event count plus [min start, max end] time span for
+ *         a track being derived from one or more grouped event queries. */
+struct track_range_stats_t
+{
+    size_t count{};
+    size_t min_start{ std::numeric_limits<size_t>::max() };
+    size_t max_end{};
+    bool   has_range{};
+
+    void merge(std::optional<size_t> row_min_start, std::optional<size_t> row_max_end)
+    {
+        if(row_min_start.has_value())
+        {
+            min_start = std::min(min_start, row_min_start.value());
+            has_range = true;
+        }
+        if(row_max_end.has_value())
+        {
+            max_end   = std::max(max_end, row_max_end.value());
+            has_range = true;
+        }
+    }
+};
+
+/** @brief track_range_stats_t plus the topology it was derived from --
+ *         used only for node/process/thread_info linkage when building a
+ *         thread_sample track (the read path identifies it by db track id,
+ *         not by topology; see reader_catalog_t::build_tracks()). */
+struct thread_sample_stats_t : track_range_stats_t
+{
+    size_t nid{};
+    size_t pid{};
+    size_t tid{};
 };
 
 /**
@@ -108,11 +144,25 @@ struct reader_catalog_t
     std::unordered_map<reader_types::track_info_ptr_t, size_t>         track_to_db_id;
 
 private:
-    // Track id -> total event count, used to populate track_info_t::event_count.
-    // `tracks` must be the raw rows just read from track_info_statement().
-    [[nodiscard]] std::unordered_map<size_t, size_t> get_track_event_counts(
-        data_storage::schema_v3::read_statements&                      stmts,
-        const std::vector<data_storage::schema_v3::track_info_result>& raw_tracks);
+    // Discovers "thread" tracks directly from the duration-event tables
+    // (region/kernel_dispatch/memory_allocate/memory_copy, grouped by
+    // (nid,pid,tid)) -- a track only exists if this returns a non-empty
+    // group for it, matching optiq's own "no rocpd_track dependency"
+    // discovery philosophy (see build_tracks()'s doc comment). Returns
+    // per-key summed event count plus [min start, max end] time span;
+    // called from build_tracks().
+    [[nodiscard]] std::
+        unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>
+        discover_thread_tracks(data_storage::schema_v3::read_statements& stmts);
+
+    // Discovers "thread_sample" tracks: duration events tagged with a real
+    // rocpd_sample.track_id (via writer_t::register_track_info() +
+    // trace_environment_t::track_name), grouped by that db track id -- a
+    // separate track per named sample, distinct from the untagged "thread"
+    // track discover_thread_tracks() returns for the same (nid,pid,tid).
+    // Called from build_tracks().
+    [[nodiscard]] std::unordered_map<size_t, thread_sample_stats_t>
+    discover_thread_sample_tracks(data_storage::schema_v3::read_statements& stmts);
 
     // Appends optiq-parity category tracks (kernel-dispatch/memory-allocate/
     // memory-copy, per agent+queue and per host-stream) to `tracks`,

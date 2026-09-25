@@ -269,7 +269,11 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
  *         set it. */
 enum class track_kind_t
 {
-    thread,                       ///< (nid,pid,tid)-based; from rocpd_track.
+    thread,                       ///< (nid,pid,tid)-based; derived from the
+                                  ///< duration-event tables, untagged rows only.
+    thread_sample,                ///< Same (nid,pid,tid) family, but events
+                                  ///< explicitly tagged with a named
+                                  ///< rocpd_sample.track_id.
     pmc_agent,                    ///< PMC/counter samples split by agent_id.
     kernel_dispatch_agent_queue,  ///< Kernel dispatches, by (nid,agent_id,queue_id).
     memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).
@@ -298,6 +302,14 @@ struct track_info_t
     // process_info->pid can't be used for that since it's the resolved OS
     // pid, not the FK.
     size_t db_pid{};
+
+    // rocpd_info_pmc.id -- which counter this track represents. Only set
+    // for track_kind_t::pmc_agent (derived directly from the counter-sample
+    // tables, not a rocpd_track row); needed to filter sample queries.
+    size_t pmc_id{};
+
+    size_t start_ts{};  ///< Nanosecond timestamp of the track's earliest event.
+    size_t end_ts{};    ///< Nanosecond timestamp of the track's latest event.
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -512,10 +524,6 @@ struct timeline_event_t
     timestamp_ns_t start_timestamp;
     timestamp_ns_t end_timestamp;
 
-    // Views into reader_t::impl::m_string_info_utility, which is populated
-    // once and never mutated afterward -- safe to reference for as long as
-    // the owning reader_t (and thus this event) is alive. Avoids a
-    // std::string allocation/copy per event on every read.
     std::string_view display_name;
     std::string_view category;
 

@@ -158,7 +158,7 @@ reader_t::impl::build_timeline_events(
     for(const auto& result : results)
     {
         reader_types::timeline_event_t event;
-        event.unique_identifier = { result.id, type };
+        event.unique_identifier = { .id = result.id, .type = type };
         event.start_timestamp   = result.start_timestamp;
         event.end_timestamp     = result.end_timestamp;
 
@@ -525,12 +525,9 @@ reader_types::counter_timeline_event_list_t
 reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
                                              const reader_types::event_filter_t& filter)
 {
-    if(!track) return {};
+    if(!track || !track->node_info) return {};
 
-    auto db_id_it = m_catalog->track_to_db_id.find(track);
-    if(db_id_it == m_catalog->track_to_db_id.end()) return {};
-
-    const auto db_id = db_id_it->second;
+    const auto nid = track->node_info->node_id;
 
     const bool has_time =
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
@@ -540,8 +537,9 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
     {
         results =
             m_read_statements
-                ->pmc_sample_time_filtered_statement()(db_id,
+                ->pmc_sample_time_filtered_statement()(nid,
                                                        track->agent_id,
+                                                       track->pmc_id,
                                                        filter.time_window.start.value(),
                                                        filter.time_window.end.value())
                 .to_vector();
@@ -549,7 +547,8 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
     else
     {
         results =
-            m_read_statements->pmc_sample_statement()(db_id, track->agent_id).to_vector();
+            m_read_statements->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
+                .to_vector();
     }
 
     reader_types::counter_timeline_event_list_t events;
@@ -557,10 +556,7 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
     for(const auto& result : results)
     {
         events.push_back(reader_types::counter_timeline_event_t{
-            .timestamp = result.timestamp,
-            .value     = result.value,
-            .track     = track,
-        });
+            .timestamp = result.timestamp, .value = result.value, .track = track });
     }
 
     return events;

@@ -1,4 +1,6 @@
 #include "profiler_hub_ctx.hpp"
+#include "debug.hpp"
+#include "fmt/base.h"
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler_hub_future.hpp"
 
@@ -28,6 +30,7 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
     switch(kind)
     {
         case track_kind_t::thread: return PH_TRACK_CATEGORY_THREAD;
+        case track_kind_t::thread_sample: return PH_TRACK_CATEGORY_THREAD_SAMPLE;
         case track_kind_t::pmc_agent: return PH_TRACK_CATEGORY_PMC_AGENT;
         case track_kind_t::kernel_dispatch_agent_queue:
             return PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE;
@@ -104,6 +107,7 @@ ph_ctx::get_storage_version()
 ph_track_list_t
 ph_ctx::get_track_list()
 {
+    fmt::println("[Profiler-Hub] Get track list");
     return ph_track_list_t{ .list_size = static_cast<std::uint32_t>(m_c_tracks.size()),
                             .tracks    = m_c_tracks.data() };
 }
@@ -190,6 +194,10 @@ ph_ctx::core_get_track_samples(profiler_hub::common::connection& conn,
 ph_event_list_t
 ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
+    fmt::println("[Profiler-Hub] Get track events. Track id {}, time slice [{} - {}]",
+                 track_id,
+                 start_ts,
+                 end_ts);
     if(!m_track_by_id.contains(track_id))
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
@@ -203,6 +211,10 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 ph_sample_list_t
 ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
+    fmt::println("[Profiler-Hub] Get track samples. Track id {}, time slice [{} - {}]",
+                 track_id,
+                 start_ts,
+                 end_ts);
     if(!m_track_by_id.contains(track_id))
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
@@ -251,6 +263,8 @@ ph_ctx::initialize_track_list()
             .category    = to_c_track_category(track->category),
             .queue_id    = static_cast<std::uint32_t>(track->queue_id),
             .stream_id   = static_cast<std::uint32_t>(track->stream_id),
+            .start_ts    = static_cast<std::uint64_t>(track->start_ts),
+            .end_ts      = static_cast<std::uint64_t>(track->end_ts),
         });
     }
 }
