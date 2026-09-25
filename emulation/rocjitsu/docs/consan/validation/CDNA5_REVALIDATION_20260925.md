@@ -404,3 +404,17 @@ D128 pressure finishes 1/8 at Default and 0/8 at SuperCollider sleep=15,
 with matching accepted clean runs and complete analysis on all healthy,
 admitted/reached trials (`pressure-lifetime-{default,sleep15}-{clean,fault}`).
 High Default calibration follows; numerical fault outcomes did not fail.
+
+### Stream-K arrival publication fault refresh
+
+Fresh `streamk-lifetime-inventory` and line-annotated pristine ISA identify the
+user counter RMW at `.text+0xd600` (ELF `46225079c03c98b7`, occurrence 104).
+Each wave publishes its LDS WMMA partials through lane zero's increment; the
+wave seeing old value one consumes both waves' partials. The reviewed mutation
+removes the release edge at `0xd5f0/0xd5fc` and preserves acquire at `0xd610`.
+The returned value reaches the source consumer branch at VMA `0xfd04/0xfd10`.
+The two stale helper-function faults are replaced by this one selected fault,
+with eight trials per mode and minimum six detections predeclared.
+
+Tensile HGEMM SuperCollider also finishes its full clean row successfully;
+both mode cells now await fault qualification.
