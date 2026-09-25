@@ -65,6 +65,7 @@ function(rj_add_consan_unit_sources target)
         ${target}
         PRIVATE
             patch/consan/analysis_test.cpp
+            patch/consan/tensor_access_test.cpp
             patch/consan/atomic_fence_policy_test.cpp
             patch/consan/atomic_classifier_test.cpp
             patch/consan/access_classifier_test.cpp

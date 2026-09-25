@@ -1566,3 +1566,24 @@ shard checks 12 numeric rows. Together with the matching retained fault-shard
 clean run and the prior eight admitted/reached high detections, this qualifies
 the row green at high. Default previously detected 0/8. The queued HGEMM
 full-high clean campaign can now use the released worker slots.
+
+### Descriptor-aware tensor-load element selection
+
+Added emitted gfx1250 selection code for dense rank-one through rank-five
+tiles, packed gather rows, and repeated tiles with LDS increments. Two input
+hashes independently select a tile element and an iteration. Trailing zero
+dimensions are omitted; interior zeros make the tile empty. Null optional
+descriptor groups supply zeros, gather mode ignores the iterate bit, and a
+zero descriptor count suppresses observation. Global bounds do not remove
+zero-filled load locations from the selected LDS writes.
+
+The selector is defined for valid descriptors whose tile fits LDS. It preserves
+hash inputs, scalar registers, EXEC, SCC, and inactive lanes; the caller owns
+VCC preservation. Tests execute selection followed by address materialization
+and compare against the emulator's enumerated transfer addresses, including
+separated/aliased iterations, gather descriptor words that must not be treated
+as higher dimensions, and wholly masked global input. These are emission
+primitives; detector admission, metadata, and completion integration remain.
+
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,028 passed,
+two existing live-inventory tests skipped (`tensor-selection-tests.log`).

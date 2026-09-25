@@ -68,6 +68,7 @@ rj_add_object_library(
         consan_instrumentation.cpp
         consan_access_apply.cpp
         consan_access_target.cpp
+        consan_tensor_access.cpp
         consan_barrier.cpp
         consan_candidate_projection.cpp
         consan_device_primitives.cpp
