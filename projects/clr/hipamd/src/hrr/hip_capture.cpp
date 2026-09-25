@@ -2322,6 +2322,7 @@ void hrr_install_clr_exception_handler() {
 }  // namespace
 
 void hip_capture_init() {
+  #if defined(HIP_HRR_CAPTURE_ENABLED)
   if (!hip_capture_enabled()) {
     // hip_capture_install_early() gates on getenv() because Flag::init() has
     // not run that early. If the flag disagrees with what getenv() saw, the
@@ -2358,28 +2359,36 @@ void hip_capture_init() {
     hip_capture_install(live);
   }
 
-  // Open the events writer now — Flag::init() has run so output_dir is valid.
-  if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+    // Open the events writer now — Flag::init() has run so output_dir is valid.
+    if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
 
-  hrr_cap::writer::set_capture_metadata_json(
-      hrr_cap::metadata::collect_json());
+    hrr_cap::writer::set_capture_metadata_json(
+        hrr_cap::metadata::collect_json());
 
-  hrr_install_clr_exception_handler();
+    hrr_install_clr_exception_handler();
 
-  // Install compiler dispatch shims now — hip::init() has completed so
-  // the compiler dispatch table is fully populated.
-  hip_capture_build_compiler_table();
+    // Install compiler dispatch shims now — hip::init() has completed so
+    // the compiler dispatch table is fully populated.
+    hip_capture_build_compiler_table();
 
-  // Retroactively record fat binaries that fired before our shims were live.
-  // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
-  hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
+    // Retroactively record fat binaries that fired before our shims were live.
+    // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
+    hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
 
-  // And the __device__ globals registered against them, for the same reason
-  // and in this order: the fat binaries have to be in the archive before the
-  // symbols that live inside them.
-  hip::PlatformState::Instance().StatCO().ForEachGlobalVar(record_registered_var);
+    // And the __device__ globals registered against them, for the same reason
+    // and in this order: the fat binaries have to be in the archive before the
+    // symbols that live inside them.
+    hip::PlatformState::Instance().StatCO().ForEachGlobalVar(record_registered_var);
 
-  std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+    std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+  #else
+    // HRR capture is disabled
+    // below to avoid -Wunused-function / -Wunused-variable
+    (void)&record_fat_binary_blob;
+    (void)&record_registered_var;
+    (void)&hrr_install_clr_exception_handler;
+    (void)&g_hrr_atexit_once;
+  #endif
 }
 
 void hip_capture_shutdown() {

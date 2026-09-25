@@ -27,6 +27,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+struct ncclReg;
+
 // ncclStrongStreamAcquire: by default returns ncclSuccess with *stream=nullptr
 // (matching the stub's prior behaviour). Tests that need to exercise the
 // strong-stream block's failure paths can install a hook that returns an

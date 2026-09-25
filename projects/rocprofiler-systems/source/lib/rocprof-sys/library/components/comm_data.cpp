@@ -62,7 +62,10 @@ void
 metadata_initialize_comm_data_categories()
 {
     static bool _is_initialized = false;
-    if(_is_initialized) return;
+    if(_is_initialized)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::comm_data>::value);
@@ -237,7 +240,10 @@ void
 comm_data::configure()
 {
     static bool _once = false;
-    if(_once) return;
+    if(_once)
+    {
+        return;
+    }
     _once = true;
 
     comm_data_tracker_t::label()        = "comm_data";
@@ -520,9 +526,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
                  size_t count, std::uint64_t tag, const void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_send>(count);
+    }
 
     {
         cache_comm_data_events<ucx_send>(0, count);
@@ -543,9 +555,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
                  std::uint64_t tag, std::uint64_t tag_mask, const void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_recv>(count);
+    }
 
     {
         cache_comm_data_events<ucx_recv>(0, count);
@@ -567,9 +585,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
                  size_t count, std::uint64_t remote_addr, void*, const void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_send>(count);
+    }
 
     {
         cache_comm_data_events<ucx_send>(0, count);
@@ -590,9 +614,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
                  std::uint64_t remote_addr, void*, const void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_recv>(count);
+    }
 
     {
         cache_comm_data_events<ucx_recv>(0, count);
@@ -614,10 +644,16 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
                  const void*, size_t header_length, const void*, size_t count,
                  const void*)
 {
-    if(count == 0 && header_length == 0) return;
+    if(count == 0 && header_length == 0)
+    {
+        return;
+    }
 
     const size_t total_size = header_length + count;
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_size);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_send>(total_size);
+    }
 
     {
         cache_comm_data_events<ucx_send>(0, total_size);
@@ -637,9 +673,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
                  size_t             count, const void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_send>(count);
+    }
 
     {
         cache_comm_data_events<ucx_send>(0, count);
@@ -659,9 +701,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
                  size_t*, const void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_recv>(count);
+    }
 
     {
         cache_comm_data_events<ucx_recv>(0, count);
@@ -680,9 +728,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
                  void*, void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_send>(count);
+    }
 
     {
         cache_comm_data_events<ucx_send>(0, count);
@@ -701,9 +755,15 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
                  void*, void*, void*, void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_recv>(count);
+    }
 
     {
         cache_comm_data_events<ucx_recv>(0, count);
@@ -722,23 +782,34 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
                  std::uint64_t, void*, void*)
 {
-    if(length == 0) return;
+    if(length == 0)
+    {
+        return;
+    }
 
     const bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
 
     if(get_use_perfetto())
     {
         if(is_put)
+        {
             write_perfetto_counter_track<ucx_send>(length);
+        }
         else
+        {
             write_perfetto_counter_track<ucx_recv>(length);
+        }
     }
 
     {
         if(is_put)
+        {
             cache_comm_data_events<ucx_send>(0, length);
+        }
         else
+        {
             cache_comm_data_events<ucx_recv>(0, length);
+        }
     }
 
     if(rocprofsys::get_use_timemory())
@@ -755,9 +826,15 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, voi
                  size_t header_length, void*, size_t length, unsigned, void*)
 {
     const size_t total_length = header_length + length;
-    if(total_length == 0) return;
+    if(total_length == 0)
+    {
+        return;
+    }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_length);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<ucx_send>(total_length);
+    }
 
     {
         cache_comm_data_events<ucx_send>(0, total_length);
@@ -776,23 +853,34 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
                  void*, unsigned, void*)
 {
-    if(count == 0) return;
+    if(count == 0)
+    {
+        return;
+    }
 
     const bool is_send = _data.tool_id.find("send") != std::string::npos;
 
     if(get_use_perfetto())
     {
         if(is_send)
+        {
             write_perfetto_counter_track<ucx_send>(count);
+        }
         else
+        {
             write_perfetto_counter_track<ucx_recv>(count);
+        }
     }
 
     {
         if(is_send)
+        {
             cache_comm_data_events<ucx_send>(0, count);
+        }
         else
+        {
             cache_comm_data_events<ucx_recv>(0, count);
+        }
     }
 
     if(rocprofsys::get_use_timemory())

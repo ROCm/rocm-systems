@@ -101,9 +101,15 @@ get_cpu_cid_stack(std::int64_t _tid, std::int64_t _parent)
         auto& _p_tid      = thread_data_t::instance(construct_on_thread{ _parent_tid });
         // if tid != parent and there is not a valid pointer for the provided parent
         // thread id set it to zero since that will always be valid
-        if(_tid != _parent_tid && !_p_tid) _parent_tid = 0;
+        if(_tid != _parent_tid && !_p_tid)
+        {
+            _parent_tid = 0;
+        }
         // copy over the thread ids from the parent if tid != parent
-        if(_tid != _parent_tid) *_v_tid = *_p_tid;
+        if(_tid != _parent_tid)
+        {
+            *_v_tid = *_p_tid;
+        }
     }
     return _v_tid;
 }
@@ -127,13 +133,19 @@ create_cpu_cid_entry(std::int64_t _tid)
     // unique lock for _tid
     auto&       _mtx = get_cpu_cid_stack_lock(_tid);
     auto_lock_t _lk{ _mtx, std::defer_lock };
-    if(!_lk.owns_lock()) _lk.lock();
+    if(!_lk.owns_lock())
+    {
+        _lk.lock();
+    }
 
     const std::int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
 
     auto&       _p_mtx = get_cpu_cid_stack_lock(_p_idx);
     auto_lock_t _p_lk{ _p_mtx, std::defer_lock };
-    if(!_p_lk.owns_lock()) _p_lk.lock();
+    if(!_p_lk.owns_lock())
+    {
+        _p_lk.lock();
+    }
 
     auto&& _cid = get_cpu_cid()++;
     // auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
@@ -173,7 +185,10 @@ void
 setup_gotchas()
 {
     static bool _initialized = false;
-    if(_initialized) return;
+    if(_initialized)
+    {
+        return;
+    }
     _initialized = true;
 
     LOG_DEBUG("Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread");
@@ -251,7 +266,9 @@ void
 set_sampling_on_all_future_threads(bool _v)
 {
     for(size_t i = 0; i < max_supported_threads; ++i)
+    {
         get_sampling_on_child_threads_history(i).emplace_back(_v);
+    }
 }
 
 pid_t
