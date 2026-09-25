@@ -1,0 +1,41 @@
+{
+    "evaluations": [
+        {
+            "expected_behavior": [
+                "recommends the trace-hpc preset",
+                "gives the exact rocprof-sys-sample --preset=trace-hpc command"
+            ],
+            "id": "which-preset-for-hpc-app",
+            "prompt": "I have an MPI + OpenMP HPC application and want to profile it with rocprof-sys-sample. Which preset should I use?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "recommends the profile-only preset",
+                "explains it is a flat profile with sampling and tracing disabled"
+            ],
+            "id": "lowest-overhead-production-profile",
+            "prompt": "I want to profile my production service with rocprof-sys-run but need the lowest possible overhead. What preset fits?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "recommends the workload-trace preset",
+                "mentions it enables MPI/RCCL tracing with a large trace buffer"
+            ],
+            "id": "aiml-training-preset-recommendation",
+            "prompt": "Recommend a rocprofiler-systems preset for profiling a long-running AI/ML training job on GPUs.",
+            "skill_should_trigger": true
+        },
+        {
+            "id": "vague-performance-question-no-tool",
+            "prompt": "How can I make my application run faster?",
+            "skill_should_trigger": false
+        },
+        {
+            "id": "cmake-build-preset-question",
+            "prompt": "Which CMake preset should I use to configure a release build of rocprofiler-systems?",
+            "skill_should_trigger": false
+        }
+    ]
+}
