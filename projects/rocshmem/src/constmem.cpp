@@ -41,9 +41,9 @@ void init_constant_memory(void) {
   constmem_values.ipc_sdma_threshold =
       static_cast<bool>(envvar::sdma::enabled)
           ? static_cast<size_t>(envvar::sdma::threshold)
-          : SIZE_MAX;
+          : SDMA_THRESHOLD_DISABLED;
 #else
-  constmem_values.ipc_sdma_threshold = SIZE_MAX;
+  constmem_values.ipc_sdma_threshold = SDMA_THRESHOLD_DISABLED;
 #endif
 
   constmem_values.heap_base =

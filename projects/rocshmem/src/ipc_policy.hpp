@@ -433,7 +433,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
-    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
         sdmaImpl_.sdmaQuietAll();
@@ -444,7 +444,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
-    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
@@ -456,7 +456,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   __device__ void ipcQuiet() {
-    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0) {
         sdmaImpl_.sdmaQuietAll();
@@ -470,7 +470,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   __device__ void ipcQuiet(int local_pe) {
-    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
