@@ -499,6 +499,55 @@
           }
         }
       ]
+    },
+    "clip-bf16": {
+      "faults": [
+        {
+          "id": "barrier-drop-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Maintained CLIP compilation reproduces fresh inventory ELF 3a959c36a47bfed7. Metadata requires 64 threads with wavefront size 32. In pristine clip-pristine.asm (.text VMA 0x5400), stores at VMA 0x9f84/0x9f8c precede the unconditional signal/wait at .text+0x4b98/0x4bec, followed by peer LDS loads. The second store address is 2304+40*(thread_id>>1)+2*((8*thread_id)&8). Thread 32 therefore publishes at 2944; thread 16 in the other wave reads that address at VMA 0xa010 (base 640 plus 2304). Drop only this publication pair; preserve the final 0x4d78/0x4d7c pair. The maintained forward invocation executes this batch matmul, and restored EXEC reaches the pair unconditionally. Eight independent trials per mode and minimum six detections are predeclared before outcomes."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3a959c36a47bfed7|kernel=forward_bs4$async_dispatch_11_batch_matmul_20x17x13x17_bf16xbf16xf32|kind=barrier|pc=0x0000000000004b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3a959c36a47bfed7|kernel=forward_bs4$async_dispatch_11_batch_matmul_20x17x13x17_bf16xbf16xf32|event=barrier|pc=0x0000000000004b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:3a959c36a47bfed7|kernel=forward_bs4$async_dispatch_11_batch_matmul_20x17x13x17_bf16xbf16xf32|event=barrier|pc=0x0000000000004bec|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

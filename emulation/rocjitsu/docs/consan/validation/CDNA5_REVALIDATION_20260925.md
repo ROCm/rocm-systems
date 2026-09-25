@@ -502,3 +502,13 @@ After that child exited, the held batch boundary allowed the shared hook to
 rebuild successfully with the tested explicit report-cap change. The scheduler
 resumed, and Qwen qualification now uses that hook. MXF4 remains orange until
 the queued full clean rerun with an explicit 256 MiB report cap completes.
+
+### CLIP BF16 publication fault review
+
+The maintained compiler invocation reproduces ELF `3a959c36a47bfed7`.
+The selected batch matmul requires 64 threads in two 32-lane waves. Its LDS
+store address is `2304+40*(thread_id>>1)+2*((8*thread_id)&8)`: thread 32
+writes address 2944, which thread 16 reads after the publication barrier.
+The spec removes only `.text+0x4b98/0x4bec`, preserving the final pair.
+Evidence: `clip-pristine.asm`, `clip-notes.txt`, and the fresh CLIP inventory.
+Eight trials per mode and a six-detection threshold are fixed before runs.
