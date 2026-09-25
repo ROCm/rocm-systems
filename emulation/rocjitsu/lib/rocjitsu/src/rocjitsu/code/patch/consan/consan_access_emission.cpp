@@ -217,10 +217,13 @@ using detail::WorkitemOwnerDerivationPlan;
   // access window.
   // Large bank tables divide capacity between wave identities and lanes.
   // Reserve at least eight wave buckets; additional capacity subdivides the
-  // lane groups until all 64 lanes can retain independent representatives.
+  // lane groups until every lane can retain an independent representative.
   // Atomic publication keeps its existing owner-only attachment protocol.
-  const bool striped = spread_lanes && arch == ROCJITSU_CODE_ARCH_CDNA4 && bank_count >= 64u;
-  const uint32_t lane_groups = striped ? std::min(64u, bank_count / 8u) : 1u;
+  const bool striped = spread_lanes &&
+                       (arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+                       bank_count >= 64u;
+  const uint32_t wave_lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32u : 64u;
+  const uint32_t lane_groups = striped ? std::min(wave_lanes, bank_count / 8u) : 1u;
   const uint32_t lane_group_bits = std::countr_zero(lane_groups);
   InstructionSequence sequence(words);
   sequence.require(append_identity_hash(words, dispatch, workgroup_sources, owner_vgpr,
@@ -241,17 +244,19 @@ using detail::WorkitemOwnerDerivationPlan;
     }
     sequence.append(
         instrumentation::build_v_and_b32_literal(bank_vgpr, owner_buckets - 1u, bank_vgpr, arch));
-    sequence.append(
-        instrumentation::build_v_mbcnt_lo_u32_b32(temporary_vgpr, 0xc1u,
-                                                  scalar_positive_inline_u32(0), arch),
-        instrumentation::build_v_mbcnt_hi_u32_b32(temporary_vgpr, 0xc1u,
-                                                  vector_source_vgpr(temporary_vgpr), arch),
-        instrumentation::build_v_lshrrev_b32(
-            temporary_vgpr, scalar_positive_inline_u32(6u - lane_group_bits), temporary_vgpr, arch),
-        instrumentation::build_v_lshlrev_b32(bank_vgpr, scalar_positive_inline_u32(lane_group_bits),
-                                             bank_vgpr, arch),
-        instrumentation::build_v_add_u32(bank_vgpr, vector_source_vgpr(temporary_vgpr), bank_vgpr,
-                                         arch));
+    sequence.append(instrumentation::build_v_mbcnt_lo_u32_b32(temporary_vgpr, 0xc1u,
+                                                              scalar_positive_inline_u32(0), arch));
+    if (wave_lanes == 64u)
+      sequence.append(instrumentation::build_v_mbcnt_hi_u32_b32(
+          temporary_vgpr, 0xc1u, vector_source_vgpr(temporary_vgpr), arch));
+    sequence.append(instrumentation::build_v_lshrrev_b32(
+                        temporary_vgpr,
+                        scalar_positive_inline_u32(std::countr_zero(wave_lanes) - lane_group_bits),
+                        temporary_vgpr, arch),
+                    instrumentation::build_v_lshlrev_b32(
+                        bank_vgpr, scalar_positive_inline_u32(lane_group_bits), bank_vgpr, arch),
+                    instrumentation::build_v_add_u32(bank_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                     bank_vgpr, arch));
   }
   return sequence.finish();
 }

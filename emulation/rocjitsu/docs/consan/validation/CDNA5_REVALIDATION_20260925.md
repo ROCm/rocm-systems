@@ -1145,3 +1145,20 @@ produce different full ELF hashes (`hgemm-repro-single-worker-results.json`).
 Serial generation alone is not a reproducibility solution. The exact reviewed
 code objects need to be reused or generation made reproducible before another
 fault campaign can be admitted; no identity check has been weakened.
+
+### CDNA5 lane-retention extension under E2E qualification
+
+Large access-evidence tables now apply the existing CDNA4 lane-stripe retention
+scheme to CDNA5 wave32. Tables of at least 64 banks reserve at least eight owner
+buckets and split remaining capacity across up to 32 lane groups. Wave32 uses
+MBCNT_LO only and a five-bit lane index. Eight-bank defaults and owner-only atomic
+publication attachment are unchanged; full identity checks still establish
+conflicts after retention.
+
+The emulator-backed lane-bank test now covers both architectures, 64/128/256/512
+banks, full and sparse EXEC, bank bounds, distinct retained lane groups and
+preservation of owner registers and EXEC. It passes. The full ConSan host filter
+passes 983 tests with two benchmark tests skipped (`cdna5-lane-retention-host.log`).
+A separate `lane-retention-hook` is running matching clean and eight fault trials
+for histogram at high plus 256 banks (`histc-lanes-high-256-{clean,fault}`).
+This is not yet an E2E qualification or a claim that the yellow cell is fixed.

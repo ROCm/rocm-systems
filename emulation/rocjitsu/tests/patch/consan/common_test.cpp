@@ -1014,53 +1014,59 @@ TEST(ConSan, WindowBanksDoNotSystematicallyAliasWorkgroupsAndWaveOwners) {
 }
 
 TEST(ConSan, CdnaLargeWindowBanksRetainDistinctLaneGroupsWithSparseExec) {
-  for (uint32_t bank_count : {64u, 128u, 256u, 512u}) {
-    for (uint64_t exec : {~uint64_t{0}, uint64_t{0x0101010101010101}}) {
-      std::vector<uint32_t> words;
-      detail::ReportDispatchIdSource dispatch;
-      dispatch.sgpr = 20u;
-      ASSERT_TRUE(detail::append_window_bank_index(words, dispatch, {}, bank_count, 40u, 41u, 42u,
-                                                   ROCJITSU_CODE_ARCH_CDNA4, true));
-      amdgpu::GpuMemory memory("lane_group_memory");
-      amdgpu::L2Cache cache("lane_group_cache");
-      cache.set_backing_memory(&memory);
-      amdgpu::ComputeUnitCore::Config config{};
-      config.arch = ROCJITSU_CODE_ARCH_CDNA4;
-      config.num_wf_slots = 1;
-      config.sgprs_per_wf = 128;
-      config.vgprs_per_wf = 256;
-      config.lds_size_kb = 64;
-      auto cu = amdgpu::ComputeUnitCore::create("lane_group_core", config, &memory, &cache);
-      ASSERT_NE(cu, nullptr);
-      auto *wave = cu->dispatch_wf(0, 0, 128, 256);
-      ASSERT_NE(wave, nullptr);
-      for (size_t i = 0; i < words.size(); ++i)
-        memory.write32(i * sizeof(uint32_t), words[i]);
-      wave->pc = 0u;
-      wave->set_exec(exec);
-      const auto base = wave->vgpr_alloc().base;
-      cu->write_sgpr(wave->sgpr_alloc().base + 20u, 123u);
-      cu->write_sgpr(wave->sgpr_alloc().base + 21u, 0u);
-      for (uint32_t lane = 0; lane < 64; ++lane)
-        cu->write_vgpr(base + 42u, lane, 3u);
-      size_t steps = 0;
-      while (wave->pc < words.size() * sizeof(uint32_t)) {
-        ASSERT_LT(steps++, words.size());
-        cu->step();
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    const uint32_t lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32u : 64u;
+    const uint64_t mask = lanes == 32u ? 0xffffffffull : ~uint64_t{0};
+    for (uint32_t bank_count : {64u, 128u, 256u, 512u}) {
+      for (uint64_t exec : {mask, uint64_t{0x0101010101010101} & mask}) {
+        std::vector<uint32_t> words;
+        detail::ReportDispatchIdSource dispatch;
+        dispatch.sgpr = 20u;
+        ASSERT_TRUE(detail::append_window_bank_index(words, dispatch, {}, bank_count, 40u, 41u, 42u,
+                                                     arch, true));
+        amdgpu::GpuMemory memory("lane_group_memory");
+        amdgpu::L2Cache cache("lane_group_cache");
+        cache.set_backing_memory(&memory);
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        config.lds_size_kb = 64;
+        auto cu = amdgpu::ComputeUnitCore::create("lane_group_core", config, &memory, &cache);
+        ASSERT_NE(cu, nullptr);
+        auto *wave = cu->dispatch_wf(0, 0, 128, 256);
+        ASSERT_NE(wave, nullptr);
+        for (size_t i = 0; i < words.size(); ++i)
+          memory.write32(i * sizeof(uint32_t), words[i]);
+        wave->pc = 0u;
+        wave->set_exec(exec);
+        const auto base = wave->vgpr_alloc().base;
+        cu->write_sgpr(wave->sgpr_alloc().base + 20u, 123u);
+        cu->write_sgpr(wave->sgpr_alloc().base + 21u, 0u);
+        for (uint32_t lane = 0; lane < lanes; ++lane)
+          cu->write_vgpr(base + 42u, lane, 3u);
+        size_t steps = 0;
+        while (wave->pc < words.size() * sizeof(uint32_t)) {
+          ASSERT_LT(steps++, words.size());
+          cu->step();
+        }
+        std::set<uint32_t> banks;
+        for (uint32_t lane = 0; lane < lanes; ++lane) {
+          if ((exec & (uint64_t{1} << lane)) == 0)
+            continue;
+          const uint32_t bank = cu->read_vgpr(base + 40u, lane);
+          EXPECT_LT(bank, bank_count);
+          banks.insert(bank);
+          EXPECT_EQ(cu->read_vgpr(base + 42u, lane), 3u);
+        }
+        EXPECT_EQ(banks.size(),
+                  std::min<size_t>(std::min(bank_count / 8u, lanes), std::popcount(exec)));
+        EXPECT_EQ(wave->exec(), exec);
+        if (!wave->is_halted())
+          wave->halt();
       }
-      std::set<uint32_t> banks;
-      for (uint32_t lane = 0; lane < 64; ++lane) {
-        if ((exec & (uint64_t{1} << lane)) == 0)
-          continue;
-        const uint32_t bank = cu->read_vgpr(base + 40u, lane);
-        EXPECT_LT(bank, bank_count);
-        banks.insert(bank);
-        EXPECT_EQ(cu->read_vgpr(base + 42u, lane), 3u);
-      }
-      EXPECT_EQ(banks.size(), std::min<size_t>(bank_count / 8u, std::popcount(exec)));
-      EXPECT_EQ(wave->exec(), exec);
-      if (!wave->is_halted())
-        wave->halt();
     }
   }
 }
