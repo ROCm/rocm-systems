@@ -137,9 +137,8 @@ The following table lists the parameters relevant to thread tracing:
 |                             |         |         |           | stats.csv and UI dir. See --kernel-include-regex and         |
 |                             |         |         |           | --kernel-iteration-range. If multiple targeted kernels       |
 |                             |         |         |           | overlap, the count for N next dispatches starts again from 0.|
-|                             |         |         |           | Recommended use with --att-gpu-index due to thread trace     |
-|                             |         |         |           | being enabled for all GPUs. Incompatible with                |
-|                             |         |         |           | --selected-regions.                                          |
+|                             |         |         |           | Thread trace is only started on the GPU the targeted kernel  |
+|                             |         |         |           | was dispatched to. Incompatible with --selected-regions.     |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
 For AMD Instinct accelerators, enable perfmon streaming using:
@@ -215,6 +214,11 @@ new targeted kernel, so it is possible for a generated ATT file to have more tha
 All the profiled kernels are then compiled into a single ATT file.
 If a new targeted kernel is encountered after the ``rocprofv3`` tool has finished profiling a batch of kernels,
 the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels.
+
+Each GPU selected for thread trace is handled independently: a targeted kernel only starts thread trace on the GPU it was
+dispatched to, and the ``n`` consecutive kernels are counted per GPU. Kernels dispatched to GPUs that are not selected with
+``att-gpu-index`` are ignored. This allows applications that run one process per GPU to use this option without the
+processes starting thread trace on the same GPU.
 
 Marker-controlled thread tracing
 =============================
