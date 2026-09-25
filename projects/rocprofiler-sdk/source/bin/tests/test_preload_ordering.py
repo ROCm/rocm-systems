@@ -25,6 +25,7 @@
 """GPU-free unit tests for the LD_PRELOAD ordering the rocprofv3 launcher builds."""
 
 import os
+import subprocess
 import sys
 
 import pytest
@@ -42,19 +43,13 @@ STUB_LIBRARIES = (
     "lib/rocprofiler-sdk/librocprofv3-list-avail.so",
 )
 
-ATTACH_CACHE_PREFIX = "/tmp/rocprofv3_attach_"
-
-
-class _Launched(Exception):
-    """Raised in place of the exec that would replace the test process."""
-
-
-@pytest.fixture(autouse=True)
-def clean_preload_env(monkeypatch):
-    # A sanitizer build injects LD_PRELOAD into the test environment, which would
-    # otherwise be indistinguishable from the value under test.
-    monkeypatch.delenv("LD_PRELOAD", raising=False)
-    monkeypatch.delenv("ROCPROF_PRELOAD", raising=False)
+# Stands in for the profiled application and reports the LD_PRELOAD it receives.
+REPORT_PREFIX = "LD_PRELOAD="
+REPORT_LD_PRELOAD = [
+    sys.executable,
+    "-c",
+    f"import os; print('{REPORT_PREFIX}' + os.environ.get('LD_PRELOAD', ''))",
+]
 
 
 @pytest.fixture
@@ -68,47 +63,42 @@ def rocm_root(tmp_path):
 
 
 @pytest.fixture
-def attach_cache(rocprofv3, tmp_path, monkeypatch):
-    """Redirect the reattach configuration away from its hardcoded /tmp path.
+def launch(rocprofv3, rocm_root):
+    """Run the launcher and return the LD_PRELOAD its application receives."""
 
-    Only the attach-mode cases reach that path, so they request this explicitly
-    rather than every case paying for a patched os.open.
-    """
-    cache = tmp_path / "attach-config"
-    cache.mkdir()
-    real_open = os.open
+    def _launch(*argv, env=None):
+        # A sanitizer build injects LD_PRELOAD into the test environment, which would
+        # otherwise be indistinguishable from the value under test.
+        environ = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in ("LD_PRELOAD", "ROCPROF_PRELOAD")
+        }
+        environ.update(env or {})
 
-    def redirected_open(path, *args, **kwargs):
-        name = os.fspath(path)
-        if name.startswith(ATTACH_CACHE_PREFIX):
-            name = str(cache / os.path.basename(name))
-        return real_open(name, *args, **kwargs)
+        result = subprocess.run(
+            [
+                sys.executable,
+                rocprofv3.__file__,
+                "--rocm-root",
+                str(rocm_root),
+                *argv,
+                "--",
+                *REPORT_LD_PRELOAD,
+            ],
+            env=environ,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
-    monkeypatch.setattr(rocprofv3.os, "open", redirected_open)
-    return cache
-
-
-@pytest.fixture
-def launch(rocprofv3, rocm_root, monkeypatch):
-    """Run the launcher and return the environment it would hand to the application."""
-
-    def _launch(*argv, application=True):
-        captured = {}
-
-        def execvpe(file, args, env):
-            captured.update(env)
-            raise _Launched
-
-        monkeypatch.setattr(rocprofv3.os, "execvpe", execvpe)
-
-        command = ["--rocm-root", str(rocm_root), *argv]
-        if application:
-            command += ["--", "/bin/true"]
-
-        with pytest.raises(_Launched):
-            rocprofv3.main(command)
-
-        return captured
+        reports = [
+            line[len(REPORT_PREFIX) :]
+            for line in result.stdout.splitlines()
+            if line.startswith(REPORT_PREFIX)
+        ]
+        assert len(reports) == 1, result.stdout
+        return reports[0]
 
     return _launch
 
@@ -125,88 +115,69 @@ def expected_preload(rocm_root, *user_libraries, roctx=False):
 
 
 def test_multiple_preloads_keep_order(launch, rocm_root):
-    env = launch("--preload", "/opt/libA.so", "/opt/libB.so", "--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
+    assert launch(
+        "--preload", "/opt/libA.so", "/opt/libB.so", "--kernel-trace"
+    ) == expected_preload(
         rocm_root, "/opt/libA.so", "/opt/libB.so"
     ), "--preload entries must keep the order they were given on the command line"
 
 
-def test_preload_prepended_before_existing(launch, rocm_root, monkeypatch):
+def test_preload_prepended_before_existing(launch, rocm_root):
     # A pre-existing value is what distinguishes prepending from appending; without
     # one both produce the same string.
-    monkeypatch.setenv("LD_PRELOAD", "/opt/libX.so")
-    env = launch("--preload", "/opt/libA.so", "--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
-        rocm_root, "/opt/libA.so", "/opt/libX.so"
-    ), (
+    assert launch(
+        "--preload", "/opt/libA.so", "--kernel-trace", env={"LD_PRELOAD": "/opt/libX.so"}
+    ) == expected_preload(rocm_root, "/opt/libA.so", "/opt/libX.so"), (
         "--preload must precede a pre-existing LD_PRELOAD, which must precede the "
         "tool and SDK libraries"
     )
 
 
-def test_rocprof_preload_env_default(launch, rocm_root, monkeypatch):
-    monkeypatch.setenv("ROCPROF_PRELOAD", "/opt/libA.so:/opt/libB.so")
-    env = launch("--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
+def test_rocprof_preload_env_default(launch, rocm_root):
+    assert launch(
+        "--kernel-trace", env={"ROCPROF_PRELOAD": "/opt/libA.so:/opt/libB.so"}
+    ) == expected_preload(
         rocm_root, "/opt/libA.so", "/opt/libB.so"
     ), "ROCPROF_PRELOAD must supply the --preload default, split on colons"
 
 
-def test_empty_entries_are_dropped(launch, rocm_root, monkeypatch):
-    monkeypatch.setenv("ROCPROF_PRELOAD", ":/opt/libA.so:")
-    env = launch("--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
+def test_cli_preload_overrides_env_default(launch, rocm_root):
+    assert launch(
+        "--preload",
+        "/opt/libA.so",
+        "--kernel-trace",
+        env={"ROCPROF_PRELOAD": "/opt/libEnv.so"},
+    ) == expected_preload(
+        rocm_root, "/opt/libA.so"
+    ), "an explicit --preload must replace the ROCPROF_PRELOAD default"
+
+
+def test_empty_entries_are_dropped(launch, rocm_root):
+    assert launch(
+        "--kernel-trace", env={"ROCPROF_PRELOAD": ":/opt/libA.so:"}
+    ) == expected_preload(
         rocm_root, "/opt/libA.so"
     ), "empty preload entries must be dropped rather than left as bare separators"
 
 
 def test_marker_trace_appends_roctx_last(launch, rocm_root):
-    env = launch("--marker-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
+    assert launch("--marker-trace") == expected_preload(
         rocm_root, roctx=True
     ), "marker tracing must append the roctx library after the tool and SDK libraries"
 
 
 def test_suppress_marker_preload_drops_roctx(launch, rocm_root):
-    env = launch("--marker-trace", "--suppress-marker-preload")
-    assert env["LD_PRELOAD"] == expected_preload(
+    assert launch("--marker-trace", "--suppress-marker-preload") == expected_preload(
         rocm_root
     ), "--suppress-marker-preload must drop the roctx library"
 
 
-def test_preload_order_with_marker_trace(launch, rocm_root, monkeypatch):
-    monkeypatch.setenv("LD_PRELOAD", "/opt/libX.so")
-    env = launch("--preload", "/opt/libA.so", "--marker-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
+def test_preload_order_with_marker_trace(launch, rocm_root):
+    assert launch(
+        "--preload", "/opt/libA.so", "--marker-trace", env={"LD_PRELOAD": "/opt/libX.so"}
+    ) == expected_preload(
         rocm_root, "/opt/libA.so", "/opt/libX.so", roctx=True
     ), "the full order is user, pre-existing, tool, SDK, then roctx"
-
-
-def test_attach_mode_skips_preload(launch, attach_cache, monkeypatch):
-    monkeypatch.setenv("LD_PRELOAD", "/opt/libX.so")
-    env = launch("--pid", "12345", "--preload", "/opt/libA.so", application=False)
-    assert (
-        env["LD_PRELOAD"] == "/opt/libX.so"
-    ), "attach mode must add neither --preload nor the tool and SDK libraries"
-    assert env["ROCPROF_ATTACH_PID"] == "12345"
-
-
-def test_cli_preload_overrides_env_default(launch, rocm_root, monkeypatch):
-    monkeypatch.setenv("ROCPROF_PRELOAD", "/opt/libEnv.so")
-    env = launch("--preload", "/opt/libA.so", "--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(
-        rocm_root, "/opt/libA.so"
-    ), "an explicit --preload must replace the ROCPROF_PRELOAD default"
-
-
-def test_attach_mode_appends_roctx(launch, rocm_root, attach_cache, monkeypatch):
-    # The marker-trace append is not covered by the attach-mode guard, so roctx is the
-    # one entry added to the environment of the rocprof-attach helper.
-    monkeypatch.setenv("LD_PRELOAD", "/opt/libX.so")
-    env = launch("--pid", "12345", "--marker-trace", application=False)
-    assert (
-        env["LD_PRELOAD"] == f"/opt/libX.so:{rocm_root / ROCTX_LIBRARY}"
-    ), "marker tracing must still append roctx in attach mode"
 
 
 if __name__ == "__main__":

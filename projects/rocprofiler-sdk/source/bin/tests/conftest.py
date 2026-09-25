@@ -24,7 +24,6 @@
 
 import importlib.util
 import os
-import sys
 
 from importlib.machinery import SourceFileLoader
 
@@ -54,9 +53,6 @@ def _load_launcher(module_name, path, option):
     loader = SourceFileLoader(module_name, path)
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
-    # Publish before executing so the launcher's own pickling of module-level
-    # classes, used by attach-mode reattachment, can resolve them again.
-    sys.modules[module_name] = module
     loader.exec_module(module)
     return module
 
