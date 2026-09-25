@@ -58,6 +58,28 @@ The ``rocpd`` database format supports conversion to alternative output formats 
 
 The ``rocpd`` conversion utility is distributed as part of the ROCm installation package, located in ``/opt/rocm-<version>/bin``, and provides both executable and Python module interfaces for programmatic integration.
 
+Installing the rocpd Python prerequisites
++++++++++++++++++++++++++++++++++++++++++
+
+Before running ``rocpd``, install the Python packages it depends on, such as ``pandas``, ``otf2``, and ``jinja2``.
+The ROCm installation ships the list of these packages in ``<ROCM_INSTALL>/share/rocprofiler-sdk/requirements.txt``, where ``<ROCM_INSTALL>`` is the ROCm installation directory, for example ``/opt/rocm``:
+
+.. code-block:: bash
+
+   python3 -m pip install -r /opt/rocm/share/rocprofiler-sdk/requirements.txt
+
+To keep the packages separate from the system Python, install them into a virtual environment:
+
+.. code-block:: bash
+
+   python3 -m venv rocpd-venv
+   source rocpd-venv/bin/activate
+   python3 -m pip install -r /opt/rocm/share/rocprofiler-sdk/requirements.txt
+
+.. note::
+
+   Install the packages with the same Python interpreter that runs ``rocpd``. If you have several Python versions installed, see the Python interpreter compatibility notes below.
+
 To transform database files into target formats, run the ``rocpd convert`` command with appropriate parameters.
 
 - **CSV format conversion**

@@ -37,7 +37,20 @@ install(
     USE_SOURCE_PERMISSIONS)
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/requirements.txt
+    FILES ${PROJECT_SOURCE_DIR}/requirements-runtime.txt
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}
+    RENAME requirements.txt
+    COMPONENT core)
+
+# tests/requirements.txt includes requirements-runtime.txt via a relative "-r" line
+install(
+    FILES ${PROJECT_SOURCE_DIR}/requirements-test.txt
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests
+    RENAME requirements.txt
+    COMPONENT tests)
+
+install(
+    FILES ${PROJECT_SOURCE_DIR}/requirements-runtime.txt
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests
     COMPONENT tests)
 
