@@ -261,15 +261,15 @@ mpi_gotcha::update()
         if(itr.first == null_comm())
         {
             continue;
-            // if currently have null comm, replace
         }
         else if(_rank_data.comm == null_comm())
         {
+            // if currently have null comm, replace
             _rank_data = itr.second;
-            // if
         }
         else if(itr.second > _rank_data)
         {
+            // if new comm is greater, replace
             _rank_data = itr.second;
         }
     }
