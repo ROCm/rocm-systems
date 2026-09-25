@@ -266,7 +266,7 @@ Panel Config:
           avg: SUM(GL1C_GL2_RET_ACK_sum) / SUM($denom)
           min: MIN(GL1C_GL2_RET_ACK_sum / $denom)
           max: MAX(GL1C_GL2_RET_ACK_sum / $denom)
-          unit: (ACKs + $normUnit)
+          unit: (Count + $normUnit)
   metrics_description:
     GL1A Utilization: >-
       Percentage of cycles the GL1 Arbiter is processing requests from GL0.

@@ -36,23 +36,23 @@ Panel Config:
           avg: AVG(SPI_RA_REQ_ALLOC_sum)
           min: MIN(SPI_RA_REQ_ALLOC_sum)
           max: MAX(SPI_RA_REQ_ALLOC_sum)
-          unit: Workgroups
+          unit: Count
         # SPI_CSN_WAVE_* reads CS0-only (DEBUG_PIPE_SEL); compute uses SPI_ALL_WAVE.
         Dispatched Wavefronts:
           avg: AVG(SPI_ALL_WAVE_sum)
           min: MIN(SPI_ALL_WAVE_sum)
           max: MAX(SPI_ALL_WAVE_sum)
-          unit: Wavefronts
+          unit: Count
         Dispatched Clusters:
           avg: AVG(SPI_CSN_NUM_CLUSTERS_sum)
           min: MIN(SPI_CSN_NUM_CLUSTERS_sum)
           max: MAX(SPI_CSN_NUM_CLUSTERS_sum)
-          unit: Clusters
+          unit: Count
         Dispatched Group-of-Groups:
           avg: AVG(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           min: MIN(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           max: MAX(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
-          unit: Group-of-Groups
+          unit: Count
         Wavefront Dispatch Rate:
           avg: SUM(SPI_ALL_WAVE_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_sum / SPI_BUSY_sum)

@@ -140,7 +140,7 @@ Panel Config:
           avg: SUM(GLARBC_GLARB_RET_ACK_sum) / SUM($denom)
           min: MIN(GLARBC_GLARB_RET_ACK_sum / $denom)
           max: MAX(GLARBC_GLARB_RET_ACK_sum / $denom)
-          unit: (ACKs + $normUnit)
+          unit: (Count + $normUnit)
   - metric_table:
       id: 1205
       title: GLARBC-GL2 Interface
@@ -165,7 +165,7 @@ Panel Config:
           avg: SUM(GLARBC_GL2_RET_ACK_sum) / SUM($denom)
           min: MIN(GLARBC_GL2_RET_ACK_sum / $denom)
           max: MAX(GLARBC_GL2_RET_ACK_sum / $denom)
-          unit: (ACKs + $normUnit)
+          unit: (Count + $normUnit)
   metrics_description:
     Utilization: >-
       Percentage of GLARBA/GLARBC cycles the Graphics Level Arbiter is actively processing requests.

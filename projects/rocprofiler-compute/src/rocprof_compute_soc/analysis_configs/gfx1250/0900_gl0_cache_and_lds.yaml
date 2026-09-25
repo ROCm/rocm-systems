@@ -76,17 +76,17 @@ Panel Config:
           avg: SUM(TX_VMW_SECTORS_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_sum / $denom)
           max: MAX(TX_VMW_SECTORS_sum / $denom)
-          unit: (Sectors + $normUnit)
+          unit: (Count + $normUnit)
         Total Requests - Sector Reads:
           avg: SUM(TX_VMW_SECTORS_READ_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_READ_sum / $denom)
           max: MAX(TX_VMW_SECTORS_READ_sum / $denom)
-          unit: (Sectors + $normUnit)
+          unit: (Count + $normUnit)
         Total Requests - Sector Writes:
           avg: SUM(TX_VMW_SECTORS_WRITE_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_WRITE_sum / $denom)
           max: MAX(TX_VMW_SECTORS_WRITE_sum / $denom)
-          unit: (Sectors + $normUnit)
+          unit: (Count + $normUnit)
   - metric_table:
       id: 903
       title: Cache Lookup
@@ -435,27 +435,27 @@ Panel Config:
           avg: SUM(TX_VMW_UTCL0_UTCL1_RETURN_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_RETURN_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_RETURN_sum / $denom)
-          unit: (Returns + $normUnit)
+          unit: (Count + $normUnit)
         UTCL0-UTCL1 Returns - Permission Fault:
           avg: SUM(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum / $denom)
-          unit: (Returns + $normUnit)
+          unit: (Count + $normUnit)
         UTCL0-UTCL1 Returns - XNACK Retry:
           avg: SUM(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum / $denom)
-          unit: (Returns + $normUnit)
+          unit: (Count + $normUnit)
         UTCL0-UTCL1 Returns - Partial Resident Fault:
           avg: SUM(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum / $denom)
-          unit: (Returns + $normUnit)
+          unit: (Count + $normUnit)
         UTCL0-UTCL1 Returns - No Retry Fault:
           avg: SUM(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum / $denom)
-          unit: (Returns + $normUnit)
+          unit: (Count + $normUnit)
         UTCL1 Request Latency:
           avg: SUM(TX_VMW_UTCL0_UTCL1_INFLIGHT_sum) / SUM(TX_VMW_UTCL0_UTCL1_REQUEST_sum)
           min: MIN(TX_VMW_UTCL0_UTCL1_INFLIGHT_sum / TX_VMW_UTCL0_UTCL1_REQUEST_sum)
