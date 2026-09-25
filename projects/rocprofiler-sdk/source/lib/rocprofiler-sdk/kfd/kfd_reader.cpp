@@ -309,7 +309,7 @@ struct reader_state
     reader_state() = default;
     ~reader_state();
 
-    reader_state(const reader_state&)            = delete;
+    reader_state(const reader_state&) = delete;
     reader_state& operator=(const reader_state&) = delete;
 };
 
@@ -1113,8 +1113,7 @@ reader_loop()
         {
             uint64_t v = 0;
             while(::read(fds[kControlPollSlot].fd, &v, sizeof(v)) == sizeof(v))
-            {
-            }
+            {}
         }
 
         // Consume each woken stream's kernel notify count BEFORE draining. The

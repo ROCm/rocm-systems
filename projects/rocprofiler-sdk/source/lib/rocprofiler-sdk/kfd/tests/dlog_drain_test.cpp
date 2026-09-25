@@ -1026,7 +1026,8 @@ TEST(stream_geometry, invalid_layouts_are_rejected)
         fn(g);
         EXPECT_FALSE(validate_stream_geometry(g, req, kPage).ok) << label;
     };
-    mutate("buffer_size_differs_from_request", [](stream_geometry&) {}, buf * 2);
+    mutate(
+        "buffer_size_differs_from_request", [](stream_geometry&) {}, buf * 2);
     mutate("mis_routed_records_offset", [](stream_geometry& g) { g.records_offset = 64; });
     mutate("wptr_offset_off_lattice", [](stream_geometry& g) { g.wptr_offset = buf + 8; });
     mutate("mmap_too_small", [](stream_geometry& g) { g.mmap_size -= kPage; });
