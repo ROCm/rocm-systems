@@ -2,7 +2,39 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
-project(profiler-hub VERSION 0.2.0)
+
+# Version lives in VERSION file.
+file(
+    STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+    FULL_VERSION_STRING
+    LIMIT_COUNT 1
+)
+
+# file(STRINGS) does not register its input as a configure dependency, so editing
+# VERSION alone would leave the old version baked into an existing build tree.
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+)
+# Only MAJOR.MINOR.PATCH is passed to project(); any trailing pre-release suffix
+# stays in FULL_VERSION_STRING for reporting.
+if(NOT FULL_VERSION_STRING MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "VERSION must begin with MAJOR.MINOR.PATCH (found '${FULL_VERSION_STRING}')"
+    )
+endif()
+
+set(PROFILER_HUB_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+
+project(profiler-hub VERSION ${PROFILER_HUB_VERSION})
+
+message(
+    STATUS
+    "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
+)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 20)
