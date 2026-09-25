@@ -615,12 +615,28 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
     int nPips = 0;
     NCCLCHECK(ibCastMultiplaneGetPipGids(&qpAttr.ah_attr.grh.dgid, pipGids, &nPips));
     if (nPips > 0) {
+      // Our own PIPs, used as the per-plane source. Leaving the source zero makes
+      // the driver do a source-unconstrained route lookup, which for a peer on this
+      // same host resolves via the kernel local table and yields source ==
+      // destination on both the IP and the MAC, so the frames are undeliverable.
+      union ibv_gid localPipGids[MULTIPLANE_MAX_PIPS];
+      int nLocalPips = 0;
+      NCCLCHECK(ibCastMultiplaneGetPipGids(&rtrAttr->localGid, localPipGids, &nLocalPips));
+      if (nLocalPips < nPips) {
+        WARN("Multiplane: local VIP maps to %d PIPs but remote maps to %d; planes %d+ fall back to an "
+             "unconstrained source lookup and will not work against a peer on this host",
+             nLocalPips, nPips, nLocalPips);
+      }
       // Replace dgid with loopback (local GID) — NIC firmware handles forwarding
       qpAttr.ah_attr.grh.dgid = rtrAttr->localGid;
       for (int i = 0; i < nPips; i++) {
         struct ionic_dv_puec_route route = {};
         route.dgid = pipGids[i];
-        memset(route.sgid.raw, 0, sizeof(union ibv_gid));
+        if (i < nLocalPips) {
+          route.sgid = localPipGids[i];
+        } else {
+          memset(route.sgid.raw, 0, sizeof(union ibv_gid));
+        }
         route.flow_label = qpAttr.ah_attr.grh.flow_label;
         route.hop_limit = qpAttr.ah_attr.grh.hop_limit;
         route.sl = qpAttr.ah_attr.sl;
