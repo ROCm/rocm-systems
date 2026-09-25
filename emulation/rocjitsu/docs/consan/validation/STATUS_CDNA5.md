@@ -34,21 +34,21 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) |  |  |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 default: filtered clean pass; fault trials pending |  |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) |  |  |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) |  |  |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) |  |  |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: clean pass; fault 0/8; delay calibration pending |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) |  |  |
-| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) |  |  |
+| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending |  |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending |  |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending |  |
+| Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) |  |  |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) |  |  |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) |  |  |
@@ -58,8 +58,8 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) |  |  |
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) |  |  |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) |  |  |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) |  |  |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟧 default: 30 s timeout during patching; longer clean run pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 default: filtered clean pass (180 s deadline); fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) |  |  |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) |  |  |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) |  |  |

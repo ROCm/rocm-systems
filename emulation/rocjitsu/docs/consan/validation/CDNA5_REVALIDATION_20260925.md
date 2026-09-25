@@ -80,3 +80,13 @@ D128's reviewed grouped K-publication fault is committed in the maintained
 establish the current code hash and two physical publication barrier pairs.
 `d128-fault-default/` runs eight precommitted trials per detector using that spec,
 with gfx1250 emulator health discovery and dispatch smoke before/after each.
+
+`torch.topk` Default hit the initial 30-second deadline during patching. The
+otherwise identical `--timeout 180` retry passed baseline and clean qualification
+in `topk-longer-clean/` (instrumented elapsed 50.98 s under campaign load).
+The initial timeout remains preserved, and this is not a detector failure.
+
+D128 delay-zero SuperCollider completed all eight admitted/reached trials with
+healthy pre/post emulator probes and zero detections. The grouped publication
+fault and expectations were fixed before the trials. Delay calibration remains
+pending; no trial was replaced or omitted to improve the fraction.
