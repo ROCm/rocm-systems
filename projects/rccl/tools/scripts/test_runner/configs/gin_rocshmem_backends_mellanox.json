@@ -196,6 +196,8 @@
         { "name": "BarrierFence_DefaultIncludesPut", "description": "Default fence covers inbound put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesPut_SingleNode" },
         { "name": "BarrierFence_AllContextsPut", "description": "Put-fenced AllContexts barrier (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsPut_SingleNode" },
         { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" },
+        { "name": "BarrierFence_CoopAnyFlush", "description": "Put fence through ncclGinBarrierSession<ncclCoopAny> (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_CoopAnyFlushMakesPutVisible_SingleNode" },
+        { "name": "BarrierFence_IpcSignalInc", "description": "Sub-threshold IPC SignalInc is visible when waitSignal returns (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_IpcSignalIncMakesPutVisible_SingleNode" },
         { "name": "GetFlush_Visibility", "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB)", "test_filter": "GinMPIDeviceTests.GetFlush_Visibility" },
         { "name": "GetFlushAsyncWait_Visibility", "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel", "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility" },
         { "name": "GetFlush_ConcurrentBlocks", "description": "8 CTAs get + flush concurrently on one GIN context", "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks" }
