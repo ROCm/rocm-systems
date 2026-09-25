@@ -53,6 +53,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Analyze mode now auto-detects memory bandwidth analysis data from the profiling output. The `--membw-analysis` analyze option has been removed; use `--membw-analysis` only at profile time.
 
+* Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" across all architectures. The panel now shows resource allocation stats (Wave Occupancy, vGPRs, sGPRs, Scratch, LDS Allocation, Workgroups).
+
+* All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
+
 ### Removed
 
 * Removed the `--kernel-verbose` analyze option and the kernel name shortener it drove. The option had no effect on any output.
