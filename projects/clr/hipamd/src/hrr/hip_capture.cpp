@@ -64,6 +64,10 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/auxv.h>
+#endif
+
 static std::once_flag g_hrr_atexit_once;
 
 
@@ -97,9 +101,21 @@ static thread_local hipStream_t g_pushed_stream{};
 // Helpers
 // ---------------------------------------------------------------------------
 
+// The kernel sets AT_SECURE for a set-user-ID, set-group-ID or file-capability
+// exec. HIP_HRR_CAPTURE_OUTPUT comes from whoever launched the process, so such a
+// process must not write where it says, nor record its memory for them.
+static bool hrr_secure_exec() {
+#if defined(__linux__)
+  static const bool secure = getauxval(AT_SECURE) != 0;
+  return secure;
+#else
+  return false;
+#endif
+}
+
 bool hip_capture_enabled() {
   return !flagIsDefault(HIP_HRR_CAPTURE_OUTPUT) &&
-         HIP_HRR_CAPTURE_OUTPUT[0] != '\0';
+         HIP_HRR_CAPTURE_OUTPUT[0] != '\0' && !hrr_secure_exec();
 }
 
 const char* hip_capture_output_dir() {
@@ -1592,7 +1608,12 @@ void hrr_install_clr_exception_handler() {
 }  // namespace
 
 void hip_capture_init() {
-  if (!hip_capture_enabled()) return;
+  if (!hip_capture_enabled()) {
+    if (hrr_secure_exec() && !flagIsDefault(HIP_HRR_CAPTURE_OUTPUT))
+      fprintf(stderr, "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the process runs with "
+              "elevated privileges (set-user-ID, set-group-ID or file capabilities).\n");
+    return;
+  }
 
   // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
   // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
