@@ -673,8 +673,10 @@ stop_context(rocprofiler_context_id_t idx)
         if(auto* _cv = get_contexts_cv()) _cv->notify_all();
     }};
 
-    // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), an
-    // unbounded wait on in-flight GPU work. Holding get_contexts_mutex() across it stalls every
+    // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), a
+    // bounded wait on in-flight GPU work -- it gives up after a slice and reports that it did,
+    // so teardown has to stay safe for completions that land after it returns rather than rely
+    // on the drain having finished. Holding get_contexts_mutex() across it stalls every
     // context lifecycle operation in the process behind one context's dispatches, and it puts the
     // mutex on the far side of a wait that the completion path has to get through -- so any future
     // completion-path read that took the mutex would deadlock rather than merely block.

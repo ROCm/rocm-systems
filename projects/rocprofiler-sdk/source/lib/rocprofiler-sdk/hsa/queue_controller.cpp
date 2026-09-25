@@ -955,14 +955,21 @@ queue_controller_init(HsaApiTable* table)
     if(enable_queue_intercept()) queue_init();
 }
 
-void
+bool
 queue_controller_sync()
 {
     // sync the queue interceptor
     queue_interposition::interposition_sync();
 
+    bool _drained = true;
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    {
+        // Every queue is synced even after one times out, so a slow queue cannot hide the state of
+        // the ones behind it.
+        get_queue_controller()->iterate_queues(
+            [&_drained](const Queue* _queue) { _drained = _queue->sync() && _drained; });
+    }
+    return _drained;
 }
 
 void
