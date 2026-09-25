@@ -2634,6 +2634,70 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   EXPECT_EQ(cu->arch(), arch);
 }
 
+TEST_P(CuFactoryTest, ActivityQueriesTrackOverlappingPauseReasonsAndSlotReuse) {
+  amdgpu::GpuMemory memory("activity_memory");
+  amdgpu::L2Cache l2("activity_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 2;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("activity_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  auto launch = [&] { return cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf); };
+  auto *first = launch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  first->set_debug_halted(true);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  auto *second = launch();
+  ASSERT_NE(second, nullptr);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+
+  // Clearing one pause reason cannot make a wave runnable while another holds
+  // it. Repeated assignments must not change the aggregate a second time.
+  for (uint32_t mask = 0; mask < 8; ++mask) {
+    SCOPED_TRACE(mask);
+    for (unsigned repeat = 0; repeat < 2; ++repeat) {
+      second->set_debug_halted(mask & 1);
+      second->set_debug_suspended(mask & 2);
+      second->set_runtime_suspended(mask & 4);
+      EXPECT_TRUE(cu->has_active_wfs());
+      EXPECT_EQ(cu->has_runnable_wfs(), mask == 0);
+    }
+  }
+  second->set_debug_halted(false);
+  second->set_debug_suspended(false);
+  second->set_runtime_suspended(false);
+  const auto saved = second->debug_stop_state();
+  second->debug_trap(1);
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  second->restore_debug_stop_state(saved);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->set_state(amdgpu::WfState::VM_RETRY);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->set_state(amdgpu::WfState::WAITCNT);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->halt();
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  first->halt();
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  first = launch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  first->halt();
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+}
+
 TEST_P(CuFactoryTest, LdsContentsSurviveWorkgroupAllocationReuse) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");

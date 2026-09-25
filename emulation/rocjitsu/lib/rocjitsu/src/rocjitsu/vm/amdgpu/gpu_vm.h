@@ -8,15 +8,14 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -292,10 +291,11 @@ struct VmMtypeSnapshot {
   }
 };
 
-/// @brief Request-local policy cache, including the binding that owns it.
+/// @brief Policy cache that does not retain the binding's backing.
+/// @details Like an L1 cache, it requires externally serialized access.
 class VmMtypeCache {
   friend class GpuVmAccess;
-  std::shared_ptr<GpuVmAccessState> access_state_;
+  std::weak_ptr<GpuVmAccessState> access_state_;
   VmMtypeSnapshot snapshot_;
 };
 
@@ -470,6 +470,11 @@ public:
 /// is allowed to finish against the binding it captured.
 class GpuVmAccess {
 public:
+  /// @brief Whether this snapshot has not been revoked.
+  /// @details Ordinary snapshots are revoked on root replacement or invalidation.
+  /// Pinned snapshots survive root replacement. An access still checks revocation
+  /// under its lease, since this result can change immediately after the query.
+  [[nodiscard]] bool is_valid() const;
   [[nodiscard]] AddressSpaceInfo info() const { return info_; }
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
@@ -479,7 +484,7 @@ public:
                                               VmAccessKind access) const;
   /// @brief Query cache policy without exposing physical backing metadata.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const;
-  /// @brief Reuse a copied policy while both its binding and mutation token are valid.
+  /// @brief Reuse a copied policy while its access state and mutation token are valid.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address, VmMtypeCache &cache) const;
   /// @brief Query whether a complete virtual range currently permits an access.
   /// @details This side-effect-free query is for provisioning and routing decisions
@@ -527,13 +532,8 @@ private:
   friend class GpuVm;
 
   GpuVmAccess(AddressSpaceHandle address_space, AddressSpaceInfo info,
-              std::shared_ptr<AddressSpaceTranslator> translator,
-              std::shared_ptr<PhysicalMemoryAccess> physical_memory,
-              std::shared_ptr<GpuVmAccessState> access_state,
-              std::function<void(uint64_t, VmAccessKind)> fault_reporter)
-      : address_space_(address_space), info_(info), translator_(std::move(translator)),
-        physical_memory_(std::move(physical_memory)), access_state_(std::move(access_state)),
-        fault_reporter_(std::move(fault_reporter)) {}
+              std::shared_ptr<GpuVmAccessState> access_state)
+      : address_space_(address_space), info_(info), access_state_(std::move(access_state)) {}
 
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
@@ -541,10 +541,7 @@ private:
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;
-  std::shared_ptr<AddressSpaceTranslator> translator_;
-  std::shared_ptr<PhysicalMemoryAccess> physical_memory_;
   std::shared_ptr<GpuVmAccessState> access_state_;
-  std::function<void(uint64_t, VmAccessKind)> fault_reporter_;
 };
 
 /// @brief Owns GPU address-space identities independently of their front end.
@@ -668,11 +665,8 @@ private:
     uint64_t translation_epoch = 1;
     uint32_t queue_references = 0;
     std::shared_ptr<GpuVmBindingState> binding_state;
-    std::shared_ptr<AddressSpaceTranslator> translator;
-    std::shared_ptr<PhysicalMemoryAccess> physical_memory;
     std::shared_ptr<GpuVmAccessState> access_state;
     std::vector<std::weak_ptr<GpuVmAccessState>> pinned_access_states;
-    std::function<void(uint64_t, VmAccessKind)> fault_reporter;
     bool legacy_cache_compatible = false;
     bool device_gart = false;
   };
@@ -686,10 +680,10 @@ private:
   [[nodiscard]] AddressSpaceHandle allocate_locked(Binding binding);
   [[nodiscard]] Binding *find_locked(AddressSpaceHandle handle);
   [[nodiscard]] const Binding *find_locked(AddressSpaceHandle handle) const;
-  void advance_access_state_locked(Binding &binding);
+  void advance_access_state_locked(Binding &binding, std::shared_ptr<GpuVmAccessState> replacement);
   void revoke_access_state_locked(Binding &binding);
 
-  mutable std::mutex mutex_;
+  mutable util::DistributedSharedMutex mutex_;
   std::vector<Slot> slots_;
   std::vector<uint32_t> free_slots_;
   std::unordered_map<uint32_t, AddressSpaceHandle> vmid_handles_;

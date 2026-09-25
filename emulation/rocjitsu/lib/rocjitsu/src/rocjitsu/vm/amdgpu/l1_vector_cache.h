@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -13,10 +13,8 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
-class GpuVm;
 class L2Cache;
 class RequestMtypeResolver;
-enum class VmAccessOutcome : uint8_t;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -95,6 +93,7 @@ private:
   CacheStore cache_;
   L2Cache *l2_;
   GpuVm *gpu_vm_ = nullptr;
+  VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;

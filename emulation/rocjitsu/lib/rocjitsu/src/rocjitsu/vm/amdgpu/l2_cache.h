@@ -193,8 +193,20 @@ public:
   [[nodiscard]] VmAccessOutcome atomic_rmw(uint64_t addr, uint32_t size, F &&fn,
                                            uint32_t vmid = 0) {
     DeviceCacheCoherence::AtomicBoundary boundary = coherence_->acquire_atomic_boundary();
+    return atomic_rmw(boundary, addr, size, std::forward<F>(fn), vmid);
+  }
+
+  /// @brief Perform one backing atomic within an existing device boundary.
+  /// @details A vector instruction can prepare the cache hierarchy once for all
+  /// its lanes. Each backing RMW remains atomic with respect to host accesses.
+  template <typename F>
+  [[nodiscard]] VmAccessOutcome atomic_rmw(const DeviceCacheCoherence::AtomicBoundary &boundary,
+                                           uint64_t addr, uint32_t size, F &&fn,
+                                           uint32_t vmid = 0) {
     if (boundary.outcome() != VmAccessOutcome::Complete)
       return boundary.outcome();
+    if (!boundary.belongs_to(coherence_.get()))
+      return VmAccessOutcome::Malformed;
 
     if (backing_memory_) {
       backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
