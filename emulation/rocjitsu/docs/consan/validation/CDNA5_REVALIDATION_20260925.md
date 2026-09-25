@@ -1042,3 +1042,15 @@ MXFP8/FP4 TDM 54/0. These are static object counts, not dynamic execution counts
 or proof of a cross-wave dependency in every specialization. They identify
 which remaining rows require producer-side review. The inventory fix is being
 built and tested separately; active campaigns retain their original hooks.
+
+### D128 block requalified after lifetime fixes
+
+`d128-current-high-clean` passes baseline and high correctness, with complete
+267/267 access and 276/276 barrier coverage. `d128-current-high-fault` detects
+8/8 admitted/reached publication faults. Every trial records high, complete
+analysis, and healthy checks before and after. Clean and fault provenance match:
+hook SHA256 `f1bc2d4b6b25a88104b7da6030892e9c73c3b392ff9215db223e5207b1201c94`,
+allowlist SHA256 `2777a4f8c8de649bdd002d83cd5a325ed3afa57f853a33ca85593c61bd6ed297`.
+This refreshes the green cell against the shared hook containing the lifetime
+fixes. The tensor-DMA inventory change is still a separate build and is not
+claimed by this result. Tree requalification follows in the same queue.
