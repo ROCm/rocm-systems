@@ -15,9 +15,9 @@ inline __device__ void loadLLLine(const union ncclLLFifoLine* src, union ncclLLF
   dst.v4u = __builtin_nontemporal_load((v4u_gptr)&src->v4u);
 }
 
-// Plain 128-bit vector store for LL FIFO lines. Like LL128 store128Plain, a
-// single 128-bit store keeps data and flag words in one memory transaction so
-// the reader's flag poll cannot observe flags before their paired data.
+// Plain 128-bit vector store for LL FIFO lines. Comm buffers are uncached; a
+// single explicit vector store avoids relying on the backend to fuse two
+// independent 64-bit stores into one 16-byte op.
 inline __device__ void storeLLLine(union ncclLLFifoLine* dst, const union ncclLLFifoLine& src) {
 #if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
   __scoped_atomic_store_n((u64_gptr)dst->v, src.v[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
@@ -196,8 +196,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
                    : "=v"(i4.i4)
                    : "v"(&src->i4));
 #else
-      // Comm FIFO buffers are uncached; use non-temporal loads so the flag poll
-      // never observes a stale cache line (no system-scope cache-bypass needed).
       // Holds for the legacy IPC allocator only. See loadLLLineB128.
       loadLLLine(src, i4);
 #endif
@@ -293,8 +291,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     // in a single transaction. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
     __builtin_amdgcn_global_store_b128((v4u_gptr)dst, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
 #else
-    // Comm FIFO buffers are uncached; use plain vector stores (no system-scope
-    // cache bypass) for higher store throughput and lower register pressure.
+    // Comm FIFO buffers are uncached. storeLLLine emits a plain 128-bit vector
+    // store, or a system-scope release pair on gfx1200/gfx1201.
     storeLLLine(dst, i4);
 #endif
 #if defined(__gfx950__) && ROCM_VERSION < 70002
