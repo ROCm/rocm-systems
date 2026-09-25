@@ -151,24 +151,37 @@ start_context(const context::context* ctx)
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
     auto* controller = hsa::get_queue_controller();
+    auto& service    = *ctx->dispatch_counter_collection;
 
-    bool already_enabled = true;
+    // Serialization is acquired before enabled is set, because queue_cb instruments a dispatch as
+    // soon as it reads enabled == true and that dispatch must already be serialized. The acquire
+    // is reference counted and stop_context() releases once per enabled -> disabled transition,
+    // so only the call that makes the disabled -> enabled transition may keep it.
+    bool already_enabled = false;
+    service.enabled.rlock([&](const auto& enabled) { already_enabled = enabled; });
+    if(already_enabled) return;
+
     // Scope serialization to the agents this context collects on. An empty set still means
     // every agent, so an unrestricted context serializes the whole machine as before.
-    CHECK_NOTNULL(controller)->enable_serialization(ctx->dispatch_counter_collection->agents);
-    ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
+    CHECK_NOTNULL(controller)->enable_serialization(service.agents);
+
+    bool transitioned = false;
+    service.enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
+        enabled      = true;
+        transitioned = true;
     });
 
-    if(!already_enabled)
+    if(!transitioned)
     {
-        // Counter collection no longer registers a per-queue callback with the queue
-        // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
-        // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
-        callback_thread_start();
+        controller->disable_serialization(service.agents);
+        return;
     }
+
+    // Counter collection no longer registers a per-queue callback with the queue
+    // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
+    // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
+    callback_thread_start();
 }
 
 void
@@ -185,7 +198,12 @@ stop_context(const context::context* ctx)
         enabled     = false;
     });
 
-    if(controller && was_enabled)
+    // Only the call that makes the enabled -> disabled transition releases what start_context()
+    // acquired. callback_thread_stop()'s floor at zero stops the count going negative, but an
+    // unmatched call would still drop a reference that another context holds.
+    if(!was_enabled) return;
+
+    if(controller)
     {
         // Drain in-flight dispatches before anything else is torn down. The review of #8891
         // accepted provenance-based completion routing on the condition that the callback thread

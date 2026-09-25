@@ -382,6 +382,43 @@ TEST(counters_per_agent, serialization_is_scoped_to_the_contexts_agents)
     EXPECT_FALSE(controller->is_serialization_enabled(agent_b));
 }
 
+// counters::start_context() acquires serialization and stop_context() releases it once per
+// enabled -> disabled transition, so a repeated start must not keep a second acquisition.
+// rocprofiler_start_context() already returns early for an active context, so this drives the
+// service directly.
+TEST(counters_per_agent, repeated_service_start_does_not_pin_serialization)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first) GTEST_SKIP() << "no GPU agent available";
+
+    auto  agent_a    = agents.first->get_rocp_agent()->id;
+    auto* controller = hsa::get_queue_controller();
+    auto  queue_a    = hsa::PerAgentFakeQueue{*agents.first, {.handle = 151}};
+    controller->serializer(&queue_a);
+
+    auto ctx = make_counter_context();
+    ASSERT_EQ(rocprofiler_dispatch_counting_service_set_agents(ctx, &agent_a, 1),
+              ROCPROFILER_STATUS_SUCCESS);
+    const auto* ctx_p = context::get_registered_context(ctx);
+    ASSERT_TRUE(ctx_p && ctx_p->dispatch_counter_collection);
+
+    ASSERT_FALSE(controller->is_serialization_enabled(agent_a));
+    counters::start_context(ctx_p);
+    counters::start_context(ctx_p);
+    EXPECT_TRUE(controller->is_serialization_enabled(agent_a));
+
+    counters::stop_context(ctx_p);
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_a))
+        << "a repeated start must not leave the agent serialized after one stop";
+
+    // An unmatched stop must not release a reference it does not hold.
+    counters::stop_context(ctx_p);
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_a));
+}
+
 // Counter collection, thread trace and SPM each enable serialization independently. Without
 // reference counting the first one to stop unserializes the others, which is a pre-existing
 // bug that per-agent scoping would otherwise make easier to hit.
