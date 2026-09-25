@@ -1024,3 +1024,21 @@ regions and their completion/publication relationship to the consuming waves.
 Treating the scalar descriptor as a lane-addressed VGLOBAL transfer is incorrect.
 The first publication fault must remove both consecutive split pairs previously
 identified; leaving either pair would retain synchronization.
+
+### Longer MXFP8/FP4 clean completes; tensor-producer census
+
+`long-tensile-clean/tensile-sk-mxf8f4gemm-tdm/default` passes baseline and Default
+on all three shards (return codes 0/0/0) with the 1800 s inner deadline.
+The prior 300 s timeout is resolved. Existing ordinary-access coverage reports
+complete, but the newly found tensor-DMA inventory omission prevents treating
+that as complete producer coverage; the Default cell remains orange with its
+updated blocker.
+
+`tensor-producer-census.json` records a disassembly census of code objects from
+fresh inventories. Tensor-load / ordinary-DS-store counts are: MXFP4 explicit
+8/0; sparse FP16 transposes 16/0 in each of four objects; sparse TDM all
+10–40/0 in each of nine objects; MXFP8 TDM 54/0; MXFP4 TDM 144/0;
+MXFP8/FP4 TDM 54/0. These are static object counts, not dynamic execution counts
+or proof of a cross-wave dependency in every specialization. They identify
+which remaining rows require producer-side review. The inventory fix is being
+built and tested separately; active campaigns retain their original hooks.
