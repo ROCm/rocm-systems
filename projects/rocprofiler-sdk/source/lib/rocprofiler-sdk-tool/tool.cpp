@@ -3703,17 +3703,33 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     // A fork() child without exec keeps this process's tool state. Give it its own identity so
     // its output is not attributed to the parent and sibling children do not derive the same
-    // rocpd UUID from the parent's pid and start time.
-    static bool fork_identity_registered = false;
-    if(!fork_identity_registered)
+    // rocpd UUID from the parent's pid and start time. Also drop the records it inherits, which
+    // the parent already reports.
+    static bool fork_handlers_registered = false;
+    if(!fork_handlers_registered)
     {
-        fork_identity_registered = true;
-        pthread_atfork(nullptr, nullptr, []() {
-            if(!tool_metadata) return;
-            tool_metadata->process_id        = getpid();
-            tool_metadata->parent_process_id = getppid();
-            rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
-        });
+        fork_handlers_registered = true;
+        pthread_atfork(
+            []() {
+                // Move records still held by rocprofiler-sdk into the file buffers now: after
+                // fork() the child would deliver its copies of them as its own records.
+                if(client_identifier)
+                {
+                    for(auto itr : get_buffers().as_array())
+                        if(itr.handle != 0) rocprofiler_flush_buffer(itr);
+                }
+                tool::prepare_fork_file_buffers();
+            },
+            []() { tool::parent_fork_file_buffers(); },
+            []() {
+                if(tool_metadata)
+                {
+                    tool_metadata->process_id        = getpid();
+                    tool_metadata->parent_process_id = getppid();
+                    rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+                }
+                tool::child_fork_file_buffers();
+            });
     }
 
     return 0;

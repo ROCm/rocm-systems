@@ -154,6 +154,18 @@ tmp_file::remove()
     return true;
 }
 
+void
+tmp_file::detach(std::string _filename)
+{
+    // Closing only releases this process's descriptor. Pending data was flushed before fork().
+    if(stream.is_open()) stream.close();
+    if(file != nullptr) std::fclose(file);
+    file = nullptr;
+    fd   = -1;
+    file_pos.clear();
+    filename = std::move(_filename);
+}
+
 bool
 tmp_file::exists() const
 {

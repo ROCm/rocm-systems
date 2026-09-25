@@ -54,6 +54,29 @@ compose_tmp_file_name(const output_config& cfg, domain_type buffer_type);
 tmp_file_name_callback_t&
 get_tmp_file_name_callback();
 
+// fork() handling for file buffers. Before fork() every file buffer is locked with its pending
+// output flushed, so no half-written data or held lock is copied into the child. After fork() the
+// parent unlocks them and the child drops the records it inherited from the parent before
+// unlocking them, so each record is reported only by the process that produced it.
+void
+prepare_fork_file_buffers();
+
+void
+parent_fork_file_buffers();
+
+void
+child_fork_file_buffers();
+
+struct file_buffer_fork_handlers
+{
+    void (*lock)()   = nullptr;
+    void (*unlock)() = nullptr;
+    void (*reset)()  = nullptr;
+};
+
+void
+register_file_buffer(file_buffer_fork_handlers handlers);
+
 template <typename Tp>
 struct file_buffer
 {
@@ -71,6 +94,7 @@ struct file_buffer
     file_buffer& operator=(file_buffer&&) noexcept = default;
 
     void reset();
+    void forget_inherited();
 
     domain_type       domain = {};
     uint64_t          nbytes = 0;
@@ -90,6 +114,17 @@ file_buffer<Tp>::reset()
     buffer.clear();
 }
 
+// Called in a fork() child with file.file_mutex held: drop the parent's records, and write to a
+// new tmp file instead of the parent's.
+template <typename Tp>
+void
+file_buffer<Tp>::forget_inherited()
+{
+    file.detach(get_tmp_file_name_callback()(domain));
+    nbytes = 0;
+    buffer.clear();
+}
+
 template <typename Tp>
 struct file_buffer<ring_buffer_t<Tp>>
 {
@@ -101,7 +136,30 @@ template <typename Tp>
 file_buffer<Tp>*&
 get_tmp_file_buffer(domain_type type)
 {
-    static file_buffer<Tp>* val = new file_buffer<Tp>{type};
+    static file_buffer<Tp>* val        = new file_buffer<Tp>{type};
+    static file_buffer<Tp>* locked     = nullptr;
+    static bool             registered = []() {
+        auto lock = []() {
+            if((locked = val))
+            {
+                locked->file.file_mutex.lock();
+                locked->file.flush();
+            }
+        };
+        auto unlock = []() {
+            if(locked) locked->file.file_mutex.unlock();
+            locked = nullptr;
+        };
+        auto reset = []() {
+            if(!locked) return;
+            locked->forget_inherited();
+            locked->file.file_mutex.unlock();
+            locked = nullptr;
+        };
+        register_file_buffer(file_buffer_fork_handlers{lock, unlock, reset});
+        return true;
+    }();
+    (void) registered;
     return val;
 }
 

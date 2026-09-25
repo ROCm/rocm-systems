@@ -26,7 +26,9 @@
 
 #include <fmt/format.h>
 
+#include <mutex>
 #include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -43,6 +45,55 @@ compose_tmp_file_name(const output_config& cfg, domain_type buffer_type)
         fmt::format("{}-{}.dat", "%ppid%-%pid%", get_domain_trace_file_name(buffer_type));
 
     return rocprofiler::tool::format_path(filename.string());
+}
+
+namespace
+{
+auto&
+get_file_buffer_registry_mutex()
+{
+    static auto* val = new std::mutex{};
+    return *val;
+}
+
+auto&
+get_file_buffer_registry()
+{
+    static auto* val = new std::vector<file_buffer_fork_handlers>{};
+    return *val;
+}
+}  // namespace
+
+void
+register_file_buffer(file_buffer_fork_handlers handlers)
+{
+    auto _lk = std::lock_guard<std::mutex>{get_file_buffer_registry_mutex()};
+    get_file_buffer_registry().emplace_back(handlers);
+}
+
+void
+prepare_fork_file_buffers()
+{
+    // Stays locked until parent/child_fork_file_buffers() so no file buffer is created mid-fork.
+    get_file_buffer_registry_mutex().lock();
+    for(const auto& itr : get_file_buffer_registry())
+        itr.lock();
+}
+
+void
+parent_fork_file_buffers()
+{
+    for(const auto& itr : get_file_buffer_registry())
+        itr.unlock();
+    get_file_buffer_registry_mutex().unlock();
+}
+
+void
+child_fork_file_buffers()
+{
+    for(const auto& itr : get_file_buffer_registry())
+        itr.reset();
+    get_file_buffer_registry_mutex().unlock();
 }
 
 tmp_file_name_callback_t&

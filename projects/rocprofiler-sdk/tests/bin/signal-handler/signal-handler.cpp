@@ -35,6 +35,10 @@
 // Bad case (--no-app-signal-handler): app has SIG_DFL everywhere.
 //   Profiler's signal handler is the only thing that can flush data before death.
 //
+// Fork after work (--fork-after-work): no signal. The app records HIP API calls and markers,
+//   then forks children that exit on their own. Records made before fork() belong to the parent
+//   only.
+//
 // TODO: --raw-fork (_Fork without exec) is not supported. _Fork skips
 // pthread_atfork handlers, leaving stale profiler state. Extremely rare in practice.
 
@@ -198,6 +202,44 @@ mode_good_single_process()
     run_kernels("parent");
 
     emit_roctx_marker("exit_marker parent single-process ppid:%d pid:%d", getppid(), getpid());
+    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
+    return 0;
+}
+
+int
+mode_fork_after_work()
+{
+    fprintf(stderr, "Mode: fork-after-work, PID=%d\n", getpid());
+
+    // HIP API calls only: a child forked after kernel launches cannot finalize the GPU runtime.
+    for(int i = 0; i < 20; ++i)
+    {
+        float* d_buf = nullptr;
+        HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
+        HIP_CHECK(hipFree(d_buf));
+    }
+
+    // Enough markers that the profiler offloads them to its tmp file before fork().
+    for(int i = 0; i < 5000; ++i)
+        emit_roctx_marker("prefork_marker %d", i);
+
+    constexpr int NUM_CHILDREN = 2;
+    pid_t         children[NUM_CHILDREN];
+    for(int i = 0; i < NUM_CHILDREN; ++i)
+    {
+        pid_t pid = fork();
+        if(pid == 0)
+        {
+            emit_roctx_marker(
+                "exit_marker child fork-after-work ppid:%d pid:%d", getppid(), getpid());
+            exit(0);
+        }
+        children[i] = pid;
+    }
+    for(int i = 0; i < NUM_CHILDREN; ++i)
+        waitpid(children[i], nullptr, 0);
+
+    emit_roctx_marker("exit_marker parent fork-after-work ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
     return 0;
 }
@@ -441,6 +483,8 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; i++)
     {
+        if(std::strcmp(argv[i], "--fork-after-work") == 0) return mode_fork_after_work();
+
         if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0)
         {

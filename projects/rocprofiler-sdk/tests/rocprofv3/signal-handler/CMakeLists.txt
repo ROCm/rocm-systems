@@ -199,3 +199,37 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;signal-handler"
     FIXTURES_REQUIRED ${_fork_name}
     ARGS --output-dir ${_fork_outdir} --expect clean-exit --process-type fork)
+
+# Records made before fork() must be reported by the parent only, not again by each child.
+set(_inherited_name app-fork-after-work)
+set(_inherited_outdir ${BASE_OUT_DIR}/fork-after-work)
+
+rocprofiler_add_integration_cleanup_test(
+    ${_inherited_name}
+    DIRECTORIES ${_inherited_outdir}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_SETUP ${_inherited_name}-clean)
+
+rocprofiler_add_integration_execute_test(
+    ${_inherited_name}
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --marker-trace --output-format
+        rocpd -d ${_inherited_outdir} -o out_%pid% -- $<TARGET_FILE:signal-handler-test>
+        --fork-after-work
+    DEPENDS signal-handler-test
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "clean exit"
+    FIXTURES_REQUIRED ${_inherited_name}-clean
+    FIXTURES_SETUP ${_inherited_name})
+
+rocprofiler_add_integration_validate_test(
+    ${_inherited_name}
+    TEST_PATHS validate_fork_inherited.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_REQUIRED ${_inherited_name}
+    ARGS --output-dir ${_inherited_outdir} --expect clean-exit --process-type fork)
