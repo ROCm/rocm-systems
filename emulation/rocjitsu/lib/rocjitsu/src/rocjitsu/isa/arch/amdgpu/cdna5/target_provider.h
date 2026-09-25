@@ -7,7 +7,14 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/target_descriptor.h"
 #include "rocjitsu/isa/target_registry.h"
 
+namespace rocjitsu {
+struct IsaExecutionBackend;
+}
+
 namespace rocjitsu::cdna5 {
+
+/// Select the CDNA5 executor for the CPU running this process.
+const IsaExecutionBackend &host_execution_backend();
 
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder();
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder(const IsaGpuTargetDescription &gpu_target);

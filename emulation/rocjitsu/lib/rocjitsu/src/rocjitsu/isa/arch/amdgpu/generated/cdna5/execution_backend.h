@@ -1645,6 +1645,7 @@ enum class InstructionExecutionId : size_t {
 };
 
 const IsaExecutionBackend &execution_backend();
+const IsaExecutionBackend &execution_backend_avx512();
 
 } // namespace cdna5
 } // namespace rocjitsu

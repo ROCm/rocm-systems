@@ -50,6 +50,85 @@ function(rj_add_split_amdgpu_isa_library arch)
     rj_add_object_library(${_target}_model ${_model_sources})
     rj_add_object_library(${_target}_exec ${_execution_sources})
 
+    if(RJ_BUILD_AVX512_EXECUTION AND arch STREQUAL "cdna5")
+        set(_variant_sources)
+        foreach(_source IN LISTS _execution_sources)
+            get_filename_component(_source_name "${_source}" NAME)
+            if(
+                _source_name STREQUAL "operand_exec.cpp"
+                OR _source_name STREQUAL "addr_calc.cpp"
+                OR _source_name STREQUAL "target_provider.cpp"
+            )
+                continue()
+            endif()
+            set(_wrapper
+                "${CMAKE_CURRENT_BINARY_DIR}/${arch}_${_source_name}_avx512.cpp"
+            )
+            set(_rename_backend)
+            if(_source_name STREQUAL "execution_backend_exec.cpp")
+                set(_rename_backend
+                    "#define execution_backend execution_backend_avx512\n"
+                )
+            endif()
+            file(
+                GENERATE OUTPUT "${_wrapper}"
+                CONTENT
+                    "#include \"rocjitsu/isa/arch/amdgpu/generated/${arch}/insts.h\"\n#include \"rocjitsu/isa/arch/amdgpu/generated/${arch}/execution_backend.h\"\n#define execute_impl execute_impl_avx512\n#define execute_modifier_impl execute_modifier_impl_avx512\n${_rename_backend}#include \"${_source}\"\n"
+            )
+            list(APPEND _variant_sources "${_wrapper}")
+        endforeach()
+        set(_entry "${CMAKE_CURRENT_BINARY_DIR}/${arch}_avx512_entry.cpp")
+        file(
+            GENERATE OUTPUT "${_entry}"
+            CONTENT
+                "#include \"rocjitsu/isa/arch/amdgpu/generated/${arch}/execution_backend.h\"\nextern \"C\" const rocjitsu::IsaExecutionBackend *rj_cdna5_avx512_backend() {\n  return &rocjitsu::${arch}::execution_backend_avx512();\n}\n"
+        )
+        list(APPEND _variant_sources "${_entry}")
+        rj_add_object_library(${_target}_exec_avx512 ${_variant_sources})
+        target_compile_options(
+            ${_target}_exec_avx512
+            PRIVATE ${RJ_AVX512_COMPILE_OPTIONS}
+        )
+        target_compile_definitions(
+            ${_target}_exec_avx512
+            PRIVATE RJ_AVX512_EXECUTION_VARIANT=1
+        )
+        target_compile_definitions(
+            ${_target}_exec
+            PRIVATE RJ_HAS_AVX512_EXECUTION=1
+        )
+        # Native SIMD's ABI differs between the baseline and AVX-512 TUs, but
+        # some libstdc++/header-only instantiations have the same mangled name.
+        # Resolve those instantiations inside the variant first, then make its
+        # symbols local except for the one C entry point used by the detector.
+        # This prevents ELF COMDAT coalescing from silently mixing SIMD widths.
+        set(_variant_raw "${CMAKE_CURRENT_BINARY_DIR}/${arch}_avx512_raw.o")
+        set(_variant_local "${CMAKE_CURRENT_BINARY_DIR}/${arch}_avx512_local.o")
+        add_custom_command(
+            OUTPUT "${_variant_local}"
+            BYPRODUCTS "${_variant_raw}"
+            COMMAND
+                ${CMAKE_LINKER} -r -o "${_variant_raw}"
+                $<TARGET_OBJECTS:${_target}_exec_avx512>
+            COMMAND
+                ${CMAKE_OBJCOPY} --keep-global-symbol=rj_cdna5_avx512_backend
+                "${_variant_raw}" "${_variant_local}"
+            DEPENDS
+                ${_target}_exec_avx512
+                $<TARGET_OBJECTS:${_target}_exec_avx512>
+            COMMAND_EXPAND_LISTS
+            VERBATIM
+        )
+        add_custom_target(
+            ${_target}_exec_avx512_local
+            DEPENDS "${_variant_local}"
+        )
+        set_source_files_properties(
+            "${_variant_local}"
+            PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE
+        )
+    endif()
+
     add_library(${_target} INTERFACE)
     target_sources(
         ${_target}
@@ -58,6 +137,10 @@ function(rj_add_split_amdgpu_isa_library arch)
             $<TARGET_OBJECTS:${_target}_exec>
     )
     target_link_libraries(${_target} INTERFACE ${_target}_model ${_target}_exec)
+    if(TARGET ${_target}_exec_avx512_local)
+        add_dependencies(${_target} ${_target}_exec_avx512_local)
+        target_sources(${_target} INTERFACE "${_variant_local}")
+    endif()
 
     if(ARG_NO_BUILTIN)
         rj_add_isa_target_provider(

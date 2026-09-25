@@ -18,6 +18,7 @@ class SMovkI32Sopk : public Sopk {
 public:
   SMovkI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
 };
@@ -26,6 +27,7 @@ class SVersionSopk : public Sopk {
 public:
   SVersionSopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand simm16;
 };
 
@@ -33,6 +35,7 @@ class SCmovkI32Sopk : public Sopk {
 public:
   SCmovkI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
@@ -42,6 +45,7 @@ class SAddkCoI32Sopk : public Sopk {
 public:
   SAddkCoI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
   Operand scc;
@@ -51,6 +55,7 @@ class SMulkI32Sopk : public Sopk {
 public:
   SMulkI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
 };
@@ -59,6 +64,7 @@ class SGetregB32Sopk : public Sopk {
 public:
   SGetregB32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
 };
@@ -67,6 +73,7 @@ class SSetregB32Sopk : public Sopk {
 public:
   SSetregB32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand simm16;
@@ -77,6 +84,7 @@ class SSetregImm32B32Sopk : public Sopk {
 public:
   SSetregImm32B32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand simm16;
@@ -87,6 +95,7 @@ class SCallI64Sopk : public Sopk {
 public:
   SCallI64Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;

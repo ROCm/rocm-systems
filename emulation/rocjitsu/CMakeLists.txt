@@ -102,6 +102,11 @@ option(
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
+    RJ_ENABLE_AVX512_SIMD
+    "Build a CDNA5 AVX-512 execution variant selected on the running CPU"
+    ON
+)
+option(
     ROCJITSU_ENABLE_PERFSIM_PLUGIN
     "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
     OFF
@@ -351,6 +356,76 @@ set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
+
+# The AVX-512 executor is a separate object target.  The baseline targets and
+# the CPU detector must never inherit these flags: the binary may run on a CPU
+# different from the one that built it. Keep IPO and sanitizer builds on the
+# baseline until their object-link and load-time instrumentation paths are
+# validated with this isolated executor.
+if(
+    RJ_ENABLE_AVX512_SIMD
+    AND NOT LTO
+    AND NOT RJ_ENABLE_ASAN
+    AND NOT RJ_ENABLE_UBSAN
+    AND NOT RJ_ENABLE_TSAN
+    AND NOT RJ_ENABLE_MSAN
+    AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"
+    AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+)
+    set(RJ_AVX512_COMPILE_OPTIONS
+        -mavx2
+        -mf16c
+        -mavx512f
+        -mavx512dq
+        -mavx512bw
+        -mavx512vl
+    )
+    string(
+        JOIN " "
+        _rj_avx512_compile_options_string
+        ${RJ_AVX512_COMPILE_OPTIONS}
+    )
+    set(_rj_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+    string(APPEND CMAKE_REQUIRED_FLAGS " ${_rj_avx512_compile_options_string}")
+    include(CheckCXXSourceCompiles)
+    # Probe the compiler and standard library without executing on the build
+    # host.  The runtime detector makes the final CPU choice.
+    unset(RJ_CXX_SUPPORTS_AVX512_SIMD CACHE)
+    check_cxx_source_compiles(
+        [=[
+            #include <cstdint>
+            #include <experimental/simd>
+
+            int main() {
+              using U = std::experimental::native_simd<std::uint64_t>;
+              static_assert(U::size() == 8);
+              const U lhs(1);
+              const U rhs(2);
+              const auto mask = lhs == rhs;
+              return mask[0] ? 0 : 1;
+            }
+        ]=]
+        RJ_CXX_SUPPORTS_AVX512_SIMD
+    )
+    set(CMAKE_REQUIRED_FLAGS "${_rj_saved_required_flags}")
+    unset(_rj_saved_required_flags)
+    if(RJ_CXX_SUPPORTS_AVX512_SIMD)
+        set(RJ_BUILD_AVX512_EXECUTION TRUE)
+        message(
+            STATUS
+            "rocjitsu: building CDNA5 AVX-512 execution variant; runtime CPU selects it"
+        )
+    else()
+        message(
+            STATUS
+            "rocjitsu: AVX-512 variant unavailable; using baseline execution"
+        )
+    endif()
+else()
+    message(STATUS "rocjitsu: building baseline execution only")
+endif()
+unset(_rj_avx512_compile_options_string)
 
 include(rj_flatbuffers)
 
