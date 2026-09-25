@@ -34,7 +34,6 @@ installation is used.
 | Main E2E | P4 | hip-moi MFMA attention (`wmma-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 sleep=15: clean pass; fault 8/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 higher (lowest passing): repaired publication journal and release fault; clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 Repair in progress: candidate max has zero ConSan conflicts and correct output, but hip-moi consistency check still fails; fresh fault qualification blocked | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
-| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 Unavailable: CDNA4 fixture absent from public hip-moi checkout | 🟨 Unavailable: CDNA4 fixture absent from public hip-moi checkout |
 | Test corpus | P0 | HIP matmul 128 cubed (`hip-matmul-m128-n128-k128`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P0 | HipKittens BF16 (`hipkittens-bf16fp32-16x32`) | 🟨 max: clean pass; fault 0/8; fresh 64/128/256/512-bank trials each 0/8; below bar | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P1 | HipKittens FP8 (`hipkittens-fp8fp32-4wave`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
