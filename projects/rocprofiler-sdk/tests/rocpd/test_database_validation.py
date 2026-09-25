@@ -319,6 +319,60 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                     imported = RocpdImportData(str(source), skip_auto_merge=True)
                     imported.connection.close()
 
+    def test_forged_table_storage_is_rejected(self):
+        table = f"rocpd_region{self.UUIDS[0]}"
+        other = f"rocpd_arg{self.UUIDS[0]}"
+
+        def view_as_table(connection):
+            table_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name=?", (table,)
+            ).fetchone()[0]
+            columns = [
+                row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')
+            ]
+            connection.execute(f'DROP TABLE "{table}"')
+            connection.execute(
+                f'CREATE VIEW "{table}" AS SELECT '
+                + ", ".join(f'0 AS "{column}"' for column in columns)
+            )
+            connection.commit()
+            # Relabel the view as a table: it keeps rootpage 0 (no b-tree).
+            return (
+                "UPDATE sqlite_master SET type='table', sql=? WHERE name=?",
+                (table_sql, table),
+            )
+
+        def out_of_range(connection):
+            return ("UPDATE sqlite_master SET rootpage=999999 WHERE name=?", (table,))
+
+        def shared(connection):
+            rootpage = connection.execute(
+                "SELECT rootpage FROM sqlite_master WHERE name=?", (other,)
+            ).fetchone()[0]
+            return ("UPDATE sqlite_master SET rootpage=? WHERE name=?", (rootpage, table))
+
+        # SQLite itself rejects an out-of-range root page when the database is attached.
+        for name, forge, error in (
+            ("view_as_table", view_as_table, "no valid table storage"),
+            ("out_of_range", out_of_range, "no valid table storage|invalid rootpage"),
+            ("shared", shared, "share storage"),
+        ):
+            with self.subTest(forgery=name):
+                source = self.directory / f"forged-{name}.db"
+                destination = self.directory / f"forged-{name}-merged.db"
+                self.create_database(source)
+                with closing(sqlite3.connect(str(source))) as connection:
+                    statement = forge(connection)
+                    connection.execute("PRAGMA writable_schema = ON")
+                    connection.execute(*statement)
+                    connection.commit()
+                with self.assertRaisesRegex((ValueError, sqlite3.DatabaseError), error):
+                    merge_sqlite_dbs([str(source)], str(destination))
+                self.assertFalse(destination.exists())
+                with self.assertRaisesRegex((ValueError, sqlite3.DatabaseError), error):
+                    imported = RocpdImportData(str(source), skip_auto_merge=True)
+                    imported.connection.close()
+
     def test_view_in_place_of_required_table_is_rejected(self):
         source = self.directory / "view-as-table.db"
         destination = self.directory / "view-as-table-merged.db"

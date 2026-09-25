@@ -72,8 +72,8 @@ REQUIRED_METADATA = (
     "schema_version_patch",
 )
 
-# name -> (type, sql) for the user objects of one database
-SchemaObjects = Mapping[str, Tuple[str, Optional[str]]]
+# name -> (type, sql, rootpage) for the user objects of one database
+SchemaObjects = Mapping[str, Tuple[str, Optional[str], Optional[int]]]
 
 
 class RocpdSourceSchema(NamedTuple):
@@ -199,11 +199,30 @@ def configure_untrusted_schema(connection: sqlite3.Connection) -> None:
 
 def _schema_objects(connection: sqlite3.Connection, alias: str) -> SchemaObjects:
     rows = connection.execute(f"""
-        SELECT type, name, sql
+        SELECT type, name, sql, rootpage
         FROM {quote_identifier(alias)}.sqlite_master
         WHERE name NOT GLOB 'sqlite_*'
         """).fetchall()
-    return {name: (kind, sql) for kind, name, sql in rows}
+    return {name: (kind, sql, rootpage) for kind, name, sql, rootpage in rows}
+
+
+def _check_storage(connection: sqlite3.Connection, alias: str, source_path: str) -> None:
+    """Reject schema entries that share storage, which SQLite never creates.
+
+    A hand-edited ``sqlite_master`` could otherwise point a required table at
+    another object's b-tree.
+    """
+
+    shared = connection.execute(f"""
+        SELECT rootpage
+        FROM {quote_identifier(alias)}.sqlite_master
+        WHERE rootpage > 0
+        GROUP BY rootpage
+        HAVING COUNT(*) > 1
+        LIMIT 1
+        """).fetchone()
+    if shared:
+        raise ValueError(f"Database objects share storage in {source_path!r}")
 
 
 def _table_columns(
@@ -232,12 +251,20 @@ def _check_table(
 ) -> None:
     """Require *table* to be a regular table with exactly the expected columns."""
 
-    kind, sql = objects.get(table, (None, None))
+    kind, sql, rootpage = objects.get(table, (None, None, None))
     if kind is None:
         raise ValueError(f"Missing rocPD table {table!r} in {source_path!r}")
     if kind != "table" or not isinstance(sql, str) or not REGULAR_TABLE_SQL.match(sql):
         raise ValueError(
             f"rocPD object {table!r} is not a regular table in {source_path!r}"
+        )
+    # A view relabeled as a table in sqlite_master has no b-tree (rootpage 0).
+    page_count = connection.execute(
+        f"PRAGMA {quote_identifier(alias)}.page_count"
+    ).fetchone()[0]
+    if not isinstance(rootpage, int) or not 0 < rootpage <= page_count:
+        raise ValueError(
+            f"rocPD table {table!r} has no valid table storage in {source_path!r}"
         )
     columns = _table_columns(connection, alias, table)
     names = [name for name, _ in columns]
@@ -349,7 +376,7 @@ def _trusted_objects(
         objects = _schema_objects(reference, "main")
         tables = {
             name: tuple(column for column, _ in _table_columns(reference, "main", name))
-            for name, (kind, _) in objects.items()
+            for name, (kind, _, _) in objects.items()
             if kind == "table"
         }
         return tables, set(objects)
@@ -366,6 +393,7 @@ def inspect_attached_rocpd(
 
     quote_identifier(alias)
     objects = _schema_objects(connection, alias)
+    _check_storage(connection, alias, source_path)
     known: Set[str] = set()
     tables: Dict[str, List[str]] = {}
     columns: Dict[str, Tuple[str, ...]] = {}
