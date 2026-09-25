@@ -363,6 +363,30 @@ launcher. Without these overrides, a gfx1250 smoke can accidentally run on the
 host GPU and fail before any mutation is attempted. Inspect the retained
 `health_command` and `smoke_command` in trial results to confirm the target.
 
+### Retaining exact Tensile fault inputs
+
+Fresh Tensile generation can change full ELF identities even when instruction
+bytes are unchanged. For an exact-identity fault campaign, run the bounded
+`consan_tensile_validation.py` driver with its usual workload arguments plus
+`--export-replay-manifest /absolute/path/replay.json`. Export occurs only after
+all numerical, timing, client-exit and target checks pass. Keep the generated
+work directory: the manifest refers to its original inputs.
+
+Repeat the same workload arguments with `--replay-manifest` pointing to that
+manifest. The driver verifies the selected/source configurations, target,
+client binary, wrapper, expected oracle counts and Stream-K controls. It checks
+SHA-256 hashes of retained client configurations, library files, code objects
+and invocation scripts before execution and again after successful execution.
+Only the results-file destinations change, into the new run directory. The
+same numerical oracle and aggregate execution deadline apply. The environment
+override `CONSAN_VALIDATION_TENSILE_REPLAY_MANIFEST` selects this path for a
+single workload/shard campaign; incompatible shards are rejected.
+
+Inventory and review the retained objects before selecting a fault identity.
+Replay does not relax mutation admission, runtime reach, coverage or detection
+requirements. Use a fresh matching clean run when qualifying a new detector
+configuration.
+
 ### Preparing Qwen
 
 The Qwen row requires a generated VMFB with recorded compiler and input
@@ -509,6 +533,7 @@ python3 -m unittest \
   test_consan_fault_runner.py \
   test_consan_run_provenance.py \
   test_consan_tensile_validation.py \
+  test_consan_tensile_replay.py \
   test_consan_validation.py
 ```
 

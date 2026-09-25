@@ -19,6 +19,8 @@ import time
 
 import yaml
 
+import consan_tensile_replay as replay
+
 from consan_tensile_support import (
     DEFAULT_TARGET,
     TensileValidationPaths,
@@ -663,6 +665,9 @@ def main() -> int:
         help="Aggregate duration floor; zero requires valid positive device timings only",
     )
     parser.add_argument("--label", required=True)
+    parser.add_argument("--export-replay-manifest", type=Path)
+    parser.add_argument("--replay-manifest", type=Path,
+                        default=os.environ.get("CONSAN_VALIDATION_TENSILE_REPLAY_MANIFEST"))
     parser.add_argument(
         "--timeout-seconds",
         type=_positive_int,
@@ -786,12 +791,33 @@ def main() -> int:
         "EnqueuesPerSync=1",
         "NumWarmups=0",
     ]
+    contract = {
+        "config_sha256": replay.digest(execution_config),
+        "source_config_sha256": replay.digest(config),
+        "target": args.gpu_target,
+        "client_sha256": replay.digest(paths.client),
+        "wrapper": str(paths.wrapper),
+        "wrapper_sha256": replay.digest(paths.wrapper),
+        "streamk_fixed_grid": args.streamk_fixed_grid,
+        "required_streamk_mode": args.require_streamk_mode,
+        "expected_numeric_rows": args.expect_numeric_rows,
+        "expected_client_passes": args.expect_client_passes,
+    }
+    replay_manifest = None
+    artifact_dir = work_dir
     started = time.monotonic()
     try:
-        returncode, output, timed_out = _run_command(
-            command, environment, args.timeout_seconds
-        )
-    except OSError as error:
+        if args.replay_manifest:
+            replay_manifest = json.loads(args.replay_manifest.read_text())
+            returncode, output, timed_out = replay.run(
+                replay_manifest, contract, work_dir, environment,
+                args.timeout_seconds, _run_command)
+            artifact_dir = Path(replay_manifest["work_dir"])
+        else:
+            returncode, output, timed_out = _run_command(
+                command, environment, args.timeout_seconds
+            )
+    except (OSError, ValueError, KeyError, TypeError) as error:
         detail = {"config": str(config), "reason": str(error)}
         _write_oracle_result("fail", detail, retained_path=oracle_artifact)
         print(f"error: cannot run Tensile: {error}", file=sys.stderr)
@@ -822,7 +848,7 @@ def main() -> int:
     artifact_errors: list[str] = []
     if not timed_out:
         artifacts, artifact_errors = _code_object_errors(
-            work_dir,
+            artifact_dir,
             paths.llvm_readelf,
             target=args.gpu_target,
             deadline=time.monotonic() + CODE_OBJECT_BUDGET_SECONDS,
@@ -881,6 +907,7 @@ def main() -> int:
         "timeout_seconds": args.timeout_seconds,
         "transcript": str(transcript),
         "verified_code_objects": [str(path) for path in artifacts],
+        "replay_manifest": str(args.replay_manifest) if args.replay_manifest else None,
         "wrapper": str(paths.wrapper),
     }
     if errors:
@@ -889,6 +916,15 @@ def main() -> int:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
+
+    if args.export_replay_manifest:
+        try:
+            retained = replay_manifest or replay.freeze(work_dir, paths.wrapper, contract)
+            _write_json_atomic(args.export_replay_manifest, retained)
+        except (OSError, ValueError) as error:
+            detail["reasons"] = [f"cannot retain replay inputs: {error}"]
+            _write_oracle_result("fail", detail, retained_path=oracle_artifact)
+            return 1
 
     print(
         json.dumps(
