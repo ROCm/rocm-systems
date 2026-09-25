@@ -1615,7 +1615,12 @@ void hip_capture_init() {
   }
 
   // Open the events writer now — Flag::init() has run so output_dir is valid.
-  if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+  // Without a writer the shims would only cost time, and the D2H ones still
+  // synchronize streams, so take them out again.
+  if (!hrr_cap::writer::open(hip_capture_output_dir())) {
+    hip_capture_uninstall();
+    return;
+  }
 
   hrr_cap::writer::set_capture_metadata_json(
       hrr_cap::metadata::collect_json());
