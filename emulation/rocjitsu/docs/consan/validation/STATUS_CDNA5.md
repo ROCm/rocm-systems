@@ -37,7 +37,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) |  |  |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) |  |  |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) |  |  |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) |  |  |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) |  |  |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) |  |  |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) |  |  |
