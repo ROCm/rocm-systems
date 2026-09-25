@@ -56,11 +56,11 @@ applicable coverage, exact-one mutation installation, reach evidence and healthy
 pre/post GPU probes. Three earlier candidate `max` clean runs also passed; they are
 supporting clean evidence, not a separate fault qualification.
 
-## Remaining tree failure
+## Tree atomic-cache repair
 
-At `max`, the candidate produces correct numerical output and no ConSan conflicts for
-tree atomic-OR. The independent hip-moi consistency check still fails, so the cell
-remains red and cannot qualify on that clean control. The final-hook recheck in
+Before the hip-moi repair, `max` produced correct numerical output and no ConSan
+conflicts for tree atomic-OR, but the independent hip-moi consistency check failed.
+That control could not qualify. The final-hook recheck in
 `clean-v4/tree-atomic-or/` confirms 12 ordered publication pairs, zero conflicts and
 complete applicable coverage.
 
@@ -76,8 +76,12 @@ The candidate hip-moi repair imports cached producers, then searches the
 underlying table for every producer not successfully imported. Two deterministic
 regressions (partial and empty masks) fail before this change and pass afterward;
 a negative control confirms cache bits cannot invent release records. All four
-atomic fast-path tests pass. Fresh native profiling and tree qualification are
-in progress. No hip-moi oracle, workload synchronization, or numerical check has
+atomic fast-path tests pass. Fresh native rocprofv3 profiling generated a new
+three-kernel allowlist, and all three `max` clean controls pass with the repaired
+hip-moi library (`tree-fixed/clean-{0,1,2}/`). The rebuilt producer release OR
+is `.text+0x1988c`, occurrence 208, in `fnv1a64:304fa2ce12cd1d95`; the final
+acquire/release OR stays at `.text+0x8a24`. Fresh ISA review and prospective
+qualification are retained in `tree-fixed/`; ascending preset trials are running. No hip-moi oracle, workload synchronization, or numerical check has
 been weakened. Evidence: `tree-debug/regression-{before,after}.log` and
 `tree-debug/{native,max-0,max-1,max-2}.log`.
 
@@ -120,7 +124,8 @@ both retained and canonical paths.
 The full CPU/emulator suite passes 3,325 tests (`cpu-v4.xml`), the hook suite passes 285
 tests (`hooks-v4.xml`), and all 436 physical tests pass with the final fault-injector
 change (`physical-v4.xml`). All 25 available in-scope Default clean rechecks are
-complete: 24 pass and tree remains rejected by its independent oracle. The retained-hook
+complete: 24 passed immediately; the repaired tree now also passes three fresh
+clean controls with its native allowlist. The retained-hook
 runner fix passes all 207 validation unit tests (`python-validation-r1.log`). The
 remaining watchpoint-bank searches are in progress; results are tracked in the live
 ledger.
