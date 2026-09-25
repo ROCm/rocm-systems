@@ -998,3 +998,29 @@ All eight new trials have complete analysis and healthy probes. The table now
 reports the latest repeat explicitly; neither batch qualifies. The corrected
 `qwen-cap-high-verified.py` process has started the actual high campaign. Artifact
 directory names are not used to infer its preset.
+
+### MXFP8 explicit: confirmed cross-wave tensor-DMA coverage gap
+
+Further final-ISA review resolves the earlier producer-side question. `s5` is
+the wave index (0x2da4/0x2dac). Even waves initialize A tensor descriptors;
+odd waves initialize B. A's LDS base is
+`4096*(wave>>1) + 16*((4096*(wave>>1))>>8)` (0x3b4c–0x3b7c), giving wave 2
+base 4352. Wave 1 lane 0 computes A read address 4352 in v16
+(0x39dc–0x3a6c), then reads at 0x4444. Independent arithmetic reproduces this
+cross-wave handoff. This workload is not wave-private like descriptor-add.
+
+`record_lds_site` accepts DS mnemonics. The CDNA5 direct-transfer decoder
+(`targets/cdna5/consan_program_analysis_cdna5_target_ops.cpp`) accepts only
+`global_load_async_to_lds_b*` / `global_store_async_from_lds_b*`, so it rejects
+`tensor_load_to_lds`. The successful ordinary-access coverage counters therefore
+omit these producer instructions. Default's cell is orange for incomplete
+applicable producer coverage, retaining the successful numerical result.
+No failed fault trial is being inferred from static review. SuperCollider's
+consumer-side perturbation still needs independent qualification.
+
+A fix must first represent tensor-DMA instructions in the access inventory so
+coverage cannot silently omit them, then model the descriptor-derived LDS write
+regions and their completion/publication relationship to the consuming waves.
+Treating the scalar descriptor as a lane-addressed VGLOBAL transfer is incorrect.
+The first publication fault must remove both consecutive split pairs previously
+identified; leaving either pair would retain synchronization.
