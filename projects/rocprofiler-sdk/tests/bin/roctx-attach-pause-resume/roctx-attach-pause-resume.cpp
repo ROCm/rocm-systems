@@ -95,6 +95,24 @@ roctx_attach_outside_after_kernel(float* data)
     data[threadIdx.x] += 6.0f;
 }
 
+__global__ void
+roctx_attach_reattach_first_kernel(float* data)
+{
+    data[threadIdx.x] += 7.0f;
+}
+
+__global__ void
+roctx_attach_reattach_inside_kernel(float* data)
+{
+    data[threadIdx.x] += 8.0f;
+}
+
+__global__ void
+roctx_attach_reattach_outside_kernel(float* data)
+{
+    data[threadIdx.x] += 9.0f;
+}
+
 bool
 wait_for_trigger(const std::string& trigger_file)
 {
@@ -116,6 +134,18 @@ wait_for_trigger(const std::string& trigger_file)
     }
 
     return false;
+}
+
+void
+signal_phase_complete(const std::string& marker_file)
+{
+    auto marker = std::ofstream{marker_file};
+    marker << "complete\n";
+    if(!marker.good())
+    {
+        std::cerr << "Failed to write phase marker: " << marker_file << "\n";
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 template <typename KernelT>
@@ -156,6 +186,27 @@ run_selected_regions_mode(float* data)
     launch_kernel("outside_after", roctx_attach_outside_after_kernel, data);
 }
 
+void
+run_ref_count_reattach_first_phase(float* data)
+{
+    // Leave two nested selected regions open when the first attachment detaches.
+    roctxProfilerResume(0);
+    roctxProfilerResume(0);
+    launch_kernel("reattach_first", roctx_attach_reattach_first_kernel, data);
+}
+
+void
+run_ref_count_reattach_second_phase(float* data)
+{
+    // A new attachment must have a fresh first-callback marker and reference count. The first
+    // Pause is ignored, then the balanced Resume/Pause pair controls collection normally.
+    roctxProfilerPause(0);
+    roctxProfilerResume(0);
+    launch_kernel("reattach_inside", roctx_attach_reattach_inside_kernel, data);
+    roctxProfilerPause(0);
+    launch_kernel("reattach_outside", roctx_attach_reattach_outside_kernel, data);
+}
+
 int
 main(int argc, char** argv)
 {
@@ -163,7 +214,8 @@ main(int argc, char** argv)
 
     if(argc != 3)
     {
-        std::cerr << "usage: roctx-attach-pause-resume <normal|selected> <trigger-file>\n";
+        std::cerr << "usage: roctx-attach-pause-resume "
+                     "<normal|selected|selected-ref-count-reattach> <trigger-file>\n";
         return EXIT_FAILURE;
     }
 
@@ -182,25 +234,46 @@ main(int argc, char** argv)
     }
 
     std::cout << "ROCTx attach pause/resume target ready in mode: " << mode << "\n";
-    if(!wait_for_trigger(trigger_file))
+    if(mode == "selected-ref-count-reattach")
     {
-        HIP_ASSERT(hipFree(data));
-        return EXIT_FAILURE;
-    }
+        if(!wait_for_trigger(trigger_file + "-first"))
+        {
+            HIP_ASSERT(hipFree(data));
+            return EXIT_FAILURE;
+        }
+        run_ref_count_reattach_first_phase(data);
+        signal_phase_complete(trigger_file + "-first-complete");
 
-    if(mode == "normal")
-    {
-        run_normal_mode(data);
-    }
-    else if(mode == "selected")
-    {
-        run_selected_regions_mode(data);
+        if(!wait_for_trigger(trigger_file + "-second"))
+        {
+            HIP_ASSERT(hipFree(data));
+            return EXIT_FAILURE;
+        }
+        run_ref_count_reattach_second_phase(data);
+        signal_phase_complete(trigger_file + "-second-complete");
     }
     else
     {
-        std::cerr << "Unknown mode: " << mode << "\n";
-        HIP_ASSERT(hipFree(data));
-        return EXIT_FAILURE;
+        if(!wait_for_trigger(trigger_file))
+        {
+            HIP_ASSERT(hipFree(data));
+            return EXIT_FAILURE;
+        }
+
+        if(mode == "normal")
+        {
+            run_normal_mode(data);
+        }
+        else if(mode == "selected")
+        {
+            run_selected_regions_mode(data);
+        }
+        else
+        {
+            std::cerr << "Unknown mode: " << mode << "\n";
+            HIP_ASSERT(hipFree(data));
+            return EXIT_FAILURE;
+        }
     }
 
     // Keep the target alive until the test driver detaches rocprofv3 and

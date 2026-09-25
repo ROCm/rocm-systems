@@ -52,7 +52,7 @@ set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
-foreach(_MODE normal selected)
+foreach(_MODE normal selected selected-ref-count-reattach)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-attachment-roctx-pause-resume-${_MODE}
         COMMAND

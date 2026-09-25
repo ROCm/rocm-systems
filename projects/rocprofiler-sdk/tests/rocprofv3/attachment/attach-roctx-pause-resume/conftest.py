@@ -34,7 +34,11 @@ from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 def pytest_addoption(parser):
     parser.addoption("--json-input", action="store", help="Path to JSON output file")
     parser.addoption("--skip-if", action="store", help="Skip test if file exists")
-    parser.addoption("--mode", action="store", help="Test mode: normal or selected")
+    parser.addoption(
+        "--mode",
+        action="store",
+        help="Test mode: normal, selected, or selected-ref-count-reattach",
+    )
 
 
 def _skip_if(request):
@@ -56,6 +60,6 @@ def json_data(request):
 @pytest.fixture
 def test_mode(request):
     mode = request.config.getoption("--mode")
-    if mode not in ("normal", "selected"):
+    if mode not in ("normal", "selected", "selected-ref-count-reattach"):
         pytest.fail(f"Unexpected test mode: {mode}")
     return mode
