@@ -4,7 +4,7 @@
 /// @file vop3p_pk_f32_selection_test.cpp
 /// @brief Compare packed FP32 ADD/MUL/FMA source selection and floating-point
 /// policies between scalar and SIMD execution on CDNA2 through CDNA5.
-/// Only FMA NaN sign/payload selection may differ; both results must be quiet NaNs.
+/// NaN selection and quieting must also agree with the architectural policy.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
@@ -184,14 +184,11 @@ protected:
     const auto simd = machine.run(*inst, false, mode, exec, dst);
     for (uint32_t lane = 0; lane < machine.wave->wf_size(); ++lane) {
       for (uint32_t half = 0; half < 2; ++half) {
-        // As in the existing FMA SIMD contract, NaN payload choice can differ.
-        // Both paths must produce a quiet NaN; non-NaN results must agree exactly.
+        ASSERT_EQ(simd[lane][half], scalar[lane][half]) << "lane=" << lane << " half=" << half;
+        // CDNA2-4 can preserve signaling NaNs with IEEE mode disabled.
         if ((exec & (uint64_t{1} << lane)) && operation == 2 && is_nan(scalar[lane][half]) &&
-            is_nan(simd[lane][half])) {
+            (arch == ROCJITSU_CODE_ARCH_CDNA5 || (mode & 0x200u))) {
           EXPECT_NE(scalar[lane][half] & 0x00400000, 0u);
-          EXPECT_NE(simd[lane][half] & 0x00400000, 0u);
-        } else {
-          ASSERT_EQ(simd[lane][half], scalar[lane][half]) << "lane=" << lane << " half=" << half;
         }
         if (dst == 6 && !(exec & (uint64_t{1} << lane))) {
           ASSERT_EQ(simd[lane][half], kSentinel);
@@ -211,8 +208,9 @@ TEST_P(PackedF32Selection, AllSelectionsPreservePolicies) {
         for (uint32_t denorm = 0; denorm < 4; ++denorm)
           for (uint8_t clamp : {0, 1})
             for (uint32_t dx10_clamp : {0u, 0x100u})
-              compare(machine, lo, hi, 5, 2, 0xc0 | round | (denorm << 4) | dx10_clamp, clamp, 6,
-                      SourceKind::Vgpr, 0xd6a53cf0a5c3697bULL);
+              for (uint32_t ieee : {0u, 0x200u})
+                compare(machine, lo, hi, 5, 2, 0xc0 | round | (denorm << 4) | dx10_clamp | ieee,
+                        clamp, 6, SourceKind::Vgpr, 0xd6a53cf0a5c3697bULL);
 }
 
 TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {

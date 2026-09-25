@@ -33,7 +33,7 @@ from amdisa.sema_ast import (
 )
 from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
-from amdisa.semantics import F32_TO_INTEGER_DTYPES
+from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
 
 if TYPE_CHECKING:
     from amdisa.semantics import InstructionSemantics
@@ -1093,7 +1093,12 @@ class _VectorUnary(_ScalarDeriver):
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
-            if dtype in F32_TO_INTEGER_DTYPES:
+            if dtype in F16_INPUT_CONVERSION_DTYPES:
+                # Expose the floating F16 source to VOP3 modifier enrichment.
+                src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
+                if dtype == 'f32_f16':
+                    call_name = 'cvt_f32_f16_valu'
+            elif dtype in F32_TO_INTEGER_DTYPES:
                 # Expose the floating source to VOP3 modifier enrichment, then
                 # pass register bits to the conversion helper.
                 src0 = SemaNode(
@@ -1151,7 +1156,13 @@ class _VectorUnary(_ScalarDeriver):
             'cvt_norm_i16_f16',
             'cvt_norm_u16_f16',
         ):
-            src0 = _src(0)
+            # Normalized conversions take a decoded float for ABS/NEG enrichment;
+            # packed FP8/BF8 conversions still take register bits.
+            src0 = (
+                _cast(_src(0, SemaType.F16), SemaType.F16)
+                if op in ('cvt_norm_i16_f16', 'cvt_norm_u16_f16')
+                else _src(0)
+            )
             body = _assign(
                 _cast(_dst(0), SemaType.B32),
                 SemaNode(

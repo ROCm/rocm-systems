@@ -12,13 +12,14 @@ vop3_modifiers helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
     vop3_dst_mod_f64,
 )
-from amdisa.semantics import F32_TO_INTEGER_DTYPES
+from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
 
 
 def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
@@ -156,8 +157,8 @@ def gen_vector_unary(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, util::f32_to_f16_mode(s, wf.fp16_ovfl()));'
             ),
             'f32_f16': (
-                f'    uint32_t raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);\n'
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(raw))));'
+                f'    float s = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));\n'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::fp_mode::cvt_f32_f16(s, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));'
             ),
             'f16_u16': (
                 f'    uint16_t s = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));\n'
@@ -196,7 +197,9 @@ def gen_vector_unary(
         }
         if dtype in cvt_map:
             body = cvt_map[dtype]
-            if is_vop3 and dtype in F32_TO_INTEGER_DTYPES:
+            if is_vop3 and dtype in (
+                F32_TO_INTEGER_DTYPES | F16_INPUT_CONVERSION_DTYPES
+            ):
                 source, rest = body.split('\n', 1)
                 L.append(source)
                 L.extend(vop3_src_mod('s', 0, has_abs))
@@ -425,14 +428,18 @@ def gen_vector_unary(
         math_map_f16 = {
             'rcp': '1.0f / s',
             'sqrt': 'std::sqrt(s)',
-            'rsq': '1.0f / std::sqrt(s)',
+            'rsq': 'amdgpu::transcendental::rsq_f16(s, wf.fp_denorm_mode_f16_f64())',
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',
             'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
-            'exp2': 'std::exp2(s)',
-            'log2': 'std::log2(s)',
+            'exp2': 'amdgpu::transcendental::log_exp_f16<false>(s, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'log2': 'amdgpu::transcendental::log_exp_f16<true>(s, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'sin': 'std::sin(s * 6.2831853071795864f)',
             'cos': 'std::cos(s * 6.2831853071795864f)',
             'abs': 'std::fabs(s)',
@@ -441,7 +448,17 @@ def gen_vector_unary(
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
+            if op in ('log2', 'exp2'):
+                L.extend(
+                    [
+                        '    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod('
+                        'wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod);',
+                        '    result = amdgpu::fp_mode::apply_omod_f16(result, effective_omod, wf.fp16_ovfl());',
+                        '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);',
+                    ]
+                )
+            else:
+                L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
             )
@@ -469,10 +486,14 @@ def gen_vector_unary(
             'trunc': 'std::trunc(s)',
             'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
-            'exp2': 'amdgpu::transcendental::exp_f32(s)',
-            'log2': 'amdgpu::transcendental::log_f32(s)',
-            'sin': 'amdgpu::transcendental::sin_f32(s)',
-            'cos': 'amdgpu::transcendental::cos_f32(s)',
+            'exp2': 'amdgpu::transcendental::exp_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'log2': 'amdgpu::transcendental::log_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'sin': 'amdgpu::transcendental::sin_f32(s, wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'cos': 'amdgpu::transcendental::cos_f32(s, wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'abs': 'std::fabs(s)',
             'neg': '-s',
         }
@@ -592,7 +613,7 @@ def gen_vector_binop(
             'max': 'std::fmax(sv0, sv1)',
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
-            'fmac': f'std::fma(sv0, sv1, std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({d}, lane)))',
+            'fmac': f'amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(sv0, sv1, std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({d}, lane)), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())',
             'ldexp': 'amdgpu::ldexp(sv0, sv1_i, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
@@ -966,7 +987,7 @@ def gen_vector_ternary(
             L.extend(vop3_src_mod('c', 2, has_abs))
         f_map = {
             'mad': 'a * b + c',
-            'fma': 'std::fma(a, b, c)',
+            'fma': 'amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(a, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())',
             'min3': 'std::fmin(std::fmin(a, b), c)',
             'max3': 'std::fmax(std::fmax(a, b), c)',
             'minimum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
@@ -979,58 +1000,18 @@ def gen_vector_ternary(
             'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
             'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
         }
-        # Cube map operations: inputs are (x, y, z)
-        if op == 'cubeid':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float face;')
-            L.append('    if (az >= ax && az >= ay) face = c >= 0 ? 4.0f : 5.0f;')
-            L.append('    else if (ay >= ax) face = b >= 0 ? 2.0f : 3.0f;')
-            L.append('    else face = a >= 0 ? 0.0f : 1.0f;')
+        # Cube selection and MODE policy match the typed semantics path.
+        if op in CUBE_OPERATIONS:
+            result = cube_expression(op, 'a', 'b', 'c')
             if is_vop3:
-                L.extend(vop3_dst_mod('face'))
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(face));'
-            )
-        elif op == 'cubesc':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float sc;')
-            L.append('    if (az >= ax && az >= ay) sc = c >= 0 ? a : -a;')
-            L.append('    else if (ay >= ax) sc = a;')
-            L.append('    else sc = a >= 0 ? -c : c;')
+                result = cube_omod(result)
+            L.append(f'    float result = {result};')
             if is_vop3:
-                L.extend(vop3_dst_mod('sc'))
+                L.append(
+                    '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+                )
             L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(sc));'
-            )
-        elif op == 'cubetc':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float tc;')
-            L.append('    if (az >= ax && az >= ay) tc = -b;')
-            L.append('    else if (ay >= ax) tc = b >= 0 ? c : -c;')
-            L.append('    else tc = -b;')
-            if is_vop3:
-                L.extend(vop3_dst_mod('tc'))
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(tc));'
-            )
-        elif op == 'cubema':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float ma;')
-            L.append('    if (az >= ax && az >= ay) ma = 2.0f * az;')
-            L.append('    else if (ay >= ax) ma = 2.0f * ay;')
-            L.append('    else ma = 2.0f * ax;')
-            if is_vop3:
-                L.extend(vop3_dst_mod('ma'))
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(ma));'
+                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
             )
         elif op in f_map:
             expr = f_map[op]
