@@ -1735,3 +1735,20 @@ no runtime observations for these small problems; this is not a fault result
 or evidence of race freedom. The MXF8 Default cell moves from orange to yellow
 with reviewed fault trials still pending. A matching high-preset clean and
 MXF4 explicit Default clean are running in separate artifact roots.
+
+### MXF8 high clean and MXF4 complete tensor coverage
+
+`tensor-private-mxf8-high-clean` is accepted with complete coverage, passing
+numerics and 1,152 runtime observations, including first-transfer tensor
+writes at .text+0x1698 for distinct wave owners. No diagnostics or unsupported
+synchronization were reported. `tensor-private-mxf4-clean` is also accepted:
+50/50 accesses, 32/32 barriers, 4/4 atomics and 4/4 fences, with passing numerics.
+MXF4 Default moves from orange to yellow; both explicit tensor workloads still
+need admitted fault results.
+
+The maintained MXF8 fault specification now removes both split publication
+pairs at .text+0x1724/0x1728 and 0x173c/0x1740. The tensor completion wait and
+all reuse barriers remain intact. The reviewed witness connects wave 2's
+tensor A write at LDS 4352 to wave 1 lane zero's DS load. Eight trials with a
+six-detection minimum are declared before results, using the existing exact
+ELF identities. Validation runner tests pass (`tensor-publication-spec-tests.log`).
