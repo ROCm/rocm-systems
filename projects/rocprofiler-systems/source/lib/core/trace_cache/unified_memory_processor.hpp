@@ -65,8 +65,14 @@ struct migration_stats
         count++;
         total_size_bytes += size_bytes;
         total_time_ns += duration_ns;
-        if(size_bytes < min_size_bytes) min_size_bytes = size_bytes;
-        if(size_bytes > max_size_bytes) max_size_bytes = size_bytes;
+        if(size_bytes < min_size_bytes)
+        {
+            min_size_bytes = size_bytes;
+        }
+        if(size_bytes > max_size_bytes)
+        {
+            max_size_bytes = size_bytes;
+        }
     }
 
     [[nodiscard]] double avg_size_bytes() const noexcept

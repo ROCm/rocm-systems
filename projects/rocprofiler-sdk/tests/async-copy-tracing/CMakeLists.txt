@@ -20,7 +20,7 @@ endif()
 
 rocprofiler_add_integration_execute_test(
     async-copy-tracing
-    TARGET transpose
+    TARGET hip-memcpy
     TIMEOUT 45
     WSL_TIMEOUT_SCALE
     LABELS "integration-tests"

@@ -59,6 +59,9 @@ class ComputeUnitTestAccess;
 }
 namespace amdgpu {
 
+/// @brief Reporting policy for pending memory-result register accesses.
+enum class MemoryWaitDiagnostics { Off, Warn };
+
 class CommandProcessor;
 class AsyncInstructionWindow;
 class MmaAdmissionCache;
@@ -112,13 +115,16 @@ struct FunctionalQuantumResult {
 /// file type, instruction execution dispatch, wavefront creation) are
 /// implemented by IsaExecComputeUnit<Mode, Isa>. Use the create() factory
 /// to construct.
-class ComputeUnitCore : public simdojo::CompositeComponent {
+// Observers compile inline register accessors against this polymorphic type.
+// Its RTTI must be visible to GCC UBSan's vptr checks in separately loaded DSOs.
+class RJ_API_TYPE_EXPORT ComputeUnitCore : public simdojo::CompositeComponent {
   friend class AsyncInstructionWindow;
 
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
+  static constexpr uint32_t kMaxMemoryWaitDiagnostics = 16;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -133,9 +139,19 @@ public:
     uint32_t functional_quantum = kFunctionalQuantum;
     /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
+    /// Report premature memory-result accesses and conflicting replay-source overwrites.
+    MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
   };
 
   ~ComputeUnitCore() override = default;
+  /// @brief Number of memory-wait hazards observed, including suppressed reports.
+  uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
+  /// @brief Number of replay-source hazards, including suppressed reports.
+  uint64_t xcnt_diagnostic_count() const { return xcnt_diagnostic_count_; }
+  /// @brief Account for an executed producer using resolved shared FLAT lanes.
+  void track_memory_wait(Instruction &inst, Wavefront &wf, uint64_t flat_shared_lanes = 0);
+  /// @brief Format a scoreboard hazard using its owning wavefront context.
+  static void report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
 
   /// @brief Create a compute unit for the given architecture and execution mode.
   /// @param name Human-readable name (e.g., "cu0").
@@ -298,6 +314,12 @@ public:
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
 
+  using QueueExceptionHandler = std::function<bool(
+      uint32_t queue_id, uint32_t process_id, uint64_t status, bool retain_failure_for_debugger)>;
+  void set_queue_exception_handler(QueueExceptionHandler cb) {
+    queue_exception_handler_ = std::move(cb);
+  }
+
   /// @brief Notify KFD after configured TBA code returns with STATUS.HALT.
   using TrapCompletionHandler = std::function<void(Wavefront &wf)>;
   void set_trap_completion_handler(TrapCompletionHandler cb) {
@@ -421,7 +443,12 @@ public:
     plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
     observes_memory_routing_ = plugin_group_->observes_memory_routing();
+    observes_register_access_ =
+        config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off || !plugin_group_->empty();
   }
+
+  /// Whether register notifications have a diagnostic or plugin consumer.
+  bool observes_register_access() const { return observes_register_access_; }
 
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
@@ -651,6 +678,22 @@ public:
     return std::forward<F>(fn)();
   }
 
+  /// @brief Pause once after releasing the wave-state lock but before flushing
+  /// command-processor notifications.
+  /// @details Test-only seam for deterministic lock-order regressions. The hook
+  /// is consumed by the next outermost wave-state guard and invoked unlocked.
+  void set_notification_flush_hook_for_testing(std::function<void()> hook) {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    notification_flush_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Queue one runtime exception and drive the normal unlocked flush path.
+  [[nodiscard]] bool defer_queue_exception_for_testing(uint32_t queue_id, uint32_t process_id,
+                                                       uint64_t status) {
+    return with_wave_state_locked(
+        [&] { return defer_queue_exception(nullptr, queue_id, process_id, status); });
+  }
+
   bool has_active_wfs_for_process(uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
@@ -726,28 +769,48 @@ private:
   void write_sgpr(const Wavefront &wf, uint32_t reg_idx, uint32_t val) {
     if (!owns_sgpr_range(wf, reg_idx, 1))
       return;
-    plugin_group_->onAmdgpuWriteScalarRegister(
-        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
+    notify_scalar_register_write(
+        wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
     sgpr_file_[reg_idx] = val;
   }
 
   void write_sgpr64(const Wavefront &wf, uint32_t reg_idx, uint64_t val) {
     if (!owns_sgpr_range(wf, reg_idx, 2))
       return;
-    plugin_group_->onAmdgpuWriteScalarRegister(
-        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
+    notify_scalar_register_write(
+        wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
     sgpr_file_[reg_idx] = static_cast<uint32_t>(val);
     sgpr_file_[reg_idx + 1] = static_cast<uint32_t>(val >> 32);
   }
 
   void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
+    if (!observes_register_access_)
+      return;
+    if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg))
+      check_active_memory_wait(reg, ~uint64_t{0}, 0xf, false);
     if (observes_sgpr_reads_)
-      plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
+      observe_scalar_register_read(wf, reg);
   }
 
   void notify_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
-    plugin_group_->onAmdgpuWriteScalarRegister(&wf, reg);
+    if (!observes_register_access_)
+      return;
+    if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg, true))
+      check_active_memory_wait(reg, ~uint64_t{0}, 0xf, true);
+    if (!plugin_group_->empty())
+      observe_scalar_register_write(wf, reg);
   }
+
+  // Keep observer-only TLS suspension out of instruction access paths when no
+  // plugins are attached. These callbacks must not consume pending results.
+  RJ_API_EXPORT RJ_NOINLINE void observe_scalar_register_read(const Wavefront &wf,
+                                                              RegisterRef reg) const;
+  RJ_API_EXPORT RJ_NOINLINE void observe_scalar_register_write(const Wavefront &wf,
+                                                               RegisterRef reg) const;
+  RJ_API_EXPORT RJ_NOINLINE void observe_vgpr_read(const Wavefront *wf, uint32_t reg_idx,
+                                                   uint64_t lane_mask, uint8_t byte_mask) const;
+  RJ_API_EXPORT RJ_NOINLINE void observe_vgpr_write(const Wavefront *wf, uint32_t reg_idx,
+                                                    uint64_t lane_mask, uint8_t byte_mask) const;
 
 public:
   /// @brief Read a scalar register from the physical SGPR file.
@@ -789,8 +852,17 @@ public:
   /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
-      plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+    if (!observes_register_access_)
+      return;
+    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+      if (wf->memory_wait_checks_enabled() &&
+          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base))
+        check_active_memory_wait(
+            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
+            byte_mask, false);
+      if (!plugin_group_->empty())
+        observe_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   /// @brief Notify plugins that a wavefront wrote lanes of a physical VGPR.
@@ -798,10 +870,19 @@ public:
   /// Raw VM/storage writes deliberately bypass this hook.
   void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
+    if (!observes_register_access_)
+      return;
     if (wf)
       lane_mask &= wf->vgpr_write_mask();
-    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
-      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+      if (wf->memory_wait_checks_enabled() &&
+          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base, true))
+        check_active_memory_wait(
+            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
+            byte_mask, true);
+      if (!plugin_group_->empty())
+        observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   /// @brief Report a scalar-lane VGPR write without applying vector write masks.
@@ -810,8 +891,17 @@ public:
   void notify_scalar_lane_vgpr_write(
       const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
-      plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+    if (!observes_register_access_)
+      return;
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+      if (wf->memory_wait_checks_enabled() &&
+          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base, true))
+        check_active_memory_wait(
+            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
+            byte_mask, true);
+      if (!plugin_group_->empty())
+        observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
+    }
   }
 
   /// @brief Notify plugins that lanes of a physical VGPR were read.
@@ -996,6 +1086,20 @@ public:
   }
 
 protected:
+  /// @brief Defer a runtime queue exception until the wave-state lock is released.
+  /// @details Instruction callbacks run under @ref wave_state_mutex_. The command
+  /// processor takes its queue lock before this lock, so reporting synchronously
+  /// here would invert that order against queue dispatch and destruction.
+  bool defer_queue_exception(Wavefront *wave, uint32_t queue_id, uint32_t process_id,
+                             uint64_t status, bool clear_debug_stop_on_success = false,
+                             bool retain_failure_for_debugger = true) {
+    if (!cp_ || status == 0)
+      return false;
+    pending_queue_exceptions_.push_back({queue_id, process_id, status, wave,
+                                         clear_debug_stop_on_success, retain_failure_for_debugger});
+    return true;
+  }
+
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                   uint32_t vgpr_allocation_block_size);
@@ -1109,8 +1213,8 @@ protected:
   /// under this lock must not reach back into the CP and take hw_queue_mutex_ --
   /// a wave hitting s_endpgm on the engine thread would otherwise close an AB-BA
   /// cycle against a concurrent dispatch or DESTROY_QUEUE. release_wf() therefore
-  /// queues its completions instead of sending them, and the outermost guard
-  /// delivers them here, after the lock is dropped and in the same order.
+  /// queues its notifications instead of sending them, and the outermost guard
+  /// delivers them here, after the lock is dropped.
   class WaveStateGuard {
   public:
     explicit WaveStateGuard(ComputeUnitCore &cu) : cu_(cu), lock_(cu.wave_state_mutex_) {
@@ -1120,9 +1224,15 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
-      lock_.unlock();
+      std::function<void()> notification_flush_hook;
       if (outermost)
-        cu_.flush_wg_completions();
+        notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
+      lock_.unlock();
+      if (outermost) {
+        if (notification_flush_hook)
+          notification_flush_hook();
+        cu_.flush_cp_notifications();
+      }
     }
 
   private:
@@ -1130,9 +1240,18 @@ protected:
     std::unique_lock<std::recursive_mutex> lock_;
   };
 
-  /// @brief Send the workgroup completions queued under the wave-state lock.
+  /// @brief Send command-processor notifications queued under the wave-state lock.
   /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
-  void flush_wg_completions();
+  void flush_cp_notifications();
+
+  struct PendingQueueException {
+    uint32_t queue_id;
+    uint32_t process_id;
+    uint64_t status;
+    Wavefront *wave;
+    bool clear_debug_stop_on_success;
+    bool retain_failure_for_debugger;
+  };
 
   /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
@@ -1143,7 +1262,7 @@ protected:
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
   /// @brief Workgroups that finished while the wave-state lock was held.
-  /// @details Drained by @ref flush_wg_completions once the lock is dropped.
+  /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
   struct PendingVmFault {
     uint32_t queue_id = 0;
@@ -1152,6 +1271,11 @@ protected:
     VmAccessOutcome outcome = VmAccessOutcome::Faulted;
   };
   std::vector<PendingVmFault> pending_vm_faults_;
+  /// @brief Runtime queue exceptions raised while the wave-state lock was held.
+  /// @details Drained before workgroup completions so an error cannot race a
+  /// successful completion from a later instruction.
+  std::vector<PendingQueueException> pending_queue_exceptions_;
+  std::function<void()> notification_flush_hook_for_testing_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -1181,6 +1305,7 @@ protected:
   std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
+  QueueExceptionHandler queue_exception_handler_;
   TrapCompletionHandler trap_completion_handler_;
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
@@ -1216,6 +1341,9 @@ protected:
   bool observes_sgpr_reads_ = false;
   bool pool_driven_ = false;
   bool observes_memory_routing_ = false;
+  bool observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off;
+  uint64_t memory_wait_diagnostic_count_ = 0;
+  uint64_t xcnt_diagnostic_count_ = 0;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;
@@ -1248,6 +1376,7 @@ protected:
   bool functional_yield_requested_ = false;
 
   friend class CommandProcessor;
+  friend class InstructionComputeUnitView;
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
@@ -1275,6 +1404,19 @@ inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
   return raw_cu().engine();
 }
+inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
+                                                                   uint32_t process_id) const {
+  if (process_id == 0)
+    return raw_cu().memory()->fetch32(address);
+  if (!raw_cu().gpu_vm())
+    return 0;
+  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
+  uint32_t word = 0;
+  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
+             ? word
+             : 0;
+}
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
 }
@@ -1289,6 +1431,7 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() cons
 }
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
+  SuspendedMemoryWaitCheck observer_scope;
   raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access);
 }
 

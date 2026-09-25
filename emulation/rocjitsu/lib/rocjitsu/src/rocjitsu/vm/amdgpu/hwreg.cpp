@@ -416,6 +416,16 @@ bool field_intersects(const DecodedHwreg &decoded, uint32_t offset, uint32_t siz
   return decoded.offset < offset + size && offset < decoded.offset + decoded.size;
 }
 
+// Observe only the requested field, never the other bits read to preserve a
+// partial HWREG write. GFX12 moved SCC from STATUS[0] to STATE_PRIV[9].
+bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg &decoded) {
+  if (state == HwregState::StatePrivGfx12)
+    return field_intersects(decoded, 9, 1);
+  const auto arch = wf.cu().arch();
+  return state == HwregState::Status && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA5 && field_intersects(decoded, 0, 1);
+}
+
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
   case HwregState::Mode:
@@ -625,6 +635,8 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return result;
   }
 
+  if (field_aliases_scc(wf, desc->state, decoded))
+    wf.check_scalar_memory_wait({RegClass::SCC, 0, 1});
   value = (raw_value >> decoded.offset) & decoded.mask;
   return HwregAccessResult::Success;
 }
@@ -667,6 +679,8 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
       wf.arm_setreg_vgpr_msb_hazard();
   }
 
+  if (field_aliases_scc(wf, desc->state, decoded))
+    wf.check_scalar_memory_wait({RegClass::SCC, 0, 1}, true);
   return write_raw_hwreg(wf, desc->state, updated);
 }
 

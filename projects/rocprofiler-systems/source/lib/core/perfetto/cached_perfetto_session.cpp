@@ -36,7 +36,10 @@ rank_from_env() noexcept
           "OMPI_COMM_WORLD_RANK", "SLURM_PROCID" })
     {
         const auto value = get_env<std::int64_t>(env_name, -1);
-        if(value >= 0) return static_cast<std::uint32_t>(value);
+        if(value >= 0)
+        {
+            return static_cast<std::uint32_t>(value);
+        }
     }
     return 0;
 }
