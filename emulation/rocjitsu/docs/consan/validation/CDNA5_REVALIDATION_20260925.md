@@ -262,3 +262,26 @@ corrupts the heap. This isolates the trigger to active tool behavior rather than
 merely loading the shared library; the precise corrupting operation is not yet
 identified. Removing ConSan environment settings is not a disable test: the
 hook defaults to Default instrumentation.
+
+### Heap-corruption root cause: publication tracker static destruction
+
+The publication dispatch isolation singleton owned a vector of pending records
+but was destructed before later HIP exit callbacks. Its destructor freed the
+vector; subsequent callback reset/submission reused the dead vector, overwriting
+allocations in the same 32-byte size class (including page-table host extents).
+A normal GCC exit-order reproducer fails with the old header (exit 3: a new
+allocation's sentinel overwritten) and passes with the process-lifetime holder
+(exit 0). The checked-in exit-order regression and 39 other publication tests
+pass. Fix: `f63dd04b087`.
+
+On the still-unmodified hook, a debugger intervention skipping **only**
+`PublicationDispatchIsolation` destruction makes HipKittens exit normally:
+`hipkittens-skip-publication-dtor.log`. Skipping all hook uninstall instead is
+not a valid workaround: it leaves stale signal tracking and aborts elsewhere.
+The lifetime fix retains the existing reset/uninstall behavior. The normal-hook
+E2E confirmation is queued after the live Tensile workload finishes; do not
+reclassify the red cells until that confirmation succeeds.
+
+Tree Default requalification on the relaxed-observation fix finished 1/8 with a
+matching clean pass (`tree-relaxed-default-*`), confirming high as the lowest
+passing preset at or above default for that hook.
