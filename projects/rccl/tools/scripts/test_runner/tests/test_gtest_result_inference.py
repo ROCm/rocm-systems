@@ -612,6 +612,15 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         self.assertEqual(leaf["full_name"], "SymCheckMode_Local.DebugLocal_HostPointer_Rejected")
         self.assertEqual(leaf["status"], "FAILED")
 
+    def test_synthetic_detail_keeps_config_name_for_colon_filter(self):
+        leaf = synthetic_case_detail(
+            "RcclAllReduceDdaDecision",
+            "Rcclwrap.Gfx942_SymOff_MidMsg_TakesDda:Rcclwrap.Gfx1250_CeEligible_StillTakesDda",
+            "FAILED",
+        )
+        self.assertEqual(leaf["full_name"], "RcclAllReduceDdaDecision")
+        self.assertNotIn(":", leaf["full_name"])
+
     def test_no_duplicate_total_matches_unique(self):
         identity = make_run_identity_key(binary="rccl-UnitTests", env_vars={})
         entries = [

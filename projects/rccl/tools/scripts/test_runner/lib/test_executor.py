@@ -344,6 +344,7 @@ def synthetic_case_detail(test_name, test_filter=None, status="FAILED"):
         and "*" not in test_filter
         and "?" not in test_filter
         and "-" not in test_filter
+        and ":" not in test_filter
     ):
         full_name = test_filter
     suite, _, case = full_name.partition(".")

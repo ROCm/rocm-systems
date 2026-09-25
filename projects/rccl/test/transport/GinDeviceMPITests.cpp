@@ -5807,7 +5807,9 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
     GTEST_SKIP() << "RAIL connection requires NCCL_CROSS_NIC=0 (rail-only mode)";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
-  SKIP_IF_GIN_UNSUPPORTED();
+  // RAIL is the connection under test. Skip only when GIN is absent; a
+  // rail-only communicator must not take the FULL skip used by defaultGinReqs().
+  SKIP_IF_GIN_REQUIRES(NCCL_GIN_CONNECTION_RAIL);
   ncclComm_t comm = getActiveCommunicator();
 
   // RAIL is only valid when the communicator advertises a railed GIN type.

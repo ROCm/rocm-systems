@@ -2636,7 +2636,7 @@ TEST(Rcclwrap, Gfx1250_CeEligible_StillTakesDda)
 // by agreeing across ranks in the symmetric path, not by taking DDA when
 // one rank's windows look eligible. 256 KiB matches CHECK_COUNT in
 // SymmetricAbortCheckModeMPITests.
-TEST(Rcclwrap, Gfx1250_SymEligible_StillTakesDda)
+TEST(Rcclwrap, Gfx1250_SymEligible_RejectsDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);

@@ -1345,7 +1345,7 @@
         {
           "name": "RcclAllReduceDdaDecision",
           "description": "AllReduce DDA dispatch decision tests across gfx1250/gfx942/gfx950: symk yield, CE yield, rank gate",
-          "test_filter": "RcclAllReduceDdaDecision.*"
+          "test_filter": "Rcclwrap.Gfx942_SymOff_MidMsg_TakesDda:Rcclwrap.Gfx942_SymOff_AboveCap_NoDda:Rcclwrap.Gfx942_SymOn_CeEligible_YieldsToCe:Rcclwrap.Gfx942_SymOn_UnsupportedOp_TakesDda:Rcclwrap.Gfx1250_CeEligible_StillTakesDda:Rcclwrap.Gfx1250_SymEligible_RejectsDda"
         },
         {
           "name": "RcclAllGatherCeRegisteredWindow",

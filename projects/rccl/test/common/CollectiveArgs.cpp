@@ -169,8 +169,18 @@ namespace RcclUnitTesting
     {
       PtrUnion staging;
       CHECK_HIP(hipHostMalloc(&staging.ptr, numOutputBytes));
-      CHECK_HIP(hipMemcpy(staging.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
-      CHECK_HIP(hipDeviceSynchronize());
+      // CHECK_HIP returns on failure, so free the staging buffer before that
+      // return. Otherwise a failed copy or sync leaks the pinned allocation.
+      hipError_t stagingCopy = hipMemcpy(staging.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost);
+      hipError_t stagingSync = hipSuccess;
+      if (stagingCopy == hipSuccess)
+        stagingSync = hipDeviceSynchronize();
+      if (stagingCopy != hipSuccess || stagingSync != hipSuccess)
+      {
+        (void)hipHostFree(staging.ptr);
+        staging.ptr = nullptr;
+        CHECK_HIP(stagingCopy != hipSuccess ? stagingCopy : stagingSync);
+      }
       memcpy(this->outputCpu.ptr, staging.ptr, numOutputBytes);
       CHECK_HIP(hipHostFree(staging.ptr));
     }
