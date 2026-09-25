@@ -1203,3 +1203,24 @@ runs with `PYTHONHASHSEED=0`. Full ELF hashes still differ. Neither worker-count
 nor Python hash-seed controls make fresh generation suitable for exact reviewed
 fault identities. The next route is reuse of reviewed client artifacts, retaining
 full code-object identity and numerical-oracle checks.
+
+### F8 quick clean qualification and lane-retention pressure regression
+
+`long-tensile-clean/tensile-sk-f8gemm-quick/default` completes all nine baseline
+and Default shards with zero return codes. Each instrumented shard reports
+complete applicable analysis. The 1800 s inner / 2100 s outer deadlines resolve
+the previous three timeouts; the largest instrumented shard takes about 525 s.
+The Default cell moves from orange to yellow.
+
+`f8gemm-default-retry-fault` stops after its first admission failure:
+requested/planned/applied are all zero, the numerical oracle passes, and no
+trial is admitted or reached. This is an exact mutation-installation problem,
+not evidence of a detector false negative. Reviewed artifact reuse remains the
+next step for qualifying generated Tensile clients.
+
+`pressure-lanes-high-256-clean` passes baseline and candidate-hook correctness.
+The matching fault campaign detects 8/8 admitted/reached trials, with complete
+analysis and healthy before/after checks in every trial. Together with the tree
+regression this checks both barrier and atomic publication after the CDNA5
+lane-retention change. The pressure table cell keeps its already qualifying
+high preset without an unnecessary bank override.
