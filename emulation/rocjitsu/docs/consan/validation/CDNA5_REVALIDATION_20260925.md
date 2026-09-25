@@ -1412,3 +1412,20 @@ Both have complete dynamic evidence but incomplete static analysis. Their
 Default cells now state the confirmed range-support limitation. The earlier
 full clean sweeps—six and three shards respectively—remain numerical evidence,
 not proof of complete detector coverage.
+
+### Sparse F8 ML tail publication reviewed
+
+`spmmml-wave4-full.asm` reviews the MT64x64x128 four-wave kernel in
+original inventory ELF `ecce44257eb1d895`. The smaller MT16x16 candidate
+has only one wave and was not selected for a cross-wave fault. For the
+maintained 16x16x64 shard, select the tail-path publication at
+.text+0x1d968/0x1d96c (VMA 0x39368/0x3936c), preserving the preceding
+reuse synchronization and store retirement. Thread 1's 16-byte A store
+starts at LDS byte 16; thread 32's first tail byte load reads byte 16.
+The source address calculations and existing passing GSU1 numerical rows
+establish the cross-wave dependency and nonempty tail path.
+
+The catalog now declares this fault with eight trials and a six-detection
+threshold before outcomes. All 209 runner tests pass. Retained replay
+preparation is still live; no fault result is claimed until its exact object
+identity is bound and matching clean/fault execution completes.
