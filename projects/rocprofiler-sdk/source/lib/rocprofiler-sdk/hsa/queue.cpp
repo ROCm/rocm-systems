@@ -44,6 +44,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
@@ -314,6 +315,15 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                       packet.instrumentation_packets,
                                                       dispatch_time);
 
+        // PC sampling completion is no longer routed through the per-queue
+        // callback registry; invoke its hook explicitly.
+        pc_sampling::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                                     packet.kernel_packet,
+                                                     _session,
+                                                     packet,
+                                                     packet.instrumentation_packets,
+                                                     dispatch_time);
+
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
             .wlock([&](auto& serializer) {
@@ -448,19 +458,21 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    // Counter collection and thread trace no longer register a queue-controller callback, so
-    // neither counts toward get_notifiers(); detect them explicitly so a run that uses only one
-    // of them still enters the interceptor.
+    // Counter collection, thread trace and PC sampling no longer register a queue-controller
+    // callback, so none of them counts toward get_notifiers(); detect them explicitly so a run
+    // that uses only one of them still enters the interceptor.
     //
-    // Both are scoped to this queue's agent: a counters context restricted via set_agents(), and
-    // a tracer configured per agent, must leave queues on the other agents on the fast path
-    // instead of paying interception and losing batching for dispatches that
-    // kernel_dispatch_phase_enter_hook() would filter out anyway.
-    const auto* rocp_agent = CHECK_NOTNULL(queue.get_agent().get_rocp_agent());
+    // Each is scoped to this queue's agent: a counters context restricted via set_agents(), a
+    // tracer configured per agent, and a PC sampling service configured per agent must leave
+    // queues on the other agents on the fast path instead of paying interception and losing
+    // batching for dispatches the corresponding enter hook would filter out anyway.
+    const auto* rocp_agent          = CHECK_NOTNULL(queue.get_agent().get_rocp_agent());
     const bool  counters_active     = counters::is_active_on_agent(rocp_agent->id);
     const bool  thread_trace_active = thread_trace::is_active_on_agent(rocp_agent->id);
+    const bool  pc_sampling_active  = pc_sampling::is_configured_on_agent(rocp_agent->id);
     const bool  no_real_consumers =
         (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active &&
+         !pc_sampling_active &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
@@ -539,8 +551,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // these are for the services (dispatch counter collection, pc sampling, ATT) which use
-    // the queue/queue_controller callback mechanism
+    // Services that attach packet instrumentation or need dispatch correlation data. Some are
+    // still routed through queue-controller callbacks while migrated services use explicit hooks.
     const auto queue_callback_context_filter = [](const context::context* ctx) {
         return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
                 ctx->dispatch_spm);
