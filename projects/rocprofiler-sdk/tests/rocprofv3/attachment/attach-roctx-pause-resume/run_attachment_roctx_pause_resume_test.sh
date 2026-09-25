@@ -63,6 +63,25 @@ wait_for_profiler_attached() {
     return 1
 }
 
+wait_for_phase_complete() {
+    local marker_file=$1
+    local max_wait=30
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        if [ -f "${marker_file}" ]; then
+            return 0
+        fi
+        if ! kill -0 "${APP_PID}" 2>/dev/null; then
+            echo "Test application exited before creating ${marker_file}"
+            return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out waiting for phase marker: ${marker_file}"
+    return 1
+}
+
 TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
@@ -97,6 +116,8 @@ if [ "${MODE}" = "normal" ]; then
     ROCPROFV3_FLAGS=(--marker-trace --kernel-trace)
 elif [ "${MODE}" = "selected" ]; then
     ROCPROFV3_FLAGS=(--selected-regions --kernel-trace)
+elif [ "${MODE}" = "selected-ref-count-reattach" ]; then
+    ROCPROFV3_FLAGS=(--selected-regions --selected-regions-ref-count --kernel-trace)
 else
     echo "Unknown test mode: ${MODE}"
     exit 1
@@ -133,35 +154,59 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
-echo "Attaching profiler to PID $APP_PID in ${MODE} mode..."
-PYTHONUNBUFFERED=1 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
-    --attach-duration-msec 8000 \
-    "${ROCPROFV3_FLAGS[@]}" \
-    -f json --attach-sync-output \
-    -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
-    --log-level "${LOG_LEVEL}" >"${ROCPROF_LOG}" 2>&1 &
-ROCPROF_PID=$!
+run_attachment() {
+    local session_name=$1
+    local log_file=$2
+    local trigger_file=$3
+    local complete_file=$4
+    local duration_msec=$5
 
-if ! wait_for_profiler_attached "${APP_PID}" "${ROCPROF_LOG}"; then
-    echo "rocprofv3 output:"
-    cat "${ROCPROF_LOG}" 2>/dev/null || true
-    wait "${ROCPROF_PID}" 2>/dev/null || true
-    ROCPROF_PID=""
-    exit 1
-fi
+    echo "${session_name}: attaching profiler to PID ${APP_PID} in ${MODE} mode..."
+    PYTHONUNBUFFERED=1 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" \
+        --attach "${APP_PID}" \
+        --attach-duration-msec "${duration_msec}" \
+        "${ROCPROFV3_FLAGS[@]}" \
+        -f json --attach-sync-output \
+        -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
+        --log-level "${LOG_LEVEL}" >"${log_file}" 2>&1 &
+    ROCPROF_PID=$!
 
-touch "${TRIGGER_FILE}"
+    if ! wait_for_profiler_attached "${APP_PID}" "${log_file}"; then
+        echo "rocprofv3 output:"
+        cat "${log_file}" 2>/dev/null || true
+        wait "${ROCPROF_PID}" 2>/dev/null || true
+        ROCPROF_PID=""
+        return 1
+    fi
 
-if wait "${ROCPROF_PID}"; then
-    ROCPROF_PID=""
+    touch "${trigger_file}"
+    if [ -n "${complete_file}" ] && ! wait_for_phase_complete "${complete_file}"; then
+        return 1
+    fi
+
+    if wait "${ROCPROF_PID}"; then
+        ROCPROF_PID=""
+    else
+        local exit_code=$?
+        ROCPROF_PID=""
+        echo "rocprofv3 attach test failed with exit code ${exit_code}"
+        return 1
+    fi
+
+    echo "${session_name}: profiler detached successfully"
+}
+
+if [ "${MODE}" = "selected-ref-count-reattach" ]; then
+    FIRST_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3-first.log"
+    SECOND_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3-second.log"
+    run_attachment "First attachment" "${FIRST_LOG}" "${TRIGGER_FILE}-first" \
+        "${TRIGGER_FILE}-first-complete" 3000
+    wait_for_attach_ready "${APP_PID}"
+    run_attachment "Second attachment" "${SECOND_LOG}" "${TRIGGER_FILE}-second" \
+        "${TRIGGER_FILE}-second-complete" 3000
 else
-    ROCPROF_EXIT_CODE=$?
-    ROCPROF_PID=""
-    echo "rocprofv3 attach test failed with exit code $ROCPROF_EXIT_CODE"
-    exit 1
+    run_attachment "Attachment" "${ROCPROF_LOG}" "${TRIGGER_FILE}" "" 8000
 fi
-
-echo "Profiler detached successfully"
 
 kill -2 "${APP_PID}" 2>/dev/null
 if wait "${APP_PID}"; then
@@ -182,7 +227,13 @@ if [ "${JSON_COUNT}" -eq 0 ]; then
     exit 1
 fi
 
-APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" -name "${APP_OUTPUT_PID}_results.json" | head -1)
+if [ "${MODE}" = "selected-ref-count-reattach" ]; then
+    APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" \
+        -name "${APP_OUTPUT_PID}_*_results.json" | sort -V | tail -1)
+else
+    APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" \
+        -name "${APP_OUTPUT_PID}_results.json" | head -1)
+fi
 if [ -z "$APP_JSON" ]; then
     echo "Error: Could not find app (PID ${APP_OUTPUT_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
     exit 1
@@ -190,10 +241,11 @@ fi
 echo "Found app JSON output: $APP_JSON"
 
 APP_OUTPUT_DIR=$(dirname "$APP_JSON")
+APP_OUTPUT_PREFIX=$(basename "$APP_JSON" "_results.json")
 
-for src in "${APP_OUTPUT_DIR}/${APP_OUTPUT_PID}"_*.json; do
+for src in "${APP_OUTPUT_DIR}/${APP_OUTPUT_PREFIX}"_*.json; do
     [ -f "$src" ] || continue
-    dst_name=$(basename "$src" | sed "s/^${APP_OUTPUT_PID}_/${OUTPUT_FILENAME}_/")
+    dst_name=$(basename "$src" | sed "s/^${APP_OUTPUT_PREFIX}_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
     echo "Copied $(basename "$src") -> ${dst_name}"
 done

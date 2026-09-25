@@ -32,6 +32,7 @@ EXPECTED_KERNELS = {
         "roctx_attach_after_resume_kernel",
     ),
     "selected": ("roctx_attach_inside_region_kernel",),
+    "selected-ref-count-reattach": ("roctx_attach_reattach_inside_kernel",),
 }
 
 FORBIDDEN_KERNELS = {
@@ -40,6 +41,7 @@ FORBIDDEN_KERNELS = {
         "roctx_attach_outside_before_kernel",
         "roctx_attach_outside_after_kernel",
     ),
+    "selected-ref-count-reattach": ("roctx_attach_reattach_outside_kernel",),
 }
 
 

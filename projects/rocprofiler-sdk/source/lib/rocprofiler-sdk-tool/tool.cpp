@@ -364,6 +364,26 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
 
+struct pause_resume_session_state
+{
+    void begin_attach()
+    {
+        // The first attachment starts with the member initializers below. Reattachment follows
+        // registration's context stop and callback drain, so no callback from the prior session
+        // can update this state after it is reset.
+        if(!has_attached.exchange(true)) return;
+
+        ref_count.store(0);
+        first_callback.store(true);
+    }
+
+    std::atomic<int64_t> ref_count      = {0};
+    std::atomic<bool>    first_callback = {true};
+    std::atomic<bool>    has_attached   = {false};
+};
+
+auto pause_resume_session = pause_resume_session_state{};
+
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
@@ -641,10 +661,9 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 cb_data)
 {
-    const auto&    session_config     = tool::get_config();
-    static auto    pause_resume_count = std::atomic<int64_t>{0};
-    constexpr auto null_context_id    = rocprofiler_context_id_t{.handle = 0};
-    auto*          ctxs               = static_cast<context_id_set_t*>(cb_data);
+    const auto&    session_config  = tool::get_config();
+    constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
+    auto*          ctxs            = static_cast<context_id_set_t*>(cb_data);
 
     // ensure that ctxs is not nullptr
     if(ctxs == nullptr)
@@ -665,11 +684,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             _active_contexts++;
     }
 
-    auto _first_pause_resume = false;
-
-    // setup once flag to track first pause/resume call
-    static auto _once_flag = std::once_flag{};
-    std::call_once(_once_flag, [&]() { _first_pause_resume = true; });
+    const auto _first_pause_resume = pause_resume_session.first_callback.exchange(false);
 
     auto roctx_pause_resume_warning = [&record]() {
         if(auto* _data =
@@ -708,8 +723,9 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
             if(!_first_pause_resume)
             {
-                _ref_count =
-                    (session_config.selected_regions_ref_count) ? --pause_resume_count : int64_t{0};
+                _ref_count = (session_config.selected_regions_ref_count)
+                                 ? --pause_resume_session.ref_count
+                                 : int64_t{0};
             }
             else if(_first_pause_resume && session_config.selected_regions &&
                     session_config.selected_regions_ref_count)
@@ -739,8 +755,9 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
             // if using the selected regions reference counting, only resume when the count goes to
             // positive (was zero)
-            auto _ref_count =
-                (session_config.selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
+            auto _ref_count = (session_config.selected_regions_ref_count)
+                                  ? pause_resume_session.ref_count++
+                                  : int64_t{0};
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
             {
@@ -2872,6 +2889,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix(next_config);
     const auto& attached_config = tool::publish_config(std::move(next_config));
+    pause_resume_session.begin_attach();
 
     pid_t instrumented_pid = getpid();   // The process being profiled
     pid_t parent_pid       = getppid();  // Its parent process
