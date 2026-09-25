@@ -47,12 +47,13 @@ View the help menu of ``rocprof-sys-attach`` using the ``-h`` or ``--help`` opti
 .. code-block:: shell
 
    $ rocprof-sys-attach --help
-   Usage: rocprof-sys-attach -p <pid> [OPTIONS]
+   Usage: rocprof-sys-attach -p <pid>[,<pid>...] [OPTIONS]
 
-   Attach to a running process for profiling.
+   Attach to one or more running processes for profiling.
 
    Options:
-     -p <pid>             Process ID to attach to (required)
+     -p, --pid PID[,PID,...]
+                          Process ID(s) to attach to (required, repeatable)
      -o, --output PATH    Output path for profiling results
      -F, --format FORMAT[,FORMAT,...]
                           Output format(s): perfetto, rocpd
@@ -64,14 +65,17 @@ View the help menu of ``rocprof-sys-attach`` using the ``-h`` or ``--help`` opti
      ROCPROFSYS_USE_ROCPD         Enable rocpd database output
      ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library
 
-   Once attached, press ENTER to detach from the process.
+   Once attached, enter a session id to detach from that process, 'a' to
+   detach from all of them, or ENTER when only one session is left.
 
 Command-line options
 ----------------------------------------
 
-``-p <pid>`` (required)
-   The process ID of the running application to attach to. You can find the PID
-   using tools like ``ps``, ``pgrep``, or ``top``.
+``-p, --pid PID[,PID,...]`` (required)
+   The process ID(s) of the running application(s) to attach to. Multiple PIDs can be
+   given as a comma-separated list, by repeating the option, or both. A PID given more
+   than once is attached to only once. You can find the PID using tools like ``ps``,
+   ``pgrep``, or ``top``.
 
 ``-o, --output PATH``
    Specifies the directory for writing the output of the profiling results. If not specified, the
@@ -187,6 +191,36 @@ Here is a complete workflow for attaching to a running GPU application:
    # View the trace in Perfetto UI
    $ firefox https://ui.perfetto.dev
    # Drag and drop the .pftrace file to visualize
+
+Attaching to multiple processes
+========================================
+
+A single ``rocprof-sys-attach`` invocation can attach to several independent
+processes on the same machine. Each successfully attached process becomes a
+session with its own id:
+
+.. code-block:: shell-session
+
+   $ rocprof-sys-attach -p 101,102,103 -o ./results -F perfetto,rocpd
+
+   Active sessions:
+     [1] pid 101
+     [2] pid 102
+     [3] pid 103
+   Enter a session id to detach, or 'a' to detach all:
+
+At the prompt:
+
+* Enter a session id (for example, ``2``) to detach from that process only. The
+  other processes stay attached and keep being profiled.
+* Enter ``a`` to detach from all remaining processes.
+* Press ENTER to detach when only one session is left. With more than one session
+  left, ENTER only redisplays the list.
+* End of input (for example, ``Ctrl+D``) detaches from all remaining processes.
+
+Each process writes its own output, named after its PID. ``rocprof-sys-attach``
+exits once the last session is detached, with a non-zero exit status if attaching
+to or detaching from any of the processes failed.
 
 Re-attaching to a process
 ========================================
