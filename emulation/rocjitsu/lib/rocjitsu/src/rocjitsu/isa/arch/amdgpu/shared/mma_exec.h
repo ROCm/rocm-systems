@@ -2654,19 +2654,6 @@ RJ_NOINLINE inline float swmmac_replay_nan_buffers(const float *a, const float *
   return util::f32_to_bf16_rne_mode(val, fp16_ovfl);
 }
 
-[[gnu::always_inline]] inline util::native<float>
-swmmac_k64_native_fma(util::native<float> a, util::native<float> b, util::native<float> c) {
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
-  static_assert(util::native<float>::size() == 16);
-  return std::bit_cast<util::native<float>>(_mm512_fmadd_ps(
-      std::bit_cast<__m512>(a), std::bit_cast<__m512>(b), std::bit_cast<__m512>(c)));
-#elif __has_include(<experimental/simd>)
-  return util::stdx::fma(a, b, c);
-#else
-  return {};
-#endif
-}
-
 /// AVX-512 fast path shared by the five gfx1250 16x16x64 16-bit SWMMAC forms.
 ///
 /// The generic SWMMAC helpers repeatedly gather A, B, and sparse metadata via
@@ -2768,9 +2755,7 @@ RJ_NOINLINE inline void exec_swmmac_16x16x64_16bit_fast_body(
       util::native<float> b_row;
       b_row.copy_from(&b_matrix[dense_k[row * COMPRESSED_K + ck] * SPEC_N],
                       util::stdx::vector_aligned);
-      // GCC's experimental::simd fma customization point does not inline on
-      // AVX-512 and otherwise emits one call plus a ZMM spill/reload here.
-      c_row = swmmac_k64_native_fma(a_broadcast, b_row, c_row);
+      c_row = util::native_fma(a_broadcast, b_row, c_row);
     }
     const uint64_t nan_lanes = util::simd_mask_to_bits(util::stdx::isnan(c_row));
     c_row.copy_to(&c_matrix[row * SPEC_N], util::stdx::vector_aligned);
@@ -3280,7 +3265,7 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
       for (uint32_t k = 0; k < K; ++k) {
         util::native<float> b_row;
         b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
-        c_row = util::stdx::fma(util::native<float>(A_buf[row * K + k]), b_row, c_row);
+        c_row = util::native_fma(util::native<float>(A_buf[row * K + k]), b_row, c_row);
       }
       const uint64_t nan_lanes = util::simd_mask_to_bits(util::stdx::isnan(c_row));
       c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);

@@ -34,6 +34,7 @@ constexpr uint32_t INPUT_A_REGS = 8;
 constexpr uint32_t INPUT_B_REGS = 16;
 constexpr uint32_t F32_ACC_REGS = 8;
 constexpr uint32_t PACKED_ACC_REGS = 4;
+constexpr bool kHasK64NativeSimd = util::has_stdx_simd && util::native_width_v<float> == 16;
 
 // Each nibble stores the ordered selector pair for one 2:4 group. These are
 // the six and only six legal index0 < index1 combinations.
@@ -378,10 +379,6 @@ TEST(SwmmacK64SimdExact, PackedF16SnapshotsAliasedInputsAndSupportsReuseHints) {
 }
 
 TEST(SwmmacK64SimdExact, Bf16f32ReadsEightF32CAndWritesFourPackedBf16D) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
-
   SwmmacFixture fx;
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
@@ -392,25 +389,10 @@ TEST(SwmmacK64SimdExact, Bf16f32ReadsEightF32CAndWritesFourPackedBf16D) {
 
   const auto initial = fx.snapshot(0, STATE_REGS);
   const auto &test = SWMMAC_CASES[4];
-  ForceScalarGuard force_scalar_guard;
-  const auto scalar = execute_from_state(fx, *instruction, initial, test, true);
-  const auto simd = execute_from_state(fx, *instruction, initial, test, false);
-
-  ASSERT_TRUE(scalar.succeeded);
-  ASSERT_TRUE(simd.succeeded);
-  EXPECT_EQ(scalar.output, expected);
-  EXPECT_EQ(simd.output, expected);
-  expect_unchanged_tail(test, scalar, initial);
-  expect_unchanged_tail(test, simd, initial);
-  expect_unchanged_canaries(test, scalar, initial);
-  expect_unchanged_canaries(test, simd, initial);
+  expect_scalar_and_default(fx, *instruction, test, initial, expected, false, kHasK64NativeSimd);
 }
 
 TEST(SwmmacK64SimdExact, Bf16ResultRoundsHalfwayToEven) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
-
   SwmmacFixture fx;
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
@@ -438,16 +420,8 @@ TEST(SwmmacK64SimdExact, Bf16ResultRoundsHalfwayToEven) {
   ASSERT_NE(instruction, nullptr);
 
   const auto initial = fx.snapshot(0, STATE_REGS);
-  ForceScalarGuard force_scalar_guard;
-  const auto scalar = execute_from_state(fx, *instruction, initial, test, true);
-  const auto simd = execute_from_state(fx, *instruction, initial, test, false);
-  ASSERT_TRUE(scalar.succeeded);
-  ASSERT_TRUE(simd.succeeded);
   const std::vector<uint32_t> expected(static_cast<size_t>(PACKED_ACC_REGS) * WF_SIZE, 0x3EC23EC2u);
-  EXPECT_EQ(scalar.output, expected);
-  EXPECT_EQ(simd.output, expected);
-  expect_unchanged_tail(test, scalar, initial);
-  expect_unchanged_tail(test, simd, initial);
+  expect_scalar_and_default(fx, *instruction, test, initial, expected, false, kHasK64NativeSimd);
 }
 
 TEST(SwmmacK64SimdExact, Bf16InputsUseFusedAccumulation) {
