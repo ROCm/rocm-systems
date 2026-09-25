@@ -344,7 +344,28 @@ AccessLoweringClassification classify_access_lowering(const ProgramSite &access,
   Reason replay = Reason::UnsupportedMnemonic;
   Reason compare = Reason::UnsupportedMnemonic;
 
-  if (access.origin == AccessOrigin::DirectToLds) {
+  if (access.origin == AccessOrigin::TensorLds) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+      return reject(Reason::TargetUnavailable);
+    if (access.size() != 3u * sizeof(uint32_t) ||
+        (access.kind != LdsAccessKind::Read && access.kind != LdsAccessKind::Write) ||
+        access.ranges.size() != 1u ||
+        access.ranges.front().geometry != AccessRangeGeometry::TensorDescriptor ||
+        access.ranges.front().byte_width != 0u || access.ranges.front().static_byte_offset)
+      return reject(Reason::UnsupportedEncoding);
+    if (!access.operands.tensor_descriptor_sgprs)
+      return reject(Reason::MissingAddressOperand);
+    const auto &groups = *access.operands.tensor_descriptor_sgprs;
+    if (groups[0] > 102u || groups[1] > 98u || (groups[2] > 102u && groups[2] != 124u) ||
+        (groups[3] > 102u && groups[3] != 124u))
+      return reject(Reason::OperandRegisterRange);
+    form.kind = AccessLoweringFormKind::TensorDescriptor;
+    form.element_width_bits = 0u;
+    form.address_vgpr.reset();
+    // Geometry normalization does not yet admit either observation mechanism.
+    // Admission requires wave-wide state preservation and completion handling.
+    replay = compare = Reason::TargetUnavailable;
+  } else if (access.origin == AccessOrigin::DirectToLds) {
     form.kind = access.operands.address_vgpr ? AccessLoweringFormKind::DirectToLdsExplicitAddress
                                              : AccessLoweringFormKind::DirectToLdsLaneAddressed;
     form.address_vgpr_count = access.operands.address_vgpr ? 1u : 0u;

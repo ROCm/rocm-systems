@@ -1610,3 +1610,22 @@ partial and empty EXEC and verify every restored register lane.
 Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,030 passed,
 two existing live-inventory tests skipped (`tensor-full-wave-tests.log`). These
 primitives are not yet enabled in detector admission; tensor rows remain orange.
+
+### Runtime tensor geometry in access inventory
+
+Tensor loads and stores now normalize to a distinct descriptor-defined range:
+its static byte offset is absent and its width remains runtime-defined. This
+keeps tile geometry separate from fixed-width per-lane DS accesses. Invalid
+scalar tuples and accidental fixed-width tensor ranges are rejected. Tests also
+check that generated tensor operands expose complete scalar tuple dependencies
+and no fictitious VGPR addresses to register allocation. Both detector admission
+paths remain unavailable until the probe and synchronization integration passes.
+
+A follow-up synchronization test is required before activation: barrier metadata
+and epoch updates in `consan_sync.inc` currently operate under incoming EXEC.
+The tensor probe's full-wave scratch preservation alone does not establish that
+an empty-EXEC barrier advances a tensor producer's epoch correctly. This is a
+source-review concern to test and fix, not a newly qualified validation result.
+
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,031 passed,
+two existing live-inventory tests skipped (`tensor-geometry-tests.log`).

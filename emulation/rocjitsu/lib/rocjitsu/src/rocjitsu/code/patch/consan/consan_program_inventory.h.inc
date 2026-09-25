@@ -69,19 +69,29 @@ struct InventoryExclusion {
   bool operator==(const InventoryExclusion &) const = default;
 };
 
+/// Geometry of an access range. Tensor tiles retain runtime descriptor geometry
+/// instead of pretending to have an ordinary per-lane address and fixed width.
+enum class AccessRangeGeometry : uint8_t {
+  FixedWidth,
+  TensorDescriptor,
+};
+
 /// One normalized byte range accessed by an original instruction.
 ///
 /// The offset is relative to the instruction's dynamic base address when the
-/// encoding makes that relationship available. Its absence means “not decoded
-/// into this legacy inventory,” not an offset of zero. Width is expressed in
-/// bytes so subword and wide accesses share one unit.
+/// encoding makes that relationship available. Its absence never means an
+/// offset of zero: FixedWidth ranges may lack a decoded offset, while tensor
+/// ranges derive their complete geometry from runtime scalar descriptors.
+/// Fixed widths use bytes so subword and wide accesses share one unit.
 struct AccessRange {
   /// Stable semantic identity of this exact logical range.
   SemanticSiteId id;
   /// Static byte displacement from the dynamic base address, when known.
   std::optional<int64_t> static_byte_offset;
-  /// Nonzero logical width of this range in bytes.
+  /// Nonzero logical width in bytes for FixedWidth; zero for TensorDescriptor.
+  /// Tensor element width and the set of touched bytes come from the descriptor.
   uint32_t byte_width = 0;
+  AccessRangeGeometry geometry = AccessRangeGeometry::FixedWidth;
 
   bool operator==(const AccessRange &) const = default;
 };
@@ -1271,9 +1281,12 @@ private:
     result.provenance = AccessProvenance::NativeLdsOpcode;
     result.confidence = SemanticConfidence::Exact;
     if (site.origin == AccessOrigin::TensorLds) {
-      // Tensor descriptors define runtime tile shapes and swizzled LDS ranges.
-      // Preserve the access without inventing a per-lane address or byte width.
-      result.exclusions.push_back({.reason = InventoryExclusionReason::RangeEncodingUnavailable});
+      // One symbolic tile range: its element width, dimensions and padding are
+      // runtime scalar descriptor fields, not a fixed per-lane DS range.
+      result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 0),
+                               .static_byte_offset = std::nullopt,
+                               .byte_width = 0,
+                               .geometry = AccessRangeGeometry::TensorDescriptor});
       result.lowering = classify_access_lowering(result, storage_->arch);
       return result;
     }

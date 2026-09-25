@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/patch/consan/consan_access_classifier.h"
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_packed_fields.h"
@@ -268,7 +269,7 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   }
 }
 
-TEST(ConSan, InventoriesGfx1250TensorDmaAsUnmodeledLdsRanges) {
+TEST(ConSan, InventoriesGfx1250TensorDmaAsRuntimeDescriptorRanges) {
   const auto load = cdna5::build_vimage(
       cdna5::kTensorLoadToLdsVimage,
       {.vaddr4 = 124, .vaddr0 = 16, .vaddr1 = 20, .vaddr2 = 124, .vaddr3 = 124});
@@ -293,19 +294,73 @@ TEST(ConSan, InventoriesGfx1250TensorDmaAsUnmodeledLdsRanges) {
     for (const auto &site : result.program_inventory.access_sites()) {
       EXPECT_EQ(site.origin, AccessOrigin::TensorLds);
       EXPECT_EQ(site.address_space, AccessAddressSpace::Group);
-      EXPECT_TRUE(site.ranges.empty());
+      ASSERT_EQ(site.ranges.size(), 1u);
+      EXPECT_EQ(site.ranges.front().geometry, AccessRangeGeometry::TensorDescriptor);
+      EXPECT_EQ(site.ranges.front().byte_width, 0u);
+      EXPECT_FALSE(site.ranges.front().static_byte_offset);
       EXPECT_FALSE(site.operands.address_vgpr.has_value());
       ASSERT_TRUE(site.operands.tensor_descriptor_sgprs.has_value());
       EXPECT_EQ(*site.operands.tensor_descriptor_sgprs,
                 (std::array<uint16_t, 4>{16, 20, 124, 124}));
-      EXPECT_EQ(site.lowering.normalization_reason,
-                AccessClassifierReason::RangeEncodingUnavailable);
+      EXPECT_TRUE(site.lowering.normalized());
+      ASSERT_TRUE(site.lowering.form);
+      EXPECT_EQ(site.lowering.form->kind, AccessLoweringFormKind::TensorDescriptor);
+      EXPECT_EQ(site.lowering.form->element_width_bits, 0u);
+      EXPECT_EQ(site.lowering.form->range_count, 1u);
+      EXPECT_EQ(site.lowering.form->address_vgpr_count, 0u);
       EXPECT_FALSE(site.lowering.replay_guest_access.available());
       EXPECT_FALSE(site.lowering.compare_observed_value.available());
     }
     EXPECT_TRUE(test_admitted_accesses(result).empty());
     EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported), 2u);
     EXPECT_EQ(applicable_access_decision_count(result), 2u);
+  }
+}
+
+TEST(ConSan, TensorDescriptorNormalizationRejectsInvalidGeometryAndOperands) {
+  const auto load = cdna5::build_vimage(
+      cdna5::kTensorLoadToLdsVimage,
+      {.vaddr4 = 124, .vaddr0 = 16, .vaddr1 = 20, .vaddr2 = 124, .vaddr3 = 124});
+  std::vector<uint32_t> words(load.begin(), load.end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+  const auto result =
+      test_lower_consan(make_gfx1250_code_object(words, "tensor_geometry"), test_options());
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  const auto valid = result.program_inventory.access_sites().front();
+  ASSERT_TRUE(valid.lowering.normalized());
+  const auto reject = [](const ProgramSite &site, AccessClassifierReason reason) {
+    const auto classified = classify_access_lowering(site, ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_FALSE(classified.normalized());
+    EXPECT_EQ(classified.normalization_reason, reason);
+    EXPECT_FALSE(classified.replay_guest_access.available());
+    EXPECT_FALSE(classified.compare_observed_value.available());
+  };
+  auto invalid = valid;
+  invalid.operands.tensor_descriptor_sgprs.reset();
+  reject(invalid, AccessClassifierReason::MissingAddressOperand);
+  for (const auto groups :
+       {std::array<uint16_t, 4>{103, 20, 124, 124}, std::array<uint16_t, 4>{16, 99, 124, 124},
+        std::array<uint16_t, 4>{16, 20, 103, 124}, std::array<uint16_t, 4>{16, 20, 124, 125}}) {
+    invalid = valid;
+    invalid.operands.tensor_descriptor_sgprs = groups;
+    reject(invalid, AccessClassifierReason::OperandRegisterRange);
+  }
+  invalid = valid;
+  invalid.ranges.front().geometry = AccessRangeGeometry::FixedWidth;
+  reject(invalid, AccessClassifierReason::UnsupportedEncoding);
+  invalid = valid;
+  invalid.ranges.front().byte_width = 4u;
+  reject(invalid, AccessClassifierReason::UnsupportedEncoding);
+  invalid = valid;
+  invalid.ranges.front().static_byte_offset = 0;
+  reject(invalid, AccessClassifierReason::UnsupportedEncoding);
+  invalid = valid;
+  invalid.ranges.push_back(invalid.ranges.front());
+  reject(invalid, AccessClassifierReason::UnsupportedEncoding);
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const auto classified = classify_access_lowering(valid, arch);
+    EXPECT_FALSE(classified.normalized());
+    EXPECT_EQ(classified.normalization_reason, AccessClassifierReason::TargetUnavailable);
   }
 }
 
@@ -316,6 +371,21 @@ TEST(ConSan, RetainsAllTensorDmaScalarDescriptorGroups) {
       for (const auto opcode : {cdna5::kTensorLoadToLdsVimage, cdna5::kTensorStoreFromLdsVimage}) {
         const auto tensor = cdna5::build_vimage(
             opcode, {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 98, .vaddr2 = group2, .vaddr3 = group3});
+        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        ASSERT_NE(decoder, nullptr);
+        const auto decoded = decoder->decode(tensor.data());
+        ASSERT_FALSE(decoded.failed());
+        const InstDefUse def_use(*decoded.value());
+        EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 4}));
+        EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 98, 8}));
+        if (group2 != 124u) {
+          EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, group2, 4}));
+        }
+        if (group3 != 124u) {
+          EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, group3, 4}));
+        }
+        for (uint16_t reg = 0; reg < 256; ++reg)
+          EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, reg, 1}));
         std::vector<uint32_t> words(tensor.begin(), tensor.end());
         words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
         const auto result = test_lower_consan(

@@ -50,6 +50,7 @@ enum class AccessLoweringFormKind : uint8_t {
   FlatScalarVectorAddress,
   DirectToLdsExplicitAddress,
   DirectToLdsLaneAddressed,
+  TensorDescriptor,
   Count,
 };
 
