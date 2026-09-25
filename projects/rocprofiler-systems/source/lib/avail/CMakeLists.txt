@@ -12,6 +12,10 @@ target_sources(
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/catalog.cpp
         ${CMAKE_CURRENT_LIST_DIR}/catalog.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/devices.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/devices.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/gpu_counters.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/gpu_counters.hpp
         ${CMAKE_CURRENT_LIST_DIR}/listing_externals.hpp
         ${CMAKE_CURRENT_LIST_DIR}/records.cpp
         ${CMAKE_CURRENT_LIST_DIR}/records.hpp
@@ -40,6 +44,7 @@ if(TARGET rocprofiler-systems-rocprofiler-sdk-backend)
         rocprofiler-systems-avail-library
         PRIVATE
             rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+            rocprofiler-systems::rocprofiler-systems-amd-smi-backend
             rocprofiler-systems::rocprofiler-systems-common-library
             rocprofiler-systems-logger
     )

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "avail/catalog.hpp"
+#include "avail/devices.hpp"
+#include "avail/gpu_counters.hpp"
 #include "avail/records.hpp"
 #include "avail/traces.hpp"
 
@@ -26,18 +28,12 @@ struct stub_spec
 };
 
 constexpr auto k_boolean_stubs = std::array{
-    stub_spec{ .flag       = &query_request::gpu_devices,
-               .capability = capability_kind::gpu_devices,
-               .source     = source_id::rocprofiler_sdk },
     stub_spec{ .flag       = &query_request::cpu_devices,
                .capability = capability_kind::cpu_devices,
                .source     = source_id::procfs },
     stub_spec{ .flag       = &query_request::nic_devices,
                .capability = capability_kind::nic_devices,
                .source     = source_id::amd_smi },
-    stub_spec{ .flag       = &query_request::gpu_counters,
-               .capability = capability_kind::gpu_counters,
-               .source     = source_id::rocprofiler_sdk },
     stub_spec{ .flag       = &query_request::cpu_counters,
                .capability = capability_kind::cpu_counters,
                .source     = source_id::papi },
@@ -127,6 +123,22 @@ query(const query_request& request)
         {
             append_stub(result, stub.capability, stub.source);
         }
+    }
+
+    if(request.gpu_devices)
+    {
+        result.queried.emplace_back(capability_kind::gpu_devices);
+        auto listed        = query_gpu_devices();
+        result.gpu_devices = std::move(listed.records);
+        append_listing_diagnostic(result, std::move(listed.issue));
+    }
+
+    if(request.gpu_counters)
+    {
+        result.queried.emplace_back(capability_kind::gpu_counters);
+        auto listed         = query_gpu_counters();
+        result.gpu_counters = std::move(listed.records);
+        append_listing_diagnostic(result, std::move(listed.issue));
     }
 
     if(request.traces)
