@@ -78,8 +78,8 @@ value; merely increasing a retry delay would not establish that contract.
 The fixed reviewed mutations are also being tested at `max` with 64, 128, 256, and 512
 banks, each with its own clean comparator and prospective 6/8 contract. HipKittens BF16
 has completed all four settings: clean passes, 0/8 detections at each. Tensile has
-completed 64, 128 and 256 banks with the same result; further settings, histc and
-norm/softmax are still running.
+completed all four bank counts with the same result; histc and norm/softmax
+are still running.
 
 Larger bank counts only address competition between retained wave/workgroup
 representatives. The [selection and retention

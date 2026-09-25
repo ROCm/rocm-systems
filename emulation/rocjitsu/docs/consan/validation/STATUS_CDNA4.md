@@ -42,7 +42,7 @@ installation is used.
 | Test corpus | P1 | HIP Stream-K simple (`hip-streamk-simple-m256-n256-k256`) | 🟩 high (lowest passing): clean pass; fault 7/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P1 | HIP Stream-K two-tile (`hip-streamk-two-tile-m256-n256-k256`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P2 | rocBLAS SGEMM square-64 (`rocblas-sgemm-square-64`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
-| Tensile | P0 | gfx950 LDS-positive BF16 GEMM (`tensile-gfx950-lds-positive`) | 🟨 max: clean pass; fault 0/8; fresh 64/128/256-bank trials each 0/8, larger-bank search running | 🟩 delay-zero: clean pass; fault 8/8 (bar 6/8) |
+| Tensile | P0 | gfx950 LDS-positive BF16 GEMM (`tensile-gfx950-lds-positive`) | 🟨 max: clean pass; fault 0/8; fresh 64/128/256/512-bank trials each 0/8; below bar | 🟩 delay-zero: clean pass; fault 8/8 (bar 6/8) |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 1/8 (bar 6/8); below bar |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 higher (lowest passing): clean pass; fault 7/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
@@ -82,8 +82,8 @@ allowlist. No previously green clean control has regressed
   faults preserve it. Fresh physical trials use this repaired mutation. Earlier fault misses remain recorded.
 - **Other below-bar Default cells:** prospective `max` watchpoint-bank searches
   are running for HipKittens BF16, Tensile, histc, and norm/softmax. HipKittens BF16 has passing clean controls but 0/8 detections at each of
-  64, 128, 256, and 512 banks. Tensile also has passing 64/128/256-bank clean controls and 0/8 detections;
-  its larger-bank search, histc, and norm/softmax remain running.
+  64, 128, 256, and 512 banks. Tensile also has passing clean controls and 0/8 detections at all four
+  bank counts. Only histc and norm/softmax searches remain running.
 
 Current repair logs, clean results, and prospective specifications are under
 `/home/benjacob/consan-default-repairs-20260924/`. In particular, `cpu-v4.xml`,
