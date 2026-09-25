@@ -100,57 +100,57 @@ Panel Config:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_ALL_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_ALL_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_ALL_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - IO Read:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - IO Write:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - DRAM Read:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - DRAM Write:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - GMI Read:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_GMI_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - GMI Write:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_GMI_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - HDM Read:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_HDM_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - HDM Write:
           avg: SUM(GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_SARB_OUTSTANDING_HDM_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - Probe Request:
           avg: SUM(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_PROBE_OUTSTANDING_REQ_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
         Outstanding Requests - Probe Response:
           avg: SUM(GC_EA_SE_PROBE_OUTSTANDING_RESP_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           min: MIN(GC_EA_SE_PROBE_OUTSTANDING_RESP_sum / GC_EA_SE_BUSY_CYCLE_sum)
           max: MAX(GC_EA_SE_PROBE_OUTSTANDING_RESP_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          unit: Count
+          unit: Requests
 
   - metric_table:
       id: 1404
