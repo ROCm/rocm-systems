@@ -132,7 +132,7 @@ namespace RcclUnitTesting
                         ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
     config.redOps = {ncclSum};
     config.roots = {1};
-    config.numElements = {1, 4314};
+    config.numElements = {1, 4314, 1048575, 1048576};
     config.inPlaceList = {true, false};
     config.useHipGraphList = {true, false};
     RunSingleProcMemRegTest(config);
