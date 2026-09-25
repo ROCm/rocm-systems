@@ -18,7 +18,7 @@ import pytest
 
 import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
-from roofline.roofline_hover import wrap_hover_name
+from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
 
 if TYPE_CHECKING:
@@ -181,21 +181,29 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
     return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
-    """A stacked figure caps points at the tallest compute roof drawn, so the
-    reported peak and limiter do not depend on the order datatypes were
-    stacked."""
+def test_kernel_traces_given_multiple_stacked_compute_peaks__limiter_names_the_one_that_binds() -> (
+    None
+):
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
-    matrix_traces, matrix_capped = kernel_traces(make_roofline(["FP32"]), ai_data)
-    valu_traces, valu_capped = kernel_traces(
-        make_roofline(["FP32"]), ai_data, compute_peaks=[("FP32 VALU", 9000.0)]
+    traces, _ = kernel_traces(
+        make_roofline(["FP32"]),
+        ai_data,
+        compute_peaks=[("FP32 MFMA", 90000.0), ("FP16 MFMA", 180000.0)],
     )
 
-    assert pct_roof(matrix_capped[0]) < 100.0
-    assert pct_roof(valu_capped[0]) > 100.0
-    assert "Performance limiter: FP32 MFMA" in matrix_traces[0].hovertemplate
-    assert "Performance limiter: FP32 VALU" in valu_traces[0].hovertemplate
+    assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
+
+
+def test_kernel_traces_given_memory_roof_already_exceeded__falls_back_to_compute_peak() -> (
+    None
+):
+    traces, _ = kernel_traces(
+        make_roofline(["FP32"]),
+        {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
+    )
+
+    assert "Limited by Compute: FP32 VALU" in traces[0].hovertemplate
 
 
 def test_kernel_traces_name_the_roof_that_binds() -> None:
@@ -213,7 +221,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     )
     assert [kernel["name"] for kernel in model] == ["kA"]
     assert [point["peak"] for point in model[0]["points"]] == ["HBM"]
-    assert "Performance limiter: HBM" in traces[0].hovertemplate
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
 
     unroofed_traces, unroofed = kernel_traces(
         make_roofline(["FP32"]),
@@ -221,16 +229,119 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         ceiling_data={},
         compute_peaks=[],
     )
-    assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
-    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A"]
+    assert "Limited by Unknown: Unknown" in unroofed_traces[0].hovertemplate
+    assert unroofed[0]["points"][0]["hoverCells"] == [
+        "N/A",
+        "N/A",
+        "Bandwidth:<br>\u2003HBM: N/A% (900.000 / N/A GB/s)",
+    ]
 
 
-def test_kernel_hover_carries_the_whole_name() -> None:
-    """A long demangled name reaches the tooltip whole. It is wrapped onto as
-    many lines as it takes, but nothing is dropped: two instantiations of the
-    same function are told apart by template arguments that run to the very end
-    of the name."""
-    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+def test_kernel_traces_expose_the_limiting_peak_for_a_memory_bound_kernel() -> None:
+    traces, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {"ai_hbm": [[1.0], [900.0]], "kernelNames": ["kA"]},
+        sanitized_cache_hierarchy=["HBM", "L2"],
+    )
+
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
+    assert model[0]["limitingPeak"] == "HBM"
+
+
+def test_kernel_traces_expose_the_leftmost_peak_for_a_compute_bound_kernel() -> None:
+    """A compute-bound kernel's limiter names a datatype/op-path (e.g. 'FP32
+    VALU'), not a cache level, so no point.peak matches it directly.
+    limitingPeak falls back to the peak of the kernel's own lowest-AI point
+    (L2's AI of 0.5 sits left of HBM's AI of 2.0) so the client still has a
+    single point to show without guessing which one."""
+    _, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+    )
+
+    assert model[0]["limitingPeak"] == "L2"
+
+
+def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() -> None:
+    """No ceiling data and no compute peaks leaves no candidate roof at all, so
+    the limiter falls back to Unknown -- and, same as the compute-bound case,
+    limitingPeak falls back to the kernel's own lowest-AI point (L2 at 0.5,
+    left of HBM's 2.0)."""
+    traces, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+        compute_peaks=[],
+    )
+
+    assert "Limited by Unknown: Unknown" in traces[0].hovertemplate
+    assert model[0]["limitingPeak"] == "L2"
+
+
+def test_kernel_traces_given_differing_level_bandwidths__all_points_share_the_binding_roofs_percentage() -> (
+    None
+):
+    ceiling = {
+        "hbm": [[0.01, 1.0], [1.0, 2000.0], 2000.0],
+        "l2": [[0.01, 1.0], [1.0, 3000.0], 3000.0],
+    }
+
+    _, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data=ceiling,
+        compute_peaks=[],
+    )
+
+    points = {point["peak"]: point for point in model[0]["points"]}
+    assert points["HBM"]["hoverCells"][:2] == ["1,500", "66.67"]
+    assert points["L2"]["hoverCells"][:2] == ["1,500", "66.67"]
+
+
+def test_bandwidth_hover_given_a_level_with_no_traffic__still_lists_it_at_zero() -> None:
+    ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
+    _, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[1.0], [900.0]],
+            "ai_l2": [[0.0], [0.0]],
+            "ai_lds": [[0.0], [0.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2", "LDS"],
+        ceiling_data=ceiling,
+    )
+    bandwidth_html = model[0]["points"][0]["hoverCells"][2]
+    lines = bandwidth_html.split("<br>")
+
+    lds_line = next(line for line in lines if "LDS" in line)
+    assert "0.000" in lds_line
+
+    l2_line = next(line for line in lines if "L2" in line)
+    assert "0.000" in l2_line
+
+    hbm_line = next(line for line in lines if "HBM" in line)
+    assert "900" in hbm_line
+
+
+def test_kernel_hover_given_a_name_under_the_length_cap__wraps_it_whole() -> None:
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 6
 
     traces, _ = kernel_traces(
         make_roofline(["FP32"]),
@@ -244,6 +355,37 @@ def test_kernel_hover_carries_the_whole_name() -> None:
     assert lines.endswith(suffix)
     lines = lines[: -len(suffix)]
     assert lines.replace("<br>", "") == name
+
+
+def test_truncate_kernel_name_caps_pathologically_long_names() -> None:
+    """A pathologically long demangled name is capped at 200 characters, ending
+    in an ellipsis, so it can't blow up the tooltip. Names within the cap are
+    untouched."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+
+    truncated = truncate_kernel_name(name)
+
+    assert len(truncated) == 200
+    assert truncated == name[:197] + "..."
+    assert truncate_kernel_name("short_name") == "short_name"
+
+
+def test_kernel_hover_truncates_names_beyond_two_hundred_characters() -> None:
+    """The kernel trace hover wraps the truncated name, not the raw one, so a
+    pathologically long demangled name can't blow up the tooltip."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+
+    traces, _ = kernel_traces(
+        make_roofline(["FP32"]),
+        {"ai_hbm": [[1.0], [900.0]], "kernelNames": [name]},
+    )
+
+    wrapped = wrap_hover_name(truncate_kernel_name(name))
+    assert wrapped in traces[0].hovertemplate
+    lines = wrapped.split(">", 1)[1].removesuffix("</span>")
+    flattened = lines.replace("<br>", "")
+    assert len(flattened) == 200
+    assert flattened.endswith("...")
 
 
 def test_canonical_frame_bounds_are_whole_decades() -> None:
@@ -578,6 +720,27 @@ def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
 
     assert all(flops_figure.data[index].visible is None for index in ceiling_indices)
     assert drawn_roof_knees(flops_figure) == roof_extents
+
+
+def test_default_precisions_given_fp32_fp16_fp8_present__orders_fp32_before_fp16_before_fp8() -> (
+    None
+):
+    from roofline.roofline_main import _default_precisions
+
+    assert _default_precisions(["FP16", "FP32", "FP8", "FP64"]) == [
+        "FP32",
+        "FP16",
+        "FP8",
+    ]
+    assert _default_precisions(["FP8"]) == ["FP8"]
+
+
+def test_default_precisions_given_none_preferred_present__falls_back_to_first_datatype() -> (
+    None
+):
+    from roofline.roofline_main import _default_precisions
+
+    assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
 
 
 def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(

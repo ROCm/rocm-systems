@@ -167,8 +167,9 @@ class PlotPoints:
     ai_lds: list[list[float]]
     kernelNames: list[str]
     counts: list[Optional[float]]
-    totalTime: list[Optional[float]]
-    pctRuntime: list[Optional[float]]
+    kernelTime: list[Optional[float]]
+    kernelPctRuntime: list[Optional[float]]
+    totalAppTime: Optional[float]
     timeUnit: str
 
     @classmethod
@@ -182,8 +183,9 @@ class PlotPoints:
             ai_lds=[[], []],
             kernelNames=[],
             counts=[],
-            totalTime=[],
-            pctRuntime=[],
+            kernelTime=[],
+            kernelPctRuntime=[],
+            totalAppTime=None,
             timeUnit="",
         )
 
@@ -531,8 +533,8 @@ def _append_kernel_point(
         getattr(plot_points, ai_field)[1].append(metrics["performance"])
     plot_points.kernelNames.append(kernel_name)
     plot_points.counts.append(_stat_or_none(stat_row, "Count"))
-    plot_points.totalTime.append(_stat_or_none(stat_row, sum_column))
-    plot_points.pctRuntime.append(_stat_or_none(stat_row, "Percent"))
+    plot_points.kernelTime.append(_stat_or_none(stat_row, sum_column))
+    plot_points.kernelPctRuntime.append(_stat_or_none(stat_row, "Percent"))
 
 
 def calc_ai_analyze(
@@ -565,6 +567,7 @@ def calc_ai_analyze(
         )
         if sum_column:
             plot_points.timeUnit = sum_column[len("Sum(") : -1]
+            plot_points.totalAppTime = float(top_df[sum_column].sum())
 
     kernel_ids_to_process = _resolve_kernel_ids(workload)
     console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
