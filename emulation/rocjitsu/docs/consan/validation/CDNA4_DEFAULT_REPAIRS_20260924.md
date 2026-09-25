@@ -176,8 +176,10 @@ retains `[56,72)` and `[64,80)` and reports the genuine cross-wave write/write
 conflict at the unchanged injected store `.text+0x142c`.
 
 The matching 64-bank Tensile clean control passes with complete access/barrier
-coverage. Eight-trial qualification is running with the original reviewed
-mutation and full native allowlist. Regression checks pass: 3,325 existing
+coverage. All eight admitted/reached fault trials detect the injected race,
+using the original reviewed mutation and full native allowlist. Tensile is
+qualified at `max` plus 64 banks. The completed-matrix audit reports zero errors.
+The lane-retention repair is committed locally as `a84ec42d79`. Regression checks pass: 3,325 existing
 CPU/emulator tests, the new full/sparse-EXEC lane-bank regression, 436 physical
 gfx950 tests, and 285 hook tests. Artifacts are `cpu-lanes-v1.xml`,
 `lane-retention-unit.log`, `physical-lanes-v1.xml`, `hooks-lanes-v1.xml`, and
