@@ -569,3 +569,13 @@ restoration of the original guest mode. Before repair it fails with the exact
 E2E error; afterward all 127 selected SuperCollider/check-trap host tests pass
 (`subword-bank-before.log`, `subword-bank-after.log`). The table stays red
 until the E2E clean run is verified.
+
+### Sparse ML isolated-hook execution after the bank fix
+
+Linked an isolated hook from the refreshed `rocjitsu_dbt_internal` archive;
+the shared campaign hook is unchanged. The retained 16x16x64 client now exits
+zero, its numerical rows pass, and coverage completes at 22,236/22,236 accesses.
+It also reports `marker=1 mismatch=true`, exposing a second issue beyond the
+fixed transform failure. The cell remains red with this newer diagnosis.
+Evidence: `spmm-sc-subword-client.log` and `spmm-sc-subword.log`. The maintained
+full three-shard baseline+clean rerun is running under `spmm-subword-clean/`.
