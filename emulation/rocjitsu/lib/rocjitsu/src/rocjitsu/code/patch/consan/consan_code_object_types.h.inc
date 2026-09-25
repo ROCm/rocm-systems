@@ -352,6 +352,12 @@ enum class AccessOrigin : uint8_t {
 /// mode policy and target lowering. The ConSan lowering candidate embeds this
 /// same record rather than copying selected operands into a parallel schema.
 struct AccessOperandFacts : DecodedMemoryOperands {
+  /// CDNA5 tensor-DMA descriptor tuple bases, in VADDR0..3 order.
+  /// Despite the encoding names these are scalar operands, with tuple widths
+  /// 4, 8, 4, 4. Preserve the null encoding (124) for optional groups 2/3:
+  /// it denotes zero descriptor words, not an absent decoded operand. The
+  /// descriptor contents and therefore the LDS ranges remain runtime values.
+  std::optional<std::array<uint16_t, 4>> tensor_descriptor_sgprs;
   std::optional<uint16_t> destination_accvgpr;
   /// Memory-side vector address of a direct LDS transfer. Direct transfers
   /// can also have an explicit LDS address, so this cannot share

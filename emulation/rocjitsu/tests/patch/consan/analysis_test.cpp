@@ -294,6 +294,9 @@ TEST(ConSan, InventoriesGfx1250TensorDmaAsUnmodeledLdsRanges) {
       EXPECT_EQ(site.address_space, AccessAddressSpace::Group);
       EXPECT_TRUE(site.ranges.empty());
       EXPECT_FALSE(site.operands.address_vgpr.has_value());
+      ASSERT_TRUE(site.operands.tensor_descriptor_sgprs.has_value());
+      EXPECT_EQ(*site.operands.tensor_descriptor_sgprs,
+                (std::array<uint16_t, 4>{16, 20, 124, 124}));
       EXPECT_EQ(site.lowering.normalization_reason,
                 AccessClassifierReason::RangeEncodingUnavailable);
       EXPECT_FALSE(site.lowering.replay_guest_access.available());
@@ -302,6 +305,30 @@ TEST(ConSan, InventoriesGfx1250TensorDmaAsUnmodeledLdsRanges) {
     EXPECT_TRUE(test_admitted_accesses(result).empty());
     EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported), 2u);
     EXPECT_EQ(applicable_access_decision_count(result), 2u);
+  }
+}
+
+TEST(ConSan, RetainsAllTensorDmaScalarDescriptorGroups) {
+  // Exercise independent optional groups and the last legal tuple bases.
+  for (const uint8_t group2 : {uint8_t{100}, uint8_t{124}}) {
+    for (const uint8_t group3 : {uint8_t{102}, uint8_t{124}}) {
+      for (const auto opcode : {cdna5::kTensorLoadToLdsVimage, cdna5::kTensorStoreFromLdsVimage}) {
+        const auto tensor = cdna5::build_vimage(
+            opcode, {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 98, .vaddr2 = group2, .vaddr3 = group3});
+        std::vector<uint32_t> words(tensor.begin(), tensor.end());
+        words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+        const auto result = test_lower_consan(
+            make_gfx1250_code_object(words, "tensor_descriptor_groups"), test_options());
+        ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+        const auto &operands = result.program_inventory.access_sites().front().operands;
+        ASSERT_TRUE(operands.tensor_descriptor_sgprs.has_value());
+        EXPECT_EQ(*operands.tensor_descriptor_sgprs,
+                  (std::array<uint16_t, 4>{0, 98, group2, group3}));
+        EXPECT_FALSE(operands.address_vgpr.has_value());
+        EXPECT_FALSE(operands.data_vgpr.has_value());
+        EXPECT_FALSE(operands.destination_vgpr.has_value());
+      }
+    }
   }
 }
 

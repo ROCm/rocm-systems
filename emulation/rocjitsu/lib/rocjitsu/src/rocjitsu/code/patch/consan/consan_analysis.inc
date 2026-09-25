@@ -1074,6 +1074,18 @@ void record_lds_site(const Instruction &inst, ProgramContainer &kernel, ProgramS
   site.decoded_site().size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
   if (tensor) {
+    std::array<uint16_t, 4> descriptor_sgprs{};
+    bool complete = true;
+    for (size_t group = 0; group < descriptor_sgprs.size(); ++group) {
+      const Operand *operand = inst.src_operand(group);
+      if (operand == nullptr || operand->encoding_value() < 0 || operand->encoding_value() > 255) {
+        complete = false;
+        break;
+      }
+      descriptor_sgprs[group] = static_cast<uint16_t>(operand->encoding_value());
+    }
+    if (complete)
+      site.operands.tensor_descriptor_sgprs = descriptor_sgprs;
     site.decoded_site().mnemonic = std::string(mnemonic);
     site.container = kernel.id;
     sites.add_access(std::move(site));

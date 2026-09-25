@@ -1475,3 +1475,33 @@ completed trials remain separately retained evidence. TP2 reruns its unfinished
 combined clean run in `tp2-lanes-higher-recovery-clean` before starting a fresh
 fault campaign. Its already completed prefill/decode clean results and combined
 baseline remain retained at the original root.
+
+### Tensor-DMA descriptor operands retained for lowering
+
+ConSan now retains the four scalar descriptor tuple bases for both tensor load
+and store instructions in `AccessOperandFacts`. The optional tuple null encoding
+is preserved explicitly; it denotes zero descriptor words. These operands do
+not populate ordinary per-lane address or data VGPR fields. Regression coverage
+checks both directions, independently null optional groups, SGPR zero, and the
+highest legal tuple bases.
+
+This is the input to the upcoming runtime range emitter, not completed access
+support. Both modes still report tensor ranges as unsupported, and the affected
+Default cells remain orange. Runtime emission must cover zero-filled load
+locations, omit padding gaps, handle repeated tiles, and distinguish masked
+store reads from load writes.
+
+The interrupted F8 full-high controller left six passing shard oracles without
+a complete aggregate result. After its remaining children stopped, the full
+clean gate was restarted in `f8gemm-full-high-recovery-clean`; HGEMM's full-high
+clean gate waits for that run to finish. No incomplete aggregate is promoted
+to green.
+
+TP2's recovered higher combined clean run passed, completing the three clean
+workloads at that preset. Its first two fresh prefill fault trials both detect
+the race; the table remains yellow until the complete eight-trial campaign.
+
+The descriptor-retention change passes a normal GCC build and the full host
+`ConSan*` suite: 984 passed, two existing live-inventory tests skipped
+(`tensor-descriptor-host-tests.log`). The shared workload hook was not relinked;
+ongoing campaigns keep their recorded hook binaries.
