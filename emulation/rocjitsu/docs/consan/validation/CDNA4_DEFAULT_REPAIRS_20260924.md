@@ -200,3 +200,11 @@ Fresh external clean rechecks and prospective fault matrices are running. The
 superseded comparison controllers stop after their current eight-trial batches;
 all completed evidence remains retained, including the rejected intermediate
 candidate's two emulator failures.
+
+The corrected adaptive mapping is committed as `8e2a6ae47e`; all 285 rebuilt
+hook unit tests also pass (`hooks-lanes-v3.xml`). Softmax's first corrected-build
+matrix at `max` plus 128 banks passes its clean control and detects 5/8 injected
+faults, so it remains below the 6/8 bar and the precommitted 256-bank batch is
+running. An earlier intermediate build recorded 6/8 at 128 banks, but its two
+emulator regressions disqualify it from promotion; that result remains evidence,
+not a replacement for the corrected-build qualification.
