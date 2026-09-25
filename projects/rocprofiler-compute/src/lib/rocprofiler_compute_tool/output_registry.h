@@ -32,6 +32,10 @@ class OutputRegistry
 public:
     void register_writer(std::shared_ptr<OutputWriter> writer);
 
+    /// Swaps the registered writer of that name for another. For tests, which
+    /// put a mock in the place the real writer holds.
+    bool replace_writer(std::string_view name, std::shared_ptr<OutputWriter> writer);
+
     /// A writer that throws is logged and skipped so one failure cannot lose
     /// the other writers' data.
     void generate_all(tool_data_t& tool_data);

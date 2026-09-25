@@ -17,6 +17,22 @@ void OutputRegistry::register_writer(std::shared_ptr<OutputWriter> writer)
         m_writers.push_back(std::move(writer));
 }
 
+bool OutputRegistry::replace_writer(std::string_view name, std::shared_ptr<OutputWriter> writer)
+{
+    if (!writer)
+        return false;
+
+    for (auto& registered : m_writers)
+    {
+        if (registered->name() == name)
+        {
+            registered = std::move(writer);
+            return true;
+        }
+    }
+    return false;
+}
+
 void OutputRegistry::generate_all(tool_data_t& tool_data)
 {
     for (const auto& writer : m_writers)

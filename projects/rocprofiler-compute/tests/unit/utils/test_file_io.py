@@ -283,6 +283,29 @@ def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):
     }
 
 
+def test_load_kernel_short_names_prefers_the_native_symbols(tmp_path):
+    """A native run writes both shapes; the rocpd one is not read."""
+    pd.DataFrame(
+        [("vecCopy(double*)", "stale")],
+        columns=KERNEL_SYMBOLS_COLUMNS,
+    ).to_csv(tmp_path / "kernel_symbols_run0.csv.gz", index=False)
+    for prefix, columns in (
+        ("counters", ["dispatch_id"]),
+        ("dispatch", ["dispatch_id"]),
+    ):
+        pd.DataFrame([(1,)], columns=columns).to_csv(
+            tmp_path / f"{prefix}_run0_100.csv.gz", index=False
+        )
+    pd.DataFrame(
+        [(7, "vecCopy(double*)", "vecCopy")],
+        columns=["kernel_id", "kernel_name", "kernel_short_name"],
+    ).to_csv(tmp_path / "kernel_symbols_run0_100.csv.gz", index=False)
+
+    assert load_kernel_short_names(str(tmp_path), []) == {
+        "vecCopy(double*)": "vecCopy",
+    }
+
+
 def test_load_kernel_short_names_falls_back_to_the_sampling_results(tmp_path):
     """A PC-sampling-only workload has no rocpd db, so its JSON carries them."""
     tool_data_records = [
