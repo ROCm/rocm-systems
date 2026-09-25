@@ -81,6 +81,11 @@ __global__ void PutmemSignalTest(int loop, int skip, long long int *start_time,
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 template <TestType Type>
 __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
                                 long long int *end_time, uint64_t *sig_addr,
@@ -110,6 +115,10 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
   }
 
 }
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 template <TestType Type>
 __global__ void SignalUpdateTest(int loop, int skip, long long int *start_time,
