@@ -142,6 +142,8 @@ subtrees:
           title: Soundness and declining
         - file: conceptual/range_replay/range_replay_performance
           title: Performance
+        - file: conceptual/range_replay/range_replay_test_plan
+          title: Test roadmap
   - caption: License
     entries:
     - file: license

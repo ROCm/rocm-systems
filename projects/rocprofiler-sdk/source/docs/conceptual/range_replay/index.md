@@ -160,3 +160,5 @@ interesting counters are.
 - **[Performance](range_replay_performance.md)** — the two-term cost model, why the fixed window
   cost is paid once per range rather than once per dispatch, what the two nightly perf tests
   measure, and why a declined range must never be timed.
+- **[Test roadmap](range_replay_test_plan.md)** — what is tested today, what is missing, and the
+  correctness and performance tests planned week by week through September 2027.
