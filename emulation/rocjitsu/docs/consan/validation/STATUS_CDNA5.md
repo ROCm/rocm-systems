@@ -38,10 +38,10 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) |  |  |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) |  |  |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) |  |  |
-| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) |  |  |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) |  |  |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) |  |  |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) |  |  |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) |  |  |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) |  |  |
