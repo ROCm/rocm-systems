@@ -53,6 +53,7 @@ test_categories:
       - "GroupEndInternalTest.*"
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
+      - "GdrProbeTest.*"
       - "Alloc*"
       - "Comm*"
       - "Compute*"
