@@ -1234,6 +1234,11 @@ def _workload_command(
             # Each leaf proves a positive timing canary. The parent result
             # aggregates all shards and enforces the workload-level minimum.
             minimum_timed_ms = min(minimum_timed_ms, TENSILE_SHARD_TIMING_CANARY_MS)
+        if target == "gfx1250" and not overhead:
+            # Emulator correctness runs have no performance-duration contract.
+            # Keep positive timing and numeric validation, but do not reject a
+            # correct workload merely because the emulator completes it faster.
+            minimum_timed_ms = 0.0
         command = [
             str(_tensile_python()),
             str(Path(__file__).with_name("consan_tensile_validation.py")),

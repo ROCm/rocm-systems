@@ -3411,7 +3411,7 @@ class ConSanValidationTest(unittest.TestCase):
             str(workload.tensile_inner_timeout_seconds),
         )
         self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "1")
-        self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "5.0")
+        self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "0.0")
         self.assertEqual(command[command.index("--streamk-fixed-grid") + 1], "4")
         self.assertEqual(command[command.index("--require-streamk-mode") + 1], "3")
 
@@ -3442,7 +3442,7 @@ class ConSanValidationTest(unittest.TestCase):
         for index, command in enumerate(commands):
             self.assertEqual(command[command.index("--timeout-seconds") + 1], "1200")
             self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "16")
-            self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "1.0")
+            self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "0.0")
             self.assertEqual(
                 json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
@@ -6535,6 +6535,15 @@ class ConSanValidationTest(unittest.TestCase):
                 "SN_1LDSB1_APM1_AF0EM2_AF1EM2_AMAS3",
                 environment["RJ_CONSAN_TEST_KERNEL_FILTER"],
             )
+
+    def test_gfx1250_tensile_correctness_has_no_benchmark_duration_floor(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8gemm-explicit"]
+        for phase, minimum in (("clean", "0.0"), ("fault", "0.0"), ("overhead", "250.0")):
+            with self.subTest(phase=phase):
+                command = validation._workload_command(
+                    Path("/workspace"), "gfx1250", workload, phase, Path("/out/result.json")
+                )
+                self.assertEqual(command[command.index("--minimum-timed-ms") + 1], minimum)
 
     def test_checked_in_gfx950_tensile_lds_control_policy_and_provenance(self) -> None:
         path = Path(__file__).with_name(
