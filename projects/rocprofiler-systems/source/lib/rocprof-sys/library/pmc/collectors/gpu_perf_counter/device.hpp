@@ -79,8 +79,14 @@ public:
         // tool_init runs before the application's hsa_init, so the first call may fail.
         // Retry here until it succeeds; once m_context_started is true this is a single
         // branch-predicted branch with no further work.
-        if(!m_context_started) start();
-        if(!m_context_started) return m_result_cache;
+        if(!m_context_started)
+        {
+            start();
+        }
+        if(!m_context_started)
+        {
+            return m_result_cache;
+        }
 
         auto rec_count = m_record_buffer.size();
 
@@ -116,7 +122,10 @@ public:
             const double raw    = record.counter_value;
             auto [it, inserted] = m_prev_values.try_emplace(id, raw);
             const double delta  = inserted ? raw : raw - it->second;
-            if(!inserted) it->second = raw;
+            if(!inserted)
+            {
+                it->second = raw;
+            }
             m_result_cache.push_back({ id, delta });
         }
 
@@ -125,7 +134,10 @@ public:
 
     void start()
     {
-        if(m_context_started) return;
+        if(m_context_started)
+        {
+            return;
+        }
 
         try
         {
