@@ -1807,3 +1807,27 @@ checked in `tensor-fallback-mxf4-192m-clean`, under the same aggregate cgroup ca
 The sparse TDM-all table entry counts four scheduled clean process shards;
 those runs contain multiple generated objects per shard. Coverage summary
 counts are not presented as a total over every client.
+
+### Full-wave memory-backed scalar preservation
+
+Tensor probes and tensor-owner barriers now support fixed private scalar spills
+as well as lane-backed spills. The allocator's separate dead frame-base SGPR
+pair temporarily saves EXEC while vector and scalar spill/fill sequences run
+with all lanes active. It is distinct from the borrowed scalar window, so the
+bootstrap itself cannot destroy guest scalar values. Scalar loads are drained
+before borrowing the auxiliary pair. Descriptor-source exclusion remains
+required, and dynamic-stack frames remain unsupported on this path.
+
+The emitted-barrier regression now checks simultaneous vector and memory-backed
+scalar spills under full, sparse and empty EXEC, including all 11 allocated
+vector registers, the complete borrowed scalar window, private epoch advancement
+in every lane, and EXEC/VCC/SCC restoration. Normal GCC build and
+`ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,035 passed, two existing skips
+(`tensor-memory-spill-tests.log`).
+
+`tensor-fallback-mixed-tdm-clean` finished three numeric passes with incomplete
+spill coverage. The 192 MiB MXF4 retry finished six numeric passes with the same
+coverage gap. New full-shard runs using the memory-spill fix are in
+`tensor-memory-{mxf8,mxf4,mixed}-clean`. Completed clients already report full
+coverage (MXF8: 1046/1046 accesses and 204/204 barriers; mixed: 822/822 and
+204/204). Table promotions wait for each full campaign's accepted result.

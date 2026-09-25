@@ -178,8 +178,8 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
     if (access_resource_facts.wave_wide_tensor) {
       const bool safe_scalar_spill =
           !probe->scalar_spill ||
-          (probe->scalar_spill->lane_reservoir_vgpr && !spill &&
-           candidate.site().operands.tensor_descriptor_sgprs && [&] {
+          (candidate.site().operands.tensor_descriptor_sgprs &&
+           [&] {
              const auto &groups = *candidate.site().operands.tensor_descriptor_sgprs;
              for (size_t group = 0; group < groups.size(); ++group)
                if (groups[group] != 124u &&
@@ -195,13 +195,9 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
                                      "descriptor-safe scratch state");
         continue;
       }
-      if (spill) {
-        auto full_wave = tensor_full_wave_spill(*spill, *candidate_point.exec_save_sgpr, arch);
-        if (!full_wave) {
-          result.warnings.emplace_back("ConSan tensor access could not preserve full-wave scratch");
-          continue;
-        }
-        spill = std::move(full_wave);
+      if (!prepare_tensor_full_wave_resources(*probe, candidate_point, arch)) {
+        result.warnings.emplace_back("ConSan tensor access could not preserve full-wave scratch");
+        continue;
       }
     }
     bool spill_overlaps_guest_operands = false;

@@ -6,6 +6,7 @@
 #include "rocjitsu/code/patch/consan/consan_dispatch_identity_source.h"
 #include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_native_abi.h"
+#include "rocjitsu/code/patch/consan/consan_probe_planning.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -60,16 +61,69 @@ std::optional<VgprSpillSequence> tensor_full_wave_spill(const VgprSpillSequence 
   const auto full_exec =
       instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch);
   const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save_sgpr, arch);
-  if (!save_exec || !full_exec || !restore_exec)
+  const auto wait_scalar = instrumentation::build_s_wait_scalar_load0(arch);
+  if (!save_exec || !full_exec || !restore_exec || !wait_scalar)
     return std::nullopt;
   auto result = spill;
   const auto wrap = [&](std::vector<uint32_t> &words) {
-    words.insert(words.begin(), {*save_exec, *full_exec});
+    words.insert(words.begin(), {*wait_scalar, *save_exec, *full_exec});
     words.push_back(*restore_exec);
   };
   wrap(result.save_words);
   wrap(result.restore_words);
   return result;
+}
+
+std::optional<SgprSpillSequence> tensor_full_wave_scalar_spill(const SgprSpillSequence &spill,
+                                                               uint16_t auxiliary_sgpr,
+                                                               rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || auxiliary_sgpr > 104u || auxiliary_sgpr % 2u ||
+      !spill.memory_transfer_vgpr || spill.lane_reservoir_vgpr || spill.sgpr_count == 0u ||
+      spill.memory_slot_store_words.size() != spill.sgpr_count || spill.save_words.empty() ||
+      spill.restore_words.empty() ||
+      (auxiliary_sgpr < spill.sgpr_base + spill.sgpr_count &&
+       spill.sgpr_base < auxiliary_sgpr + 2u))
+    return std::nullopt;
+  const auto save = instrumentation::build_s_mov_b64(auxiliary_sgpr, kAmdGpuExecLo, arch);
+  const auto full =
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch);
+  const auto restore = instrumentation::build_s_mov_b64(kAmdGpuExecLo, auxiliary_sgpr, arch);
+  const auto wait_scalar = instrumentation::build_s_wait_scalar_load0(arch);
+  if (!save || !full || !restore || !wait_scalar)
+    return std::nullopt;
+  auto result = spill;
+  for (auto *words : {&result.save_words, &result.restore_words}) {
+    words->insert(words->begin(), {*wait_scalar, *save, *full});
+    words->push_back(*restore);
+  }
+  return result;
+}
+
+bool prepare_tensor_full_wave_resources(PlannedProbeResources &probe, const OperatingPoint &point,
+                                        rj_code_arch_t arch) {
+  if (!point.exec_save_sgpr)
+    return false;
+  uint16_t bootstrap = *point.exec_save_sgpr;
+  std::optional<SgprSpillSequence> scalar = probe.scalar_spill;
+  if (scalar) {
+    if (scalar->lane_reservoir_vgpr)
+      return !probe.spill;
+    if (!probe.spill || probe.spill->uses_dynamic_stack_frame || !point.scalar_spill_setup)
+      return false;
+    bootstrap = point.scalar_spill_setup->temporaries.frame_base_sgpr;
+    scalar = tensor_full_wave_scalar_spill(*scalar, bootstrap, arch);
+    if (!scalar)
+      return false;
+  }
+  std::optional<VgprSpillSequence> vector = probe.spill;
+  if (vector) {
+    vector = tensor_full_wave_spill(*vector, bootstrap, arch);
+    if (!vector)
+      return false;
+  }
+  probe.scalar_spill = std::move(scalar);
+  probe.spill = std::move(vector);
+  return true;
 }
 
 bool append_full_wave_private_identity(std::vector<uint32_t> &words,

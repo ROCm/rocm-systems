@@ -15,7 +15,9 @@ class ProgramInventory;
 struct DispatchIdentity;
 struct WorkgroupSources;
 struct PrivateStateLayout;
+struct OperatingPoint;
 namespace detail {
+struct PlannedProbeResources;
 
 /// Owners which may execute wave-wide tensor accesses, including shared helpers.
 [[nodiscard]] std::vector<ProgramContainerId>
@@ -34,6 +36,17 @@ tensor_identity_sources_are_wave_uniform(const DispatchIdentity &dispatch,
 [[nodiscard]] std::optional<VgprSpillSequence>
 tensor_full_wave_spill(const VgprSpillSequence &spill, uint16_t exec_save_sgpr,
                        rj_code_arch_t arch);
+
+/// Preserve a borrowed ordinary scalar window through fixed private memory,
+/// independently of guest EXEC. The auxiliary SGPR pair must be dead and
+/// disjoint from the borrowed window; the transfer VGPR is preserved by caller.
+[[nodiscard]] std::optional<SgprSpillSequence>
+tensor_full_wave_scalar_spill(const SgprSpillSequence &spill, uint16_t auxiliary_sgpr,
+                              rj_code_arch_t arch);
+/// Resolve the bootstrap pair and wrap both spill classes for full-wave use.
+[[nodiscard]] bool prepare_tensor_full_wave_resources(PlannedProbeResources &probe,
+                                                      const OperatingPoint &point,
+                                                      rj_code_arch_t arch);
 
 /// Replicate initialized lane-zero identity to every lane at kernel entry.
 /// The SGPR pair is borrowed by the entry prologue; the caller preserves any

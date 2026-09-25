@@ -91,7 +91,7 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
   const bool scalar_persistent = plan.persistent_sgprs.complete();
   if (plan.wave_exec_archive_vgpr &&
       (arch != ROCJITSU_CODE_ARCH_CDNA5 || (!scalar_persistent && !private_layout) ||
-       (scalar_spill && (!scalar_spill->lane_reservoir_vgpr || spill)) ||
+       (spill && spill->uses_dynamic_stack_frame) ||
        *plan.wave_exec_archive_vgpr != plan.scratch_vgpr + 9u ||
        *plan.wave_exec_archive_vgpr >= 256u ||
        !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources,
@@ -812,22 +812,16 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
     if (!probe)
       continue;
     if (candidate.wave_wide_tensor_owner) {
-      if ((probe->scalar_spill && (!probe->scalar_spill->lane_reservoir_vgpr || probe->spill)) ||
-          (!candidate_point.persistent_sgprs.complete() && !probe->private_layout) ||
+      if ((!candidate_point.persistent_sgprs.complete() && !probe->private_layout) ||
           !candidate_point.exec_save_sgpr) {
         result.warnings.emplace_back(
             "ConSan wave-wide barrier needs preserved full-wave identity and scratch state");
         continue;
       }
-      if (probe->spill) {
-        auto full_wave =
-            tensor_full_wave_spill(*probe->spill, *candidate_point.exec_save_sgpr, arch);
-        if (!full_wave) {
-          result.warnings.emplace_back(
-              "ConSan wave-wide barrier could not preserve full-wave scratch");
-          continue;
-        }
-        probe->spill = std::move(full_wave);
+      if (!prepare_tensor_full_wave_resources(*probe, candidate_point, arch)) {
+        result.warnings.emplace_back(
+            "ConSan wave-wide barrier could not preserve full-wave scratch");
+        continue;
       }
     }
     note_probe_private_requirements(private_requirements, *probe);

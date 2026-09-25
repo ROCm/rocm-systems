@@ -194,9 +194,10 @@ TEST(ConSanTensor, TensorOwnerBarrierAdvancesEpochWithEmptyExecAndPreservesAllLa
   guest.push_back(0xbf94ffffu); // s_barrier_wait -1
   guest.resize(512, build_s_nop(0, arch));
   guest.push_back(build_s_endpgm(arch));
-  for (int identity_mode : {0, 1, 2}) {
+  for (int identity_mode : {0, 1, 2, 3}) {
     const bool private_identity = identity_mode != 0;
     const bool lane_scalar_spill = identity_mode == 2;
+    const bool scalar_spill = identity_mode >= 2;
     SCOPED_TRACE(identity_mode);
     TestOptions options = test_options();
     options.exec_save_sgpr = 88;
@@ -207,8 +208,9 @@ TEST(ConSanTensor, TensorOwnerBarrierAdvancesEpochWithEmptyExecAndPreservesAllLa
       options.persistent_sgprs.exact_workgroup = PersistentWorkgroupRegisters{82, 83, 84};
     }
     options.test_force_vgpr_spill = !lane_scalar_spill;
-    if (lane_scalar_spill) {
+    if (lane_scalar_spill)
       options.scratch_vgpr = 20;
+    if (scalar_spill) {
       options.automatic_scalar_spill_layout = ScalarSpillLayout::Compact;
       options.scalar_spill_setup =
           ScalarSpillSetup{.temporaries = ScalarSpillTemporaries{96u, 98u}};
@@ -226,7 +228,7 @@ TEST(ConSanTensor, TensorOwnerBarrierAdvancesEpochWithEmptyExecAndPreservesAllLa
     EXPECT_EQ(test_persistent_sgpr_state(result).complete(), !private_identity);
     ASSERT_EQ(barrier->private_state_layout.has_value(), private_identity);
     ASSERT_TRUE(barrier->scratch_vgpr);
-    EXPECT_EQ(barrier->spilled_vgpr_count, lane_scalar_spill ? 0u : 10u);
+    EXPECT_EQ(barrier->spilled_vgpr_count, lane_scalar_spill ? 0u : (scalar_spill ? 11u : 10u));
     const auto owners = detail::tensor_execution_owner_kernels(result.program_inventory);
     ASSERT_EQ(owners.size(), 1u);
     const auto cave = emitted_patch_words(result, *barrier);
@@ -311,11 +313,13 @@ TEST(ConSanTensor, TensorOwnerBarrierAdvancesEpochWithEmptyExecAndPreservesAllLa
       EXPECT_EQ(wave->exec(), exec);
       EXPECT_EQ(wave->vcc(), 0x12345678u);
       EXPECT_TRUE(wave->read_scc());
-      if (lane_scalar_spill) {
+      if (scalar_spill) {
         for (uint16_t reg = 88; reg < 96; ++reg)
           EXPECT_EQ(cu->read_sgpr(sb + reg), 0xcafe0000u + reg);
-      } else {
-        for (uint16_t reg = *barrier->scratch_vgpr; reg < *barrier->scratch_vgpr + 10; ++reg)
+      }
+      if (!lane_scalar_spill) {
+        for (uint16_t reg = *barrier->scratch_vgpr;
+             reg < *barrier->scratch_vgpr + barrier->spilled_vgpr_count; ++reg)
           for (uint32_t lane = 0; lane < 32; ++lane)
             EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5a50000u + reg * 32 + lane);
       }
