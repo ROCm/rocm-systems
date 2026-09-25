@@ -929,3 +929,18 @@ both the selected producer and consumer. A matching baseline/Default clean plus
 Default fault campaign runs in `sgemm-smoke-default-{clean,fault}`, using an
 explicit 180 s inner client deadline and 240 s outer deadline. SuperCollider
 qualification remains deferred under Default-first steering.
+
+### SGEMM smoke health-probe correction
+
+`sgemm-smoke-default-clean` passes baseline and Default correctness with complete
+320/320 access, 4/4 atomic, 22/22 barrier and 4/4 fence coverage. The first fault
+attempt admits no trials: its independent D128-pressure smoke was launched
+without the emulator and reported an invalid kernel image on the physical host.
+This is a campaign launch error, not a fault-detection result.
+
+`sgemm-smoke-default-retry.py` supplies explicit emulator-prefixed discovery and
+D128-pressure smoke commands through the existing paired CLI overrides. It uses
+fresh `sgemm-smoke-default-retry-fault` artifacts and retains the same reviewed
+fault and default preset. VALIDATION.md now documents the distinction between
+Tensile's internal client launcher and these independent health probes. The
+runner's 209-test gate passed with the current fault spec before this retry.

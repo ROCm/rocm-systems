@@ -342,8 +342,8 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --workload qwen-prefill --profile all
 ```
 
-For an emulated target, pass the same JSON argv prefix to `doctor`, `run`,
-`inventory`, and `fault`:
+For workloads launched directly on an emulated target, pass the same JSON argv
+prefix to `doctor`, `run`, `inventory`, and `fault`:
 
 ```sh
 --launcher-json '["rocjitsu", "--config", "gfx1250_mi455x.json", "--"]'
@@ -351,6 +351,17 @@ For an emulated target, pass the same JSON argv prefix to `doctor`, `run`,
 
 The prefix is retained in the artifacts. The exact config name is deployment
 specific; use one whose target matches `--target`.
+
+Tensile's driver launches its client through RocJITsu internally, using
+`CONSAN_VALIDATION_ROCJITSU_EXE` and `CONSAN_VALIDATION_ROCJITSU_CONFIG`.
+Omit the outer `--launcher-json` for these workloads. For Tensile **fault**
+runs, also supply both `--health-command-json` and `--smoke-command-json`
+with explicit emulator-prefixed argv arrays: the former runs `rocminfo`, and
+the latter runs an independent target-compatible smoke binary and its test
+filter. These independent probes do not inherit the Tensile client's internal
+launcher. Without these overrides, a gfx1250 smoke can accidentally run on the
+host GPU and fail before any mutation is attempted. Inspect the retained
+`health_command` and `smoke_command` in trial results to confirm the target.
 
 ### Preparing Qwen
 
