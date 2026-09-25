@@ -121,15 +121,26 @@ uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t 
 
 uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
   uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
-  if (uses_src_neg_modifier(slot.op))
-    src0 = apply_neg(src0, slot.neg, 0);
   // MOV has no src1: its unused encoding bits may name a pending register.
   if (slot.op == kVopdMovB32)
-    return src0;
+    return execute_slot_values(slot, wf, lane, src0, 0, slot.src2_imm, 0, 0);
   uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
   uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
                                         : slot.src2_imm;
+  uint32_t accumulator =
+      slot.op == kVopdFmacF32 ? amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane) : 0;
+  uint64_t condition = slot.op == kVopdCndmaskB32
+                           ? (slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane)
+                                            : amdgpu::read_wave_mask_scalar(*slot.src2, wf))
+                           : 0;
+  return execute_slot_values(slot, wf, lane, src0, src1, src2, accumulator, condition);
+}
+
+uint32_t Vopd::execute_slot_values(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane,
+                                   uint32_t src0, uint32_t src1, uint32_t src2,
+                                   uint32_t accumulator, uint64_t condition) {
   if (uses_src_neg_modifier(slot.op)) {
+    src0 = apply_neg(src0, slot.neg, 0);
     src1 = apply_neg(src1, slot.neg, 1);
     src2 = apply_neg(src2, slot.neg, 2);
   }
@@ -137,8 +148,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   switch (slot.op) {
   case kVopdFmacF32: {
     float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)),
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(accumulator),
         wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
     return std::bit_cast<uint32_t>(result);
   }
@@ -188,8 +198,6 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition = slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane)
-                                       : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxNumF32: {
@@ -237,8 +245,15 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.wf_size() != 32)
     throw util::UnimplementedInst("VOPD requires Wave32");
-  if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
-          wf, x_, y_))
+  if (amdgpu::try_execute_vopd_b32_pair_simd(
+          wf, x_, y_, [](const Slot &slot) { return slot.op == kVopdMovB32; },
+          [](const Slot &slot) { return slot.op == kVopdFmacF32; },
+          [](const Slot &slot) { return slot.op == kVopdCndmaskB32; },
+          [](const Slot &slot) { return is_float64_op(slot.op); },
+          [&wf](const Slot &slot, uint32_t lane, uint32_t src0, uint32_t src1, uint32_t src2,
+                uint32_t accumulator, uint64_t condition) {
+            return execute_slot_values(slot, wf, lane, src0, src1, src2, accumulator, condition);
+          }))
     return;
   if (amdgpu::try_execute_vopd_simd<true>(x_, y_, wf))
     return;

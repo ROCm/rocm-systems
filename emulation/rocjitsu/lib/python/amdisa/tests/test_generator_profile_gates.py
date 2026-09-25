@@ -7090,6 +7090,8 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' not in exec_cpp
+    assert 'try_execute_vopd_b32_pair_simd(' in exec_cpp
+    assert 'return execute_slot_values(slot, wf, lane, src0, src1, src2,' in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
     src_neg_body = exec_cpp[
         src_neg_start : exec_cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
@@ -7099,7 +7101,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'Vopd::execute_slot' not in cpp
     assert 'Vopd::execute_impl' not in cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in cpp
-    execute_start = exec_cpp.index('uint32_t Vopd::execute_slot')
+    execute_start = exec_cpp.index('uint32_t Vopd::execute_slot_values')
     mul_dx9_start = exec_cpp.index('case kVopdMulDx9ZeroF32:', execute_start)
     mul_dx9_case = exec_cpp[
         mul_dx9_start : exec_cpp.index('case kVopdAddF32:', mul_dx9_start)
@@ -7150,9 +7152,14 @@ def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op
         assert f'k{missing_op}' not in exec_cpp
 
     # MOV must observe only src0 while preserving the generated negation policy.
-    execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
-    assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
-    assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+    execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot(') :]
+    assert execute_slot.index('slot.op == kVopdMovB32') < execute_slot.index(
+        'uint32_t src1 ='
+    )
+    execute_values = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot_values') :]
+    assert execute_values.index('src0 = apply_neg(') < execute_values.index(
+        'return src0;'
+    )
 
 
 def test_rdna4_profile_enables_generated_vopd():

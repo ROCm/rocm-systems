@@ -35,6 +35,7 @@
 #include <limits>
 #include <optional>
 #include <type_traits>
+#include <utility>
 
 namespace rocjitsu::cdna5 {
 struct Isa;
@@ -925,6 +926,116 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
 
 template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
 [[nodiscard]] bool try_execute_vopd_integer_pair_simd(Wavefront &, const Slot &, const Slot &) {
+  return false;
+}
+
+/// Execute a Wave32 VOPD pair through instruction-scoped operand views while
+/// retaining the generated scalar operation body for each lane. VOPD is a
+/// particularly expensive scalar fallback because every instruction contains
+/// two operations and the old path resolved every source and destination
+/// through the virtual Operand interface once per active lane. This helper
+/// resolves each operand once, snapshots both slot results for a native-width
+/// lane chunk before either destination is written, and then performs masked
+/// stores through the ordinary observed RegisterAccess views.
+///
+/// The caller supplies opcode classification and scalar evaluation so this
+/// remains shared by generated ISA profiles without duplicating opcode values.
+/// F64 slots retain their established scalar path until equivalent pair-view
+/// coverage exists. No timing-model state is touched by this optimization.
+template <typename Slot, typename IsMov, typename IsFmac, typename IsCndmask, typename IsFloat64,
+          typename Evaluate>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vopd_b32_pair_simd(Wavefront &wf, const Slot &x,
+                                                         const Slot &y, IsMov is_mov,
+                                                         IsFmac is_fmac, IsCndmask is_cndmask,
+                                                         IsFloat64 is_float64, Evaluate evaluate) {
+  if (wf.wf_size() != 32 || simd_force_scalar() || is_float64(x) || is_float64(y))
+    return false;
+
+  const auto slot_is_capable = [&](const Slot &slot) {
+    if (!slot.dst->simd_capable() || !slot.src0->simd_capable())
+      return false;
+    if (!is_mov(slot) && !slot.src1->simd_capable())
+      return false;
+    return !slot.has_src2_operand || slot.src2->simd_capable();
+  };
+  if (!slot_is_capable(x) || !slot_is_capable(y))
+    return false;
+
+  const uint64_t exec = static_cast<uint32_t>(wf.exec());
+  if (exec == 0)
+    return true;
+
+  RegisterAccess registers(wf);
+  struct PreparedSlot {
+    const Slot *slot;
+    RegisterAccess::OperandReadView src0;
+    std::optional<RegisterAccess::OperandReadView> src1;
+    std::optional<RegisterAccess::OperandReadView> src2;
+    std::optional<RegisterAccess::OperandReadView> accumulator;
+    uint64_t condition;
+  };
+
+  const auto prepare = [&](const Slot &slot) {
+    auto src0 = registers.read_operand(*slot.src0, exec);
+    std::optional<RegisterAccess::OperandReadView> src1;
+    std::optional<RegisterAccess::OperandReadView> src2;
+    std::optional<RegisterAccess::OperandReadView> accumulator;
+    if (!is_mov(slot))
+      src1.emplace(registers.read_operand(*slot.src1, exec));
+    if (slot.has_src2_operand)
+      src2.emplace(registers.read_operand(*slot.src2, exec));
+    if (is_fmac(slot))
+      accumulator.emplace(registers.read_operand(*slot.dst, exec));
+    const uint64_t condition =
+        is_cndmask(slot)
+            ? (slot.uses_vcc ? wf.vcc_mask(exec) : read_wave_mask_scalar(*slot.src2, wf))
+            : 0;
+    return PreparedSlot{&slot,           std::move(src0),        std::move(src1),
+                        std::move(src2), std::move(accumulator), condition};
+  };
+
+  // Acquire every input view before either output view. This makes source /
+  // destination aliases observe the pre-instruction values for both slots.
+  auto px = prepare(x);
+  auto py = prepare(y);
+  const auto x_dst = registers.write_operand(*x.dst, exec);
+  const auto y_dst = registers.write_operand(*y.dst, exec);
+
+  const auto source_value = [](const std::optional<RegisterAccess::OperandReadView> &view,
+                               uint32_t lane,
+                               uint32_t fallback) { return view ? view->lane(lane) : fallback; };
+  constexpr uint32_t kWidth = util::native_width_v<uint32_t>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(kWidth));
+  for (uint32_t lane_base = 0; lane_base < wf.wf_size(); lane_base += kWidth) {
+    const uint64_t lane_mask = (exec >> lane_base) & chunk_full;
+    if (lane_mask == 0)
+      continue;
+    alignas(util::native<uint32_t>) uint32_t x_results[kWidth]{};
+    alignas(util::native<uint32_t>) uint32_t y_results[kWidth]{};
+    for (uint32_t offset = 0; offset < kWidth; ++offset) {
+      if ((lane_mask & (uint64_t{1} << offset)) == 0)
+        continue;
+      const uint32_t lane = lane_base + offset;
+      const auto eval_prepared = [&](const PreparedSlot &prepared) {
+        const Slot &slot = *prepared.slot;
+        return evaluate(slot, lane, prepared.src0.lane(lane), source_value(prepared.src1, lane, 0),
+                        source_value(prepared.src2, lane, slot.src2_imm),
+                        source_value(prepared.accumulator, lane, 0), prepared.condition);
+      };
+      x_results[offset] = eval_prepared(px);
+      y_results[offset] = eval_prepared(py);
+    }
+    x_dst.template store_native<uint32_t>(lane_base, util::load<uint32_t>(x_results), lane_mask);
+    y_dst.template store_native<uint32_t>(lane_base, util::load<uint32_t>(y_results), lane_mask);
+  }
+  return true;
+}
+
+template <typename Slot, typename IsMov, typename IsFmac, typename IsCndmask, typename IsFloat64,
+          typename Evaluate>
+[[nodiscard]] bool try_execute_vopd_b32_pair_simd(Wavefront &, const Slot &, const Slot &, IsMov,
+                                                  IsFmac, IsCndmask, IsFloat64, Evaluate) {
   return false;
 }
 
