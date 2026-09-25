@@ -31,6 +31,8 @@ namespace rocprofiler
 {
 namespace registration
 {
+// Global lookup can pair configure and attach symbols from different clients. Accept only the
+// configure owner's callback; RTLD_NOLOAD recovers it without loading a new shared object.
 inline rocprofiler_configure_attach_func_t
 resolve_attach_for_configure(rocprofiler_configure_func_t        configure,
                              rocprofiler_configure_attach_func_t candidate)

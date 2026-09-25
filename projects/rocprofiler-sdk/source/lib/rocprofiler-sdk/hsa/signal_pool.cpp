@@ -47,8 +47,8 @@ construct_hsa_signal(signal_t&          signal,
                      const hsa_agent_t* consumers,
                      uint64_t           attributes)
 {
-    // pool::acquire invokes this function for recycled slots as well as newly allocated slots.
-    // Recreating a live signal would overwrite and leak its existing handle.
+    // The pool creates each signal once, then calls this function again on acquire.
+    // Recreating a live signal would overwrite and leak its handle, so only reset its value.
     if(signal.value.handle != 0)
     {
         get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
