@@ -648,6 +648,55 @@
           }
         }
       ]
+    },
+    "pytorch-torch-sort": {
+      "faults": [
+        {
+          "id": "barrier-drop-key-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh gfx1250 inventory ELF 2778564a54e0ada2 radixSortKVInPlace<float,int64,128,8>, reviewed sort-pristine.asm. Matched rocprofv3 trace launches four blocks of 128 threads, wave32, for the maintained 4x256 input. Initial key stores at VMA 0x3411e4 onward publish the padded LDS transpose array: first store address is 4*(tid+(tid>>5)). First load at 0x3412c4 reads 4*(8*tid+(tid>>2)); thread 4 reads offset 132 written by thread 32, crossing waves. Drop the unconditional first signal/wait .text+0x289d78/0x289dc0 (VMA 0x341278/0x3412c0), preserving the later load-retirement and value-publication barriers. Nonempty maintained rows necessarily reach initialization and this first key transpose. Eight trials per mode, minimum six detections, predeclared before outcomes."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2778564a54e0ada2|kernel=_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b|kind=barrier|pc=0x0000000000289d78|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2778564a54e0ada2|kernel=_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b|event=barrier|pc=0x0000000000289d78|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:2778564a54e0ada2|kernel=_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b|event=barrier|pc=0x0000000000289dc0|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

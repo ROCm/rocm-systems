@@ -749,3 +749,13 @@ qualification remains required before changing its red cell.
 detections and no oracle manifestations, matching the earlier Default result.
 Every trial has complete analysis and healthy before/after checks. The paired
 high clean run passed. The next preset to test is `higher`.
+
+### torch.sort publication fault review
+
+`sort-pristine.asm` and the matched profiler trace establish four blocks of 128
+wave32 threads. The padded key-transpose store maps thread 32 to LDS offset
+132; thread 4's first transpose load reads that location. The new
+`barrier-drop-key-publication` removes only the first signal/wait at
+.text+0x289d78/0x289dc0 in ELF 2778564a54e0ada2, preserving retirement and
+subsequent value publication. Eight trials per mode and six detections are
+predeclared. `sort-spec-tests.log`: all 208 validation-runner tests pass.
