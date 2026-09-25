@@ -659,3 +659,11 @@ SuperCollider/check-trap host tests pass (`address-bank-verified-tests.log`).
 The isolated E2E hook will be linked under `address-hook/`, leaving both
 shared and subword-fix hooks used by running jobs unchanged. MXF4 remains red
 until its clean rerun completes without a mismatch.
+
+### CLIP SuperCollider qualification complete
+
+At sleep=15, the matching filtered clean run passes, but the reviewed
+publication fault produces 0/8 detections. All eight trials are admitted and
+reached, analysis is complete, pre/post health checks pass, and clean/fault
+provenance files match. The cell stays yellow with the measured result.
+Evidence: `clip-cap-sleep15-{clean,fault}`.
