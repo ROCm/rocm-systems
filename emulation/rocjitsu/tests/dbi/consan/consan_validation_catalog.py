@@ -674,25 +674,6 @@ WORKLOADS = (
         targets=("gfx1250",),
     ),
     Workload(
-        id="tensile-spmm-f16-sb",
-        priority="P2",
-        corpus="rocjitsu-test-corpus",
-        kind="tensile",
-        relative_path=(
-            "corpus/tensile/configs/Tensile/Tests/common/sparse/gfx1250/"
-            "spmm_f16_sb.yaml"
-        ),
-        clean_filter=None,
-        overhead_filter=None,
-        sharktank_workload=None,
-        sharktank_mode=None,
-        tracks_barriers=True,
-        tracks_atomics=False,
-        overhead_processes=1,
-        fault_families=("barrier-drop",),
-        targets=("gfx1250",),
-    ),
-    Workload(
         id="tensile-spmm-f8-ml",
         priority="P3",
         corpus="rocjitsu-test-corpus",

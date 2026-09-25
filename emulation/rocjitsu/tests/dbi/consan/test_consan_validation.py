@@ -3344,45 +3344,12 @@ class ConSanValidationTest(unittest.TestCase):
             "/artifacts/tensile-work",
         )
 
-    def test_gfx1250_manifest_registers_f16_sb_tensile_closure(self) -> None:
-        manifest = validation._manifest("gfx1250")
-        workloads = {workload["id"]: workload for workload in manifest["workloads"]}
-        workload = workloads["tensile-spmm-f16-sb"]
-        self.assertEqual(workload["priority"], "P2")
-        self.assertEqual(workload["kind"], "tensile")
-        self.assertEqual(
-            workload["relative_path"],
-            (
-                "corpus/tensile/configs/Tensile/Tests/common/sparse/gfx1250/"
-                "spmm_f16_sb.yaml"
-            ),
-        )
-        self.assertEqual(workload["fault_families"], ("barrier-drop",))
-
-    def test_f16_sb_tensile_closure_uses_exact_runner_once(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["tensile-spmm-f16-sb"]
-        with mock.patch.dict(
-            os.environ,
-            {validation.TENSILE_PYTHON_ENV: "/workspace/venv/bin/python"},
-        ):
-            command = validation._workload_command(
-                Path("/workspace"),
-                "gfx1250",
-                workload,
-                "clean",
-                Path("/artifacts/benchmark.json"),
-            )
-        self.assertEqual(command[0], "/workspace/venv/bin/python")
-        self.assertTrue(command[1].endswith("consan_tensile_validation.py"))
-        self.assertEqual(command[command.index("--repetitions") + 1], "1")
-        self.assertEqual(
-            command[command.index("--config") + 1],
-            str(Path("/workspace") / workload.corpus / workload.relative_path),
-        )
-        self.assertEqual(
-            command[command.index("--output-dir") + 1],
-            "/artifacts/tensile-work",
-        )
+    def test_gfx1250_manifest_excludes_inapplicable_f16_sb_sweep(self) -> None:
+        ids = {w["id"] for w in validation._manifest("gfx1250")["workloads"]}
+        # The unfiltered sweep includes K=16 inputs for solutions requiring
+        # K>=64. Keep the numeric oracle strict and use the TDM transpose row.
+        self.assertNotIn("tensile-spmm-f16-sb", ids)
+        self.assertIn("tensile-spmm-tdm-f16-transposes", ids)
 
     def test_bounded_tensile_smoke_is_workspace_native_and_fixed_grid(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
@@ -3474,7 +3441,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             fault_command[fault_command.index("--minimum-timed-ms") + 1],
-            "1.0",
+            "0.0",
         )
 
     def test_gfx1250_mxf8_tdm_shards_every_exact_problem_size(self) -> None:

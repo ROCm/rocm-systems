@@ -6,8 +6,11 @@ are retained in git history. Rows use the existing gfx1250 workload manifest:
 IREE/Sharktank, five hip-moi fixtures, the CDNA5 HipKittens BF16 kernel,
 Tensile configurations, and PyTorch/Triton operations including tensor descriptors
 and cluster synchronization. The unavailable gfx1250 Jakub fixture and broad
-survey summaries are excluded. hip-moi ports can be added when implemented;
-corpus and Torch selections use existing target support.
+survey summaries are excluded, as is the FP16 sparse sweep whose selected
+inputs fail solution applicability checks. See the
+[workload audit and exact commands](CDNA5_WORKLOAD_AUDIT_20260925.md).
+hip-moi ports can be added when implemented; corpus and Torch selections use
+existing target support.
 
 Qualification follows [RDNA4](STATUS_RDNA4.md) and [CDNA4](STATUS_CDNA4.md):
 🟩 matching clean correctness, complete applicable coverage, healthy emulator
@@ -46,7 +49,6 @@ For the global-access scope limitation relevant to `pytorch-scatter-reduce`, see
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) |  |  |
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) |  |  |
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) |  |  |
-| Tensile | P2 | `019_spmm_f16_sb` (`tensile-spmm-f16-sb`) |  |  |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) |  |  |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) |  |  |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) |  |  |
