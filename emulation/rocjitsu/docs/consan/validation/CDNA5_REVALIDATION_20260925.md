@@ -579,3 +579,12 @@ It also reports `marker=1 mismatch=true`, exposing a second issue beyond the
 fixed transform failure. The cell remains red with this newer diagnosis.
 Evidence: `spmm-sc-subword-client.log` and `spmm-sc-subword.log`. The maintained
 full three-shard baseline+clean rerun is running under `spmm-subword-clean/`.
+
+### TP1 decode/combined Default qualification
+
+Current-hook Default clean passes, but the reviewed maximum-publication fault
+is detected in 0/8 admitted/reached trials. Every trial has complete analysis
+and healthy pre/post checks, and clean/fault provenance files match. Evidence:
+`tp1-decode-cap-default-{clean,fault}`. The emulator-only workload lock is
+confirmed in each result, allowing independent CPU simulations to run in
+parallel while physical GPU jobs retain the global lock. Next test `high`.
