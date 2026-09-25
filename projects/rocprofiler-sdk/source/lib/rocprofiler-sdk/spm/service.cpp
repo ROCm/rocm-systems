@@ -124,6 +124,9 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
 rocprofiler_status_t
 rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id)
 {
+    const auto* sym = rocprofiler::spm::construct_spm_interface();
+    if(!sym) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+
     return rocprofiler::spm::destroy_spm_counter_profile(config_id);
 }
 
@@ -153,6 +156,9 @@ rocprofiler_spm_dispatch_counting_service_set_agents(rocprofiler_context_id_t   
                                                      const rocprofiler_agent_id_t* agents,
                                                      size_t                        num_agents)
 {
+    const auto* sym = rocprofiler::spm::construct_spm_interface();
+    if(!sym) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+
     if(!rocprofiler::spm::is_spm_explicitly_enabled())
         return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 

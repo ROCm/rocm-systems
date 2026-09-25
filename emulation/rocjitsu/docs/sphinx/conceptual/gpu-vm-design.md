@@ -168,7 +168,7 @@ architectures and RISC-V:
 | RDNA3 | gfx1100 | GFX11 |
 | RDNA3.5 | gfx1150 | GFX11 |
 | RDNA4 | gfx1200 | GFX12 |
-| gfx1250 | gfx1250 | GFX12 |
+| CDNA5 | gfx1250 | GFX12.5 |
 | RISC-V | RV32IMAFDC | RV |
 
 The architecture is selected through the `vm.arch` field in the JSON

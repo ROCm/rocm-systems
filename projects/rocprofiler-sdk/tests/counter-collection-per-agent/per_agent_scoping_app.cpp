@@ -91,6 +91,10 @@ rocprofiler_context_id_t ctx_all_second  = {.handle = 0};
 // reorder HIP ordinals.
 std::vector<rocprofiler_agent_id_t> gpu_agents = {};
 
+// HIP ordinal that could not be matched to a rocprofiler agent, or -1 when every device
+// mapped. Reported by main() so a skip is distinguishable from a machine with one GPU.
+int unmapped_device = -1;
+
 // Intermediate storage used to build the HIP-to-rocprofiler mapping: keeps the
 // location_id (BDF) and PCI domain alongside the agent id until the mapping is done.
 struct agent_info_t
@@ -127,6 +131,38 @@ records_on(rocprofiler_agent_id_t agent)
     auto lk  = std::unique_lock{observed_mutex};
     auto itr = records_per_agent.find(agent.handle);
     return (itr == records_per_agent.end()) ? 0 : itr->second;
+}
+
+// This test only runs on a multi-GPU machine, so when it fails in CI there is no way to
+// reproduce it locally. Dump every agent the callbacks actually fired for, not just the two the
+// assertions read: a count of zero on GPU-0 otherwise cannot be told apart from callbacks that
+// fired and were attributed to some other agent handle.
+void
+dump_observations(const char* phase)
+{
+    auto lk = std::unique_lock{observed_mutex};
+    printf("[%s] dispatch callbacks fired for %zu agent(s):", phase, dispatch_per_agent.size());
+    for(const auto& [handle, count] : dispatch_per_agent)
+        printf(" %lu=%zu", static_cast<unsigned long>(handle), count);
+    printf("\n[%s] records delivered for %zu agent(s):", phase, records_per_agent.size());
+    for(const auto& [handle, count] : records_per_agent)
+        printf(" %lu=%zu", static_cast<unsigned long>(handle), count);
+    printf("\n");
+    fflush(stdout);
+}
+
+// A context can be started successfully and still not be visible to the dispatch path, which is
+// the distinction between "the service never engaged" and "the service engaged and collected
+// nothing".
+void
+report_context_state(const char* what, rocprofiler_context_id_t ctx)
+{
+    int status = -1;
+    if(rocprofiler_context_is_active(ctx, &status) != ROCPROFILER_STATUS_SUCCESS)
+        printf("[ctx] %s: rocprofiler_context_is_active failed\n", what);
+    else
+        printf("[ctx] %s: active=%d\n", what, status);
+    fflush(stdout);
 }
 
 void
@@ -200,7 +236,17 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
         if(strcmp(info.name, "SQ_WAVES") == 0) collect.push_back(counter);
     }
 
-    if(collect.empty()) return;
+    if(collect.empty())
+    {
+        // Leaving *config unset means the dispatch is seen but never produces a record, which
+        // looks identical to a scoping failure in the record counts below.
+        printf("[profile] agent %lu exposes %zu counters but no SQ_WAVES; no records will be "
+               "produced for it\n",
+               static_cast<unsigned long>(agent_id.handle),
+               supported.size());
+        fflush(stdout);
+        return;
+    }
 
     rocprofiler_counter_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(
@@ -212,15 +258,12 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 }
 
 void
-configure_cc(rocprofiler_context_id_t* ctx, const rocprofiler_agent_id_t* agent)
+configure_cc(rocprofiler_context_id_t* ctx)
 {
     ROCPROFILER_CALL(rocprofiler_create_context(ctx), "create context");
     ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
                          *ctx, dispatch_callback, nullptr, record_callback, nullptr),
                      "configure dispatch counting service");
-    if(agent)
-        ROCPROFILER_CALL(rocprofiler_dispatch_counting_service_set_agents(*ctx, agent, 1),
-                         "restrict counting service to agent");
 }
 
 rocprofiler_status_t
@@ -233,6 +276,55 @@ collect_gpu_agents(rocprofiler_agent_version_t, const void** agents, size_t num_
             all_gpu_agent_info.push_back({agent->id, agent->location_id, agent->domain});
     }
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+// Maps each HIP device ordinal to its rocprofiler agent using PCI domain/BDF so that
+// gpu_agents[i] is the agent for HIP device i, regardless of the order rocprofiler enumerates
+// agents or how ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES reorders ordinals.
+//
+// This must run from main(), never from tool_init(). tool_init() is invoked from
+// rocprofiler_set_api_table(), which the HSA runtime calls during hsa_init(), and rocprofiler
+// only installs its HSA interception after that call returns. Touching HIP from tool_init()
+// therefore forces the HIP runtime to initialize against the unwrapped HSA dispatch table, and
+// HIP keeps the function pointers it captured, so every queue it creates afterwards bypasses
+// the dispatch hooks and no counter collection ever happens.
+void
+map_hip_devices_to_agents()
+{
+    int device_count = 0;
+    if(hipGetDeviceCount(&device_count) != hipSuccess || device_count < 2) return;
+
+    // A device with no matching agent must not be skipped silently: dropping it would shift
+    // every later ordinal, so gpu_agents[i] would stop being HIP device i and the contexts
+    // would be scoped to a different physical GPU than the workload runs on. Bail instead and
+    // let main() report the skip.
+    for(int dev = 0; dev < device_count; ++dev)
+    {
+        hipDeviceProp_t prop{};
+        if(hipGetDeviceProperties(&prop, dev) != hipSuccess) return;
+        const auto bus = static_cast<uint32_t>(prop.pciBusID);
+        const auto did = static_cast<uint32_t>(prop.pciDeviceID);
+        const auto dom = static_cast<uint32_t>(prop.pciDomainID);
+
+        bool matched = false;
+        for(const auto& info : all_gpu_agent_info)
+        {
+            if(info.domain == dom && (info.location_id >> 8) == bus &&
+               ((info.location_id >> 3) & 0x1Fu) == did)
+            {
+                gpu_agents.push_back(info.id);
+                matched = true;
+                break;
+            }
+        }
+
+        // Only the first two ordinals are used, so an unmapped device beyond them is harmless.
+        if(!matched)
+        {
+            unmapped_device = dev;
+            break;
+        }
+    }
 }
 
 int
@@ -248,36 +340,13 @@ tool_init(rocprofiler_client_finalize_t, void*)
     // skip so the reason is visible in the test output.
     if(all_gpu_agent_info.size() < 2) return 0;
 
-    // Map each HIP device ordinal to its rocprofiler agent using PCI domain/BDF so that
-    // gpu_agents[i] is the agent for HIP device i, regardless of the order rocprofiler
-    // enumerates agents or how ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES reorders ordinals.
-    int device_count = 0;
-    if(hipGetDeviceCount(&device_count) != hipSuccess || device_count < 2) return 0;
-
-    for(int dev = 0; dev < device_count; ++dev)
-    {
-        hipDeviceProp_t prop{};
-        if(hipGetDeviceProperties(&prop, dev) != hipSuccess) return 0;
-        const auto bus = static_cast<uint32_t>(prop.pciBusID);
-        const auto did = static_cast<uint32_t>(prop.pciDeviceID);
-        const auto dom = static_cast<uint32_t>(prop.pciDomainID);
-        for(const auto& info : all_gpu_agent_info)
-        {
-            if(info.domain == dom && (info.location_id >> 8) == bus &&
-               ((info.location_id >> 3) & 0x1Fu) == did)
-            {
-                gpu_agents.push_back(info.id);
-                break;
-            }
-        }
-    }
-
-    if(gpu_agents.size() < 2) return 0;
-
-    configure_cc(&ctx_scoped_gpu0, &gpu_agents[0]);
-    configure_cc(&ctx_scoped_gpu1, &gpu_agents[1]);
-    configure_cc(&ctx_all, nullptr);
-    configure_cc(&ctx_all_second, nullptr);
+    // Created unscoped: the agent sets depend on the HIP ordinal mapping, which cannot run
+    // until main(). rocprofiler_dispatch_counting_service_set_agents() is only rejected while
+    // a context is active, so main() applies the scoping before the first start.
+    configure_cc(&ctx_scoped_gpu0);
+    configure_cc(&ctx_scoped_gpu1);
+    configure_cc(&ctx_all);
+    configure_cc(&ctx_all_second);
 
     return 0;
 }
@@ -369,14 +438,38 @@ main()
     int device_count = 0;
     HIP_CALL(hipGetDeviceCount(&device_count));
 
+    map_hip_devices_to_agents();
+
     if(device_count < 2 || gpu_agents.size() < 2)
     {
-        printf("SKIP: per-agent scoping requires at least 2 GPUs (found %d)\n", device_count);
+        // Both counts are reported because a machine with enough HIP devices but no
+        // rocprofiler agents means the tool never registered, which is a very different
+        // problem from a single-GPU machine and must not read as one.
+        if(unmapped_device >= 0 && unmapped_device < 2)
+        {
+            printf("SKIP: HIP device %d has no rocprofiler agent with matching PCI "
+                   "coordinates, so per-agent scoping cannot be checked in this configuration\n",
+                   unmapped_device);
+        }
+        else
+        {
+            printf("SKIP: per-agent scoping requires at least 2 GPUs (%d HIP device(s), %zu "
+                   "rocprofiler GPU agent(s), %zu mapped)\n",
+                   device_count,
+                   all_gpu_agent_info.size(),
+                   gpu_agents.size());
+        }
         return 0;
     }
 
     const auto agent_0 = gpu_agents[0];
     const auto agent_1 = gpu_agents[1];
+
+    // Deferred from tool_init because the mapping above is what names these agents.
+    ROCPROFILER_CALL(rocprofiler_dispatch_counting_service_set_agents(ctx_scoped_gpu0, &agent_0, 1),
+                     "restrict gpu0 context to its agent");
+    ROCPROFILER_CALL(rocprofiler_dispatch_counting_service_set_agents(ctx_scoped_gpu1, &agent_1, 1),
+                     "restrict gpu1 context to its agent");
 
     // Phase 1: no counter collection anywhere. Reference for an unserialized GPU-0.
     const double baseline_ms = time_concurrent_workload(0);
@@ -385,7 +478,9 @@ main()
     // it doubles as the positive control for the timing measurement.
     reset_observations();
     ROCPROFILER_CALL(rocprofiler_start_context(ctx_all), "start unrestricted context");
+    report_context_state("unrestricted after start", ctx_all);
     const double unrestricted_ms = time_concurrent_workload(0);
+    dump_observations("unrestricted");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx_all), "stop unrestricted context");
     const size_t unrestricted_dispatches_gpu0 = dispatches_on(agent_0);
 
@@ -393,8 +488,10 @@ main()
     // untouched.
     reset_observations();
     ROCPROFILER_CALL(rocprofiler_start_context(ctx_scoped_gpu1), "start scoped context");
+    report_context_state("scoped-to-gpu1 after start", ctx_scoped_gpu1);
     time_concurrent_workload(1);
     const double scoped_ms = time_concurrent_workload(0);
+    dump_observations("scoped-to-gpu1");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx_scoped_gpu1), "stop scoped context");
     const size_t scoped_records_gpu1    = records_on(agent_1);
     const size_t scoped_dispatches_gpu0 = dispatches_on(agent_0);
@@ -406,6 +503,17 @@ main()
            scoped_ms,
            kNumStreams,
            kKernelsPer);
+    // This test only runs on a multi-GPU machine, so print the mapping and the raw counts the
+    // assertions below read: a control failure is otherwise indistinguishable from a scoping bug.
+    printf("hip device 0 -> agent %lu, hip device 1 -> agent %lu\n",
+           static_cast<unsigned long>(agent_0.handle),
+           static_cast<unsigned long>(agent_1.handle));
+    printf("unrestricted: dispatches(gpu0)=%zu | scoped: records(gpu1)=%zu dispatches(gpu0)=%zu "
+           "records(gpu0)=%zu\n",
+           unrestricted_dispatches_gpu0,
+           scoped_records_gpu1,
+           scoped_dispatches_gpu0,
+           scoped_records_gpu0);
 
     // Exact assertions. These hold regardless of how fast the machine is.
     check(unrestricted_dispatches_gpu0 > 0,

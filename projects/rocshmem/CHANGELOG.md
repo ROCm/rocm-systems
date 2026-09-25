@@ -1,6 +1,19 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
 
+### Added
+* GDA device code refactor (#7217)
+  * Core GDA device code is now header-only.
+  * Removed indirection and branching when compiled for a single GDA provider.
+  * Significantly reduced size of device code GDA Queue Pair management objects.
+  * Reduced latency of `rocshmem_quiet` for AMD Pensando IONIC provider.
+    This also reduces the latency of blocking communication calls.
+  * Communications using the GDA backend can now selectively choose at compilation time
+    to reduce the internal GDA Queue Pair object correctness and safety constraints,
+    improving application performance when such relaxations are known to be safe by the caller.
+    These relaxations can be applied independently at each call site.
+    This is currently an internal mechanism and is not exposed by the public rocSHMEM APIs.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

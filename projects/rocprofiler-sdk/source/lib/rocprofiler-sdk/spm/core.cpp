@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_set>
 #include <vector>
@@ -271,7 +272,8 @@ start_context(const context::context* ctx)
     });
 
     // SPM no longer registers a per-queue callback with the queue controller; the HSA write
-    // interceptor calls spm::write_hook / signal_completion_hook directly (see hsa/queue.cpp).
+    // interceptor calls spm::kernel_dispatch_phase_enter_hook / kernel_dispatch_phase_exit_hook
+    // directly (see hsa/queue.cpp).
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -285,14 +287,16 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->dispatch_spm) return;
 
-    auto* controller = hsa::get_queue_controller();
+    auto* controller  = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        was_enabled = true;
+        enabled     = false;
     });
 
-    if(controller)
+    if(controller && was_enabled)
     {
         // Drain in-flight dispatches, then disable serialization. The review of #8887 asked for
         // this sync to be kept and for SPM to stay visible to the enter hook and to serialization
@@ -317,8 +321,8 @@ stop_context(const context::context* ctx)
         // teardown depends on. Keeping it.
         hsa::queue_controller_sync();
         controller->disable_serialization(ctx->dispatch_spm->agents);
-        // No per-queue callback to remove; spm::write_hook no-ops once dispatch_spm is
-        // disabled above.
+        // No per-queue callback to remove; spm::kernel_dispatch_phase_enter_hook no-ops once
+        // dispatch_spm is disabled above.
     }
 }
 
@@ -328,6 +332,15 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
                     size_t                        num_agents)
 {
     if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Held across the active-context check and the assignment below. start_context() reads this
+    // set to scope enable_serialization() and stop_context() reads it again to scope the matching
+    // disable_serialization(); if the set changed in between, the per-agent refcount for an agent
+    // that was enabled but not disabled never returns to zero and serialization stays on for the
+    // life of the process. The same mutex is what start_context() takes, so holding it here makes
+    // "the context is not active" and "the agent set is now this" one indivisible step.
+    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
+    context::wait_for_stopping_contexts(_lk);
 
     auto* ctx_p = context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
@@ -344,8 +357,9 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
     for(size_t i = 0; i < num_agents; ++i)
     {
         const auto* agent = rocprofiler::agent::get_agent(agents[i]);
-        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
-            return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         selected.emplace(agents[i]);
     }
 

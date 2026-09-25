@@ -4,8 +4,18 @@ name: RCCL cluster CI
 # on ruby, gin on tw). Each leg is self-contained: it provisions the ROCm floor from
 # TheRock CI artifacts, builds rocSHMEM/RCCL/rccl-tests from the PR sources, and runs.
 # ROCm tracks TheRock automatically (latest main run); pass artifact_run_id to pin one.
+#
+# Nightly and on demand, not PR-triggered. rccl-coco-pr.yml covers RCCL and
+# rccl-tests PRs; these suites rejoin it once the device-api tests are restored
+# there. Until then, changes under projects/rocshmem are covered only by this
+# nightly, not by any PR check.
 
 on:
+  schedule:
+    # Weekday nightly, offset from rccl-coco-scheduled.yml's 03:47 nightly and from
+    # rccl-ainic-tw-gfx950-runner.yml's 02:00 so the three do not contend for
+    # the ruby and tw runners. The longest leg here is 5h.
+    - cron: '47 12 * * 1-5'
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -28,14 +38,6 @@ on:
         type: string
         required: false
         default: 'gfx950'
-  pull_request:
-    paths:
-      - 'projects/rocshmem/**'
-      - 'projects/rccl/**'
-      - 'projects/rccl-tests/**'
-      - 'projects/rccl/tools/ci/**'
-      - '.github/workflows/rccl-ci.yml'
-      - '.github/workflows/rccl-suite.yml'
 
 permissions:
   contents: read
@@ -117,7 +119,7 @@ jobs:
     name: GIN build gate
     needs: gin
     if: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: |
           echo "GIN build/infra failed; see the GIN job logs." >&2

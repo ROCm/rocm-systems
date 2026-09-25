@@ -144,8 +144,8 @@ create_queue(hsa_agent_t        agent,
             return HSA_STATUS_SUCCESS;
         }
     }
-    ROCP_FATAL << "Could not find agent - " << agent.handle;
-    return HSA_STATUS_ERROR_FATAL;
+    return controller->get_core_table().hsa_queue_create_fn(
+        agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
 }
 
 hsa_status_t
@@ -697,10 +697,9 @@ QueueController::serializer(const Queue* queue)
                 return false;
             },
             [&](auto& m) {
-                ret =
-                    m.emplace(agent_id,
-                              std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                        .first->second.get();
+                ret = m.emplace(agent_id,
+                                std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                          .first->second.get();
                 if(should_serialize)
                 {
                     ret->wlock([&](auto& serializer) { serializer.enable({}); });
@@ -770,16 +769,19 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                 {
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
-                    if(itr->second == state.enabled(agent_id)) continue;
+                    const bool now_enabled = state.enabled(agent_id);
+                    if(itr->second == now_enabled) continue;
 
                     auto queues = hsa_barrier::queue_map_ptr_t{};
-                    if(auto it = pd_map.find(agent_id); it != pd_map.end())
-                        queues = it->second;
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
 
                     auto ser_itr = serializers.find(agent_id);
                     if(ser_itr == serializers.end() || !ser_itr->second) continue;
+                    // Derived from the post-update refcount rather than the caller's `enable`
+                    // flag, so the applied state cannot disagree with the count that produced
+                    // the transition.
                     ser_itr->second->wlock([&](auto& serializer) {
-                        if(enable)
+                        if(now_enabled)
                             serializer.enable(queues);
                         else
                             serializer.disable(queues);
@@ -953,14 +955,21 @@ queue_controller_init(HsaApiTable* table)
     if(enable_queue_intercept()) queue_init();
 }
 
-void
+bool
 queue_controller_sync()
 {
     // sync the queue interceptor
     queue_interposition::interposition_sync();
 
+    bool _drained = true;
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    {
+        // Every queue is synced even after one times out, so a slow queue cannot hide the state of
+        // the ones behind it.
+        get_queue_controller()->iterate_queues(
+            [&_drained](const Queue* _queue) { _drained = _queue->sync() && _drained; });
+    }
+    return _drained;
 }
 
 void

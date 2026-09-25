@@ -64,6 +64,7 @@ main(int argc, char** argv)
     }
     // The counter is the dispatch-accounting check below, so warmup must not be in it.
     HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
     using clock      = std::chrono::steady_clock;
     const auto start = clock::now();
     for(int i = 0; i < launches; ++i)

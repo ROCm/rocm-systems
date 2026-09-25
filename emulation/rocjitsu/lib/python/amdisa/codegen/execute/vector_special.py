@@ -1076,6 +1076,18 @@ def gen_vector_dot(
         L.append('    }')
     elif op == 'dot2c' and dtype == 'f32':
         # V_DOT2C_F32_F16: D.f32 += f16_lo(A)*f16_lo(B) + f16_hi(A)*f16_hi(B)
+        L.append('    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||')
+        L.append('        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {')
+        L.append(
+            f'      if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))'
+        )
+        L.append('        a = util::f32_to_f16(std::bit_cast<float>(a));')
+        L.append(
+            '      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);'
+        )
+        L.append(f'      amdgpu::RegisterAccess(wf).write_lane({d}, lane, acc);')
+        L.append('      continue;')
+        L.append('    }')
         L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
         L.append(
             '    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));'

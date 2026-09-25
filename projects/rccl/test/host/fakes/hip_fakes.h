@@ -94,6 +94,11 @@ extern std::function<hipError_t(int* /*pi*/, hipDeviceAttribute_t /*attr*/, int 
 extern std::function<hipError_t(hipLimit_t /*limit*/, size_t /*value*/)> g_hipDeviceSetLimit;
 extern hipError_t g_hipDeviceGetAttributeResult;
 extern hipError_t g_hipDeviceGetPCIBusIdResult;
+// Backs hipDeviceGetPCIBusId. Default returns a fixed bus string gated on
+// g_hipDeviceGetPCIBusIdResult; install a hook to make the string encode the
+// device index (drives busIdToCudaDev's per-device resolution).
+extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
+    g_hipDeviceGetPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
@@ -160,6 +165,18 @@ extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
 extern std::function<hipError_t(void)> g_hipGetLastError;
+
+// Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
+// proxy-progress tests keep the existing behaviour, but exposing it as a hook
+// lets a test drive hipEventRecord independently of the shared async-ops seam.
+extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)> g_hipEventRecord;
+
+// Opt-in record->query fidelity. When true, hipEventQuery reports hipErrorNotReady
+// for any event that has not been recorded via hipEventRecord, modelling the
+// async publish-ordering the CE proxy relies on (a copy's completion event must
+// be recorded before the query is allowed to see the copy as done). Off by
+// default so existing tests keep the simple g_hipAsyncOpsResult behaviour.
+extern bool g_hipEventQueryRequiresRecord;
 
 // Install a working host-memory stand-in for the VMM surface: mmap-backed
 // reserve/free (honouring the requested alignment), succeeding map/unmap/

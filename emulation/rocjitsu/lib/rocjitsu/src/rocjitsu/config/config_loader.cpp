@@ -961,6 +961,11 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
   result.build_result =
       build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources);
+  if (result.device.present)
+    if (SoC *soc = result.soc())
+      soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
+      });
 
   // A config that describes no bus still yields usable defaults, so front ends
   // that attach the GPU to a VMM work without every config being updated.
@@ -979,9 +984,14 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       result.devices[i].drm_render_minor = 128 + i;
       result.devices[i].unique_id = result.device.unique_id + i;
     }
-    for (uint32_t i = 1; i < result.num_gpus; ++i)
+    for (uint32_t i = 1; i < result.num_gpus; ++i) {
       result.extra_gpu_builds.push_back(
           build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources));
+      if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
+        soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+          cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
+        });
+    }
   }
 
   return result;

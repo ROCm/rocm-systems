@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
@@ -42,20 +43,21 @@ thread_trace_contexts_filter()
 }  // namespace
 
 void
-write_hook(const hsa::Queue& queue,
-           const hsa::rocprofiler_packet& /*kernel_packet*/,
-           rocprofiler_kernel_id_t   kernel_id,
-           rocprofiler_dispatch_id_t dispatch_id,
-           rocprofiler_user_data_t*  user_data,
-           const hsa::queue_info_session_t::external_corr_id_map_t& /*ext_corr_ids*/,
-           const context::correlation_id* correlation_id,
-           hsa::inst_pkt_t&               inst_pkt,
-           bool&                          is_serialized)
+kernel_dispatch_phase_enter_hook(
+    const hsa::Queue& queue,
+    const hsa::rocprofiler_packet& /*kernel_packet*/,
+    rocprofiler_kernel_id_t   kernel_id,
+    rocprofiler_dispatch_id_t dispatch_id,
+    rocprofiler_user_data_t*  user_data,
+    const hsa::queue_info_session_t::external_corr_id_map_t& /*ext_corr_ids*/,
+    const context::correlation_id* correlation_id,
+    hsa::inst_pkt_t&               inst_pkt,
+    bool&                          is_serialized)
 {
     const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
 
     auto active = context::get_active_contexts(thread_trace_contexts_filter());
-    for(auto* ctx : active)
+    for(const auto* ctx : active)
     {
         auto& tracer = *ctx->dispatch_thread_trace;
         if(!tracer.collects_on(agent_id)) continue;
@@ -69,17 +71,18 @@ write_hook(const hsa::Queue& queue,
 }
 
 void
-signal_completion_hook(const hsa::Queue& /*queue*/,
-                       const hsa::rocprofiler_packet& /*kernel_packet*/,
-                       std::shared_ptr<hsa::queue_info_session_t>& session,
-                       hsa::packet_data_t&                         packet_data,
-                       hsa::inst_pkt_t&                            inst_pkt,
-                       kernel_dispatch::profiling_time /*dispatch_time*/)
+kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
+                                const hsa::rocprofiler_packet& /*kernel_packet*/,
+                                std::shared_ptr<hsa::queue_info_session_t>& session,
+                                hsa::packet_data_t&                         packet_data,
+                                hsa::inst_pkt_t&                            inst_pkt,
+                                kernel_dispatch::profiling_time /*dispatch_time*/)
 {
-    // Completion routing follows packet provenance rather than current activeness so work
-    // submitted before stop_context can still retire after the context leaves the active set.
+    // Route by packet provenance, not current activeness: post_kernel_call self-filters via
+    // THREAD_TRACE_CLIENT_ID and agent ownership, so in-flight dispatches still complete after
+    // stop_context removes the context from the active list.
     auto contexts = context::get_registered_contexts(thread_trace_contexts_filter());
-    for(auto* ctx : contexts)
+    for(const auto* ctx : contexts)
     {
         auto& tracer = *ctx->dispatch_thread_trace;
         tracer.post_kernel_call(inst_pkt, *session, packet_data);
@@ -90,6 +93,16 @@ bool
 is_any_active()
 {
     return !context::get_active_contexts(thread_trace_contexts_filter()).empty();
+}
+
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id)
+{
+    for(const auto* ctx : context::get_active_contexts(thread_trace_contexts_filter()))
+    {
+        if(ctx->dispatch_thread_trace->collects_on(agent_id)) return true;
+    }
+    return false;
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler

@@ -139,7 +139,7 @@ public:
 
   /// @brief Perform the RPC handshake with the daemon.
   /// @details Sends RPC_HANDSHAKE, receives the topology path and gpu_id,
-  /// and creates a synthetic memfd to use as the KFD fd.
+  /// and creates a synthetic pollable eventfd to use as the KFD fd.
   /// @retval >=0 Synthetic KFD fd on success.
   /// @retval -1 Handshake failed (socket error or daemon rejected).
   int open() override;
@@ -149,7 +149,7 @@ public:
   /// dup2 overwrote it) but the RPC connection is still live and must keep a
   /// valid primary fd number to hand back to open("/dev/kfd"). Unlike open(),
   /// this performs no RPC and does not disturb the connection/metadata.
-  /// @retval >=0 A new synthetic KFD fd. @retval -1 memfd creation failed.
+  /// @retval >=0 A new synthetic KFD fd. @retval -1 eventfd creation failed.
   [[nodiscard]] int reissue_synthetic_kfd_fd();
 
   /// @brief Send RPC_CLOSE to the daemon.

@@ -40,19 +40,22 @@ spm_contexts_filter()
 }  // namespace
 
 void
-write_hook(const hsa::Queue&                                        queue,
-           const hsa::rocprofiler_packet&                           kernel_packet,
-           rocprofiler_kernel_id_t                                  kernel_id,
-           rocprofiler_dispatch_id_t                                dispatch_id,
-           rocprofiler_user_data_t*                                 user_data,
-           const hsa::queue_info_session_t::external_corr_id_map_t& ext_corr_ids,
-           const context::correlation_id*                           correlation_id,
-           hsa::inst_pkt_t&                                         inst_pkt,
-           bool&                                                    is_serialized)
+kernel_dispatch_phase_enter_hook(
+    const hsa::Queue*                                        queue,
+    const hsa::rocprofiler_packet&                           kernel_packet,
+    rocprofiler_kernel_id_t                                  kernel_id,
+    rocprofiler_dispatch_id_t                                dispatch_id,
+    rocprofiler_user_data_t*                                 user_data,
+    const hsa::queue_info_session_t::external_corr_id_map_t& ext_corr_ids,
+    const context::correlation_id*                           correlation_id,
+    hsa::inst_pkt_t&                                         inst_pkt,
+    bool&                                                    is_serialized)
 {
-    const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
-
     auto active = context::get_active_contexts(spm_contexts_filter());
+    if(active.empty()) return;
+
+    const auto agent_id = CHECK_NOTNULL(CHECK_NOTNULL(queue)->get_agent().get_rocp_agent())->id;
+
     for(const auto* ctx : active)
     {
         if(!ctx->dispatch_spm->collects_on(agent_id)) continue;
@@ -61,7 +64,7 @@ write_hook(const hsa::Queue&                                        queue,
         {
             auto [packet, bSerial] = pre_kernel_call(ctx,
                                                      cb,
-                                                     queue,
+                                                     *queue,
                                                      kernel_packet,
                                                      kernel_id,
                                                      dispatch_id,
@@ -75,12 +78,12 @@ write_hook(const hsa::Queue&                                        queue,
 }
 
 void
-signal_completion_hook(const hsa::Queue& /*queue*/,
-                       const hsa::rocprofiler_packet& /*kernel_packet*/,
-                       std::shared_ptr<hsa::queue_info_session_t>& session,
-                       hsa::packet_data_t& /*packet*/,
-                       hsa::inst_pkt_t&                inst_pkt,
-                       kernel_dispatch::profiling_time dispatch_time)
+kernel_dispatch_phase_exit_hook(const hsa::Queue* /*queue*/,
+                                const hsa::rocprofiler_packet& /*kernel_packet*/,
+                                std::shared_ptr<hsa::queue_info_session_t>& session,
+                                hsa::packet_data_t& /*packet*/,
+                                hsa::inst_pkt_t&                inst_pkt,
+                                kernel_dispatch::profiling_time dispatch_time)
 {
     bool has_spm_packets = false;
     for(const auto& tagged_pkt : inst_pkt)
@@ -115,6 +118,16 @@ bool
 is_any_active()
 {
     return !context::get_active_contexts(spm_contexts_filter()).empty();
+}
+
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id)
+{
+    for(const auto* ctx : context::get_active_contexts(spm_contexts_filter()))
+    {
+        if(ctx->dispatch_spm->collects_on(agent_id)) return true;
+    }
+    return false;
 }
 }  // namespace spm
 }  // namespace rocprofiler

@@ -77,7 +77,20 @@ process_completed_cb(completed_cb_params_t&& params)
 
     if(info->buffer)
     {
-        buf = CHECK_NOTNULL(buffer::get_buffer(info->buffer->handle));
+        buf = buffer::get_buffer(info->buffer->handle);
+        if(!buf)
+        {
+            // The stop-time drain is bounded, so a completion can land after the tool has already
+            // destroyed the buffer it named. Drop the record: falling through would take the
+            // callback branch below and CHECK on a record_callback this context never configured,
+            // and aborting here would turn a late completion into a crash in the tool's own
+            // shutdown path.
+            ROCP_WARNING << "counter collection: buffer " << info->buffer->handle
+                         << " was destroyed before dispatch "
+                         << packet.callback_record.dispatch_info.dispatch_id
+                         << " completed; dropping its counter record";
+            return;
+        }
     }
 
     auto _corr_id_v =
@@ -173,20 +186,51 @@ callback_thread_get()
 // the thread is only joined when the count returns to zero.  Two dispatch-counting contexts
 // with disjoint agent sets may be active at the same time, so without the refcount stopping
 // either one would kill the consumer while the other still needs it.
-std::atomic<int> callback_thread_refcount{0};
+//
+// The count and the start()/exit() call have to move together under one lock. An atomic is
+// not enough: a stop that decremented to zero can be overtaken by a start that increments
+// back to one and finds the consumer still valid, so start() no-ops and the stop then tears
+// the thread down underneath it, leaving a non-zero count with no consumer. Completions still
+// get processed in that state -- consumer_thread_t::add() runs them inline when the thread is
+// gone -- but they run on the HSA async signal handler, which is exactly what this consumer
+// exists to avoid.
+//
+// Held via static_object, like get_buffer_mut() above: a tool that finalizes after this
+// translation unit's statics were destroyed would otherwise lock a dead mutex, which is the
+// same teardown hazard 78d6079 fixed for the context stopping set.
+//
+// static_object's default ContextT is unique per translation unit but shared within one, so
+// it needs a distinct tag here: get_buffer_mut() already constructs static_object<std::mutex>
+// in this file and a second construct() on the same instantiation aborts the process with
+// "reconstructing static object".
+struct callback_thread_mut_tag
+{};
+
+std::mutex&
+callback_thread_mut()
+{
+    static auto*& _v = common::static_object<std::mutex, callback_thread_mut_tag>::construct();
+    return *CHECK_NOTNULL(_v);
+}
+
+int callback_thread_refcount = 0;
 }  // namespace
 
 void
 callback_thread_start()
 {
-    ++callback_thread_refcount;
-    callback_thread_get().start();
+    auto _lk = std::unique_lock<std::mutex>{callback_thread_mut()};
+    if(callback_thread_refcount++ == 0) callback_thread_get().start();
 }
 
 void
 callback_thread_stop()
 {
-    if(--callback_thread_refcount == 0) callback_thread_get().exit();
+    auto _lk = std::unique_lock<std::mutex>{callback_thread_mut()};
+    // The > 0 test keeps an unbalanced stop from driving the count negative and leaking the
+    // consumer thread for the rest of the process.
+    if(callback_thread_refcount > 0 && --callback_thread_refcount == 0)
+        callback_thread_get().exit();
 }
 
 /**

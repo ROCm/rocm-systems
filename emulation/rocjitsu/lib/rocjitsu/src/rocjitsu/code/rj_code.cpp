@@ -205,7 +205,8 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_basic_block_list_t>();
-    auto blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
+                                    ExternalEntryPolicy::InferPredecessorless, {}, target_id);
     if (blocks.failed())
       return ROCJITSU_STATUS_ERROR;
     owned->blocks = std::move(blocks).value();

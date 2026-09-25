@@ -55,16 +55,27 @@ kernel_dispatch_phase_enter_hook(
 // registered dispatch_counter_collection contexts (not only active ones) and calls
 // each callback's completed_cb; completed_cb self-filters via packet_return_map so
 // in-flight dispatches still complete after stop_context.
+// queue is nullable: the hook never dereferences it, and tests exercise the
+// early-return path without an HSA runtime to build a queue from.
 void
-kernel_dispatch_phase_exit_hook(const hsa::Queue&                           queue,
+kernel_dispatch_phase_exit_hook(const hsa::Queue*                           queue,
                                 const hsa::rocprofiler_packet&              kernel_packet,
                                 std::shared_ptr<hsa::queue_info_session_t>& session,
                                 hsa::packet_data_t&                         packet,
                                 hsa::inst_pkt_t&                            inst_pkt,
                                 kernel_dispatch::profiling_time             dispatch_time);
 
-// True if any context currently has dispatch counter collection active.
+// True if any context in the active list has a dispatch counter collection service. This is not
+// the service's enabled flag: counters::stop_context() clears that flag first and then drains
+// while the context is still in the active list, and for that window this stays true so the
+// enter hook keeps coordinating the serialized -> unserialized transition.
 bool
 is_any_active();
+
+// True if a context with dispatch counter collection active collects on `agent_id`. Callers on
+// a per-queue path should prefer this over is_any_active(): a counters context scoped to one GPU
+// via set_agents() must not pull queues on the other GPUs off the write interceptor's fast path.
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id);
 }  // namespace counters
 }  // namespace rocprofiler
