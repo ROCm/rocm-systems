@@ -161,6 +161,11 @@ def _validate_registry() -> None:
         for suite in SUITES:
             if suite.validation_workload_id is None:
                 continue
+            workload = consan_validation.WORKLOAD_BY_ID[suite.validation_workload_id]
+            # The simulator registry also describes optional fixtures that
+            # have no physical validation row on a given target.
+            if workload.targets is not None and target.id not in workload.targets:
+                continue
             manifest_path = Path(
                 consan_validation.resolved_workload_relative_path(
                     target.id,

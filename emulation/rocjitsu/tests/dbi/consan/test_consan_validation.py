@@ -1257,14 +1257,9 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["d128-block"]["overhead_filter"],
             ("HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"),
         )
-        self.assertEqual(
-            workloads["jakub-attention"]["relative_path"],
-            (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_reference_cdna4_jakub_matmul"
-            ),
-        )
-        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 300)
+        self.assertNotIn("jakub-attention", workloads)
+        with self.assertRaises(validation.ValidationError):
+            validation._workload_for_target("gfx950", "jakub-attention")
         self.assertEqual(
             workloads["streamk-arrival"]["fault_families"],
             ("atomic-weaken-order",),
@@ -1496,7 +1491,6 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "d128-block", 150),
                 ("gfx950", "d128-pressure", 30),
                 ("gfx1250", "d128-pressure", 300),
-                ("gfx950", "jakub-attention", 300),
                 ("gfx1250", "jakub-attention", 90),
                 ("gfx950", "tp1-prefill", 300),
                 ("gfx1250", "tp1-prefill", 60),
@@ -1673,6 +1667,8 @@ class ConSanValidationTest(unittest.TestCase):
         for target, shape in target_shapes.items():
             expected_paths = {}
             for workload_id, (family_kind, binary_kind, stem) in workload_stems.items():
+                if target == "gfx950" and workload_id == "jakub-attention":
+                    continue
                 family = shape.base if family_kind == "base" else shape.matrix
                 expected_paths[workload_id] = (
                     f"{shape.build_dir}/tests/hip_moi_{binary_kind}_{family}_{stem}"

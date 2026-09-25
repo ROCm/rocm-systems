@@ -1212,6 +1212,8 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=3,
         fault_families=("barrier-drop",),
+        # The CDNA4 fixture does not exist; do not advertise a synthetic path.
+        targets=("gfx942", "gfx1100", "gfx1201", "gfx1250"),
     ),
 )
 
@@ -1656,7 +1658,12 @@ def _native_gtest_overrides(
 
 
 NATIVE_GTEST_WORKLOAD_OVERRIDES = {
-    target_id: _native_gtest_overrides(target)
+    target_id: {
+        workload_id: override
+        for workload_id, override in _native_gtest_overrides(target).items()
+        if WORKLOAD_BY_ID[workload_id].targets is None
+        or target_id in WORKLOAD_BY_ID[workload_id].targets
+    }
     for target_id, target in NATIVE_GTEST_TARGETS.items()
 }
 NATIVE_GTEST_WORKLOAD_IDS = tuple(
@@ -1666,7 +1673,12 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
     _validate_exact_keys(
         f"{target_id} native gtest override matrix",
         overrides,
-        NATIVE_GTEST_WORKLOAD_IDS,
+        tuple(
+            workload.id
+            for workload in WORKLOADS
+            if workload.kind == "gtest"
+            and (workload.targets is None or target_id in workload.targets)
+        ),
     )
 
 
@@ -1716,11 +1728,6 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "run_timeout_seconds": 600,
         },
         "clip-bf16": {
-            "run_timeout_seconds": 300,
-        },
-        # The four Jakub oracle dispatches also miss the denser 256 cadence,
-        # so this bounded row selects every workgroup deterministically.
-        "jakub-attention": {
             "run_timeout_seconds": 300,
         },
         # The physical gfx950 histogram is one two-workgroup dispatch. Its
