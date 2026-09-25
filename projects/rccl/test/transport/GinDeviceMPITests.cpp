@@ -8,6 +8,7 @@
 // gin.{put|putValue|waitSignal|...} kernel against a real proxy thread + IB,
 // and validates the wire-level result on the receiving rank.
 
+#include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "SymmetricMemPrereq.hpp"
@@ -608,6 +609,46 @@ void GinMPIDeviceTests::runPutBasicAndOffsets(int nContexts) {
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
   runPutBasicAndOffsets(/*nContexts=*/1);
+}
+
+// GIN IB links pass nQpsPerDev=1. Collective links still follow
+// NCCL_IB_QPS_PER_CONNECTION. The param is cached on first read, so the
+// variable has to be set before this process starts.
+TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
+  const char* qpEnv = std::getenv("NCCL_IB_QPS_PER_CONNECTION");
+  const int qpPerConn = qpEnv ? std::atoi(qpEnv) : 1;
+  if (qpPerConn <= 1)
+    GTEST_SKIP() << "Set NCCL_IB_QPS_PER_CONNECTION>1 before the process";
+
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_PROXY)
+    GTEST_SKIP() << "IB QP override applies to the proxy backend (NCCL_GIN_TYPE="
+                 << NCCL_NET_DEVICE_GIN_PROXY << ")";
+
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+  MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "NET");
+  MPIHelpers::TestLogAssertionContext logCtx(
+      MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+  runBasicPutSelfCheck();
+  if (HasFatalFailure()) return;
+
+  const std::string log = logCtx.readNcclDebugLog();
+  const std::string marker = "Max Nqps=";
+  bool sawConnect = false;
+  bool sawGin = false;
+  for (size_t pos = 0; (pos = log.find(marker, pos)) != std::string::npos; pos += marker.size()) {
+    sawConnect = true;
+    const int nqps = std::atoi(log.c_str() + pos + marker.size());
+    if (nqps < qpPerConn) sawGin = true;
+  }
+  EXPECT_TRUE(sawConnect) << "GIN proxy bring-up did not log an IB connect";
+  EXPECT_TRUE(sawGin) << "every IB connect used NCCL_IB_QPS_PER_CONNECTION=" << qpPerConn
+                      << "; GIN links should stay at one QP per device";
 }
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {

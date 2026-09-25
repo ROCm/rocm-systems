@@ -339,7 +339,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
     // Inline connection setup: each rank uses a different device ID.
     // Rank 0 (receiver): listen on vdev (ndevs=2, 2 PDs, doubled QPs)
     // Rank 1 (sender):   connect on physical dev 0 (ndevs=1, 1 PD)
-    // ncclIbCalculateNqps uses max(local, remote) so both sides get the same QP count.
+    // ncclIbNqpsForMultiplier uses max(local, remote) so both sides get the same QP count.
     ConnectionPair pair;
 
     if (rank == 0) {

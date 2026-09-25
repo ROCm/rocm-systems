@@ -109,7 +109,8 @@ NOTE: In general we discourage the use of these variables in production since a 
 
   NCCL_IB_QPS_PER_CONNECTION - This controls the number of QPs per connection. The default value is 1. However, on
                                systems with ECMP routing enabled or multiple ports per NIC, increasing this value
-                               can improve path diversity on the network and increase throughput.
+                               can improve path diversity on the network and increase throughput. GIN InfiniBand
+                               connections stay at one QP per device when this value is raised.
 
   NCCL_CROSS_NIC - This controls whether NCCL allows rings and trees to use different NICs, causing inter-node
                    communication to use different NICs on different nodes. Forcing cross-NIC communication may

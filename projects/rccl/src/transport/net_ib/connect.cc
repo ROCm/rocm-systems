@@ -64,14 +64,28 @@ struct ncclIbHandle {
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
 
-// Calculate number of QPs based on P2P flag and device counts
-static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
-  auto qp_multiplier = (rcclParamIbQpsPerP2p() > 0 && isP2p) ? rcclParamIbQpsPerP2p() : ncclParamIbQpsPerConn();
-  int localNqps = qp_multiplier * localNdevs;
-  int remoteNqps = qp_multiplier * remoteNdevs;
+// nQpsPerDev > 0 wins (GIN passes 1). Otherwise use the IB QP env policy.
+static int ncclIbQpMultiplier(int nQpsPerDev, int isP2p) {
+  if (nQpsPerDev > 0) return nQpsPerDev;
+  if (rcclParamIbQpsPerP2p() > 0 && isP2p) return (int)rcclParamIbQpsPerP2p();
+  return (int)ncclParamIbQpsPerConn();
+}
+
+// Explicit GIN count sizes the CQ. The env path keeps NCCL_IB_QPS_PER_CONNECTION.
+static int ncclIbCqQpFactor(int nQpsPerDev) {
+  return nQpsPerDev > 0 ? nQpsPerDev : (int)ncclParamIbQpsPerConn();
+}
+
+static int ncclIbNqpsForMultiplier(int qpMultiplier, int localNdevs, int remoteNdevs, const char* funcName) {
+  int localNqps = qpMultiplier * localNdevs;
+  int remoteNqps = qpMultiplier * remoteNdevs;
   int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
   INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d", funcName, maxNqps, localNqps, remoteNqps);
   return maxNqps;
+}
+
+static int ncclIbSelectNqps(int nQpsPerDev, int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
+  return ncclIbNqpsForMultiplier(ncclIbQpMultiplier(nQpsPerDev, isP2p), localNdevs, remoteNdevs, funcName);
 }
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
@@ -932,7 +946,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   INFO(NCCL_NET, "NET/IB: ncclIbConnect isP2p=%d", isP2p);
-  comm->base.nqps = ncclIbCalculateNqps(isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
+  comm->base.nqps = ncclIbSelectNqps(nQpsPerDev, isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -945,7 +959,7 @@ ib_recv_dev_list:
   // Sender's CQ size needs to accomodate the upper bound of number of send
   // requests multiplied by the number of QPs used per request.
   int cqSize;
-  cqSize = NET_IB_MAX_REQUESTS * ncclParamIbQpsPerConn();
+  cqSize = NET_IB_MAX_REQUESTS * ncclIbCqQpFactor(nQpsPerDev);
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     int ibDevN = comm->base.vProps.devs[i];
     if (comm->base.resiliency) {
@@ -1143,7 +1157,7 @@ fail:
 
 ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** sendDevComm) {
-  return ncclIbConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, ncclParamIbQpsPerConn(), ncclParamIbTc());
+  return ncclIbConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, /*nQpsPerDev*/ 0, ncclParamIbTc());
 }
 
 NCCL_PARAM(IbWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
@@ -1545,7 +1559,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
-  rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
+  rComm->base.nqps = ncclIbSelectNqps(nQpsPerDev, remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
 
   // Subnet-aware device selection: use the remote sender's GIDs to find a local
   // NIC on the same subnet. Override lComm->dev and update vProps if a
@@ -1587,7 +1601,7 @@ ib_recv:
   // of a receive request) per QP, in the worst case.
   // +1 reserves space for one in-flight speed update RDMA write completion.
   int cqSize;
-  cqSize = 3 * NET_IB_MAX_REQUESTS * ncclParamIbQpsPerConn() +
+  cqSize = 3 * NET_IB_MAX_REQUESTS * ncclIbCqQpFactor(nQpsPerDev) +
            ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
@@ -1884,7 +1898,7 @@ fail:
 }
 
 ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm) {
-  return ncclIbAcceptImpl(listenComm, recvComm, recvDevComm, ncclParamIbQpsPerConn());
+  return ncclIbAcceptImpl(listenComm, recvComm, recvDevComm, /*nQpsPerDev*/ 0);
 }
 
 ncclResult_t ncclIbCloseSend(void* sendComm) {
