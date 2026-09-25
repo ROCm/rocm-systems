@@ -20,6 +20,10 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Changed
+
+- Project version `VERSION` file is added.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added
