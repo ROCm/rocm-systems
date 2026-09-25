@@ -1771,8 +1771,9 @@ void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(
             *this, wf,
-            amdgpu::transcendental::rsq_f32(util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
+            amdgpu::transcendental::rsq_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                                amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                            wf.fp_denorm_mode_f16_f64()),
             wf.fp16_ovfl()));
   }
 }
@@ -1801,8 +1802,9 @@ RJ_NOINLINE void VRsqF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(
             *this, wf,
-            amdgpu::transcendental::rsq_f32(util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
+            amdgpu::transcendental::rsq_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                                amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                            wf.fp_denorm_mode_f16_f64()),
             wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -2433,7 +2435,8 @@ void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled)));
         }());
   }
@@ -2465,7 +2468,8 @@ RJ_NOINLINE void VCvtNormI16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled)));
         }());
   }
@@ -2487,7 +2491,8 @@ void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 65535.0, 0.0, 65535.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(scaled));
         }());
   }
@@ -2519,7 +2524,8 @@ RJ_NOINLINE void VCvtNormU16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 65535.0, 0.0, 65535.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(scaled));
         }());
   }

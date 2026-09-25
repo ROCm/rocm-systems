@@ -70,6 +70,23 @@ public:
     compute_unit_->write_vgpr(base_ + 1, 0, b);
     compute_unit_->write_vgpr(base_ + 2, 0, c);
     compute_unit_->write_vgpr(base_ + 6, 0, 0xfacebeef);
+    execute(words);
+    return compute_unit_->read_vgpr(base_ + 6, 0);
+  }
+  template <size_t N>
+  uint32_t run_scalar(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b,
+                      uint32_t accumulator, uint32_t mode) {
+    wave_->set_mode_raw(mode);
+    const auto base = wave_->sgpr_alloc().base;
+    compute_unit_->write_sgpr(base, a);
+    compute_unit_->write_sgpr(base + 1, b);
+    compute_unit_->write_sgpr(base + 6, accumulator);
+    execute(words);
+    return compute_unit_->read_sgpr(base + 6);
+  }
+
+private:
+  template <size_t N> void execute(const std::array<uint32_t, N> &words) {
     std::array<uint32_t, 4> padded{};
     std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder_->decode(padded.data());
@@ -77,10 +94,7 @@ public:
       throw std::runtime_error("Instruction encoding rejected by decoder_");
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
     EXPECT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
-    return compute_unit_->read_vgpr(base_ + 6, 0);
   }
-
-private:
   amdgpu::GpuMemory memory_;
   amdgpu::L2Cache cache_;
   std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit_;
@@ -185,69 +199,335 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
 std::array<uint32_t, 1> unary_words(rj_code_arch_t arch, size_t op) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1: {
-    const std::array<uint16_t, 5> ops = {cdna1::kVRcpF32Vop1, cdna1::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna1::kVRcpF32Vop1, cdna1::kVSqrtF32Vop1,
                                          cdna1::kVLogF32Vop1, cdna1::kVExpF32Vop1,
-                                         cdna1::kVRsqF32Vop1};
+                                         cdna1::kVRsqF32Vop1, cdna1::kVRsqF16Vop1};
     return cdna1::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA2: {
-    const std::array<uint16_t, 5> ops = {cdna2::kVRcpF32Vop1, cdna2::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna2::kVRcpF32Vop1, cdna2::kVSqrtF32Vop1,
                                          cdna2::kVLogF32Vop1, cdna2::kVExpF32Vop1,
-                                         cdna2::kVRsqF32Vop1};
+                                         cdna2::kVRsqF32Vop1, cdna2::kVRsqF16Vop1};
     return cdna2::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA3: {
-    const std::array<uint16_t, 5> ops = {cdna3::kVRcpF32Vop1, cdna3::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna3::kVRcpF32Vop1, cdna3::kVSqrtF32Vop1,
                                          cdna3::kVLogF32Vop1, cdna3::kVExpF32Vop1,
-                                         cdna3::kVRsqF32Vop1};
+                                         cdna3::kVRsqF32Vop1, cdna3::kVRsqF16Vop1};
     return cdna3::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA4: {
-    const std::array<uint16_t, 5> ops = {cdna4::kVRcpF32Vop1, cdna4::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna4::kVRcpF32Vop1, cdna4::kVSqrtF32Vop1,
                                          cdna4::kVLogF32Vop1, cdna4::kVExpF32Vop1,
-                                         cdna4::kVRsqF32Vop1};
+                                         cdna4::kVRsqF32Vop1, cdna4::kVRsqF16Vop1};
     return cdna4::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA5: {
-    const std::array<uint16_t, 5> ops = {cdna5::kVRcpF32Vop1, cdna5::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna5::kVRcpF32Vop1, cdna5::kVSqrtF32Vop1,
                                          cdna5::kVLogF32Vop1, cdna5::kVExpF32Vop1,
-                                         cdna5::kVRsqF32Vop1};
+                                         cdna5::kVRsqF32Vop1, cdna5::kVRsqF16Vop1};
     return cdna5::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA1: {
-    const std::array<uint16_t, 5> ops = {rdna1::kVRcpF32Vop1, rdna1::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna1::kVRcpF32Vop1, rdna1::kVSqrtF32Vop1,
                                          rdna1::kVLogF32Vop1, rdna1::kVExpF32Vop1,
-                                         rdna1::kVRsqF32Vop1};
+                                         rdna1::kVRsqF32Vop1, rdna1::kVRsqF16Vop1};
     return rdna1::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA2: {
-    const std::array<uint16_t, 5> ops = {rdna2::kVRcpF32Vop1, rdna2::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna2::kVRcpF32Vop1, rdna2::kVSqrtF32Vop1,
                                          rdna2::kVLogF32Vop1, rdna2::kVExpF32Vop1,
-                                         rdna2::kVRsqF32Vop1};
+                                         rdna2::kVRsqF32Vop1, rdna2::kVRsqF16Vop1};
     return rdna2::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA3: {
-    const std::array<uint16_t, 5> ops = {rdna3::kVRcpF32Vop1, rdna3::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna3::kVRcpF32Vop1, rdna3::kVSqrtF32Vop1,
                                          rdna3::kVLogF32Vop1, rdna3::kVExpF32Vop1,
-                                         rdna3::kVRsqF32Vop1};
+                                         rdna3::kVRsqF32Vop1, rdna3::kVRsqF16Vop1};
     return rdna3::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA3_5: {
-    const std::array<uint16_t, 5> ops = {rdna3_5::kVRcpF32Vop1, rdna3_5::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna3_5::kVRcpF32Vop1, rdna3_5::kVSqrtF32Vop1,
                                          rdna3_5::kVLogF32Vop1, rdna3_5::kVExpF32Vop1,
-                                         rdna3_5::kVRsqF32Vop1};
+                                         rdna3_5::kVRsqF32Vop1, rdna3_5::kVRsqF16Vop1};
     return rdna3_5::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    const std::array<uint16_t, 5> ops = {rdna4::kVRcpF32Vop1, rdna4::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna4::kVRcpF32Vop1, rdna4::kVSqrtF32Vop1,
                                          rdna4::kVLogF32Vop1, rdna4::kVExpF32Vop1,
-                                         rdna4::kVRsqF32Vop1};
+                                         rdna4::kVRsqF32Vop1, rdna4::kVRsqF16Vop1};
     return rdna4::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   default:
     return {};
   }
 }
+std::array<uint32_t, 2> rsq_f16_vop3_words(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_vop3(cdna1::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_vop3(cdna2::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_vop3(cdna3::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_vop3(cdna4::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::build_vop3(cdna5::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_vop3(rdna1::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_vop3(rdna2::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_vop3(rdna3::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_vop3(rdna3_5::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_vop3(rdna4::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  default:
+    return {};
+  }
+}
+std::array<uint32_t, 2> fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate,
+                                      uint8_t omod, uint8_t clamp) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_vop3(cdna1::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_vop3(cdna2::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_vop3(cdna3::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_vop3(cdna4::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::build_vop3(cdna5::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_vop3(rdna1::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_vop3(rdna2::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_vop3(rdna3::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_vop3(rdna3_5::kVFmaF32Vop3, {.vdst = 6,
+                                                       .abs = absolute,
+                                                       .clamp = clamp,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .src2 = 258,
+                                                       .omod = omod,
+                                                       .neg = negate});
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_vop3(rdna4::kVFmaF32Vop3, {.vdst = 6,
+                                                   .abs = absolute,
+                                                   .clamp = clamp,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .src2 = 258,
+                                                   .omod = omod,
+                                                   .neg = negate});
+  default:
+    throw std::runtime_error("Unsupported FMA test architecture");
+  }
+}
+
+TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
+  // Physical gfx1201: scaling a rounded subnormal by two still yields +0.
+  // Earlier targets disable OMOD when output denormals or IEEE mode are set.
+  for (auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    const auto words = fma_f32_words(arch, 0, 0, 1, 0);
+    for (uint32_t mode : {0xf0u, 0x2f0u})
+      for (uint32_t addend : {0x007fffffu, 0x807fffffu}) {
+        const uint32_t expected =
+            arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : addend;
+        witness("fma_omod_subnormal", arch, machine.run(words, 0, 0, addend, mode), expected);
+      }
+  }
+}
+
+TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
+  // Raw gfx1100/gfx1201 captures at the minimum-normal boundary. A tiny
+  // product changes directed rounding even far below the addend's low bit.
+  struct Case {
+    uint32_t a, b, c;
+    std::array<uint32_t, 4> preserved, flushed;
+  };
+  const Case cases[] = {
+      {1, 1, 0x007fffff, {0x007fffff, 0x00800000, 0x007fffff, 0x007fffff}, {0, 0, 0, 0}},
+      {1, 0x3f000000, 0x007fffff, {0x00800000, 0x00800000, 0x007fffff, 0x007fffff}, {0, 0, 0, 0}},
+      {0x80000001,
+       1,
+       0x00800000,
+       {0x00800000, 0x00800000, 0x007fffff, 0x007fffff},
+       {0x00800000, 0x00800000, 0, 0}},
+      {1,
+       1,
+       0x00800000,
+       {0x00800000, 0x00800001, 0x00800000, 0x00800000},
+       {0x00800000, 0x00800001, 0x00800000, 0x00800000}},
+      {1,
+       0x80000001,
+       0x807fffff,
+       {0x807fffff, 0x807fffff, 0x80800000, 0x807fffff},
+       {0x80000000, 0x80000000, 0x80000000, 0x80000000}},
+  };
+  for (auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    for (uint32_t ieee : {0u, 1u})
+      for (uint32_t denorm : {1u, 3u})
+        for (uint32_t round = 0; round < 4; ++round)
+          for (uint8_t omod : {0, 1}) {
+            const bool scaling =
+                omod && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ||
+                         (!ieee && !(denorm & 2u)));
+            const auto words = fma_f32_words(arch, 0, 0, omod, 0);
+            for (const auto &test : cases) {
+              uint32_t expected =
+                  scaling || !(denorm & 2u) ? test.flushed[round] : test.preserved[round];
+              if (scaling)
+                expected = (expected & 0x7fffffffu) == 0 ? 0 : expected + 0x00800000u;
+              SCOPED_TRACE(::testing::Message()
+                           << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
+                           << " round=" << round << " omod=" << unsigned(omod));
+              EXPECT_EQ(
+                  machine.run(words, test.a, test.b, test.c, (ieee << 9) | (denorm << 4) | round),
+                  expected);
+            }
+          }
+  }
+}
+
+TEST(ValuFloatingPolicy, ScalarFmaF32UsesModeAndNanPolicy) {
+  // CDNA5 section 6.8 gives SALU floating point the same MODE controls as VALU.
+  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  struct Case {
+    uint32_t a, b, c, mode, expected;
+  };
+  const Case cases[] = {
+      {0x3f800001, 0x3f800001, 0, 0x31, 0x3f800003},
+      {0x3f800001, 0x3f800001, 0, 0x30, 0x3f800002},
+      {1, 0x3f800000, 0, 0, 0},
+      {1, 0x3f800000, 0, 0x30, 1},
+      {1, 1, 0x007fffff, 0x11, 0},
+      {0x7f801abc, 0xff803def, 0x7fc01234, 0x30, 0x7fc01abc},
+  };
+  for (uint16_t opcode : {cdna5::kSFmacF32Sop2, cdna5::kSFmaakF32Sop2, cdna5::kSFmamkF32Sop2}) {
+    for (const auto &test : cases) {
+      const auto first = cdna5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 6});
+      const bool multiply_literal = opcode == cdna5::kSFmamkF32Sop2;
+      const std::array<uint32_t, 2> words{first[0], multiply_literal ? test.b : test.c};
+      EXPECT_EQ(
+          machine.run_scalar(words, test.a, multiply_literal ? test.c : test.b, test.c, test.mode),
+          test.expected)
+          << opcode;
+    }
+  }
+}
+
+TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
+  // Captured V_FMA_F32 outputs on gfx1100/gfx1201, including both IEEE modes.
+  // Earlier RDNA/CDNA share the MODE.IEEE rule; CDNA5, like RDNA4, always quiets.
+  struct Case {
+    uint32_t a, b, c, flushed, preserved, modified;
+  };
+  const Case cases[] = {
+      {0x7f801abc, 0xff803def, 0x7fc01234, 0x7f801abc, 0x7f801abc, 0xff801abc},
+      {0xff803def, 0x7f801abc, 0x7fc01234, 0xff803def, 0xff803def, 0xff803def},
+      {0x7fc01234, 0xff803def, 0x7f801abc, 0x7fc01234, 0x7fc01234, 0xffc01234},
+      {0x3f800000, 0xff803def, 0x7fc01234, 0xff803def, 0xff803def, 0x7f803def},
+      {0x3f800000, 0x3f800000, 0x7f801abc, 0x7f801abc, 0x7f801abc, 0x7f801abc},
+      {0x3f800000, 0x3f800000, 0xff803def, 0xff803def, 0xff803def, 0x7f803def},
+      {0x00000000, 0x7f800000, 0xff803def, 0xffc00000, 0xffc00000, 0xffc00000},
+      {0x7f800000, 0x80000000, 0x7f801abc, 0xffc00000, 0xffc00000, 0xffc00000},
+      {0x00000001, 0x7f800000, 0xff803def, 0xffc00000, 0xff803def, 0x7f803def},
+      {0x807fffff, 0xff800000, 0x7f801abc, 0xffc00000, 0x7f801abc, 0x7f801abc},
+      {0x7f800000, 0x3f800000, 0xff800000, 0xffc00000, 0xffc00000, 0x7f800000},
+  };
+  for (auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    for (uint32_t ieee : {0u, 1u})
+      for (uint32_t denorm : {0u, 1u, 2u, 3u})
+        for (uint32_t round : {0u, 1u, 2u, 3u})
+          for (unsigned variant = 0; variant < 4; ++variant) {
+            const bool modified = variant == 1, clamped = variant == 3;
+            const auto words = fma_f32_words(arch, modified ? 5 : 0, modified ? 3 : 0,
+                                             variant == 2 ? 1 : 0, clamped);
+            for (const auto &test : cases) {
+              uint32_t expected = (denorm & 1u) ? test.preserved : test.flushed;
+              if (modified && ((denorm & 1u) || test.flushed == test.preserved))
+                expected = test.modified;
+              if ((expected & 0x7fffffffu) > 0x7f800000u &&
+                  (ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+                expected |= 0x00400000u;
+              if (clamped && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+                expected = 0;
+              SCOPED_TRACE(::testing::Message()
+                           << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
+                           << " round=" << round << " variant=" << variant);
+              EXPECT_EQ(
+                  machine.run(words, test.a, test.b, test.c, (ieee << 9) | (denorm << 4) | round),
+                  expected);
+            }
+          }
+  }
+}
+
 TEST(ValuFloatingPolicy, PackedMinimumPropagatesNaN) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
@@ -370,6 +650,42 @@ TEST(ValuFloatingPolicy, F32UnaryDenormControls) {
     }
   }
 }
+TEST(ValuFloatingPolicy, ReciprocalSquareRootUsesSharedMappingAcrossProfiles) {
+  // The shared one-ULP/FTZ contract applies to all profiles. Raw hardware
+  // qualification for these finite approximation witnesses covers RDNA3/4.
+  for (rj_code_arch_t arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    const auto words = unary_words(arch, 4);
+    for (const auto &test :
+         {std::pair{0x3f80cab3u, 0x3f7f363du}, std::pair{0x80000001u, 0xff800000u},
+          std::pair{0xbf800000u, 0xffc00000u}, std::pair{0x7fa12345u, 0x7fe12345u}})
+      witness("rsq_f32_shared", arch, machine.run(words, test.first, 0, 0, 0xf0), test.second);
+  }
+}
+
+TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
+  // All profiles support F16 input denormals; the shared mapping meets the
+  // stricter 0.51-ULP bound of older RDNA/CDNA profiles.
+  // Finite witness bits are physically qualified on RDNA3/4.
+  for (rj_code_arch_t arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    for (uint32_t mode = 0; mode < 16; ++mode) {
+      const uint32_t raw_mode = 0x30u | ((mode & 3u) << 2) | ((mode >> 2) << 6);
+      for (const auto &test :
+           {std::pair{0x0401u, 0x57ffu}, std::pair{0x7c02u, 0x7e02u}, std::pair{0xfc02u, 0xfe02u},
+            std::pair{0xbc00u, 0xfe00u}, std::pair{0x0001u, (mode & 4u) ? 0x6c00u : 0x7c00u},
+            std::pair{0x8001u, (mode & 4u) ? 0xfe00u : 0xfc00u}}) {
+        witness("rsq_f16_vop1", arch,
+                machine.run(unary_words(arch, 5), test.first, 0, 0, raw_mode) & 0xffffu,
+                test.second);
+        witness("rsq_f16_vop3", arch,
+                machine.run(rsq_f16_vop3_words(arch), test.first, 0, 0, raw_mode) & 0xffffu,
+                test.second);
+      }
+    }
+  }
+}
+
 TEST(ValuFloatingPolicy, F32UnaryQuietsSignalingNaNs) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);

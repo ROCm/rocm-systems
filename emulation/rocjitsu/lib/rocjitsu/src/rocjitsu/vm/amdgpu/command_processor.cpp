@@ -6,6 +6,8 @@
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/graphics_draw.h"
+#include "rocjitsu/vm/amdgpu/graphics_stage.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
@@ -471,6 +473,11 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                       uint32_t global_wg_id,
                                                       uint32_t wf_index_in_wg) {
   using namespace rocr::llvm::amdhsa;
+  if (pkt.graphics_stage) {
+    wf->set_graphics_stage(pkt.graphics_stage);
+    pkt.graphics_stage->initialize(*wf, global_wg_id, wf_index_in_wg);
+    return VmAccessOutcome::Complete;
+  }
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
 
@@ -3091,6 +3098,54 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
   qs.push_entry(std::move(dp));
 }
 
+void CommandProcessor::draw_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                uint32_t vertices, std::vector<uint32_t> indices) {
+  if (!vertices || !queue.pm4->num_instances)
+    return;
+  if (cus_.empty())
+    throw std::runtime_error("graphics draw requires a compute unit");
+  auto draw = std::make_shared<GraphicsDraw>(*queue.pm4, cus_[0]->config().arch, vertices,
+                                             std::move(indices));
+  auto dp = draw->vertex_dispatch();
+  queue.pm4->draw = std::move(draw);
+  dispatch_graphics_pm4(queue, qs, std::move(dp));
+}
+
+void CommandProcessor::dispatch_graphics_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                             DispatchEntry dp) {
+  if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
+    throw std::runtime_error("graphics launch exceeds available VGPRs");
+  dp.kind = DispatchPacketKind::Kernel;
+  dp.dispatch_id = allocate_dispatch_id();
+  dp.process_id = queue.process_id;
+  dp.queue_id = queue.queue_id;
+  dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
+  dp.pm4_abi = true;
+  dp.pm4_failure = queue.pm4->submissions.front().failure;
+  dp.graphics_stage = queue.pm4->draw;
+  dp.address_space = queue.address_space;
+  flush_gpu_caches();
+  util::Logger::cp("graphics dispatch pc=", std::hex, dp.kernel_entry_pc, std::dec,
+                   " workgroups=", dp.total_wgs);
+  KernelDispatchInfo info{};
+  info.dispatch_id = dp.dispatch_id;
+  info.entry_pc = dp.kernel_entry_pc;
+  info.kernel_name = queue.pm4->draw->fragment_stage() ? "PM4 fragment" : "PM4 vertex";
+  info.code_target = cus_[0]->config().target;
+  info.lds_size_bytes = dp.group_segment_fixed_size;
+  info.wave_size = dp.kernel_wave_size;
+  info.grid_size_x = dp.grid_size_x;
+  info.workgroup_size_x = dp.kernel_wave_size;
+  info.grid_size_y = info.grid_size_z = info.workgroup_size_y = info.workgroup_size_z = 1;
+  info.workgroup_count = dp.total_wgs;
+  info.wfs_per_workgroup = 1;
+  info.sgprs_per_wf = dp.sgprs_per_wf;
+  info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuDispatchPacketProcessed(info);
+  ++total_dispatched_;
+  qs.push_entry(std::move(dp));
+}
+
 void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs) {
   queue.faulted = true;
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
@@ -3111,6 +3166,7 @@ void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &q
     if (submission.complete)
       submission.complete(false);
   queue.pm4->submissions.clear();
+  queue.pm4->draw.reset();
 }
 
 void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now) {
@@ -3128,6 +3184,14 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
     const auto access = snapshot_gpu_access(queue.address_space);
     if (!access)
       throw std::runtime_error("PM4 queue has no GPU address space");
+    if (state.draw) {
+      flush_gpu_caches();
+      if (auto dp = state.draw->advance(*access)) {
+        dispatch_graphics_pm4(queue, qs, std::move(*dp));
+        return;
+      }
+      state.draw.reset();
+    }
     // Bound one event's packet work, including IB chains.
     for (uint32_t budget = 0; budget < 4096 && !state.submissions.empty(); ++budget) {
       auto &submission = state.submissions.front();
@@ -3173,16 +3237,19 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         return uint64_t{words[index]} | (uint64_t{words[index + 1]} << 32);
       };
       const uint32_t opcode = (header >> 8) & 0xff;
-      util::Logger::vm("PM4 packet ", std::hex, opcode, std::dec, " words=", count);
+      util::Logger::vm([&](auto &os) {
+        os << "PM4 packet " << std::hex << opcode << " payload:";
+        for (uint32_t word : words)
+          os << ' ' << word;
+      });
+      if ((header & 1) && !state.predicate_pass)
+        continue;
       switch (static_cast<Pm4Opcode>(opcode)) {
       case Pm4Opcode::Nop:
         break;
       case Pm4Opcode::ContextControl:
       case Pm4Opcode::ClearState:
       case Pm4Opcode::PfpSyncMe:
-      case Pm4Opcode::SetContextReg:
-      case Pm4Opcode::SetContextRegPairs:
-      case Pm4Opcode::SetContextRegPairsPacked:
         if (!submission.graphics_engine)
           throw std::runtime_error("graphics state packet on compute engine");
         // Graphics context state is unused by compute shaders. The single CP
@@ -3195,6 +3262,43 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         else if (words.size() < 2)
           throw std::runtime_error("invalid graphics register payload");
         break;
+      case Pm4Opcode::CondExec: {
+        require(4);
+        if ((words[0] & 3) || words[2] || (words[3] & ~0x3fffu) || words[3] > ib.dwords)
+          throw std::runtime_error("invalid COND_EXEC address, control, or extent");
+        flush_gpu_caches();
+        uint32_t value = 0;
+        if (access->read(address(0), {reinterpret_cast<std::byte *>(&value), sizeof(value)}) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 COND_EXEC read failed");
+        if (!value) {
+          ib.address += uint64_t{words[3]} * 4;
+          ib.dwords -= words[3];
+        }
+        break;
+      }
+      case Pm4Opcode::SetPredication: {
+        require(3);
+        const uint32_t operation = (words[0] >> 16) & 7;
+        // Boolean predicates use the common GFX9+ packet layout.
+        // Query accumulation and its CONTINUE/HINT controls are not modeled.
+        if (!submission.graphics_engine || (words[0] & ~0x70100u) ||
+            (operation != 0 && operation != 3 && operation != 4))
+          throw std::runtime_error("unsupported SET_PREDICATION control");
+        state.predicate_pass = true;
+        if (operation) {
+          const size_t bytes = operation == 4 ? 4 : 8;
+          if (address(1) % bytes)
+            throw std::runtime_error("unaligned SET_PREDICATION address");
+          flush_gpu_caches();
+          uint64_t value = 0;
+          if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
+              VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 SET_PREDICATION read failed");
+          state.predicate_pass = (value != 0) == bool(words[0] & (1u << 8));
+        }
+        break;
+      }
       case Pm4Opcode::SetBase:
         require(3);
         if (!submission.graphics_engine || words[0] != 1)
@@ -3236,7 +3340,23 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
           throw std::runtime_error("unsupported COPY_DATA destination");
         flush_gpu_caches();
         uint64_t value = 0;
-        if (source == 5)
+        if (source == 0) {
+          if (!submission.graphics_engine || words[2] || words[1] > 0x3ffff)
+            throw std::runtime_error("unsupported COPY_DATA register source");
+          for (uint32_t i = 0; i < bytes / 4; ++i) {
+            const uint32_t reg = words[1] + i;
+            uint32_t data;
+            if (reg >= 0x2c00 && reg < 0x3000)
+              data = state.sh_registers[reg - 0x2c00];
+            else if (reg >= 0xa000 && reg < 0xc000)
+              data = state.context_registers[reg - 0xa000];
+            else if (reg >= 0xc000 && reg < 0x10000)
+              data = state.uconfig_registers[reg - 0xc000];
+            else
+              throw std::runtime_error("COPY_DATA register outside modeled apertures");
+            value |= uint64_t{data} << (32 * i);
+          }
+        } else if (source == 5)
           value = address(1);
         else if (source == 9)
           value = hsa_system_timestamp();
@@ -3297,25 +3417,37 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         }
         break;
       }
-      case Pm4Opcode::LoadShRegIndex: {
+      case Pm4Opcode::LoadShRegIndex:
+      case Pm4Opcode::LoadContextRegIndex: {
         require(4);
         const uint32_t first = words[2], count = words[3];
+        const std::span<uint32_t> registers = opcode == uint32_t(Pm4Opcode::LoadShRegIndex)
+                                                  ? std::span<uint32_t>(state.sh_registers)
+                                                  : std::span<uint32_t>(state.context_registers);
         // Direct-address mode, contiguous values (no register/value pairs).
-        if ((words[0] & 3) || !count || first >= state.sh_registers.size() ||
-            count > state.sh_registers.size() - first)
-          throw std::runtime_error("unsupported LOAD_SH_REG_INDEX range or mode");
+        if ((words[0] & 3) || !count || first >= registers.size() ||
+            count > registers.size() - first)
+          throw std::runtime_error("unsupported register load range or mode");
         flush_gpu_caches();
-        if (access->read(address(0),
-                         {reinterpret_cast<std::byte *>(state.sh_registers.data() + first),
-                          count * 4}) != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 LOAD_SH_REG_INDEX read failed");
+        if (access->read(address(0), {reinterpret_cast<std::byte *>(registers.data() + first),
+                                      count * 4}) != VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 register load read failed");
         break;
       }
-      case Pm4Opcode::SetShReg: { // SET_SH_REG
-        if (words.size() < 2 || words[0] >= state.sh_registers.size() ||
-            words.size() - 1 > state.sh_registers.size() - words[0])
-          throw std::runtime_error("invalid SET_SH_REG range");
-        std::ranges::copy(words.begin() + 1, words.end(), state.sh_registers.begin() + words[0]);
+      case Pm4Opcode::SetShReg:
+      case Pm4Opcode::SetShRegIndex: {
+        if (words.size() < 2)
+          throw std::runtime_error("invalid shader register payload");
+        const uint32_t index = words[0] >> 28;
+        const uint32_t first = words[0] & 0xffff;
+        // Index 3 applies the KMD CU mask to RSRC3/4. CU affinity does not
+        // change functional shader results; retain the programmed resources.
+        if ((words[0] & 0x0fff0000) ||
+            (index && (opcode != uint32_t(Pm4Opcode::SetShRegIndex) || index != 3)) ||
+            first >= state.sh_registers.size() ||
+            words.size() - 1 > state.sh_registers.size() - first)
+          throw std::runtime_error("invalid shader register range or index");
+        std::copy(words.begin() + 1, words.end(), state.sh_registers.begin() + first);
         break;
       }
       case Pm4Opcode::SetShRegPairs: // SET_SH_REG_PAIRS
@@ -3327,10 +3459,51 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
           state.sh_registers[words[i]] = words[i + 1];
         }
         break;
-      case Pm4Opcode::SetUconfigReg: // SET_UCONFIG_REG: graphics index selection, irrelevant to
-                                     // compute.
-      case Pm4Opcode::SetUconfigRegPairs: // SET_UCONFIG_REG_PAIRS
+      case Pm4Opcode::SetContextReg:
+      case Pm4Opcode::SetContextRegPairs:
+      case Pm4Opcode::SetContextRegPairsPacked:
+      case Pm4Opcode::SetUconfigReg:
+      case Pm4Opcode::SetUconfigRegIndex:
+      case Pm4Opcode::SetUconfigRegPairs: {
+        const bool context = opcode == uint32_t(Pm4Opcode::SetContextReg) ||
+                             opcode == uint32_t(Pm4Opcode::SetContextRegPairs) ||
+                             opcode == uint32_t(Pm4Opcode::SetContextRegPairsPacked);
+        if (context && !submission.graphics_engine)
+          throw std::runtime_error("graphics state packet on compute engine");
+        std::span<uint32_t> registers = context ? std::span<uint32_t>(state.context_registers)
+                                                : std::span<uint32_t>(state.uconfig_registers);
+        const auto write = [&](uint32_t reg, uint32_t value) {
+          if (reg >= registers.size())
+            throw std::runtime_error("graphics register outside aperture");
+          registers[reg] = value;
+        };
+        if (opcode == uint32_t(Pm4Opcode::SetContextRegPairsPacked)) {
+          if (words.empty() || words[0] == 0 || (words[0] & 1) ||
+              uint64_t{words[0]} / 2 * 3 + 1 != words.size())
+            throw std::runtime_error("invalid packed graphics register payload");
+          for (size_t i = 1; i < words.size(); i += 3) {
+            write(words[i] & 0xffff, words[i + 1]);
+            write(words[i] >> 16, words[i + 2]);
+          }
+        } else if (opcode == uint32_t(Pm4Opcode::SetContextRegPairs) ||
+                   opcode == uint32_t(Pm4Opcode::SetUconfigRegPairs)) {
+          if (words.empty() || words.size() % 2)
+            throw std::runtime_error("invalid graphics register pairs");
+          for (size_t i = 0; i < words.size(); i += 2)
+            write(words[i], words[i + 1]);
+        } else {
+          if (words.size() < 2)
+            throw std::runtime_error("invalid graphics register payload");
+          const uint32_t index = words[0] >> 28;
+          const uint32_t first = words[0] & 0xffff;
+          if ((words[0] & 0x0fff0000) || (index && (context || index > 4)))
+            throw std::runtime_error(
+                std::format("unsupported graphics register index {:#x}", words[0]));
+          for (size_t i = 1; i < words.size(); ++i)
+            write(first + i - 1, words[i]);
+        }
         break;
+      }
       case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
         require(7);
         flush_gpu_caches();
@@ -3391,6 +3564,43 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         if (words[2] & (1u << 20))
           submission.buffers.pop_front();
         submission.buffers.push_front({address(0), words[2] & 0xfffff, depth});
+        break;
+      }
+      case Pm4Opcode::NumInstances:
+        require(1);
+        if (!submission.graphics_engine)
+          throw std::runtime_error("NUM_INSTANCES on compute engine");
+        state.num_instances = words[0];
+        break;
+      case Pm4Opcode::DrawIndexAuto:
+        require(2);
+        if (!submission.graphics_engine || words[1] != 2)
+          throw std::runtime_error("unsupported DRAW_INDEX_AUTO initiator");
+        draw_pm4(queue, qs, words[0]);
+        if (!qs.entries.empty())
+          return;
+        break;
+      case Pm4Opcode::DrawIndex2: {
+        require(5);
+        if (!submission.graphics_engine || words[4] || words[3] > (1u << 20))
+          throw std::runtime_error("unsupported DRAW_INDEX_2 initiator or count");
+        const uint32_t type = state.uconfig_registers[0x243] & 3;
+        if (type > 2)
+          throw std::runtime_error("unsupported graphics index type");
+        const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+        const uint32_t valid = std::min(words[0], words[3]);
+        flush_gpu_caches();
+        std::vector<uint8_t> data(valid * bytes);
+        if (!data.empty() && access->read(address(1), std::as_writable_bytes(std::span{data})) !=
+                                 VmAccessOutcome::Complete)
+          throw std::runtime_error("graphics index read failed");
+        std::vector<uint32_t> indices(words[3]);
+        for (uint32_t i = 0; i < valid; ++i)
+          for (uint32_t b = 0; b < bytes; ++b)
+            indices[i] |= uint32_t{data[i * bytes + b]} << (b * 8);
+        draw_pm4(queue, qs, words[3], std::move(indices));
+        if (!qs.entries.empty())
+          return;
         break;
       }
       case Pm4Opcode::DispatchDirect:

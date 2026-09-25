@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/image_filter.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace rocjitsu::amdgpu {
 namespace {
@@ -108,6 +111,93 @@ double round_even(double value) {
   return lo + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0));
 }
 
+constexpr float kFilterNan = std::bit_cast<float>(0xffc00000u);
+
+double filter_float_texels(std::array<double, 4> channels, const std::array<double, 4> &weights,
+                           uint32_t unaligned = 0, uint32_t precision = 12) {
+  double maximum = 0;
+  uint32_t active = 0, selected = 0;
+  bool positive_inf = false, negative_inf = false;
+  for (uint32_t tap = 0; tap < channels.size(); ++tap) {
+    // Zero-weight texels do not contribute even when their value is NaN or infinity.
+    if (weights[tap] == 0) {
+      channels[tap] = 0;
+      continue;
+    }
+    ++active;
+    selected = tap;
+    const double value = channels[tap];
+    if (std::isnan(value))
+      return kFilterNan;
+    positive_inf |= value == std::numeric_limits<double>::infinity();
+    negative_inf |= value == -std::numeric_limits<double>::infinity();
+    maximum = std::max(maximum, std::abs(value));
+  }
+  if (positive_inf && negative_inf)
+    return kFilterNan;
+  if (positive_inf || negative_inf)
+    return negative_inf ? -std::numeric_limits<double>::infinity()
+                        : std::numeric_limits<double>::infinity();
+  if (active == 1)
+    return channels[selected]; // Preserve signed zero at an exact texel center.
+
+  // RDNA3/4 filters align contributing texels to a shared exponent,
+  // truncating toward zero: twelve bits for sRGB/FP16, twenty-five for FP32.
+  const int exponent = maximum > 0 ? std::ilogb(maximum) : 0;
+  const double scale = std::ldexp(1.0, int(precision) - 1 - exponent);
+  for (uint32_t i = 0; i < channels.size(); ++i)
+    if (!(unaligned & (1u << i)))
+      channels[i] = std::trunc(channels[i] * scale) / scale;
+  // Weighted zero sums are positive, including sums of only negative zeros.
+  return 0.0 + channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
+         channels[3] * weights[3];
+}
+
+/// The floating-point footprint accumulator aligns signed operands to 35 bits
+/// before each addition. A carry increases its exponent; cancellation does not
+/// decrease it. Final rounding must retain that exponent as well.
+class ImageFilterAccumulator {
+public:
+  explicit ImageFilterAccumulator(double first) : value(first) {
+    if (std::isfinite(first) && first != 0) {
+      std::frexp(first, &exponent);
+      has_exponent = true;
+    }
+  }
+
+  void add(double term) {
+    if (!std::isfinite(value) || !std::isfinite(term)) {
+      value += term;
+      if (std::isnan(value))
+        value = kFilterNan;
+      return;
+    }
+    if (term != 0) {
+      int term_exponent;
+      std::frexp(term, &term_exponent);
+      exponent = has_exponent ? std::max(exponent, term_exponent) : term_exponent;
+      has_exponent = true;
+    }
+    if (!has_exponent) {
+      value = 0; // Weighted sums of zeros are positive, including only negative zeros.
+      return;
+    }
+    double mantissa =
+        std::floor(std::ldexp(value, 35 - exponent)) + std::floor(std::ldexp(term, 35 - exponent));
+    if (std::abs(mantissa) >= 0x1p35) {
+      mantissa = std::floor(mantissa / 2);
+      ++exponent;
+    }
+    value = std::ldexp(mantissa, exponent - 35);
+  }
+
+  double value;
+  int exponent = 0;
+
+private:
+  bool has_exponent = false;
+};
+
 uint32_t read_bits(std::span<const uint8_t> bytes, uint32_t offset, uint32_t width) {
   uint64_t value = 0;
   for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i)
@@ -194,15 +284,15 @@ uint32_t pack(uint32_t value, uint32_t width, Number n) {
 }
 } // namespace
 
+util::FailureOr<BufferFormat> decode_buffer_format(uint32_t format, BufferFormatEncoding encoding) {
+  return decode(format, encoding);
+}
+
 util::FailureOr<uint32_t> buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding) {
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
     return util::Result::failure();
-  const auto &f = decoded.value();
-  uint32_t bits = 0;
-  for (auto width : f.widths)
-    bits += width;
-  return bits / 8;
+  return decoded.value().byte_size();
 }
 
 namespace {
@@ -302,13 +392,8 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (decoded.failed())
     return util::Result::failure();
   d.decoded_buffer_format = decoded.value();
-  uint32_t bits = 0;
-  for (uint32_t width : d.decoded_buffer_format.widths)
-    bits += width;
-  if (!bits)
-    return false;
-  d.elem_size = bits / 8;
-  return true;
+  d.elem_size = d.decoded_buffer_format.byte_size();
+  return d.elem_size != 0;
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
@@ -350,10 +435,165 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.exec_mask & (1ULL << lane)))
       continue;
-    const auto bytes = d.lane_mask & (1ULL << lane)
-                           ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
-                           : std::span<const uint8_t>{};
-    const auto values = unpack_format(format, d.buffer_selectors, bytes);
+    const auto texel = [&](uint32_t tap) {
+      const bool valid = d.lane_mask & (uint64_t{1} << lane);
+      const bool border =
+          d.image_sample && !(d.image_sample->taps[tap].lane_mask & (uint64_t{1} << lane));
+      const auto bytes = valid && !border
+                             ? std::span(d.response_data)
+                                   .subspan((tap * d.wf_size + lane) * d.elem_size, d.elem_size)
+                             : std::span<const uint8_t>{};
+      auto values = unpack_format(format, d.buffer_selectors, bytes);
+      for (uint32_t i = 0; i < d.buffer_components; ++i) {
+        const uint32_t selector = (d.buffer_selectors >> (3 * i)) & 7;
+        if (border && valid && selector >= 4) {
+          const uint32_t color = d.image_sample->border_color;
+          const bool one = color == 2 || (color == 1 && selector == 7);
+          values[i] = one ? (integer(format.number) ? 1u : 0x3f800000u) : 0;
+        } else if (d.image_srgb && selector >= 4 && selector <= 6) {
+          const float value = std::bit_cast<float>(values[i]);
+          const float linear =
+              value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+          // RDNA3/4 texture decoding rounds sRGB channels to BF16 precision.
+          values[i] = std::bit_cast<uint32_t>(util::bf16_to_f32(util::f32_to_bf16_rne(linear)));
+        }
+        if (d.image_sampling && format.number == Number::Float) {
+          // Before filtering, sampling canonicalizes decoded FP32 NaNs and
+          // flushes subnormals to signed zero, independently of VALU MODE.
+          // Image and buffer loads preserve the decoded texel bits.
+          const uint32_t magnitude = values[i] & 0x7fffffffu;
+          if (magnitude > 0x7f800000u)
+            values[i] = std::bit_cast<uint32_t>(kFilterNan);
+          else if (magnitude < 0x00800000u)
+            values[i] &= 0x80000000u;
+        }
+      }
+      return values;
+    };
+    auto values = texel(0);
+    if (d.image_sample && d.image_sample->tap_count >= 4) {
+      std::array<std::array<uint32_t, 4>, ImageSampleAccess::kMaxTaps> texels{};
+      for (uint32_t tap = 0; tap < d.image_sample->tap_count; ++tap)
+        texels[tap] = texel(tap);
+      for (uint32_t c = 0; c < d.buffer_components; ++c) {
+        const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
+        const bool unorm8 = format.number == Number::Unorm && format.widths[0] == 8 &&
+                            (!d.image_srgb || selector == 7);
+        const auto filter_sample = [&](uint32_t filter_index) {
+          const auto filter_level = [&](uint32_t level) {
+            const double x = d.image_sample->filters[filter_index].fractions[lane][level][0];
+            const double y = d.image_sample->filters[filter_index].fractions[lane][level][1];
+            std::array<double, 4> channels{};
+            const auto &access = *d.image_sample;
+            const uint32_t corners = access.filters[filter_index].cube_corners[lane][level];
+            for (uint32_t tap = 0; tap < 4; ++tap) {
+              const uint32_t first =
+                  filter_index * access.taps_per_filter + (level * 4 + tap) * access.texels_per_tap;
+              const auto channel = [&](uint32_t source) {
+                const double value = std::bit_cast<float>(texels[first + source][c]);
+                return unorm8 ? round_even(value * 255) : value;
+              };
+              channels[tap] = channel(0);
+              if (corners & (1u << tap))
+                channels[tap] =
+                    (channels[tap] * 21846 + channel(1) * 21845 + channel(2) * 21845) / 65536;
+            }
+            const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
+            if (!unorm8)
+              return filter_float_texels(
+                  channels, weights, corners,
+                  format.number == Number::Float && format.widths[0] == 32 ? 25 : 12);
+            return channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
+                   channels[3] * weights[3];
+          };
+          double filtered = filter_level(0);
+          if (d.image_sample->taps_per_filter == 8 * d.image_sample->texels_per_tap) {
+            const double fraction = d.image_sample->mip_fractions[lane];
+            if (unorm8) {
+              // Each weighted mip retains nineteen fractional texel-value bits
+              // before the two contributions are added.
+              filtered = (round_even(std::ldexp(filtered * (1 - fraction), 19)) +
+                          round_even(std::ldexp(filter_level(1) * fraction, 19))) /
+                         std::ldexp(1.0, 19);
+            } else {
+              // Do not multiply an unused mip's NaN/infinity by zero, or lose
+              // signed zero at an exact mip level.
+              if (fraction == 1)
+                filtered = filter_level(1);
+              else if (fraction != 0)
+                filtered = 0.0 + filtered * (1 - fraction) + filter_level(1) * fraction;
+              if (std::isnan(filtered))
+                filtered = kFilterNan;
+            }
+          }
+          return filtered;
+        };
+        const uint32_t filter_count = d.image_sample->filter_counts[lane];
+        double filtered;
+        int accumulation_exponent = 0;
+        if (filter_count > 1) {
+          const auto weighted_filter = [&](uint32_t index) {
+            const double value =
+                filter_sample(index) * image_anisotropic_filter_weight(filter_count, index);
+            // The UNORM accumulator normalizes after summation. Each weighted
+            // contribution retains nineteen fractional texel-value bits.
+            return unorm8 ? round_even(std::ldexp(value * std::bit_floor(filter_count), 19)) /
+                                std::ldexp(1.0, 19)
+                          : value;
+          };
+          filtered = weighted_filter(0);
+          if (unorm8) {
+            for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+              filtered += weighted_filter(filter_index);
+          } else {
+            ImageFilterAccumulator accumulator(filtered);
+            for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+              accumulator.add(weighted_filter(filter_index));
+            filtered = accumulator.value;
+            accumulation_exponent = accumulator.exponent;
+          }
+        } else {
+          filtered = filter_sample(0);
+        }
+        if (unorm8) {
+          // Anisotropic accumulation rounds half up before normalization, then
+          // discards the normalization remainder. A single filter rounds even.
+          const uint64_t rounded_unorm =
+              filter_count > 1 ? static_cast<uint64_t>(std::floor(std::ldexp(filtered, 13) + 0.5)) /
+                                     std::bit_floor(filter_count)
+                               : static_cast<uint64_t>(round_even(std::ldexp(filtered, 13)));
+          // Normalize by byte replication, converting its 34 fractional bits
+          // to FP32 with midpoints rounded up.
+          const uint64_t numerator = rounded_unorm << 13;
+          uint64_t normalized = numerator + (numerator >> 8) + (numerator >> 16) +
+                                (numerator >> 24) + (numerator >> 32);
+          const uint32_t bits = std::bit_width(normalized);
+          const uint32_t shift = bits > 24 ? bits - 24 : 0;
+          if (shift)
+            normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
+          filtered = std::ldexp(static_cast<double>(normalized), static_cast<int>(shift) - 34);
+        } else if (std::isfinite(filtered) && filtered != 0) {
+          const int exponent =
+              filter_count > 1 ? accumulation_exponent : 1 + std::ilogb(std::abs(filtered));
+          if (format.number == Number::Float && format.widths[0] == 32) {
+            // FP32 filtering retains 35 signed significant bits before the
+            // final rounding. Discarding signed low bits rounds downward.
+            const double scale = std::ldexp(1.0, 35 - exponent);
+            filtered = std::floor(filtered * scale) / scale;
+          }
+          // The floating-point filter rounds its result to 29 significant
+          // bits before conversion to FP32. This intermediate rounding can
+          // turn a value on either side of an FP32 midpoint into an exact tie.
+          const double scale = std::ldexp(1.0, 29 - exponent);
+          filtered = round_even(filtered * scale) / scale;
+        }
+        values[c] = std::bit_cast<uint32_t>(static_cast<float>(filtered));
+        // Sampling flushes FP32 underflow at the output as well as the input.
+        if (format.number == Number::Float && format.widths[0] == 32 &&
+            (values[c] & 0x7fffffffu) < 0x00800000u)
+          values[c] &= 0x80000000u;
+      }
+    }
     for (uint32_t reg = 0; reg < registers; ++reg) {
       if (!d.buffer_d16) {
         if (d.lds_dst)

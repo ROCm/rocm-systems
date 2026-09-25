@@ -2095,16 +2095,18 @@ void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     const uint32_t omod =
         amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf);
-    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1),
-                                           static_cast<uint16_t>(rawd), false, false, false, false,
-                                           false, false, wf.fp_round_mode_f16_f64(),
-                                           wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
-                                           amdgpu::floating_clamp_nan_to_zero(wf));
+    uint32_t r0 = amdgpu::fp_mode::fma_f16(
+        static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd),
+        false, false, false, false, false, false, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf),
+        amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     uint32_t r1 = amdgpu::fp_mode::fma_f16(
         static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16),
         static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false,
         wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
-        amdgpu::floating_clamp_nan_to_zero(wf));
+        amdgpu::floating_clamp_nan_to_zero(wf),
+        amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf, vdst, lane,
                                                                  r0 | (r1 << 16));
   }
@@ -2150,16 +2152,18 @@ RJ_NOINLINE void VPkFmacF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     const uint32_t omod =
         amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf);
-    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1),
-                                           static_cast<uint16_t>(rawd), false, false, false, false,
-                                           false, false, wf.fp_round_mode_f16_f64(),
-                                           wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
-                                           amdgpu::floating_clamp_nan_to_zero(wf));
+    uint32_t r0 = amdgpu::fp_mode::fma_f16(
+        static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd),
+        false, false, false, false, false, false, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf),
+        amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     uint32_t r1 = amdgpu::fp_mode::fma_f16(
         static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16),
         static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false,
         wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
-        amdgpu::floating_clamp_nan_to_zero(wf));
+        amdgpu::floating_clamp_nan_to_zero(wf),
+        amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf, vdst, lane,
                                                                  r0 | (r1 << 16));
   }

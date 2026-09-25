@@ -36,11 +36,12 @@ struct WaitCounters {
   uint8_t kmcnt = 0;     ///< Scalar/constant memory count (GFX11+).
   uint8_t tensorcnt = 0; ///< Tensor data mover count (GFX12.5).
   uint8_t asynccnt = 0;  ///< Async global/cluster LDS transfer count (GFX12.5).
+  uint8_t samplecnt = 0; ///< Image sample count (GFX12).
 
   /// @brief Check whether all counters are zero (no outstanding memory ops).
   bool empty() const {
     return vmcnt == 0 && lgkmcnt == 0 && expcnt == 0 && vscnt == 0 && dscnt == 0 && kmcnt == 0 &&
-           tensorcnt == 0 && asynccnt == 0;
+           tensorcnt == 0 && asynccnt == 0 && samplecnt == 0;
   }
 
   /// Storage maxima covering every supported ISA. Architecture-specific
@@ -53,6 +54,7 @@ struct WaitCounters {
   static constexpr uint8_t KMCNT_MAX = 31;
   static constexpr uint8_t TENSORCNT_MAX = 63;
   static constexpr uint8_t ASYNCCNT_MAX = 63;
+  static constexpr uint8_t SAMPLECNT_MAX = 63;
 
   void increment(WaitCounterType type) {
     switch (type) {
@@ -83,6 +85,9 @@ struct WaitCounters {
       break;
     case WaitCounterType::ASYNCCNT:
       asynccnt = std::min<uint8_t>(asynccnt + 1, ASYNCCNT_MAX);
+      break;
+    case WaitCounterType::SAMPLECNT:
+      samplecnt = std::min<uint8_t>(samplecnt + 1, SAMPLECNT_MAX);
       break;
     }
   }
@@ -127,6 +132,10 @@ struct WaitCounters {
       assert(asynccnt > 0 && "ASYNCCNT underflow");
       --asynccnt;
       break;
+    case WaitCounterType::SAMPLECNT:
+      assert(samplecnt > 0 && "SAMPLECNT underflow");
+      --samplecnt;
+      break;
     }
   }
 };
@@ -144,12 +153,13 @@ struct WaitTarget {
   uint8_t kmcnt = WaitCounters::KMCNT_MAX;
   uint8_t tensorcnt = WaitCounters::TENSORCNT_MAX;
   uint8_t asynccnt = WaitCounters::ASYNCCNT_MAX;
+  uint8_t samplecnt = WaitCounters::SAMPLECNT_MAX;
 
   /// @brief Check whether the given counters satisfy all thresholds.
   bool satisfied(const WaitCounters &c) const {
     return c.vmcnt <= vmcnt && c.lgkmcnt <= lgkmcnt && c.expcnt <= expcnt && c.vscnt <= vscnt &&
            c.dscnt <= dscnt && c.kmcnt <= kmcnt && c.tensorcnt <= tensorcnt &&
-           c.asynccnt <= asynccnt;
+           c.asynccnt <= asynccnt && c.samplecnt <= samplecnt;
   }
 };
 

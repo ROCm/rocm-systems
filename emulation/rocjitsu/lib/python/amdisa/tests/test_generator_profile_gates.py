@@ -4470,6 +4470,23 @@ def test_generated_rdna3_5_sendmsg_return_uses_symbolic_disassembly(
     assert 'return std::format("sendmsg({}, 0, 0)", value);' in sendmsg_return
 
 
+def test_gfx11_graphics_sources_use_vgpr_selectors():
+    for profile in (Rdna3Profile(), Rdna3_5Profile()):
+        for source in ('src0', 'src1', 'src2'):
+            assert (
+                profile.normalize_operand_type('ENC_VINTERP', source, 'OPR_VGPR')
+                == 'OPR_SRC_VGPR'
+            )
+        assert (
+            profile.normalize_operand_type('ENC_VINTERP', 'vdst', 'OPR_VGPR')
+            == 'OPR_VGPR'
+        )
+        assert (
+            profile.normalize_operand_type('ENC_DS', 'data0', 'OPR_VGPR') == 'OPR_VGPR'
+        )
+        assert profile.has_gfx11_image_address_extension
+
+
 def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
     rdna3 = Rdna3Profile()
     rdna3_5 = Rdna3_5Profile()
@@ -6356,15 +6373,16 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     rdna4_generated_root: Path,
 ):
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
-
     body = _generated_method_body(vop3, 'VCvtF32F16Vop3', 'VCvtU16F16Vop3')
-
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'float src = util::f16_to_f32(static_cast<uint16_t>(raw));' in body
     assert 'if (inst_.abs & (1u << 0))' in body
-    assert 'src = std::fabs(src);' in body
     assert 'if (inst_.neg & (1u << 0))' in body
-    assert 'std::bit_cast<uint32_t>(src)' in body
+    assert 'util::f16_to_f32' in body
+    assert 'std::fabs(sv)' in body
+    assert 'sv = -sv' in body
+    assert 'amdgpu::fp_mode::cvt_f32_f16' in body
+    assert 'wf.fp_denorm_mode_f16_f64()' in body
+    assert 'wf.ieee_mode()' in body
 
 
 def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(

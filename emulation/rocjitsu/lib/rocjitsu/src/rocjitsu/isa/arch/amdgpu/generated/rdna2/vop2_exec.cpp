@@ -218,7 +218,7 @@ void VFmacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)),
-            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));
+            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));
   }
 }
 

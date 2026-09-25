@@ -87,19 +87,19 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
         std::bit_cast<float>(src0), std::bit_cast<float>(src1),
         std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmaakF32: {
     float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
         std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(src2),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdFmamkF32: {
     float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
         std::bit_cast<float>(src0), std::bit_cast<float>(src2), std::bit_cast<float>(src1),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMulF32: {

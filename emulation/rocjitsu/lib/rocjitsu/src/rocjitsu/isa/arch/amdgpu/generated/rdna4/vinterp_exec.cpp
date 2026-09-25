@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vinterp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -18,27 +19,35 @@ namespace rocjitsu {
 namespace rdna4 {
 
 void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_graphics_interp_f32(wf, inst_.vdst,
+                                      {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u},
+                                      false, inst_.neg, inst_.clamp, inst_.opsel);
 }
 
 void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_graphics_interp_f32(wf, inst_.vdst,
+                                      {inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u},
+                                      true, inst_.neg, inst_.clamp, inst_.opsel);
 }
 
 void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 } // namespace rdna4

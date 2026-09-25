@@ -593,6 +593,7 @@ add_executable(
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
+    cube_instruction_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
@@ -600,6 +601,7 @@ add_executable(
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
+    graphics_export_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     valu_fp_mode_test.cpp
@@ -1879,6 +1881,10 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    GraphicsRegistersRetainAllPacketForms
+    ContextRegisterLoadReadsMemoryAndPreservesAdjacentRegisters
+    ContextRegisterLoadRejectsRangeOverflow
+    MalformedPackedGraphicsRegistersFailFence
     DependencyDefersMemoryWriteAndCompletion
     MalformedPacketFailsCompletion
     FaultedQueueRejectsNewSubmission

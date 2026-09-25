@@ -131,6 +131,8 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
       return WaitCounterKind::Exp;
     case WaitCounterType::ASYNCCNT:
       return WaitCounterKind::Async;
+    case WaitCounterType::SAMPLECNT:
+      return WaitCounterKind::Sample;
     case WaitCounterType::TENSORCNT:
       return WaitCounterKind::Tensor;
     }

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -22,6 +23,9 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -46,6 +50,7 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -71,6 +76,7 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -96,6 +102,7 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -121,6 +128,7 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -146,6 +154,7 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -171,6 +180,12 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -195,6 +210,7 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -220,6 +236,7 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -245,6 +262,7 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -273,6 +291,7 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -303,6 +322,7 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -333,6 +353,7 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -363,6 +384,7 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -393,6 +415,7 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -423,6 +446,7 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -453,6 +477,7 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -483,6 +508,7 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -513,6 +539,7 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -543,6 +570,7 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -573,6 +601,7 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -603,6 +632,7 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -633,6 +663,7 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   src_operands_[2] = &gpumem_in;
   num_src_ = 3;
   num_dst_ = 2;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -660,6 +691,7 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -685,6 +717,7 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -710,6 +743,7 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -735,6 +769,7 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -762,6 +797,9 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -789,6 +827,9 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -816,6 +857,9 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -843,6 +887,9 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -870,6 +917,9 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -897,6 +947,7 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -924,6 +975,7 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -951,6 +1003,7 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -978,6 +1031,7 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1005,6 +1059,7 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1032,6 +1087,7 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1059,6 +1115,7 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1086,6 +1143,7 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1113,6 +1171,7 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1140,6 +1199,7 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1167,6 +1227,7 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1194,6 +1255,7 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1221,6 +1283,7 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1248,6 +1311,7 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1275,6 +1339,7 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1302,6 +1367,7 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1329,6 +1395,7 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1356,6 +1423,7 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1383,6 +1451,7 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1410,6 +1479,7 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1437,6 +1507,7 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1464,6 +1535,7 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1491,6 +1563,7 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1518,6 +1591,7 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1545,6 +1619,7 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1572,6 +1647,9 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1599,6 +1677,7 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1626,6 +1705,7 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1653,6 +1733,7 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1680,6 +1761,7 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1707,6 +1789,7 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1734,6 +1817,7 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1761,6 +1845,7 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1788,6 +1873,7 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1815,6 +1901,7 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1842,6 +1929,7 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1869,6 +1957,7 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1896,6 +1985,7 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1923,6 +2013,7 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1950,6 +2041,7 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1977,6 +2069,7 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2004,6 +2097,7 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2031,6 +2125,7 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2058,6 +2153,7 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2085,6 +2181,7 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2112,6 +2209,7 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2139,6 +2237,7 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2166,6 +2265,7 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2193,6 +2293,7 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2220,6 +2321,7 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2247,6 +2349,7 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2274,6 +2377,7 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

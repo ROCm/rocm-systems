@@ -359,14 +359,14 @@ template <bool Extended, typename Slot>
       U result;
       switch (slot.op) {
       case 0:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, acc->template load_native<float>(base)));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, acc->template load_native<float>(base), wf));
         break;
       case 1:
       case 19:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, cf));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, cf, wf));
         break;
       case 2:
-        result = std::bit_cast<U>(util::stdx::fma(af, cf, bf));
+        result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
         break;
       case 3:
         result = std::bit_cast<U>(af * bf);
@@ -525,7 +525,8 @@ template <bool Vop3, typename Inst>
       return fma_f16_mode_simd(
           (av >> shift) & U(0xffffu), (bv >> shift) & U(0xffffu), (cv >> shift) & U(0xffffu),
           abs & 1, abs & 2, false, neg & 1, neg & 2, false, wf.fp_round_mode_f16_f64(),
-          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     };
     U low = compute(0), high = compute(16);
     dst.template store_native<uint32_t>(base, low | (high << 16), mask);
