@@ -255,8 +255,11 @@ AdjustGridBarrierProblemSize() {
 ExecTest() {
   if [[ "$1" == "buffer_register_symmetric" ]]; then
     local selected_backend="${ROCSHMEM_BACKEND:-${ROCSHMEM_BACKEND_TYPE:-$TEST}}"
-    if [[ "${ROCSHMEM_HEAP_ALLOCATOR_TYPE,,}" != "vmm_posix" ]]; then
-      echo "Skip:   buffer_register_symmetric (set ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix)"
+    local heap_allocator="${ROCSHMEM_HEAP_ALLOCATOR_TYPE:-}"
+    heap_allocator="${heap_allocator,,}"
+    if [[ "$heap_allocator" != "vmm_posix" &&
+          "$heap_allocator" != "vmm_fabric" ]]; then
+      echo "Skip:   buffer_register_symmetric (set ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix or vmm_fabric)"
       return
     fi
   fi
@@ -325,13 +328,9 @@ ExecTest_SLR() {
   if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
     env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
   fi
-  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
-    env_vars+=(
-      "ROCSHMEM_GDA_ENABLE_DMABUF=1"
-    )
-    if [[ "${selected_backend:-}" == gda* ]]; then
-      env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
-    fi
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" &&
+        "${selected_backend:-}" == gda* ]]; then
+    env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
   fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
@@ -474,7 +473,6 @@ ExecTest_MPI() {
     test_env_args+=(
       -x "ROCSHMEM_TEST_UUID=1"
       -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=$ROCSHMEM_HEAP_ALLOCATOR_TYPE"
-      -x "ROCSHMEM_GDA_ENABLE_DMABUF=1"
     )
     if [[ "${selected_backend:-}" == gda* ]]; then
       test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")

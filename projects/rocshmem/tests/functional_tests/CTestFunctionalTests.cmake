@@ -1452,11 +1452,8 @@ function(add_symmetric_buffer_tests)
         return()
     endif()
 
-    # GDA must register VMM-backed memory through dmabuf. In a GDA-only build,
-    # force the NIC path so this test cannot pass through mixed IPC instead.
     set(symmetric_buffer_env
-        "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
-        "ROCSHMEM_GDA_ENABLE_DMABUF=1")
+        "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix")
     if(USE_GDA AND NOT USE_IPC)
         list(APPEND symmetric_buffer_env "ROCSHMEM_DISABLE_MIXED_IPC=1")
     endif()

@@ -28,8 +28,11 @@
 #include <rocshmem/rocshmem.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstdio>
 #include <limits>
+#include <string>
 #include <vector>
 
 using namespace rocshmem;
@@ -64,6 +67,33 @@ __global__ void BufferRegisterSymmetricTest(unsigned char *dest,
 }
 
 #if HIP_VERSION >= 70200000
+bool get_vmm_handle_type(hipMemAllocationHandleType *handle_type) {
+  const char *allocator_env = std::getenv("ROCSHMEM_HEAP_ALLOCATOR_TYPE");
+  if (allocator_env == nullptr) {
+    return false;
+  }
+
+  std::string allocator{allocator_env};
+  std::transform(allocator.begin(), allocator.end(), allocator.begin(),
+                 [](unsigned char c) {
+                   return static_cast<char>(std::tolower(c));
+                 });
+
+  if (allocator == "vmm_posix") {
+    *handle_type = hipMemHandleTypePosixFileDescriptor;
+    return true;
+  }
+
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
+  if (allocator == "vmm_fabric") {
+    *handle_type = hipMemHandleTypeFabric;
+    return true;
+  }
+#endif
+
+  return false;
+}
+
 bool device_supports_vmm(int device_id) {
   int supported = 0;
   CHECK_HIP(hipDeviceGetAttribute(
@@ -73,12 +103,13 @@ bool device_supports_vmm(int device_id) {
 }
 
 bool vmm_alloc(void **ptr, hipMemGenericAllocationHandle_t *handle,
-               size_t requested_size, size_t *allocation_size, int device_id) {
+               size_t requested_size, size_t *allocation_size, int device_id,
+               hipMemAllocationHandleType handle_type) {
   hipMemAllocationProp prop = {};
-  prop.type = hipMemAllocationTypePinned;
+  prop.type = hipMemAllocationTypeUncached;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device_id;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = handle_type;
   prop.allocFlags.gpuDirectRDMACapable = 1;
 
   size_t granularity = 0;
@@ -168,6 +199,16 @@ BufferRegisterSymmetricTester::BufferRegisterSymmetricTester(
   }
 
 #if HIP_VERSION >= 70200000
+  hipMemAllocationHandleType handle_type{};
+  if (!get_vmm_handle_type(&handle_type)) {
+    std::fprintf(stderr,
+                 "[PE %d] buffer_register_symmetric: requires a supported "
+                 "VMM heap allocator (vmm_posix or vmm_fabric)\n",
+                 this->args.myid);
+    rocshmem_global_exit(1);
+    return;
+  }
+
   if (!device_supports_vmm(device_id)) {
     std::fprintf(stderr,
                  "[PE %d] buffer_register_symmetric: GPU does not support "
@@ -178,7 +219,7 @@ BufferRegisterSymmetricTester::BufferRegisterSymmetricTester(
   }
 
   if (!vmm_alloc(&original_, &handle_, requested_size, &allocation_size_,
-                 device_id)) {
+                 device_id, handle_type)) {
     std::fprintf(stderr,
                  "[PE %d] buffer_register_symmetric: VMM allocation failed\n",
                  this->args.myid);
