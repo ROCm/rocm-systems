@@ -365,6 +365,11 @@ ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch(
   return rocshmem::rocshmem_signal_fetch(sig_addr);
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wg(
     const uint64_t *sig_addr) {
   return rocshmem::rocshmem_signal_fetch_wg(sig_addr);
@@ -374,6 +379,10 @@ ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wave(
     const uint64_t *sig_addr) {
   return rocshmem::rocshmem_signal_fetch_wave(sig_addr);
 }
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 ROCSHMEM_DEVICE_API void rocshmem_signal_add(
     uint64_t *sig_addr, uint64_t signal, int pe) {
