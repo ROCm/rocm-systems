@@ -303,6 +303,8 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"MultiNodeRejected_Isolated", 4, 2, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv},
         {"NoSymmetricSupportRejected_Isolated", 4, 1, false, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv},
         {"WrongCtaPolicyRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_DEFAULT, 4096, ncclSum, ncclFloat32, false, baseEnv},
+        {"CombinedZeroPolicyEligible_Isolated", 4, 1, true,
+         NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_EFFICIENCY, 4096, ncclSum, ncclFloat32, true, baseEnv},
         {"CountNotDivisibleByRanksRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4097, ncclSum, ncclFloat32, false, baseEnv},
         // Non-power-of-2 rank counts are eligible too, and are the ones whose
         // staging layout the chunk-layout tests above cover; 4098 = 6 * 683.
@@ -388,12 +390,24 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isol
 
 TEST(RcclCeAllReduceEligibility, StagedUnregisteredRejectsUnsupportedDriver)
 {
+    CeAllReduceMockComm mock;
     const int savedDriverVersion = ncclCudaDriverVersionCache;
     ncclCudaDriverVersionCache = 0;
     EXPECT_FALSE(rcclCeStagedUnregisteredEligible(
-        /*nRanks=*/4, /*msgBytes=*/4096, ncclFloat32, ncclProd,
+        mock.get(), /*msgBytes=*/4096, ncclFloat32, ncclProd,
         /*force=*/true, /*ceArGraphAllowed=*/true, /*ceUsable=*/true));
     ncclCudaDriverVersionCache = savedDriverVersion;
+}
+
+TEST(RcclCeAllReduceEligibility, StagedUnregisteredRejectsReducedLsaTeam)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    CeAllReduceMockComm mock;
+    mock.comm.devrState.lsaSize = mock.comm.nRanks - 1;
+    EXPECT_FALSE(rcclCeStagedUnregisteredEligible(
+        mock.get(), /*msgBytes=*/4096, ncclFloat32, ncclProd,
+        /*force=*/true, /*ceArGraphAllowed=*/true, /*ceUsable=*/true));
 }
 
 // FORCE + unregistered above the 32 MiB staging buffer still takes CE up to
@@ -409,6 +423,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSel
             {
                 CeAllReduceMockComm mock;
                 mock.comm.nRanks = 8;
+                mock.comm.devrState.lsaSize = mock.comm.nRanks;
                 mock.comm.nNodes = 1;
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
