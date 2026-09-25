@@ -588,3 +588,14 @@ and healthy pre/post checks, and clean/fault provenance files match. Evidence:
 `tp1-decode-cap-default-{clean,fault}`. The emulator-only workload lock is
 confirmed in each result, allowing independent CPU simulations to run in
 parallel while physical GPU jobs retain the global lock. Next test `high`.
+
+### PyTorch norm/softmax publication fault review
+
+Retained native norm ELF `596cff9a6cd4b098` has a block-X reduction at
+`.text+0x2ef5c8/0x2ef5e8`. The matched rocprofv3 trace records workgroup
+64x8x1: each 64-thread row writes its partial, then threads 0..31 read
+partials from threads 32..63 after this pair. This is a cross-wave dependency
+and the 64-wide launch necessarily executes the first reduction iteration.
+The spec removes this pair only and predeclares eight trials per mode.
+Evidence: `norm-reduce-pristine.asm`, `norm-review-images`, and
+`discovery-pytorch-matched/pytorch-norm-softmax/trace-0/hocher/373598_kernel_trace.csv`.

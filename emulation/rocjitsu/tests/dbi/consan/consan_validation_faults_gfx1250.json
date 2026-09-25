@@ -548,6 +548,55 @@
           }
         }
       ]
+    },
+    "pytorch-norm-softmax": {
+      "faults": [
+        {
+          "id": "barrier-drop-norm-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh inventory ELF 596cff9a6cd4b098 matches the retained native NormTwoOps kernel. The matched rocprofv3 trace records workgroup 64x8x1 for the maintained 8x1024 vector-norm input. In norm-reduce-pristine.asm (.text VMA 0x52000), the block-X reduction stores each thread partial at VMA 0x34159c, then the first loop iteration publishes at .text+0x2ef5c8/0x2ef5e8 before reading the partial from thread_x+32 at VMA 0x3415fc. With block X=64, thread x=0 and its producer x=32 are in different waves, and this first iteration is necessarily reached. Drop only this pair, preserving the later reduction-completion and Y/global-reduction barriers. Eight independent trials per mode and minimum six detections are predeclared before outcomes."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:596cff9a6cd4b098|kernel=_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOpIfNS0_10NormTwoOpsIfffLb1EEEjfLi4ELi4EEEEEvT1_|kind=barrier|pc=0x00000000002ef5c8|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:596cff9a6cd4b098|kernel=_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOpIfNS0_10NormTwoOpsIfffLb1EEEjfLi4ELi4EEEEEvT1_|event=barrier|pc=0x00000000002ef5c8|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:596cff9a6cd4b098|kernel=_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOpIfNS0_10NormTwoOpsIfffLb1EEEjfLi4ELi4EEEEEvT1_|event=barrier|pc=0x00000000002ef5e8|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
