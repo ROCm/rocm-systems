@@ -1136,11 +1136,12 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
 
       queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
       std::atomic_thread_fence(std::memory_order_release);
-      queue->Submit();
+      if (queue->Submit() != HSA_STATUS_SUCCESS) break;
 
       // Wait for GPU to complete this IB before submitting the next.
       uint64_t expected_fence = queue->rptr_next;
-      while (*queue->GetSyncAddr() < expected_fence) {
+      volatile uint64_t* fence_addr = queue->GetSyncAddr();
+      while (*fence_addr < expected_fence) {
         std::this_thread::yield();
       }
     }
@@ -1179,11 +1180,10 @@ void SDMAQueue::RingDoorbell(uint64_t value) {
   thread_cond_lock_.lock();
 
   wptr_queue_.emplace_back(wptr_pre_, wptr_next_);
+  wptr_pre_ = wptr_next_;
   thread_cond_.notify_one();
 
   thread_cond_lock_.unlock();
-
-  wptr_pre_ = wptr_next_;
 }
 
 hsa_status_t SDMAQueue::Init(void) {
