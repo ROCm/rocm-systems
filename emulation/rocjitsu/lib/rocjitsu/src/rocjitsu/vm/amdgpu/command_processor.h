@@ -40,6 +40,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -124,7 +126,7 @@ public:
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
     // maintenance does not flush the same L2 twice.
-    if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
+    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end())
       l2_caches_.push_back(l2);
   }
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
@@ -145,6 +147,10 @@ public:
 
   using ScratchBackingAllocator =
       std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
+  /// Ensure the requested pool is backed before each shard admits its first wave.
+  /// Requests may repeat or overlap: preserve existing storage and mappings,
+  /// including live spills, and allocate only missing ranges. Wave admission
+  /// still validates the access permissions of each wave's slice afterward.
   void set_scratch_backing_allocator(ScratchBackingAllocator cb) {
     scratch_allocator_ = std::move(cb);
   }
@@ -155,6 +161,9 @@ public:
   void set_scratch_wave_divisor(uint32_t se_per_xcc) {
     scratch_wave_divisor_ = se_per_xcc == 0 ? 1 : se_per_xcc;
   }
+
+  /// @brief Configure scratch-backed wave slots independently of CU execution slots.
+  void set_scratch_slots_per_cu(uint32_t slots);
 
   /// @brief Tell this CP where its XCD sits among the SoC's XCDs.
   ///
@@ -190,11 +199,8 @@ public:
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
 
-  /// @brief Identify this CP's XCC in the device-wide scratch allocation.
-  void set_scratch_xcc_layout(uint32_t xcc_id, uint32_t xcc_count) {
-    scratch_xcc_id_ = xcc_id;
-    scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
-  }
+  /// @brief Override this CP's scratch XCC layout in a standalone unit test.
+  void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
   uint64_t register_queue(AqlQueueConfig queue);
@@ -238,8 +244,17 @@ public:
   /// @brief Reconfigure only the queue incarnation identified by @p registration_id.
   [[nodiscard]] bool update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                uint32_t ring_size, uint32_t queue_percentage);
-  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
+                                 bool resolve_exception = false);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool publish_interrupt = true);
+  /// @brief Publish a prepared queue exception without entering any CU.
+  /// @details The caller must first stop every queue replica with
+  /// signal_queue_exception(..., false). This operation is safe to serialize
+  /// under a driver status-publication mutex because it cannot flush CU
+  /// notifications back into the driver.
+  bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
     if (completion_) {
@@ -256,10 +271,12 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
+    if (configured_scratch_slots_per_cu_ != 0)
+      cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
     scratch_shader_engine_count_ =
         std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
     scratch_waves_per_se_ =
-        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->scratch_slots_per_cu());
     cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_gpu_vm(gpu_vm_);
@@ -337,7 +354,7 @@ public:
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == aql_queues_.end() ? std::nullopt
@@ -351,7 +368,7 @@ public:
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue == aql_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
@@ -446,7 +463,7 @@ public:
   [[nodiscard]] bool queue_debug_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     std::vector<AqlQueueRecord>::iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue != aql_queues_.end() && queue->debug_suspended;
@@ -455,7 +472,7 @@ public:
   [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     std::vector<AqlQueueRecord>::iterator queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
+        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
     return queue != aql_queues_.end() && queue->runtime_suspended;
@@ -485,11 +502,25 @@ public:
     drain_fanout_inbox();
   }
 
+  [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != aql_queues_.end() && queue->exception_suspended;
+  }
+
   /// @brief Test-only count of executed command-processor doorbell passes.
   [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
     return doorbell_handle_count_.load(std::memory_order_relaxed);
   }
   bool schedule_retry_event_for_test() { return schedule_retry_event(); }
+
+  /// @brief Override the wall-clock ROCr acknowledgment deadline in timeout tests.
+  void set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds timeout) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    runtime_exception_ack_timeout_ = timeout;
+  }
 
 private:
   friend class CommandProcessorCloseTestAccess;
@@ -952,11 +983,15 @@ private:
   bool scan_doorbells();
   bool schedule_retry_event();
 
+  static constexpr std::chrono::milliseconds kRuntimeExceptionAckTimeout{1000};
+  // Protected by hw_queue_mutex_; each publication snapshots its deadline.
+  std::chrono::milliseconds runtime_exception_ack_timeout_ = kRuntimeExceptionAckTimeout;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
   uint32_t scratch_shader_engine_count_ = 1;
   uint32_t scratch_waves_per_se_ = 1;
+  uint32_t configured_scratch_slots_per_cu_ = 0;
   uint32_t scratch_xcc_id_ = 0;
   uint32_t scratch_xcc_count_ = 1;
   std::unique_ptr<CompletionTracker> completion_;

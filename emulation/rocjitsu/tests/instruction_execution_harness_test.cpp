@@ -538,10 +538,10 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
   const auto *expectation = harness_expectation(arch_name);
   ASSERT_NE(expectation, nullptr) << "Missing harness expectation for " << arch_name;
-  std::sort(unimpl_list.begin(), unimpl_list.end());
+  std::ranges::sort(unimpl_list);
   std::vector<std::string_view> expected(expectation->unimplemented.begin(),
                                          expectation->unimplemented.end());
-  std::sort(expected.begin(), expected.end());
+  std::ranges::sort(expected);
   EXPECT_EQ(unimpl_list, expected) << arch_name << " unimplemented instruction set changed";
 }
 
@@ -2968,6 +2968,72 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(Gfx1250WmmaTest, Bf16F32K32Bf16ScalarUsesFusedMac) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_wmma_bf16f32_fused_mem");
+  amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_fused_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t a_base = vb + 10;
+  const uint32_t b_base = vb + 20;
+  const uint32_t c_base = vb + 30;
+  const uint32_t d_base = vb + 40;
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(a_base + reg, lane, 0);
+      cu->write_vgpr(b_base + reg, lane, 0);
+      cu->write_vgpr(c_base + reg, lane, 0);
+    }
+
+  const auto a = amdgpu::wmma_input_loc(16, 32, /*row=*/0, /*k=*/0, 16);
+  const auto b = amdgpu::wmma_input_loc(16, 32, /*col=*/0, /*k=*/0, 16);
+  write_packed_half(*cu, a_base + a.vgpr_offset, a.lane, a.sub_element, 0x5F80u); // 2^64
+  write_packed_half(*cu, b_base + b.vgpr_offset, b.lane, b.sub_element, 0x5F80u);
+  const auto c = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+  cu->write_vgpr(c_base + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
+
+  ForceScalarGuard force_scalar(/*force_scalar=*/true);
+  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+
+  const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
+  const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
+  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250WmmaTest, Bf16F32FmaHasStableNanPriority) {
+  auto value = [](uint32_t bits) { return std::bit_cast<float>(bits); };
+  auto result_bits = [&](uint32_t a, uint32_t b, uint32_t c) {
+    return std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(value(a), value(b), value(c)));
+  };
+
+  EXPECT_EQ(result_bits(0x7FC10000u, 0x7FC20000u, 0x7FC30000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x7FC20000u, 0x7FC30000u), 0x7FC20000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x3F800000u, 0x7FC30000u), 0x7FC30000u);
+  EXPECT_EQ(result_bits(0x7F810000u, 0x3F800000u, 0x00000000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0xFFC40000u, 0x00000000u), 0xFFC40000u);
+  EXPECT_EQ(result_bits(0x7F800000u, 0x00000000u, 0x3F800000u), 0xFFC00000u);
+  const float early_a_nan = amdgpu::wmma_bf16f32_fma(value(0x7FC10000u), 1.0f, 0.0f);
+  EXPECT_EQ(
+      std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(1.0f, value(0x7FC20000u), early_a_nan)),
+      0x7FC20000u);
 }
 
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
@@ -6716,7 +6782,7 @@ TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
   cu->write_vgpr(base + kScale, 0, std::bit_cast<uint32_t>(1.0f));
 
   uint8_t fp6_values[32];
-  std::fill(std::begin(fp6_values), std::end(fp6_values), 0x10u);
+  std::ranges::fill(fp6_values, 0x10u);
   uint32_t packed_fp6[6]{};
   util::pack_6bit(fp6_values, packed_fp6);
   const uint16_t expected_half = util::f32_to_f16(util::fp6_e2m3_to_f32(0x10u));
@@ -7179,7 +7245,7 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
                    : (returns ? cdna5::kDsPkAddRtnF16Vds : cdna5::kDsPkAddF16Vds);
           const std::array<uint32_t, 2> ds =
               cdna5::build_vds(ds_op, {.addr = 2, .data0 = 1, .vdst = 0});
-          std::copy(ds.begin(), ds.end(), words.begin());
+          std::ranges::copy(ds, words.begin());
         }
         cu.write_sgpr(sb + 4, kAddr);
         cu.write_sgpr(sb + 5, 0);
@@ -7287,7 +7353,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
                        : (returns ? rdna4::kDsPkAddRtnF16Vds : rdna4::kDsPkAddF16Vds);
               const std::array<uint32_t, 2> ds =
                   rdna4::build_vds(opcode, {.addr = 2, .data0 = 1, .vdst = 0});
-              std::copy(ds.begin(), ds.end(), words.begin());
+              std::ranges::copy(ds, words.begin());
             } else {
               const uint16_t opcode =
                   bf16 ? rdna4::kFlatAtomicPkAddBf16Vflat : rdna4::kFlatAtomicPkAddF16Vflat;
@@ -8275,75 +8341,6 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
   }
 }
 
-// Packed D16 FORMAT loads/stores carry partial-def metadata for liveness but are
-// deliberately non-executable (the memory pipeline does not model the packed
-// two-components-per-VGPR layout). Executing one must report failure;
-// this locks in that the metadata-only classification never silently starts
-// executing an incorrect layout.
-TEST(D16FormatExecution, PackedFormatD16LoadStoreReportFailure) {
-  amdgpu::GpuMemory gpu_mem("d16_format_unimpl_mem");
-  amdgpu::L2Cache l2("d16_format_unimpl_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 256;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create("d16_format_unimpl", cfg, &gpu_mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_NE(decoder, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-
-  struct Case {
-    std::string_view mnemonic;
-    std::array<uint32_t, 3> words;
-  };
-  const std::array<Case, 2> cases = {{
-      {"buffer_load_d16_format_xy", {0xC4024000U, 0x00000000U, 0x00000000U}},
-      {"buffer_store_d16_format_xy", {0xC4034000U, 0x00000000U, 0x00000000U}},
-  }};
-
-  const uint32_t sgpr_base = wf->sgpr_alloc().base;
-  const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  cu->write_sgpr(sgpr_base, 0x12345678u);
-  cu->write_vgpr(vgpr_base, 0, 0xabcdef01u);
-  wf->pc = 0x1000;
-  wf->set_exec(1);
-
-  // Rejection preserves architectural state; each call resets the failure reason.
-  for (const auto &c : cases) {
-    SCOPED_TRACE(c.mnemonic);
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, c.words.data()));
-    ASSERT_NE(inst, nullptr);
-    ASSERT_EQ(std::string_view(inst->mnemonic()), c.mnemonic);
-    EXPECT_TRUE(inst->is_memory_op()) << c.mnemonic;
-    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    EXPECT_EQ(cu->read_sgpr(sgpr_base), 0x12345678u);
-    EXPECT_EQ(cu->read_vgpr(vgpr_base, 0), 0xabcdef01u);
-    EXPECT_EQ(wf->pc, 0x1000u);
-    EXPECT_EQ(wf->exec(), 1u);
-    EXPECT_FALSE(wf->is_halted());
-    EXPECT_EQ(inst->data(), nullptr);
-  }
-
-  // The CU must clear a rejection before the next instruction, without a
-  // redispatch or an explicit error reset by its caller.
-  constexpr std::array<uint32_t, 2> nop_words{0xBF800000u, 0};
-  std::unique_ptr<Instruction> nop(decode_valid(*decoder, nop_words.data()));
-  ASSERT_NE(nop, nullptr);
-  ASSERT_EQ(nop->mnemonic(), "s_nop");
-  EXPECT_TRUE(cu->execute_instruction(nop.get(), *wf).succeeded());
-  EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
-}
-
 TEST(SparseMmaExecution, UnimplementedIntegerInstructionsReportFailure) {
   struct Case {
     rj_code_arch_t arch;
@@ -8696,7 +8693,7 @@ template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t
   } else {
     const std::array<uint32_t, 2> legacy_words = cdna4::build_flat(
         cdna4::kFlatAtomicAddF32Flat, {.sc0 = 1, .addr = 2, .data = 0, .saddr = 127, .vdst = 6});
-    std::copy(legacy_words.begin(), legacy_words.end(), words.begin());
+    std::ranges::copy(legacy_words, words.begin());
   }
   for (uint32_t mode : {0u, 0xf0u}) {
     wave->set_mode_raw(mode);

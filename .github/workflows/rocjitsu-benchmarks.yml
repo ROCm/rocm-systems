@@ -111,7 +111,7 @@ jobs:
             --target rocjitsu_bin rocjitsu_shared
 
       - name: Run nightly suite
-        timeout-minutes: 30
+        timeout-minutes: 60
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |

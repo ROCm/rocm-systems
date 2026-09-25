@@ -516,9 +516,7 @@ public:
   }
 
   [[nodiscard]] const LatticeValue *find(uint16_t pair_lo) const {
-    const auto it =
-        std::lower_bound(entries_.begin(), entries_.end(), pair_lo,
-                         [](const Entry &entry, uint16_t key) { return entry.first < key; });
+    const auto it = std::ranges::lower_bound(entries_, pair_lo, {}, &Entry::first);
     return it != entries_.end() && it->first == pair_lo ? &it->second : nullptr;
   }
 
@@ -2351,17 +2349,13 @@ class RestoredSgprFacts {
 public:
   [[nodiscard]] const StashedPcHalf *find(uint16_t sgpr) const {
     const Storage &current = values();
-    const auto it =
-        std::lower_bound(current.begin(), current.end(), sgpr,
-                         [](const Entry &entry, uint16_t value) { return entry.sgpr < value; });
+    const auto it = std::ranges::lower_bound(current, sgpr, {}, &Entry::sgpr);
     return it != current.end() && it->sgpr == sgpr ? &it->half : nullptr;
   }
 
   void set(uint16_t sgpr, StashedPcHalf half) {
     const Storage &current = values();
-    const auto found =
-        std::lower_bound(current.begin(), current.end(), sgpr,
-                         [](const Entry &entry, uint16_t value) { return entry.sgpr < value; });
+    const auto found = std::ranges::lower_bound(current, sgpr, {}, &Entry::sgpr);
     const size_t index = static_cast<size_t>(found - current.begin());
     if (found != current.end() && found->sgpr == sgpr) {
       if (found->half == half)
@@ -2377,9 +2371,7 @@ public:
   void erase(uint16_t sgpr) {
     if (!values_)
       return;
-    const auto found =
-        std::lower_bound(values_->begin(), values_->end(), sgpr,
-                         [](const Entry &entry, uint16_t value) { return entry.sgpr < value; });
+    const auto found = std::ranges::lower_bound(*values_, sgpr, {}, &Entry::sgpr);
     if (found == values_->end() || found->sgpr != sgpr)
       return;
     const size_t index = static_cast<size_t>(found - values_->begin());

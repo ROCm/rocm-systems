@@ -23,6 +23,7 @@ enum class AtomicOp : uint8_t {
   SUB,            ///< Atomic subtract (mem - data).
   SUB_CLAMP,      ///< Unsigned subtraction, clamped to zero on underflow.
   COND_SUB,       ///< Unsigned subtraction, retaining memory on underflow.
+  WRAP,           ///< Subtract if nonnegative; otherwise add the second operand.
   RSUB,           ///< Atomic reverse subtract (data - mem).
   SMIN,           ///< Signed minimum.
   UMIN,           ///< Unsigned minimum.

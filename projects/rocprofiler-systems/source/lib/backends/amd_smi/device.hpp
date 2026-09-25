@@ -182,7 +182,10 @@ public:
     // sdma_supported == false so callers need no #ifdef.
     [[nodiscard]] bool probe_sdma_gpu_support() const noexcept
     {
-        if constexpr(sdma_supported) return m_session->probe_sdma_support(m_handle);
+        if constexpr(sdma_supported)
+        {
+            return m_session->probe_sdma_support(m_handle);
+        }
         return false;
     }
 
@@ -193,7 +196,9 @@ public:
             std::uint64_t cumulative = 0;
             auto          procs      = m_session->get_gpu_process_list(m_handle);
             for(const auto& proc : procs)
+            {
                 cumulative += proc.sdma_usage;
+            }
             return cumulative;
         }
         return 0;
@@ -213,7 +218,10 @@ public:
     {
         typename Backend::nic_port_info_t raw{};
         m_session->get_nic_port_info(m_handle, &raw);
-        if(raw.num_ports == 0) return {};
+        if(raw.num_ports == 0)
+        {
+            return {};
+        }
         return { raw.ports[0].netdev };
     }
 
@@ -221,7 +229,10 @@ public:
     {
         auto raw = std::make_unique<typename Backend::nic_rdma_devices_info_t>();
         m_session->get_nic_rdma_dev_info(m_handle, raw.get());
-        if(raw->num_rdma_dev == 0) return { 0 };
+        if(raw->num_rdma_dev == 0)
+        {
+            return { 0 };
+        }
         return { raw->rdma_dev_info[0].num_rdma_ports };
     }
 
@@ -231,7 +242,10 @@ public:
         std::uint32_t count = 0;
         m_session->get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &count, nullptr);
 
-        if(count == 0) return {};
+        if(count == 0)
+        {
+            return {};
+        }
 
         std::vector<typename Backend::nic_stat_t> raw_stats(count);
         m_session->get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &count,
@@ -240,7 +254,9 @@ public:
         std::vector<nic::stat_entry> result;
         result.reserve(count);
         for(const auto& stat : raw_stats)
+        {
             result.emplace_back(nic::stat_entry{ stat.name, stat.value });
+        }
         return result;
     }
 #endif

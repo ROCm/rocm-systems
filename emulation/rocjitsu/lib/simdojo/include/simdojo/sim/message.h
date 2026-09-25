@@ -137,7 +137,7 @@ public:
     if (entries_.size() >= capacity_)
       return false;
     entries_.push_back(std::move(msg));
-    std::push_heap(entries_.begin(), entries_.end(), ptr_greater);
+    std::ranges::push_heap(entries_, ptr_greater);
     return true;
   }
 
@@ -145,7 +145,7 @@ public:
   /// @returns The message with the smallest arrival tick.
   std::unique_ptr<Message> pop() {
     assert(!entries_.empty());
-    std::pop_heap(entries_.begin(), entries_.end(), ptr_greater);
+    std::ranges::pop_heap(entries_, ptr_greater);
     auto msg = std::move(entries_.back());
     entries_.pop_back();
     return msg;

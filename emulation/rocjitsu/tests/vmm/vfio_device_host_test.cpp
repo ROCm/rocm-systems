@@ -451,7 +451,8 @@ TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchan
   source.fill(std::byte{0xc3});
   EXPECT_EQ(served.host().write_outcome(kGuestAddress + kWindowSize - kTransferSize / 2, source),
             simdojo::DmaAccessOutcome::Faulted);
-  EXPECT_TRUE(std::equal(before.begin(), before.end(), bytes + kWindowSize - before.size()))
+  EXPECT_TRUE(
+      std::ranges::equal(before, std::span(bytes + kWindowSize - before.size(), before.size())))
       << "a failed physical write must not modify the reachable window's prefix";
 
   ASSERT_EQ(::munmap(mapping, kWindowSize), 0);

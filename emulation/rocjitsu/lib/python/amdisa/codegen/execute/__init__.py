@@ -405,7 +405,7 @@ def _register_handlers() -> None:
         c.src_ops,
         c.cls,
         opsel_exprs=c.opsel_exprs,
-        replicate_inline=c.arch_name == 'rdna4',
+        arch_name=c.arch_name,
     )
     DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
     DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)

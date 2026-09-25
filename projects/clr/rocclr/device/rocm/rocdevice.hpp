@@ -531,7 +531,7 @@ class Device : public NullDevice {
   virtual void DestroyHwEvent(void* hw_event) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
-  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;

@@ -315,6 +315,8 @@ parse:
         - WILL_FAIL
         - UNSTABLE
         - DISABLED_CODECOV
+        - DISABLED_NO_KFD
+        - WSL_TIMEOUT_SCALE
       kwargs:
         TARGET: '*'
         WORKING_DIRECTORY: '*'
@@ -340,6 +342,7 @@ parse:
         - WILL_FAIL
         - UNSTABLE
         - DISABLED_CODECOV
+        - DISABLED_NO_KFD
         - STRIP_PARAM_BRACKETS
         - INCLUDE_FILE_NAME
         - BUNDLE_TESTS
@@ -380,6 +383,10 @@ parse:
         PASS_REGEX: '*'
         APP_EXTRA_FLAGS: '*'
         ROCPROFV3_EXTRA_FLAGS: '*'
+    rocprofiler_add_invalid_yaml_test:
+      kwargs:
+        NAME: '*'
+        ERROR_REGEX: '*'
   override_spec: {}
   vartags: []
   proptags: []

@@ -42,22 +42,36 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     {
         auto _env_val = get_env(itr.c_str(), std::string{});
         for(auto vitr : rocprofsys::delimit(_env_val, ":"))
-            if(!vitr.empty()) _paths.emplace_back(vitr);
+        {
+            if(!vitr.empty())
+            {
+                _paths.emplace_back(vitr);
+            }
+        }
     }
 
     for(const std::string& itr : _hints)
     {
-        if(!itr.empty()) _paths.emplace_back(itr);
+        if(!itr.empty())
+        {
+            _paths.emplace_back(itr);
+        }
     }
 
     for(auto& itr : _paths)
     {
         auto _v = fmt::format("{}/{}", itr, _name);
-        if(path::is_regular_file(_v)) return _v;
+        if(path::is_regular_file(_v))
+        {
+            return _v;
+        }
         for(const auto& litr : _path_suffixes)
         {
             _v = fmt::format("{}/{}/{}", itr, litr, _name);
-            if(path::is_regular_file(_v)) return _v;
+            if(path::is_regular_file(_v))
+            {
+                return _v;
+            }
         }
     }
 
@@ -99,7 +113,10 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
         }
     }
 
-    if(_open) open();
+    if(_open)
+    {
+        open();
+    }
 }
 
 dynamic_library::~dynamic_library() { close(); }
@@ -123,7 +140,10 @@ dynamic_library::open()
 int
 dynamic_library::close() const
 {
-    if(handle) return dlclose(handle);
+    if(handle)
+    {
+        return dlclose(handle);
+    }
     return -1;
 }
 

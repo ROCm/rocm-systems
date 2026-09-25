@@ -12,6 +12,7 @@
 /// These functions are templated on the machine instruction type so they work
 /// with any ISA family whose encoding struct exposes the required field names.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -27,6 +28,39 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
 
+/// Mark each in-range DWORD separately so partial buffer loads zero only the
+/// out-of-range destinations. Byte and halfword loads use one destination DWORD.
+inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint64_t bound) {
+  if (!state)
+    return;
+  state->load_dword_mask = 0;
+  for (uint32_t i = 0; i < state->num_dwords; ++i) {
+    const int64_t part = offset + i * 4;
+    if (part >= 0 && static_cast<uint64_t>(part) < bound)
+      state->load_dword_mask |= 1u << i;
+  }
+}
+
+/// Scalar buffer resource layout shared by GFX9 and RDNA: a 48-bit base,
+/// 14-bit stride and 32-bit record count. Stride affects bounds, not the address.
+inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t selector,
+                                                     uint64_t base, int64_t offset,
+                                                     ScalarMemState *state, uint64_t align_mask = 3,
+                                                     uint64_t size_align_mask = 0) {
+  auto records = try_read_scalar_selector(wf, selector + 2);
+  if (!records)
+    return std::nullopt;
+  const uint64_t stride = (base >> 48) & 0x3fff;
+  scalar_buffer_load_mask(state, offset, (*records * (stride ? stride : 1)) & ~size_align_mask);
+  return buffer_virtual_address(base + offset) & ~align_mask;
+}
+
+/// @brief Scalar-buffer load opcode families (GFX9/RDNA through GFX11, then GFX12).
+constexpr bool smem_is_buffer_load_op(uint32_t op) { return op >= 8 && op <= 12; }
+constexpr bool gfx12_smem_is_buffer_load_op(uint32_t op) {
+  return (op >= 16 && op <= 21) || (op >= 24 && op <= 27);
+}
+
 /// @brief GFX9 SMEM s_scratch_{load,store}_dword{,x2,x4} opcodes.
 constexpr bool smem_is_scratch_op(uint32_t op) {
   return (op >= 5 && op <= 7) || (op >= 21 && op <= 23);
@@ -41,7 +75,8 @@ constexpr bool smem_is_scratch_op(uint32_t op) {
 ///
 /// Requires: inst.op, inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
 template <typename SmemInst>
-std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
+std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf,
+                                               ScalarMemState *state = nullptr) {
   constexpr uint64_t kDwordMask = ~0x3ULL;
   auto base = amdgpu::try_read_scalar_selector64(wf, inst.sbase * 2);
   if (!base)
@@ -61,6 +96,8 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
     reg_offset = *value;
   }
   reg_offset = smem_is_scratch_op(inst.op) ? reg_offset * 64 : reg_offset & kDwordMask;
+  if (smem_is_buffer_load_op(inst.op))
+    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;

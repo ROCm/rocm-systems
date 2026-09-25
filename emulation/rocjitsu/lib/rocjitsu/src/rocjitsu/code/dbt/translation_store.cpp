@@ -361,10 +361,9 @@ namespace {
   if (path.size() < 2 || path.front() != '/' || path.find('\0') != std::string_view::npos)
     return false;
   const auto components = path_components(path);
-  return !components.empty() &&
-         std::none_of(components.begin(), components.end(), [](const std::string &component) {
-           return component == "." || component == "..";
-         });
+  return !components.empty() && std::ranges::none_of(components, [](const std::string &component) {
+    return component == "." || component == "..";
+  });
 }
 
 /// @brief Which owners a directory the store relies on may have.

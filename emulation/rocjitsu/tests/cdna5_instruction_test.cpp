@@ -43,7 +43,7 @@ public:
     for (const auto *wf : wavefronts)
       workgroups.push_back(wf->wg_id());
     std::ranges::sort(workgroups);
-    workgroups.erase(std::unique(workgroups.begin(), workgroups.end()), workgroups.end());
+    workgroups.erase(std::ranges::unique(workgroups).begin(), workgroups.end());
     resolution.workgroup_ids = std::move(workgroups);
     std::lock_guard<std::mutex> lock(mutex_);
     resolutions_.push_back(std::move(resolution));

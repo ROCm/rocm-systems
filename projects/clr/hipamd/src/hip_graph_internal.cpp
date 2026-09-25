@@ -528,10 +528,10 @@ void GraphExecSegmented::BuildSyncPlan() {
 
     auto& firstBatch = segBatch.packet_batches[0];
 
-    // Prepend barrier packets for segments with dependencies.
-    // Optimization: when there is exactly 1 dependency and the first captured
-    // packet is an ext kernel dispatch, embed the dep_signal directly into
-    // that packet instead of creating a separate barrier.
+    // Prepend wait packets for segments with dependencies. A single dependency
+    // is handled by the cheapest form the device offers: embedded in the first
+    // captured packet's dep_signal when that packet is an ext kernel dispatch,
+    // else a barrier-value packet, else a barrier-AND.
     if (!barrier_dep_indices.empty()) {
       int num_deps = static_cast<int>(barrier_dep_indices.size());
       bool use_ext_dep = false;
@@ -556,14 +556,17 @@ void GraphExecSegmented::BuildSyncPlan() {
              sync_plan_.seg_to_hw_event[barrier_dep_indices[0]],
              amd::Device::HwEventPatch::kExtDispatchDepSignal});
       } else {
+        // One barrier packet holds up to five dependencies. A packet that
+        // carries exactly one is a barrier-value packet on devices that
+        // support it; CreateBarrierPacket makes that choice.
         int barrier_count = (num_deps + 4) / 5;
 
         for (int b = 0; b < barrier_count; ++b) {
-          uint8_t* barrier_pkt = device->CreateBarrierPacket();
-          sync_plan_.barrier_packets.push_back(barrier_pkt);
-
           int start_dep = b * 5;
           int end_dep = std::min(start_dep + 5, num_deps);
+          uint8_t* barrier_pkt = device->CreateBarrierPacket(end_dep - start_dep);
+          sync_plan_.barrier_packets.push_back(barrier_pkt);
+
           for (int d = start_dep; d < end_dep; ++d) {
             sync_plan_.patch_list.push_back(
                 {barrier_pkt, nullptr,
