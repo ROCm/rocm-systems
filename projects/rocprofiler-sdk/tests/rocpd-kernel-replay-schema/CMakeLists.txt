@@ -19,6 +19,7 @@ set(rocpd-kernel-replay-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-r
 rocprofiler_add_integration_execute_test(
     rocpd-kernel-replay-schema-test
     COMMAND ${Python3_EXECUTABLE} -c "pass"
+    DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 10
     LABELS "integration-tests;rocpd;kernel-replay"
     FIXTURES_SETUP rocpd-kernel-replay-schema)
