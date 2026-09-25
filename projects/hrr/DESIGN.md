@@ -1438,7 +1438,9 @@ is made and not only when someone tries to replay it. The exclusions are:
   in the recording process; there is nothing to call at replay.
 - **Host nodes in a graph** — `hipGraphAddHostNode`, `hipGraphHostNodeSetParams`,
   `hipGraphExecHostNodeSetParams`: the same function pointer reached through the graph
-  API, which is why a graph containing one is refused at instantiate.
+  API. Like every exclusion these stop the replay at the call itself. Under
+  `--continue-on-error` the replay goes on, so the handler also marks the owning graph
+  incomplete, and instantiating that graph is then refused rather than run short a node.
 - **Cross-process handle import** — `hipMemImportFromShareableHandle`,
   `hipMemPoolImportFromShareableHandle`. The exported fd or HANDLE is meaningful only
   inside the exporting process and its peers, which a later replay is not.

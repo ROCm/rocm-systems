@@ -2347,8 +2347,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     A pointee too large for its fixed-size field is clipped. The warning alone
     is not enough: AMD_LOG_LEVEL defaults to 0, so nothing durable would record
     that the payload is partial and replay would treat it as faithful. Each
-    truncation therefore also calls note_unreplayable(), which lists the API
-    under manifest.unreplayable_apis where replay can see it.
+    truncation therefore also calls note_unreplayable(), which lists the API,
+    with the clipped argument as the reason, under manifest.unreplayable_apis
+    where replay can see it.
 
     note_unreplayable(), not mark_incomplete(): the event is written and the
     archive stays well-formed — only the clipped argument makes the call
@@ -3220,8 +3221,11 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
         reason = UNREPLAYABLE_PLAYBACK_APIS[entry.name]
         gparam = _graph_param(entry)
-        # A graph that was supposed to contain this node is now short one, and
-        # the place that matters is instantiation, not here.
+        # Unlike ERROR_STUB_PLAYBACK_APIS this returns an error, so by default
+        # the replay stops right here. Under --continue-on-error it goes on,
+        # and the graph that should hold this node is now short one: marking
+        # it makes the later instantiate refuse it instead of running a graph
+        # missing work.
         mark = (f"  const auto* a = reinterpret_cast<const {sname}*>(payload);\n"
                 f"  ctx.mark_graph_incomplete(a->{gparam}, \"{entry.name}\");\n"
                 if gparam else "  (void)payload;\n")
