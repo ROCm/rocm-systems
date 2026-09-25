@@ -317,7 +317,7 @@ The ``--preload`` option works alongside existing ``LD_PRELOAD`` settings:
 
 The profiler appends its own tool and SDK libraries after any user-supplied and pre-existing entries. When ``--marker-trace`` is active, ``librocprofiler-sdk-roctx.so`` is appended last as well.
 
-In attach mode (``--pid``), the target process is already running, so ``--preload`` and the tool and SDK libraries are not added to ``LD_PRELOAD``. Marker tracing still appends ``librocprofiler-sdk-roctx.so``.
+In attach mode (``--pid``), the target process is already running and receives the tool through the attachment mechanism rather than ``LD_PRELOAD``, so ``--preload`` and the tool and SDK libraries are not added. ``LD_PRELOAD`` still applies to the ``rocprof-attach`` helper that ``rocprofv3`` launches, and marker tracing appends ``librocprofiler-sdk-roctx.so`` to it.
 
 **Troubleshooting:**
 
