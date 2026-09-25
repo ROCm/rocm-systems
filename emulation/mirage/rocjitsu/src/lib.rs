@@ -911,11 +911,15 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         .as_u64()
         .filter(|value| *value <= u64::from(u32::MAX))
         .map_or(agent.vm.gpu.device.gfx_target_version, |value| value as u32);
-    sim["thread_allocations"] = serde_json::to_value(target_thread_allocations(
-        gfx_target_version,
-        topology.gpus_per_node,
-    ))
-    .map_err(|error| MirageError::Other(format!("rocjitsu thread allocations: {error}")))?;
+    // Target allocation tables are defaults. A profile or imported agent
+    // that supplies one is choosing its own scheduling policy.
+    if sim.get("thread_allocations").is_none() {
+        sim["thread_allocations"] = serde_json::to_value(target_thread_allocations(
+            gfx_target_version,
+            topology.gpus_per_node,
+        ))
+        .map_err(|error| MirageError::Other(format!("rocjitsu thread allocations: {error}")))?;
+    }
 
     // Multi-partition RCCL collectives currently hang on multi-GPU VMs.
     // Serial dispatch also avoids the measured small-collective slowdown.
@@ -1099,8 +1103,10 @@ fn missing_config_fields(
     config: &serde_json::Value,
     expected_config: Option<&serde_json::Value>,
 ) -> Vec<String> {
-    let skeleton =
-        serde_json::json!({"vm": {"arch": "", "gpu": {"device": {}}}, "topology": {"root": {}}});
+    let skeleton = serde_json::json!({
+        "vm": {"arch": "", "gpu": {"device": {}}},
+        "topology": {"root": {}}
+    });
     let expected = expected_config.unwrap_or(&skeleton);
     let mut missing = Vec::new();
     for key in ["vm", "topology"] {
@@ -1878,6 +1884,39 @@ mod tests {
         );
         assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
         assert_eq!(json["num_threads"], 1);
+    }
+
+    #[test]
+    fn supplied_thread_allocations_survive_validation_and_emission() {
+        for source in ["agent", "profile"] {
+            let custom = serde_json::json!([{
+                "num_threads": 1,
+                "cpu_dispatch_threads": 1,
+                "async_helper_threads": 0
+            }]);
+            let mut agent =
+                mirage_builtin::agents::agent("mi350x").expect("builtin mi350x agent");
+            let mut def = def_with_gpus(1);
+            if source == "agent" {
+                agent
+                    .extra
+                    .insert("thread_allocations".into(), custom.clone());
+            } else {
+                def.extra
+                    .insert("thread_allocations".into(), custom.clone());
+            }
+            if let MaybeRef::Owned(topology) = &mut def.topology {
+                topology.agent = MaybeRef::Owned(agent);
+            }
+
+            check_config(&def).unwrap();
+
+            let tmp = tempfile::tempdir().unwrap();
+            let config = kmd_config(&def, tmp.path()).unwrap();
+            let json: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
+            assert_eq!(json["thread_allocations"], custom, "{source}");
+        }
     }
 
     #[test]
