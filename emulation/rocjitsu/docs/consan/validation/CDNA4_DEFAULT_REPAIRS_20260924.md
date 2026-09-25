@@ -185,3 +185,18 @@ gfx950 tests, and 285 hook tests. Artifacts are `cpu-lanes-v1.xml`,
 `lane-retention-unit.log`, `physical-lanes-v1.xml`, `hooks-lanes-v1.xml`, and
 `tensile-gfx950-lds-positive/max-lanes-v1-banks-64/` under the repair root.
 The frozen candidate hook is recorded in `hook-lanes-v1.json`.
+
+The follow-up scales lane groups with the bank budget: 64/128/256/512 banks
+retain up to 8/16/32/64 lane representatives per wave, with at least eight wave
+buckets. This addresses softmax's peer reads in lanes 0–7, which an eight-group
+partition can still collapse onto lane 0. A first refinement exposed systematic
+aliasing of sparse wave IDs in the smaller owner table; folding high owner bits
+restores both two- and three-dimensional cross-wave emulator regressions.
+The corrected candidate passes all 3,325 existing CPU/emulator tests, the expanded
+lane-group regression, and all 436 physical tests (`cpu-lanes-v3.xml`,
+`lane-retention-v3-unit.log`, `lane-retention-v3-sparse-owner.log`, and
+`physical-lanes-v3.xml`). Its immutable hook is pinned in `hook-lanes-v3.json`.
+Fresh external clean rechecks and prospective fault matrices are running. The
+superseded comparison controllers stop after their current eight-trial batches;
+all completed evidence remains retained, including the rejected intermediate
+candidate's two emulator failures.

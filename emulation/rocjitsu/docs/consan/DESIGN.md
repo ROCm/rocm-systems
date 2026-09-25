@@ -431,10 +431,13 @@ protocol. A locally proven uniform address can also retain the participating
 lane mask, allowing the host to diagnose collisions within one instruction.
 
 On CDNA4, tables with at least 64 banks and no atomic-publication journal
-partition each wave bucket into eight lane groups (lanes 0–7, 8–15, and so on).
-Access and barrier probes use the same partition. This retains up to eight
-representatives per wave rather than letting every lane compete for one slot.
-The total bank count and allocation remain fixed; the tradeoff is fewer buckets
+partition each wave bucket into contiguous lane groups. Tables of 64, 128,
+256, and 512 banks retain up to 8, 16, 32, and 64 lane representatives per wave,
+respectively. At least eight wave buckets remain; larger tables add wave buckets.
+Access and barrier probes use the same partition. This prevents every lane from competing for one slot.
+High wave-owner bits are folded into the reduced bucket index so sparse owners
+do not systematically alias. The total bank count and allocation remain fixed;
+the tradeoff is fewer buckets
 for distinct wave/workgroup identities. Smaller tables and atomic-publication
 paths retain the owner-only mapping.
 
