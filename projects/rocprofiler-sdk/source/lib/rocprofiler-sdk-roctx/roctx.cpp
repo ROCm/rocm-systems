@@ -52,9 +52,11 @@ namespace common = ::rocprofiler::common;
 using common::static_buffer_size;
 using atomic_roctx_range_id_t = std::atomic<roctx_range_id_t>;
 
-constexpr auto    atomic_range_id_size_v     = static_buffer_size<atomic_roctx_range_id_t>();
-thread_local auto nested_range_level_buffer  = std::array<std::byte, static_buffer_size<int>()>{};
-auto              start_stop_range_id_buffer = std::array<std::byte, atomic_range_id_size_v>{};
+constexpr auto atomic_range_id_size_v = static_buffer_size<atomic_roctx_range_id_t>();
+alignas(int) thread_local auto nested_range_level_buffer =
+    std::array<std::byte, static_buffer_size<int>()>{};
+alignas(atomic_roctx_range_id_t) auto start_stop_range_id_buffer =
+    std::array<std::byte, atomic_range_id_size_v>{};
 
 auto&
 get_nested_range_level()
