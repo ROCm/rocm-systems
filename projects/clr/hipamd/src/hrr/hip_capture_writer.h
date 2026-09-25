@@ -73,16 +73,18 @@ bool is_incomplete();
 
 // Record that `api` was captured but cannot be replayed faithfully — the call
 // is in the archive, its effect is not reproducible (a host callback belonging
-// to this process, a handle only meaningful to another rank, ...). Warns once
-// per API at capture time, so the gap is visible when the recording is made
-// rather than only when someone tries to replay it, and lists the API under
-// "unreplayable_apis" in manifest.json.
+// to this process, a handle only meaningful to another rank, an argument
+// truncated at capture, ...). Warns once per distinct (api, reason) at capture
+// time, so the gap is visible when the recording is made rather than only when
+// someone tries to replay it, and lists it in manifest.json as
+// "unreplayable_apis": {"<api>": ["<reason>", ...]}. Both strings are
+// JSON-escaped on write, so any text is safe to pass.
 //
 // Deliberately NOT mark_incomplete(): that means an event was dropped or torn
 // and suppresses the clean-shutdown trailer. Here every event is present and
 // the archive is well-formed; what is missing is the ability to re-execute
-// this particular call. Thread-safe; the warning fires once per API per
-// process.
+// this particular call. Thread-safe; the warning fires once per (api, reason)
+// per process.
 void note_unreplayable(const char* api, const char* reason);
 
 // Write a buffer as a content-addressed blob. Returns hash.

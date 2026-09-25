@@ -35,6 +35,7 @@
 #include <cstring>
 #include <cerrno>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -221,7 +222,10 @@ static std::unordered_set<std::string> g_written_blobs;
 // Listed in manifest.json so the gap is a property of the archive rather than
 // something only visible in a replay log.
 static std::mutex                      g_unreplayable_mu;
-static std::set<std::string>           g_unreplayable_apis;
+// api -> distinct reasons it was noted for. One API can be unreplayable for
+// several reasons (e.g. a different truncated argument on different calls),
+// and each is worth reporting.
+static std::map<std::string, std::set<std::string>> g_unreplayable_apis;
 
 // ---------------------------------------------------------------------------
 // Low-level fd helpers
@@ -509,13 +513,21 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
   {
     std::lock_guard<std::mutex> lk(g_unreplayable_mu);
     if (!g_unreplayable_apis.empty()) {
-      fprintf(mf, ",\n  \"unreplayable_apis\": [");
-      bool first = true;
-      for (const auto& api : g_unreplayable_apis) {
-        fprintf(mf, "%s\"%s\"", first ? "" : ", ", api.c_str());
-        first = false;
+      fprintf(mf, ",\n  \"unreplayable_apis\": {");
+      bool first_api = true;
+      for (const auto& [api, reasons] : g_unreplayable_apis) {
+        fprintf(mf, "%s\n    \"%s\": [", first_api ? "" : ",",
+                metadata::json_escape(api.c_str()).c_str());
+        bool first_reason = true;
+        for (const auto& reason : reasons) {
+          fprintf(mf, "%s\"%s\"", first_reason ? "" : ", ",
+                  metadata::json_escape(reason.c_str()).c_str());
+          first_reason = false;
+        }
+        fprintf(mf, "]");
+        first_api = false;
       }
-      fprintf(mf, "]");
+      fprintf(mf, "\n  }");
     }
   }
   if (g_metadata_json_len > 0) {
@@ -772,9 +784,10 @@ bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxe
 
 void note_unreplayable(const char* api, const char* reason) {
   if (!api) return;
+  if (!reason) reason = "(unspecified)";
   {
     std::lock_guard<std::mutex> lk(g_unreplayable_mu);
-    if (!g_unreplayable_apis.insert(api).second) return;
+    if (!g_unreplayable_apis[api].insert(reason).second) return;
   }
   // Warning, not Error: unlike mark_incomplete() the archive is well-formed and
   // every event is present — only the ability to re-execute this one call is
@@ -783,7 +796,7 @@ void note_unreplayable(const char* api, const char* reason) {
   LogPrintfWarning(
       "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
       "replay will report it as unreplayable rather than reproduce it",
-      api, reason ? reason : "(unspecified)");
+      api, reason);
 }
 
 void flush(const char* /*output_dir*/) {
