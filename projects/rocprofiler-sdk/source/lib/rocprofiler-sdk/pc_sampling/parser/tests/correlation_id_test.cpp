@@ -413,3 +413,86 @@ TEST(pcs_parser, multi_buffer)
     pcs_parser_multi_buffer<rocprofiler_pc_sampling_record_host_trap_v0_t>();
     pcs_parser_multi_buffer<rocprofiler_pc_sampling_record_stochastic_v0_t>();
 }
+
+/**
+ * Regression test for AIPROFSDK-1154.
+ *
+ * The trap-correlation-id lookup in add_upcoming_samples() legitimately fails for samples
+ * that cannot be tied to any tracked dispatch (e.g. blit-kernel / self-modifying-code
+ * samples). That is intentional: such samples are still published, just with
+ * Dispatch_Id == 0 and Correlation_Id == 0 (see PR #878 "PC Sampling - blit kernels
+ * handling"). Deliberately dropping every sample that hits this path would silently
+ * regress that feature.
+ *
+ * On gfx942 (MI300A), a fraction of samples arrive with the same "no known correlation"
+ * signature, but their contents (hw_id, workgroup_id, exec_mask, timestamp) are leftover/
+ * uninitialized hardware memory rather than a real measurement. Every single one of these
+ * genuinely-corrupt samples has bit 63 of the timestamp set (i.e. is negative when read as
+ * signed), which a real timestamp can never be. This test verifies that samples are
+ * distinguished by that signal: a negative-timestamp sample is dropped (size == 0), while an
+ * otherwise-identical, merely-uncorrelated sample with a normal timestamp is preserved.
+ */
+template <typename PcSamplingRecordT>
+void
+pcs_parser_negative_timestamp_dropped()
+{
+    auto buffer = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+
+    // Neither sample below corresponds to a registered dispatch, so both take the
+    // correlation-lookup exception path inside add_upcoming_samples().
+    buffer->genUpcomingSamples(2);
+
+    packet_union_t uncorrelated_but_real;
+    ::memset(&uncorrelated_but_real, 0, sizeof(uncorrelated_but_real));
+    uncorrelated_but_real.snap.pc                 = 0xbadd;
+    uncorrelated_but_real.snap.correlation_id     = 0xdeadbeef;  // never registered
+    uncorrelated_but_real.snap.timestamp          = 123456789ULL;  // plausible, non-negative
+    uncorrelated_but_real.snap.perf_snapshot_data = 0x1;  // stochastic "valid" bit
+    buffer->submit(uncorrelated_but_real);
+
+    packet_union_t garbage_slot;
+    ::memset(&garbage_slot, 0, sizeof(garbage_slot));
+    garbage_slot.snap.pc                 = 0xbadd;
+    garbage_slot.snap.correlation_id     = 0xdeadbeef;  // never registered
+    garbage_slot.snap.timestamp          = 0x8000000000000001ULL;  // sign bit set
+    garbage_slot.snap.perf_snapshot_data = 0x1;  // stochastic "valid" bit
+    buffer->submit(garbage_slot);
+
+    // Both samples take the correlation-lookup exception path, so parse_buffer() is expected
+    // to report PCSAMPLE_STATUS_PARSER_ERROR (this is how blit-kernel samples are normally
+    // surfaced; it is not treated as fatal by callers). We can't use
+    // MockRuntimeBuffer::get_parsed_buffer()/CHECK_PARSER here since those abort on anything
+    // other than PCSAMPLE_STATUS_SUCCESS.
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
+    auto                                                 status =
+        parse_buffer((generic_sample_t*) buffer->packets.data(),
+                     buffer->packets.size(),
+                     GFXIP_MAJOR,
+                     GFXIP_MINOR,
+                     alloc_callback<PcSamplingRecordT>,
+                     (void*) &all_allocations);
+    EXPECT_EQ(status, PCSAMPLE_STATUS_PARSER_ERROR);
+
+    ASSERT_EQ(all_allocations.size(), 1);
+    ASSERT_EQ(all_allocations[0].second, 2);
+
+    const auto& uncorrelated = all_allocations[0].first[0];
+    const auto& garbage      = all_allocations[0].first[1];
+
+    // Legitimate uncorrelated ("blit kernel") sample: kept, with the existing sentinel
+    // values, i.e. NOT invalidated by this fix.
+    EXPECT_NE(uncorrelated.size, 0u);
+    EXPECT_EQ(uncorrelated.dispatch_id, 0u);
+    EXPECT_EQ(uncorrelated.correlation_id.internal, ROCPROFILER_CORRELATION_ID_INTERNAL_NONE);
+
+    // Genuinely corrupt trap slot (negative timestamp): must be dropped.
+    EXPECT_EQ(garbage.size, 0u);
+
+    delete[] all_allocations[0].first;
+}
+
+TEST(pcs_parser, negative_timestamp_dropped)
+{
+    pcs_parser_negative_timestamp_dropped<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_negative_timestamp_dropped<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}

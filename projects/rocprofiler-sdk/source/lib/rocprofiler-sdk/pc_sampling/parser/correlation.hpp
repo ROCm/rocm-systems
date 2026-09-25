@@ -244,6 +244,19 @@ add_upcoming_samples(const device_handle     device,
         // skip invalid samples
         if(pc_sample.size == 0) continue;
 
+        // A trap-handler slot that was never (fully) written by hardware before we read it
+        // carries leftover/uninitialized memory rather than a real measurement. We have
+        // observed such slots exclusively on gfx942 (MI300A), and every single one of them
+        // has bit 63 of the timestamp set, i.e. it decodes to a negative time when read as
+        // signed - something a real timestamp can never be. Treat that as a hardware-level
+        // "this slot is garbage" marker and drop the sample now, before we try to correlate
+        // it to a dispatch or code object (both of which are meaningless for such a slot).
+        if(static_cast<int64_t>(pc_sample.timestamp) < 0)
+        {
+            pc_sample.size = 0;
+            continue;
+        }
+
         // Correct PC address of the original sample (if needed) prior to decoding it.
         auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);
 
