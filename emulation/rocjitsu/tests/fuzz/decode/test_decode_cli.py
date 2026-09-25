@@ -45,6 +45,23 @@ class DecodeCliTest(unittest.TestCase):
             self.assertEqual(process.returncode, 2)
             self.assertIn("exactly 16 bytes", process.stderr)
 
+    def test_replay_preserves_concrete_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            sample = Path(temporary) / "gfx1251_only.bin"
+            sample.write_bytes(struct.pack("<4I", 0x7E083AFA, 0xFF015002, 0, 0))
+
+            gfx1251 = self.run_decoder(
+                "--input", str(sample), "--json", "--target", "gfx1251"
+            )
+            self.assertEqual(gfx1251.returncode, 0, gfx1251.stderr)
+            self.assertEqual(json.loads(gfx1251.stdout)["mnemonic"], "v_mov_b64_e32")
+
+            gfx1250 = self.run_decoder(
+                "--input", str(sample), "--json", "--target", "gfx1250"
+            )
+            self.assertEqual(gfx1250.returncode, 0, gfx1250.stderr)
+            self.assertEqual(json.loads(gfx1250.stdout)["status"], "invalid")
+
     def test_rejects_non_amdgpu_target(self):
         process = self.run_decoder("--emit-seeds", "unused", "--target", "risc-v")
         self.assertEqual(process.returncode, 2)
@@ -69,6 +86,17 @@ class DecodeCliTest(unittest.TestCase):
             second = self.run_decoder("--emit-seeds", str(seeds), "--target", "gfx950")
             self.assertEqual(second.returncode, 2)
             self.assertIn("not empty", second.stderr)
+
+    def test_emits_gfx1251_seeds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            seeds = Path(temporary) / "seeds"
+            process = self.run_decoder(
+                "--emit-seeds", str(seeds), "--target", "gfx1251"
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            files = list(seeds.iterdir())
+            self.assertGreater(len(files), 100)
+            self.assertTrue(all(path.stat().st_size == 16 for path in files))
 
 
 if __name__ == "__main__":

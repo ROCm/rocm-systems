@@ -5,6 +5,7 @@
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
+#include "test_paths.h"
 
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
@@ -19,6 +20,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -35,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -86,6 +89,14 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+bool replace_exactly_once(std::string &text, std::string_view from, std::string_view to) {
+  const size_t offset = text.find(from);
+  if (offset == std::string::npos || text.find(from, offset + from.size()) != std::string::npos)
+    return false;
+  text.replace(offset, from.size(), to);
+  return true;
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
@@ -1405,6 +1416,7 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
     ]}})";
 
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1250);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
@@ -1419,16 +1431,27 @@ TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
 }
 
 TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
-  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
-    "device":{"gfx_target_version":120501}}}})";
-  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
-}
+  std::ifstream base(test::config_path("gfx1251_synthetic.json"));
+  ASSERT_TRUE(base.is_open());
+  const std::string gfx1251_config((std::istreambuf_iterator<char>(base)),
+                                   std::istreambuf_iterator<char>());
+  ASSERT_NO_THROW((void)config::load_config_from_string(gfx1251_config, rocjitsu::kEmbeddedSchema));
 
-TEST(ConfigLoaderTest, RejectsGfx1251SimulationUntilExecutionIsImplemented) {
-  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1251"}})";
-  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
+  std::string gfx1250_config = gfx1251_config;
+  ASSERT_TRUE(
+      replace_exactly_once(gfx1250_config, R"("target": "gfx1251")", R"("target": "gfx1250")"));
+  ASSERT_TRUE(replace_exactly_once(gfx1250_config, "120501", "120500"));
+  ASSERT_NO_THROW((void)config::load_config_from_string(gfx1250_config, rocjitsu::kEmbeddedSchema));
+
+  std::array<std::string, 2> mismatches{gfx1251_config, gfx1251_config};
+  ASSERT_TRUE(
+      replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
+  ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
+  for (const std::string &json : mismatches) {
+    EXPECT_THAT([&] { (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema); },
+                testing::ThrowsMessage<std::runtime_error>(
+                    "vm target does not match device.gfx_target_version"));
+  }
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
@@ -1586,6 +1609,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_NE(legacy_config, nullptr);
   EXPECT_FALSE(
       flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM));
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_SCRATCH_SLOTS_PER_CU));
   ASSERT_NE(checkpoint->compute_units(), nullptr);
   ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
   EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
@@ -1594,6 +1619,45 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
+  EXPECT_EQ(cu->scratch_slots_per_cu(), cu->num_wf_slots());
+}
+
+TEST(CheckpointTest, RoundTripsCdna5ScratchCapacity) {
+  auto source =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
+  ASSERT_EQ(source_cu->num_wf_slots(), 64u);
+  ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
+  ASSERT_EQ(source_cu->scratch_scoreboard_base(), 480u);
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-scratch-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *stored_cu = fb::GetSimulationCheckpoint(bytes.data())
+                              ->config()
+                              ->vm()
+                              ->gpu()
+                              ->xcd()
+                              ->shader_engine()
+                              ->compute_unit();
+  ASSERT_NE(stored_cu, nullptr);
+  EXPECT_EQ(stored_cu->scratch_slots_per_cu(), 32u);
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_EQ(restored.soc()->num_xcds(), 8u);
+  for (auto *xcd : restored.soc()->xcds()) {
+    auto *cp = xcd->command_processor();
+    ASSERT_NE(cp, nullptr);
+    const auto &cus = cp->compute_units();
+    ASSERT_EQ(cus.size(), 32u);
+    for (const auto *cu : cus) {
+      EXPECT_EQ(cu->num_wf_slots(), 64u);
+      EXPECT_EQ(cu->scratch_slots_per_cu(), 32u);
+    }
+    EXPECT_EQ(cus[15]->scratch_scoreboard_base(), 480u);
+    EXPECT_EQ(cus[16]->scratch_scoreboard_base(), 0u);
+  }
 }
 
 TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
@@ -2067,6 +2131,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   wf->set_status_raw(kStatus);
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   wf->set_wave_sched_mode_raw(kWaveSchedMode);
+  wf->arm_setreg_vgpr_msb_hazard();
   ASSERT_TRUE(wf->fp16_ovfl());
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
@@ -2098,6 +2163,9 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(restored_wf->status_raw(), kStatus);
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
+  EXPECT_TRUE(restored_wf->setreg_vgpr_msb_hazard());
+  EXPECT_TRUE(restored_wf->consume_setreg_vgpr_msb_hazard());
+  EXPECT_FALSE(restored_wf->consume_setreg_vgpr_msb_hazard());
   EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 

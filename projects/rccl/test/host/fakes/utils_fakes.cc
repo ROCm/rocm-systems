@@ -24,9 +24,26 @@ thread_local struct ncclThreadSignal ncclThreadSignalLocalInstance = {};
 
 // busId helpers referenced by transports (e.g. p2p.cc) but only faked here for
 // microtest binaries that do not link the real utils.cc. Sensible defaults.
-ncclResult_t busIdToInt64(const char* /*busId*/, int64_t* id)
+// Parse the PCI bus-id string the same way src/misc/utils.cc does, so tests
+// that hand p2pCanConnect device-distinct bus strings (via the
+// g_hipDeviceGetPCIBusId hook) resolve distinct busIdToCudaDev indices.
+// (The old stub always returned 0, collapsing every device to index 0.)
+ncclResult_t busIdToInt64(const char* busId, int64_t* id)
 {
-    if (id) *id = 0;
+    if (!id) return ncclSuccess;
+    char hexStr[17];
+    int hexOffset = 0;
+    for (int i = 0; busId && hexOffset < (int)sizeof(hexStr) - 1; i++) {
+        char c = busId[i];
+        if (c == '\0') break;
+        if (c == '.' || c == ':') continue;
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))
+            hexStr[hexOffset++] = c;
+        else
+            break;
+    }
+    hexStr[hexOffset] = '\0';
+    *id = std::strtol(hexStr, nullptr, 16);
     return ncclSuccess;
 }
 

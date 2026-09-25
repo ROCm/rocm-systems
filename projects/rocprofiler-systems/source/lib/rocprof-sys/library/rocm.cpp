@@ -12,14 +12,11 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocm
+namespace rocprofsys::rocm
 {
 std::vector<hardware_counter_info>
 rocm_events()
 {
     return rocprofiler_sdk::get_rocm_events_info();
 }
-}  // namespace rocm
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocm

@@ -33,8 +33,9 @@ registry. The optional architecture and GPU bindings connect it to RocJITsu's
 closed public enums, offload-bundle processor names, and ELF machine values.
 
 One ISA family may bind multiple concrete targets to a variant-aware decoder
-factory. Each binding carries immutable instruction-feature and execution
-capabilities, and the descriptor names an explicit architecture-only default:
+factory. Each binding carries immutable instruction-feature, target-behavior,
+and execution capabilities, and the descriptor names an explicit
+architecture-only default:
 
 ```cpp
 std::unique_ptr<rocjitsu::Decoder>
@@ -146,6 +147,21 @@ ID, alias, integrated architecture enum, or integrated GPU target. Use
 `find_gpu_target()` when target-level capability or identity is required;
 family-level `supports_execution` does not imply that every concrete binding
 implements execution.
+
+Generated instruction-feature masks answer whether a concrete target may use
+an instruction or encoding form. Provider-authored behavioral capabilities
+select semantics that differ within an otherwise shared ISA implementation,
+such as a target-specific hardware fixup. Keep those capabilities disabled by
+default and enable them explicitly on affected bindings; consumers query the
+binding instead of branching on a GPU name. Execution capability remains
+independent of both: a model-only binding may expose target legality and
+behavior for analysis without advertising simulator execution.
+
+Once a code-analysis caller selects a concrete target, that selection remains
+authoritative through decoding, CFG construction, and target-specific semantic
+analysis. A targetless code object may use the architecture default only when
+the caller did not supply a concrete target; its missing ELF identity must not
+replace an explicit selection made alongside the decoder.
 
 Direct registry construction accepts only const lvalue descriptor arrays. The
 array and every aliases/GPU metadata array referenced by it must remain alive

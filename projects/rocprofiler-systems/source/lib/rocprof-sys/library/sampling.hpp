@@ -20,9 +20,7 @@
 #include <set>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace sampling
+namespace rocprofsys::sampling
 {
 unique_ptr_t<std::set<int>>&
 get_signal_types(std::int64_t _tid);
@@ -79,5 +77,4 @@ pause();
 void
 resume();
 
-}  // namespace sampling
-}  // namespace rocprofsys
+}  // namespace rocprofsys::sampling

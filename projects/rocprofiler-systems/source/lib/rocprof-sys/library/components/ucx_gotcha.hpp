@@ -32,9 +32,7 @@ template <typename Policy>
 concept HasUcxGotcha = requires { typename Policy::ucx_gotcha_t; };
 }  // namespace rocprofsys::component::ucx_concepts
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 template <typename UCXPolicy>
 struct ucx_gotcha : tim::component::base<ucx_gotcha<UCXPolicy>, void>
@@ -540,5 +538,4 @@ ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, lon
     UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

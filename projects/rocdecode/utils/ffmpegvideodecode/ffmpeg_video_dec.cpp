@@ -169,7 +169,7 @@ int FFMpegVideoDecoder::HandleVideoSequence(RocdecVideoFormatHost *format_host) 
     // AV1 has max width/height of sequence in sequence header
     if (codec_id_ == rocDecVideoCodec_AV1 && p_video_format->seqhdr_data_length > 0) {
         // dont overwrite if it is already set from cmdline or reconfig.txt
-        if (!(max_width_ > p_video_format->coded_width || max_height_ > p_video_format->coded_height)) {
+        if (!(static_cast<uint32_t>(max_width_) > p_video_format->coded_width || static_cast<uint32_t>(max_height_) > p_video_format->coded_height)) {
             RocdecVideoFormatEx *vidFormatEx = (RocdecVideoFormatEx *)p_video_format;
             max_width_ = vidFormatEx->max_width;
             max_height_ = vidFormatEx->max_height;
@@ -432,7 +432,7 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             int luma_size = src_pitch[0] * disp_height_;
             memcpy(p_frame_y, p_src_ptr_y, luma_size);
         } else {
-            for (int i = 0; i < disp_height_; i++) {
+            for (uint32_t i = 0; i < disp_height_; i++) {
                 memcpy(p_dec_frame, p_src_ptr_y, dst_pitch);
                 p_frame_y += dst_pitch;
                 p_src_ptr_y += src_pitch[0];
@@ -458,7 +458,7 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             memcpy(p_frame_uv, p_src_ptr_uv, chroma_size);
         } 
         else {
-            for (int i = 0; i < chroma_height_; i++) {
+            for (uint32_t i = 0; i < chroma_height_; i++) {
                 memcpy(p_frame_uv, p_src_ptr_uv, dst_pitch);
                 p_frame_uv += dst_pitch;
                 p_src_ptr_uv += src_pitch[1];
@@ -484,7 +484,7 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                 memcpy(p_frame_v, p_src_ptr_v, chroma_size);
             } 
             else {
-                for (int i = 0; i < chroma_height_; i++) {
+                for (uint32_t i = 0; i < chroma_height_; i++) {
                     memcpy(p_frame_v, p_src_ptr_v, dst_pitch);
                     p_frame_v += dst_pitch;
                     p_src_ptr_v += src_pitch[1];
@@ -502,7 +502,7 @@ int FFMpegVideoDecoder::DecodeFrame(const uint8_t *data, size_t size, int pkt_fl
     output_frame_cnt_ = 0, output_frame_cnt_ret_ = 0;
     decoded_pic_cnt_ = 0;
     RocdecPicParamsHost pic_params = {};
-    pic_params.bitstream_data_len = size;
+    pic_params.bitstream_data_len = static_cast<uint32_t>(size);
     pic_params.bitstream_data = data;
     if (!data || size == 0) {
         pic_params.flags = ROCDEC_PKT_ENDOFPICTURE;     // mark end_of_picture flag for last frame
@@ -603,7 +603,7 @@ void FFMpegVideoDecoder::SaveFrameToFile(std::string output_file_name, void *sur
             } else {
                 uint32_t width = surf_info->output_width * surf_info->bytes_per_pixel;
                 if (surf_info->bit_depth <= 16) {
-                    for (int i = 0; i < surf_info->output_height; i++) {
+                    for (uint32_t i = 0; i < surf_info->output_height; i++) {
                         fwrite(tmp_hst_ptr, 1, width, fp_out_);
                         tmp_hst_ptr += output_stride;
                     }
@@ -611,12 +611,12 @@ void FFMpegVideoDecoder::SaveFrameToFile(std::string output_file_name, void *sur
                     uint32_t chroma_stride = (output_stride >> 1);
                     uint8_t *u_hst_ptr = hst_ptr + output_stride * surf_info->output_height;
                     uint8_t *v_hst_ptr = u_hst_ptr + chroma_stride * chroma_height_;
-                    for (int i = 0; i < chroma_height_; i++) {
+                    for (uint32_t i = 0; i < chroma_height_; i++) {
                         fwrite(u_hst_ptr, 1, chroma_width_, fp_out_);
                         u_hst_ptr += chroma_stride;
                     }
                     if (num_chroma_planes_ == 2) {
-                        for (int i = 0; i < chroma_height_; i++) {
+                        for (uint32_t i = 0; i < chroma_height_; i++) {
                             fwrite(v_hst_ptr, 1, chroma_width_, fp_out_);
                             v_hst_ptr += chroma_stride;
                         }

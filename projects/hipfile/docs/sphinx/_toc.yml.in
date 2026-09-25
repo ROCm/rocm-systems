@@ -59,6 +59,7 @@ subtrees:
           - file: reference/api-file-and-buffer
           - file: reference/api-async
           - file: reference/api-batch
+          - file: reference/api-stats
           - file: reference/api-errors
           - file: reference/api-python
   - caption: Troubleshooting

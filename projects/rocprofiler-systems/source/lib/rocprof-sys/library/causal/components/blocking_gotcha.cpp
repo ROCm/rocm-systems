@@ -43,11 +43,7 @@
 #pragma weak sigtimedwait
 #pragma weak sigsuspend
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 std::string
 blocking_gotcha::label()
@@ -320,8 +316,6 @@ blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*func)(const sigs
 
     return ret;
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::causal::component::blocking_gotcha)

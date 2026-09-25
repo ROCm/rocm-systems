@@ -14,11 +14,7 @@
 #include <cstddef>
 #include <string>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
 {
@@ -53,9 +49,7 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
 
 using unblocking_gotcha_t =
     comp::gotcha<unblocking_gotcha::gotcha_capacity, tim::type_list<>, unblocking_gotcha>;
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(prevent_reentry, causal::component::unblocking_gotcha_t,
                                  false_type)

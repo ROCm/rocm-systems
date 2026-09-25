@@ -8,9 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 
 struct domain_flag_state
@@ -26,5 +24,4 @@ struct domain_flag_state
     std::optional<int> early_exit;
 };
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils
