@@ -26,6 +26,8 @@ constexpr uint32_t BF16_IN_REGS = 8, BF16_DST = 112, BF16_DST_REGS = 4;
 constexpr uint32_t INDEX_KEY = 0;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 constexpr uint32_t SCALE_A = 100, SCALE_B = 104;
+constexpr bool kHasBf16F32NativeSimd =
+    util::has_stdx_simd && util::native_width_v<float> == 16;
 
 using WmmaF32SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
                                uint32_t, uint32_t);
@@ -315,37 +317,47 @@ TEST(WmmaSimdExact, Bf16F32MixedNanPayloadPriority) {
 // Several values would round up under RNE, so this also catches use of the
 // wrong pack operation.
 TEST(WmmaSimdExact, Bf16F32MixedPackLayout) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
-
   WmmaFixture fx;
   ASSERT_NE(fx.wf, nullptr);
-  fx.seed(S0, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
-  fx.seed(S1, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
-  fx.seed_words(BF16_DST, BF16_DST_REGS, 0xBAD5EED);
   constexpr uint32_t inputs[] = {0x3F800001u, 0x3F80FFFFu, 0x3F818000u,
                                  0xBF80FFFFu, 0x0080FFFFu, 0x7F7FFFFFu};
-  for (uint32_t row = 0; row < 16; ++row)
-    for (uint32_t col = 0; col < 16; ++col) {
-      const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
-      fx.cu->write_vgpr(fx.vbase + ACC + out.reg, out.lane,
-                        inputs[(row * 16 + col) % std::size(inputs)]);
-    }
+
+  auto seed_state = [&] {
+    fx.seed(S0, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
+    fx.seed(S1, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
+    fx.seed_words(BF16_DST, BF16_DST_REGS, 0xBAD5EED);
+    for (uint32_t row = 0; row < 16; ++row)
+      for (uint32_t col = 0; col < 16; ++col) {
+        const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+        fx.cu->write_vgpr(fx.vbase + ACC + out.reg, out.lane,
+                          inputs[(row * 16 + col) % std::size(inputs)]);
+      }
+  };
+  auto run_and_check = [&](bool force_scalar, const char *path) {
+    SCOPED_TRACE(path);
+    seed_state();
+    util::set_force_scalar_for_testing(force_scalar);
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(
+        *fx.cu, fx.vbase + BF16_DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC,
+        amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+    for (uint32_t row = 0; row < 16; ++row)
+      for (uint32_t col = 0; col < 16; ++col) {
+        const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+        const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
+        const uint16_t actual = static_cast<uint16_t>(word >> (16 * out.sub_element));
+        const uint16_t expected =
+            static_cast<uint16_t>(inputs[(row * 16 + col) % std::size(inputs)] >> 16);
+        EXPECT_EQ(actual, expected) << "row=" << row << " col=" << col;
+      }
+    return fx.snapshot(BF16_DST, BF16_DST_REGS);
+  };
 
   ForceScalarGuard force_scalar_guard;
-  util::set_force_scalar_for_testing(false);
-  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + BF16_DST, fx.vbase + S0, fx.vbase + S1,
-                                          fx.vbase + ACC, amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
-  for (uint32_t row = 0; row < 16; ++row)
-    for (uint32_t col = 0; col < 16; ++col) {
-      const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
-      const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
-      const uint16_t actual = static_cast<uint16_t>(word >> (16 * out.sub_element));
-      const uint16_t expected =
-          static_cast<uint16_t>(inputs[(row * 16 + col) % std::size(inputs)] >> 16);
-      EXPECT_EQ(actual, expected) << "row=" << row << " col=" << col;
-    }
+  const auto scalar = run_and_check(true, "forced scalar");
+  if constexpr (kHasBf16F32NativeSimd) {
+    const auto simd = run_and_check(false, "default SIMD");
+    EXPECT_EQ(simd, scalar) << "default SIMD result is not bit-identical to forced scalar";
+  }
 }
 
 // Multiplication overflows in isolation, but the hardware-fused operation is
