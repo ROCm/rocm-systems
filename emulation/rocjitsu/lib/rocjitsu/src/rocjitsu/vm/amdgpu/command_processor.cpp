@@ -91,8 +91,8 @@ void CommandProcessor::set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_addr
     throw std::invalid_argument("command processor default address space is not registered");
   if (gpu_vm_ != gpu_vm || default_address_space_ != default_address_space) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (!aql_queues_.empty() || active_queue_registrations_ != 0)
-      throw std::logic_error("cannot replace the command processor VM while AQL queues exist");
+    if (!aql_queues_.empty() || !drm_queues_.empty() || active_queue_registrations_ != 0)
+      throw std::logic_error("cannot replace the command processor VM while queues exist");
     if (pm4_queue_controller_ && pm4_queue_controller_->active_queues() != 0) {
       throw std::logic_error("cannot replace the command processor VM while PM4 queues exist");
     }
@@ -172,7 +172,7 @@ size_t CommandProcessor::registered_pm4_queue_count_for_test() const {
 
 bool CommandProcessor::has_registered_queues() const {
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  return active_queue_registrations_ != 0 || !aql_queues_.empty() ||
+  return active_queue_registrations_ != 0 || !aql_queues_.empty() || !drm_queues_.empty() ||
          (pm4_queue_controller_ && pm4_queue_controller_->active_queues() != 0);
 }
 
@@ -264,7 +264,7 @@ uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
 }
 
 bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
-  return std::any_of(cus.begin(), cus.end(), [](const auto *cu) { return cu->has_active_wfs(); });
+  return std::ranges::any_of(cus, [](const auto *cu) { return cu->has_active_wfs(); });
 }
 
 bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_local_wg_id,
@@ -481,7 +481,10 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   // When kernel_code_properties is 0 (internal test dispatches), fall back to
   // the legacy layout: kernarg at s[0:1].
   int flat_scratch_init_sgpr = -1;
-  if (kcp != 0) {
+  if (pkt.pm4_abi) {
+    for (uint32_t i = 0; i < pkt.num_user_sgprs; ++i)
+      cu->write_sgpr(sbase + i, pkt.user_sgprs[i]);
+  } else if (kcp != 0) {
     const DispatchLaunchMetadata *launch_metadata = nullptr;
     if (pkt.queue_ptr != 0) {
       const std::unordered_map<uint32_t, DispatchLaunchMetadata>::const_iterator metadata_entry =
@@ -565,26 +568,41 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
 
   uint32_t gx = pkt.grid_wgs_x > 0 ? pkt.grid_wgs_x : 1;
   uint32_t gy = pkt.grid_wgs_y > 0 ? pkt.grid_wgs_y : 1;
-  uint32_t grid_wg_id_x = global_wg_id % gx;
-  uint32_t wg_id_y = (global_wg_id / gx) % gy;
-  uint32_t wg_id_z = global_wg_id / (gx * gy);
-  uint32_t wg_id_x = (pkt.enable_wg_id_y || pkt.enable_wg_id_z) ? grid_wg_id_x : global_wg_id;
+  uint32_t grid_wg_id_x = global_wg_id % gx + pkt.workgroup_origin[0];
+  uint32_t wg_id_y = (global_wg_id / gx) % gy + pkt.workgroup_origin[1];
+  uint32_t wg_id_z = global_wg_id / (gx * gy) + pkt.workgroup_origin[2];
+  uint32_t wg_id_x =
+      (pkt.pm4_abi || pkt.enable_wg_id_y || pkt.enable_wg_id_z) ? grid_wg_id_x : global_wg_id;
 
   // System SGPRs: workgroup_id_{x,y,z} placed sequentially after user SGPRs.
   // Only the IDs whose enable bits are set in compute_pgm_rsrc2 are written.
   // When kernel_code_properties is 0 (internal test dispatches), always write
   // workgroup_id_x as a fallback since internal kernels expect it.
   uint32_t sys_idx = pkt.num_user_sgprs;
-  {
-    bool kcp_zero = (pkt.kernel_code_properties == 0);
-    if (pkt.enable_wg_id_x || kcp_zero)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_x);
-    if (pkt.enable_wg_id_y)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_y);
-    if (pkt.enable_wg_id_z)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_z);
-  }
   const auto properties = isa_properties(cu->arch());
+  const bool pm4_ttmp_ids = pkt.pm4_abi && properties.uses_ttmp_workgroup_ids;
+  {
+    bool kcp_zero = (pkt.kernel_code_properties == 0) && !pkt.pm4_abi;
+    if (!pm4_ttmp_ids && (pkt.enable_wg_id_x || kcp_zero))
+      cu->write_sgpr(sbase + sys_idx++, wg_id_x);
+    if (!pm4_ttmp_ids && pkt.enable_wg_id_y)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_y);
+    if (!pm4_ttmp_ids && pkt.enable_wg_id_z)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+    if (pkt.enable_wg_info) {
+      // RDNA CS SGPR ABI: wave count [5:0] and ordered append term [17:6].
+      // With ordered append disabled, the term is the wave index. RDNA1–3.5
+      // also have first-wave [31]; RDNA2–3.5 add wave ID [24:20]. RDNA4
+      // supplies the wave ID in TTMP8 and leaves those SGPR bits clear.
+      uint32_t info = pkt.wfs_per_workgroup | (wf_index_in_wg << 6);
+      if (!pm4_ttmp_ids) {
+        info |= wf_index_in_wg == 0 ? 1u << 31 : 0;
+        if (cu->arch() != ROCJITSU_CODE_ARCH_RDNA1)
+          info |= wf_index_in_wg << 20;
+      }
+      cu->write_sgpr(sbase + sys_idx++, info);
+    }
+  }
   if (properties.uses_ttmp_workgroup_ids) {
     // The ordinary TTMP ABI uses grid coordinates. Targets advertising the
     // clustered extension reinterpret these fields below.
@@ -659,19 +677,25 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
-    // Round the per-wave region to the 1 KB COMPUTE_TMPRING_SIZE.WAVESIZE granule
-    // so that each wave's base equals scratch_pool + scoreboard_id * wavesize,
+    // Round the per-wave region to the target's COMPUTE_TMPRING_SIZE.WAVESIZE
+    // granule for PM4, or 1 KB for AQL, so that each wave's base equals
+    // scratch_pool + scoreboard_id * wavesize,
     // which is exactly what rocm-dbgapi computes to locate a wave's private
     // memory (rocdbgapi architecture.cpp scratch_memory_region).
     uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
-    uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
+    uint64_t granule = pkt.pm4_abi ? properties.compute_tmpring_wavesize_granule : 1024;
+    uint64_t per_wave_size = ((raw_per_wave + granule - 1) / granule) * granule;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
     uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t scratch_slot = global_wave_idx;
-    if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (pkt.pm4_abi) {
+      auto lease = pkt.pm4_scratch_pool->acquire();
+      scratch_slot = *lease;
+      wf->set_scratch_lease(std::move(lease));
+    } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
       const uint32_t shader_engine_count =
           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
       const uint32_t shader_engine_id = wf->shader_engine_id();
@@ -708,7 +732,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     };
     VmAccessOutcome scratch_outcome = scratch_range_outcome(false);
 
-    if (scratch_outcome != VmAccessOutcome::Complete && scratch_allocator_) {
+    if (!pkt.pm4_abi && scratch_outcome != VmAccessOutcome::Complete && scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
@@ -804,14 +828,38 @@ void CommandProcessor::shutdown() {
 }
 
 void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers) {
+  assert(!peers.empty() && "XCD topology must contain at least this CP");
+  assert(peers.size() <= MAX_NUM_XCC && "XCD topology exceeds the queue ABI capacity");
   assert(rank < peers.size() && "XCD rank must index its own SoC's CP list");
   assert(peers[rank] == this && "XCD rank must be this CP's own position");
   xcd_rank_ = rank;
+  // Fan-out and scratch address the same physical XCD topology. Keeping a
+  // frontend-owned scratch identity lets PCI/MES queues leave every CP at XCC
+  // zero, so corresponding wave slots on different XCDs alias one another.
+  scratch_xcc_id_ = rank;
+  scratch_xcc_count_ = static_cast<uint32_t>(peers.size());
   xcd_peers_ = std::move(peers);
   // Carve this XCD its own dispatch-id space; see allocate_dispatch_id().
   dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
   dispatch_id_base_ = 1 + rank;
   next_dispatch_id_ = dispatch_id_base_;
+}
+
+void CommandProcessor::set_scratch_slots_per_cu(uint32_t slots) {
+  configured_scratch_slots_per_cu_ = std::max(slots, 1u);
+  scratch_waves_per_se_ = 1;
+  for (ComputeUnitCore *cu : cus_) {
+    cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->scratch_slots_per_cu());
+  }
+}
+
+void CommandProcessor::set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count) {
+  assert(xcc_count != 0 && xcc_count <= MAX_NUM_XCC);
+  assert(xcc_id < xcc_count);
+  scratch_xcc_id_ = xcc_id;
+  scratch_xcc_count_ = xcc_count;
 }
 
 AqlQueueRecord *CommandProcessor::find_aql_queue(uint32_t queue_id, uint32_t process_id) {
@@ -1215,11 +1263,7 @@ void CommandProcessor::drain_doorbell_inbox() {
 }
 
 bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                              uint64_t status) {
-  uint64_t exception_status_va = 0;
-  uint32_t exception_event_id = 0;
-  AddressSpaceHandle address_space;
-  InterruptSink interrupt_sink;
+                                              uint64_t status, bool publish_interrupt) {
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
     auto queue =
@@ -1228,23 +1272,7 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
         });
     if (queue == aql_queues_.end() || queue->exception_status_va == 0)
       return false;
-    exception_status_va = queue->exception_status_va;
-    exception_event_id = queue->exception_event_id;
-    address_space = queue->address_space;
-    interrupt_sink = queue->interrupt_sink;
-  }
-
-  if (write_gpu_block(address_space, exception_status_va, &status, sizeof(status)) !=
-      VmAccessOutcome::Complete) {
-    return false;
-  }
-  interrupt_sink.deliver(process_id, exception_event_id);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-  AtomicLoadResult exception_status = read_gpu_u64(address_space, exception_status_va);
-  while (exception_status.outcome == VmAccessOutcome::Complete &&
-         exception_status.value == status && std::chrono::steady_clock::now() < deadline) {
-    std::this_thread::yield();
-    exception_status = read_gpu_u64(address_space, exception_status_va);
+    queue->exception_suspended = true;
   }
 
   for (auto *cu : cus_) {
@@ -1252,12 +1280,61 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (wave && !wave->is_halted() && wave->process_id() == process_id &&
-            wave->queue_id() == queue_id)
+            wave->queue_id() == queue_id) {
+          wave->set_fatal_exception_pending(true);
           wave->set_debug_suspended(true);
+        }
       }
     });
   }
-  return true;
+  if (!publish_interrupt)
+    return true;
+  return publish_queue_exception(queue_id, process_id, status);
+}
+
+bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t process_id,
+                                               uint64_t status) {
+  if (!gpu_vm_)
+    return false;
+
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
+  AddressSpaceHandle address_space;
+  InterruptSink interrupt_sink;
+  std::chrono::milliseconds ack_timeout;
+  {
+    std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
+    auto queue = std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    if (queue == aql_queues_.end() || queue->exception_status_va == 0)
+      return false;
+    exception_status_va = queue->exception_status_va;
+    exception_event_id = queue->exception_event_id;
+    ack_timeout = runtime_exception_ack_timeout_;
+    address_space = queue->address_space;
+    interrupt_sink = queue->interrupt_sink;
+  }
+
+  const AtomicLoadResult previous =
+      gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
+  if (previous.outcome != VmAccessOutcome::Complete)
+    return false;
+  const uint64_t combined_status = previous.value | status;
+  if (gpu_vm_->atomic_store(address_space, exception_status_va, sizeof(combined_status),
+                            combined_status) != VmAccessOutcome::Complete)
+    return false;
+  interrupt_sink.deliver(process_id, exception_event_id);
+  const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
+  AtomicLoadResult exception_status =
+      gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
+  while (exception_status.outcome == VmAccessOutcome::Complete &&
+         exception_status.value == combined_status && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+    exception_status = gpu_vm_->atomic_load(address_space, exception_status_va, sizeof(uint64_t));
+  }
+  return exception_status.outcome == VmAccessOutcome::Complete &&
+         exception_status.value != combined_status;
 }
 
 QueuePrepareCloseStatus
@@ -1297,8 +1374,11 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         return QueuePrepareCloseStatus::Faulted;
       retry_close = queue->read_pointer_journal.publication_pending() ||
                     queue->publication_retry_pending || queue->idle_publication.active() ||
-                    queue->scratch_request.active() || queue->scratch_reclaim.active() ||
-                    !queue->entries.empty();
+                    // After delivery, ROCr owns the scratch request and may suspend the queue
+                    // while allocating backing. Only an unfinished notification publication
+                    // must delay that removal.
+                    queue->scratch_request.publication_pending() ||
+                    queue->scratch_reclaim.active() || !queue->entries.empty();
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
@@ -1427,7 +1507,7 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
         // here while the debugger still holds the gate would leave the later
         // debugger resume with nothing to release, and the already-fetched
         // packets would sit until an unrelated doorbell arrived.
-        if (changed && !suspended && !q.debug_suspended)
+        if (changed && !suspended && !q.debug_suspended && !q.exception_suspended)
           wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
@@ -1466,14 +1546,17 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
 }
 
 void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
-                                                 bool suspended) {
+                                                 bool suspended, bool resolve_exception) {
   bool wake_command_processor = false;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     for (AqlQueueRecord &q : aql_queues_) {
       if (q.queue_id == queue_id && q.process_id == process_id) {
-        if (q.debug_suspended == suspended)
+        const bool exception_resolved = resolve_exception && q.exception_suspended;
+        if (q.debug_suspended == suspended && !exception_resolved)
           continue;
+        if (exception_resolved)
+          q.exception_suspended = false;
         q.debug_suspended = suspended;
         if (suspended) {
           // Existing queue work needs a resume pass only when the gate, rather
@@ -1490,7 +1573,7 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
             q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
           }
-        } else if (!q.runtime_suspended) {
+        } else if (!q.runtime_suspended && !q.exception_suspended) {
           wake_command_processor |= std::exchange(q.debug_work_deferred, false);
         }
       }
@@ -1778,7 +1861,7 @@ AqlQueueRecord *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < aql_queues_.size(); ++i) {
     size_t idx = (start + i) % aql_queues_.size();
     auto &qs = aql_queues_[idx];
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended)
+    if (qs.faulted || qs.suspended())
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       next_queue_idx_ = (idx + 1) % aql_queues_.size();
@@ -1812,6 +1895,13 @@ void CommandProcessor::drain_pending_wg_completions() {
     mark_cluster_workgroup_complete(completion.dispatch_id, completion.wg_id);
     if (completion_)
       completion_->notify_wg_complete(completion.dispatch_id, completion.wg_id, aql_queues_);
+    for (auto &queue : drm_queues_)
+      for (auto &entry : queue.dispatches.entries)
+        if (entry.dispatch_id == completion.dispatch_id) {
+          ++entry.completed_wgs;
+          if (engine())
+            engine()->schedule_event_now(doorbell_event());
+        }
   }
   pending_wg_completions_.clear();
 }
@@ -2199,6 +2289,10 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_wave_in_group(w);
       wf->set_address_space(entry.address_space);
       wf->set_process_id(entry.process_id);
+      // Live PM4 applications share the host monotonic clock with DRM query
+      // timestamps. Internal simulation workloads retain the modeled clock.
+      wf->set_system_clock(entry.pm4_abi);
+      wf->set_pm4_failure(entry.pm4_failure);
       wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_queue_id(entry.queue_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, wf->wf_size()));
@@ -2231,7 +2325,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   };
 
   while (entry.dispatched_wgs < entry.total_wgs) {
-    if (entry.grid_faulted())
+    if (entry.grid_faulted() ||
+        (entry.pm4_scratch_pool && !entry.pm4_scratch_pool->available(entry.wfs_per_workgroup)))
       break;
     if (entry.has_workgroup_clusters()) {
       assert(!entry.wgp_mode && "workgroup clusters are gfx1250-only and use CU mode");
@@ -2504,7 +2599,7 @@ void CommandProcessor::on_cu_idle() {
   // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (AqlQueueRecord &qs : aql_queues_) {
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended || qs.publication_retry_pending)
+    if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &e = qs.entries[qs.next_dispatch_idx];
@@ -2546,7 +2641,7 @@ void CommandProcessor::on_cu_idle() {
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
   for (AqlQueueRecord &qs : aql_queues_) {
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended || qs.publication_retry_pending)
+    if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
@@ -2596,8 +2691,10 @@ bool CommandProcessor::step() {
 }
 
 void CommandProcessor::process_queues() {
+  if (engine())
+    service_drm_queues(engine()->context(partition_id()).current_tick());
   for (AqlQueueRecord &qs : aql_queues_) {
-    if (qs.faulted || qs.debug_suspended || qs.runtime_suspended || qs.publication_retry_pending)
+    if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
@@ -2715,6 +2812,608 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
       pooled_due_ticks_.erase(cu);
   }
   return result;
+}
+
+bool CommandProcessor::register_drm_queue(Pm4SubmitQueue queue) {
+  std::unique_lock structure_lock(queue_structure_mutex_);
+  std::lock_guard lock(hw_queue_mutex_);
+  if (!queue.address_space)
+    queue.address_space = default_address_space_;
+  if (!gpu_vm_ || !queue.pm4 || !queue.address_space)
+    return false;
+  queue.binding = gpu_vm_->retain_binding(queue.address_space);
+  if (!queue.binding || std::ranges::any_of(drm_queues_, [&](const auto &existing) {
+        return existing.queue_id == queue.queue_id && existing.process_id == queue.process_id;
+      }))
+    return false;
+  drm_queues_.push_back(std::move(queue));
+  return true;
+}
+
+void CommandProcessor::unregister_drm_queues(uint32_t process_id) {
+  std::unique_lock structure_lock(queue_structure_mutex_);
+  std::lock_guard lock(hw_queue_mutex_);
+  for (auto &queue : drm_queues_)
+    if (queue.process_id == process_id)
+      fail_pm4_queue(queue, queue.dispatches);
+  std::erase_if(drm_queues_, [&](const auto &queue) { return queue.process_id == process_id; });
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
+void CommandProcessor::unregister_drm_queue(uint32_t queue_id, uint32_t process_id) {
+  std::unique_lock structure_lock(queue_structure_mutex_);
+  std::lock_guard lock(hw_queue_mutex_);
+  const auto it = std::ranges::find_if(drm_queues_, [&](const auto &queue) {
+    return queue.queue_id == queue_id && queue.process_id == process_id;
+  });
+  if (it == drm_queues_.end())
+    return;
+  fail_pm4_queue(*it, it->dispatches);
+  drm_queues_.erase(it);
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
+void CommandProcessor::service_drm_queues(simdojo::Tick now) {
+  for (auto &queue : drm_queues_) {
+    auto &state = queue.dispatches;
+    if (queue.faulted)
+      continue;
+    if (!queue.pm4->submissions.empty() &&
+        queue.pm4->submissions.front().failure->failed.load(std::memory_order_acquire)) {
+      fail_pm4_queue(queue, state);
+      continue;
+    }
+    while (!state.entries.empty() && state.entries.front().fully_completed()) {
+      const auto &entry = state.entries.front();
+      flush_gpu_caches();
+      if (entry.execution_begun)
+        plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+      erase_cluster_workgroups(entry.dispatch_id);
+      state.entries.pop_front();
+    }
+    fetch_pm4(queue, state, now);
+    if (queue.faulted || state.entries.empty())
+      continue;
+    auto &entry = state.entries.front();
+    // All DRM queues for this GPU are routed to the same CP. Delay a new
+    // dispatch while another queue owns any overlapping scratch range.
+    if (entry.pm4_scratch_pool && !entry.execution_begun) {
+      const auto scratch_bytes = [&](const DispatchEntry &dispatch) -> uint64_t {
+        return uint64_t{dispatch.pm4_scratch_waves_per_se} *
+               std::max(scratch_wave_divisor_, scratch_shader_engine_count_) *
+               dispatch.private_segment_fixed_size * dispatch.kernel_wave_size;
+      };
+      const bool busy = std::ranges::any_of(drm_queues_, [&](const auto &other) {
+        if (&other == &queue || other.address_space != queue.address_space)
+          return false;
+        return std::ranges::any_of(other.dispatches.entries, [&](const auto &active) {
+          if (!active.pm4_scratch_pool || !active.execution_begun || active.fully_completed())
+            return false;
+          const auto a = entry.scratch_backing_addr, b = active.scratch_backing_addr;
+          return a <= b ? b - a < scratch_bytes(entry) : a - b < scratch_bytes(active);
+        });
+      });
+      if (busy)
+        continue;
+    }
+    try {
+      const auto result = dispatch_workgroups(entry);
+      if (result.outcome != VmAccessOutcome::Complete) {
+        entry.pm4_failure->fail();
+        fail_pm4_queue(queue, state);
+      } else if (entry.fully_completed() && engine()) {
+        engine()->schedule_event_now(doorbell_event());
+      }
+    } catch (const std::exception &error) {
+      util::Logger::warn("PM4 launch failed: ", error.what());
+      entry.pm4_failure->fail();
+      fail_pm4_queue(queue, state);
+    }
+  }
+}
+
+bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
+                                  Pm4Submission submission) {
+  {
+    std::lock_guard lock(hw_queue_mutex_);
+    auto it = std::ranges::find_if(drm_queues_, [&](const Pm4SubmitQueue &queue) {
+      return queue.queue_id == queue_id && queue.process_id == process_id;
+    });
+    if (it == drm_queues_.end() || !it->pm4)
+      throw std::runtime_error("PM4 submission has no registered queue");
+    if (it->faulted)
+      return false;
+    submission.failure->wake = [this] {
+      if (engine())
+        engine()->schedule_event_now(doorbell_event());
+    };
+    it->pm4->submissions.push_back(std::move(submission));
+    if (!is_primary_ && engine() && !has_kfd_queues()) {
+      engine()->register_as_primary();
+      is_primary_ = true;
+    }
+  }
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+  return true;
+}
+
+void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                    const std::array<uint32_t, 4> &dimensions) {
+  using namespace rocr::llvm::amdhsa;
+  const auto &regs = queue.pm4->sh_registers;
+  const uint32_t initiator = dimensions[3];
+  if (!(initiator & 1))
+    return;
+  if (cus_.empty() || (initiator & (1u << 5)))
+    throw std::runtime_error("unsupported PM4 dispatch dimensions");
+  const auto arch = cus_[0]->config().arch;
+  const uint32_t rsrc1 = regs[kPm4ComputePgmRsrc1], rsrc2 = regs[kPm4ComputePgmRsrc2];
+  DispatchEntry dp;
+  dp.kind = DispatchPacketKind::Kernel;
+  dp.dispatch_id = allocate_dispatch_id();
+  dp.address_space = queue.address_space;
+  dp.process_id = queue.process_id;
+  dp.queue_id = queue.queue_id;
+  dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
+  if (AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
+    dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
+    const auto properties = isa_properties(arch);
+    const uint32_t wave_bytes = ((regs[kPm4ComputeTmpringSize] >> 12) &
+                                 util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits)) *
+                                properties.compute_tmpring_wavesize_granule;
+    if (!dp.pm4_scratch_waves_per_se || !wave_bytes)
+      throw std::runtime_error("PM4 scratch enabled with an empty descriptor");
+    dp.private_segment_fixed_size = wave_bytes / dp.kernel_wave_size;
+    dp.pm4_scratch_pool = std::make_shared<Pm4ScratchPool>(
+        dp.pm4_scratch_waves_per_se *
+        std::max(scratch_wave_divisor_, scratch_shader_engine_count_));
+    uint64_t scratch = ((uint64_t{regs[kPm4ComputeScratchHi]} << 32) | regs[kPm4ComputeScratchLo])
+                       << 8;
+    dp.scratch_backing_addr = static_cast<uint64_t>(static_cast<int64_t>(scratch << 16) >> 16);
+  }
+  // Program addresses have 256-byte granularity and are sign-extended from 48 bits.
+  uint64_t pc = ((uint64_t{regs[kPm4ComputePgmHi]} << 32) | regs[kPm4ComputePgmLo]) << 8;
+  dp.kernel_entry_pc = static_cast<uint64_t>(static_cast<int64_t>(pc << 16) >> 16);
+  dp.num_user_sgprs = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+  if (dp.num_user_sgprs > dp.user_sgprs.size())
+    throw std::runtime_error("PM4 launch exceeds compute user-data registers");
+  dp.pm4_abi = true;
+  dp.pm4_failure = queue.pm4->submissions.front().failure;
+  std::ranges::copy_n(regs.begin() + kPm4ComputeUserData0, dp.num_user_sgprs,
+                      dp.user_sgprs.begin());
+  dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
+  const auto granule = descriptor_vgpr_count_granule_for_wavefront(arch, dp.kernel_wave_size);
+  if (!granule)
+    throw std::runtime_error("unsupported PM4 wave size");
+  dp.vgprs_per_wf =
+      (AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * *granule;
+  if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
+    throw std::runtime_error("PM4 launch exceeds available VGPRs");
+  dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(rsrc1, arch);
+  dp.enable_wg_id_x = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
+  dp.enable_wg_id_y = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
+  dp.enable_wg_id_z = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z);
+  dp.enable_wg_info = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO);
+  dp.enable_vgpr_workitem_id = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID);
+  dp.wgp_mode = AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE);
+  dp.group_segment_fixed_size = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE) * 512;
+  std::array<uint32_t, 3> counts{};
+  for (uint32_t i = 0; i < 3; ++i) {
+    dp.workgroup_origin[i] = (initiator & (1u << 2)) ? 0 : regs[kPm4ComputeStartX + i];
+    counts[i] = dimensions[i] > dp.workgroup_origin[i] ? dimensions[i] - dp.workgroup_origin[i] : 0;
+  }
+  dp.grid_wgs_x = counts[0];
+  dp.grid_wgs_y = counts[1];
+  dp.grid_wgs_z = counts[2];
+  dp.grid_yz_valid = true;
+  uint64_t total = counts[0];
+  for (uint32_t i = 1; i < 3; ++i) {
+    if (counts[i] && total > UINT32_MAX / counts[i])
+      throw std::runtime_error("PM4 grid exceeds supported workgroup count");
+    total *= counts[i];
+  }
+  dp.total_wgs = total;
+  for (uint32_t i = 0; i < 3; ++i)
+    if (!(regs[kPm4ComputeNumThreadX + i] & 0xffff) ||
+        (regs[kPm4ComputeNumThreadX + i] & 0xffff) > 1024)
+      throw std::runtime_error("invalid PM4 workgroup dimension");
+  dp.workgroup_size_x = regs[kPm4ComputeNumThreadX] & 0xffff;
+  dp.workgroup_size_y = regs[kPm4ComputeNumThreadY] & 0xffff;
+  dp.workgroup_size_z = regs[kPm4ComputeNumThreadZ] & 0xffff;
+  uint64_t threads = uint64_t{dp.workgroup_size_x} * dp.workgroup_size_y * dp.workgroup_size_z;
+  if (threads > 1024)
+    throw std::runtime_error("PM4 workgroup exceeds 1024 threads");
+  dp.wfs_per_workgroup = (threads + dp.kernel_wave_size - 1) / dp.kernel_wave_size;
+  if (dp.pm4_scratch_pool && dp.total_wgs) {
+    if (!dp.pm4_scratch_pool->available(dp.wfs_per_workgroup))
+      throw std::runtime_error("PM4 scratch cannot accommodate one workgroup");
+    const uint64_t slots = uint64_t{dp.pm4_scratch_waves_per_se} *
+                           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+    const uint64_t bytes = slots * dp.private_segment_fixed_size * dp.kernel_wave_size;
+    const auto access = snapshot_gpu_access(queue.address_space);
+    if (!access || access->query_access(dp.scratch_backing_addr, bytes, VmAccessKind::Atomic) !=
+                       VmAccessOutcome::Complete)
+      throw std::runtime_error("PM4 scratch descriptor exceeds its mapped buffer");
+  }
+  if ((dp.grid_wgs_x && dp.workgroup_size_x > UINT32_MAX / dp.grid_wgs_x) ||
+      (dp.grid_wgs_y && dp.workgroup_size_y > UINT32_MAX / dp.grid_wgs_y) ||
+      (dp.grid_wgs_z && dp.workgroup_size_z > UINT32_MAX / dp.grid_wgs_z))
+    throw std::runtime_error("PM4 grid exceeds supported invocation count");
+  dp.grid_size_x = dp.grid_wgs_x * dp.workgroup_size_x;
+  dp.grid_size_y = dp.grid_wgs_y * dp.workgroup_size_y;
+  dp.grid_size_z = dp.grid_wgs_z * dp.workgroup_size_z;
+  if (initiator & 2) {
+    uint32_t *sizes[] = {&dp.grid_size_x, &dp.grid_size_y, &dp.grid_size_z};
+    for (uint32_t i = 0; i < 3; ++i) {
+      uint32_t partial = regs[kPm4ComputeNumThreadX + i] >> 16;
+      uint32_t full = regs[kPm4ComputeNumThreadX + i] & 0xffff;
+      if (partial > full)
+        throw std::runtime_error("invalid PM4 partial workgroup size");
+      if (partial && counts[i])
+        *sizes[i] -= full - partial;
+    }
+  }
+  dp.wait_for_predecessors = true;
+  util::Logger::vm("PM4 dispatch pc=", std::hex, dp.kernel_entry_pc, " rsrc1=", rsrc1,
+                   " rsrc2=", rsrc2, std::dec, " workgroups=", total);
+  flush_gpu_caches();
+  KernelDispatchInfo info{};
+  info.dispatch_id = dp.dispatch_id;
+  info.entry_pc = dp.kernel_entry_pc;
+  info.kernel_name = "PM4 compute";
+  info.code_target = cus_[0]->config().target;
+  info.lds_size_bytes = dp.group_segment_fixed_size;
+  info.wave_size = dp.kernel_wave_size;
+  info.grid_size_x = dp.grid_size_x;
+  info.grid_size_y = dp.grid_size_y;
+  info.grid_size_z = dp.grid_size_z;
+  info.workgroup_size_x = dp.workgroup_size_x;
+  info.workgroup_size_y = dp.workgroup_size_y;
+  info.workgroup_size_z = dp.workgroup_size_z;
+  info.workgroup_count = dp.total_wgs;
+  info.wfs_per_workgroup = dp.wfs_per_workgroup;
+  info.sgprs_per_wf = dp.sgprs_per_wf;
+  info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuDispatchPacketProcessed(info);
+  ++total_dispatched_;
+  qs.push_entry(std::move(dp));
+}
+
+void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs) {
+  queue.faulted = true;
+  // The CP owns the queue lock and CU workers have rejoined. Stop all resident
+  // waves before releasing the submission's BO references or publishing failure.
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
+            wave->queue_id() == queue.queue_id)
+          wave->halt();
+      }
+    });
+  }
+  flush_gpu_caches();
+  qs.entries.clear();
+  for (auto &submission : queue.pm4->submissions)
+    if (submission.complete)
+      submission.complete(false);
+  queue.pm4->submissions.clear();
+}
+
+void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now) {
+  if (queue.faulted)
+    return;
+  auto &state = *queue.pm4;
+  if (!state.submissions.empty() &&
+      state.submissions.front().failure->failed.load(std::memory_order_acquire)) {
+    fail_pm4_queue(queue, qs);
+    return;
+  }
+  if (!qs.entries.empty())
+    return;
+  try {
+    const auto access = snapshot_gpu_access(queue.address_space);
+    if (!access)
+      throw std::runtime_error("PM4 queue has no GPU address space");
+    // Bound one event's packet work, including IB chains.
+    for (uint32_t budget = 0; budget < 4096 && !state.submissions.empty(); ++budget) {
+      auto &submission = state.submissions.front();
+      if (submission.ready && !submission.ready()) {
+        arm_stall_recheck(now);
+        return;
+      }
+      if (submission.buffers.empty()) {
+        flush_gpu_caches();
+        if (submission.complete)
+          submission.complete(true);
+        state.submissions.pop_front();
+        continue;
+      }
+      auto &ib = submission.buffers.front();
+      if (!ib.dwords) {
+        submission.buffers.pop_front();
+        continue;
+      }
+      uint32_t header = 0;
+      if (access->read(ib.address, {reinterpret_cast<std::byte *>(&header), sizeof(header)}) !=
+          VmAccessOutcome::Complete)
+        throw std::runtime_error("unmapped PM4 command buffer");
+      const uint32_t type = header >> 30;
+      const uint32_t count = type == 2 || header == 0xffff1000 ? 1 : ((header >> 16) & 0x3fff) + 2;
+      if (count > ib.dwords || (type != 2 && type != 3))
+        throw std::runtime_error("invalid PM4 packet size or type");
+      std::vector<uint32_t> words(count - 1);
+      if (!words.empty() &&
+          access->read(ib.address + 4, {reinterpret_cast<std::byte *>(words.data()),
+                                        words.size() * 4}) != VmAccessOutcome::Complete)
+        throw std::runtime_error("unmapped PM4 packet payload");
+      ib.address += count * 4;
+      ib.dwords -= count;
+      if (type == 2 || header == 0xffff1000)
+        continue;
+      const auto require = [&](size_t size) {
+        if (words.size() != size)
+          throw std::runtime_error(std::format("PM4 opcode {:#x} expects {} payload words, got {}",
+                                               (header >> 8) & 0xff, size, words.size()));
+      };
+      const auto address = [&](size_t index) {
+        return uint64_t{words[index]} | (uint64_t{words[index + 1]} << 32);
+      };
+      const uint32_t opcode = (header >> 8) & 0xff;
+      util::Logger::vm("PM4 packet ", std::hex, opcode, std::dec, " words=", count);
+      switch (static_cast<Pm4Opcode>(opcode)) {
+      case Pm4Opcode::Nop:
+        break;
+      case Pm4Opcode::ContextControl:
+      case Pm4Opcode::ClearState:
+      case Pm4Opcode::PfpSyncMe:
+      case Pm4Opcode::SetContextReg:
+      case Pm4Opcode::SetContextRegPairs:
+      case Pm4Opcode::SetContextRegPairsPacked:
+        if (!submission.graphics_engine)
+          throw std::runtime_error("graphics state packet on compute engine");
+        // Graphics context state is unused by compute shaders. The single CP
+        // retires preceding work before these packets, including PFP_SYNC_ME.
+        if (opcode == uint32_t(Pm4Opcode::ContextControl))
+          require(2);
+        else if (opcode == uint32_t(Pm4Opcode::ClearState) ||
+                 opcode == uint32_t(Pm4Opcode::PfpSyncMe))
+          require(1);
+        else if (words.size() < 2)
+          throw std::runtime_error("invalid graphics register payload");
+        break;
+      case Pm4Opcode::SetBase:
+        require(3);
+        if (!submission.graphics_engine || words[0] != 1)
+          throw std::runtime_error("unsupported SET_BASE index");
+        state.indirect_base = address(1);
+        break;
+      case Pm4Opcode::WriteData: {
+        if (words.size() < 4)
+          throw std::runtime_error("invalid WRITE_DATA payload");
+        const uint32_t destination = (words[0] >> 8) & 15;
+        if ((destination != 1 && destination != 2 && destination != 5) || (words[0] & (1u << 16)))
+          throw std::runtime_error("unsupported WRITE_DATA destination");
+        flush_gpu_caches();
+        if (access->write(address(1), {reinterpret_cast<const std::byte *>(words.data() + 3),
+                                       (words.size() - 3) * 4}) != VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 WRITE_DATA failed");
+        break;
+      }
+      case Pm4Opcode::ReleaseMem: {
+        require(7);
+        flush_gpu_caches();
+        const uint32_t selection = words[1] >> 29;
+        uint64_t value = address(4);
+        if (selection == 3)
+          value = hsa_system_timestamp();
+        else if (selection != 0 && selection != 1 && selection != 2)
+          throw std::runtime_error("unsupported RELEASE_MEM data source");
+        const size_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
+        if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
+                                                bytes}) != VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 RELEASE_MEM failed");
+        break;
+      }
+      case Pm4Opcode::CopyData: {
+        require(5);
+        const uint32_t source = words[0] & 15, destination = (words[0] >> 8) & 15;
+        const size_t bytes = (words[0] & (1u << 16)) ? 8 : 4;
+        if (destination != 1 && destination != 2 && destination != 5)
+          throw std::runtime_error("unsupported COPY_DATA destination");
+        flush_gpu_caches();
+        uint64_t value = 0;
+        if (source == 5)
+          value = address(1);
+        else if (source == 9)
+          value = hsa_system_timestamp();
+        else if (source == 1 || source == 2) {
+          if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
+              VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 COPY_DATA read failed");
+        } else {
+          throw std::runtime_error("unsupported COPY_DATA source");
+        }
+        if (access->write(address(3), {reinterpret_cast<const std::byte *>(&value), bytes}) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 COPY_DATA write failed");
+        break;
+      }
+      case Pm4Opcode::WaitRegMem: {
+        require(6);
+        if (((words[0] >> 4) & 3) != 1)
+          throw std::runtime_error("unsupported WAIT_REG_MEM register space");
+        flush_gpu_caches();
+        uint32_t value = 0;
+        if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), sizeof(value)}) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 WAIT_REG_MEM read failed");
+        value &= words[4];
+        uint32_t reference = words[3] & words[4];
+        bool ready;
+        switch (words[0] & 7) {
+        case 0:
+          ready = true;
+          break;
+        case 1:
+          ready = value < reference;
+          break;
+        case 2:
+          ready = value <= reference;
+          break;
+        case 3:
+          ready = value == reference;
+          break;
+        case 4:
+          ready = value != reference;
+          break;
+        case 5:
+          ready = value >= reference;
+          break;
+        case 6:
+          ready = value > reference;
+          break;
+        default:
+          throw std::runtime_error("invalid WAIT_REG_MEM comparison");
+        }
+        if (!ready) {
+          ib.address -= count * 4;
+          ib.dwords += count;
+          arm_stall_recheck(now);
+          return;
+        }
+        break;
+      }
+      case Pm4Opcode::LoadShRegIndex: {
+        require(4);
+        const uint32_t first = words[2], count = words[3];
+        // Direct-address mode, contiguous values (no register/value pairs).
+        if ((words[0] & 3) || !count || first >= state.sh_registers.size() ||
+            count > state.sh_registers.size() - first)
+          throw std::runtime_error("unsupported LOAD_SH_REG_INDEX range or mode");
+        flush_gpu_caches();
+        if (access->read(address(0),
+                         {reinterpret_cast<std::byte *>(state.sh_registers.data() + first),
+                          count * 4}) != VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 LOAD_SH_REG_INDEX read failed");
+        break;
+      }
+      case Pm4Opcode::SetShReg: { // SET_SH_REG
+        if (words.size() < 2 || words[0] >= state.sh_registers.size() ||
+            words.size() - 1 > state.sh_registers.size() - words[0])
+          throw std::runtime_error("invalid SET_SH_REG range");
+        std::ranges::copy(words.begin() + 1, words.end(), state.sh_registers.begin() + words[0]);
+        break;
+      }
+      case Pm4Opcode::SetShRegPairs: // SET_SH_REG_PAIRS
+        if (words.size() % 2)
+          throw std::runtime_error("invalid SET_SH_REG_PAIRS payload");
+        for (size_t i = 0; i < words.size(); i += 2) {
+          if (words[i] >= state.sh_registers.size())
+            throw std::runtime_error("invalid SET_SH_REG_PAIRS register");
+          state.sh_registers[words[i]] = words[i + 1];
+        }
+        break;
+      case Pm4Opcode::SetUconfigReg: // SET_UCONFIG_REG: graphics index selection, irrelevant to
+                                     // compute.
+      case Pm4Opcode::SetUconfigRegPairs: // SET_UCONFIG_REG_PAIRS
+        break;
+      case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
+        require(7);
+        flush_gpu_caches();
+        break;
+      case Pm4Opcode::EventWrite: {
+        const uint32_t event = words[0] & 0x3f;
+        if (submission.graphics_engine && event == 56) {
+          // PIXEL_PIPE_STAT_CONTROL configures graphics counters, not a memory write.
+          require(3);
+          break;
+        }
+        require(1);
+        if (event != 7 && !(submission.graphics_engine &&
+                            (event == 15 || event == 16 || event == 25 || event == 26 ||
+                             event == 36 || event == 44 || event == 46)))
+          throw std::runtime_error(std::format("unsupported PM4 EVENT_WRITE event {}", event));
+        flush_gpu_caches();
+        break;
+      }
+      case Pm4Opcode::DmaData: {
+        require(6);
+        const uint32_t src_select = (words[0] >> 29) & 3;
+        const uint32_t dst_select = (words[0] >> 20) & 3;
+        const uint32_t bytes = words[5] & 0x3ffffff;
+        if (!bytes || dst_select == 2) // DMA drain or prefetch only.
+          break;
+        if (dst_select != 0 && dst_select != 3)
+          throw std::runtime_error("unsupported PM4 DMA destination");
+        flush_gpu_caches();
+        if (src_select == 2) {
+          std::vector<uint8_t> data(bytes);
+          for (uint32_t i = 0; i < bytes; ++i)
+            data[i] = words[1] >> ((i % 4) * 8);
+          if (access->write(address(3), std::as_bytes(std::span(data))) !=
+              VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 DMA fill failed");
+        } else if (src_select == 0 || src_select == 3) {
+          std::vector<std::byte> data(bytes);
+          if (access->read(address(1), data) != VmAccessOutcome::Complete ||
+              access->write(address(3), data) != VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 DMA copy failed");
+        } else {
+          throw std::runtime_error("unsupported PM4 DMA source");
+        }
+        break;
+      }
+      case Pm4Opcode::IndirectBuffer: {
+        require(3);
+        const bool chained = words[2] & (1u << 20);
+        const uint32_t depth = ib.depth + (chained ? 0 : 1);
+        if (++submission.indirect_expansions > Pm4Submission::kMaxIndirectExpansions ||
+            depth >= Pm4Submission::kMaxIndirectDepth) {
+          fail_pm4_queue(queue, qs);
+          return;
+        }
+        // CHAIN jumps at the current IB level; a non-chained IB returns here.
+        // Other root IBs supplied by the same CS remain queued behind this one.
+        if (words[2] & (1u << 20))
+          submission.buffers.pop_front();
+        submission.buffers.push_front({address(0), words[2] & 0xfffff, depth});
+        break;
+      }
+      case Pm4Opcode::DispatchDirect:
+        require(4);
+        dispatch_pm4(queue, qs, {words[0], words[1], words[2], words[3]});
+        if (!qs.entries.empty())
+          return;
+        break;
+      case Pm4Opcode::DispatchIndirect: {
+        require(submission.graphics_engine ? 2 : 3);
+        flush_gpu_caches();
+        const uint64_t arguments =
+            submission.graphics_engine ? state.indirect_base + words[0] : address(0);
+        std::array<uint32_t, 4> dimensions{0, 0, 0, words.back()};
+        if (access->read(arguments, {reinterpret_cast<std::byte *>(dimensions.data()), 12}) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 DISPATCH_INDIRECT read failed");
+        dispatch_pm4(queue, qs, dimensions);
+        if (!qs.entries.empty())
+          return;
+        break;
+      }
+      default:
+        throw std::runtime_error(std::format("unsupported PM4 opcode {:#x}", opcode));
+      }
+    }
+    if (!state.submissions.empty())
+      arm_stall_recheck(now);
+  } catch (const std::exception &error) {
+    util::Logger::warn("PM4 queue failed: ", error.what());
+    fail_pm4_queue(queue, qs);
+  }
 }
 
 CommandProcessor::KernelDescriptorReadResult
@@ -3096,6 +3795,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint32_t scratch_wave_stride_per_se = 0;
   bool scratch_use_once = false;
   bool scratch_uses_alternate = false;
+  const uint32_t private_segment_fixed_size =
+      std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   if (uses_kfd_queue_abi) {
     queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
     if (AMDHSA_BITS_GET(kd.kernel_code_properties,
@@ -3115,8 +3816,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       launch_metadata.write_dispatch_id = loaded.value;
     }
 
-    const uint32_t private_segment_fixed_size =
-        std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
     if (private_segment_fixed_size > 0) {
       uint32_t queue_caps = 0;
       VmAccessOutcome outcome =
@@ -3274,6 +3973,9 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     }
   }
 
+  if (private_segment_fixed_size > 0 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+    scratch_wave_limit_per_se = std::min(scratch_wave_limit_per_se, scratch_waves_per_se_);
+
   DispatchEntry dp{};
   dp.queue_id = queue.queue_id;
   dp.enabled_cus = queue.enabled_cus;
@@ -3307,7 +4009,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
-  dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
+  dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
   dp.scratch_wave_stride_per_se = scratch_wave_stride_per_se;
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
@@ -3688,7 +4390,7 @@ void CommandProcessor::fetch_from_queue(AqlQueueRecord &queue, simdojo::Tick now
       queue.faulted = true;
     return false;
   };
-  if (queue.debug_suspended || queue.runtime_suspended) {
+  if (queue.suspended()) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
@@ -3928,6 +4630,8 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   if (!drain_completions())
     return;
 
+  service_drm_queues(now);
+
   size_t entries_before = 0;
   for (const AqlQueueRecord &queue : aql_queues_)
     entries_before += queue.entries.size();
@@ -3994,8 +4698,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
       progress = false;
 
       for (AqlQueueRecord &queue : aql_queues_) {
-        if (queue.faulted || queue.debug_suspended || queue.runtime_suspended ||
-            queue.publication_retry_pending)
+        if (queue.faulted || queue.suspended() || queue.publication_retry_pending)
           continue;
 
         while (queue.next_dispatch_idx < queue.entries.size()) {
@@ -4124,8 +4827,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     process_refetched_entries = false;
 
     for (AqlQueueRecord &queue : aql_queues_) {
-      if (queue.faulted || queue.debug_suspended || queue.runtime_suspended ||
-          queue.publication_retry_pending)
+      if (queue.faulted || queue.suspended() || queue.publication_retry_pending)
         continue;
       while (queue.next_dispatch_idx < queue.entries.size()) {
         DispatchEntry &entry = queue.entries[queue.next_dispatch_idx];
@@ -4172,7 +4874,10 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     }
   }
 
-  const bool all_done = completion_ && completion_->all_complete(aql_queues_);
+  const bool drm_done = std::ranges::all_of(drm_queues_, [](const auto &queue) {
+    return queue.dispatches.entries.empty() && queue.pm4->submissions.empty();
+  });
+  const bool all_done = drm_done && completion_ && completion_->all_complete(aql_queues_);
   const bool should_release = all_done && is_primary_ && !kfd;
 
   util::Logger::cp([&](auto &os) {

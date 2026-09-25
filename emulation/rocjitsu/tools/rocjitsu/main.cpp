@@ -213,7 +213,7 @@ void reap_stale_runtime_dirs() {
     if (status_error || status.type() != std::filesystem::file_type::directory)
       continue;
     const std::string name = it->path().filename().string();
-    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+    if (!std::ranges::all_of(name, [](unsigned char c) { return std::isdigit(c); }))
       continue;
     pid_t pid = 0;
     auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
@@ -303,8 +303,7 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
     }
   }
 
-  std::sort(nodes.begin(), nodes.end(),
-            [](const auto &lhs, const auto &rhs) { return lhs.node_id < rhs.node_id; });
+  std::ranges::sort(nodes, {}, &KfdNodeInfo::node_id);
 
   std::vector<KfdGpuOrdinal> gpus;
   gpus.reserve(nodes.size());
@@ -686,11 +685,11 @@ int main(int argc, char *argv[]) {
                 dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
                 environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
       launch_environment.set(client_visible->name, client_visible->value);
-    // The HSA hook still uses the legacy tools callback path. Disable only the
+    // The HSA hook still uses the legacy tools callback path. Disable the
     // rocprofiler-register table-delivery path so it cannot validate an
-    // unshadowed table before rocjitsu installs guest-agent wrappers.
-    launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
-    launch_environment.set("HSA_TOOLS_LIB", hooks_path);
+    // unshadowed table before rocjitsu installs guest-agent wrappers. Also
+    // exclude the overlapping automatic HotSwap hook across ROCr generations.
+    rocjitsu::cli::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory

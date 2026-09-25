@@ -43,9 +43,11 @@
 namespace rocjitsu {
 namespace amdgpu {
 bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                                        uint64_t status) {
-  auto *cp = raw_cu().command_processor();
-  return cp && cp->signal_queue_exception(queue_id, process_id, status);
+                                                        uint64_t status,
+                                                        bool clear_debug_stop_on_success,
+                                                        bool retain_failure_for_debugger) {
+  return raw_cu().defer_queue_exception(&raw_wavefront(), queue_id, process_id, status,
+                                        clear_debug_stop_on_success, retain_failure_for_debugger);
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -66,6 +68,17 @@ void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
 
 namespace {
 constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
+
+bool has_setreg_vgpr_msb_fixup(const ComputeUnitCore::Config &config) {
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaGpuTargetDescription *target = nullptr;
+  if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
+    target = registry.find_gpu_target(config.target);
+  } else if (const IsaTargetDescriptor *descriptor = registry.find(config.arch)) {
+    target = registry.find_default_gpu_target(*descriptor);
+  }
+  return target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
+}
 
 bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
 
@@ -96,8 +109,7 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
                             std::to_string(Isa::MAX_WF_SLOTS));
   }
 
-  const uint32_t vgprs_per_block =
-      std::max(config.vgprs_per_wf, Limits::MAX_ACCVGPR_PHYSICAL_LIMIT);
+  const uint32_t vgprs_per_block = Limits::effective_vgpr_allocation_block_size(config);
   if (vgprs_per_block > Limits::MAX_VGPRS_PER_BLOCK) {
     throw util::ConfigError("effective VGPRs per wavefront exceeds the ISA maximum of " +
                             std::to_string(Limits::MAX_VGPRS_PER_BLOCK));
@@ -111,9 +123,13 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
 }
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
-                                 L2Cache *l2, uint32_t wf_size)
+                                 L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
+                                 uint32_t vgpr_allocation_block_size)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size),
+      wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
+      vgpr_allocation_block_size_(vgpr_allocation_block_size),
+      scratch_slots_per_cu_(config.num_wf_slots),
+      setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)),
       decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
                    ? Decoder::create(config.arch)
                    : Decoder::create(default_isa_target_registry(), config.target)),
@@ -233,7 +249,10 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
   // halted slot is immediately available, as is a slot never materialized.
   size_t slot = config_.num_wf_slots;
-  for (size_t i = 0; i < wfs_.size(); ++i) {
+  const size_t slot_limit = scratch_wave_limit_per_se == UINT32_MAX
+                                ? wfs_.size()
+                                : std::min<size_t>(wfs_.size(), scratch_slots_per_cu_);
+  for (size_t i = 0; i < slot_limit; ++i) {
     const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + i;
     if (scratch_scoreboard_id < scratch_wave_limit_per_se && (!wfs_[i] || wfs_[i]->is_halted())) {
       slot = i;
@@ -342,18 +361,21 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   wf.reset();
 }
 
-void ComputeUnitCore::flush_wg_completions() {
+void ComputeUnitCore::flush_cp_notifications() {
   // Loops because a notification can retire more work and queue another
-  // completion behind it; draining to empty keeps that from waiting for whatever
+  // notification behind it; draining to empty keeps that from waiting for whatever
   // takes the wave-state lock next.
   for (;;) {
     std::vector<PendingVmFault> faults;
+    std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-      if (pending_vm_faults_.empty() && pending_wg_completions_.empty())
+      if (pending_vm_faults_.empty() && pending_queue_exceptions_.empty() &&
+          pending_wg_completions_.empty())
         return;
       faults.swap(pending_vm_faults_);
+      exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
     }
     // The lock is released here, so taking hw_queue_mutex_ below cannot invert
@@ -363,6 +385,28 @@ void ComputeUnitCore::flush_wg_completions() {
     for (const PendingVmFault &fault : faults)
       cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
                                     fault.outcome);
+    for (const auto &exception : exceptions) {
+      const bool delivered =
+          queue_exception_handler_
+              ? queue_exception_handler_(exception.queue_id, exception.process_id, exception.status,
+                                         exception.retain_failure_for_debugger)
+              : cp_->signal_queue_exception(exception.queue_id, exception.process_id,
+                                            exception.status);
+      if (delivered && exception.wave != nullptr) {
+        std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+        // Queue teardown can reclaim this slot while the external handler is
+        // waiting for acknowledgement. Only commit ownership to the wave that
+        // originally queued the exception.
+        if (exception.wave->process_id() == exception.process_id &&
+            exception.wave->queue_id() == exception.queue_id) {
+          exception.wave->add_trap_runtime_exception_status(exception.status);
+          if (exception.clear_debug_stop_on_success) {
+            exception.wave->set_debug_halted(false);
+            exception.wave->set_status_halt(false);
+          }
+        }
+      }
+    }
     for (const auto &[dispatch_id, wg_id] : ready)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
@@ -370,6 +414,10 @@ void ComputeUnitCore::flush_wg_completions() {
 
 void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.fail_pm4_submission()) {
+    abort_dispatch(wf.dispatch_id());
+    return;
+  }
   pending_vm_faults_.push_back({.queue_id = wf.queue_id(),
                                 .process_id = wf.process_id(),
                                 .dispatch_id = wf.dispatch_id(),
@@ -666,7 +714,10 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
                                            uint32_t scratch_wave_limit_per_se) const {
   // Count free wavefront slots.
   uint32_t free_slots = 0;
-  for (size_t slot = 0; slot < wfs_.size(); ++slot) {
+  const size_t slot_limit = scratch_wave_limit_per_se == UINT32_MAX
+                                ? wfs_.size()
+                                : std::min<size_t>(wfs_.size(), scratch_slots_per_cu_);
+  for (size_t slot = 0; slot < slot_limit; ++slot) {
     const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + slot;
     if (scratch_scoreboard_id < scratch_wave_limit_per_se &&
         (!wfs_[slot] || wfs_[slot]->is_halted()))
@@ -714,7 +765,6 @@ void ComputeUnitCore::tick_pipelines() {
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
-
   const uint8_t decoded_route_tag = inst->data()->tag();
   bool normalized_to_local = false;
   uint64_t flat_local_lane_mask = 0;
@@ -741,15 +791,18 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         }
       }
     }
-    // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
-    // not VMCNT).  Scratch-targeting FLATs stay on the global path.
+    // Under the current uniform-address-space assumption, FLAT operations
+    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
+    // FLATs stay on the global path. Architectural wait-counter obligations
+    // remain properties of the decoded instruction; this route selects only
+    // the memory path used by the emulator.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
     const uint32_t first_lane =
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
     if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
       if (observes_memory_routing_) {
-        std::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
+        std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
@@ -758,6 +811,15 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
+      const auto *issue = inst->amdgpu_memory_issue_info();
+      if (issue) {
+        for (const auto obligation : issue->counter_obligations()) {
+          if (obligation.completion_class() == MemoryCompletionClass::LDS) {
+            d.wait_counter_type = obligation.wait_counter_type();
+            break;
+          }
+        }
+      }
       normalized_to_local = true;
     }
   }
@@ -826,7 +888,7 @@ DecodedMemorySpace decoded_memory_space(std::string_view mnemonic, uint8_t decod
 
 } // namespace
 
-void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefront &wf,
+void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &wf,
                                            uint8_t route_tag, uint8_t decoded_route_tag,
                                            bool normalized_to_local,
                                            std::span<const uint64_t> pre_routing_addresses,
@@ -904,7 +966,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefr
     break;
   }
 
-  plugin_group_->onAmdgpuMemoryAccessRouted(access);
+  plugin_group_->onAmdgpuMemoryAccessRouted(access, inst, wf);
 }
 
 void ComputeUnitCore::update_wf_states() {
@@ -1117,6 +1179,7 @@ template <bool EnableAsync>
     // Under a debugger, surface the undecodable instruction as an illegal-
     // instruction exception (stops the wave at this PC) instead of silently
     // retiring it. Without a debugger this halts as before.
+    active->fail_pm4_submission();
     if (illegal_inst_handler_ && illegal_inst_handler_(*active))
       return;
     active->halt();
@@ -1142,7 +1205,7 @@ template <bool EnableAsync>
       may_submit = false;
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
-        std::copy_n(words, first.size(), first.begin());
+        std::ranges::copy_n(words, first.size(), first.begin());
         issuer =
             admission->inspect(*decoder_, inst_cache_, *memory_, vm_access ? &*vm_access : nullptr,
                                active->pc, vmid, active->num_vgprs(), storage->has_accvgprs, first);
@@ -1157,6 +1220,9 @@ template <bool EnableAsync>
       if (may_submit && window->submit_mma(decoded.value())) {
         if (issuer)
           window->reserve_issuer(*issuer);
+        // Async execution bypasses execute_instruction(), but the submitted
+        // instruction still ends the immediately-adjacent setreg hazard.
+        active->clear_setreg_vgpr_msb_hazard();
         plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
         active->pc += inst_size;
         return;
@@ -1197,6 +1263,9 @@ template <bool EnableAsync>
   // TBA. The handler advances TTMP0:1 for software traps, sends the KFD
   // interrupt message, restores STATUS, and returns through s_rfe_b64.
   if (std::string_view(inst->mnemonic()) == "s_trap") {
+    // s_trap bypasses execute_instruction(), but still occupies the adjacent
+    // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
+    active->clear_setreg_vgpr_msb_hazard();
     uint32_t trap_id = words[0] & 0xFFu;
     if (!active->in_trap_handler() && trap_handler_resolver_) {
       auto config = trap_handler_resolver_(*active);
@@ -1258,6 +1327,7 @@ template <bool EnableAsync>
         active->set_trap_saved_status(saved_status);
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
+        active->clear_trap_exception_status();
         // A fresh handler entry owns the halt state from here on; a marker left
         // over from a previous stop would attribute this entry's HALT to an
         // s_sendmsghalt that has already been resumed past.
@@ -1306,8 +1376,10 @@ template <bool EnableAsync>
                                             this->name(), active->wf_id(), inst->mnemonic(),
                                             active->pc, instruction_execution_error_name(error));
     util::Logger::warn(failure);
-    if (auto *sim_engine = this->engine())
-      sim_engine->request_exit(failure, /*code=*/1);
+    if (!active->fail_pm4_submission()) {
+      if (auto *sim_engine = this->engine())
+        sim_engine->request_exit(failure, /*code=*/1);
+    }
     active->halt();
     return;
   }

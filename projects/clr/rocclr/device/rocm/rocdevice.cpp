@@ -4094,17 +4094,37 @@ void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
 }
 
 // ================================================================================================
-uint8_t* Device::CreateBarrierPacket() const {
+uint8_t* Device::CreateBarrierPacket(int num_deps) const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
       (1 << HSA_PACKET_HEADER_BARRIER) |
       (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
+  static constexpr uint16_t kBarrierValueNopHeader =
+      (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+
   static_assert(sizeof(hsa_barrier_and_packet_t) == 64, "AQL packet size must be 64 bytes");
+  static_assert(sizeof(hsa_amd_barrier_value_packet_t) == 64, "AQL packet size must be 64 bytes");
+
   auto* raw = new uint8_t[64]();
-  auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-  pkt->header = kBarrierNopHeader;
+  if (num_deps == 1 && settings().barrier_value_packet_) {
+    auto* pkt = reinterpret_cast<hsa_amd_barrier_value_packet_t*>(raw);
+    pkt->header.header = kBarrierValueNopHeader;
+    pkt->header.AmdFormat = HSA_AMD_PACKET_TYPE_BARRIER_VALUE;
+    // The awaited signal is a completion signal: it rests armed at 1 and the GPU
+    // decrements it to 0 when the producer finishes. So "producer done" is
+    // (signal & mask) < 1. ApplyHwEventPatches fills in the signal handle.
+    pkt->value = kInitSignalValueOne;
+    pkt->mask = std::numeric_limits<int64_t>::max();
+    pkt->cond = HSA_SIGNAL_CONDITION_LT;
+  } else {
+    auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
+    pkt->header = kBarrierNopHeader;
+  }
   return raw;
 }
 
@@ -4133,7 +4153,8 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       ps->flags_.done_ = false;
       ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
-      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
+      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
+      // Slot 0 also covers a barrier-value packet: its signal aliases dep_signal[0].
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->dep_signal[patch.dep_slot] = sig;
     }
