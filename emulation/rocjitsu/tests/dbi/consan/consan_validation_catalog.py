@@ -1212,8 +1212,8 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=3,
         fault_families=("barrier-drop",),
-        # The CDNA4 fixture does not exist; do not advertise a synthetic path.
-        targets=("gfx942", "gfx1100", "gfx1201", "gfx1250"),
+        # The CDNA4/CDNA5 Jakub fixtures do not exist in hip-moi.
+        targets=("gfx942", "gfx1100", "gfx1201"),
     ),
 )
 
@@ -1541,22 +1541,7 @@ def _jakub_override(target: _NativeGtestTarget) -> dict[str, object]:
         f"SafeFp16Packed/Jakub{target.suite_family}MatmulReference."
         "MatchesHostReference"
     )
-    if target.id != "gfx1250":
-        return _single_oracle_override(relative_path, f"{oracle_prefix}/*")
-
-    # The producer-skew case is the barrier-fault discriminator, not a timing row.
-    # Keep clean coverage broad, measure the non-pipelined and double-buffered
-    # variants, and mutate only the exact-oracle case selected for inventory.
-    return {
-        "relative_path": relative_path,
-        "clean_filter": f"{oracle_prefix}/*",
-        "overhead_filter": (
-            f"{oracle_prefix}/NoPipelineProd16x8:"
-            f"{oracle_prefix}/DoubleBufferedProd16x8"
-        ),
-        "fault_filter": f"{oracle_prefix}/ProducerSkewProd16x8",
-        "run_timeout_seconds": 90,
-    }
+    return _single_oracle_override(relative_path, f"{oracle_prefix}/*")
 
 
 STREAMK_WORKLOAD_SHAPES = {

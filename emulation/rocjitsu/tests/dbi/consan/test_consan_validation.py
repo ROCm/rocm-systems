@@ -571,7 +571,7 @@ class ConSanValidationTest(unittest.TestCase):
             "gfx950": "STATUS_CDNA4.md",
             "gfx1100": "STATUS_RDNA3.md",
             "gfx1201": "STATUS_RDNA4.md",
-            "gfx1250": "STATUS_GFX1250.md",
+            "gfx1250": "STATUS_CDNA5.md",
         }
         status_colors = ("🩶", "🟥", "🟧", "🟨", "🟩")
         yellow_rule = (
@@ -584,9 +584,9 @@ class ConSanValidationTest(unittest.TestCase):
                 status = (status_root / filename).read_text()
                 self.assertEqual(status.count("| Set | Priority |"), 1)
                 self.assertEqual(status.count("| --- | ---: | --- | --- | --- |"), 1)
-                # RDNA4 and CDNA4 use the fault-detection qualification bar;
+                # Revalidated ledgers use the fault-detection qualification bar;
                 # other ledgers retain the historical support-based legend.
-                if target not in {"gfx1201", "gfx950"}:
+                if target not in {"gfx1201", "gfx950", "gfx1250"}:
                     self.assertIn(yellow_rule, status)
                 rows = [
                     line
@@ -599,6 +599,8 @@ class ConSanValidationTest(unittest.TestCase):
                     fields = [field.strip() for field in row.strip("|").split("|")]
                     self.assertEqual(len(fields), 5, row)
                     for cell in fields[3:]:
+                        if target == "gfx1250" and not cell:
+                            continue  # New campaign starts with empty result cells.
                         self.assertEqual(
                             sum(cell.count(color) for color in status_colors), 1, cell
                         )
@@ -1404,14 +1406,7 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["tensile-sk-mxf4gemm-explicit"]["tensile_inner_timeout_seconds"],
             900,
         )
-        self.assertEqual(
-            workloads["jakub-attention"]["relative_path"],
-            (
-                "hip-moi-build-gfx1250-tests/tests/"
-                "hip_moi_reference_gfx1250_jakub_matmul"
-            ),
-        )
-        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 90)
+        self.assertNotIn("jakub-attention", workloads)
         self.assertEqual(workloads["tp1-prefill"]["run_timeout_seconds"], 60)
         self.assertTrue(workloads["tp1-decode-combined"]["sharktank_skip_warmup"])
         self.assertEqual(workloads["qwen-prefill"]["run_timeout_seconds"], 360)
@@ -1491,7 +1486,6 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "d128-block", 150),
                 ("gfx950", "d128-pressure", 30),
                 ("gfx1250", "d128-pressure", 300),
-                ("gfx1250", "jakub-attention", 90),
                 ("gfx950", "tp1-prefill", 300),
                 ("gfx1250", "tp1-prefill", 60),
                 ("gfx950", "tp1-decode-combined", 300),
@@ -1667,7 +1661,7 @@ class ConSanValidationTest(unittest.TestCase):
         for target, shape in target_shapes.items():
             expected_paths = {}
             for workload_id, (family_kind, binary_kind, stem) in workload_stems.items():
-                if target == "gfx950" and workload_id == "jakub-attention":
+                if target in {"gfx950", "gfx1250"} and workload_id == "jakub-attention":
                     continue
                 family = shape.base if family_kind == "base" else shape.matrix
                 expected_paths[workload_id] = (
@@ -1682,15 +1676,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "MatchesHostReference"
             )
             jakub_filters = (f"{jakub_prefix}/*",) * 3
-            if target == "gfx1250":
-                jakub_filters = (
-                    f"{jakub_prefix}/*",
-                    (
-                        f"{jakub_prefix}/NoPipelineProd16x8:"
-                        f"{jakub_prefix}/DoubleBufferedProd16x8"
-                    ),
-                    f"{jakub_prefix}/ProducerSkewProd16x8",
-                )
             expected_filters = {
                 "d128-block": (
                     d128_block_clean,
@@ -1783,35 +1768,9 @@ class ConSanValidationTest(unittest.TestCase):
                                 ],
                             )
 
-    def test_gfx1250_doctor_reports_missing_target_native_jakub_artifact(
-        self,
-    ) -> None:
-        with temporary_root() as workspace:
-            (workspace / "hip-moi").mkdir()
-            hook = (
-                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
-                "librocjitsu_dbi_hooks.so"
-            )
-            hook.parent.mkdir(parents=True)
-            hook.touch()
-            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(
-                    workspace,
-                    "gfx1250",
-                    ("jakub-attention",),
-                )
-
-        self.assertFalse(doctor["ok"])
-        self.assertEqual(
-            doctor["paths"]["workload:jakub-attention:executable"],
-            {
-                "path": str(
-                    workspace / "hip-moi-build-gfx1250-tests/tests/"
-                    "hip_moi_reference_gfx1250_jakub_matmul"
-                ),
-                "present": False,
-            },
-        )
+    def test_gfx1250_excludes_unavailable_jakub_fixture(self) -> None:
+        with self.assertRaisesRegex(validation.ValidationError, "excludes workload"):
+            validation._workload_for_target("gfx1250", "jakub-attention")
 
     def test_main_doctor_all_uses_target_filtered_workloads(self) -> None:
         result = {
@@ -2059,7 +2018,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
 
     def test_gfx1250_environment_exposes_companion_hotswap_hook(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
         hook = Path("/workspace/rocjitsu-build/hooks/librocjitsu_dbi_hooks.so")
         with mock.patch.dict(
             os.environ,
@@ -4707,50 +4666,11 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(result["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
         self.assertEqual(trials, [{}])
 
-    def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
+    def test_gfx1250_fault_catalog_excludes_unavailable_workloads(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
-        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
-        fault = validation._load_fault(path, "gfx1250", workload, "barrier-drop")
-        expected_detectors = {
-            "supercollider": "not_detected",
-            "default": "detected",
-        }
-        for profile, detector in expected_detectors.items():
-            policy, trials = validation._fault_trials(fault, profile)
-            self.assertEqual(policy["detector"], detector)
-            self.assertEqual(policy["oracle"], "fail")
-            self.assertEqual(trials, [{}])
-        self.assertEqual(
-            fault["profiles"]["supercollider"]["tracking_issue"],
-            "bd-2sjm.1",
-        )
-        self.assertNotIn("tracking_issue", fault["profiles"]["default"])
-        environment = fault["profiles"]["default"]["environment"]
-        self.assertEqual(
-            environment["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1"
-        )
-        self.assertEqual(
-            environment["RJ_CONSAN_RUNTIME_SAMPLE_OFFSET"], "0"
-        )
-        self.assertEqual(
-            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-            (
-                "fnv1a64:d050643f089d6be9|function=_ZL20__work_group_barrierj|"
-                "kind=barrier|pc=0x0000000000009590|mnemonic=s_barrier_wait|"
-                "occurrence=1"
-            ),
-        )
-        self.assertEqual(
-            fault["site_provenance"]["corpus_commit"],
-            "a5054ec6f69fedbd723e528a3ac9881abbe61ec5",
-        )
-
-        resolved = validation._resolved_workload("gfx1250", workload)
-        self.assertIn("ProducerSkewProd16x8", resolved.fault_filter)
-        self.assertNotIn("ProducerSkewProd16x8", resolved.overhead_filter)
-        self.assertIn("NoPipelineProd16x8", resolved.overhead_filter)
-        self.assertIn("DoubleBufferedProd16x8", resolved.overhead_filter)
-        self.assertTrue(resolved.clean_filter.endswith("/*"))
+        catalog = json.loads(path.read_text())
+        available = {w["id"] for w in validation._manifest("gfx1250")["workloads"]}
+        self.assertLessEqual(set(catalog["workloads"]), available)
 
     def test_overhead_uses_bracketing_baseline_mean_and_maximum_mode(self) -> None:
         results = [
@@ -5707,7 +5627,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(outcome, "timeout")
 
     def test_inventory_prefixes_the_target_launcher(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
         inventory_output = "\n".join(
             (
                 "ConSan fault site reader=7 identity=h|kind=barrier|pc=2 "
@@ -5809,7 +5729,7 @@ class ConSanValidationTest(unittest.TestCase):
             )
 
     def test_fault_resume_reuses_only_a_complete_matching_row(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
         fault = {
             "id": "barrier-drop",
             "family": "barrier-drop",
@@ -5955,7 +5875,7 @@ class ConSanValidationTest(unittest.TestCase):
                 )
 
     def test_fault_launcher_covers_payload_and_only_default_health_checks(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
         fault = {
             "id": "barrier-drop",
             "family": "barrier-drop",
@@ -6061,7 +5981,7 @@ class ConSanValidationTest(unittest.TestCase):
                 )
                 self.assertEqual(json.loads(invocation[health_index]), expected_health)
                 self.assertEqual(json.loads(invocation[smoke_index]), expected_smoke)
-                self.assertEqual(invocation[timeout_index], "90")
+                self.assertEqual(invocation[timeout_index], "300")
                 summary = json.loads(
                     (
                         root
