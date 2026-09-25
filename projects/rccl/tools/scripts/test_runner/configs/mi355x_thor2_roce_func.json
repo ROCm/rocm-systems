@@ -2016,6 +2016,7 @@
     "unit_tests_gin_sdma_allgather_policy": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGinSdmaAllGatherPolicy",
+      "skip_if_missing": true,
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
@@ -2031,6 +2032,7 @@
     "unit_tests_gin_sdma_broadcast_policy": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGinSdmaBroadcastPolicy",
+      "skip_if_missing": true,
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
@@ -2046,6 +2048,7 @@
     "unit_tests_gin_sdma_allgather_gpu": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGinSdmaAllGatherGpu",
+      "skip_if_missing": true,
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,

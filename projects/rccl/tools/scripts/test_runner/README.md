@@ -1404,6 +1404,7 @@ This simplified approach eliminates the need for multiple test type conditionals
 - Build first: remove `--no-build` flag
 - Check binary name in `build/test/` directory
 - Verify CMAKE built successfully
+- A configuration with `skip_if_missing: true` reports SKIPPED instead of FAILED when its binary was not built. The GIN-SDMA AllGather and Broadcast unit tests use this because CMake only creates them when sibling `rccl-tests` headers are present. Missing MPI binaries are skipped the same way.
 
 ### Multi-node tests hang
 - Ensure SLURM allocation or hostfile is configured

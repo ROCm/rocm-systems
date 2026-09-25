@@ -1931,6 +1931,18 @@ class TestExecutor:
                     "duration": 0,
                     "error": f"MPI binary not found: {test_binary_path}"
                 }
+            # CMake omits some single-rank targets unless an optional dependency
+            # is present (GIN-SDMA AllGather/Broadcast need sibling rccl-tests
+            # headers). Those configurations set skip_if_missing so a standalone
+            # RCCL build reports SKIPPED instead of failing before any test runs.
+            if suite_config.get("skip_if_missing") or test_config.get("skip_if_missing"):
+                print(f"SKIP: optional test binary not found: {test_binary_path}")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": f"Optional binary not found: {test_binary_path}"
+                }
             print(f"ERROR: Test binary not found: {test_binary_path}")
             return {
                 "name": test_name,
