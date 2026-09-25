@@ -58,7 +58,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟧 default: all 3 shards hit the 900 s client deadline; clean qualification incomplete | 🟥 delay-zero: subword transform fixed; clean mismatches persist and all 3 shards time out |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 default: filtered clean pass; fault 0/8; high next | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 default: filtered clean pass (180 s deadline); fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |

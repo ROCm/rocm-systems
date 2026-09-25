@@ -786,3 +786,10 @@ in each instrumented shard). The two address-bank repairs resolve the original
 clean false positives across the maintained workload, not only solution 6.
 The SuperCollider cell moves from red to yellow; injected-fault qualification
 remains pending. The full sparse-ML rerun uses this same isolated hook next.
+
+### torch.mode Default result
+
+`mode-cap-default-fault` completes eight admitted/reached trials with zero
+detections and zero oracle manifestations. Every trial has complete analysis
+and healthy before/after checks, and the paired clean run passes. SuperCollider
+sleep=15 is next in the running driver; Default's next preset is high.
