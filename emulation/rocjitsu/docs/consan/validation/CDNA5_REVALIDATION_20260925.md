@@ -1878,3 +1878,23 @@ all disassembled instruction addresses and encodings match. The spec is rebound
 to exact identities verified in the retained export inventory before any trials.
 Runner tests: 209 passed (`mxf8-tdm-spec-tests.log`); identity-update rerun is
 recorded in `mxf8-tdm-rebound-spec-tests.log`.
+
+### MXF8 TDM qualified at high
+
+`tensor-memory-mxf8-tdm-high-clean` passes all six clean shards with complete
+coverage. The retained replay also passes its baseline and matching clean checks
+in `mxf8-tdm-exact-{default,high}-clean-retry`. Eight admitted/reached publication
+fault trials detect 1/8 at default and 8/8 at high, with healthy emulator checks
+and independent passing numeric oracles. `mxf8-tdm-exact-high-fault` is accepted;
+the Default cell moves to green at high.
+
+The next reviewed mixed MXF8/F4 publication uses retained ELF
+`1d7f6f9dfe5b603c`, MT32x32x256. `mixed-tdm-exact-replay-check` exports and replays
+all six numeric rows successfully. Disassembled instruction addresses and bytes
+match the original review, with regenerated labels changing ELF identity.
+Both publication pairs at .text 0x173c/0x1740 and 0x1754/0x1758 follow tensor
+completion at 0x1738. Wave 2's A tensor producer and wave 1 lane zero's reader
+at 0x175c overlap at LDS byte 4352. Exact identities are verified against the
+retained inventory. The eight-trial specification is committed before outcomes.
+
+Mixed TDM fault-spec runner tests: 209 passed (`mixed-tdm-spec-tests.log`).
