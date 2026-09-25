@@ -981,3 +981,20 @@ tests pass (`f8gemm-spec-tests.log`). `f8gemm-default-queue.py` waits for the
 existing longer full Default clean to finish successfully before launching faults;
 it exits without fault trials if that clean result is not accepted. The row
 remains orange until the full clean evidence is available.
+
+### Completed SGEMM Default and repeated Qwen Default trials
+
+`sgemm-smoke-default-retry-fault` completes eight admitted/reached trials at
+recorded preset default, with complete analysis and healthy pre/post probes in
+every trial: detector 0/8, oracle manifestations 0/8. The matching clean campaign
+already passed. Its cell remains yellow with the measured result. A matching
+high clean/fault campaign (`sgemm-high-retry-{clean,fault}`) is queued after the
+active HGEMM campaign process, with the same exact fault and emulator health
+commands. This advances one preset rather than repeating default.
+
+The misconfigured `qwen-cap-high-fault` campaign completed at its actual recorded
+preset default: 1/8 detections, versus 0/8 in the earlier Default campaign.
+All eight new trials have complete analysis and healthy probes. The table now
+reports the latest repeat explicitly; neither batch qualifies. The corrected
+`qwen-cap-high-verified.py` process has started the actual high campaign. Artifact
+directory names are not used to infer its preset.
