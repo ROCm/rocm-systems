@@ -172,13 +172,10 @@ if(BUILD_TESTS)
     ${ROCM_PATH}
   )
 
-  # The copied rocSHMEM GDA headers include each other as "gda/...", so the
-  # rocshmem_gda directory itself has to be on the include path, not just its
-  # parent (same requirement as rccl's own BEFORE PRIVATE entry in
-  # src/CMakeLists.txt). Targets that link rccl inherit this from its INTERFACE
-  # include directories, but the ones that deliberately don't link it -
-  # rccl-UnitTestsDevRuntime and the host micro-tests - still reach these
-  # headers through nccl_device.h and need it spelled out.
+  # The GDA headers include each other as "gda/...", so rocshmem_gda itself must
+  # be on the include path, not just its parent (as in src/CMakeLists.txt).
+  # rccl-UnitTestsDevRuntime and the host micro-tests do not link rccl, so they
+  # do not inherit it, yet still reach these headers via nccl_device.h.
   if(ENABLE_ROCSHMEM_GIN)
     list(APPEND RCCL_COMMON_INCLUDE_DIRS
       ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
@@ -506,9 +503,7 @@ if(BUILD_TESTS)
 
     # No rccl link below, so the implicit ordering after hipify has to be explicit.
     add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all copy_nccl_device_headers)
-    if(TARGET copy_rocshmem_headers)
-      add_dependencies(rccl-UnitTestsGinAnvilPlugin copy_rocshmem_headers)
-    endif()
+    rccl_order_rocshmem_headers(rccl-UnitTestsGinAnvilPlugin)
   endif()
   endif()
 
@@ -992,12 +987,7 @@ if(BUILD_TESTS)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-    # copy_rocshmem_headers stages the GDA headers at build time. Targets that
-    # link rccl get the ordering through it; the ones that don't would race the
-    # copy, so make it explicit for everything.
-    if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
-      add_dependencies(${test_executable} copy_rocshmem_headers)
-    endif()
+    rccl_order_rocshmem_headers(${test_executable})
 
     # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
     # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1 and pulls in rocSHMEM's sdma headers.
