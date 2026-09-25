@@ -3,6 +3,7 @@
 
 #pragma once
 #include <cstdint>
+#include <deque>
 #include <stack>
 
 namespace rocprofsys::rocprofiler_sdk
@@ -13,16 +14,23 @@ struct stream_stack_service
 {
     static void push(SdkBackend::stream_id_t sid) { get_stack().push(sid); }
 
-    static void pop() { get_stack().pop(); }
+    static void pop()
+    {
+        auto& stack = get_stack();
+        if(!stack.empty())
+        {
+            stack.pop();
+        }
+    }
 
     static SdkBackend::stream_id_t top()
     {
-        auto stack = get_stack();
+        auto& stack = get_stack();
         if(stack.empty())
         {
             return {};
         }
-        return get_stack().top();
+        return stack.top();
     }
 
     // NOLINTNEXTLINE (readability-function-size)
@@ -33,7 +41,12 @@ struct stream_stack_service
         SdkBackend::user_data_t* external_corr_id, void* /*user_data*/)
     {
         constexpr auto k_success_code = 0;
-        external_corr_id->value       = top().handle;
+        if(external_corr_id == nullptr)
+        {
+            return k_success_code;
+        }
+
+        external_corr_id->value = top().handle;
         return k_success_code;
     }
 
