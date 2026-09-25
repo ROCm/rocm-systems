@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
+#include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
@@ -1337,9 +1338,16 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
             _orig->amd_ext_, _tbl_instance, async_copy::async_copy_index_seq_t{});
 
         auto ctxs = context::get_registered_contexts(async_copy::context_filter);
-        if(!ctxs.empty())
+
+        // Range replay has to see every copy that writes device memory while a range is open,
+        // whether or not anything traces memory copies, so it needs the wrappers on its own. It
+        // does not need copy timestamps, so profiling is only enabled for tracing.
+        const bool range_replay_configured = range_replay::has_registered_range_replay_context();
+
+        if(!ctxs.empty()) _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
+
+        if(!ctxs.empty() || range_replay_configured)
         {
-            _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
             async_copy::async_copy_wrap<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
                 _orig->amd_ext_, async_copy::async_copy_index_seq_t{});
         }
