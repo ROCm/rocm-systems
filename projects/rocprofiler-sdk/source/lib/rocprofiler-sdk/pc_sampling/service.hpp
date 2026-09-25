@@ -53,6 +53,11 @@ using global_pc_sampling_sessions_map_t =
 common::Synchronized<global_pc_sampling_sessions_map_t>&
 get_global_pc_sampling_sessions();
 
+// Set once the HSA runtime is up. is_pc_sample_service_configured gates on it so that a
+// caller never sees a session whose ROCr-side state does not exist yet.
+std::atomic<bool>&
+is_hsa_initialized();
+
 rocprofiler_status_t
 start_service(const context::context* ctx);
 
