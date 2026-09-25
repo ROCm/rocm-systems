@@ -24,7 +24,9 @@
 
 """GPU-free unit tests for the rocprofv3 MPI rank/size environment handling."""
 
+import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -66,8 +68,13 @@ PAIR_REQUIRED_ERROR = (
 )
 
 
-class _Launched(Exception):
-    """Raised in place of the exec that would replace the test process."""
+# Stands in for the profiled application and reports the environment it receives.
+REPORT_PREFIX = "ENVIRONMENT="
+REPORT_ENVIRONMENT = [
+    sys.executable,
+    "-c",
+    f"import json, os; print('{REPORT_PREFIX}' + json.dumps(dict(os.environ)))",
+]
 
 
 @pytest.fixture(autouse=True)
@@ -94,31 +101,34 @@ def rocm_root(tmp_path):
 
 
 @pytest.fixture
-def launch(rocprofv3, rocm_root, monkeypatch):
-    """Run the launcher and return the environment it would hand to the application."""
+def launch(rocprofv3, rocm_root):
+    """Run the launcher and return the environment its application receives."""
 
     def _launch(*argv):
-        captured = {}
+        result = subprocess.run(
+            [
+                sys.executable,
+                rocprofv3.__file__,
+                "--rocm-root",
+                str(rocm_root),
+                *argv,
+                "--kernel-trace",
+                "--",
+                *REPORT_ENVIRONMENT,
+            ],
+            env=dict(os.environ),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
-        def execvpe(file, args, env):
-            captured.update(env)
-            raise _Launched
-
-        monkeypatch.setattr(rocprofv3.os, "execvpe", execvpe)
-
-        with pytest.raises(_Launched):
-            rocprofv3.main(
-                [
-                    "--rocm-root",
-                    str(rocm_root),
-                    *argv,
-                    "--kernel-trace",
-                    "--",
-                    "/bin/true",
-                ]
-            )
-
-        return captured
+        reports = [
+            line[len(REPORT_PREFIX) :]
+            for line in result.stdout.splitlines()
+            if line.startswith(REPORT_PREFIX)
+        ]
+        assert len(reports) == 1, result.stdout
+        return json.loads(reports[0])
 
     return _launch
 
@@ -232,6 +242,7 @@ def test_selected_rank_is_profiled(launch, rocm_root, monkeypatch):
     env = launch("--profile-mpi-ranks", "0-1")
 
     assert str(rocm_root / TOOL_LIBRARY) in env["LD_PRELOAD"]
+    assert env["ROCPROF_MPI_RANK_VAR"] == "OMPI_COMM_WORLD_RANK"
 
 
 def test_unselected_rank_is_not_profiled(launch, monkeypatch):
@@ -309,6 +320,12 @@ CUSTOM_VARIABLE_ARGS = [
             CUSTOM_VARIABLE_ARGS,
             "[rocprofv3] Fatal error: MPI rank variable MY_RANK=-1 is out of range "
             "(expected 0 or greater)\n",
+        ),
+        (
+            {"MY_RANK": "4", "MY_SIZE": "4"},
+            CUSTOM_VARIABLE_ARGS,
+            "[rocprofv3] Fatal error: MPI rank variable MY_RANK=4 is out of range for "
+            "world size variable MY_SIZE=4 (expected 0-3)\n",
         ),
     ],
 )
