@@ -846,3 +846,24 @@ new `bounded-retry-*` artifacts and a 3600 s client deadline.
 admitted/reached fault trials with complete analysis and healthy probes.
 Sleep=15 detects 0/8 and all eight workload oracles pass. The next Default
 preset remains high; SuperCollider now has a completed measured cell.
+
+### Default-first steering and preflight scheduling correction
+
+Default qualification now takes priority. New SuperCollider trials are deferred;
+its already running sparse-ML clean batch may finish. The remaining Tensile
+clean queue includes only Default runs. Mode high, histogram Default, TP1 high
+with a longer deadline, and a topk Default retry are queued for the slot occupied
+by the already running sort Default bundle; Qwen high continues independently.
+
+The earlier SIGSTOP-based CPU steward could pause a CLI inside a timed child
+probe. Resuming after the wall-clock deadline can produce an artificial doctor
+failure even if the child finished. Sort and topk failed preflight without
+injection; sort's independent doctor recheck passed. Replaced that scheduling
+with waiting before launching a whole CLI. The three paused Default jobs and
+one paused SuperCollider job had no result or provenance files and only zombie
+or absent children; they were terminated and saved for clean requeue/defer,
+respectively. No in-flight fault trial was restarted. The Default queue retains
+exact commands and selected environment in `requeued-default-jobs.json`; SC
+commands are retained in `deferred-supercollider-jobs.json`. The outer sequential
+preset driver is held without a subprocess deadline and resumes after its
+requeued child. No qualification is inferred from the interrupted preflights.
