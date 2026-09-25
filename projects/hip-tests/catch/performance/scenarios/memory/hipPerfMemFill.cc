@@ -372,6 +372,16 @@ template <class T> class hipPerfMemFill {
   /* This function should be via device attribute query*/
   bool supportDeviceMallocFinegrained() {
 #ifdef __HIP_PLATFORM_AMD__
+    int deviceId = -1;
+    int isFineGrain = 0;
+    HIP_CHECK(hipGetDevice(&deviceId));
+    HIP_CHECK(hipDeviceGetAttribute(&isFineGrain, hipDeviceAttributeFineGrainSupport, deviceId));
+    if (isFineGrain == 0) {
+      std::cout << "Device " << deviceId
+                << " does not support FineGrainVRAM. hipDeviceMallocFinegrained may fallback to host memory + PCIe atomics."
+                << std::endl;
+    }
+
     T* A = nullptr;
     hipError_t err;
 
