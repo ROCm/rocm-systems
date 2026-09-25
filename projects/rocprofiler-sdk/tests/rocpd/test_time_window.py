@@ -206,7 +206,12 @@ def test_empty_window_reports_no_timed_events(import_data, capsys):
 
     time_window.apply_time_window(import_data, start="120", end="180")
 
-    assert "contains no timed events" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "\n###\n"
+        "### WARNING: time window [120, 180] nsec contains no timed events\n"
+        "### Try adjusting your start and end times to include more events\n"
+        "###\n\n"
+    )
 
 
 def test_zero_length_trace_does_not_divide_by_zero(import_data, capsys):
@@ -243,7 +248,7 @@ def test_malformed_percentages_are_rejected(intervals, value):
 )
 def test_overhanging_percentages_are_clamped(intervals, capsys, start, end, expected):
     assert time_window.percentages2timestamp(intervals, start, end) == expected
-    assert "using time window [100, 200] nsec instead" in capsys.readouterr().err
+    assert "### Using time window [100, 200] nsec instead" in capsys.readouterr().err
 
 
 #
@@ -272,8 +277,11 @@ def test_invalid_timestamp_identifies_the_argument(intervals):
 def test_overhanging_bounds_are_clamped(intervals, capsys, start, end, expected):
     assert time_window.percentages2timestamp(intervals, start, end) == expected
     warning = capsys.readouterr().err
-    assert "WARNING" in warning
-    assert f"using time window [{expected[0]}, {expected[1]}] nsec instead" in warning
+    assert warning.startswith("\n###\n### WARNING: ")
+    assert warning.endswith(
+        f";\n### Using time window [{expected[0]}, {expected[1]}] nsec instead\n"
+        "###\n\n"
+    )
 
 
 def test_bounds_inside_the_trace_are_not_clamped(intervals, capsys):
