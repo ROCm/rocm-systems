@@ -339,7 +339,7 @@ void push_user_scope(const std::string& marker, const std::string& context, cons
     }
 }
 
-void pop_user_scope()
+bool pop_user_scope()
 {
     ProcessState& state  = process_state();
     ThreadState&  thread = thread_state();
@@ -348,17 +348,19 @@ void pop_user_scope()
         if (thread.stack.empty() || thread.guards.empty())
         {
             state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-            return;
+            return false;
         }
         roctxRangePop();
         state.stats.user_scope_pops.fetch_add(1, std::memory_order_relaxed);
         state.stats.pops.fetch_add(1, std::memory_order_relaxed);
         thread.stack.pop_back();
         thread.guards.pop_back();
+        return true;
     }
     catch (...)
     {
         state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
+        return false;
     }
 }
 
