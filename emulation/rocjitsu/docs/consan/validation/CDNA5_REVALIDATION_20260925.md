@@ -319,3 +319,15 @@ accepted clean correctness, complete analysis on all eight admitted/reached
 faults, and healthy pre/post checks. Every trial records `RJ_CONSAN_PRESET=high`.
 SuperCollider delay zero detects 0/8 (`hipkittens-sc-fault`); sleep=15 calibration
 is running with its own matching clean pass.
+
+HipKittens SuperCollider sleep=15 also finishes 0/8, with matching accepted
+clean and eight complete, healthy, admitted/reached trials
+(`hipkittens-sleep15-{clean,fault}`). The cell stays yellow.
+
+PyTorch TDM fresh inventory is retained under `tdm-lifetime-inventory`. Review
+of both cached Triton variants found wave-partitioned tensor transfers: the
+one-CTA variant uses four 320-byte padded LDS regions, while the two-CTA
+variant uses four 160-byte regions within each CTA. Their ordinary LDS accesses
+use the corresponding wave region. A dropped workgroup barrier therefore needs
+further dependency review before it can count as an injected inter-wave race;
+no TDM fault has been selected or run from this inventory yet.
