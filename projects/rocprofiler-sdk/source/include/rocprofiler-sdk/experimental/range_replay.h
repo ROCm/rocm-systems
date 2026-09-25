@@ -64,6 +64,10 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
                                                                   ///< or freed inside the range
     ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH,  ///< The queue submission path in use
                                                              ///< cannot re-submit recorded packets
+    ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE,  ///< A code object was unloaded,
+                                                                   ///< or a kernel from one loaded
+                                                                   ///< after the range began was
+                                                                   ///< dispatched, inside the range
     ROCPROFILER_RANGE_REPLAY_STATUS_LAST,
 } rocprofiler_range_replay_status_t;
 
