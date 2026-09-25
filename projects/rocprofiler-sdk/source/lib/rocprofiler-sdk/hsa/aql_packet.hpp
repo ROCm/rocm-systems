@@ -248,13 +248,19 @@ public:
         this->tracepool      = other.tracepool;
         this->packets        = other.packets;
         this->owner          = other.owner;
+        this->owner_state    = other.owner_state;
         this->loaded_codeobj = other.loaded_codeobj;
     }
 
     aqlprofile_handle_t    GetHandle() const { return tracepool->handle; }
     rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
-    const void*            GetOwner() const { return owner; }
-    void                   SetOwner(const void* value) { owner = value; }
+    uint64_t               GetOwner() const { return owner; }
+    void                   SetOwner(uint64_t value) { owner = value; }
+
+    // Holds a reference to the per-agent state this packet will deliver into, so a completion
+    // arriving after the owning tracer has torn down its agent map can still be serviced.
+    const std::shared_ptr<void>& GetOwnerState() const { return owner_state; }
+    void SetOwnerState(std::shared_ptr<void> value) { owner_state = std::move(value); }
 
     void populate_before() override
     {
@@ -274,7 +280,8 @@ public:
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;
     aqlprofile_att_control_aql_packets_t packets;
-    const void*                          owner = nullptr;
+    uint64_t                             owner = 0;
+    std::shared_ptr<void>                owner_state{};
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };

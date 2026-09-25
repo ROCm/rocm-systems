@@ -288,4 +288,76 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
     registration::finalize();
     context::pop_client(1);
 }
+
+// resource_deinit() clears the agent map, so a completion arriving after it must be serviced
+// through the reference the packet carries. Routing it through a map lookup instead both loses
+// the trace and leaves post_move_data permanently above zero.
+TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto&                  agents    = hsa::get_queue_controller()->get_supported_agents();
+    const hsa::AgentCache* att_agent = nullptr;
+    for(const auto& [_, agent] : agents)
+    {
+        if(!agent.get_rocp_agent()) continue;
+        if(!agent.get_rocp_agent()->runtime_visibility.hsa) continue;
+        att_agent = &agent;
+        break;
+    }
+    if(!att_agent) GTEST_SKIP() << "no ATT-capable GPU agent available";
+
+    auto ctx = rocprofiler_context_id_t{0};
+    ASSERT_EQ(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
+                  ctx,
+                  att_agent->get_rocp_agent()->id,
+                  nullptr,
+                  0,
+                  start_stop_dispatch_cb,
+                  [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
+                  nullptr),
+              ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    auto* ctx_p = context::get_mutable_registered_context(ctx);
+    ASSERT_TRUE(ctx_p && ctx_p->dispatch_thread_trace);
+    auto& tracer = *ctx_p->dispatch_thread_trace;
+    tracer.resource_init();
+
+    hsa::HookTestFakeQueue  fq(*att_agent, {.handle = 902});
+    hsa::rocprofiler_packet pkt{};
+    context::correlation_id corr_id{};
+    corr_id.internal = 43;
+    auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
+
+    hsa::inst_pkt_t inst_pkt;
+    bool            is_serialized = false;
+    thread_trace::kernel_dispatch_phase_enter_hook(
+        fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+
+    ASSERT_FALSE(inst_pkt.empty())
+        << "kernel_dispatch_phase_enter_hook must inject ATT control packet";
+    ASSERT_EQ(tracer.pending_post_moves(), 1);
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    // Tear down the agent map with the dispatch still outstanding.
+    tracer.resource_deinit();
+    EXPECT_TRUE(tracer.get_agents().empty());
+
+    auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
+    auto packet_data      = hsa::packet_data_t{};
+    packet_data.user_data = user_data;
+
+    thread_trace::kernel_dispatch_phase_exit_hook(fq, pkt, sess, packet_data, inst_pkt, {});
+
+    EXPECT_EQ(tracer.pending_post_moves(), 0)
+        << "a completion racing resource_deinit() must still drain post_move_data";
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
 }  // namespace

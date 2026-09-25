@@ -52,6 +52,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -456,6 +457,13 @@ DispatchThreadTracer::resource_init()
     }
 }
 
+uint64_t
+DispatchThreadTracer::allocate_tracer_id()
+{
+    static auto _counter = std::atomic<uint64_t>{1};
+    return _counter.fetch_add(1, std::memory_order_relaxed);
+}
+
 void
 DispatchThreadTracer::resource_deinit()
 {
@@ -520,7 +528,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         return {nullptr, parameters.bSerialize};
 
     auto packet = agent.get_start_packet();
-    packet->SetOwner(this);
+    packet->SetOwner(tracer_id);
+    packet->SetOwnerState(it->second);
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
@@ -540,19 +549,16 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
-        if(pkt->GetOwner() != this) continue;
-
-        auto agent = std::shared_ptr<ThreadTracerAgent>{};
-        {
-            std::shared_lock<std::shared_mutex> lk(agents_map_mut);
-            auto                                it = agents.find(pkt->GetAgent());
-            if(it == agents.end() || it->second == nullptr) continue;
-            agent = it->second;
-        }
+        if(pkt->GetOwner() != tracer_id) continue;
 
         post_move_data.fetch_sub(1);
 
         if(pkt->after_krn_pkt.empty()) continue;
+
+        // Delivered through the reference the packet carries rather than a lookup in agents,
+        // which resource_deinit() may already have cleared.
+        auto agent = std::static_pointer_cast<ThreadTracerAgent>(pkt->GetOwnerState());
+        if(!agent) continue;
 
         agent->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
