@@ -1274,3 +1274,20 @@ the exact retained objects. A fresh `f8gemm-exact-inventory` run is underway
 to bind the reviewed publication fault to those objects; eight-trial detection
 qualification is still pending. The table no longer describes fresh-generation
 identity drift as an unresolved prerequisite to launching this campaign.
+
+### TP2 high result and F8 retained fault identity
+
+`tp2-cap-high-clean` passes baseline and high prefill correctness. All eight
+`tp2-cap-high-fault` trials are admitted/reached, have complete analysis and
+healthy pre/post checks, and record high, but detect 0/8. The table reflects
+this completed result. `tp2-lanes-high-256` now checks all three TP2 clean
+workloads before faulting prefill using the repaired lane-retention hook.
+
+`f8gemm-exact-inventory` is accepted and contains the reviewed physical
+publication site and signal/wait sequence under ELF `9f71e85e45854416`.
+All 99,620 instruction bytes match the original reviewed object, SHA-256
+`add88be0f9148d988c51575a61fe5c6aa0099e3e1c57455e63688a8030d4ee37`.
+Inspection used separate output ELF paths, and the complete replay manifest
+was verified afterward. The spec now names that retained identity; all 209
+runner tests pass. `f8gemm-exact-default-qualification.py` is running matching
+shard baseline/Default checks before its eight-trial campaign.
