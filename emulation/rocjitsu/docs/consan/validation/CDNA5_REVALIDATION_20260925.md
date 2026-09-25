@@ -822,3 +822,10 @@ there is no cross-wave handoff to invalidate by dropping workgroup barriers.
 The cells remain yellow for this demonstrated qualification limit, rather than
 claiming an untested fault or leaving the dependency review pending. This does
 not qualify omitted tensor-wait mutations or establish generic TDM race support.
+
+### norm/softmax SuperCollider result
+
+`norm-cap-sleep15-{clean,fault}` completes with clean correctness and eight
+admitted/reached fault trials, all with complete analysis and healthy probes.
+Sleep=15 detects 0/8; the oracle also remains passing in all eight trials.
+The SuperCollider cell now records the measured result rather than pending work.
