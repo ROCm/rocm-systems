@@ -1171,3 +1171,20 @@ with complete analysis and healthy pre/post checks, but detects 0/8. This
 supersedes the partial five-trial result cut short by the original 60 s deadline.
 A new `tp1-cap-higher` clean/fault campaign advances to higher with a 600 s
 outer deadline and fresh roots; no repeat at low or default is requested.
+
+### Histogram qualifies after CDNA5 lane-retention repair
+
+`histc-lanes-high-256-clean` passes baseline and instrumented correctness.
+`histc-lanes-high-256-fault` detects 8/8 admitted/reached faults, with complete
+analysis, healthy pre/post checks and recorded high throughout. Clean and fault
+hook/allowlist hashes match. The 256-bank override is recorded in the campaign
+commands and displayed in the green cell; minimum bank count is not calibrated.
+
+The retained records now include the previously missing pair: FP32 LDS atomic
+updates at .text+0x311ac by owner 8 at bytes [64,68), and final reads at
+.text+0x31210 by owner 0 at the same bytes in workgroup (0,0,0), epoch 1.
+Default produced no observations; high with the old eight-bank layout produced
+0/8. The repaired high/256-bank configuration is the lowest qualifying preset
+in this search. Two additional candidate-hook campaigns check atomic publication
+(tree) and barrier handling (D128 pressure) with 256 banks; those results remain
+pending and are not claimed here.
