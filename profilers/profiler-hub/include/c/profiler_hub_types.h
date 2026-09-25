@@ -48,8 +48,10 @@ extern "C"
     /** @brief Distinguishes the identity columns a track was derived from. */
     typedef enum
     {
-        PH_TRACK_CATEGORY_THREAD,    /**< (nid,pid,tid)-based. */
-        PH_TRACK_CATEGORY_PMC_AGENT, /**< PMC/counter samples split by agent_id. */
+        PH_TRACK_CATEGORY_THREAD,        /**< (nid,pid,tid)-based, untagged events. */
+        PH_TRACK_CATEGORY_THREAD_SAMPLE, /**< Same (nid,pid,tid) family, events
+                                               tagged with a named track. */
+        PH_TRACK_CATEGORY_PMC_AGENT,     /**< PMC/counter samples split by agent_id. */
         PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE,     /**< By (nid,agent_id,queue_id). */

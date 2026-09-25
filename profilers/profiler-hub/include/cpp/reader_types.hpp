@@ -269,7 +269,11 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
  *         set it. */
 enum class track_kind_t
 {
-    thread,                       ///< (nid,pid,tid)-based; from rocpd_track.
+    thread,                       ///< (nid,pid,tid)-based; derived from the
+                                  ///< duration-event tables, untagged rows only.
+    thread_sample,                ///< Same (nid,pid,tid) family, but events
+                                  ///< explicitly tagged with a named
+                                  ///< rocpd_sample.track_id.
     pmc_agent,                    ///< PMC/counter samples split by agent_id.
     kernel_dispatch_agent_queue,  ///< Kernel dispatches, by (nid,agent_id,queue_id).
     memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).

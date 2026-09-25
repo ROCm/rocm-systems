@@ -236,6 +236,50 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         topology_to_track.emplace(topo, track_info_ptr);
     }
 
+    // "Sample" sub-tracks: duration events explicitly tagged with a real
+    // rocpd_sample.track_id, one track per tagged db track id. Registered
+    // into track_to_topology with a topology that can never match a real
+    // row (own_track_where's UNION branch requires S.track_id IS NULL), and
+    // into track_to_db_id with the REAL sample track id, so
+    // get_events_for_track()'s existing S.track_id = ? branch serves it --
+    // no read-path code changes needed beyond that.
+    constexpr topology_key_t no_topology{ no_db_id, no_db_id, no_db_id };
+
+    for(const auto& [sample_track_id, stats] : discover_thread_sample_tracks(stmts))
+    {
+        auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id          = next_id++;
+        track_info_ptr->name        = fmt::format("Thread {} (Sample)", stats.tid);
+        track_info_ptr->category    = reader_types::track_kind_t::thread_sample;
+        track_info_ptr->event_count = stats.count;
+        if(stats.has_range)
+        {
+            track_info_ptr->start_ts = stats.min_start;
+            track_info_ptr->end_ts   = stats.max_end;
+        }
+
+        if(const auto node_it = node_utility.find(stats.nid);
+           node_it != node_utility.end())
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        if(const auto process_it = process_utility.find(stats.pid);
+           process_it != process_utility.end())
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        if(const auto thread_it = thread_utility.find(stats.tid);
+           thread_it != thread_utility.end())
+        {
+            track_info_ptr->thread_info = thread_it->second;
+        }
+
+        tracks.push_back(track_info_ptr);
+        track_utility.emplace(track_info_ptr->id, track_info_ptr);
+        track_to_db_id.emplace(track_info_ptr, sample_track_id);
+        track_to_topology.emplace(track_info_ptr, no_topology);
+    }
+
     // PMC/counter tracks: one row per (nid,agent_id,pmc_id), already grouped
     // directly off the counter-sample tables -- naturally one track per
     // device+counter, no per-track-id agent-split bookkeeping needed.
@@ -430,6 +474,33 @@ reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statement
     accumulate(track_stmts.memory_copy);
 
     return key_stats;
+}
+
+std::unordered_map<size_t, thread_sample_stats_t>
+reader_catalog_t::discover_thread_sample_tracks(
+    data_storage::schema_v3::read_statements& stmts)
+{
+    std::unordered_map<size_t, thread_sample_stats_t> track_stats;
+
+    auto accumulate = [&](const auto& statement) {
+        for(const auto& row : statement().to_vector())
+        {
+            auto& stats = track_stats[row.sample_track_id];
+            stats.nid   = row.nid;
+            stats.pid   = row.pid.value_or(0);
+            stats.tid   = row.tid.value_or(0);
+            stats.count += row.count;
+            stats.merge(row.min_start, row.max_end);
+        }
+    };
+
+    const auto& sample_stmts = stmts.track_thread_sample_statements();
+    accumulate(sample_stmts.region);
+    accumulate(sample_stmts.kernel_dispatch);
+    accumulate(sample_stmts.memory_allocate);
+    accumulate(sample_stmts.memory_copy);
+
+    return track_stats;
 }
 
 void

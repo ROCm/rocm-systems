@@ -127,6 +127,7 @@ track_category_name(ph_track_category_t category)
     switch(category)
     {
         case PH_TRACK_CATEGORY_THREAD: return "thread";
+        case PH_TRACK_CATEGORY_THREAD_SAMPLE: return "thread_sample";
         case PH_TRACK_CATEGORY_PMC_AGENT: return "pmc_agent";
         case PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE: return "kernel_dispatch_aq";
         case PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE: return "memory_allocate_aq";

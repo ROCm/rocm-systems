@@ -30,6 +30,7 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
     switch(kind)
     {
         case track_kind_t::thread: return PH_TRACK_CATEGORY_THREAD;
+        case track_kind_t::thread_sample: return PH_TRACK_CATEGORY_THREAD_SAMPLE;
         case track_kind_t::pmc_agent: return PH_TRACK_CATEGORY_PMC_AGENT;
         case track_kind_t::kernel_dispatch_agent_queue:
             return PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE;

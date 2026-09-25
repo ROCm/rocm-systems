@@ -63,6 +63,17 @@ struct track_range_stats_t
     }
 };
 
+/** @brief track_range_stats_t plus the topology it was derived from --
+ *         used only for node/process/thread_info linkage when building a
+ *         thread_sample track (the read path identifies it by db track id,
+ *         not by topology; see reader_catalog_t::build_tracks()). */
+struct thread_sample_stats_t : track_range_stats_t
+{
+    size_t nid{};
+    size_t pid{};
+    size_t tid{};
+};
+
 /**
  * @brief Cached, read-only trace metadata: nodes/processes/threads/agents/
  *        tracks/code objects/kernel symbols/streams/queues/pmc info, plus
@@ -143,6 +154,15 @@ private:
     [[nodiscard]] std::
         unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>
         discover_thread_tracks(data_storage::schema_v3::read_statements& stmts);
+
+    // Discovers "thread_sample" tracks: duration events tagged with a real
+    // rocpd_sample.track_id (via writer_t::register_track_info() +
+    // trace_environment_t::track_name), grouped by that db track id -- a
+    // separate track per named sample, distinct from the untagged "thread"
+    // track discover_thread_tracks() returns for the same (nid,pid,tid).
+    // Called from build_tracks().
+    [[nodiscard]] std::unordered_map<size_t, thread_sample_stats_t>
+    discover_thread_sample_tracks(data_storage::schema_v3::read_statements& stmts);
 
     // Appends optiq-parity category tracks (kernel-dispatch/memory-allocate/
     // memory-copy, per agent+queue and per host-stream) to `tracks`,

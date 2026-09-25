@@ -49,6 +49,11 @@ downstream consumer of the library.
   timestamps spanning each track's events, computed for every track
   category (thread, pmc_agent, the 3 agent+queue categories, and stream —
   the latter combined across kernel-dispatch/memory-allocate/memory-copy).
+- New `PH_TRACK_CATEGORY_THREAD_SAMPLE`/`track_kind_t::thread_sample`
+  category: duration events explicitly tagged with a named track (via
+  `writer_t::register_track_info()` + `trace_environment_t::track_name`)
+  are now split out of the plain `thread` track into their own
+  `thread_sample` track instead of being merged into it.
 
 ### Changed
 

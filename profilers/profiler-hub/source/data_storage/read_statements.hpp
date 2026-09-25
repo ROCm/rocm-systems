@@ -310,6 +310,17 @@ struct track_key_count_result
     std::optional<size_t> max_end;
 };
 
+struct track_thread_sample_result
+{
+    size_t                nid{};
+    std::optional<size_t> pid;
+    std::optional<size_t> tid;
+    size_t                sample_track_id{};
+    size_t                count{};
+    std::optional<size_t> min_start;
+    std::optional<size_t> max_end;
+};
+
 struct track_agent_queue_count_result
 {
     size_t                nid{};
@@ -377,6 +388,7 @@ struct read_statements
         initialize_count_statements();
         initialize_time_range_statements();
         initialize_track_event_count_statements();
+        initialize_track_thread_sample_statements();
         initialize_track_category_statements();
         initialize_pmc_track_statement();
         initialize_pmc_sample_statements();
@@ -479,6 +491,17 @@ struct read_statements
         track_key_count_statement_func_t kernel_dispatch;
         track_key_count_statement_func_t memory_allocate;
         track_key_count_statement_func_t memory_copy;
+    };
+
+    using track_thread_sample_statement_func_t =
+        std::function<sqlite_backend::result_set<track_thread_sample_result>()>;
+
+    struct track_thread_sample_statement_set
+    {
+        track_thread_sample_statement_func_t region;
+        track_thread_sample_statement_func_t kernel_dispatch;
+        track_thread_sample_statement_func_t memory_allocate;
+        track_thread_sample_statement_func_t memory_copy;
     };
 
     using track_agent_queue_count_statement_func_t =
@@ -657,6 +680,12 @@ struct read_statements
         const
     {
         return m_track_event_count_statements;
+    }
+
+    [[nodiscard]] const track_thread_sample_statement_set&
+    track_thread_sample_statements() const
+    {
+        return m_track_thread_sample_statements;
     }
 
     [[nodiscard]] const track_category_statement_set& track_category_statements() const
@@ -926,16 +955,22 @@ private:
 
     void initialize_track_event_count_statements()
     {
+        // LEFT JOIN + "S.track_id IS NULL": these are the "main" (untagged)
+        // thread-track numbers -- sample-tagged rows are counted separately
+        // by initialize_track_thread_sample_statements(), surfaced as their
+        // own thread_sample track (see reader_catalog.cpp).
         auto make_key_count_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
-                         .select("nid",
-                                 "pid",
-                                 "tid",
+                         .select("T.nid",
+                                 "T.pid",
+                                 "T.tid",
                                  "COUNT(*) AS count",
-                                 "MIN(start) AS min_start",
-                                 "MAX(end) AS max_end")
-                         .from(fmt::format("{}_{}", table, m_uuid))
-                         .group_by("nid", "pid", "tid")
+                                 "MIN(T.start) AS min_start",
+                                 "MAX(T.end) AS max_end")
+                         .from(fmt::format("{}_{}", table, m_uuid), "T")
+                         .left_join("rocpd_sample", "S", "S.event_id = T.event_id")
+                         .where("S.track_id IS NULL")
+                         .group_by("T.nid", "T.pid", "T.tid")
                          .get_query_string();
             return m_backend->create_read_statement_executor<track_key_count_result>(
                 q,
@@ -954,6 +989,44 @@ private:
             make_key_count_stmt("rocpd_memory_allocate");
         m_track_event_count_statements.memory_copy =
             make_key_count_stmt("rocpd_memory_copy");
+    }
+
+    void initialize_track_thread_sample_statements()
+    {
+        // Sample-tagged counterpart to initialize_track_event_count_statements():
+        // one row per (nid,pid,tid,S.track_id) group that has at least one
+        // sample-tagged duration event -- becomes a thread_sample track.
+        auto make_sample_stmt = [&](const std::string_view table) {
+            auto q = queries::select::table_select_query{}
+                         .select("T.nid",
+                                 "T.pid",
+                                 "T.tid",
+                                 "S.track_id AS sample_track_id",
+                                 "COUNT(*) AS count",
+                                 "MIN(T.start) AS min_start",
+                                 "MAX(T.end) AS max_end")
+                         .from(fmt::format("{}_{}", table, m_uuid), "T")
+                         .inner_join("rocpd_sample", "S", "S.event_id = T.event_id")
+                         .group_by("T.nid", "T.pid", "T.tid", "S.track_id")
+                         .get_query_string();
+            return m_backend->create_read_statement_executor<track_thread_sample_result>(
+                q,
+                &track_thread_sample_result::nid,
+                &track_thread_sample_result::pid,
+                &track_thread_sample_result::tid,
+                &track_thread_sample_result::sample_track_id,
+                &track_thread_sample_result::count,
+                &track_thread_sample_result::min_start,
+                &track_thread_sample_result::max_end);
+        };
+
+        m_track_thread_sample_statements.region = make_sample_stmt("rocpd_region");
+        m_track_thread_sample_statements.kernel_dispatch =
+            make_sample_stmt("rocpd_kernel_dispatch");
+        m_track_thread_sample_statements.memory_allocate =
+            make_sample_stmt("rocpd_memory_allocate");
+        m_track_thread_sample_statements.memory_copy =
+            make_sample_stmt("rocpd_memory_copy");
     }
 
     void initialize_track_category_statements()
@@ -1271,15 +1344,17 @@ private:
         // independently-indexable branches instead: verified on a 5.9GB
         // trace this drops a ~1.7s query to ~4ms (with the (nid,pid,tid)
         // index from initialize_track_topology_indexes()). UNION ALL (not
-        // UNION) is safe here because the two branches are always disjoint
-        // in every trace observed: rocpd_sample never actually references a
-        // region/kernel_dispatch/memory_allocate/memory_copy event_id (only
-        // PMC/counter events populate it), so the S.track_id branch matches
-        // zero of the same rows as the (nid,pid,tid) branch. UNION ALL skips
-        // the DISTINCT temp-b-tree dedup pass, which otherwise roughly
-        // doubles the cost of reading a whole large track (measured).
-        const auto own_track_where =
-            a + ".nid = ? AND " + a + ".pid = ? AND " + a + ".tid = ?";
+        // UNION) is safe here because the two branches are disjoint BY
+        // CONSTRUCTION: "own track" requires S.track_id IS NULL, so it can
+        // never match the same row as the "S.track_id = ?" branch. This
+        // matters now that a thread's sample-tagged events are surfaced as
+        // a separate thread_sample track (see reader_catalog.cpp) instead
+        // of just being (historically, in every trace observed) absent.
+        // UNION ALL skips the DISTINCT temp-b-tree dedup pass, which
+        // otherwise roughly doubles the cost of reading a whole large track
+        // (measured).
+        const auto own_track_where = a + ".nid = ? AND " + a + ".pid = ? AND " + a +
+                                     ".tid = ? AND S.track_id IS NULL";
 
         out.track_filtered = m_backend->create_read_statement_executor<
             timeline_event_result,
@@ -1814,8 +1889,9 @@ private:
     // Correlated events
     correlated_event_statement_set m_correlated_event_statements;
 
-    track_event_count_statement_set m_track_event_count_statements;
-    track_category_statement_set    m_track_category_statements;
+    track_event_count_statement_set   m_track_event_count_statements;
+    track_thread_sample_statement_set m_track_thread_sample_statements;
+    track_category_statement_set      m_track_category_statements;
 
     pmc_track_statement_func_t                m_pmc_track_statement;
     pmc_sample_statement_func_t               m_pmc_sample_statement;
