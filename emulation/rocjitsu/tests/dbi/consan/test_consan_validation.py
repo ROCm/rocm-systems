@@ -3963,6 +3963,22 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--config") + 1], str(config))
         self.assertEqual(inputs["config"], config)
 
+    def test_required_paths_accepts_retained_hook_outside_build_tree(self) -> None:
+        with temporary_root() as directory:
+            hook = directory / "retained-hook.so"
+            hook.write_bytes(b"retained hook")
+            with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_HOOK": str(hook)}):
+                paths = validation._required_paths(Path("/workspace"), ())
+            self.assertEqual(paths, {"hook": hook.resolve()})
+            self.assertTrue(paths["hook"].is_file())
+
+    def test_required_paths_retains_canonical_build_prerequisite(self) -> None:
+        hook = Path("/workspace/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so")
+        with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_HOOK": str(hook)}):
+            paths = validation._required_paths(Path("/workspace"), ())
+        self.assertEqual(paths["hook"], hook)
+        self.assertEqual(paths["rocjitsu-build"], Path("/workspace/build"))
+
     def test_tensile_required_paths_follow_selected_corpus(self) -> None:
         smoke = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
         external = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-quick"]

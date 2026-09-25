@@ -170,10 +170,12 @@ def _required_paths(
     workspace: Path, workloads: tuple[Workload, ...]
 ) -> dict[str, Path]:
     hook = _hook_path(workspace)
-    paths = {
-        "rocjitsu-build": hook.parents[5],
-        "hook": hook,
-    }
+    paths = {"hook": hook}
+    # An explicitly retained hook need not live in a build tree. Only infer
+    # a build prerequisite when the resolved path has the canonical suffix.
+    build_suffix = Path("lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so")
+    if hook.parts[-len(build_suffix.parts) :] == build_suffix.parts:
+        paths["rocjitsu-build"] = hook.parents[len(build_suffix.parts) - 1]
     if any(workload.corpus == "iree-test-suites" for workload in workloads):
         paths["iree-test-suites"] = workspace / "iree-test-suites"
     if any(workload.kind == "qwen" for workload in workloads):
