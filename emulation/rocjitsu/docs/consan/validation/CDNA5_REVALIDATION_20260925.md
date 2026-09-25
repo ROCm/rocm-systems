@@ -301,3 +301,14 @@ Tensile F8 Default completed six shards; its 511/512/513 square-size shards hit
 the 420-second client execution budget (one retained log has 10 of 12 expected
 numeric rows). The full row is orange, with no shard coverage or oracle waived.
 The bounded scheduler has resumed with the rebuilt hook.
+
+### HipKittens fault requalification after lifetime repair
+
+Fresh inventory retains ELF `9fe162c3afef62c6` and tile-publication split pair
+`.text+0x09bc/0x09cc`. Source `gemm_naive.cpp` publishes the cooperatively loaded
+A/B tiles before peer reads. Pristine ISA (`hipkittens-pristine.asm`, text VMA
+0x1700) confirms the last tile store and restored EXEC before the pair, followed
+by `ds_load_b128`; the later reuse barrier remains intact. The 64x64x32 launch
+executes one workgroup and one reduction iteration. Both modes now predeclare
+eight trials with minimum six detections and independent numerical outcomes.
+The existing matching clean results are under `lifetime-clean`.

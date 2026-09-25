@@ -11,7 +11,7 @@
           "family": "barrier-drop",
           "reach_witness": {
             "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected first split signal/wait pair at .text+0x09bc/.text+0x09cc is the unconditional tile-publication barrier in the executed gemm_naive_kernel reduction iteration. All four waves cooperatively populate the A and B LDS tiles before this edge and issue peer LDS reads afterward. The exact 64x64x32 command launches one complete workgroup and one reduction iteration, so it necessarily reaches the preselected sequence."
+            "evidence": "The selected first split signal/wait pair at .text+0x09bc/.text+0x09cc is the unconditional tile-publication barrier in the executed gemm_naive_kernel reduction iteration. All four waves cooperatively populate the A and B LDS tiles before this edge and issue peer LDS reads afterward. The exact 64x64x32 command launches one complete workgroup and one reduction iteration, so it necessarily reaches the preselected sequence. Reconfirmed September 25 after the publication tracker lifetime repair: hipkittens-lifetime-inventory records the same ELF and split pair. Pristine hipkittens-pristine.asm has .text VMA 0x1700; final flat LDS tile store at 0x20a0 and EXEC restore at 0x20b8 precede signal 0x20bc/wait 0x20cc, then ds_load_b128 at 0x20d0 onward. The second reuse pair at 0x2124/0x2128 is preserved. Eight independent trials per mode, minimum six detections, are predeclared before outcomes."
           },
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
@@ -19,13 +19,35 @@
             "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:9fe162c3afef62c6|kernel=_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii|event=barrier|pc=0x00000000000009bc|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:9fe162c3afef62c6|kernel=_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii|event=barrier|pc=0x00000000000009cc|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "any"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "any"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }
