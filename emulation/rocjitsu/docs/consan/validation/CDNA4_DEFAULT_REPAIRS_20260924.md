@@ -204,7 +204,10 @@ candidate's two emulator failures.
 The corrected adaptive mapping is committed as `8e2a6ae47e`; all 285 rebuilt
 hook unit tests also pass (`hooks-lanes-v3.xml`). Softmax's first corrected-build
 matrix at `max` plus 128 banks passes its clean control and detects 5/8 injected
-faults, so it remains below the 6/8 bar and the precommitted 256-bank batch is
-running. An earlier intermediate build recorded 6/8 at 128 banks, but its two
+faults. The precommitted 256-bank batch then passes its matching clean control
+and detects all eight injected faults, qualifying softmax at `max` plus 256
+banks. All eight trials are admitted/reached with complete coverage and healthy
+GPU probes; the completed-matrix audit reports zero errors. Evidence is in
+`pytorch-norm-softmax/max-lanes-v3-banks-256/`. An earlier intermediate build recorded 6/8 at 128 banks, but its two
 emulator regressions disqualify it from promotion; that result remains evidence,
 not a replacement for the corrected-build qualification.

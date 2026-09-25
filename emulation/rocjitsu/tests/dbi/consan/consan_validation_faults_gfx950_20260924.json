@@ -822,28 +822,36 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "max"
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
                 }
               ]
             },
