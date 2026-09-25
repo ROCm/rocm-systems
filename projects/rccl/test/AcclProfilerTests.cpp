@@ -323,6 +323,46 @@ TEST(AcclProfilerInit, NestedOutputDirIsCreated) {
     );
 }
 
+// getenv() returns a non-NULL pointer for a set-but-empty variable, so a plain
+// !outDir check left outDir == "" and every rank assembled
+// "/accl_profiler_rank*.jsonl" at the filesystem root: EACCES unprivileged, and
+// silently successful as root in a container. Both are quiet — ACCL_WARN is
+// level WARN and the RCCL default with NCCL_DEBUG unset is ERROR — so an empty
+// value has to fall back to the same /tmp the unset case uses.
+TEST(AcclProfilerInit, EmptyOutputDirFallsBackToTmp) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerInit.EmptyOutputDirFallsBackToTmp",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD113, &mask, "empty_dir_test",
+                                     1, 1, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+            test_acclWriteDummyRecord(ctx);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // "" as a directory makes ReadProfilerOutput look at "/...", which
+            // is exactly where the unfixed plugin wrote.
+            EXPECT_TRUE(ReadProfilerOutput("", "0xd113").empty())
+                << "plugin wrote to the filesystem root";
+            EXPECT_FALSE(ReadProfilerOutput("/tmp", "0xd113").empty())
+                << "empty ACCL_PROFILER_OUTPUT_DIR did not fall back to /tmp";
+
+            // No ScopedProfilerDir owns /tmp, so remove our own file. The name
+            // carries this pid and the comm hash, so nothing else can match.
+            char host[256] = {0};
+            gethostname(host, sizeof(host) - 1);
+            char path[1024];
+            snprintf(path, sizeof(path),
+                     "/tmp/accl_profiler_rank0_%s_pid%d_0xd113.jsonl",
+                     host, (int)getpid());
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", ""}}
+    );
+}
+
 // An ACCL_PROFILER_OUTPUT_DIR long enough to truncate the assembled path must
 // be refused, not written to. Truncation cuts the rank/pid/hash suffix — and,
 // once the directory alone exceeds the buffer, the trailing path component too
