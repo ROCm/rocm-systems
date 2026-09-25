@@ -1070,7 +1070,7 @@ int64_t GpuPciDevice::access_memory(std::span<std::byte> buf, uint64_t offset, b
   if (write) {
     std::ranges::copy(buf, begin);
   } else {
-    std::copy_n(begin, buf.size(), buf.begin());
+    std::ranges::copy_n(begin, buf.size(), buf.begin());
   }
   return static_cast<int64_t>(buf.size());
 }

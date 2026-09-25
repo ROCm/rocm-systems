@@ -226,7 +226,20 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_ELEMS_PER_THREAD 120
 #endif
 
+/* Same host/device split as NCCL_LL128_LINESIZE above.
+ * Device code: 32 on gfx1250 (wider slices roughly double large-message LL128 bandwidth),
+ * 8 elsewhere. Host code: must NOT use this macro for logic as it defaults to 8. Use
+ * rcclLL128ShmemElemsPerThreadFromArch() (archinfo.h) or comm->ll128ShmemElemsPerThread
+ * instead. */
+#if __HIP_DEVICE_COMPILE__
+#if defined(__gfx1250__)
+#define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 32
+#else
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
+#endif
+#else
+#define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
+#endif
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_MAX_NTHREADS)
 
 #define NCCL_P2P_WRITE 0x01

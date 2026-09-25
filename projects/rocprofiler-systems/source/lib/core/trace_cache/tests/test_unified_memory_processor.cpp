@@ -110,9 +110,13 @@ struct ScopedEnv
     ~ScopedEnv()
     {
         if(had_env)
+        {
             setenv(env_name.c_str(), previous.c_str(), 1);
+        }
         else
+        {
             unsetenv(env_name.c_str());
+        }
     }
 
     std::string env_name;
@@ -191,7 +195,10 @@ protected:
     {
         for(const auto& file : registered_files())
         {
-            if(file.format == format) return file.path;
+            if(file.format == format)
+            {
+                return file.path;
+            }
         }
         return std::nullopt;
     }
@@ -451,8 +458,14 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath
     {
         EXPECT_THAT(e.path, ::testing::HasSubstr(explicit_dir));
         EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        if(e.format == output_format::text)
+        {
+            saw_txt = true;
+        }
+        if(e.format == output_format::json)
+        {
+            saw_json = true;
+        }
     }
     EXPECT_TRUE(saw_txt) << "text file not registered";
     EXPECT_TRUE(saw_json) << "json file not registered";
@@ -479,8 +492,14 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
     {
         EXPECT_THAT(e.path, ::testing::HasSubstr(expected_dir));
         EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        if(e.format == output_format::text)
+        {
+            saw_txt = true;
+        }
+        if(e.format == output_format::json)
+        {
+            saw_json = true;
+        }
     }
     EXPECT_TRUE(saw_txt) << "text file not registered";
     EXPECT_TRUE(saw_json) << "json file not registered";
@@ -506,8 +525,14 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
     {
         EXPECT_THAT(e.path, ::testing::HasSubstr(nested_dir));
         EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        if(e.format == output_format::text)
+        {
+            saw_txt = true;
+        }
+        if(e.format == output_format::json)
+        {
+            saw_json = true;
+        }
     }
     EXPECT_TRUE(saw_txt) << "text file not registered";
     EXPECT_TRUE(saw_json) << "json file not registered";
@@ -529,8 +554,14 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
     for(const auto& e : files)
     {
         EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
-        if(e.format == output_format::text) saw_txt = true;
-        if(e.format == output_format::json) saw_json = true;
+        if(e.format == output_format::text)
+        {
+            saw_txt = true;
+        }
+        if(e.format == output_format::json)
+        {
+            saw_json = true;
+        }
     }
     EXPECT_TRUE(saw_txt);
     EXPECT_TRUE(saw_json);
@@ -616,7 +647,9 @@ TEST_F(UnifiedMemoryProcessorTest, FloatSanitizationProducesZeroSize)
     };
 
     for(const double v : rejected_values)
+    {
         feed_h2d_migrate_with_value(v);
+    }
 
     processor->finalize_processing();
 

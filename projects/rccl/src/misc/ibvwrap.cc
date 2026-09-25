@@ -277,6 +277,14 @@ ncclResult_t wrap_ibv_reg_mr_iova2(struct ibv_mr** ret, struct ibv_pd* pd, void*
                       *ret, NULL, "ibv_reg_mr_iova2");
 }
 
+struct ibv_mr* wrap_direct_ibv_reg_mr_iova2(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access) {
+  if (ibvSymbols.ibv_internal_reg_mr_iova2 == NULL) {
+    WARN("lib wrapper not initialized.");
+    return NULL;
+  }
+  return ibvSymbols.ibv_internal_reg_mr_iova2(pd, addr, length, iova, access);
+}
+
 /* DMA-BUF support */
 ncclResult_t wrap_ibv_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length,
                                     uint64_t iova, int fd, int access) {

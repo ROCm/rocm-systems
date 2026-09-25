@@ -40,7 +40,10 @@ protected:
 
     void cleanup_temp_dir(const std::string& dir)
     {
-        if(dir.empty()) return;
+        if(dir.empty())
+        {
+            return;
+        }
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
     }
@@ -72,14 +75,22 @@ protected:
     void restore_env_vars()
     {
         if(m_saved_rocm_path.has_value())
+        {
             setenv("ROCM_PATH", m_saved_rocm_path->c_str(), 1);
+        }
         else
+        {
             unsetenv("ROCM_PATH");
+        }
 
         if(m_saved_rocmv_dir.has_value())
+        {
             setenv("ROCmVersion_DIR", m_saved_rocmv_dir->c_str(), 1);
+        }
         else
+        {
             unsetenv("ROCmVersion_DIR");
+        }
     }
 
     void set_rocm_path(const std::string& path) { setenv("ROCM_PATH", path.c_str(), 1); }
