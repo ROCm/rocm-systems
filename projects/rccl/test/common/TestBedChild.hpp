@@ -68,10 +68,10 @@ namespace RcclUnitTesting
     int childReadFd;
 
     // These varibles may change based on commands issued by parent
-    int totalRanks;                                                   // Total ranks
-    int rankOffset;                                                   // Global rank offset for this child
-    int numGroupCalls;                                                // Toatal # of group calls to be executed
-    bool useBlocking;                                                 // RCCL communication with blocking or non-blocking option
+    int totalRanks = 0;                                               // Total ranks
+    int rankOffset = 0;                                               // Global rank offset for this child
+    int numGroupCalls = 0;                                            // Toatal # of group calls to be executed
+    bool useBlocking = true;                                          // RCCL communication with blocking or non-blocking option
     std::vector<int> numCollectivesInGroup;                           // # of collectives to run per group call
     std::vector<int> numStreamsPerGroup;                              // # of different streams allowed per group call
     std::vector<ncclComm_t> comms;                                    // RCCL communicators for each rank
@@ -133,5 +133,13 @@ namespace RcclUnitTesting
 
     ErrCode DeallocateMemInternal_impl(int groupId, int collId, int localRank);
 
+    // Closes an NCCL group opened by the caller and returns bodyStatus unless
+    // ncclGroupEnd itself fails. The group must be closed on every exit path,
+    // otherwise a pooled worker carries the open group into the next config.
+    ErrCode EndGroup(ErrCode bodyStatus, char const* msg);
+
+    // Destroys any live graph / graph-exec handles for groupId after syncing
+    // the owning devices.
+    ErrCode ReleaseGraphHandles(int groupId);
   };
 }
