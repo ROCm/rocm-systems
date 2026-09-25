@@ -113,3 +113,14 @@ D128's first Default matrix detected 1/8 admitted/reached faults; delay-zero
 SuperCollider detected 0/8. Both matching filtered clean controls pass. The next
 Default calibration is `high`, with a new matching clean control and the same
 reviewed fault; artifacts are under `d128-high/`.
+
+Tensor-descriptor add also reproduces the teardown heap corruption in both
+profiles. HipKittens' full GDB stack reaches `KfdProcess::unmap_pages` while
+freeing `LegacyPageTableEntry::host_extents`; this identifies where corruption is
+detected, not yet where it originates. `hipkittens-teardown-gdb-full.log`
+preserves the stack for follow-up.
+
+`pytorch-scatter-reduce` returns zero and passes its numerical oracle in both
+profiles, with no applicable LDS code objects (0/0 accesses). These are yellow
+scope-limit cells, not detector failures. All three TP2 IDs now pass filtered
+clean controls independently in each profile.
