@@ -680,3 +680,11 @@ The first replay-address fix therefore does not yet qualify the clean workload.
 `spmm-subword-clean` completes with failures: all three maintained shards reach
 the 900 s client deadline and report clean SuperCollider mismatches. The
 subword encoding fix removed the transform error but does not resolve this row.
+
+### Qwen sleep=15 deadline
+
+`qwen-cap-sleep15-clean/qwen-prefill/clean/supercollider/result.json` reports
+exit 124 after 360 s with no final analysis verdict. Baseline passed in 70 s.
+The driver correctly stopped before starting fault trials. Earlier delay-zero
+clean evidence remains valid, but sleep=15 qualification needs a longer rerun
+with less CPU contention; the table now exposes that blocker.
