@@ -3410,3 +3410,24 @@ TEST_CASE("Unit_HRR_ChevronLaunch_Direct", "[.][hrr][direct]") {
   HRR_HIP_CHECK(hipFree(d));
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
+
+// ---------------------------------------------------------------------------
+// A hipMemcpy3D the runtime rejects, its extent far larger than both buffers.
+// Unit_HRR_FailedMemcpy3DNotRecorded checks that capture does not record it.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_FailedMemcpy3D_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipPitchedPtr dst{};
+  HRR_HIP_CHECK(hipMalloc3D(&dst, make_hipExtent(64, 4, 1)));
+  std::vector<char> host(4096, 1);
+
+  hipMemcpy3DParms p{};
+  p.srcPtr = make_hipPitchedPtr(host.data(), size_t{1} << 20, size_t{1} << 20, size_t{1} << 12);
+  p.dstPtr = dst;
+  p.extent = make_hipExtent(size_t{1} << 20, size_t{1} << 12, 1);  // 4 GiB
+  p.kind = hipMemcpyHostToDevice;
+  REQUIRE(hipMemcpy3D(&p) != hipSuccess);
+  (void)hipGetLastError();
+
+  HRR_HIP_CHECK(hipFree(dst.ptr));
+}
