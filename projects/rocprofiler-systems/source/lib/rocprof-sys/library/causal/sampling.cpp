@@ -79,7 +79,10 @@ std::shared_ptr<causal_sampler_allocator_t>&
 get_causal_sampler_allocator(bool _construct)
 {
     static auto _v = std::shared_ptr<causal_sampler_allocator_t>{};
-    if(!_v && _construct) _v = std::make_shared<causal_sampler_allocator_t>();
+    if(!_v && _construct)
+    {
+        _v = std::make_shared<causal_sampler_allocator_t>();
+    }
     return _v;
 }
 
@@ -113,7 +116,9 @@ get_causal_sampler_signals(std::int64_t _tid)
 {
     auto& _data = get_causal_sampler_signals();
     if(static_cast<size_t>(_tid) >= _data->size())
+    {
         _data->resize(_tid + 1, std::set<int>{});
+    }
     return _data->at(_tid);
 }
 
@@ -121,7 +126,10 @@ bool&
 get_causal_sampler_running(std::int64_t _tid)
 {
     auto& _data = get_causal_sampler_running();
-    if(static_cast<size_t>(_tid) >= _data->size()) _data->resize(_tid + 1, false);
+    if(static_cast<size_t>(_tid) >= _data->size())
+    {
+        _data->resize(_tid + 1, false);
+    }
     return _data->at(_tid);
 }
 
@@ -129,7 +137,10 @@ auto&
 get_causal_sampler(std::int64_t _tid)
 {
     auto& _data = get_causal_samplers();
-    if(static_cast<size_t>(_tid) >= _data->size()) _data->resize(_tid + 1);
+    if(static_cast<size_t>(_tid) >= _data->size())
+    {
+        _data->resize(_tid + 1);
+    }
     return _data->at(_tid);
 }
 
@@ -150,7 +161,10 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
 
             for(auto itr : _stack)
             {
-                if(itr > 0) _processed[_bt_causal->get_index()][itr] += 1;
+                if(itr > 0)
+                {
+                    _processed[_bt_causal->get_index()][itr] += 1;
+                }
             }
         }
 
@@ -163,7 +177,10 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
             {
                 for(auto aitr : ditr)
                 {
-                    if(aitr > 0) _processed[_of_causal->get_index()][aitr] += 1;
+                    if(aitr > 0)
+                    {
+                        _processed[_of_causal->get_index()][aitr] += 1;
+                    }
                 }
             }
         }
@@ -198,7 +215,10 @@ configure(bool _setup, std::int64_t _tid)
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    if(_setup && _signal_types.empty()) _signal_types = get_sampling_signals(_tid);
+    if(_setup && _signal_types.empty())
+    {
+        _signal_types = get_sampling_signals(_tid);
+    }
 
     // initialize
     if(_setup)
@@ -216,16 +236,24 @@ configure(bool _setup, std::int64_t _tid)
     if(_setup && !_causal && !_running && !_signal_types.empty())
     {
         auto _verbose = std::min<int>(get_verbose() - 2, 2);
-        if(get_debug_sampling()) _verbose = 2;
+        if(get_debug_sampling())
+        {
+            _verbose = 2;
+        }
 
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
         // thus we should not start a sampler for it
-        if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
+        if(_tid > 0 && _info && _info->is_offset)
+        {
+            return std::set<int>{};
+        }
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
            state::thread::get() == state::thread::Disabled)
+        {
             return std::set<int>{};
+        }
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
@@ -260,7 +288,10 @@ configure(bool _setup, std::int64_t _tid)
                                                  return perf::get_instance(_idx)->stop();
                                              },
                                              _tid, threading::get_sys_tid() });
-                if(_tid == 0) LOG_DEBUG("Causal profiling backend: perf");
+                if(_tid == 0)
+                {
+                    LOG_DEBUG("Causal profiling backend: perf");
+                }
             }
 
             return _open_error;
@@ -274,7 +305,10 @@ configure(bool _setup, std::int64_t _tid)
             _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                       SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
                                       threading::get_sys_tid() });
-            if(_tid == 0) LOG_DEBUG("Causal profiling backend: timer");
+            if(_tid == 0)
+            {
+                LOG_DEBUG("Causal profiling backend: timer");
+            }
             return true;
         };
 
@@ -344,7 +378,9 @@ configure(bool _setup, std::int64_t _tid)
         _running = false;
 
         if(_tid == threading::get_id() && !_signal_types.empty())
+        {
             block_signals(_signal_types);
+        }
 
         if(_tid == 0)
         {
@@ -396,7 +432,10 @@ get_signal_types(std::int64_t _tid)
 std::set<int>
 setup()
 {
-    if(!get_use_causal()) return std::set<int>{};
+    if(!get_use_causal())
+    {
+        return std::set<int>{};
+    }
     return configure(true);
 }
 
@@ -454,20 +493,29 @@ pause(ScopeT)
 {
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
-        if(!_thread_paused) _thread_paused = false;
+        if(!_thread_paused)
+        {
+            _thread_paused = false;
+        }
 
         const bool _paused_v = *_thread_paused;
         if(!_paused_v)
         {
             auto& _causal_perf = perf::get_instance(threading::get_id());
-            if(_causal_perf) _causal_perf->stop();
+            if(_causal_perf)
+            {
+                _causal_perf->stop();
+            }
             signals::block_signals(sampling_signals(), signals::sigmask_scope::thread);
             _thread_paused = true;
         }
     }
     else
     {
-        if(!_process_paused) _process_paused = false;
+        if(!_process_paused)
+        {
+            _process_paused = false;
+        }
 
         const bool _paused_v = *_process_paused;
         if(!_paused_v)
@@ -475,7 +523,10 @@ pause(ScopeT)
             for(auto i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
                 auto& _causal_perf = perf::get_instance(i);
-                if(_causal_perf) _causal_perf->stop();
+                if(_causal_perf)
+                {
+                    _causal_perf->stop();
+                }
             }
             signals::block_signals(sampling_signals(), signals::sigmask_scope::process);
             _process_paused = true;
@@ -490,20 +541,29 @@ resume(ScopeT)
 {
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
-        if(!_thread_paused) _thread_paused = true;
+        if(!_thread_paused)
+        {
+            _thread_paused = true;
+        }
 
         const bool _paused_v = *_thread_paused;
         if(_paused_v)
         {
             auto& _causal_perf = perf::get_instance(threading::get_id());
-            if(_causal_perf) _causal_perf->start();
+            if(_causal_perf)
+            {
+                _causal_perf->start();
+            }
             signals::unblock_signals(sampling_signals(), signals::sigmask_scope::thread);
             _thread_paused = false;
         }
     }
     else
     {
-        if(!_process_paused) _process_paused = true;
+        if(!_process_paused)
+        {
+            _process_paused = true;
+        }
 
         const bool _paused_v = *_process_paused;
         if(_paused_v)
@@ -511,7 +571,10 @@ resume(ScopeT)
             for(auto i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
                 auto& _causal_perf = perf::get_instance(i);
-                if(_causal_perf) _causal_perf->start();
+                if(_causal_perf)
+                {
+                    _causal_perf->start();
+                }
             }
             signals::unblock_signals(sampling_signals(), signals::sigmask_scope::process);
             _process_paused = false;
@@ -528,8 +591,14 @@ template void resume<scope::process_scope>(scope::process_scope);
 void
 block_signals(std::set<int> _signals)
 {
-    if(_signals.empty()) _signals = get_signal_types(threading::get_id());
-    if(_signals.empty()) return;
+    if(_signals.empty())
+    {
+        _signals = get_signal_types(threading::get_id());
+    }
+    if(_signals.empty())
+    {
+        return;
+    }
 
     ::rocprofsys::sampling::block_signals(_signals);
 }
@@ -537,8 +606,14 @@ block_signals(std::set<int> _signals)
 void
 unblock_signals(std::set<int> _signals)
 {
-    if(_signals.empty()) _signals = get_signal_types(threading::get_id());
-    if(_signals.empty()) return;
+    if(_signals.empty())
+    {
+        _signals = get_signal_types(threading::get_id());
+    }
+    if(_signals.empty())
+    {
+        return;
+    }
 
     ::rocprofsys::sampling::unblock_signals(_signals);
 }
@@ -558,15 +633,24 @@ post_process()
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
         auto& _causal = get_causal_sampler(i);
-        if(_causal) _causal->stop();
+        if(_causal)
+        {
+            _causal->stop();
+        }
         auto& _causal_perf = perf::get_instance(i);
-        if(_causal_perf) _causal_perf->stop();
+        if(_causal_perf)
+        {
+            _causal_perf->stop();
+        }
     }
 
     configure(false, 0);
 
     auto _allocator = get_causal_sampler_allocator(false);
-    if(_allocator) _allocator->flush();
+    if(_allocator)
+    {
+        _allocator->flush();
+    }
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
@@ -574,7 +658,10 @@ post_process()
         auto  _causal_data =
             (_causal) ? _causal->get_data() : std::vector<sampling::causal_bundle_t>{};
 
-        if(!_causal_data.empty()) post_process_causal(i, _causal_data);
+        if(!_causal_data.empty())
+        {
+            post_process_causal(i, _causal_data);
+        }
     }
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
@@ -588,7 +675,10 @@ post_process()
         }
     }
 
-    if(_allocator) _allocator.reset();
+    if(_allocator)
+    {
+        _allocator.reset();
+    }
 }
 
 namespace
@@ -604,7 +694,10 @@ post_process_causal(std::int64_t, const std::vector<causal_bundle_t>& _data)
             auto _stack = _bt_causal->get_stack();
             for(auto&& ditr : _stack)
             {
-                if(ditr > 0) add_sample(_bt_causal->get_index(), ditr);
+                if(ditr > 0)
+                {
+                    add_sample(_bt_causal->get_index(), ditr);
+                }
             }
         }
 
@@ -617,7 +710,10 @@ post_process_causal(std::int64_t, const std::vector<causal_bundle_t>& _data)
             {
                 for(auto aitr : ditr)
                 {
-                    if(aitr > 0) add_sample(_of_causal->get_index(), aitr);
+                    if(aitr > 0)
+                    {
+                        add_sample(_of_causal->get_index(), aitr);
+                    }
                 }
             }
         }
