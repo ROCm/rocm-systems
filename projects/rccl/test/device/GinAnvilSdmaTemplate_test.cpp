@@ -82,6 +82,33 @@ static void uploadHarness(DeviceBuffer<TemplateHarness>* d_h, TemplateHarness* h
   d_h->upload(*host);
 }
 
+template <typename T>
+static ncclGinAnvilIpcBufEntry makeIpcEntry(DeviceBuffer<T>* buf, size_t bytes) {
+  ncclGinAnvilIpcBufEntry entry{};
+  entry.local_base = reinterpret_cast<uintptr_t>(buf->ptr);
+  entry.length = bytes;
+  entry.remote_bases[1] = reinterpret_cast<uintptr_t>(buf->ptr);
+  return entry;
+}
+
+template <typename T>
+static void mapIpcTo(TemplateHarness* host, DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
+                     DeviceBuffer<T>* buf, size_t bytes) {
+  host->ipcEntry = makeIpcEntry(buf, bytes);
+  d_entry->upload(host->ipcEntry);
+  host->ctx.ipcTable = d_entry->ptr;
+  host->ctx.ipcTableCount = 1;
+}
+
+template <typename A, typename B>
+static void mapIpcToTwo(TemplateHarness* host, DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
+                        DeviceBuffer<A>* a, size_t aBytes, DeviceBuffer<B>* b, size_t bBytes) {
+  ncclGinAnvilIpcBufEntry table[2] = {makeIpcEntry(a, aBytes), makeIpcEntry(b, bBytes)};
+  d_entry->copyFrom(table, 2);
+  host->ctx.ipcTable = d_entry->ptr;
+  host->ctx.ipcTableCount = 2;
+}
+
 static void resetThreadfenceCount() {
   unsigned long long z = 0;
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_sdmaStubThreadfenceCount), &z, sizeof(z)));
@@ -633,33 +660,6 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_EpochBumpDuringQuietSkipsClear) {
 }
 
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;
-
-template <typename T>
-static ncclGinAnvilIpcBufEntry makeIpcEntry(DeviceBuffer<T>* buf, size_t bytes) {
-  ncclGinAnvilIpcBufEntry entry{};
-  entry.local_base = reinterpret_cast<uintptr_t>(buf->ptr);
-  entry.length = bytes;
-  entry.remote_bases[1] = reinterpret_cast<uintptr_t>(buf->ptr);
-  return entry;
-}
-
-template <typename T>
-static void mapIpcTo(TemplateHarness* host, DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
-                     DeviceBuffer<T>* buf, size_t bytes) {
-  host->ipcEntry = makeIpcEntry(buf, bytes);
-  d_entry->upload(host->ipcEntry);
-  host->ctx.ipcTable = d_entry->ptr;
-  host->ctx.ipcTableCount = 1;
-}
-
-template <typename A, typename B>
-static void mapIpcToTwo(TemplateHarness* host, DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
-                        DeviceBuffer<A>* a, size_t aBytes, DeviceBuffer<B>* b, size_t bBytes) {
-  ncclGinAnvilIpcBufEntry table[2] = {makeIpcEntry(a, aBytes), makeIpcEntry(b, bBytes)};
-  d_entry->copyFrom(table, 2);
-  host->ctx.ipcTable = d_entry->ptr;
-  host->ctx.ipcTableCount = 2;
-}
 
 // H13: Get below the SDMA threshold copies via ipcPut (reverse copy).
 __global__ void kernelGetIpc(TemplateHarness* h, size_t bytes) {

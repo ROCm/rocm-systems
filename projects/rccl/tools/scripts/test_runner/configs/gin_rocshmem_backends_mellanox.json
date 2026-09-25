@@ -192,7 +192,9 @@
         { "name": "BarrierFence_DefaultIncludesGet", "description": "Default fence covers local get (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesGet_SingleNode" },
         { "name": "BarrierFence_DefaultIncludesPut", "description": "Default fence covers inbound put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesPut_SingleNode" },
         { "name": "BarrierFence_AllContextsPut", "description": "Put-fenced AllContexts barrier (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsPut_SingleNode" },
-        { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" }
+        { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" },
+        { "name": "BarrierFence_CoopAnyFlush", "description": "Put fence through ncclGinBarrierSession<ncclCoopAny> (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_CoopAnyFlushMakesPutVisible_SingleNode" },
+        { "name": "BarrierFence_IpcSignalInc", "description": "Sub-threshold IPC SignalInc is visible when waitSignal returns (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_IpcSignalIncMakesPutVisible_SingleNode" }
       ]
     },
     "gin_devmpi_gda": {
