@@ -444,6 +444,27 @@ jobs:
           if [ -n "${DEVICES}" ]; then
             export HIP_VISIBLE_DEVICES="${DEVICES}"
           fi
+          # A GPU-labelled runner with no visible device is infrastructure
+          # failure, not 67 unsupported capabilities. Still run the four
+          # CPU-only integration checks and publish their JUnit, then fail the
+          # job so the table cannot make a broken runner look green.
+          if ! python3 - <<'PY'
+          import ctypes
+          import sys
+
+          hip = ctypes.CDLL("libamdhip64.so.7")
+          count = ctypes.c_int()
+          status = hip.hipGetDeviceCount(ctypes.byref(count))
+          print(f"hipGetDeviceCount: status={status}, devices={count.value}")
+          sys.exit(0 if status == 0 and count.value > 0 else 1)
+          PY
+          then
+            echo "::error::GPU runner has no visible ROCm-capable device"
+            python3 projects/hrr/tests/run_catch2.py \
+              --xml integration-${{ matrix.family }}.xml \
+              -- ./build/hrr/tests/integration/hrr-integration-tests "[cpu]"
+            exit 1
+          fi
           # Keep passing logs to one result line per case. The wrapper captures
           # Catch2 and subprocess output, and only emits it when the suite fails.
           python3 projects/hrr/tests/run_catch2.py \
