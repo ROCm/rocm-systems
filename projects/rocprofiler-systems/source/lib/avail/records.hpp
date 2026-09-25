@@ -13,6 +13,9 @@
 namespace rocprofsys::avail
 {
 
+inline constexpr std::string_view k_sdk_unavailable_message =
+    "rocprofiler-sdk is not available in this build";
+
 enum class source_id : std::uint8_t
 {
     catalog,

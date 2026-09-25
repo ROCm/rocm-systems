@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(avail-catalog-tests OBJECT test_catalog.cpp test_traces.cpp)
+add_library(
+    avail-catalog-tests
+    OBJECT
+    test_catalog.cpp
+    test_traces.cpp
+    test_gpu_inventory.cpp
+)
 
 target_link_libraries(
     avail-catalog-tests

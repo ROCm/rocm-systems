@@ -70,10 +70,8 @@ TEST(avail_catalog, requested_stub_has_stable_message_and_source)
 TEST(avail_catalog, remaining_stub_queries_keep_not_implemented_message)
 {
     query_request request   = {};
-    request.gpu_devices     = true;
     request.cpu_devices     = true;
     request.nic_devices     = true;
-    request.gpu_counters    = true;
     request.cpu_counters    = true;
     request.cpu_metrics     = true;
     request.gpu_metrics     = true;
@@ -81,14 +79,10 @@ TEST(avail_catalog, remaining_stub_queries_keep_not_implemented_message)
     request.storage_metrics = true;
 
     constexpr auto k_expected = std::array{
-        expected_diagnostic{ .capability = capability_kind::gpu_devices,
-                             .source     = source_id::rocprofiler_sdk },
         expected_diagnostic{ .capability = capability_kind::cpu_devices,
                              .source     = source_id::procfs },
         expected_diagnostic{ .capability = capability_kind::nic_devices,
                              .source     = source_id::amd_smi },
-        expected_diagnostic{ .capability = capability_kind::gpu_counters,
-                             .source     = source_id::rocprofiler_sdk },
         expected_diagnostic{ .capability = capability_kind::cpu_counters,
                              .source     = source_id::papi },
         expected_diagnostic{ .capability = capability_kind::cpu_metrics,
@@ -109,6 +103,48 @@ TEST(avail_catalog, remaining_stub_queries_keep_not_implemented_message)
     {
         expect_stub_diagnostic(snapshot, entry.capability, entry.source);
     }
+}
+
+TEST(avail_catalog, gpu_devices_query_is_not_a_stub)
+{
+    query_request request = {};
+    request.gpu_devices   = true;
+
+    const auto snapshot = query(request);
+
+    EXPECT_TRUE(snapshot.was_queried(capability_kind::gpu_devices));
+    const auto* diagnostic_entry =
+        find_diagnostic(snapshot, capability_kind::gpu_devices);
+    if(diagnostic_entry != nullptr)
+    {
+        EXPECT_NE(diagnostic_entry->message, k_not_implemented_message);
+    }
+#if !defined(ROCPROFSYS_AVAIL_HAS_SDK)
+    ASSERT_NE(diagnostic_entry, nullptr);
+    EXPECT_EQ(diagnostic_entry->message, k_sdk_unavailable_message);
+    EXPECT_TRUE(snapshot.gpu_devices.empty());
+#endif
+}
+
+TEST(avail_catalog, gpu_counters_query_is_not_a_stub)
+{
+    query_request request = {};
+    request.gpu_counters  = true;
+
+    const auto snapshot = query(request);
+
+    EXPECT_TRUE(snapshot.was_queried(capability_kind::gpu_counters));
+    const auto* diagnostic_entry =
+        find_diagnostic(snapshot, capability_kind::gpu_counters);
+    if(diagnostic_entry != nullptr)
+    {
+        EXPECT_NE(diagnostic_entry->message, k_not_implemented_message);
+    }
+#if !defined(ROCPROFSYS_AVAIL_HAS_SDK)
+    ASSERT_NE(diagnostic_entry, nullptr);
+    EXPECT_EQ(diagnostic_entry->message, k_sdk_unavailable_message);
+    EXPECT_TRUE(snapshot.gpu_counters.empty());
+#endif
 }
 
 [[nodiscard]] const trace_record*
