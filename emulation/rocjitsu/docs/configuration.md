@@ -275,6 +275,16 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
+### Memory wait diagnostics
+
+With memory wait diagnostics enabled, compute units warn when an instruction reads
+or overwrites a pending memory result without a sufficient wait. Results still
+execute eagerly. See
+[memory wait diagnostics](memory-wait-diagnostics.md) for coverage and the
+`memory_wait_diagnostics` setting (`off`, the default, or `warn`).
+On gfx1250, this setting also controls XCNT replay-source warnings. Both checks
+are disabled by default and enabled together with `memory_wait_diagnostics=warn`.
+
 ### KFD device sections
 
 KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and

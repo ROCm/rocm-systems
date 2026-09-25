@@ -13,12 +13,44 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+# src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
+# NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "NCCL_PARAM(MinCTAs, \"MIN_CTAS\", NCCL_CONFIG_UNDEF_INT)" "fakes/comm_fakes.cc: ncclParamMinCTAs()")
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "NCCL_PARAM(MaxCTAs, \"MAX_CTAS\", NCCL_CONFIG_UNDEF_INT)" "fakes/comm_fakes.cc: ncclParamMaxCTAs()")
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "NCCL_PARAM(NvlsChannels, \"NVLS_NCHANNELS\", NCCL_CONFIG_UNDEF_INT)"
+  "fakes/comm_fakes.cc: ncclParamNvlsChannels()")
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "NCCL_PARAM(CGAClusterSize, \"CGA_CLUSTER_SIZE\", NCCL_CONFIG_UNDEF_INT)"
+  "fakes/comm_fakes.cc: ncclParamCGAClusterSize()")
+# Both arms of the ROCM_VERSION split at enqueue.cc:437-441; enqueue_fakes.cc mirrors both, so pin both.
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
+  "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 1)"
+  "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
+  "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
+  "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+# gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
+# keep its kRegAccessFlags and both reg.cc copies spelling the same set.
+set(_rccl_reg_access_flags
+  "IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;")
+foreach(_reg_cc transport/net_ib/reg.cc transport/net_ib_cast/reg.cc)
+  rccl_assert_source_line("${_rccl_src_root}/${_reg_cc}"
+    "${_rccl_reg_access_flags}" "gdr-probe-test.cc: kRegAccessFlags")
+  rccl_assert_source_line("${_rccl_src_root}/${_reg_cc}"
+    "if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;" "gdr-probe-test.cc: the relaxed-ordering flags")
+endforeach()
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
+  "${_rccl_reg_access_flags}" "the production registration flags")
+unset(_rccl_reg_access_flags)
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -31,6 +63,7 @@ function(rccl_define_micro_source_lists)
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
+    ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     tuning-general-test.cc
     ras-client-test.cc
     group-test.cc
@@ -38,9 +71,11 @@ function(rccl_define_micro_source_lists)
     wrap-test.cc
     dev-runtime-test.cc
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
+    gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/dev_runtime_micro_fakes.cc
+    fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
     fakes/ras_param_fakes.cc
@@ -110,6 +145,7 @@ function(rccl_define_micro_source_lists)
     fakes/amdsmi_fakes.cc
     fakes/api_trace_fakes.cc
     fakes/dev_runtime_fakes.cc
+    fakes/enqueue_fakes.cc               # src/enqueue/enqueue.cc (rcclEffectiveP2pBatchEnable)
     fakes/env_fakes.cc
     fakes/env_plugin_fakes.cc
     fakes/gin_fakes.cc
@@ -184,6 +220,50 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/.
+  # Its own binary, not rccl-UnitTestsMicro: that target compiles group.cc, rccl_wrap.cc and
+  # dev_runtime.cc as real units under test, and this suite fakes all three to drive them.
+  # The four production files are separate TUs so task_prep.cc's three sibling externs resolve to
+  # real code. task-prep-test.cc #includes TASK_PREP_CC_PATH; each remaining file moves from this
+  # source list into its own test TU as that unit comes under test.
+  set(TEST_MICRO_TASKPREP_SOURCE_FILES
+    task-prep-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/ce_fakes.cc                    # src/ce_coll.cc
+    fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
+    fakes/comm_fakes.cc                  # src/init.cc comm lifecycle + CTA/channel params
+    fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc
+    fakes/enqueue_fakes.cc               # src/enqueue/enqueue.cc
+    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/group_fakes.cc                 # src/group.cc
+    fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
+    fakes/proxy_fakes.cc                 # src/proxy.cc
+    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
+    fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/register_stubs.cc              # src/register/*.cc
+    fakes/rma_fakes.cc                   # src/rma/*.cc
+    fakes/sched_stubs.cc                 # src/scheduler/*.cc + deep launch paths
+    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
+    fakes/tuning_fakes.cc                # src/graph/tuning.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc   # real alg-selector parsing
+    ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc  # real per-func alg validity mask
+    ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc  # real CTA-policy/alg-mask resolution
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc  # real PtrCheck/CommCheck
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real busId/hash helpers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -645,6 +725,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${_MICRO_MODE_DEFS}
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
+    RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -657,11 +738,13 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
+    RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
+    GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS
@@ -744,6 +827,38 @@ if(_MICRO_BUILD_SYM_KERNELS)
       SYM_KERNELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/sym_kernels.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 endif()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/.
+# Its own binary (not rccl-UnitTestsMicro): the four task_prep/config production
+# files are compiled as real TUs so task_prep.cc's sibling externs resolve to
+# real code; the surrounding subsystems are faked. See the source-list comment
+# in rccl_define_micro_source_lists() for the rationale.
+# ---------------------------------------------------------------------------
+# task_prep/ and config/ oracle TUs live outside src/misc/, so mark them GENERATED
+# here (rccl_mark_oracle_tus_generated only covers the misc/ argcheck/archinfo/utils set).
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc
+  PROPERTIES GENERATED TRUE)
+rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
+  SOURCES ${TEST_MICRO_TASKPREP_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/device               # device/common.h (neutered)
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    # Hipify preserves src/enqueue/task_prep/ and renames none of the four (no basename collisions).
+    TASK_PREP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_prep.cc"
+    TASK_CLASSIFY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc"
+    TASK_PRETUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc"
+    TASK_POSTTUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_taskprep.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

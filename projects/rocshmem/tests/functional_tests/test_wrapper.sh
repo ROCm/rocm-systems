@@ -143,6 +143,39 @@ if [[ "$BACKEND" == "ro" || "$BACKEND" == "gda" ]]; then
     esac
 fi
 
+# Symmetric user-buffer registration is unsupported by the RO backend
+if [[ "$BACKEND" == "ro" ]]; then
+    case "$TEST_NAME" in
+        buffer_register_symmetric_*)
+            echo "Skip: $TEST_NAME (RO does not support symmetric buffer registration)"
+            exit $SKIP_CODE
+            ;;
+    esac
+fi
+
+# The vmm_posix allocator aborts during rocSHMEM initialization on unsupported
+# hardware. Check VMM support first so CTest can report a proper skip instead.
+case "$TEST_NAME" in
+    buffer_register_symmetric_*)
+        if ! command -v rocminfo >/dev/null 2>&1 ||
+           ! rocminfo 2>/dev/null |
+             awk -F ':' '
+               /^[[:space:]]*VMM Support[[:space:]]*:/ {
+                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+                 if (toupper($2) == "YES") found = 1
+               }
+               END { exit !found }
+             '; then
+            echo "Skip: $TEST_NAME (HIP VMM is unavailable)"
+            exit $SKIP_CODE
+        fi
+
+        if [[ "$BACKEND" == "gda" ]]; then
+            export ROCSHMEM_DISABLE_MIXED_IPC=1
+        fi
+        ;;
+esac
+
 # AIROCSHMEM-120: RO get tests abort
 if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in

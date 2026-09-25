@@ -28,6 +28,7 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -57,6 +58,7 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -85,6 +87,7 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5667,6 +5670,7 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5696,6 +5700,7 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5725,6 +5730,7 @@ VInterpP2LegacyF16Vop3::VInterpP2LegacyF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -5760,6 +5766,7 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {

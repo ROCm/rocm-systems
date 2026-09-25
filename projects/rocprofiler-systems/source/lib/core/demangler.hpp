@@ -43,7 +43,10 @@ struct demangler
 
     std::string demangle(std::string_view _mangled_name)
     {
-        if(_mangled_name.empty()) return {};
+        if(_mangled_name.empty())
+        {
+            return {};
+        }
 
         const auto result = try_get_from_cache(_mangled_name);
         if(result._found)
@@ -72,7 +75,10 @@ private:
         const std::unique_ptr<char, decltype(&std::free)> _demangled(
             DemanglerTp::demangle(_mangled_name, nullptr, nullptr, &_status), &std::free);
 
-        if(_status != 0 || !_demangled) return std::string{ _mangled_name };
+        if(_status != 0 || !_demangled)
+        {
+            return std::string{ _mangled_name };
+        }
 
         return std::string{ _demangled.get() };
     }

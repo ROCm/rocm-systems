@@ -40,13 +40,7 @@ void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_wait_alu_sopp(*this, wf);
 }
 
-void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
-  uint8_t exp = imm & 0x7;
-  uint8_t lgkm = (imm >> 4) & 0x3F;
-  uint8_t vm = (imm >> 10) & 0x3F;
-  wf.set_wait_target(vm, lgkm, exp);
-}
+void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) { wf.set_wait_all(); }
 
 void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_wait_idle_sopp(*this, wf);
@@ -94,8 +88,7 @@ void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc_mask();
   if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
@@ -103,8 +96,7 @@ void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc_mask();
   if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
