@@ -49,20 +49,14 @@ using common::get_env;
 
 struct config;
 
-enum class config_context
-{
-    global = 0,
-};
-
 void
 initialize();
 
-template <config_context ContextT = config_context::global>
-config&
+const config&
 get_config();
 
 std::string
-format_name(std::string_view _name, const config& = get_config<>());
+format_name(std::string_view _name, const config& = get_config());
 
 struct att_perfcounter
 {
@@ -224,6 +218,8 @@ config::get_attach_invariants() const
                            hsa_image_ext_api_trace,
                            hsa_finalizer_ext_api_trace,
                            marker_api_trace,
+                           selected_regions,
+                           selected_regions_ref_count,
                            memory_copy_trace,
                            memory_allocation_trace,
                            scratch_memory_trace,
@@ -245,6 +241,7 @@ config::get_attach_invariants() const
                            att_library_path,
                            att_param_perfcounters,
                            att_param_perf_ctrl,
+                           att_consecutive_kernels,
                            pc_sampling_method,
                            pc_sampling_unit,
                            kernel_filter_include,
@@ -265,6 +262,11 @@ is_attach_invariant(const config& lhs, const config& rhs)
 {
     return lhs.get_attach_invariants() == rhs.get_attach_invariants();
 }
+
+const config& publish_config(config);
+
+void
+reclaim_config_generations();
 
 template <typename ArchiveT>
 void
@@ -370,22 +372,5 @@ config::save(ArchiveT& ar) const
 
 #undef CFG_SERIALIZE_MEMBER
 #undef CFG_SERIALIZE_NAMED_MEMBER
-
-template <config_context ContextT>
-config&
-get_config()
-{
-    if constexpr(ContextT == config_context::global)
-    {
-        static auto* _v = new config{};
-        return *_v;
-    }
-    else
-    {
-        // context specific config copied from global config
-        static auto* _v = new config{get_config<config_context::global>()};
-        return *_v;
-    }
-}
 }  // namespace tool
 }  // namespace rocprofiler

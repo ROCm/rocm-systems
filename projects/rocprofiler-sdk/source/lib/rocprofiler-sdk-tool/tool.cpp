@@ -364,6 +364,26 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
 
+struct pause_resume_session_state
+{
+    void begin_attach()
+    {
+        // The first attachment starts with the member initializers below. Reattachment follows
+        // registration's context stop and callback drain, so no callback from the prior session
+        // can update this state after it is reset.
+        if(!has_attached.exchange(true)) return;
+
+        ref_count.store(0);
+        first_callback.store(true);
+    }
+
+    std::atomic<int64_t> ref_count      = {0};
+    std::atomic<bool>    first_callback = {true};
+    std::atomic<bool>    has_attached   = {false};
+};
+
+auto pause_resume_session = pause_resume_session_state{};
+
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
@@ -641,9 +661,9 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 cb_data)
 {
-    static auto    pause_resume_count = std::atomic<int64_t>{0};
-    constexpr auto null_context_id    = rocprofiler_context_id_t{.handle = 0};
-    auto*          ctxs               = static_cast<context_id_set_t*>(cb_data);
+    const auto&    session_config  = tool::get_config();
+    constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
+    auto*          ctxs            = static_cast<context_id_set_t*>(cb_data);
 
     // ensure that ctxs is not nullptr
     if(ctxs == nullptr)
@@ -664,11 +684,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             _active_contexts++;
     }
 
-    auto _first_pause_resume = false;
-
-    // setup once flag to track first pause/resume call
-    static auto _once_flag = std::once_flag{};
-    std::call_once(_once_flag, [&]() { _first_pause_resume = true; });
+    const auto _first_pause_resume = pause_resume_session.first_callback.exchange(false);
 
     auto roctx_pause_resume_warning = [&record]() {
         if(auto* _data =
@@ -688,7 +704,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(ctxs && record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
     {
-        if(!tool::get_config().collection_periods.empty())
+        if(!session_config.collection_periods.empty())
         {
             ROCP_WARNING_IF(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
                 << "rocprofv3 collection period(s) enabled, ignoring roctxProfilerPause/Resume";
@@ -707,11 +723,12 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
             if(!_first_pause_resume)
             {
-                _ref_count = (tool::get_config().selected_regions_ref_count) ? --pause_resume_count
-                                                                             : int64_t{0};
+                _ref_count = (session_config.selected_regions_ref_count)
+                                 ? --pause_resume_session.ref_count
+                                 : int64_t{0};
             }
-            else if(_first_pause_resume && tool::get_config().selected_regions &&
-                    tool::get_config().selected_regions_ref_count)
+            else if(_first_pause_resume && session_config.selected_regions &&
+                    session_config.selected_regions_ref_count)
             {
                 ROCP_INFO
                     << "first call to roctxProfilerPause ignored for selected regions profiling "
@@ -738,12 +755,13 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
             // if using the selected regions reference counting, only resume when the count goes to
             // positive (was zero)
-            auto _ref_count =
-                (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
+            auto _ref_count = (session_config.selected_regions_ref_count)
+                                  ? pause_resume_session.ref_count++
+                                  : int64_t{0};
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
             {
-                if(tool::get_config().selected_regions) att_device_trace_id++;
+                if(session_config.selected_regions) att_device_trace_id++;
                 set_contexts_active(*ctxs, true);
             }
             else if(_ref_count < 0)
@@ -1764,8 +1782,8 @@ get_config_perf_counters()
 }  // namespace
 
 std::vector<rocprofiler_thread_trace_parameter_t>
-get_att_perfcounter_params(rocprofiler_agent_id_t                           agent,
-                           std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
+get_att_perfcounter_params(rocprofiler_agent_id_t                                 agent,
+                           const std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
 {
     std::vector<rocprofiler_thread_trace_parameter_t> _data{};
     if(att_perf_counters.empty()) return _data;
@@ -1961,7 +1979,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
     auto  kernel_id   = rdata->dispatch_info.kernel_id;
 
     // Keep track of number of consecutive kernels
-    const auto consecutive_kernels = *static_cast<uint64_t*>(CHECK_NOTNULL(userdata));
+    const auto consecutive_kernels = *static_cast<const uint64_t*>(CHECK_NOTNULL(userdata));
 
     static std::atomic<bool> isprofiling{false};
     static bool              stop_profiling{false};
@@ -2795,13 +2813,26 @@ write_attach_session(const fs::path& path, uint64_t session)
     set_attach_session_file_permissions(path);
     return true;
 }
+
+bool
+normalize_att_no_intercept_config(tool::config& cfg)
+{
+    if(!cfg.advanced_thread_trace || !cfg.att_no_intercept ||
+       tool::att_no_intercept::is_supported())
+        return false;
+
+    ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
+                    "ATT quick-scan support. Falling back to --att.";
+    cfg.att_no_intercept = false;
+    return true;
+}
 }  // namespace
 
 // Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
 // and if so suffixes the output file name with the session number so that previous output files are
 // not overwritten.
 void
-assign_attach_output_session_suffix()
+assign_attach_output_session_suffix(tool::config& cfg)
 {
     const auto instrumented_pid = getpid();
     const auto session_path     = attach_session_file_path(instrumented_pid);
@@ -2813,7 +2844,6 @@ assign_attach_output_session_suffix()
 
     if(session > 0)
     {
-        auto& cfg       = tool::get_config();
         cfg.output_file = fmt::format("{}_{}", cfg.output_file, session);
         ROCP_INFO << "Reattach #" << session << " for PID " << instrumented_pid
                   << ". Base file name is " << cfg.output_file;
@@ -2844,18 +2874,22 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
     // save the existing config for comparison
     auto original_config = tool::get_config();
 
-    // reset config for attach (i.e. re-parse environment variables)
-    tool::get_config() = tool::config{};
+    // Re-parse environment variables into a private generation. Readers continue using the
+    // previous immutable generation until the replacement is complete and validated.
+    auto next_config = tool::config{};
+    normalize_att_no_intercept_config(next_config);
 
     // ensure the config has not changed which services were requested.
     // NOTE: this is a temporary restriction
-    ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
+    ROCP_FATAL_IF(!tool::is_attach_invariant(next_config, original_config))
         << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
            "support changing the set of enabled tracing services between initial load and attach. "
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
-    assign_attach_output_session_suffix();
+    assign_attach_output_session_suffix(next_config);
+    const auto& attached_config = tool::publish_config(std::move(next_config));
+    pause_resume_session.begin_attach();
 
     pid_t instrumented_pid = getpid();   // The process being profiled
     pid_t parent_pid       = getppid();  // Its parent process
@@ -2866,6 +2900,15 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
+        // In selected-regions mode, these profiling contexts intentionally start stopped.
+        // Keep them inactive across attach so collection begins only after roctxProfilerResume.
+        if(attached_config.selected_regions && pause_resume_contexts.count(context_ids[i]) > 0)
+        {
+            ROCP_INFO << "Attach mode: leaving selected-regions context ID "
+                      << context_ids[i].handle << " stopped until roctxProfilerResume";
+            continue;
+        }
+
         if(int status = 0;
            rocprofiler_context_is_active(context_ids[i], &status) == ROCPROFILER_STATUS_SUCCESS &&
            status == 0)
@@ -2889,12 +2932,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_finalizer = fini_func;
 
-    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
-       !tool::att_no_intercept::is_supported())
+    auto initial_config = tool::get_config();
+    if(normalize_att_no_intercept_config(initial_config))
     {
-        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
-                        "ATT quick-scan support. Falling back to --att.";
-        tool::get_config().att_no_intercept = false;
+        tool::publish_config(std::move(initial_config));
     }
 
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
@@ -3375,13 +3416,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             // Use user data pointer to dispatch id to communicate dispatch ID to shader callback
             // function
             ROCPROFILER_CALL(rocprofiler_create_context(&att_device_context), "context creation");
+            // The callback API accepts void*, but the callback only reads this attach-invariant
+            // value. Published config generations remain alive until callbacks are drained.
+            const auto* consecutive_kernels = &tool::get_config().att_consecutive_kernels;
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                                  get_client_ctx(),
                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                  nullptr,
                                  0,
                                  callbacks.att_dispatch_consecutive_kernel,
-                                 static_cast<void*>(&tool::get_config().att_consecutive_kernels)),
+                                 const_cast<void*>(static_cast<const void*>(consecutive_kernels))),
                              "dispatch tracing service configure");
         }
 
@@ -4299,6 +4343,10 @@ tool_fini(void* /*tool_data*/)
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
+
+    // Registration stops contexts and drains callback-capable services before invoking tool_fini.
+    // The output thread is joined above, so no reader can retain an older configuration now.
+    tool::reclaim_config_generations();
 }
 
 std::vector<rocprofiler_counter_record_dimension_info_t>

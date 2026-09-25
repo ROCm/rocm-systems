@@ -22,6 +22,7 @@
 //
 
 #include "config.hpp"
+#include "config_storage.hpp"
 #include "kernel_filter_range.hpp"
 
 #include "lib/common/defines.hpp"
@@ -48,6 +49,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -56,6 +58,18 @@ namespace tool
 {
 namespace
 {
+using config_storage_t = config_details::immutable_config_storage<config>;
+
+config_storage_t&
+get_config_storage()
+{
+    // The active generation remains valid for the process lifetime, matching the previous
+    // singleton lifetime. Retired generations are reclaimed explicitly after tool callbacks
+    // become quiescent.
+    static auto* value = new config_storage_t{config{}};
+    return *value;
+}
+
 inline bool
 not_is_space(int ch)
 {
@@ -323,6 +337,24 @@ config::config()
     }
 }
 
+const config&
+get_config()
+{
+    return get_config_storage().get();
+}
+
+const config&
+publish_config(config value)
+{
+    return get_config_storage().publish(std::move(value));
+}
+
+void
+reclaim_config_generations()
+{
+    get_config_storage().reclaim_retired();
+}
+
 std::string
 format_name(std::string_view _name, const config& _cfg)
 {
@@ -341,7 +373,7 @@ format_name(std::string_view _name, const config& _cfg)
 void
 initialize()
 {
-    (void) get_config<config_context::global>();
+    (void) get_config();
 }
 }  // namespace tool
 }  // namespace rocprofiler
