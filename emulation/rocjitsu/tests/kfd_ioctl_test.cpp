@@ -662,8 +662,9 @@ protected:
 TEST_F(KfdIoctlTest, CloseReleasesProcessAfterCompletedOrAbortedInstructionExecution) {
   for (const bool abort : {false, true}) {
     SCOPED_TRACE(abort ? "aborted dispatch" : "completed quantum");
-    if (abort)
+    if (abort) {
       ASSERT_GE(driver_->open(), 0);
+    }
 
     constexpr uint64_t kKernelAddress = 0x600000000ULL;
     alignas(4096) std::array<uint8_t, 4096> code{};
