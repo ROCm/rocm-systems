@@ -2058,7 +2058,13 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     [
         ('V_SWMMAC_I32_16X16X32_IU8', 'exec_swmmac_i32'),
         ('V_SWMMAC_F32_16X16X32_F16', 'exec_swmmac_f32'),
+        ('V_SWMMAC_F16_16X16X64_F16', 'exec_swmmac_f16'),
+        ('V_SWMMAC_BF16_16X16X64_BF16', 'exec_swmmac_bf16'),
         ('V_SWMMAC_BF16F32_16X16X64_BF16', 'exec_swmmac_bf16f32'),
+        ('V_SWMMAC_F16_16X16X128_FP8_FP8', 'exec_swmmac_f16'),
+        ('V_SWMMAC_F16_16X16X128_FP8_BF8', 'exec_swmmac_f16'),
+        ('V_SWMMAC_F16_16X16X128_BF8_FP8', 'exec_swmmac_f16'),
+        ('V_SWMMAC_F16_16X16X128_BF8_BF8', 'exec_swmmac_f16'),
     ],
 )
 @pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
@@ -2084,6 +2090,10 @@ def test_fixed_wave_swmmac_layout_selects_sparse_executor_without_arch_name(
     assert 'uint32_t index_key = 0u;' in body
     assert 'uint32_t index_key = inst_.opsel & 0x1u;' not in body
     assert 'wf.wf_size()' not in call
+    if callee in ('exec_swmmac_f16', 'exec_swmmac_bf16', 'exec_swmmac_bf16f32'):
+        assert 'amdgpu::WMMA_WAVE32, wf.fp16_ovfl()' in call
+    else:
+        assert 'wf.fp16_ovfl()' not in call
 
 
 @pytest.mark.parametrize(
@@ -8258,6 +8268,77 @@ def test_generated_atomic_def_use_follows_return_control(
         assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
+
+
+def test_generated_cdna5_swmmac_tied_destination_metadata(
+    amdgpu_generated_root: Path,
+):
+    profile = Cdna5Profile()
+    assert profile.tied_destination_prefixes == ('V_SWMMAC_',)
+    assert profile.tied_destination_def_widths == {
+        'V_SWMMAC_BF16F32_16X16X64_BF16': 128
+    }
+    assert Cdna4Profile().tied_destination_prefixes == ()
+    assert Cdna4Profile().tied_destination_def_widths == {}
+
+    root = amdgpu_generated_root / _generated_dir_name('cdna5')
+    header = (root / 'vop3p.h').read_text()
+    source = (root / 'vop3p.cpp').read_text()
+
+    ordinary_forms = (
+        ('VSwmmacF3216x16x64F16Vop3p', 256),
+        ('VSwmmacF3216x16x64Bf16Vop3p', 256),
+        ('VSwmmacF1616x16x64F16Vop3p', 128),
+        ('VSwmmacBf1616x16x64Bf16Vop3p', 128),
+        ('VSwmmacF3216x16x128Fp8Fp8Vop3p', 256),
+        ('VSwmmacF3216x16x128Fp8Bf8Vop3p', 256),
+        ('VSwmmacF3216x16x128Bf8Fp8Vop3p', 256),
+        ('VSwmmacF3216x16x128Bf8Bf8Vop3p', 256),
+        ('VSwmmacF1616x16x128Fp8Fp8Vop3p', 128),
+        ('VSwmmacF1616x16x128Fp8Bf8Vop3p', 128),
+        ('VSwmmacF1616x16x128Bf8Fp8Vop3p', 128),
+        ('VSwmmacF1616x16x128Bf8Bf8Vop3p', 128),
+        ('VSwmmacI3216x16x128Iu8Vop3p', 256),
+    )
+    for class_name, destination_bits in ordinary_forms:
+        constructor = _generated_constructor_body(source, class_name)
+        assert f'vdst({destination_bits}, OperandType::OPR_VGPR' in constructor
+        assert 'dst_operands_[0] = &vdst;' in constructor
+        assert f'void {class_name}::implicit_uses(RegisterSet &uses) const' in source
+        assert f'void {class_name}::implicit_use_operands(' in source
+
+    class_name = 'VSwmmacBf16f3216x16x64Bf16Vop3p'
+    constructor = _generated_constructor_body(source, class_name)
+    assert 'vdst(256, OperandType::OPR_VGPR' in constructor
+    assert 'vdst_result(128, OperandType::OPR_VGPR' in constructor
+    assert 'dst_operands_[0] = &vdst_result;' in constructor
+    assert 'vdst_result.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);' in constructor
+    assert 'src_operands_[0] = &vdst' not in constructor
+
+    declaration = header.split(f'class {class_name} : public Vop3p {{', 1)[1]
+    declaration = declaration.split('\n};', 1)[0]
+    assert 'Operand vdst;' in declaration
+    assert 'Operand vdst_result;' in declaration
+    assert (
+        'void append_dst_operand(std::string &out, uint8_t operand_index)'
+        in declaration
+    )
+    assert 'void implicit_uses(RegisterSet &uses) const override;' in declaration
+    assert 'void implicit_use_operands(' in declaration
+
+    render = source.split(f'void {class_name}::append_dst_operand', 1)[1]
+    render = render.split('\n}\n', 1)[0]
+    assert 'out += vdst.name();' in render
+
+    implicit_uses = source.split(f'void {class_name}::implicit_uses', 1)[1]
+    implicit_uses = implicit_uses.split('\n}\n', 1)[0]
+    assert 'vdst.to_register_ref()' in implicit_uses
+    assert 'uses.expand(*r);' in implicit_uses
+
+    implicit_operands = source.split(f'void {class_name}::implicit_use_operands', 1)[1]
+    implicit_operands = implicit_operands.split('\n}\n', 1)[0]
+    assert 'operands.push_back(&vdst);' in implicit_operands
+    assert 'operands.push_back(&vdst_result);' not in implicit_operands
 
 
 def test_generated_flat_saddr_null_selector_follows_encoding(

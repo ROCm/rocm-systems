@@ -2433,7 +2433,8 @@ void VSwmmacF1616x16x64F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc);
+                          index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc,
+                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacBf1616x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2454,7 +2455,8 @@ void VSwmmacBf1616x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_bf16(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                           index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
+                           index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc,
+                           amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacBf16f3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2475,7 +2477,8 @@ void VSwmmacBf16f3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_bf16f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                              index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
+                              index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc,
+                              amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VWmmaF3216x16x64Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2792,7 +2795,8 @@ void VSwmmacF1616x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc);
+                          index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc,
+                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacF1616x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2813,7 +2817,8 @@ void VSwmmacF1616x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc);
+                          index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc,
+                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacF1616x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2834,7 +2839,8 @@ void VSwmmacF1616x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc);
+                          index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc,
+                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacF1616x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2855,7 +2861,8 @@ void VSwmmacF1616x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc);
+                          index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc,
+                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacI3216x16x128Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {

@@ -39,6 +39,14 @@ struct WmmaFixture : ExactFixture {
   WmmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF) {}
 };
 
+void write_packed8(WmmaFixture &fx, uint32_t base, const amdgpu::InputLoc &loc, uint8_t value) {
+  const uint32_t reg = fx.vbase + base + loc.vgpr_offset;
+  const uint32_t old = fx.cu->read_vgpr(reg, loc.lane);
+  const uint32_t shift = loc.sub_element * 8;
+  const uint32_t word = (old & ~(0xFFu << shift)) | (static_cast<uint32_t>(value) << shift);
+  fx.cu->write_vgpr(reg, loc.lane, word);
+}
+
 // Drive one (kernel, fmt) case across all trial modes and both accumulator
 // sources. dst == acc, so reseed_acc restores the window between runs.
 void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
@@ -462,6 +470,43 @@ TEST(WmmaSimdExact, Sparse) {
                  amdgpu::extract_fp8);
   run_sparse_f16("swmmac_f16_16x16x128_bf8", Fmt::BF8, 128, 8, 32, amdgpu::extract_bf8,
                  amdgpu::extract_bf8);
+}
+
+TEST(WmmaSimdExact, SparseK128NaNPayloadsMatchScalar) {
+  SKIP_IF_NO_SIMD();
+  WmmaFixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.seed(S0, IN_REGS, Fmt::BF8, Mode::Zeros, 0);
+  fx.seed(S1, IN_REGS, Fmt::BF8, Mode::Zeros, 0);
+  for (uint32_t lane = 0; lane < WF; ++lane)
+    fx.cu->write_vgpr(fx.vbase + INDEX, lane, 0x44444444u);
+
+  // Use opposite-sign BF8 qNaNs so a host FMA choosing B instead of A is
+  // visible. The architectural source priority selects positive A.
+  write_packed8(fx, S0, amdgpu::swmmac_a_input_loc(WF, 16, 128, 0, 0, 8), 0x7Eu);
+  write_packed8(fx, S1, amdgpu::swmmac_b_input_loc(WF, 16, 128, 0, 0, 8), 0xFEu);
+
+  auto reseed_f32 = [&] { fx.seed(ACC, ACC_REGS, Fmt::F32, Mode::Zeros, 0); };
+  expect_bit_exact(
+      "swmmac_f32_16x16x128_bf8_nan", Mode::NaN, fx, reseed_f32,
+      [&] {
+        amdgpu::exec_swmmac_f32(*fx.cu, 16, 16, 128, 8, fx.vbase + ACC, fx.vbase + S0,
+                                fx.vbase + S1, fx.vbase + ACC, fx.vbase + INDEX, 32, INDEX_KEY,
+                                amdgpu::extract_bf8, amdgpu::extract_bf8);
+      },
+      ACC, ACC_REGS);
+  EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC, 0), 0x7FC00000u);
+
+  auto reseed_f16 = [&] { fx.seed(ACC, ACC_REGS, Fmt::F16, Mode::Zeros, 0); };
+  expect_bit_exact(
+      "swmmac_f16_16x16x128_bf8_nan", Mode::NaN, fx, reseed_f16,
+      [&] {
+        amdgpu::exec_swmmac_f16(*fx.cu, 16, 16, 128, 8, fx.vbase + ACC, fx.vbase + S0,
+                                fx.vbase + S1, fx.vbase + ACC, fx.vbase + INDEX, 32, INDEX_KEY,
+                                amdgpu::extract_bf8, amdgpu::extract_bf8);
+      },
+      ACC, ACC_REGS);
+  EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC, 0) & 0xFFFFu, 0x7E01u);
 }
 
 // --- integer WMMA/SWMMAC, signed/unsigned, clamp on and off ---

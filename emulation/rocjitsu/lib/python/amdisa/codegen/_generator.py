@@ -10140,6 +10140,41 @@ class CodeGenerator:
                     cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
                     cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
+                    tied_destination_name = None
+                    tied_destination_def_width = None
+                    tied_destination_result_name = None
+                    if inst.name.upper().startswith(
+                        self.isa_spec.profile.tied_destination_prefixes
+                    ):
+                        tied_destinations = [
+                            o
+                            for o in inst.operands
+                            if o.is_output and o.name in ('vdst', 'sdst')
+                        ]
+                        assert len(tied_destinations) == 1, (
+                            f'{inst.name}: tied destination requires exactly one '
+                            "'vdst' or 'sdst' output"
+                        )
+                        tied_destination = tied_destinations[0]
+                        tied_destination_name = tied_destination.name
+                        tied_destination_def_width = (
+                            self.isa_spec.profile.tied_destination_def_widths.get(
+                                inst.name.upper(), tied_destination.size
+                            )
+                        )
+                        assert (
+                            tied_destination_def_width > 0
+                            and tied_destination_def_width <= tied_destination.size
+                            and tied_destination_def_width % 32 == 0
+                            and tied_destination.size % 32 == 0
+                        ), (
+                            f'{inst.name}: tied destination widths must be positive, '
+                            'dword-aligned, and no wider than the encoded operand'
+                        )
+                        if tied_destination_def_width != tied_destination.size:
+                            tied_destination_result_name = (
+                                f'{tied_destination.name}_result'
+                            )
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
                         # FLAT's optional scalar address is constructed below,
@@ -10273,8 +10308,17 @@ class CodeGenerator:
                             and inst_sem.operation in ('cmpswap', 'fcmpswap')
                             and opnd.name == 'vdata'
                         )
+                        _needs_tied_destination_result_view = (
+                            opnd.name == tied_destination_name
+                            and tied_destination_result_name is not None
+                        )
                         atomic_return_operand = (
                             'vdata_return' if _needs_atomic_return_view else opnd.name
+                        )
+                        destination_operand = (
+                            tied_destination_result_name
+                            if _needs_tied_destination_result_view
+                            else opnd.name
                         )
                         if _is_optional_atomic_return:
                             sc0, _, _ = self._coherency_exprs()
@@ -10284,7 +10328,7 @@ class CodeGenerator:
                             )
                         elif opnd.is_output:
                             opnd_body.append(
-                                f'dst_operands_[{dst_idx}] = &{opnd.name};'
+                                f'dst_operands_[{dst_idx}] = &{destination_operand};'
                             )
                             dst_idx += 1
                         if not opnd.is_input and not opnd.is_output:
@@ -10380,6 +10424,19 @@ class CodeGenerator:
                                 f'OperandType::{opr_type}, '
                                 f'{operand_value}{packed_16bit_args})'
                             )
+                            if _needs_tied_destination_result_view:
+                                private_members.append(
+                                    cgen.Statement(f'Operand {opnd.name}_result')
+                                )
+                                opnd_ctor_init.append(
+                                    f'{opnd.name}_result({tied_destination_def_width}, '
+                                    f'OperandType::{opr_type}, {operand_value})'
+                                )
+                                if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
+                                    vgpr_msb_role_body.append(
+                                        f'{opnd.name}_result.set_vgpr_msb_role('
+                                        'amdgpu::VgprMsbRole::Dst);'
+                                    )
                             if _needs_atomic_return_view:
                                 private_members.append(
                                     cgen.Statement('Operand vdata_return')
@@ -10435,6 +10492,13 @@ class CodeGenerator:
                         public_members.append(
                             cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                         )
+                    if tied_destination_result_name is not None:
+                        public_members.append(
+                            cgen.Statement(
+                                'void append_dst_operand(std::string &out, '
+                                'uint8_t operand_index) const override'
+                            )
+                        )
                     # A sub-dword (< 32-bit) destination writes only part of its
                     # 32-bit register lane, so the old value survives and the
                     # register is also a read. Surface these partial defs as
@@ -10459,6 +10523,14 @@ class CodeGenerator:
                             for tag in ('IMM', 'LABEL', 'CONST')
                         )
                     ]
+                    # Two-address instructions can read their encoded
+                    # destination without listing it as a printed source. Keep
+                    # that tied input in the same hidden-use hooks as partial
+                    # destination preservation. For an asymmetric result view,
+                    # this intentionally names the original wider read operand.
+                    _implicit_destination_uses = list(_partial_def_outputs)
+                    if tied_destination_name is not None:
+                        _implicit_destination_uses.append(tied_destination_name)
                     # v_writelane preserves the other lanes of vdst, so it reads
                     # the old value: a lane-partial def, distinct from the
                     # sub-dword partial defs above. Surface it only where the XML
@@ -10483,7 +10555,10 @@ class CodeGenerator:
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
-                    if _partial_def_outputs or _dpp_secondary_mask_preserve_output:
+                    if (
+                        _implicit_destination_uses
+                        or _dpp_secondary_mask_preserve_output
+                    ):
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_uses(RegisterSet &uses) const override'
@@ -12662,11 +12737,27 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    if _partial_def_outputs or _dpp_secondary_mask_preserve_output:
+                    if tied_destination_result_name is not None:
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::append_dst_operand'
+                                f'(std::string &out, uint8_t operand_index) const {{\n'
+                                f'  if (operand_index == 0) {{\n'
+                                f'    out += {tied_destination_name}.name();\n'
+                                f'    return;\n'
+                                f'  }}\n'
+                                f'  Instruction::append_dst_operand(out, operand_index);\n'
+                                f'}}'
+                            )
+                        )
+                    if (
+                        _implicit_destination_uses
+                        or _dpp_secondary_mask_preserve_output
+                    ):
                         _pd_body = ''.join(
                             f'  if (auto r = {name}.to_register_ref())\n'
                             f'    uses.expand(*r);\n'
-                            for name in _partial_def_outputs
+                            for name in _implicit_destination_uses
                         )
                         if _dpp_secondary_mask_preserve_output:
                             _pd_body += (
@@ -12686,8 +12777,8 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                        # Operand-backed twin of implicit_uses: report each partial
-                        # def as a preserved-read Operand so a caller can resolve it
+                        # Operand-backed twin of implicit_uses: report each hidden
+                        # destination read as an Operand so a caller can resolve it
                         # with its own VGPR-MSB role and width (see
                         # Instruction::implicit_use_operands). Gated to profiles
                         # with VGPR-MSB banking -- InstDefUse only consults this
@@ -12697,7 +12788,7 @@ class CodeGenerator:
                             _pd_operands_body = ''.join(
                                 f'  if ({name}.to_register_ref())\n'
                                 f'    operands.push_back(&{name});\n'
-                                for name in _partial_def_outputs
+                                for name in _implicit_destination_uses
                             )
                             inst_impls.append(
                                 cgen.Line(
