@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import unittest.mock
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
@@ -15,6 +16,44 @@ _loader = SourceFileLoader("rccl_device_compile", str(DRIVER_PATH))
 _spec = spec_from_loader(_loader.name, _loader)
 driver = module_from_spec(_spec)
 _loader.exec_module(driver)
+
+
+class ScratchDirTest(unittest.TestCase):
+    def setUp(self):
+        self._build = tempfile.TemporaryDirectory()
+        self._decoy = tempfile.TemporaryDirectory()
+        self.addCleanup(self._build.cleanup)
+        self.addCleanup(self._decoy.cleanup)
+        # Patch tempdir, not $TMPDIR: tempfile resolves it once and caches it,
+        # so a regressed driver would litter the real /tmp.
+        patcher = unittest.mock.patch.object(tempfile, "tempdir",
+                                             self._decoy.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_scratch_dir_is_created_under_the_output_directory(self):
+        obj = str(Path(self._build.name) / "sub" / "kernel.o")
+
+        scratch = driver.make_scratch_dir(obj, "rccl-dc-")
+
+        self.assertEqual(Path(scratch).parent, Path(self._build.name) / "sub")
+        self.assertTrue(Path(scratch).is_dir())
+
+    def test_scratch_dir_ignores_the_ambient_temp_dir(self):
+        obj = str(Path(self._build.name) / "kernel.o")
+
+        scratch = driver.make_scratch_dir(obj, "rccl-dc-")
+
+        self.assertEqual(Path(scratch).parent, Path(self._build.name))
+        self.assertEqual(list(Path(self._decoy.name).iterdir()), [])
+
+    def test_repeated_calls_do_not_collide(self):
+        obj = str(Path(self._build.name) / "kernel.o")
+
+        first = driver.make_scratch_dir(obj, "rccl-dc-")
+        second = driver.make_scratch_dir(obj, "rccl-dc-")
+
+        self.assertNotEqual(first, second)
 
 
 class DropLocalNoDeadStripTest(unittest.TestCase):

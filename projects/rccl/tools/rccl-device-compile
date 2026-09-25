@@ -476,6 +476,16 @@ def run(cmd, description=""):
         sys.exit(1)
 
 
+def make_scratch_dir(output, prefix):
+    """Scratch beside the output object, not TMPDIR: cleanup runs only on a
+    normal exit, so a killed build would orphan dirs outside the tree that a
+    clean build removes. Still mkdtemp: one source compiles for many arches.
+    """
+    out_dir = os.path.dirname(output) or '.'
+    os.makedirs(out_dir, exist_ok=True)
+    return tempfile.mkdtemp(prefix=prefix, dir=out_dir)
+
+
 # ---------------------------------------------------------------------------
 # Compile mode: .cpp -> .o + .resources.json
 # ---------------------------------------------------------------------------
@@ -497,13 +507,12 @@ def do_compile(args, forwarded_flags):
     out_dir = os.path.dirname(output) or '.'
     os.makedirs(out_dir, exist_ok=True)
 
-    # Determine temp directory: alongside output if --keep-temps, else truly temp
     if keep_temps:
         asm_file = base + '.full.s'
         ext_file = base + '.extracted.s'
         cleanup = []
     else:
-        tmpdir = tempfile.mkdtemp(prefix='rccl-dc-')
+        tmpdir = make_scratch_dir(output, 'rccl-dc-')
         asm_file = os.path.join(tmpdir, 'full.s')
         ext_file = os.path.join(tmpdir, 'extracted.s')
         cleanup = [asm_file, ext_file, tmpdir]
@@ -650,7 +659,7 @@ def do_link(args, forwarded_flags):
         rocshmem_obj = os.path.join(output_dir, f'rocshmem_device_{arch}.o') if rocshmem_bitcode else None
         cleanup = []
     else:
-        tmpdir = tempfile.mkdtemp(prefix='rccl-dl-')
+        tmpdir = make_scratch_dir(output, 'rccl-dl-')
         disp_asm = os.path.join(tmpdir, 'dispatcher.s')
         disp_patched = os.path.join(tmpdir, 'dispatcher_patched.s')
         disp_obj = os.path.join(tmpdir, 'dispatcher.o')
