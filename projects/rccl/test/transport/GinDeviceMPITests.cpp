@@ -628,6 +628,9 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
+  // MPI collective: must run on every rank before the self-check, which can
+  // return early on one rank only.
+  const bool crossNode = crossNodeReason().empty();
 
   MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
   MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "NET");
@@ -636,6 +639,10 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
 
   runBasicPutSelfCheck();
   if (HasFatalFailure()) return;
+
+  ncclComm_t comm = getActiveCommunicator();
+  if (!comm || !comm->ncclNet || std::strcmp(comm->ncclNet->name, "IB") != 0)
+    GTEST_SKIP() << "qpPerDev is only logged by the IB network transport";
 
   const std::string log = logCtx.readNcclDebugLog();
   const std::string marker = "qpPerDev=";
@@ -646,11 +653,11 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
     if (perDev == 1) sawGin = true;
     if (perDev == qpPerConn) sawEnv = true;
   }
-  // Total Max Nqps is 1 * ndevs, so a 2-device GIN link can equal the env value.
+  // qpPerDev is the per-device multiplier, so a GIN link logs 1 for any ndevs.
   EXPECT_TRUE(sawGin) << "no IB connect used one QP per device while NCCL_IB_QPS_PER_CONNECTION="
                       << qpPerConn;
   // Two nodes also open collective links. Those must still follow the env value.
-  if (crossNodeReason().empty()) {
+  if (crossNode) {
     EXPECT_TRUE(sawEnv) << "no collective IB connect logged qpPerDev=" << qpPerConn;
   }
 }
