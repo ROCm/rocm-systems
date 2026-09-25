@@ -5,6 +5,7 @@
 import csv
 import json
 import re
+import threading
 import time
 from typing import Dict
 from enum import Enum
@@ -40,6 +41,14 @@ class AMDSMILogger:
         self.store_memory_partition_json_output = []
         self.store_partition_profiles_json_output = []
         self.store_partition_resources_json_output = []
+
+        # Event streaming state. The event command prints one record at a time,
+        # once per event, from one listener thread per GPU. ``_event_csv_header``
+        # is captured from the first event so the CSV header is written once
+        # (subsequent events emit only a data row). ``_event_lock`` serializes
+        # printing so records from concurrent GPU threads do not interleave.
+        self._event_csv_header = None
+        self._event_lock = threading.Lock()
 
     class LoggerFormat(Enum):
         """Enum for logger formats"""
@@ -735,6 +744,76 @@ class AMDSMILogger:
                 self._print_human_readable_output(
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
+
+    def _format_event_human_readable(self, event):
+        message = event.get("message", {})
+        message_fields = []
+        if isinstance(message, dict):
+            message_fields = [f"{key}={value}" for key, value in message.items()]
+        elif message:
+            message_fields = [str(message)]
+
+        fields = [
+            str(event.get("timestamp", "unknown")),
+            f"GPU {event.get('gpu', 'unknown')}",
+            str(event.get("event", "unknown")),
+            *message_fields,
+        ]
+        return " ".join(field.replace("\n", " ") for field in fields)
+
+    def print_event_output(self):
+        """Print a single event record in the configured format.
+
+        The event command streams one record per call, once per event, from one
+        listener thread per GPU. Each format emits a single well-formed record:
+        human-readable is one line, CSV writes the header once followed by a row
+        per event, and JSON emits one object per line (newline-delimited JSON so
+        every line is independently parseable). Printing is serialized so records
+        from concurrent GPU threads do not interleave.
+        """
+        with self._event_lock:
+            if self.is_human_readable_format():
+                self._write_event_line(self._format_event_human_readable(self.output))
+            elif self.is_csv_format():
+                self._print_event_csv_output()
+            elif self.is_json_format():
+                self._write_event_line(json.dumps(self.output))
+            else:
+                raise ValueError("Invalid output format: expected json, csv, or human_readable")
+
+    def _write_event_line(self, line):
+        """Emit a single event line to stdout or append it to the output file."""
+        if self.destination == "stdout":
+            print(line)
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(line + "\n")
+
+    def _print_event_csv_output(self):
+        """Emit one CSV row per event, writing the header only on the first event.
+
+        The header is fixed from the first event's keys so the stream stays a
+        single valid CSV document. Later events fill missing columns with ``N/A``
+        and ignore any extra keys, keeping every row aligned to that header.
+        """
+        write_header = self._event_csv_header is None
+        if write_header:
+            self._event_csv_header = list(self.output.keys())
+        header = self._event_csv_header
+        row = {key: self.output.get(key, "N/A") for key in header}
+
+        builder = self.CsvStdoutBuilder()
+        writer = csv.DictWriter(builder, header, lineterminator="\n", extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+        text = str(builder)
+
+        if self.destination == "stdout":
+            print(text, end="")
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(text)
 
     def _print_json_output(
         self, multiple_device_enabled=False, watching_output=False, emit_empty=False

@@ -8,7 +8,6 @@ import re
 import warnings
 from collections.abc import Iterable
 from ctypes import POINTER, c_void_p
-from datetime import datetime
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
@@ -809,7 +808,7 @@ class AmdSmiEventReader:
             )
         )
 
-        receipt_time = datetime.now().astimezone().isoformat(timespec="milliseconds")
+        receipt_time = int(time())
         ret = []
         for i in range(c_count.value):
             unique_event_values = set(event.value for event in AmdSmiEvtNotificationType)
