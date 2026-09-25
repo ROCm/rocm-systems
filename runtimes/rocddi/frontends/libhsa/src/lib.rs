@@ -29,7 +29,7 @@ core::arch::global_asm!(include_str!("exports_linux.S"));
 
 mod ffi;
 mod finalizer;
-mod image;
+mod image_abi;
 mod loader;
 mod memory;
 mod pc_sampling;
@@ -278,9 +278,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                 SYSTEM_INFO_SIGNAL_MAX_WAIT => write_value(value, u64::MAX),
                 SYSTEM_INFO_ENDIANNESS => write_value(value, 0_u32),
                 SYSTEM_INFO_MACHINE_MODEL => write_value(value, 1_u32),
-                SYSTEM_INFO_EXTENSIONS => {
-                    write_value(value, extension_mask(false, runtime.has_image_gpu()))
-                }
+                SYSTEM_INFO_EXTENSIONS => write_value(value, extension_mask(false)),
                 AMD_SYSTEM_INFO_SVM_SUPPORTED => write_value(value, true),
                 AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT => write_value(value, false),
                 AMD_SYSTEM_INFO_MWAITX_ENABLED => write_value(value, false),
@@ -313,13 +311,10 @@ fn extension_name(extension: u16) -> Option<&'static [u8]> {
     }
 }
 
-fn extension_mask(pc_sampling: bool, images: bool) -> [u8; 128] {
+fn extension_mask(pc_sampling: bool) -> [u8; 128] {
     let mut extensions = [0_u8; 128];
     for extension in [EXTENSION_AMD_PROFILER, EXTENSION_AMD_LOADER] {
         extensions[usize::from(extension / 8)] |= 1 << (extension % 8);
-    }
-    if images {
-        extensions[usize::from(EXTENSION_IMAGES / 8)] |= 1 << (EXTENSION_IMAGES % 8);
     }
     if pc_sampling {
         extensions[usize::from(EXTENSION_AMD_PC_SAMPLING / 8)] |=
@@ -329,8 +324,7 @@ fn extension_mask(pc_sampling: bool, images: bool) -> [u8; 128] {
 }
 
 fn supported_extension_minor(extension: u16, version_major: u16) -> Option<u16> {
-    (version_major == 1 && matches!(extension, EXTENSION_IMAGES | EXTENSION_AMD_LOADER))
-        .then_some(0)
+    (version_major == 1 && extension == EXTENSION_AMD_LOADER).then_some(0)
 }
 
 fn legacy_extension_supported(extension: u16, version_major: u16, version_minor: u16) -> bool {
@@ -338,10 +332,7 @@ fn legacy_extension_supported(extension: u16, version_major: u16, version_minor:
         && version_minor == 0
         && matches!(
             extension,
-            EXTENSION_IMAGES
-                | EXTENSION_AMD_PROFILER
-                | EXTENSION_AMD_LOADER
-                | EXTENSION_AMD_PC_SAMPLING
+            EXTENSION_AMD_PROFILER | EXTENSION_AMD_LOADER | EXTENSION_AMD_PC_SAMPLING
         )
 }
 
@@ -398,14 +389,13 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
+        let Some(_runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
         if !valid_extension(extension) || result.is_null() {
             return INVALID_ARGUMENT;
         }
-        let supported = legacy_extension_supported(extension, version_major, version_minor)
-            && (extension != EXTENSION_IMAGES || runtime.has_image_gpu());
+        let supported = legacy_extension_supported(extension, version_major, version_minor);
         // SAFETY: The caller supplied writable output storage.
         unsafe { result.write(supported) };
         SUCCESS
@@ -424,14 +414,13 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
+        let Some(_runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
         if version_minor.is_null() || result.is_null() {
             return INVALID_ARGUMENT;
         }
-        let minor = supported_extension_minor(extension, version_major)
-            .filter(|_| extension != EXTENSION_IMAGES || runtime.has_image_gpu());
+        let minor = supported_extension_minor(extension, version_major);
         // ROCr leaves version_minor untouched when the extension is unsupported.
         unsafe {
             if let Some(minor) = minor {
@@ -578,7 +567,6 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         };
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
         let gpu_only = gpu.is_some();
-        let image_only = gpu.is_some_and(|info| runtime::image_target_supported(*info));
         if !gpu_only && cpu_rejects_amd_agent_info(attribute) {
             return INVALID_ARGUMENT;
         }
@@ -659,7 +647,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 AGENT_INFO_EXTENSIONS => write_value(
                     value,
                     if gpu_only {
-                        extension_mask(true, image_only)
+                        extension_mask(true)
                     } else {
                         [0; 128]
                     },
@@ -824,47 +812,20 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 AMD_AGENT_INFO_CLUSTER_MAX_SIZE if gpu_only => {
                     write_value(value, CLUSTER_MAX_DIM.x)
                 }
-                EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS | EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS => {
-                    write_value(value, if image_only { 16_384_u32 } else { 0 })
-                }
-                EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS => {
-                    write_value(value, if image_only { u32::MAX } else { 0 })
-                }
+                EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS
+                | EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS
+                | EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS => write_value(value, 0_u32),
                 EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS
                 | EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS
                 | EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS
-                | EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS => write_value(
-                    value,
-                    if image_only {
-                        [16_384_u32, 16_384]
-                    } else {
-                        [0; 2]
-                    },
-                ),
-                EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS => write_value(
-                    value,
-                    if image_only {
-                        [16_384_u32, 16_384, 8192]
-                    } else {
-                        [0; 3]
-                    },
-                ),
-                EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS => {
-                    write_value(value, if image_only { 8192_u32 } else { 0 })
-                }
-                EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES => {
-                    write_value(value, if image_only { 128_u32 } else { 0 })
-                }
-                EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES => {
-                    write_value(value, if image_only { 64_u32 } else { 0 })
-                }
-                EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS => {
-                    write_value(value, if image_only { 16_u32 } else { 0 })
-                }
-                EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT => {
-                    write_value(value, if image_only { 256_usize } else { 0 })
-                }
-                EXT_AGENT_INFO_IMAGE_SUPPORT => write_value(value, image_only),
+                | EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS => write_value(value, [0_u32; 2]),
+                EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS => write_value(value, [0_u32; 3]),
+                EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS
+                | EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES
+                | EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES
+                | EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS => write_value(value, 0_u32),
+                EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT => write_value(value, 0_usize),
+                EXT_AGENT_INFO_IMAGE_SUPPORT => write_value(value, false),
                 _ => INVALID_ARGUMENT,
             }
         }
@@ -922,11 +883,7 @@ pub unsafe extern "C" fn hsa_agent_extension_supported(
             return INVALID_AGENT;
         }
         let supported = legacy_agent_extension_supported(
-            if extension == EXTENSION_IMAGES {
-                runtime.image_supported(agent)
-            } else {
-                runtime.gpu_index(agent).is_some()
-            },
+            extension != EXTENSION_IMAGES && runtime.gpu_index(agent).is_some(),
             version_major,
             version_minor,
         );
@@ -961,11 +918,7 @@ pub unsafe extern "C" fn hsa_agent_major_extension_supported(
             return INVALID_AGENT;
         }
         let supported = major_agent_extension_supported(
-            if extension == EXTENSION_IMAGES {
-                runtime.image_supported(agent)
-            } else {
-                runtime.gpu_index(agent).is_some()
-            },
+            extension != EXTENSION_IMAGES && runtime.gpu_index(agent).is_some(),
             version_major,
         );
         if supported && version_minor.is_null() {
@@ -1315,25 +1268,13 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
+        let Some(_runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if extension == EXTENSION_IMAGES && !runtime.has_image_gpu() {
+        if extension == EXTENSION_IMAGES {
             return NOT_SUPPORTED;
         }
         match (extension, version_major) {
-            (EXTENSION_IMAGES, 1) => {
-                let functions = image::image_extension_table();
-                let count = table_length.min(size_of_val(&functions));
-                // SAFETY: The caller promises table_length writable bytes.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        (&raw const functions).cast::<u8>(),
-                        table.cast::<u8>(),
-                        count,
-                    );
-                }
-            }
             (EXTENSION_AMD_LOADER, 1) => {
                 let functions = loader::loader_extension_table();
                 let count = table_length.min(size_of_val(&functions));
@@ -1716,7 +1657,7 @@ mod tests {
         assert_eq!(AMD_SYSTEM_INFO_EXT_VERSION_MINOR, 0x208);
         assert_eq!(supported_extension_minor(EXTENSION_AMD_LOADER, 1), Some(0));
         assert_eq!(supported_extension_minor(EXTENSION_AMD_LOADER, 2), None);
-        assert_eq!(supported_extension_minor(EXTENSION_IMAGES, 1), Some(0));
+        assert_eq!(supported_extension_minor(EXTENSION_IMAGES, 1), None);
         assert_eq!(supported_extension_minor(EXTENSION_FINALIZER, 1), None);
         assert_eq!(supported_extension_minor(EXTENSION_AMD_AQLPROFILE, 1), None);
         assert!(!legacy_extension_supported(EXTENSION_FINALIZER, 1, 0));
@@ -1740,16 +1681,16 @@ mod tests {
         );
         assert_eq!(extension_name(EXTENSION_AMD_PC_SAMPLING), None);
 
-        let system = extension_mask(false, true);
-        assert_eq!(system[0], 0b10);
+        assert!(!legacy_extension_supported(EXTENSION_IMAGES, 1, 0));
+        let system = extension_mask(false);
+        assert_eq!(system[0], 0);
         assert_eq!(system[64], 0b0011);
-        let agent = extension_mask(true, true);
-        let without_images = extension_mask(false, false);
+        let agent = extension_mask(true);
         assert_eq!(
-            without_images[usize::from(EXTENSION_IMAGES / 8)] & (1 << (EXTENSION_IMAGES % 8)),
+            agent[usize::from(EXTENSION_IMAGES / 8)] & (1 << (EXTENSION_IMAGES % 8)),
             0
         );
-        assert_eq!(agent[0], 0b10);
+        assert_eq!(agent[0], 0);
         assert_eq!(agent[64], 0b1011);
     }
 

@@ -135,14 +135,6 @@ impl PointerDescription {
         let offset = address.checked_sub(base)?;
         (offset.checked_add(size)? <= self.size).then_some(offset)
     }
-
-    fn resolved_range(&self, address: usize, size: usize) -> Option<(usize, Option<usize>)> {
-        let offset = self.offset_range(address, size)?;
-        Some((
-            self.agent_base.checked_add(offset)?,
-            self.host_base.and_then(|base| base.checked_add(offset)),
-        ))
-    }
 }
 
 /// Runtime-owned allocation plus callbacks registered for its destruction.
@@ -3144,108 +3136,6 @@ fn host_address(runtime: &Runtime, address: usize) -> Result<usize, Status> {
             .ok_or(INVALID_ALLOCATION);
     }
     Ok(address)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ResolvedMemoryRange {
-    pub(crate) device_address: u64,
-    pub(crate) host_address: Option<usize>,
-}
-
-pub(crate) fn resolve_memory_range(
-    runtime: &Runtime,
-    agent: HsaAgent,
-    address: usize,
-    size: usize,
-) -> Result<ResolvedMemoryRange, Status> {
-    if address == 0 || size == 0 {
-        return Err(INVALID_ARGUMENT);
-    }
-    let Some(gpu_index) = runtime.gpu_index(agent) else {
-        return Err(INVALID_AGENT);
-    };
-    if let Some((_, mapping)) =
-        runtime
-            .vmem_mappings
-            .range(..=address)
-            .next_back()
-            .filter(|(_, mapping)| {
-                address
-                    .checked_sub(mapping.address)
-                    .and_then(|offset| offset.checked_add(size))
-                    .is_some_and(|end| end <= mapping.size)
-            })
-    {
-        let gpu_access = mapping
-            .access
-            .get(&agent.handle)
-            .is_some_and(|access| access.permissions != ACCESS_PERMISSION_NONE);
-        if !gpu_access {
-            return Err(INVALID_ALLOCATION);
-        }
-        let host_address = mapping
-            .access
-            .get(&CPU_AGENT)
-            .filter(|access| access.permissions != ACCESS_PERMISSION_NONE)
-            .map(|_| address);
-        return Ok(ResolvedMemoryRange {
-            device_address: address as u64,
-            host_address,
-        });
-    }
-
-    macro_rules! resolve_allocation {
-        ($memory:expr) => {{
-            let memory = $memory;
-            if let Some((_, host_address)) = memory.description.resolved_range(address, size) {
-                let base = memory
-                    .allocation
-                    .device_address(&runtime.gpus[gpu_index].device)
-                    .map_err(map_error)?;
-                let offset = memory
-                    .description
-                    .offset_range(address, size)
-                    .ok_or(INVALID_ALLOCATION)?;
-                return Ok(ResolvedMemoryRange {
-                    device_address: base.checked_add(offset as u64).ok_or(INVALID_ALLOCATION)?,
-                    host_address,
-                });
-            }
-        }};
-    }
-
-    for memory in runtime.allocations.values() {
-        resolve_allocation!(memory);
-    }
-    for memory in runtime.ipc_allocations.values() {
-        resolve_allocation!(memory);
-    }
-    for memory in runtime.interop_allocations.values() {
-        resolve_allocation!(memory);
-    }
-    for memory in runtime.locked_allocations.iter().rev() {
-        if let Some((device_address, host_address)) =
-            memory.description.resolved_range(address, size)
-        {
-            let device_address = if let Some(allocation) = &memory.allocation {
-                let base = allocation
-                    .device_address(&runtime.gpus[gpu_index].device)
-                    .map_err(map_error)?;
-                let offset = memory
-                    .description
-                    .offset_range(address, size)
-                    .ok_or(INVALID_ALLOCATION)?;
-                base.checked_add(offset as u64).ok_or(INVALID_ALLOCATION)?
-            } else {
-                device_address as u64
-            };
-            return Ok(ResolvedMemoryRange {
-                device_address,
-                host_address,
-            });
-        }
-    }
-    Err(INVALID_ALLOCATION)
 }
 
 fn translate_copy_address(address: usize) -> Result<usize, Status> {

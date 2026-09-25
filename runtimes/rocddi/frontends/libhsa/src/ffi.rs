@@ -312,19 +312,6 @@ pub(crate) const ACCESS_PERMISSION_RO: u32 = 1;
 pub(crate) const ACCESS_PERMISSION_WO: u32 = 2;
 pub(crate) const ACCESS_PERMISSION_RW: u32 = 3;
 
-pub(crate) const IMAGE_GEOMETRY_1D: u32 = 0;
-pub(crate) const IMAGE_GEOMETRY_2D: u32 = 1;
-pub(crate) const IMAGE_GEOMETRY_3D: u32 = 2;
-pub(crate) const IMAGE_GEOMETRY_1DA: u32 = 3;
-pub(crate) const IMAGE_GEOMETRY_2DA: u32 = 4;
-pub(crate) const IMAGE_GEOMETRY_1DB: u32 = 5;
-pub(crate) const IMAGE_GEOMETRY_2DDEPTH: u32 = 6;
-pub(crate) const IMAGE_GEOMETRY_2DADEPTH: u32 = 7;
-pub(crate) const IMAGE_DATA_LAYOUT_LINEAR: u32 = 1;
-pub(crate) const IMAGE_CAPABILITY_READ_ONLY: u32 = 1;
-pub(crate) const IMAGE_CAPABILITY_WRITE_ONLY: u32 = 1 << 1;
-pub(crate) const IMAGE_CAPABILITY_READ_WRITE: u32 = 1 << 2;
-
 pub(crate) type HsaHandle = i32;
 
 pub(crate) const SYMBOL_INFO_TYPE: u32 = 0;

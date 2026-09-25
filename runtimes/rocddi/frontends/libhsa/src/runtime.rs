@@ -28,7 +28,6 @@ use rocddi::session::{Session, SessionLifetime};
 use rocddi::topology::{Endpoint, GpuInfo};
 
 use crate::ffi::*;
-use crate::image::{Image, Sampler};
 use crate::loader::{CodeObject, CodeSymbol, Executable, Reader, Symbol};
 use crate::memory::{LockedMemory, Memory, VmemHandle, VmemMapping, VmemReservation};
 use crate::pc_sampling::PcSamplingSession;
@@ -347,16 +346,6 @@ pub(crate) struct Gpu {
     pub(crate) fine_grain_pool: bool,
 }
 
-impl Gpu {
-    pub(crate) fn supports_images(&self) -> bool {
-        image_target_supported(self.info)
-    }
-}
-
-pub(crate) fn image_target_supported(target: GpuInfo) -> bool {
-    target.gfx_major == 12 && target.gfx_minor == 0 && target.gfx_stepping == 1
-}
-
 /// Stable HSA cache object associated with one CPU or GPU agent.
 pub(crate) struct Cache {
     pub(crate) agent: HsaAgent,
@@ -418,8 +407,6 @@ pub(crate) struct Runtime {
     pub(crate) owned_ipc_signals: HashMap<usize, OwnedIpcSignal>,
     pub(crate) imported_ipc_signals: HashMap<usize, ImportedIpcSignal>,
     pub(crate) signal_groups: HashMap<u64, Vec<HsaSignal>>,
-    pub(crate) images: HashMap<u64, Image>,
-    pub(crate) samplers: HashMap<u64, Sampler>,
     pub(crate) pc_sampling: HashMap<u64, Arc<Mutex<PcSamplingSession>>>,
     pub(crate) pc_sampling_agents: HashMap<usize, u64>,
     pub(crate) queues: HashMap<usize, Queue>,
@@ -573,8 +560,6 @@ impl Runtime {
             owned_ipc_signals: HashMap::new(),
             imported_ipc_signals: HashMap::new(),
             signal_groups: HashMap::new(),
-            images: HashMap::new(),
-            samplers: HashMap::new(),
             pc_sampling: HashMap::new(),
             pc_sampling_agents: HashMap::new(),
             queues: HashMap::new(),
@@ -635,15 +620,6 @@ impl Runtime {
         let offset = agent.handle.checked_sub(GPU_AGENT_BASE)?;
         let index = usize::try_from(offset).ok()?;
         (index < self.gpus.len()).then_some(index)
-    }
-
-    pub(crate) fn image_supported(&self, agent: HsaAgent) -> bool {
-        self.gpu_index(agent)
-            .is_some_and(|index| self.gpus[index].supports_images())
-    }
-
-    pub(crate) fn has_image_gpu(&self) -> bool {
-        self.gpus.iter().any(Gpu::supports_images)
     }
 
     pub(crate) fn is_agent(&self, agent: HsaAgent) -> bool {
@@ -790,8 +766,6 @@ impl Runtime {
         self.interop_allocations.clear();
         self.allocations.clear();
         self.signal_groups.clear();
-        self.images.clear();
-        self.samplers.clear();
         self.imported_ipc_signals.clear();
         self.owned_ipc_signals.clear();
         self.signal_slabs.clear();
@@ -1168,24 +1142,6 @@ mod tests {
             }),
             "gfx1201"
         );
-    }
-
-    #[test]
-    fn images_are_qualified_only_for_the_gfx1201_descriptor() {
-        for target in [(10, 3, 0), (11, 0, 0), (12, 0, 0), (12, 1, 0)] {
-            assert!(!image_target_supported(GpuInfo {
-                gfx_major: target.0,
-                gfx_minor: target.1,
-                gfx_stepping: target.2,
-                ..GpuInfo::default()
-            }));
-        }
-        assert!(image_target_supported(GpuInfo {
-            gfx_major: 12,
-            gfx_minor: 0,
-            gfx_stepping: 1,
-            ..GpuInfo::default()
-        }));
     }
 
     #[test]
