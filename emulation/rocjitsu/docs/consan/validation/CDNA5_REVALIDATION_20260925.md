@@ -759,3 +759,15 @@ wave32 threads. The padded key-transpose store maps thread 32 to LDS offset
 .text+0x289d78/0x289dc0 in ELF 2778564a54e0ada2, preserving retirement and
 subsequent value publication. Eight trials per mode and six detections are
 predeclared. `sort-spec-tests.log`: all 208 validation-runner tests pass.
+
+### torch.histc publication fault review
+
+The matched trace launches two blocks of 512 wave32 threads for 1024 input
+elements. In the first block thread 32 atomically updates LDS bin 2; thread 2
+reads that bin for global accumulation after the final publication barrier.
+`histc-pristine.asm` identifies that split pair at .text+0x311c8/0x311cc in
+ELF 091d1b99cafd2094, FP32 kernelHistogram1D. The reviewed fault preserves
+initialization, targets only FP32 and retains FP64 as supporting clean coverage.
+Eight trials per mode and six detections are predeclared; all 208 validation
+runner tests pass (`histc-spec-tests.log`). Sort and histogram clean/fault runs
+are queued sequentially after the full MXF4 clean batch to limit contention.
