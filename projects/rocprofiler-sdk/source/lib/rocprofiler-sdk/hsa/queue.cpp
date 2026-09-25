@@ -48,6 +48,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -324,6 +325,15 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                   packet.instrumentation_packets,
                                                   dispatch_time);
 
+        // Thread trace completion is migrated off the callback registry (see WriteInterceptor);
+        // invoke it explicitly here.
+        thread_trace::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
+                                                      packet.kernel_packet,
+                                                      _session,
+                                                      packet,
+                                                      packet.instrumentation_packets,
+                                                      dispatch_time);
+
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
             .wlock([&](auto& serializer) {
@@ -474,8 +484,16 @@ WriteInterceptor(const void* packets,
     // dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
     const bool counters_active =
         counters::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
+    // Thread trace no longer registers a queue-controller callback, so it does not count toward
+    // get_notifiers(); detect it explicitly so an ATT-only run still enters the interceptor.
+    //
+    // Scoped to this queue's agent: a tracer is configured per agent, so queues on agents it was
+    // never configured for must stay on the fast path instead of paying interception and losing
+    // batching for dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool thread_trace_active =
+        thread_trace::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
     const bool no_real_consumers =
-        (queue.get_notifiers() == 0 && !counters_active &&
+        (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active &&
          !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          !spm_active &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
@@ -901,6 +919,19 @@ WriteInterceptor(const void* packets,
                 _packet_data.instrumentation_packets,
                 _packet_data.is_serialized);
 
+            // Thread trace is migrated off the per-queue callback registry: call its hook
+            // explicitly (the other services still flow through signal_callback above).
+            thread_trace::kernel_dispatch_phase_enter_hook(
+                queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
+
             bool inserted_before = false;
             if(_packet_data.is_serialized)
             {
@@ -1273,6 +1304,8 @@ WriteInterceptor(const void* packets,
     if(spm_active) should_batch_packets = false;
     // Counter collection requires per-packet mode; it no longer participates in the registry.
     if(counters_active) should_batch_packets = false;
+    // Thread trace requires per-packet mode; it no longer participates in the registry above.
+    if(thread_trace_active) should_batch_packets = false;
 
     if(should_batch_packets)
     {

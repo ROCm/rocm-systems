@@ -561,6 +561,14 @@ start_context(rocprofiler_context_id_t context_id)
                 // sets of GPU agents. A context with no agent restriction claims every agent.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
+            else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
+                    cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
+            {
+                // Two dispatch ATT contexts can run concurrently as long as they target disjoint
+                // sets of GPU agents. Overlapping agent sets would cross-talk in
+                // post_kernel_call.
+                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+            }
         }
 
         // try to find a nullptr slot first
