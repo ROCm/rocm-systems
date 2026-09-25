@@ -86,7 +86,12 @@ qualification review are retained in `tree-fixed/`. Fresh `default`, `high`, and
 8/8 respectively. **`higher` is the lowest passing preset and tree is green.**
 All trials are admitted/reached, coverage is complete, and pre/post GPU probes
 are healthy. The three matrices are retained in
-`tree-atomic-or/{default,high,higher}-cache-repair-v1/`. No hip-moi oracle, workload synchronization, or numerical check has
+`tree-atomic-or/{default,high,higher}-cache-repair-v1/`.
+The existing SuperCollider `sleep=15` setting was also rerun on this same repaired
+binary: its clean control passes and fault detection remains 0/8, with all eight
+trials admitted/reached and healthy. It remains yellow. This evidence is in
+`tree-atomic-or/sc-sleep15-cache-repair-v1/`. The final audit covers all 23
+repair-campaign batches and reports zero errors. No hip-moi oracle, workload synchronization, or numerical check has
 been weakened. The repair is committed locally in hip-moi as `346343f`; its
 full gfx950 CTest suite passes 184/184 (`tree-fixed/ctest-native-wave-r1.xml`).
 Generic two-subgroup atomic tests were changed to use native wave sizes because
@@ -141,8 +146,7 @@ tests (`hooks-v4.xml`), and all 436 physical tests pass with the final fault-inj
 change (`physical-v4.xml`). All 25 available in-scope Default clean rechecks are
 complete: 24 passed immediately; the repaired tree now also passes three fresh
 clean controls with its native allowlist. The retained-hook
-runner fix passes all 207 validation unit tests (`python-validation-r1.log`). The
-remaining watchpoint-bank searches are in progress; results are tracked in the live
+runner fix passes all 207 validation unit tests (`python-validation-r1.log`). All watchpoint-bank searches are complete; results are recorded in the live
 ledger.
 
 The first general torch.mode recheck used the older fixture's allowlist and is excluded
@@ -151,5 +155,6 @@ recheck is `clean-v4-mode-correct-allowlist/`, which uses the current fixture's 
 native trace-derived list and passes.
 
 All physical work uses `/tmp/rocjitsu-consan-destructive-gpu.lock`, the venv TheRock
-ROCm stack, and full native rocprofv3 allowlists (regenerated for the repaired tree). Source fixtures and
-binaries used by the external validation rows are unchanged.
+ROCm stack, and full native rocprofv3 allowlists (regenerated for the repaired tree). Only the tree fixture binary changed among the hip-moi validation rows; its
+original and repaired binaries, fresh native trace, allowlist, source patch,
+and commit pin are retained. The other four hip-moi binaries are unchanged.
