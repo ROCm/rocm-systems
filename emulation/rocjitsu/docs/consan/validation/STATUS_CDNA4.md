@@ -33,7 +33,7 @@ installation is used.
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Main E2E | P4 | hip-moi MFMA attention (`wmma-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 sleep=15: clean pass; fault 8/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 higher (lowest passing): repaired publication journal and release fault; clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 Repair in progress: candidate max has zero ConSan conflicts and correct output, but hip-moi consistency check still fails; fresh fault qualification blocked | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 Repair in progress: confirmed hip-moi incomplete atomic-cache bug; regression reproduced and repaired; fresh clean/fault qualification running | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P0 | HIP matmul 128 cubed (`hip-matmul-m128-n128-k128`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P0 | HipKittens BF16 (`hipkittens-bf16fp32-16x32`) | 🟨 max: clean pass; fault 0/8; fresh 64/128/256/512-bank trials each 0/8; below bar | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | Test corpus | P1 | HipKittens FP8 (`hipkittens-fp8fp32-4wave`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
@@ -45,7 +45,7 @@ installation is used.
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 1/8 (bar 6/8); below bar |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 higher (lowest passing): clean pass; fault 7/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
-| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 max: clean pass; fault 0/8; fresh 64/128/256-bank trials each 0/8, larger-bank search running | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
+| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 max: clean pass; fault 0/8; fresh 64/128/256/512-bank trials each 0/8; below bar | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 | PyTorch | P2 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 Out of scope: numerical pass; traced global-atomic kernels have no applicable LDS/FLAT race coverage | 🟨 Out of scope: numerical pass; traced global-atomic kernels have no applicable LDS/FLAT race coverage |
 | PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟨 max: clean pass; fault 0/8 (bar 6/8); below bar | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); below bar |
 
@@ -73,8 +73,11 @@ allowlist. No previously green clean control has regressed
 - **Tree atomic-OR:** the candidate removes the ConSan false positives at `max`
   (zero conflicts; numerical output passes), but the independent hip-moi
   consistency check fails. The final-hook recheck reproduces this result with
-  12 ordered pairs and complete coverage. This remains red. Investigation points to delayed
-  publication of hip-moi's own atomic metadata; no oracle has been disabled.
+  12 ordered pairs and complete coverage. This remains red. Post-kernel snapshots proved that all release records exist, but the address cache
+  omits a producer and incorrectly suppresses authoritative-table lookup. Two
+  deterministic regressions fail before the repair; all four cache tests pass
+  after treating the cache only as a positive hint. Fresh tree qualification is
+  running; no oracle or workload synchronization has been weakened.
 - **Atomic fault repair:** the CDNA weaken-order mutation left the combined
   VM/LDS completion wait intact after removing the cache operation. The fix passes all 15 atomic mutation tests, including a new
   regression proving that release faults remove the LDS boundary while acquire
@@ -82,8 +85,9 @@ allowlist. No previously green clean control has regressed
 - **Other below-bar Default cells:** prospective `max` watchpoint-bank searches
   are running for HipKittens BF16, Tensile, histc, and norm/softmax. HipKittens BF16 has passing clean controls but 0/8 detections at each of
   64, 128, 256, and 512 banks. Tensile also has passing clean controls and 0/8 detections at all four
-  bank counts. Histc has passing 64/128/256-bank clean controls and 0/8 detections; its larger-bank
-  search and norm/softmax remain running.
+  bank counts. Histc also has passing clean controls and 0/8 detections at all four bank counts.
+  Norm/softmax has passing 64/128-bank controls and 0/8 detections; larger counts
+  remain running.
 
 Current repair logs, clean results, and prospective specifications are under
 `/home/benjacob/consan-default-repairs-20260924/`. In particular, `cpu-v4.xml`,

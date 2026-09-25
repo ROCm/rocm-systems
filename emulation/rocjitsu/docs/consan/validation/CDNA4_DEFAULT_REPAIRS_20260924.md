@@ -64,14 +64,22 @@ remains red and cannot qualify on that clean control. The final-hook recheck in
 `clean-v4/tree-atomic-or/` confirms 12 ordered publication pairs, zero conflicts and
 complete applicable coverage.
 
-Inspection of hip-moi's `context.hpp` shows that release-RMW metadata is published after
-the hardware atomic. Its acquiring RMW retries stop once any producer metadata is found,
-even when another producer's metadata is still pending. The earlier diagnostic build
-reported missing producer-to-consumer ordering while ConSan's complete journal ordered
-the LDS pairs. This is a suspected timing defect in the independent oracle, not
-justification for ignoring it. No hip-moi oracle, workload synchronization or numerical
-check has been weakened. A robust repair needs metadata tied to the atomic's observed
-value; merely increasing a retry delay would not establish that contract.
+Post-kernel snapshots in `tree-debug/` establish a concrete hip-moi cache bug:
+all four authoritative release records are ready, but failed instrumented runs
+have cache masks `0xb` or `0xe` rather than `0xf`. Their missing acquired epoch
+matches the omitted producer. The native control and a passing instrumented run
+have complete masks and acquired epochs. Cache insertion has bounded retries;
+previously, an address hit incorrectly bypassed table lookup even when insertion
+had omitted a producer.
+
+The candidate hip-moi repair imports cached producers, then searches the
+underlying table for every producer not successfully imported. Two deterministic
+regressions (partial and empty masks) fail before this change and pass afterward;
+a negative control confirms cache bits cannot invent release records. All four
+atomic fast-path tests pass. Fresh native profiling and tree qualification are
+in progress. No hip-moi oracle, workload synchronization, or numerical check has
+been weakened. Evidence: `tree-debug/regression-{before,after}.log` and
+`tree-debug/{native,max-0,max-1,max-2}.log`.
 
 ## Remaining sampling searches
 
