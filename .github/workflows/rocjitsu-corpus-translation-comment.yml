@@ -1,0 +1,74 @@
+name: "rocjitsu-corpus-translation-comment"
+
+on:
+  workflow_run:
+    workflows: ["rocjitsu-test-corpus"]
+    types: [completed]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      # This job has a write token. Check out only trusted develop content;
+      # candidate data is downloaded separately and is never executed.
+      - name: Checkout trusted comparison helper
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: develop
+          sparse-checkout: |
+            .github/scripts
+            emulation/rocjitsu/tests/corpus
+
+      - name: Resolve comparison inputs
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/rocjitsu_corpus_translation_comment.py plan \
+            --event "${GITHUB_EVENT_PATH}" \
+            --output "${GITHUB_OUTPUT}"
+
+      - name: Download PR gfx1250 B0-to-A0 SHA pairs
+        if: steps.plan.outputs.ready == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: gfx1250-b0-a0-sha-pairs-candidate
+          path: ${{ github.workspace }}/candidate
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.plan.outputs.candidate-run-id }}
+
+      - name: Download develop gfx1250 B0-to-A0 baseline
+        if: steps.plan.outputs.baseline-found == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: gfx1250-b0-a0-sha-pairs
+          path: ${{ github.workspace }}/baseline
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.plan.outputs.baseline-run-id }}
+
+      - name: Update PR translation comment
+        if: steps.plan.outputs.ready == 'true'
+        env:
+          BASELINE_FOUND: ${{ steps.plan.outputs.baseline-found }}
+          CANDIDATE_HEAD_SHA: ${{ steps.plan.outputs.candidate-head-sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.plan.outputs.pull-number }}
+          SOURCE_RUN_ID: ${{ steps.plan.outputs.candidate-run-id }}
+        run: |
+          python3 .github/scripts/rocjitsu_corpus_translation_comment.py comment \
+            --candidate "${GITHUB_WORKSPACE}/candidate/gfx1250-b0-a0-sha-pairs.json" \
+            --baseline "${GITHUB_WORKSPACE}/baseline/gfx1250-b0-a0-sha-pairs.json" \
+            --comparison-tool \
+              emulation/rocjitsu/tests/corpus/record-gfx1250-dbt-sha-pairs.py

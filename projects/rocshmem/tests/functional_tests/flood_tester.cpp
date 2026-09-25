@@ -31,9 +31,10 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
+template <TestType Type>
 __global__ void FloodTest(int loop, int skip, long long int *start_time,
                            long long int *end_time, uint64_t *r_buf, uint64_t *s_buf,
-                           TestType type, ShmemContextType ctx_type, int wf_size) {
+                           ShmemContextType ctx_type, int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
 
   /**
@@ -57,7 +58,6 @@ __global__ void FloodTest(int loop, int skip, long long int *start_time,
 
   auto t_offset {wg_id * num_th + t_id};
   auto tgt_offset {my_pe * num_wg * num_th + t_offset};
-  auto dst_offset {0};
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
@@ -69,30 +69,21 @@ __global__ void FloodTest(int loop, int skip, long long int *start_time,
       // shuffle ordering so that threads in the wave put to a
       // different pe 'simultaneously'
       auto pe = (t_id + j) % num_pe;
-      switch (type) {
-      case FloodPutTestType:
+      if constexpr (Type == FloodPutTestType) {
         rocshmem_ctx_putmem(ctx, &r_buf[tgt_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
-        break;
-      case FloodPutNBITestType:
+      } else if constexpr (Type == FloodPutNBITestType) {
         rocshmem_ctx_putmem_nbi(ctx, &r_buf[tgt_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
-        break;
-      case FloodPTestType:
+      } else if constexpr (Type == FloodPTestType) {
         rocshmem_ctx_ulong_p(ctx, &r_buf[tgt_offset], s_buf[t_offset], pe);
-        break;
-      case FloodGetTestType:
-        dst_offset = pe * num_wg * num_th + t_offset;
+      } else if constexpr (Type == FloodGetTestType) {
+        auto dst_offset = pe * num_wg * num_th + t_offset;
         rocshmem_ctx_getmem(ctx, &r_buf[dst_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
-        break;
-      case FloodGetNBITestType:
-        dst_offset = pe * num_wg * num_th + t_offset;
+      } else if constexpr (Type == FloodGetNBITestType) {
+        auto dst_offset = pe * num_wg * num_th + t_offset;
         rocshmem_ctx_getmem_nbi(ctx, &r_buf[dst_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
-        break;
-      case FloodGTestType:
-        dst_offset = pe * num_wg * num_th + t_offset;
+      } else if constexpr (Type == FloodGTestType) {
+        auto dst_offset = pe * num_wg * num_th + t_offset;
         r_buf[dst_offset] = rocshmem_ctx_ulong_g(ctx, &s_buf[t_offset], pe);
-        break;
-      default:
-        break;
       }
       __syncthreads();
       if (is_thread_zero_in_block()) {
@@ -209,10 +200,44 @@ void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   size_t shared_bytes = 0;
   int num_pes {rocshmem_n_pes()};
 
-  hipLaunchKernelGGL(FloodTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, r_buf, s_buf,
-                     _type, _shmem_context, wf_size);
-
+  switch (_type) {
+    case FloodPutTestType:
+      hipLaunchKernelGGL(FloodTest<FloodPutTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, r_buf, s_buf, _shmem_context, wf_size);
+      break;
+    case FloodPutNBITestType:
+      hipLaunchKernelGGL(FloodTest<FloodPutNBITestType>, gridSize,
+                         blockSize, shared_bytes, stream, loop, args.skip,
+                         start_time, end_time, r_buf, s_buf, _shmem_context,
+                         wf_size);
+      break;
+    case FloodPTestType:
+      hipLaunchKernelGGL(FloodTest<FloodPTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, r_buf, s_buf, _shmem_context, wf_size);
+      break;
+    case FloodGetTestType:
+      hipLaunchKernelGGL(FloodTest<FloodGetTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, r_buf, s_buf, _shmem_context, wf_size);
+      break;
+    case FloodGetNBITestType:
+      hipLaunchKernelGGL(FloodTest<FloodGetNBITestType>, gridSize,
+                         blockSize, shared_bytes, stream, loop, args.skip,
+                         start_time, end_time, r_buf, s_buf, _shmem_context,
+                         wf_size);
+      break;
+    case FloodGTestType:
+      hipLaunchKernelGGL(FloodTest<FloodGTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, r_buf, s_buf, _shmem_context, wf_size);
+      break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in FloodTester::launchKernel" << std::endl;
+      exit(-1);
+  }
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x * num_pes;
   num_timed_msgs = loop * gridSize.x * blockSize.x * num_pes;

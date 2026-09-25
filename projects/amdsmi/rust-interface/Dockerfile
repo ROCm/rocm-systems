@@ -21,6 +21,7 @@ RUN apt update --yes \
             libnl-3-dev \
             libnl-genl-3-dev \
             pkg-config \
+            python3 \
         && apt clean \
         && rm -rf /var/cache/apt/ /var/lib/apt/lists/*
 

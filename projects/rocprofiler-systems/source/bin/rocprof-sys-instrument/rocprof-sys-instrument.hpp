@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/path.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -11,8 +12,7 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include <spdlog/fmt/ranges.h>
-#include <timemory/utility/filepath.hpp>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <string>
@@ -27,17 +27,6 @@ bool
 is_text_file(const std::string& filename);
 
 //======================================================================================//
-
-inline string_t
-to_lower(string_t s)
-{
-    for(auto& itr : s)
-        itr = tolower(itr);
-    return s;
-}
-//
-//======================================================================================//
-//
 template <typename Tp>
     requires(!std::is_same_v<Tp, std::string>)
 snippet_pointer_t
@@ -63,7 +52,7 @@ snippet_pointer_vec_t
 get_snippets(Args&&... args)
 {
     snippet_pointer_vec_t _tmp{};
-    TIMEMORY_FOLD_EXPRESSION(_tmp.push_back(get_snippet(std::forward<Args>(args))));
+    (_tmp.push_back(get_snippet(std::forward<Args>(args))), ...);
     return _tmp;
 }
 //
@@ -82,11 +71,13 @@ struct rocprofsys_call_expr
     {
         snippet_vec_t _ret;
         for(auto& itr : m_params)
+        {
             _ret.push_back(itr.get());
+        }
         return _ret;
     }
 
-    inline call_expr_pointer_t get(procedure_t* func)
+    call_expr_pointer_t get(procedure_t* func)
     {
         return call_expr_pointer_t((func) ? new call_expr_t(*func, get_params())
                                           : nullptr);
@@ -119,7 +110,9 @@ struct rocprofsys_snippet_vec
     void append(snippet_vec_t& _obj)
     {
         for(auto& itr : m_data)
+        {
             _obj.push_back(itr.get());
+        }
     }
 
 private:
@@ -130,13 +123,13 @@ private:
 //======================================================================================//
 //
 static inline bool
-rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
+rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 {
     bool _is_executable = _default_v;
 
-    if(_cmd.empty())
+    if(!_cmd.empty())
     {
-        if(!tim::filepath::exists(std::string{ _cmd }))
+        if(!rocprofsys::path::is_regular_file(_cmd))
         {
             verbprintf(
                 0,
@@ -146,7 +139,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
         }
 
         Dyninst::SymtabAPI::Symtab* _symtab = nullptr;
-        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
+        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd))
         {
             _is_executable = _symtab->isExecutable() && _symtab->isExec();
             Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
@@ -176,7 +169,10 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
 
         verbprintf(1, "Opening '%s' for binary rewrite... ", _name.c_str());
         fflush(stderr);
-        if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
+        if(!_name.empty())
+        {
+            mutatee = _bpatch->openBinary(_name.c_str(), false);
+        }
         if(!mutatee)
         {
             verbprintf(-1, "Failed to open binary '%s'\n", _name.c_str());
@@ -193,7 +189,9 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         auto _get_env_pair = [](const std::string& _full) {
             auto _pos = _full.find('=');
             if(_pos < _full.length())
+            {
                 return std::make_pair(_full.substr(0, _pos), _full.substr(_pos + 1));
+            }
             return strpair_t{};
         };
 
@@ -201,7 +199,9 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         {
             size_t _idx = 0;
             while(environ[_idx] != nullptr)
+            {
                 _imported.emplace_back(_get_env_pair(environ[_idx++]));
+            }
         }
 
         for(const auto& itr : _cmdenv)
@@ -228,11 +228,17 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         std::stringstream ss;
         for(int i = 0; i < _cmdc; ++i)
         {
-            if(!_cmdv || !_cmdv[i]) continue;
+            if(!_cmdv || !_cmdv[i])
+            {
+                continue;
+            }
             ss << " " << _cmdv[i];
         }
         auto _cmd_msg = ss.str();
-        if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
+        if(_cmd_msg.length() > 1)
+        {
+            _cmd_msg = _cmd_msg.substr(1);
+        }
 
         verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
         fflush(stderr);
@@ -246,82 +252,6 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     }
 
     return mutatee;
-}
-//
-//======================================================================================//
-//
-TIMEMORY_NOINLINE inline void
-rocprofsys_thread_exit(thread_t* thread, BPatch_exitType exit_type)
-{
-    if(!thread) return;
-
-    ROCPROFSYS_ADD_LOG_ENTRY("Executing the thread callback");
-
-    BPatch_process* app = thread->getProcess();
-
-    if(!terminate_expr)
-    {
-        fprintf(stderr, "[rocprof-sys][exe] continuing execution\n");
-        app->continueExecution();
-        return;
-    }
-
-    switch(exit_type)
-    {
-        case ExitedNormally:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] Thread exited normally\n");
-            break;
-        }
-        case ExitedViaSignal:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] Thread terminated unexpectedly\n");
-            break;
-        }
-        case NoExit:
-        default:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] %s invoked with NoExit\n", __FUNCTION__);
-            break;
-        }
-    }
-
-    // terminate_expr = nullptr;
-    thread->oneTimeCode(*terminate_expr);
-
-    fprintf(stderr, "[rocprof-sys][exe] continuing execution\n");
-    app->continueExecution();
-}
-//
-//======================================================================================//
-//
-TIMEMORY_NOINLINE inline void
-rocprofsys_fork_callback(thread_t* parent, thread_t* child)
-{
-    ROCPROFSYS_ADD_LOG_ENTRY("Executing the fork callback");
-
-    if(child)
-    {
-        auto* app = child->getProcess();
-        if(app)
-        {
-            verbprintf(4, "Stopping execution and detaching child fork...\n");
-            app->stopExecution();
-            app->detach(true);
-            // app->terminateExecution();
-            // app->continueExecution();
-        }
-    }
-
-    if(parent)
-    {
-        auto* app = parent->getProcess();
-        if(app)
-        {
-            verbprintf(4, "Continuing execution on parent after fork callback...\n");
-            app->continueExecution();
-        }
-    }
 }
 //
 //======================================================================================//
@@ -347,12 +277,20 @@ bool
 insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp traceFunc,
              procedure_loc_t, bool allow_traps)
 {
-    if(!traceFunc || _points.empty()) return false;
+    if(!traceFunc || _points.empty())
+    {
+        return false;
+    }
 
     auto _names = [&_points]() {
         std::set<std::string> _v{};
         for(const auto& itr : _points)
-            if(itr && itr->getFunction()) _v.emplace(get_name(itr->getFunction()));
+        {
+            if(itr && itr->getFunction())
+            {
+                _v.emplace(get_name(itr->getFunction()));
+            }
+        }
         return _v;
     }();
     auto _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
@@ -366,7 +304,10 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     {
         for(const auto& itr : _points)
         {
-            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+            if(itr && itr->usesTrap_NP())
+            {
+                _traps.insert(itr);
+            }
         }
     }
 
@@ -377,7 +318,10 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     size_t _n = 0;
     for(const auto& itr : _points)
     {
-        if(!itr || _traps.count(itr) > 0) continue;
+        if(!itr || _traps.count(itr) > 0)
+        {
+            continue;
+        }
         mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
@@ -397,9 +341,15 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              procedure_loc_t traceLoc, flow_graph_t* cfGraph,
              basic_loop_t* loopToInstrument, bool allow_traps)
 {
-    if(!funcToInstr) return false;
+    if(!funcToInstr)
+    {
+        return false;
+    }
     module_t* module = funcToInstr->getModule();
-    if(!module || !traceFunc) return false;
+    if(!module || !traceFunc)
+    {
+        return false;
+    }
 
     std::vector<point_t*>* _points = nullptr;
     auto                   _trace  = traceFunc.get();
@@ -407,21 +357,34 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     ROCPROFSYS_ADD_LOG_ENTRY("Searching for loop instrumentation points in function",
                              get_name(funcToInstr));
 
-    if(!cfGraph) funcToInstr->getCFG();
+    if(!cfGraph)
+    {
+        funcToInstr->getCFG();
+    }
     if(cfGraph && loopToInstrument)
     {
         if(traceLoc == BPatch_entry)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
+        }
         else if(traceLoc == BPatch_exit)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+        }
     }
     else
     {
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr) return false;
-    if(_points->empty()) return false;
+    if(_points == nullptr)
+    {
+        return false;
+    }
+    if(_points->empty())
+    {
+        return false;
+    }
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserting max of", _points->size(),
                              "loop instrumentation points in function",
@@ -432,7 +395,10 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     {
         for(auto& itr : *_points)
         {
-            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+            if(itr && itr->usesTrap_NP())
+            {
+                _traps.insert(itr);
+            }
         }
     }
 
@@ -443,7 +409,10 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     size_t _n = 0;
     for(auto& itr : *_points)
     {
-        if(!itr || _traps.count(itr) > 0) continue;
+        if(!itr || _traps.count(itr) > 0)
+        {
+            continue;
+        }
         mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
@@ -462,7 +431,10 @@ bool
 insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps)
 {
-    if(!basicBlock) return false;
+    if(!basicBlock)
+    {
+        return false;
+    }
 
     point_t* _point = nullptr;
     auto     _trace = traceFunc.get();

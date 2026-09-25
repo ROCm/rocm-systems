@@ -97,6 +97,15 @@ int64_t ncclParamWorkArgsBytes() {
   return INT64_MAX;
 }
 
+// The NCCL 2.31 sync moved these tuning params out of src/enqueue.cc into
+// src/tuning/, which topo_expl does not link. graph/tuning.cc forward-declares
+// and calls them, so define them here with the real macro to keep the env-var
+// names and defaults identical to the runtime.
+NCCL_PARAM(Nthreads, "NTHREADS", -2);
+NCCL_PARAM(Ll128Nthreads, "LL128_NTHREADS", -2);
+NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
+NCCL_PARAM(NetOverhead, "NET_OVERHEAD", -2);
+
 // Stubs for symbols newly referenced by src/misc/param.cc and debug.h
 // after the NCCL 2.28.9 sync. topo_expl does not use the env-plugin
 // machinery and does not link debug.cc, so provide minimal definitions.
@@ -116,4 +125,23 @@ const char* ncclEnvPluginGetEnv(const char* name) {
 // report "not disabled" (i.e. caching enabled, the normal runtime behavior).
 extern "C" bool ncclParamIsCacheDisabled(const char* key) {
   return false;
+}
+
+// Stub definition for ncclParamP2pDisable
+int64_t ncclParamP2pDisable() {
+  static int64_t val = -1;
+  if (val != -1) {
+    return val;
+  }
+
+  const char* env = std::getenv("NCCL_P2P_DISABLE");
+  if (!env) {
+    val = 0; // Unset defaults to 0
+    return val;
+  }
+  int parsed = std::atoi(env);
+
+  // Return 1 for any non-zero value, 0 otherwise
+  val = (parsed != 0) ? 1 : 0;
+  return val;
 }

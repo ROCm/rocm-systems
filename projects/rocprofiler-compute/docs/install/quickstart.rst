@@ -1,6 +1,7 @@
 .. meta::
    :description:  Quickstart guide for ROCm Compute Profiler (rocprofiler-compute)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, AMD, Profile, Analyze, CLI, performance counters, quickstart, guide
+   :keywords: Omniperf, ROCm, ROCm Optiq, profiler, tool, Instinct, AMD,
+              Profile, Analyze, CLI, performance counters, quickstart, guide
 
 **********
 Quickstart
@@ -72,23 +73,34 @@ Ensure ROCm is installed and follow the steps:
       :widths: 40 60
 
       * - Component
-        - Python requirement
+        - Supported Python versions
       * - Profile mode (standard library only)
-        - 3.8 or newer
-      * - Analyze mode (numpy, pandas, dash, textual)
-        - 3.9 or newer
+        - 3.8 through 3.14
+      * - Analyze mode (numpy, pandas, dash, textual, etc.)
+        - 3.9 through 3.14
 
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
 
-3. Check the installation dependencies. These are required for analyze mode
-   only; profile mode uses the standard library and needs no extra packages.
+3. Install the analyze mode dependencies. Profile mode uses the standard
+   library and needs no extra packages, so this step is only for analyze mode.
+
+   Install them into a virtual environment that is separate from the one your
+   profiled application uses. Analyze mode pins versions of packages such as
+   ``numpy`` and ``pandas``, and installing them alongside a workload that has
+   its own versions of ``torch``, ``numpy``, or similar packages can break
+   either side.
 
    .. code-block:: shell-session
 
+      python3 -m venv ~/.venvs/rocprof-compute-analyze
+      source ~/.venvs/rocprof-compute-analyze/bin/activate
       pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
 
    **Note:** Replace ``<ROCM_PATH>`` with the ROCm installation path (e.g., ``/opt/rocm`` or ``/opt/rocm-7.3.0``).
+
+   Profile your application with its own Python environment, then activate this
+   environment to run analyze mode on the results.
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 
@@ -216,24 +228,25 @@ Use multiple blocks (5 and 7) for detailed metric collection
 Analysis
 =========
 
-Analysis phase refers to the process of examining profiling data to understand GPU kernel performance, identify bottlenecks, and determine optimization opportunities. ROCm Compute Profiler provides multiple analysis modes to accommodate different workflows.
+Analysis phase refers to the process of examining profiling data to understand GPU kernel
+performance, identify bottlenecks, and determine optimization opportunities. Multiple
+analysis options are available to accommodate different workflows.
 
 .. list-table::
   :header-rows: 1
-  :widths: 25 25 25
+  :widths: 25 25
 
-  * - Mode
+  * - Analysis option
     - When to Use
-    - Links to docs
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-    - `CLI analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst>`_
   * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
     - Interactive exploration, visual drill-down, and detailed charts.
-    - `Standalone GUI analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/standalone-gui.rst>`_
   * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
     - Lightweight, keyboard-driven experience for terminals.
-    - `Text-based User Interface (TUI) analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/tui.rst>`_
+  * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
+    - Interactive graphical exploration of generated ROCm Compute Profiler
+      analysis databases.
 
 **Analysis Command:**
 
@@ -283,7 +296,7 @@ Analyze dispatches 12 and 34 from mixbench workload with 3 decimal precision:
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 12 34 --decimal 3
+   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13 35 --decimal 3
 
 Compare two workloads to evaluate the impact of code optimizations
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

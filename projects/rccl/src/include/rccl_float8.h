@@ -70,16 +70,24 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
     shortx2_t i16_vec;
     rccl_float8 fp8[4];
   } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
+  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(u.i16_vec, v1, /* scale */ 1.f, 0);
   return u.fp8[0];
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
 
   float2_t v;
   uint32_t ival = 0;
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_fp8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_fp8(y.__x, 0)));
-  return __builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
+  // The builtin returns the packed fp8 bytes in an int. Returning that int
+  // directly would select rccl_float8's numeric int constructor, which converts
+  // the bit pattern as a value, so reinterpret it as raw storage instead.
+  union {
+    fp8x2_storage_t fp8x2;
+    rccl_float8 fp8[2];
+  } u{0};
+  u.fp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
+  return u.fp8[0];
 #else
   return rccl_float8(float(x) + float(y));
 #endif
@@ -96,16 +104,23 @@ inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
     shortx2_t i16_vec;
     rccl_bfloat8 fp8[4];
   } u1{0};
-  u1.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
+  u1.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(u1.i16_vec, v1, /* scale */ 1.f, 0);
   return u1.fp8[0];
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
 
   float2_t v;
   uint32_t ival = 0;
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_bf8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_bf8(y.__x, 0)));
-  return __builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
+  // See hadd: reinterpret the packed bytes rather than letting the int
+  // constructor convert them numerically.
+  union {
+    fp8x2_storage_t bfp8x2;
+    rccl_bfloat8 bfp8[2];
+  } u{0};
+  u.bfp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
+  return u.bfp8[0];
 #else
   return rccl_bfloat8(float(x) + float(y));
 #endif
@@ -122,9 +137,9 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
     shortx2_t i16_vec;
     fp8x2_storage_t fp8;
   } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
+  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(u.i16_vec, v1, /* scale */ 1.f, 0);
   return u.fp8;
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
   float2_t v;
   uint32_t ival = 0;
   asm volatile("v_pk_add_f32 %0, %1, %2"
@@ -155,9 +170,9 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
     shortx2_t i16_vec;
     fp8x2_storage_t fp8;
   } u{0};
-  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
+  u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(u.i16_vec, v1, /* scale */ 1.f, 0);
   return u.fp8;
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
   float2_t v;
   uint32_t ival = 0;
   asm volatile("v_pk_add_f32 %0, %1, %2"
@@ -445,7 +460,7 @@ struct rccl_float8 {
 
   constexpr inline HIP_HOST_DEVICE rccl_float8(const rccl_float8& a) : data(a.data) {}
 
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
     // device specific optimized F8 down-conversion code
 
   template <bool stochastic_rounding = false>
@@ -480,7 +495,7 @@ struct rccl_float8 {
 #endif // __gfx942__
 
     // constructor from float
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
 
     // NOTE: ON-DEVICE... always optimal bias
   explicit HIP_DEVICE rccl_float8(float v, rocblas_hip_f8_rounding_mode rm = rocblas_hip_f8_rounding_mode::standard,
@@ -520,7 +535,7 @@ struct rccl_float8 {
     : rccl_float8((float)v, rm, rng) {}
 
     // convert to float
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
     // upcast using device specific intrinsic
   explicit inline HIP_DEVICE operator float() const {
     float fval;
@@ -579,7 +594,7 @@ struct rccl_bfloat8 {
 
   constexpr inline HIP_HOST_DEVICE rccl_bfloat8(const rccl_bfloat8& a) : data(a.data) {}
 
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
     // device specific optimized F8 down-conversion code
 
   template <bool stochastic_rounding = false>
@@ -614,7 +629,7 @@ struct rccl_bfloat8 {
 #endif // __gfx942__
 
     // constructor from float
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
 
     // NOTE: ON-DEVICE... always optimal bias
   explicit HIP_DEVICE rccl_bfloat8(float v, rocblas_hip_f8_rounding_mode rm = rocblas_hip_f8_rounding_mode::standard,
@@ -654,7 +669,7 @@ struct rccl_bfloat8 {
     : rccl_bfloat8((float)v, rm, rng) {}
 
     // convert to float
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
     // upcast using device specific intrinsic
   explicit inline HIP_DEVICE operator float() const {
     float fval;
@@ -984,7 +999,7 @@ template <
   typename std::enable_if<
     (!(std::is_same<T, Ta>{}) && (std::is_same<T, rccl_float8>{} || std::is_same<T, rccl_bfloat8>{})), int>::type = 0>
 inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng) {
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
     // NOTE: we are directly calling cast_to_f8_from_f32 instead of constructor to optimize away one runtime branch
   T val;
   if (std::is_same<T, rccl_float8>::value)

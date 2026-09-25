@@ -25,6 +25,9 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tests/details/agent.hpp"
 
@@ -203,7 +206,29 @@ TEST(rocprofiler_lib, agent)
 
     auto& hsa_agents_v = _rocm_info.agents;
 
-    EXPECT_GE(agents.size(), hsa_agents_v.size());
+    // rocprofiler and the HSA runtime enumerate the topology independently. On
+    // bare metal both read the same KFD tree, so rocprofiler's list is a superset
+    // of HSA's. On WSL rocprofiler drops every GPU the DXG topology thunk cannot
+    // fully describe while HSA keeps reporting it, so there the list may
+    // legitimately be a strict subset.
+    //
+    // select_platform() in agent.cpp has internal linkage, so its precedence has
+    // to be restated here: an explicit ROCPROFILER_FORCE_PLATFORM decides, a
+    // value it does not recognize is ignored in favour of autodetect, and
+    // autodetect prefers gnulinux over wsl.
+    const bool wsl_topology = []() {
+        const auto forced =
+            ::rocprofiler::common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+        if(forced == "wsl") return true;
+        if(forced == "gnulinux") return false;
+        return !::rocprofiler::platform::gnulinux::is_available() &&
+               ::rocprofiler::platform::wsl::is_available();
+    }();
+
+    if(!wsl_topology)
+    {
+        EXPECT_GE(agents.size(), hsa_agents_v.size());
+    }
 
     uint64_t skipped = 0;
     for(const auto* agent : agents)
@@ -296,7 +321,19 @@ TEST(rocprofiler_lib, agent)
         }
     }
 
-    EXPECT_EQ(skipped, (agents.size() - hsa_agents_v.size()));
+    // Every rocprofiler agent either paired with a distinct HSA agent or was
+    // counted in 'skipped'. Phrased as a subtraction from agents.size() (never
+    // less than 'skipped') rather than 'skipped == agents.size() -
+    // hsa_agents_v.size()' so it cannot underflow when rocprofiler published
+    // fewer agents than HSA reports.
+    if(wsl_topology)
+    {
+        EXPECT_LE(agents.size() - skipped, hsa_agents_v.size());
+    }
+    else
+    {
+        EXPECT_EQ(agents.size() - skipped, hsa_agents_v.size());
+    }
 
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)
@@ -315,6 +352,8 @@ struct LocalTopologyExpectedAgent
     uint32_t                 gfx_target_version;
     uint32_t                 max_waves_per_simd;
     uint32_t                 cu_per_simd_array;
+    uint32_t                 cwsr_size;
+    uint32_t                 ctl_stack_size;
     // uint32_t                 mem_banks_count;
     // uint32_t                 io_links_count;
     // uint32_t                 wave_front_size;
@@ -331,19 +370,19 @@ const int ExpectedAgentsCount{7};
 
 const std::array<LocalTopologyExpectedAgent, ExpectedAgentsCount> kLocalTopologyExpectedAgents = {{
     // Node 0: CPU (from data/topology/nodes/0/properties)
-    {ROCPROFILER_AGENT_TYPE_CPU, 24, 0, 0, 0, 0},
+    {ROCPROFILER_AGENT_TYPE_CPU, 24, 0, 0, 0, 0, 0, 0},
     // Node 1: GPU gfx906 (simd_count/simd_per_cu=60, array_count/simd_arrays_per_engine=4)
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 240, 90006, 10, 16},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 240, 90006, 10, 16, 0, 0},
     // Node 2: GPU gfx1102
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 56, 110002, 16, 8},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 56, 110002, 16, 8, 0, 0},
     // Node 3: GPU gfx1032
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 64, 100302, 16, 8},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 64, 100302, 16, 8, 0, 0},
     // Node 4: GPU gfx942 (num_shader_banks = array_count/simd_arrays_per_engine = 32/1)
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1216, 90402, 8, 10},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1216, 90402, 8, 10, 23203840, 12288},
     // Node 5: GPU gfx950
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1024, 90500, 8, 9},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1024, 90500, 8, 9, 22687744, 12288},
     // Node 6: GPU gfx1201 (num_shader_banks = 8/2 = 4)
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 128, 120001, 16, 8},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 128, 120001, 16, 8, 30699520, 28672},
 }};
 
 void
@@ -361,6 +400,10 @@ expect_agent_matches_local_topology(const rocprofiler_agent_t*        actual,
     EXPECT_EQ(actual->gfx_target_version, expected.gfx_target_version) << msg("gfx_target_version");
     EXPECT_EQ(actual->max_waves_per_simd, expected.max_waves_per_simd) << msg("max_waves_per_simd");
     EXPECT_EQ(actual->cu_per_simd_array, expected.cu_per_simd_array) << msg("cu_per_simd_array");
+    const auto* internal = rocprofiler::agent::get_agent_info(actual->id);
+    ASSERT_NE(internal, nullptr);
+    EXPECT_EQ(internal->cwsr_size, expected.cwsr_size) << msg("cwsr_size");
+    EXPECT_EQ(internal->ctl_stack_size, expected.ctl_stack_size) << msg("ctl_stack_size");
     // EXPECT_EQ(actual->mem_banks_count, expected.mem_banks_count) << msg("mem_banks_count");
     // EXPECT_EQ(actual->io_links_count, expected.io_links_count) << msg("io_links_count");
     // EXPECT_EQ(actual->wave_front_size, expected.wave_front_size) << msg("wave_front_size");
@@ -625,15 +668,18 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
 
     ASSERT_EQ(in_half.size(), num_gpu_agents);
 
-    auto strngpus = std::to_string(num_gpu_agents);
-    all_ordinals  = all_ordinals.substr(1);
-    all_uuids     = all_uuids.substr(1);
-    all_mixed     = all_mixed.substr(1);
-
+    // Must precede the substr() calls below: the accumulators are only non-empty
+    // once the loop above has appended at least one ",<device>" pair, so with no
+    // gpu agents at all trimming the leading separator would throw.
     if(num_gpu_agents < 2)
     {
         GTEST_SKIP() << "requires multiple gpu agents";
     }
+
+    auto strngpus = std::to_string(num_gpu_agents);
+    all_ordinals  = all_ordinals.substr(1);
+    all_uuids     = all_uuids.substr(1);
+    all_mixed     = all_mixed.substr(1);
 
     common::set_env("ROCR_VISIBLE_DEVICES", all_ordinals, 1);
     common::set_env("HIP_VISIBLE_DEVICES", noval, 1);

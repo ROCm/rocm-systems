@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/components/backtrace.hpp"
-#include "common/units.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
@@ -32,11 +31,7 @@
 #include <execinfo.h>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -78,13 +73,16 @@ backtrace::global_init()
 void
 overflow::sample(int _sig)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
     auto&                           _perf_event = perf::get_instance(_tid);
 
-    if(!_perf_event) return;
+    if(!_perf_event)
+    {
+        return;
+    }
 
     m_index = causal::experiment::get_index();
 
@@ -99,8 +97,14 @@ overflow::sample(int _sig)
             _data.emplace_back(_sample_ip);
             for(auto ditr : itr.get_callchain())
             {
-                if(ditr != _sample_ip) _data.emplace_back(ditr);
-                if(_data.size() == _data.capacity()) break;
+                if(ditr != _sample_ip)
+                {
+                    _data.emplace_back(ditr);
+                }
+                if(_data.size() == _data.capacity())
+                {
+                    break;
+                }
             }
 
             if(causal::experiment::is_active() && causal::experiment::is_selected(_data))
@@ -120,7 +124,10 @@ overflow::sample(int _sig)
 
     _perf_event->start();
 
-    if(_sig == cputime_signal) causal::delay::process();
+    if(_sig == cputime_signal)
+    {
+        causal::delay::process();
+    }
 }
 
 void
@@ -147,9 +154,9 @@ backtrace::sample(int _sig)
 
     ++_protect_flag;
     // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    m_index = causal::experiment::get_index();
-    m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_index                  = causal::experiment::get_index();
+    m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
     auto _set_current_selection = [](auto _stack) {
         // save the former selection count
@@ -158,13 +165,19 @@ backtrace::sample(int _sig)
         _select_count = causal::set_current_selection(_stack);
         // if the selection count was reduced, reset select zeros.
         // this typically means that a new experiment was started
-        if(_former_count > _select_count) _select_zeros = 0;
+        if(_former_count > _select_count)
+        {
+            _select_zeros = 0;
+        }
         // if no PCs were selected, increment the select zeros.
         // if the cputime signal has not selected a PC in select_ival iterations,
         // then the realtime signal will start contributing to the current
         // selection. We generally want only the cputime signal to contribute
         // because those PCs are in-use (since the thread CPU clock in increasing)
-        if(_select_count == 0) ++_select_zeros;
+        if(_select_count == 0)
+        {
+            ++_select_zeros;
+        }
     };
 
     // the batch handler timer delivers a signal according to the thread CPU
@@ -173,9 +186,13 @@ backtrace::sample(int _sig)
     if(_sig == cputime_signal)
     {
         if(causal::experiment::is_active())
+        {
             causal::delay::process();
+        }
         else
+        {
             _set_current_selection(m_stack);
+        }
     }
     else if(_sig == realtime_signal)
     {
@@ -196,7 +213,9 @@ backtrace::sample(int _sig)
             // the cputime signals. This is rare but has been observed
             //
             if(_select_count == 0 && _select_zeros >= select_ival)
+            {
                 _set_current_selection(m_stack);
+            }
         }
     }
     else
@@ -207,26 +226,4 @@ backtrace::sample(int _sig)
     ++_protect_flag;
 }
 
-template <typename Tp>
-Tp
-backtrace::get_period(std::uint64_t _units)
-{
-    using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
-
-    double       _period = 1.0 / 1000.0;
-    std::int64_t _period_nsec =
-        static_cast<std::int64_t>(_period * units::sec) % units::sec;
-    return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
-}
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
-
-#define INSTANTIATE_BT_CAUSAL_PERIOD(TYPE)                                               \
-    template TYPE rocprofsys::causal::component::backtrace::get_period<TYPE>(            \
-        std::uint64_t);
-
-INSTANTIATE_BT_CAUSAL_PERIOD(float)
-INSTANTIATE_BT_CAUSAL_PERIOD(double)
-INSTANTIATE_BT_CAUSAL_PERIOD(std::int64_t)
-INSTANTIATE_BT_CAUSAL_PERIOD(std::uint64_t)
+}  // namespace rocprofsys::causal::component

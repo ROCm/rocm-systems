@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Enforce amd_smi_test C++ test conventions.
 
 Fails (exit 1) when a test source breaks the layout, file-naming, or GTest
@@ -28,7 +31,7 @@ REPO_ROOT = TEST_ROOT.parents[3]
 DOC = "projects/amdsmi/docs/conceptual/test-design.md"
 
 TIERS = ("unit", "functional")  # top-level test-type directories
-COMPONENTS = ("gpu", "cpu", "nic", "ifoe", "system")  # allowed component dirs
+COMPONENTS = ("gpu", "cpu", "nic", "ifoe", "system", "wsl")  # allowed component dirs
 # Functional tests group into per-feature leaf dirs (<component>/<feature>/),
 # except these flat components which have no sub-features (component == feature).
 FLAT_COMPONENTS = ("system",)
@@ -37,7 +40,9 @@ TEST_SUFFIX = "_test.cc"
 # A GTest suite name is <Component><Type>[<Operation>]:
 #   unit       -> <Component>Unit                        (no operation)
 #   functional -> <Component>Functional{ReadOnly,ReadWrite}
-SUITE_RE = re.compile(r"^(Gpu|Cpu|Nic|Ifoe|System)(Unit|FunctionalReadOnly|FunctionalReadWrite)$")
+SUITE_RE = re.compile(
+    r"^(Gpu|Cpu|Nic|Ifoe|System|Wsl)(Unit|FunctionalReadOnly|FunctionalReadWrite)$"
+)
 
 # Captures the suite from TEST(Suite, Name) and TEST_F(Suite, Name).
 _TEST_MACRO_RE = re.compile(r"\bTEST(?:_F)?\(\s*([A-Za-z_]\w*)\s*,")

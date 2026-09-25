@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Generate rust-wrapper and package targets
 
 # This string is the installation directory containing all rust files

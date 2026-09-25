@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1086,9 +1087,13 @@ executable_freeze_internal(hsa_executable_t executable)
                                     // when kernel_symbol_device_map kernels are not present in
                                     // host_function_map, skip.
                                     if(host_data.device_function == nullptr) return;
-                                    host_data.code_object_id   = sym_data.code_object_id;
-                                    host_data.kernel_id        = sym_data.kernel_id;
-                                    host_data.host_function_id = ++get_host_function_id();
+                                    host_data.code_object_id = sym_data.code_object_id;
+                                    host_data.kernel_id      = sym_data.kernel_id;
+                                    // the id identifies the symbol, not this notification, so
+                                    // allocate it on the first context and reuse it for the rest
+                                    if(sitr->host_function_id == 0)
+                                        sitr->host_function_id = ++get_host_function_id();
+                                    host_data.host_function_id = sitr->host_function_id;
                                     auto hip_record = rocprofiler_callback_tracing_record_t{
                                         .context_id = rocprofiler_context_id_t{citr->context_idx},
                                         .thread_id  = tidx,
@@ -1265,9 +1270,13 @@ shutdown(hsa_executable_t executable)
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
 
-    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
-    // queue-interposition completion records first so pending dispatch records are delivered while
-    // that metadata is still valid.
+    // No signal-less-specific hook at code-object unload: a late signal-less completion
+    // is memory-safe (the payload carries copies, no code-object-owned pointer is
+    // dereferenced), so the only residual is a tool-semantic/buffered-tracing
+    // inconsistency, which is explicitly acceptable per the success criterion.
+
+    // Unloading invalidates tool-side kernel symbol metadata, so drain in-flight
+    // queue-interposition completions first while that metadata is still valid.
     ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
@@ -1428,6 +1437,11 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
+    // Same mutex executable_destroy_internal() holds across shutdown(), so a runtime-thread
+    // destroy cannot run the unload callbacks concurrently with finalization. is_shutdown is
+    // both tested and set under the lock, so a destroy arriving afterwards observes it.
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
     if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
         return;
 

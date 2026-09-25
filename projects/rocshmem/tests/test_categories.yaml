@@ -216,6 +216,7 @@ test_categories:
       # Tile collective tests (IPC-only)
       - "tile_broadcast_.*"
       - "tile_allgather_.*"
+      - "tile_reduce_.*"
 
     labels:
       - "nightly"

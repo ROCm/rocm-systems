@@ -6,20 +6,26 @@
 /// no rocjitsu Operand/Wavefront fixture.
 
 #include "util/simd.h"
+#include "util/simd_test_hooks.h"
 
 #include "util/data_types.h"
 
 #include <gtest/gtest.h>
 
+#include <dlfcn.h>
+
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -46,6 +52,56 @@ inline int sweep_iters() {
   }
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
+
+struct FallbackMask {
+  static constexpr std::size_t kSize = 5;
+  explicit FallbackMask(bool value) { lanes.fill(value); }
+  static constexpr std::size_t size() { return kSize; }
+  bool operator[](std::size_t i) const { return lanes[i]; }
+  bool &operator[](std::size_t i) { return lanes[i]; }
+
+  std::array<bool, kSize> lanes{};
+};
+
+struct FallbackSimd {
+  using mask_type = FallbackMask;
+  static constexpr std::size_t size() { return mask_type::size(); }
+};
+
+TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
+  SKIP_IF_NO_SIMD();
+  using U = util::native<uint32_t>;
+  std::mt19937 rng(129);
+  for (bool overflow : {false, true}) {
+    for (uint32_t bits = 0; bits < 65536; bits += U::size()) {
+      U raw([&](auto i) { return uint32_t(((bits + i) << 16) | (uint32_t(rng()) & 0xffffu)); });
+      U actual = util::pack_bf16_simd(raw, overflow);
+      for (unsigned i = 0; i < U::size(); ++i)
+        ASSERT_EQ(actual[i],
+                  util::f32_to_bf16_rne_mode(std::bit_cast<float>(uint32_t(raw[i])), overflow))
+            << raw[i];
+    }
+  }
+}
+
+TEST(UtilSimd, Fp8WideningExhaustsEveryCode) {
+  SKIP_IF_NO_SIMD();
+  using U = util::native<uint32_t>;
+  for (uint32_t code = 0; code < 256; code += U::size()) {
+    U bits([&](auto i) { return uint32_t(code + i); });
+    auto e5m3 = util::fp8_e5m3_to_f32_simd(bits);
+    auto e4m3 = util::fp8_e4m3_to_f32_simd(bits);
+    auto e5m2 = util::bf8_e5m2_to_f32_simd(bits);
+    for (uint32_t i = 0; i < U::size(); ++i) {
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(e5m3[i])),
+                std::bit_cast<uint32_t>(util::fp8_e5m3_to_f32(code + i)));
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(e4m3[i])),
+                std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(code + i)));
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(e5m2[i])),
+                std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(code + i)));
+    }
+  }
+}
 
 TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
   constexpr int workaround = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
@@ -100,6 +156,65 @@ TEST(UtilSimd, Broadcast_F32) {
   auto v = util::broadcast<float>(bits);
   for (std::size_t i = 0; i < kW; ++i)
     EXPECT_EQ(v[i], kVal) << "lane " << i;
+}
+
+TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const auto check = []<typename Simd>() {
+    constexpr std::size_t W = Simd::size();
+    ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+    const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+    for (uint64_t bits = 0; bits <= full; ++bits) {
+      const auto mask = util::simd_mask_from_bits<Simd>(bits);
+      for (std::size_t i = 0; i < W; ++i)
+        ASSERT_EQ(static_cast<bool>(mask[i]), ((bits >> i) & 1u) != 0)
+            << "width " << W << ", bits " << bits << ", lane " << i;
+      ASSERT_EQ(util::simd_mask_to_bits(mask), bits) << "width " << W << ", bits " << bits;
+    }
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~uint64_t{0})), full)
+        << "input bits above the SIMD width must be ignored";
+    EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~full)), 0u)
+        << "high-only input bits must not set SIMD lanes";
+  };
+
+  check.template operator()<util::native<uint32_t>>();
+#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+  check.template operator()<util::native<uint64_t>>();
+  check.template operator()<util::narrow32<uint32_t>>();
+#endif
+#endif
+}
+
+TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
+  SKIP_IF_NO_SIMD();
+#if __has_include(<experimental/simd>)
+  const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
+    for (std::size_t i = 0; i < FallbackSimd::size(); ++i)
+      ASSERT_EQ(mask[i], ((bits >> i) & 1u) != 0) << "bits " << bits << ", lane " << i;
+    ASSERT_EQ(util::simd_mask_to_bits(mask), bits);
+  }
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~uint64_t{0})), full);
+  EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~full)), 0u);
+#endif
+}
+
+TEST(UtilSimd, MaskBitsExpandToOrderedZeroOneLanes) {
+  SKIP_IF_NO_SIMD();
+  constexpr std::size_t W = util::native<uint32_t>::size();
+  ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
+  const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
+  for (uint64_t bits = 0; bits <= full; ++bits) {
+    const auto lanes = util::simd_u32_lanes_from_bits(bits);
+    for (std::size_t i = 0; i < W; ++i)
+      ASSERT_EQ(lanes[i], static_cast<uint32_t>((bits >> i) & 1u))
+          << "bits " << bits << ", lane " << i;
+  }
+  const auto high_bits = util::simd_u32_lanes_from_bits(~uint64_t{0});
+  for (std::size_t i = 0; i < W; ++i)
+    EXPECT_EQ(high_bits[i], 1u) << "lane " << i;
 }
 
 TEST(UtilSimd, MaskedStore_FullMask) {
@@ -237,23 +352,89 @@ TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
     EXPECT_EQ(dd[i], static_cast<double>(iv[i])) << "i32->f64 lane " << i;
 }
 
-TEST(UtilSimd, ForceScalar_ImmutableProcessWide) {
-  // force_scalar() is seeded once from RJ_FORCE_SCALAR at startup. Absent the
-  // test-only setter (util/simd_test_hooks.h), it is stable across calls and
-  // identical on every thread; this test exercises that steady-state behaviour
-  // without flipping the gate.
+TEST(UtilSimd, ForceScalar_StableAcrossThreadsWithinImage) {
+  // force_scalar() is seeded once from RJ_FORCE_SCALAR at image load. Absent
+  // the test-only setter (util/simd_test_hooks.h), it is stable across calls
+  // and identical on every thread; this test exercises that steady-state
+  // behaviour without flipping the gate.
+  //
+  // Scope note: the gate has local binding per shared object (see
+  // util::detail::g_force_scalar), so this only covers the copy linked into
+  // this test executable. It deliberately does NOT assert process-wide
+  // behaviour -- a same-image thread check cannot observe the DSO boundary,
+  // where each image carries its own copy.
   const bool v = util::force_scalar();
-  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within a process";
+  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within an image";
 
   std::atomic<bool> other{!v};
   std::thread t([&]() { other.store(util::force_scalar()); });
   t.join();
-  EXPECT_EQ(other.load(), v) << "force_scalar() must be process-wide (identical on all threads)";
+  EXPECT_EQ(other.load(), v) << "force_scalar() must be identical on all threads in this image";
+}
 
-  // Value reflects the env parse: unset/empty/"0" => false, else true.
-  const char *e = std::getenv("RJ_FORCE_SCALAR");
-  const bool expected = e && e[0] && !(e[0] == '0' && e[1] == '\0');
-  EXPECT_EQ(v, expected);
+// The documented contract for RJ_FORCE_SCALAR, driven through the parser with
+// literal expectations. Restating the parser to compute the expected value
+// cannot fail, so these cases name the answers instead.
+TEST(UtilSimd, ForceScalar_EnvContract) {
+  struct EnvCase {
+    const char *value; // nullptr means unset.
+    bool expected;
+  };
+  static constexpr EnvCase kCases[] = {
+      {nullptr, false}, {"", false}, {"0", false}, {"1", true}, {"00", true}, {"false", true},
+  };
+
+  const char *saved = std::getenv("RJ_FORCE_SCALAR");
+  const bool was_set = saved != nullptr;
+  const std::string saved_value = was_set ? saved : std::string();
+
+  for (const EnvCase &test_case : kCases) {
+    SCOPED_TRACE(test_case.value ? test_case.value : "<unset>");
+    if (test_case.value == nullptr)
+      ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+    else
+      ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", test_case.value, 1), 0);
+    EXPECT_EQ(util::detail::init_force_scalar(), test_case.expected);
+  }
+
+  if (was_set)
+    ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", saved_value.c_str(), 1), 0);
+  else
+    ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+}
+
+// Positive control for the test seam. Without this, a setter that did nothing
+// would leave every scalar/SIMD comparison in this suite passing, because both
+// halves of each comparison would run the same path.
+TEST(UtilSimd, ForceScalar_SeamActuallyMovesTheGate) {
+  const bool original = util::force_scalar();
+
+  util::set_force_scalar_for_testing(!original);
+  EXPECT_EQ(util::force_scalar(), !original) << "the seam must move the gate";
+
+  util::set_force_scalar_for_testing(original);
+  EXPECT_EQ(util::force_scalar(), original) << "the seam must restore the gate";
+}
+
+// The gate is an inline variable with hidden visibility, so a module the process
+// loads carries its own copy and the seam cannot reach it. This is the scope the
+// headers document; pinning it here keeps a later test from flipping the gate and
+// expecting a loaded module to follow, which would silently assert nothing.
+TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
+  void *module = ::dlopen(RJ_FORCE_SCALAR_PROBE_MODULE, RTLD_NOW | RTLD_LOCAL);
+  ASSERT_NE(module, nullptr) << ::dlerror();
+  auto *probe = reinterpret_cast<bool (*)()>(::dlsym(module, "rj_probe_force_scalar"));
+  ASSERT_NE(probe, nullptr) << ::dlerror();
+
+  const bool original = util::force_scalar();
+  const bool module_before = probe();
+
+  util::set_force_scalar_for_testing(!original);
+  EXPECT_EQ(util::force_scalar(), !original) << "the host gate must have moved";
+  EXPECT_EQ(probe(), module_before) << "a loaded module must keep its own gate";
+
+  util::set_force_scalar_for_testing(original);
+  ::dlclose(module);
 }
 
 // Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
@@ -342,12 +523,10 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
   }
 }
 
-// Toolchain guard for the 64-bit-lane VOP2 FMA SIMD fast path (v_fmac_f64,
-// SIMD_VOP2_FMA_F64). Same contract as the f32 Fma guard above, over
-// native<double>: util::stdx::fma must be the single-rounded fused operation
-// matching the scalar std::fma in the generated body. Sweeps full-range random
-// 64-bit patterns for all three operands, EXCLUDING NaN-input lanes (accepted
-// payload divergence). If a finite/Inf lane diverges, drop SIMD_VOP2_FMA_F64.
+// Toolchain guard for the native<double> stdx::fma primitive. Architectural
+// F64 execution declines this SIMD operation because MODE cannot be represented
+// exactly; this test documents the utility's narrower host-default rounding
+// contract. It excludes NaN-input lanes because payload propagation may differ.
 TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   using V = util::native<double>;
@@ -842,12 +1021,106 @@ TEST(UtilSimd, CubeMa_F32_BitExact) {
 int16_t scalar_cvt_pknorm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
+  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<uint16_t>(lower);
+}
+
+TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
+  SKIP_IF_NO_SIMD();
+  const int original_mode = std::fegetround();
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(mode), 0);
+    EXPECT_EQ(util::round_to_nearest_even(16383.5f), 16384.0f);
+    EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
+    util::native<float> input(32767.5f);
+    auto result = util::round_to_nearest_even_simd(input);
+    for (std::size_t lane = 0; lane < result.size(); ++lane)
+      EXPECT_EQ(result[lane], 32768.0f);
+  }
+  EXPECT_EQ(std::fesetround(original_mode), 0);
+}
+
+template <typename Float> void check_rndne_host_independence() {
+  using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  using V = util::native<Float>;
+  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
+  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
+  constexpr Bits kInfinity = Bits(2 * kBias + 1) << kFraction;
+  constexpr Bits kQuiet = Bits(1) << (kFraction - 1);
+  std::vector<Bits> inputs;
+  for (Float value : {Float(0), Float(0.5), Float(1.5), Float(2.5), Float(3.5), Float(0.1),
+                      Float(0.9), Float(0x1p23), Float(0x1p52)}) {
+    inputs.push_back(std::bit_cast<Bits>(value));
+    if (value != 0) {
+      inputs.push_back(std::bit_cast<Bits>(value) - 1);
+      inputs.push_back(std::bit_cast<Bits>(value) + 1);
+    }
+  }
+  for (Bits bits : {Bits(1), kInfinity, kInfinity | Bits(0x123), kInfinity | kQuiet | Bits(0x456)})
+    inputs.push_back(bits);
+  const size_t positives = inputs.size();
+  for (size_t i = 0; i < positives; ++i)
+    inputs.push_back(inputs[i] | (Bits(1) << (sizeof(Bits) * 8 - 1)));
+  // Include broad exponent/fraction coverage in addition to exact boundaries.
+  std::mt19937_64 rng(0x11939);
+  for (unsigned i = 0; i < 2048; ++i)
+    inputs.push_back(static_cast<Bits>(rng()));
+  struct RestoreEnvironment {
+    std::fenv_t saved;
+    RestoreEnvironment() { std::fegetenv(&saved); }
+    ~RestoreEnvironment() { std::fesetenv(&saved); }
+  } restore_environment;
+  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+  std::vector<Bits> expected;
+  for (Bits bits : inputs) {
+    const Bits magnitude = bits & ~(Bits(1) << (sizeof(Bits) * 8 - 1));
+    expected.push_back(magnitude > kInfinity
+                           ? bits | kQuiet
+                           : std::bit_cast<Bits>(std::nearbyint(std::bit_cast<Float>(bits))));
+  }
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    SCOPED_TRACE(mode);
+    for (size_t base = 0; base < inputs.size(); base += V::size()) {
+      V values(
+          [&](auto lane) { return std::bit_cast<Float>(inputs[(base + lane) % inputs.size()]); });
+      std::feclearexcept(FE_ALL_EXCEPT);
+      std::feraiseexcept(FE_DIVBYZERO);
+      const auto actual = util::rndne_simd(values);
+      for (size_t lane = 0; lane < V::size(); ++lane) {
+        const size_t index = (base + lane) % inputs.size();
+        EXPECT_EQ(std::bit_cast<Bits>(Float(actual[lane])), expected[index]);
+        EXPECT_EQ(std::bit_cast<Bits>(util::rndne_scalar(std::bit_cast<Float>(inputs[index]))),
+                  expected[index]);
+      }
+      EXPECT_EQ(std::fegetround(), mode);
+      EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_DIVBYZERO);
+    }
+  }
+}
+
+TEST(UtilSimd, RndneF32IgnoresHostRoundingAndPreservesEnvironment) {
+  SKIP_IF_NO_SIMD();
+  check_rndne_host_independence<float>();
+}
+
+TEST(UtilSimd, RndneF64IgnoresHostRoundingAndPreservesEnvironment) {
+  SKIP_IF_NO_SIMD();
+  check_rndne_host_independence<double>();
 }
 
 TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {

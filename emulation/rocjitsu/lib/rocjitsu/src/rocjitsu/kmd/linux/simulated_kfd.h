@@ -1,14 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_
-#define ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -19,14 +21,97 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
+namespace amdgpu {
+class Wavefront;
+}
+
+namespace kmd {
+struct CwsrWaveState;
+
+namespace detail {
+
+enum class TrapInterruptSite { Unknown, Profiling, QueueException };
+
+enum class TrapInterruptAbi { Unsupported, PreGfx12, Gfx12 };
+
+constexpr TrapInterruptAbi trap_interrupt_abi(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return TrapInterruptAbi::PreGfx12;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return TrapInterruptAbi::Gfx12;
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    return TrapInterruptAbi::Unsupported;
+  }
+  return TrapInterruptAbi::Unsupported;
+}
+
+constexpr bool uses_pre_gfx12_trap_interrupt_sites(rj_code_arch_t arch) {
+  return trap_interrupt_abi(arch) == TrapInterruptAbi::PreGfx12;
+}
+
+constexpr TrapInterruptSite
+classify_pre_gfx12_trap_interrupt_site(rj_code_arch_t arch, uint32_t payload_move, uint32_t delay) {
+  constexpr uint32_t kSNop0 = 0xBF800000u;
+  if (delay != kSNop0)
+    return TrapInterruptSite::Unknown;
+
+  uint32_t profiling_move = 0;
+  uint32_t exception_move = 0;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    profiling_move = 0xBEFC0073u;
+    exception_move = 0xBEFC006Fu;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    profiling_move = 0xBEFC0373u;
+    exception_move = 0xBEFC036Fu;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    profiling_move = 0xBEFD0073u;
+    exception_move = 0xBEFD006Fu;
+    break;
+  default:
+    return TrapInterruptSite::Unknown;
+  }
+
+  if (payload_move == profiling_move)
+    return TrapInterruptSite::Profiling;
+  if (payload_move == exception_move)
+    return TrapInterruptSite::QueueException;
+  return TrapInterruptSite::Unknown;
+}
+
+} // namespace detail
+} // namespace kmd
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
 struct IpcHandleKey {
   uint32_t words[4];
@@ -67,10 +152,19 @@ struct IpcObject {
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
 public:
+  /// Minimum backing descriptor requested when the process limit permits it.
+  /// Shared with the interposer so its early table growth covers this range.
+  static constexpr int kBackingFdMin = 4096;
+
+  /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
+  using DebugIdentityValidationHook = std::function<void()>;
+
   [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
-  SimulatedKfd(SoC &soc, bool daemon_mode = false);
-  SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false);
+  SimulatedKfd(SoC &soc, bool daemon_mode = false,
+               DebugIdentityValidationHook debug_identity_validation_hook = {});
+  SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false,
+               DebugIdentityValidationHook debug_identity_validation_hook = {});
   ~SimulatedKfd() override;
 
   /// @brief Local-mode interface (interposer). Operates on the local process.
@@ -86,6 +180,122 @@ public:
   /// @retval false No local process to retain (e.g. it was already torn down, or
   ///         daemon/remote mode); the caller must NOT treat the fd as retained.
   [[nodiscard]] bool retain_local_open() override;
+
+  /// @brief Change the debugger mask once, immediately before event publication.
+  /// @details This test seam mutates only state protected by
+  /// debug_sessions_mutex_. An arbitrary callback here could re-enter an ioctl
+  /// while the compute unit's wave-state lock is held and manufacture a lock
+  /// order that production event publication never takes.
+  void set_debug_event_claim_mask_for_testing(uint64_t exception_mask);
+
+  /// @brief Remove the debug session at the next event-publication boundary.
+  /// @details One-shot test seam for detach racing trap completion after the
+  /// event was initially assigned to the debugger.
+  void detach_debug_event_claim_for_testing();
+
+  /// @brief Exercise the CWSR-layout publication gate without constructing a wave.
+  /// @details Used to drive concurrent unsupported-target checks under TSAN.
+  [[nodiscard]] bool debug_stop_publishable_for_testing(uint32_t gpu_id) {
+    return debug_stop_publishable(gpu_id);
+  }
+
+  /// @brief Override the runtime interrupt consumer for deterministic exception tests.
+  void set_interrupt_callback_for_testing(amdgpu::InterruptSubscription::Callback callback) {
+    interrupt_override_for_testing_ = amdgpu::InterruptSubscription(std::move(callback));
+  }
+
+  /// @brief Exercise queue-wide runtime exception fan-out without executing a trap handler.
+  [[nodiscard]] bool signal_runtime_queue_exception_for_testing(uint32_t gpu_id, uint32_t queue_id,
+                                                                uint32_t process_id,
+                                                                uint64_t exception_mask) {
+    return signal_runtime_queue_exception(gpu_id, queue_id, process_id, exception_mask);
+  }
+
+  /// @brief Number of per-queue exception publication locks currently in use.
+  [[nodiscard]] size_t queue_exception_lock_count_for_testing() {
+    std::lock_guard<std::mutex> lock(queue_exception_locks_mutex_);
+    return queue_exception_locks_.size();
+  }
+
+  /// @brief Pause immediately before or after per-queue lock registry release.
+  /// @details The boolean is false before the release and true after it. Tests
+  /// install this hook before starting publishers and clear it after joining.
+  void set_queue_exception_cleanup_hook_for_testing(std::function<void(bool)> hook) {
+    queue_exception_cleanup_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Pause after a debugger-notifier write and before its state commit.
+  void set_debug_notification_result_hook_for_testing(std::function<void(bool)> hook) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_result_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Run immediately before the bounded notification writer is created.
+  void set_debug_notification_write_hook_for_testing(std::function<void()> hook) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_write_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Make clone3 fail with @p error so tests exercise the legacy clone fallback.
+  void set_debug_notification_clone3_error_for_testing(std::optional<int> error) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_clone3_error_for_testing_ = error;
+  }
+
+  /// @brief Make legacy clone with CLONE_PIDFD fail so tests use no-pidfd fallback.
+  void set_debug_notification_clone_pidfd_error_for_testing(std::optional<int> error) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_clone_pidfd_error_for_testing_ = error;
+  }
+
+  /// @brief Force timed-out writers through the asynchronous reap path in tests.
+  void set_debug_notification_deferred_reap_for_testing(bool defer) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_deferred_reap_for_testing_ = defer;
+  }
+
+  /// @brief Pause after ROCr decides queue-exception delivery and before ownership resolves.
+  void set_runtime_exception_result_hook_for_testing(std::function<void(bool)> hook) {
+    runtime_exception_result_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Inject an errno for debugger-notifier duplication.
+  void set_debug_notifier_dup_error_for_testing(std::optional<int> error) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notifier_dup_error_for_testing_ = error;
+  }
+
+  /// @brief Replace a local session's notifier and generation without an ioctl boundary.
+  /// @details Models a new debugger session while an old notification commit is paused;
+  /// normal self-debug ioctls are serialized by KfdProcess::op_mutex_.
+  int replace_debug_session_for_testing(pid_t target_pid, int dbg_fd, uint64_t exception_mask);
+
+  /// @brief Publish a queue debug event without constructing a wave stop.
+  /// @details This narrow seam exercises notifier transaction races and retained
+  /// event re-notification through the same production helper.
+  bool notify_debug_event_for_testing(uint32_t queue_id, uint64_t exception_mask,
+                                      bool retain_on_rejection,
+                                      bool reserve_runtime_on_rejection = false) {
+    auto proc = find_process(local_process_id_);
+    return proc && notify_debug_event(proc, queue_id, exception_mask, retain_on_rejection,
+                                      reserve_runtime_on_rejection);
+  }
+
+  /// @brief Publish a process/device debug event without a runtime transition.
+  /// @details This narrow seam exercises retained process-event notification
+  /// and subscription races through the production retry helper.
+  void raise_process_debug_event_for_testing(pid_t target_pid, uint64_t exception_mask) {
+    raise_process_debug_event(target_pid, exception_mask, /*invoke_result_hook=*/true);
+  }
+
+  /// @brief Release the local process's parked event waiters so a blocking
+  /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
+  /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
+  /// return a benign KFD_IOC_WAIT_RESULT_TIMEOUT and drop the driver snapshot that
+  /// would otherwise keep the object alive. Mutates no process, event, or
+  /// signal-page state — close() performs the destructive teardown. Idempotent.
+  void begin_local_shutdown() override;
+
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;
@@ -101,7 +311,40 @@ public:
   uint32_t open_process(pid_t client_pid = 0);
   void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
-  int ioctl(uint32_t process_id, unsigned long request, void *arg);
+  /// @brief Binds one GPU's memory to this driver for fault reporting.
+  /// @details Every GPU has its own GpuMemory, and the report has to name the
+  /// device that faulted: the runtime maps gpu_id to a node and surfaces it, so
+  /// a shared reporter that guessed would misattribute a fault from any device
+  /// but the first.
+  class GpuFaultReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    GpuFaultReporter(SimulatedKfd *driver, uint32_t gpu_id, std::shared_ptr<KfdProcess> process)
+        : driver_(driver), gpu_id_(gpu_id), process_(std::move(process)) {}
+
+    void report_memory_fault(uint32_t vmid, uint64_t addr,
+                             amdgpu::MemoryFaultCause cause) override {
+      if (process_ != nullptr && process_->process_id() == vmid)
+        driver_->report_memory_fault(process_, addr, gpu_id_, cause);
+    }
+
+  private:
+    SimulatedKfd *driver_ = nullptr;
+    uint32_t gpu_id_ = 0;
+    std::shared_ptr<KfdProcess> process_;
+  };
+
+  /// @brief Deliver a GPU memory violation to the faulting process.
+  /// @details Hardware raises a VM fault and KFD reports it as an event of type
+  /// KFD_IOC_EVENT_MEMORY; the runtime parks a handler thread on that event and
+  /// decides whether to abort. Emulating the report rather than choosing a
+  /// policy here is what makes an invalid GPU access behave as it would on
+  /// silicon. A process that registered no such event gets a warning instead,
+  /// because the violation would otherwise vanish silently.
+  void report_memory_fault(const std::shared_ptr<KfdProcess> &process, uint64_t addr,
+                           uint32_t gpu_id, amdgpu::MemoryFaultCause cause);
+
+  int ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd = nullptr,
+            int target_proc_fd = -1);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
   int munmap(uint32_t process_id, void *addr, size_t length);
   int close(uint32_t process_id);
@@ -122,8 +365,20 @@ public:
   void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
   void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
   bool is_doorbell_range(const void *addr, size_t length) const override;
+
+  /// @brief Perform an ordinary MAP_FIXED mmap while retiring replaced client doorbell views.
+  /// @details The interposer routes non-KFD fixed mappings here so a successful replacement no
+  /// longer remains protected or teardown-owned as a doorbell. The canonical backing and private
+  /// command-processor alias are retained. A failed mmap restores the retired GPU mappings/views.
+  void *mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags, int fd,
+                                             off_t offset) override;
+
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
+  /// @brief KFD gpu_id of the device at @p index, for callers that must name one.
+  uint32_t gpu_id_at(uint32_t index) const {
+    return index < gpus_.size() ? gpus_[index].gpu_id : 0;
+  }
   const Sysfs &topology() const { return topology_; }
   std::string topology_path() const override { return topology_.path(); }
   std::string drm_path() const override { return topology_.drm_path(); }
@@ -148,9 +403,25 @@ public:
   [[nodiscard]] PrimaryInvalidation invalidate_primary_fd(int fd) override;
 
   /// @brief Open-reference count of the local process, or 0 if none is alive.
-  /// @details Introspection for tests/diagnostics. Each live KFD fd (the primary
-  /// plus every dup) holds one reference; the process is destroyed at zero.
-  [[nodiscard]] uint32_t local_open_ref_count() const;
+  /// @details Each live KFD fd (the primary plus every dup) holds one reference;
+  /// the process is destroyed at zero. In the interposer's local VM this includes
+  /// the VM's own bootstrap open (rj_vm_create), which is why teardown compares
+  /// against a captured baseline rather than against zero.
+  [[nodiscard]] uint32_t local_open_ref_count() const override;
+
+  /// @brief Make the next private doorbell-monitor mmap fail with ENOMEM.
+  /// @details One-shot test seam for verifying failure atomicity before a
+  /// destructive client MAP_FIXED mapping.
+  void fail_next_doorbell_monitor_mmap_for_testing() {
+    fail_next_doorbell_monitor_mmap_.store(true, std::memory_order_release);
+  }
+
+  /// @brief Place the next private doorbell-monitor mmap at @p addr.
+  /// @details Uses MAP_FIXED_NOREPLACE so this test seam never destroys an
+  /// unexpected mapping while deterministically exercising alias relocation.
+  void force_next_doorbell_monitor_mmap_at_for_testing(void *addr) {
+    next_doorbell_monitor_mmap_addr_.store(addr, std::memory_order_release);
+  }
 
   [[nodiscard]] bool owns_fd(int fd) const override;
   std::string redirect_sysfs_path(const char *path) const override;
@@ -163,11 +434,18 @@ public:
   /// @details Public so the interposer's DRM GEM_VA path can install page-table
   /// entries with the same coherency type the KFD alloc requested.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+  /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
+  int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
+  /// Cancel accepted work and release the queue owned by one DRM context/ring.
+  void retire_pm4_queue(uint64_t queue_key);
 
   /// @brief Install a host range into the local process's GPU page table.
   /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
   /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
   /// @p alloc_flags.
+  /// @pre host_ptr names the interposer-owned read-write dmabuf mapping, which
+  /// remains alive until these GPU mappings are removed. Application-owned
+  /// pointers must use map_to_gpu with HostExtentOwner::Application instead.
   /// @retval true the range was installed.
   /// @retval false the local process is gone, so nothing was mapped (the caller
   ///         must surface an error rather than report a phantom success).
@@ -192,11 +470,27 @@ public:
   struct GpuDevice {
     SoC *soc = nullptr;
     uint32_t gpu_id = 0;
+    /// Legacy KFD binding factory layered over the frontend-neutral VM service.
+    std::unique_ptr<amdgpu::LegacyGpuVmAdapter> legacy_vm;
+    /// One revocable route owned by this frontend and carried only by its queues.
+    amdgpu::InterruptSubscription interrupt_subscription;
     bool cps_initialized = false;
+    /// Whether the "no CWSR layout for this architecture" warning has been
+    /// logged for this GPU. The check now runs per faulting access rather than
+    /// once per stop, so the diagnostic is latched here -- per device, not per
+    /// ordinal, because gpu_ordinal() reports 0 for an unknown id and would
+    /// silence the real ordinal 0.
+    bool cwsr_layout_warned = false;
     kfd_process_device_apertures apertures{};
   };
 
 private:
+  /// @brief Publish one process to every GPU memory/VM service atomically.
+  /// @details The caller holds process_mutex_. A failed address-space
+  /// registration unwinds every memory and VM registration made for @p proc.
+  [[nodiscard]] bool register_process_address_spaces(const std::shared_ptr<KfdProcess> &proc,
+                                                     pid_t client_pid, bool passthrough);
+
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 
@@ -220,12 +514,14 @@ private:
   }
 
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                  amdgpu::Mtype mtype = amdgpu::Mtype::RW);
+                  amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                  KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
-  int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg);
+  int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
+                     int *target_mem_fd = nullptr, int target_proc_fd = -1);
   void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                       off_t offset);
   int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
@@ -246,6 +542,7 @@ private:
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
   int update_queue_ioctl(KfdProcess &proc, void *arg);
+  int set_cu_mask_ioctl(KfdProcess &proc, void *arg);
   int destroy_queue_ioctl(KfdProcess &proc, void *arg);
   int create_event_ioctl(KfdProcess &proc, void *arg);
   int set_memory_policy_ioctl(KfdProcess &proc, void *arg);
@@ -260,15 +557,163 @@ private:
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
-  int debug_trap_ioctl(KfdProcess &caller, void *arg);
+  int debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd, int target_proc_fd);
+  void reap_exited_debug_sessions(std::stop_token stop);
+  int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
+  int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
+  int debug_query_event(pid_t target_pid, KfdProcess *target_proc,
+                        KfdProcess::DebugSession &session,
+                        kfd_ioctl_dbg_trap_query_debug_event_args &args);
+  int debug_query_exception_info(pid_t target_pid,
+                                 kfd_ioctl_dbg_trap_query_exception_info_args &args);
+  void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask,
+                                 bool invoke_result_hook = false);
+  /// @brief Report an EC_PROCESS_RUNTIME transition to the attached debugger.
+  /// @param enabling True to block for the debugger's ack under the liveness
+  ///        deadline. A disable transition is reported and returns immediately:
+  ///        the ioctl is served on the daemon's connection thread for a client
+  ///        that is already exiting, so parking it there parks the client.
+  void runtime_debugger_handshake(pid_t target_pid, bool enabling);
+
+  std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
+  resolve_trap_handler(const amdgpu::Wavefront &wf, uint32_t gpu_ordinal);
+  bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
+  void on_wave_trap_complete(amdgpu::Wavefront &wf);
+  uint64_t debugger_queue_exception_mask(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                         uint64_t exception_mask,
+                                         bool reserve_runtime_if_unclaimed = false);
+  void reserve_runtime_queue_exception(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                       uint64_t exception_mask);
+  void complete_runtime_queue_exception(uint32_t process_id, uint32_t queue_id,
+                                        uint64_t exception_mask, bool delivered,
+                                        bool retain_failure = true);
+  int duplicate_debug_notifier(int fd);
+  int retry_debug_notifications(pid_t target_pid, bool invoke_result_hook = false);
+  bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
+                                      uint64_t exception_mask);
+
+  bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
+  void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);
+  [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                        uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+                                        bool retain_on_rejection = true,
+                                        bool reserve_runtime_on_rejection = false);
+  bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask,
+                                       bool suspend_while_pending,
+                                       bool clear_debug_stop_on_success = false,
+                                       bool runtime_already_reserved = false,
+                                       bool runtime_failure_debuggable = true);
+  /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
+  /// @param retain_on_rejection Whether a serialized stop whose notification
+  ///        loses its subscription or notifier should remain in the queue's
+  ///        exception status for a later debugger query.
+  /// @param runtime_failure_debuggable Receives whether CWSR serialization
+  ///        succeeded, so a later runtime-delivery failure can be exposed to a
+  ///        debugger without publishing an unusable queue snapshot.
+  /// @returns True if the CWSR record was written and the event raised. False
+  /// can still mean that CWSR serialization succeeded and, when retention is
+  /// enabled, that exception status was latched. The caller must undo the stop
+  /// it claimed because no debugger was woken to resume it.
+  [[nodiscard]] bool report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                         uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
+                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+                                         bool retain_on_rejection = true,
+                                         bool *runtime_failure_debuggable = nullptr);
+
+  /// @brief Whether a wave stop on @p gpu_id could be published to a debugger.
+  /// @details Checked *before* a handler claims a stop. The CWSR codec models
+  /// the gfx9.4 record layout only (kmd/linux/cwsr.h), and serialization is the
+  /// last step of reporting a stop -- by the time it can refuse, the wave is
+  /// halted and the compute unit has been told the faulting access was handled.
+  /// Asking first lets the handler decline the stop instead, which is a path
+  /// every call site already supports.
+  /// @param gpu_id KFD GPU id of the queue whose wave would stop.
+  bool debug_stop_publishable(uint32_t gpu_id);
+  int resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues);
+  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state,
+                          rj_code_arch_t arch);
+
+  /// @brief Address-watchpoint handler installed on every compute unit.
+  /// @details Runs on the engine thread for each active-lane global-memory
+  /// access. If the address matches one of the debugger's address watchpoints
+  /// (compared under its mask, with a matching access mode), stops the wave with
+  /// the corresponding TRAPSTS.addr_watch bit set and reports it. Returns true
+  /// if the wave was stopped. @param addr post-translation global address;
+  /// @param bytes access width; @param is_write store/atomic; @param is_atomic
+  /// atomic read-modify-write.
+  bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
+                          bool is_atomic);
+  bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
+  bool on_wave_alu_exception(amdgpu::Wavefront &wf);
+
+  /// @brief Memory-violation handler installed on every compute unit.
+  /// @details Runs on the engine thread for a global-memory access to an
+  /// unmapped address. If the wave's process is being debugged, sets
+  /// TRAPSTS.xnack_error, stops the wave, and reports an
+  /// EC_QUEUE_WAVE_MEMORY_VIOLATION exception (rocm-dbgapi
+  /// WAVE_STOP_REASON_MEMORY_VIOLATION); returns true, else false.
+  bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write);
+
+  /// @brief Toggle per-access debugger checks on every compute unit.
+  void set_debug_active_on_all_cus(bool active);
+
+  /// @brief Undo everything a debug session imposed on its inferior.
+  /// @details Resumes waves the departing debugger left stopped, reopens the
+  /// queue launch gates, clears per-queue exception status and queued debug
+  /// events, and revokes target-memory routing. Explicit detach and debugger
+  /// death must both run this, or a debugger that dies while a wave is stopped
+  /// strands the inferior's GPU work forever.
+  /// @param target_pid Client pid whose session has just been erased.
+  /// @note Must be called with debug_sessions_mutex_ *unlocked*: it takes CU
+  /// wave-state locks, and the engine thread takes those before
+  /// debug_sessions_mutex_.
+  /// @param target_proc The debuggee, resolved while the session still pinned
+  /// its identity. Re-resolving by pid inside the release would race pid reuse:
+  /// the reaper runs after the inferior may already have exited, and clearing
+  /// exception status, queue gates, wave stop bits and memory routing on an
+  /// innocent process that inherited the number is worse than leaking them.
+  /// Callers that resolved a std::shared_ptr must keep it alive across the
+  /// call; @p target_proc is borrowed, and may be nullptr when the debuggee has
+  /// already gone (only the queued events are then purged).
+  void release_debuggee_state(pid_t target_pid, KfdProcess *target_proc);
+
+  /// @brief Revoke a process's target-memory routing on every GPU.
+  void revoke_target_mem_routing(uint32_t process_id);
+
+  /// @brief Turn per-access debugger checks back off once no session wants them.
+  /// @note Takes debug_sessions_mutex_, so it must be called with that unlocked.
+  void release_debug_checks_if_last_session();
+
+  /// @brief Duplicate the authorized target-memory fd for lock-free I/O.
+  UniqueDriverFd duplicate_debug_target_mem(pid_t target_pid) const;
+
+  /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
+  bool serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+                                   uint64_t ctx_base, uint32_t ctx_size);
+
+  /// @brief Stop the target's running waves and refresh their CWSR areas
+  /// (KFD_IOC_DBG_TRAP_SUSPEND_QUEUES).
+  int suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues,
+                           uint64_t exception_mask);
+
+  /// @brief Clear the CWSR area of any of the target's queues whose stopped waves
+  /// have completed, so rocm-dbgapi prunes them cleanly instead of reading a
+  /// stale wave against an advanced read_dispatch_id (KFD_IOC_DBG_TRAP_SUSPEND).
+  void clear_completed_debug_queues(KfdProcess *proc, const uint32_t *queue_ids,
+                                    uint32_t num_queues);
+  /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
+  /// @details Each further ordinal shifts the per-GPU LDS/scratch windows by
+  /// @ref kApertureStride. Shared by
+  /// AMDKFD_IOC_GET_PROCESS_APERTURES_NEW and the debug device snapshot.
+  kfd_process_device_apertures gpu_apertures(uint32_t ordinal) const;
   int set_xnack_mode_ioctl(void *arg);
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
-  /// @brief Lazily create the backing memfd exactly once across racing opens.
+  /// @brief Lazily create the pollable KFD event descriptor across racing opens.
   /// @details CAS-publishes fd_ so concurrent open()/open_process() callers agree
-  /// on a single memfd; losers close their own and adopt the winner's.
-  /// @retval true fd_ holds a valid descriptor. @retval false memfd_create failed.
+  /// on a single eventfd; losers close their own and adopt the winner's.
+  /// @retval true fd_ holds a valid descriptor. @retval false eventfd failed.
   [[nodiscard]] bool ensure_fd_created();
 
   /// @brief One-time per-GPU CP setup: apertures + interrupt/scratch callbacks.
@@ -278,8 +723,12 @@ private:
   void init_command_processors_locked();
 
   std::vector<GpuDevice> gpus_;
+  /// @brief Serializes each per-GPU unsupported-CWSR warning latch and log.
+  std::mutex cwsr_layout_warning_mutex_;
   bool daemon_mode_ = false;
   std::atomic<int> fd_{-1};
+  std::atomic<bool> fail_next_doorbell_monitor_mmap_{false};
+  std::atomic<void *> next_doorbell_monitor_mmap_addr_{nullptr};
 
   /// @brief Process table mapping process_id to KfdProcess.
   /// @details Protected by process_mutex_ for concurrent daemon access.
@@ -290,17 +739,23 @@ private:
   /// held simultaneously (allocate_scratch_backing and close() both release
   /// process_mutex_ before taking alloc_mutex_):
   ///   op_mutex_ < process_mutex_
-  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_mutex_, owned_fds_mutex_}
+  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_request_mutex_, owned_fds_mutex_}
+  ///   page_table_request_mutex_ < page_table_mutex_
+  ///   page_table_request_mutex_ < vmid_mutex_       (GpuMemory binding validation)
   ///   op_mutex_ < runtime_mutex_ < alloc_mutex_        (runtime_enable_ioctl)
-  ///   op_mutex_ < debug_mutex_ < runtime_mutex_        (debug_trap_ioctl)
+  ///   op_mutex_ < debug_sessions_mutex_ < runtime_mutex_ (debug_trap_ioctl)
   ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
-  /// The op_mutex_ in the debug rule is always the CALLER's, while debug_mutex_/
-  /// runtime_mutex_ may belong to a DIFFERENT process (the debug target resolved
-  /// by client pid). debug_trap_ioctl holds only the caller's op_mutex_ and never
-  /// acquires the target's op_mutex_, so a cross-process attach cannot deadlock.
+  ///   hw_queue_mutex_ (CP) < scratch_backing_mutex_ (KfdProcess) < alloc_mutex_
+  ///                                                    (allocate_scratch_backing)
+  /// The op_mutex_ in the debug rule is always the CALLER's, while runtime_mutex_
+  /// may belong to a DIFFERENT process (the debug target resolved by client pid).
+  /// debug_trap_ioctl holds only the caller's op_mutex_ and never acquires the
+  /// target's op_mutex_, so a cross-process attach cannot deadlock.
   /// interrupt_mutex_ is a leaf: the CP interrupt callback takes it and only
   /// descends into EventState::mutex_, and close() takes it only after releasing
   /// process_mutex_, so there is no cycle.
+  /// PM4 registration/enqueue takes pm4_mutex_ -> hw_queue_mutex_. Neither the
+  /// engine nor code holding process_mutex_ acquires pm4_mutex_.
   /// The CP engine thread acquires hw_queue_mutex_ first, then reaches
   /// process_mutex_ (scratch resolver) or alloc_mutex_ (scratch allocator) through
   /// the callbacks — hw_queue_mutex_ -> process_mutex_ and, separately,
@@ -309,13 +764,77 @@ private:
   /// CommandProcessor call that takes hw_queue_mutex_ (e.g. register_queue) — build
   /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;
+
+  /// @brief PM4 queue registry; nests outside CP queue locks, never inside process_mutex_.
+  /// The engine does not acquire this mutex when completing a submission.
+  std::mutex pm4_mutex_;
+  std::unordered_map<uint64_t, std::pair<amdgpu::CommandProcessor *, uint32_t>> pm4_queues_;
+  static constexpr uint32_t kPm4QueueIdBase = 0x80000000; ///< Separate from KFD queue IDs.
+  uint32_t next_pm4_queue_id_ = kPm4QueueIdBase;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
-  uint32_t next_process_id_ = 1;
+  // Hardware-visible VMIDs/PASIDs share the SoC namespace even when tests or
+  // an embedder attach more than one KFD frontend to that SoC. A per-driver
+  // counter would let two live frontends publish the same numeric identity and
+  // silently replace each other's memory binding.
+  inline static std::atomic<uint32_t> next_process_id_{1};
+
+  /// @brief Debugger sessions keyed by the target inferior's Linux pid.
+  /// @details Decoupled from KfdProcess so a debugger (rocgdb) can enable a
+  /// session on an inferior before the inferior opens /dev/kfd, mirroring the
+  /// kernel creating the target kfd_process in the DBG_TRAP_ENABLE path.
+  mutable std::mutex debug_sessions_mutex_;
+  std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
+  uint64_t next_debug_session_generation_ = 1;
+  DebugIdentityValidationHook debug_identity_validation_hook_;
+  std::optional<uint64_t> debug_event_claim_mask_for_testing_;
+  bool debug_event_claim_detach_for_testing_ = false;
+  std::condition_variable_any debug_sessions_cv_;
+  std::jthread debug_session_reaper_;
+
+  /// @brief Pending non-queue debug exceptions per target and source.
+  /// @details Queue exceptions live in QueueSnapshotInfo::exception_status,
+  /// matching KFD's single authoritative status word. This table retains
+  /// process and device exceptions for KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT.
+  struct DebugProcessException {
+    uint32_t gpu_id = 0;
+    uint64_t mask = 0;
+    std::vector<uint64_t> events;
+  };
+  mutable std::mutex debug_process_events_mutex_;
+  std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugProcessException>>
+      debug_process_events_;
+
+  mutable std::mutex runtime_handshake_mutex_;
+  std::condition_variable runtime_handshake_cv_;
+  std::unordered_set<pid_t> runtime_acked_;
+  /// @brief Targets whose debugger went away while RUNTIME_ENABLE was waiting.
+  /// @details A detaching or dying debugger will never send the ack, so the
+  /// teardown paths record the pid here and wake the waiter instead of leaving
+  /// the inferior blocked until the safety deadline.
+  std::unordered_set<pid_t> runtime_handshake_cancelled_;
+
+  /// @brief Release any RUNTIME_ENABLE waiter for @p target_pid.
+  void cancel_runtime_handshake(pid_t target_pid);
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
   /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
   mutable std::mutex interrupt_mutex_;
+  struct QueueExceptionLock {
+    std::mutex publication_mutex;
+    uint32_t users = 0;
+  };
+  std::mutex queue_exception_locks_mutex_;
+  std::unordered_map<uint64_t, std::shared_ptr<QueueExceptionLock>> queue_exception_locks_;
+  std::function<void(bool)> queue_exception_cleanup_hook_for_testing_;
+  std::function<void(bool)> debug_notification_result_hook_for_testing_;
+  std::function<void()> debug_notification_write_hook_for_testing_;
+  std::optional<int> debug_notification_clone3_error_for_testing_;
+  std::optional<int> debug_notification_clone_pidfd_error_for_testing_;
+  bool debug_notification_deferred_reap_for_testing_ = false;
+  amdgpu::InterruptSubscription interrupt_override_for_testing_;
+  std::function<void(bool)> runtime_exception_result_hook_for_testing_;
+  std::optional<int> debug_notifier_dup_error_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().
@@ -326,16 +845,9 @@ private:
   /// single-primary-fd local path.
   uint32_t local_process_id_ = 0;
 
-  static constexpr kfd_process_device_apertures default_apertures_{
-      .lds_base = 0x1000000000000ULL,
-      .lds_limit = 0x10000FFFFFFFFULL,
-      .scratch_base = 0x2000000000000ULL,
-      .scratch_limit = 0x20000FFFFFFFFULL,
-      .gpuvm_base = 0x1000000000ULL,
-      .gpuvm_limit = 0x3FFFFFFFFFFFULL,
-      .gpu_id = 0,
-      .pad = 0,
-  };
+  /// @brief Per-ordinal shift applied to the LDS and scratch aperture windows
+  /// so each GPU in a multi-GPU process gets a distinct range.
+  static constexpr uint64_t kApertureStride = 0x10000000000ULL;
 
   /// @brief IPC handle store for cross-process memory sharing.
   /// @details Lock ordering: process_mutex_ < alloc_mutex_ < ipc_mutex_.
@@ -347,6 +859,10 @@ private:
 
   Sysfs topology_;
 
+  /// @brief Per-GPU topology info captured at setup_topology, indexed to match
+  /// gpus_. Feeds the AMDKFD_IOC_DBG_TRAP device snapshot.
+  std::vector<Sysfs::GpuInfo> gpu_infos_;
+
   static constexpr int kReservedFdCount = 256;
   int reserved_fd_base_ = 0;
   int next_reserved_fd_ = 0;
@@ -355,5 +871,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_

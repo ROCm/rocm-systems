@@ -37,29 +37,34 @@
 #    define NUM_ROCPROFSYS_MPIP_WRAPPERS 500
 #endif
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE void configure_mpip(const std::set<std::string>& permit = {},
-                                      const std::set<std::string>& reject = {});
+void
+configure_mpip(const std::set<std::string>& permit = {},
+               const std::set<std::string>& reject = {});
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t activate_mpip();
+std::uint64_t
+activate_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t deactivate_mpip(std::uint64_t);
+std::uint64_t deactivate_mpip(std::uint64_t);
+//
+//--------------------------------------------------------------------------------------//
+//
+void
+pause_mpip();
+
+void
+resume_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
@@ -97,7 +102,10 @@ struct mpip_handle : base<mpip_handle<Toolset, Tag>, void>
         if(get_tool_instance().get())
         {
             get_tool_instance()->stop();
-            if(idx == 0) get_tool_instance().reset();
+            if(idx == 0)
+            {
+                get_tool_instance().reset();
+            }
         }
     }
 
@@ -132,8 +140,8 @@ private:
 //
 //======================================================================================//
 //
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
+
 //
 //======================================================================================//
 //
@@ -735,7 +743,9 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
                 TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
             for(const auto& itr : rocprofsys::delimit(reject_list))
+            {
                 _reject.insert(itr);
+            }
             return _reject;
         };
 
@@ -747,7 +757,9 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
                 TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
             for(const auto& itr : rocprofsys::delimit(permit_list))
+            {
                 _permit.insert(itr);
+            }
             return _permit;
         };
 

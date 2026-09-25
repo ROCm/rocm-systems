@@ -12,7 +12,7 @@
 #include "comm__types.h"
 #include <atomic>
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(Coop coop, ncclDevComm const& comm, ncclTeam team,
                                                                       ncclLsaBarrierHandle handle, uint32_t index,
@@ -29,14 +29,14 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(Coop coop,
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(Coop coop, ncclDevComm const& comm,
                                                                       ncclTeamTagLsa, uint32_t index, bool multimem)
   : ncclLsaBarrierSession(coop, comm, ncclTeamLsa(comm), comm.lsaBarrier, index, multimem, comm.lsaMultimem) {}
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
   uint32_t* state = (uint32_t*)ncclGetResourceBufferLocalPointer(this->comm, this->handle.bufHandle);
@@ -52,7 +52,7 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_order order) {
   this->coop.sync();
@@ -71,7 +71,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
     if (this->team.nRanks > 1) {
       cuda::atomic_thread_fence(nccl::utility::releaseOrderOf(order));
     }
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(peer, this->team.rank));
@@ -81,7 +81,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 template <bool EnableTimeout>
 NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitInternal(Coop, cuda::memory_order order,
@@ -99,7 +99,7 @@ NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitIntern
 #if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       cuda::atomic_ref<uint32_t> inbox(*this->mcInbox(/*multimem=*/false));
-#pragma unroll 1
+      NVCC_PRAGMA_UNROLL_DISABLED
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
         if (got - (this->epoch + this->team.nRanks) <= uint32_t(-1) >> 1) break;
@@ -117,11 +117,11 @@ NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitIntern
     }
 #endif
   } else {
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(this->team.rank, peer));
-#pragma unroll 1
+      NVCC_PRAGMA_UNROLL_DISABLED
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
         if (got - (this->epoch + 1) <= uint32_t(-1) >> 1) break;
@@ -145,14 +145,14 @@ exit:
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop coop, cuda::memory_order order) {
   (void)(this->template waitInternal</*EnableTimeout=*/false>(coop, order, 0ULL));
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession<Coop>::wait(Coop coop, cuda::memory_order order,
                                                                   uint64_t timeoutCycles) {
@@ -161,7 +161,7 @@ NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession<Coop>::wait(Coop coop, cud
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memory_order order) {
   this->arrive(coop, order);
@@ -169,7 +169,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memor
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memory_order order,
                                                                   uint64_t timeoutCycles) {

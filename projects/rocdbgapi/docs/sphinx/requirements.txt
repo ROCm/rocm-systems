@@ -73,7 +73,7 @@ fonttools==4.60.2
     # via matplotlib
 gitdb==4.0.11
     # via gitpython
-gitpython==3.1.52
+gitpython==3.1.54
     # via rocm-docs-core
 greenlet==3.1.1
     # via sqlalchemy
@@ -283,7 +283,7 @@ tabulate==0.9.0
     # via jupyter-cache
 tomli==2.0.1
     # via sphinx
-tornado==6.5.7
+tornado==6.5.8
     # via
     #   ipykernel
     #   jupyter-client

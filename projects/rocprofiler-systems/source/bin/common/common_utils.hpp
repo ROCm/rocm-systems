@@ -15,9 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 /**
  * Result of translating command-line arguments for the argument parser.
@@ -176,7 +174,10 @@ template <typename ParserT>
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;
-    if(parser.exists("help")) topic = parser.template get<std::string>("help");
+    if(parser.exists("help"))
+    {
+        topic = parser.template get<std::string>("help");
+    }
 
     if(topic.empty())
     {
@@ -208,5 +209,4 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
     return exit_code;
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

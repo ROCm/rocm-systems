@@ -51,6 +51,7 @@ kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
     {
         beg_notified.store(rhs.beg_notified.load());
         end_notified.store(rhs.end_notified.load());
+        host_function_id.store(rhs.host_function_id.load());
         name           = rhs.name;
         hsa_executable = rhs.hsa_executable;
         hsa_agent      = rhs.hsa_agent;

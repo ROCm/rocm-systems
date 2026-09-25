@@ -27,7 +27,9 @@
 #define NVML_STRUCT_VERSION(data, ver) (unsigned int)(sizeof(nvml##data##_v##ver##_t) | (ver << 24U))
 
 typedef struct nvmlDevice_st* nvmlDevice_t;
+#define NVML_DEVICE_PCI_BUS_ID_BUFFER_V2_SIZE 16
 #define NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE 32
+#define NVML_DEVICE_NAME_BUFFER_SIZE 64
 
 typedef enum nvmlEnableState_enum {
   NVML_FEATURE_DISABLED = 0,     //!< Feature disabled
@@ -70,9 +72,9 @@ typedef enum nvmlReturn_enum {
 } nvmlReturn_t;
 
 typedef struct nvmlPciInfo_st {
-  char busId
-    [NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE]; //!< The tuple domain:bus:device.function PCI identifier (&amp; NULL terminator)
-  unsigned int domain; //!< The PCI domain on which the device's bus resides, 0 to 0xffff
+  char busIdLegacy
+    [NVML_DEVICE_PCI_BUS_ID_BUFFER_V2_SIZE]; //!< The legacy tuple domain:bus:device.function PCI identifier (&amp; NULL terminator)
+  unsigned int domain; //!< The PCI domain on which the device's bus resides, 0 to 0xffffffff
   unsigned int bus; //!< The bus on which the device resides, 0 to 0xff
   unsigned int device; //!< The device's id on the bus, 0 to 31
   unsigned int pciDeviceId; //!< The combined 16-bit device id and 16-bit vendor id
@@ -80,12 +82,35 @@ typedef struct nvmlPciInfo_st {
   // Added in NVML 2.285 API
   unsigned int pciSubSystemId; //!< The 32-bit Sub System Device ID
 
-  // NVIDIA reserved for internal use only
-  unsigned int reserved0;
-  unsigned int reserved1;
-  unsigned int reserved2;
-  unsigned int reserved3;
+  char busId
+    [NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE]; //!< The tuple domain:bus:device.function PCI identifier (&amp; NULL terminator)
 } nvmlPciInfo_t;
+
+typedef struct {
+  unsigned int version; //!< The version number of this struct
+  unsigned int domain; //!< The PCI domain on which the device's bus resides, 0 to 0xffffffff
+  unsigned int bus; //!< The bus on which the device resides, 0 to 0xff
+  unsigned int device; //!< The device's id on the bus, 0 to 31
+
+  unsigned int pciDeviceId; //!< The combined 16-bit device id and 16-bit vendor id
+  unsigned int pciSubSystemId; //!< The 32-bit Sub System Device ID
+
+  unsigned int baseClass; //!< The 8-bit PCI base class code
+  unsigned int subClass; //!< The 8-bit PCI sub class code
+
+  char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE]; //!< The tuple domain:bus:device.function PCI identifier (&amp;
+  //!< NULL terminator)
+} nvmlPciInfoExt_v1_t;
+
+typedef nvmlPciInfoExt_v1_t nvmlPciInfoExt_t;
+#define nvmlPciInfoExt_v1 NVML_STRUCT_VERSION(PciInfoExt, 1)
+
+typedef enum nvmlIntNvLinkDeviceType_enum {
+  NVML_NVLINK_DEVICE_TYPE_GPU = 0x00,
+  NVML_NVLINK_DEVICE_TYPE_IBMNPU = 0x01,
+  NVML_NVLINK_DEVICE_TYPE_SWITCH = 0x02,
+  NVML_NVLINK_DEVICE_TYPE_UNKNOWN = 0xFF
+} nvmlIntNvLinkDeviceType_t;
 
 /* P2P Capability Index Status*/
 typedef enum nvmlGpuP2PStatus_enum {
@@ -298,6 +323,21 @@ typedef struct {
 typedef nvmlSystemConfComputeSettings_v1_t nvmlSystemConfComputeSettings_t;
 #define nvmlSystemConfComputeSettings_v1 NVML_STRUCT_VERSION(SystemConfComputeSettings, 1)
 
+// ECC counter enums from nvml.h, reduced to the values used by the diagnostics ECC check.
+typedef enum nvmlMemoryErrorType_enum {
+  NVML_MEMORY_ERROR_TYPE_CORRECTED = 0,
+  NVML_MEMORY_ERROR_TYPE_UNCORRECTED = 1
+} nvmlMemoryErrorType_t;
+
+typedef enum nvmlEccCounterType_enum {
+  NVML_VOLATILE_ECC = 0
+} nvmlEccCounterType_t;
+
+typedef enum nvmlMemoryLocation_enum {
+  NVML_MEMORY_LOCATION_DRAM = 2,
+  NVML_MEMORY_LOCATION_SRAM = 7
+} nvmlMemoryLocation_t;
+
 /* End of nvml.h */
 #endif // NCCL_NVML_DIRECT
 
@@ -327,8 +367,15 @@ ncclResult_t ncclNvmlEnsureInitialized();
 ncclResult_t ncclNvmlDeviceGetHandleByPciBusId(const char* pciBusId, nvmlDevice_t* device);
 ncclResult_t ncclNvmlDeviceGetIndex(nvmlDevice_t device, unsigned* index);
 ncclResult_t ncclNvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
+ncclResult_t ncclNvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length);
+ncclResult_t ncclNvmlDeviceGetCount(unsigned int* deviceCount);
+ncclResult_t ncclNvmlDeviceGetMemoryErrorCounter(nvmlDevice_t device, nvmlMemoryErrorType_t errorType,
+                                                 nvmlEccCounterType_t counterType, nvmlMemoryLocation_t locationType,
+                                                 unsigned long long* count);
 ncclResult_t ncclNvmlDeviceGetNvLinkState(nvmlDevice_t device, unsigned int link, nvmlEnableState_t* isActive);
 ncclResult_t ncclNvmlDeviceGetNvLinkRemotePciInfo(nvmlDevice_t device, unsigned int link, nvmlPciInfo_t* pci);
+ncclResult_t ncclNvmlDeviceGetNvLinkRemoteDeviceType(nvmlDevice_t device, unsigned int link,
+                                                     nvmlIntNvLinkDeviceType_t* deviceType);
 ncclResult_t ncclNvmlDeviceGetNvLinkCapability(nvmlDevice_t device, unsigned int link,
                                                nvmlNvLinkCapability_t capability, unsigned int* capResult);
 ncclResult_t ncclNvmlDeviceGetCudaComputeCapability(nvmlDevice_t device, int* major, int* minor);
@@ -338,5 +385,10 @@ ncclResult_t ncclNvmlDeviceGetFieldValues(nvmlDevice_t device, int valuesCount, 
 ncclResult_t ncclNvmlDeviceGetGpuFabricInfoV(nvmlDevice_t device, nvmlGpuFabricInfoV_t* gpuFabricInfo);
 ncclResult_t ncclNvmlDeviceGetPlatformInfo(nvmlDevice_t device, nvmlPlatformInfo_t* plaformInfo);
 ncclResult_t ncclNvmlGetCCStatus(struct ncclNvmlCCStatus* status);
+ncclResult_t ncclNvmlDeviceGetPciInfo(nvmlDevice_t device, nvmlPciInfo_t* pci);
+ncclResult_t ncclNvmlDeviceGetPciInfoExt(nvmlDevice_t device, nvmlPciInfoExt_t* pciInfoExt);
+ncclResult_t ncclNvmlDeviceGetPcieLinkMaxSpeed(nvmlDevice_t device, int* maxSpeed);
+ncclResult_t ncclNvmlDeviceGetCurrPcieLinkGeneration(nvmlDevice_t device, unsigned int* currLinkGen);
+ncclResult_t ncclNvmlDeviceGetCurrPcieLinkWidth(nvmlDevice_t device, unsigned int* currLinkWidth);
 
 #endif // End include guard

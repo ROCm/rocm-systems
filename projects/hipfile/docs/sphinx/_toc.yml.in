@@ -10,6 +10,8 @@ subtrees:
         title: Install Python bindings
   - caption: How to
     entries:
+      - file: how-to/checking-system-compatibility
+        title: Check for fastpath compatibility
       - file: how-to/setup-local-nvme
         title: Set up a local NVMe drive
       - file: how-to/setup-nvmeof
@@ -57,6 +59,7 @@ subtrees:
           - file: reference/api-file-and-buffer
           - file: reference/api-async
           - file: reference/api-batch
+          - file: reference/api-stats
           - file: reference/api-errors
           - file: reference/api-python
   - caption: Troubleshooting

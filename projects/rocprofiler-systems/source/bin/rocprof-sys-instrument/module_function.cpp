@@ -9,8 +9,6 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <stdexcept>
 
 module_function::width_t&
@@ -41,7 +39,10 @@ module_function::update_width(const module_function& rhs)
 string_t
 module_function::get_source_object_name(procedure_t* func)
 {
-    if(!func) return string_t{};
+    if(!func)
+    {
+        return string_t{};
+    }
     auto* module = func->getModule();
     auto* object = (module) ? module->getObject() : nullptr;
     auto  _name  = (object) ? object->name() : string_t{};
@@ -78,7 +79,9 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 
     // make sure all exist
     for(int i = 0; i <= instruction_category_t::c_NoCategory; ++i)
+    {
         instruction_types[static_cast<instruction_category_t>(i)] = 0;
+    }
 
     if(function->isInstrumentable())
     {
@@ -109,7 +112,9 @@ module_function::module_function(module_t* mod, procedure_t* proc)
                     }
                     // num_instructions += _instructions.size();
                     if(debug_print || verbose_level > 3 || instr_print)
+                    {
                         instructions.emplace_back(std::move(_instructions));
+                    }
                 }
                 else
                 {
@@ -157,11 +162,26 @@ bool
 module_function::should_coverage_instrument() const
 {
     // hard constraints
-    if(!is_instrumentable()) return false;
-    if(!can_instrument_entry()) return false;
-    if(is_internal_constrained()) return false;
-    if(is_module_constrained()) return false;
-    if(is_routine_constrained()) return false;
+    if(!is_instrumentable())
+    {
+        return false;
+    }
+    if(!can_instrument_entry())
+    {
+        return false;
+    }
+    if(is_internal_constrained())
+    {
+        return false;
+    }
+    if(is_module_constrained())
+    {
+        return false;
+    }
+    if(is_routine_constrained())
+    {
+        return false;
+    }
 
     // should be before user selection
     constexpr int absolute_min_instructions = 2;
@@ -175,18 +195,42 @@ module_function::should_coverage_instrument() const
     }
 
     // user selection
-    if(is_user_excluded()) return false;
+    if(is_user_excluded())
+    {
+        return false;
+    }
 
-    if(is_overlapping_constrained()) return false;
-    if(is_entry_trap_constrained()) return false;
+    if(is_overlapping_constrained())
+    {
+        return false;
+    }
+    if(is_entry_trap_constrained())
+    {
+        return false;
+    }
 
     // user selection
-    if(!file_restrict.empty() || !func_restrict.empty()) return !is_user_restricted();
-    if(is_user_included()) return true;
+    if(!file_restrict.empty() || !func_restrict.empty())
+    {
+        return !is_user_restricted();
+    }
+    if(is_user_included())
+    {
+        return true;
+    }
 
-    if(is_address_range_constrained()) return false;
-    if(is_num_instructions_constrained()) return false;
-    if(is_instruction_constrained()) return false;
+    if(is_address_range_constrained())
+    {
+        return false;
+    }
+    if(is_num_instructions_constrained())
+    {
+        return false;
+    }
+    if(is_instruction_constrained())
+    {
+        return false;
+    }
 
     return true;
 }
@@ -195,12 +239,30 @@ bool
 module_function::should_instrument(bool coverage) const
 {
     // hard constraints
-    if(!is_instrumentable()) return false;
-    if(!can_instrument_entry()) return false;
-    if(!coverage && !can_instrument_exit()) return false;
-    if(is_internal_constrained()) return false;
-    if(is_module_constrained()) return false;
-    if(is_routine_constrained()) return false;
+    if(!is_instrumentable())
+    {
+        return false;
+    }
+    if(!can_instrument_entry())
+    {
+        return false;
+    }
+    if(!coverage && !can_instrument_exit())
+    {
+        return false;
+    }
+    if(is_internal_constrained())
+    {
+        return false;
+    }
+    if(is_module_constrained())
+    {
+        return false;
+    }
+    if(is_routine_constrained())
+    {
+        return false;
+    }
 
     // should be before user selection
     constexpr int absolute_min_instructions = 2;
@@ -214,30 +276,66 @@ module_function::should_instrument(bool coverage) const
     }
 
     // user selection
-    if(is_user_excluded()) return false;
+    if(is_user_excluded())
+    {
+        return false;
+    }
 
     // should be applied before dynamic-callsite check
-    if(is_overlapping_constrained()) return false;
-    if(is_entry_trap_constrained()) return false;
-    if(!coverage && is_exit_trap_constrained()) return false;
+    if(is_overlapping_constrained())
+    {
+        return false;
+    }
+    if(is_entry_trap_constrained())
+    {
+        return false;
+    }
+    if(!coverage && is_exit_trap_constrained())
+    {
+        return false;
+    }
 
     // needs to be applied before address range and number of instruction constraints
-    if(is_dynamic_callsite_forced()) return true;
+    if(is_dynamic_callsite_forced())
+    {
+        return true;
+    }
 
     // user selection
-    if(!file_restrict.empty() || !func_restrict.empty()) return !is_user_restricted();
-    if(is_user_included()) return true;
+    if(!file_restrict.empty() || !func_restrict.empty())
+    {
+        return !is_user_restricted();
+    }
+    if(is_user_included())
+    {
+        return true;
+    }
 
     // do not apply visibility and linkage constraints to code coverage
     if(!coverage)
     {
-        if(is_linkage_constrained()) return false;
-        if(is_visibility_constrained()) return false;
+        if(is_linkage_constrained())
+        {
+            return false;
+        }
+        if(is_visibility_constrained())
+        {
+            return false;
+        }
     }
 
-    if(is_address_range_constrained()) return false;
-    if(is_num_instructions_constrained()) return false;
-    if(is_instruction_constrained()) return false;
+    if(is_address_range_constrained())
+    {
+        return false;
+    }
+    if(is_num_instructions_constrained())
+    {
+        return false;
+    }
+    if(is_instruction_constrained())
+    {
+        return false;
+    }
 
     return true;
 }
@@ -261,7 +359,10 @@ check_regex_restrictions(const std::string& _name, const regexvec_t& _regexes)
 {
     // NOLINTNEXTLINE
     for(auto& itr : _regexes)
-        if(std::regex_search(_name, itr)) return true;
+        if(std::regex_search(_name, itr))
+        {
+            return true;
+        }
     return false;
 }
 }  // namespace
@@ -386,12 +487,18 @@ module_function::get_linkage() const
 {
     constexpr auto unknown_v = SymTab::Symbol::SL_UNKNOWN;
 
-    if(symtab_function == nullptr) return unknown_v;
+    if(symtab_function == nullptr)
+    {
+        return unknown_v;
+    }
     symbol_linkage_t _v = unknown_v;
     for(const auto& itr : symtab_data.symbols.at(symtab_function))
     {
         auto litr = itr->getLinkage();
-        if(litr > unknown_v) _v = (_v == unknown_v) ? litr : std::min(_v, litr);
+        if(litr > unknown_v)
+        {
+            _v = (_v == unknown_v) ? litr : std::min(_v, litr);
+        }
     }
     return _v;
 }
@@ -401,23 +508,51 @@ module_function::get_visibility() const
 {
     constexpr auto unknown_v = SymTab::Symbol::SV_UNKNOWN;
 
-    if(symtab_function == nullptr) return unknown_v;
+    if(symtab_function == nullptr)
+    {
+        return unknown_v;
+    }
     symbol_visibility_t _v = unknown_v;
     for(const auto& itr : symtab_data.symbols.at(symtab_function))
     {
         auto litr = itr->getVisibility();
-        if(litr > unknown_v) _v = (_v == unknown_v) ? litr : std::min(_v, litr);
+        if(litr > unknown_v)
+        {
+            _v = (_v == unknown_v) ? litr : std::min(_v, litr);
+        }
     }
     return _v;
+}
+
+// Dyninst names a module either after the source file its code was compiled
+// from, taken from the debug info, e.g. "/home/me/src/app.cpp", or, when that
+// code has no debug info, after the object holding it, i.e. the binary or
+// library file itself, e.g. "/home/me/bin/app".
+//
+// Constraints that search a module name for the name of a known component must
+// tell the two apart: a source path names the code, so it is searched whole,
+// whereas an object path names a file the user may keep in any directory, so
+// only its filename is searched. E.g. "/home/me/dyninst-tests/app" is
+// not part of dyninst.
+//
+// Returns whichever of the two the caller should search, so the result refers
+// to module_base and is valid for as long as it is.
+const string_t&
+module_function::get_module_identity(const string_t& module_base) const
+{
+    auto* _object = (module) ? module->getObject() : nullptr;
+
+    // module_name is the object's own path when the code had no debug info
+    const bool _is_object_module =
+        _object != nullptr &&
+        module_base == rocprofsys::path::filename(_object->pathName());
+
+    return _is_object_module ? module_base : module_name;
 }
 
 bool
 module_function::is_internal_constrained() const
 {
-    auto _basename = [](std::string_view _v) {
-        return std::string{ tim::filepath::basename(_v) };
-    };
-
     auto _report = [&](const string_t& _action, const std::string& _type,
                        const string_t& _reason, int _lvl) {
         messages.emplace_back(_lvl, _action, _type, _reason, module_name);
@@ -426,47 +561,64 @@ module_function::is_internal_constrained() const
 
     const auto& _gnu_libs = get_internal_libs_data();
 
-    auto _module_base = _basename(module_name);
-    auto _module_real = rocprofsys::path::realpath(module_name);
+    auto        _module_base = rocprofsys::path::filename(module_name);
+    auto        _module_real = rocprofsys::path::realpath(module_name);
+    const auto& _module_id   = get_module_identity(_module_base);
 
-    if(std::regex_search(module_name,
+    if(std::regex_search(_module_id,
                          std::regex{ "lib(rocprof-sys|rocprofsys|timemory|perfetto)" }))
+    {
         return _report("Excluding", "module", "rocprofsys", 3);
+    }
     else if(std::regex_match(module_name,
                              std::regex{ ".*/source/lib/"
                                          "(core|common|binary|"
                                          "rocprofsys|rocprofsys-dl|"
                                          "rocprofsys-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
+    {
         return _report("Excluding", "module", "rocprofsys", 3);
+    }
 
     if(std::regex_search(function_name,
                          std::regex{ "10rocprofsys|rocprofsys|rocprofsys(::|_)" }))
+    {
         return _report("Excluding", "function", "rocprofsys", 3);
+    }
     else if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
+    {
         return _report("Excluding", "function", "timemory", 3);
+    }
     else if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
+    {
         return _report("Excluding", "function", "perfetto", 3);
+    }
 
     if(_gnu_libs.find(module_name) != _gnu_libs.end() ||
        _gnu_libs.find(_module_real) != _gnu_libs.end() ||
        _gnu_libs.find(_module_base) != _gnu_libs.end())
+    {
         return _report("Excluding", "module", "internal library", 3);
+    }
 
     for(const auto& litr : _gnu_libs)
     {
-        if(_module_base == _basename(litr.first) ||
+        if(_module_base == rocprofsys::path::filename(litr.first) ||
            litr.second.find(_module_base) != litr.second.end() ||
            _module_real == litr.first ||
            litr.second.find(_module_real) != litr.second.end() ||
            litr.second.find(module_name) != litr.second.end())
+        {
             return _report("Excluding", "module",
                            fmt::format("internal library {}", litr.first), 3);
+        }
 
         for(const auto& fitr : litr.second)
         {
             if(fitr.second.find(function_name) != fitr.second.end())
+            {
                 return _report("Excluding", "function",
                                fmt::format("internal library {}", litr.first), 3);
+            }
         }
     }
 
@@ -482,12 +634,20 @@ module_function::is_module_constrained() const
         return true;
     };
 
-    if(module->isSystemLib()) return _report("Excluding", "system library", 3);
+    if(module->isSystemLib())
+    {
+        return _report("Excluding", "system library", 3);
+    }
 
     // always instrument these modules
     if(module_name == "DEFAULT_MODULE" || module_name == "LIBRARY_MODULE")
+    {
         // return _report("Skipping", "default module", 2);
         return false;
+    }
+
+    auto        _module_base = rocprofsys::path::filename(module_name);
+    const auto& _module_id   = get_module_identity(_module_base);
 
     static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
     static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
@@ -506,25 +666,35 @@ module_function::is_module_constrained() const
 
     // file extensions that should not be instrumented
     if(std::regex_search(module_name, ext_regex))
+    {
         return _report("Excluding", "file extension", 3);
+    }
 
     // system modules that should not be instrumented (wastes time)
     if(std::regex_search(module_name, sys_regex) ||
        std::regex_search(module_name, sys_build_regex))
+    {
         return _report("Excluding", "system module", 3);
+    }
 
     // dyninst modules that must not be instrumented
-    if(std::regex_search(module_name, dyninst_regex))
+    if(std::regex_search(_module_id, dyninst_regex))
+    {
         return _report("Excluding", "dyninst module", 3);
+    }
 
     // modules used by rocprof-sys and dependent libraries
-    if(std::regex_search(module_name, core_lib_regex) ||
+    if(std::regex_search(_module_id, core_lib_regex) ||
        std::regex_search(module_name, core_cmod_regex))
+    {
         return _report("Excluding", "core module", 3);
+    }
 
     // modules used by rocprof-sys and dependent libraries
     if(std::regex_search(module_name, dependlib_regex))
+    {
         return _report("Excluding", "dependency module", 3);
+    }
 
     // known set of modules whose starting sequence of characters suggest it should not be
     // instrumented (wastes time)
@@ -582,8 +752,12 @@ module_function::is_routine_constrained() const
         auto _v   = get_whole_function_names();
         auto _ret = _v;
         for(std::string _ext : { "64", "_l", "_r" })
+        {
             for(const auto& itr : _v)
+            {
                 _ret.emplace(itr + _ext);
+            }
+        }
         return _ret;
     }();
 
@@ -605,13 +779,15 @@ module_function::is_routine_constrained() const
         return _report("Excluding", "critical-whole-match", 3);
     }
 
-    // don't instrument the functions when key is found at the start of the function name
+    // don't instrument the functions when key is found at the start of the
+    // function name
     if(std::regex_search(function_name, leading))
     {
         return _report("Excluding", "recommended-leading-match", 3);
     }
 
-    // don't instrument the functions when key is found at the end of the function name
+    // don't instrument the functions when key is found at the end of the function
+    // name
     if(std::regex_search(function_name, trailing))
     {
         return _report("Excluding", "recommended-trailing-match", 3);
@@ -635,7 +811,10 @@ module_function::is_overlapping_constrained() const
 bool
 module_function::contains_dynamic_callsites() const
 {
-    if(flow_graph) return flow_graph->containsDynamicCallsites();
+    if(flow_graph)
+    {
+        return flow_graph->containsDynamicCallsites();
+    }
 
     return false;
 }
@@ -643,7 +822,10 @@ module_function::contains_dynamic_callsites() const
 bool
 module_function::contains_user_callsite() const
 {
-    if(caller_include.empty()) return false;
+    if(caller_include.empty())
+    {
+        return false;
+    }
 
     std::vector<BPatch_point*> call_points;
     function->getCallPoints(call_points);
@@ -677,7 +859,10 @@ module_function::is_dynamic_callsite_forced() const
 bool
 module_function::is_address_range_constrained() const
 {
-    if(!loop_blocks.empty()) return is_loop_address_range_constrained();
+    if(!loop_blocks.empty())
+    {
+        return is_loop_address_range_constrained();
+    }
 
     if(address_range < min_address_range)
     {
@@ -697,7 +882,9 @@ module_function::is_instruction_constrained() const
         {
             auto _instrss = std::stringstream{};
             for(auto&& iitr : itr)
+            {
                 _instrss << " " << iitr.first.format();
+            }
 
             auto _instr = _instrss.str();
             if(!_instr.empty())
@@ -718,7 +905,10 @@ module_function::is_instruction_constrained() const
 bool
 module_function::is_loop_address_range_constrained() const
 {
-    if(loop_blocks.empty()) return false;
+    if(loop_blocks.empty())
+    {
+        return false;
+    }
 
     if(address_range < min_loop_address_range)
     {
@@ -733,7 +923,10 @@ module_function::is_loop_address_range_constrained() const
 bool
 module_function::is_num_instructions_constrained() const
 {
-    if(!loop_blocks.empty()) return is_loop_num_instructions_constrained();
+    if(!loop_blocks.empty())
+    {
+        return is_loop_num_instructions_constrained();
+    }
 
     if(num_instructions < min_instructions)
     {
@@ -748,7 +941,10 @@ module_function::is_num_instructions_constrained() const
 bool
 module_function::is_loop_num_instructions_constrained() const
 {
-    if(loop_blocks.empty()) return false;
+    if(loop_blocks.empty())
+    {
+        return false;
+    }
 
     if(num_instructions < min_loop_instructions)
     {
@@ -815,7 +1011,10 @@ module_function::can_instrument_exit() const
 bool
 module_function::is_entry_trap_constrained() const
 {
-    if(instr_traps) return false;
+    if(instr_traps)
+    {
+        return false;
+    }
 
     size_t _num_points = 0;
     size_t _num_traps  = 0;
@@ -835,7 +1034,10 @@ module_function::is_entry_trap_constrained() const
 bool
 module_function::is_exit_trap_constrained() const
 {
-    if(instr_traps) return false;
+    if(instr_traps)
+    {
+        return false;
+    }
 
     size_t _num_points = 0;
     size_t _num_traps  = 0;
@@ -858,7 +1060,10 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
 {
     std::pair<size_t, size_t> _count = { 0, 0 };
 
-    if(!function || !module) return _count;
+    if(!function || !module)
+    {
+        return _count;
+    }
 
     auto _name            = signature.get();
     auto _source_obj_name = get_source_object_name(function);
@@ -867,7 +1072,9 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     // the shared wire format (see rocprofsys::get_args_string)
     rocprofsys::function_args_t _args{};
     if(!_source_obj_name.empty())
+    {
         _args.push_back({ 0U, "string", "source_object", _source_obj_name });
+    }
     auto _serialized_args = rocprofsys::get_args_string(_args);
     bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
 
@@ -889,8 +1096,14 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
 
     for(size_t i = 0; i < loop_blocks.size(); ++i)
     {
-        if(!loop_level_instr) continue;
-        if(!flow_graph) continue;
+        if(!loop_level_instr)
+        {
+            continue;
+        }
+        if(!flow_graph)
+        {
+            continue;
+        }
 
         auto* itr             = loop_blocks.at(i);
         auto  _is_constrained = [this](bool _v, const std::string& _label,
@@ -912,18 +1125,26 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
         std::tie(_points, _ntraps) = query_instr(function, BPatch_entry, flow_graph, itr);
 
         if(_is_constrained(_points == 0, "no-instrumentable-loop-entry-point", _lname))
+        {
             continue;
+        }
         if(_is_constrained(!instr_loop_traps && _points == _ntraps,
                            "loop-entry-point-trap-instrumentation", _lname))
+        {
             continue;
+        }
 
         std::tie(_points, _ntraps) = query_instr(function, BPatch_exit, flow_graph, itr);
 
         if(_is_constrained(_points == 0, "no-instrumentable-loop-exit-point", _lname))
+        {
             continue;
+        }
         if(_is_constrained(!instr_loop_traps && _points == _ntraps,
                            "loop-exit-point-trap-instrumentation", _lname))
+        {
             continue;
+        }
 
         auto _ltrace_entr = (use_args_entr)
                                 ? rocprofsys_call_expr(_lname.c_str(), _serialized_args)

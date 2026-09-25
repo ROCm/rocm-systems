@@ -82,18 +82,25 @@ Settings::Settings() {
   blocking_blit_ = amd::IS_HIP;
 
   max_hw_queues_ = GPU_MAX_HW_QUEUES;
+  aql_barrier_opt_ = amd::IS_HIP && DEBUG_CLR_AQL_BARRIER_OPT;
 
   queue_pipe_dist_ = false;
 }
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool isXgmi) {
+                      bool isXgmi, bool isAPU) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
 
   customHostAllocator_ = false;
+
+  // On MI300A staging is two local memcpys (no PCIe leg), so keep 1 MiB threshold.
+  if (isAPU && flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) &&
+      gfxipMajor == 9 && gfxipMinor == 4 && gfxStepping == 2) {
+    pinnedMinXferSize_ = 1 * Mi;
+  }
 
   if (fullProfile) {
     pinnedXferSize_ = 0;

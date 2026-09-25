@@ -6,22 +6,16 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <iomanip>
 #include <string_view>
 #include <type_traits>
 
-#include "traits.hpp"
-
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 class md5sum
 {
 public:
     using size_type                = std::uint32_t;  // must be 32bit
-    using raw_digest_t             = std::array<std::uint8_t, 16>;
     static constexpr int blocksize = 64;
 
     template <typename Tp, typename... Args>
@@ -35,19 +29,15 @@ public:
     md5sum& operator=(const md5sum&) = default;
     md5sum& operator=(md5sum&&)      = default;
 
-    md5sum&      update(std::string_view inp);
-    md5sum&      update(const unsigned char* buf, size_type length);
-    md5sum&      update(const char* buf, size_type length);
-    md5sum&      finalize();
-    std::string  hexdigest() const;
-    std::string  hexliteral() const;
-    raw_digest_t rawdigest() const { return digest; }
+    md5sum&     update(std::string_view inp);
+    md5sum&     update(const unsigned char* buf, size_type length);
+    md5sum&     update(const char* buf, size_type length);
+    md5sum&     finalize();
+    std::string hexdigest() const;
 
     template <typename Tp>
         requires std::is_arithmetic_v<Tp>
     md5sum& update(Tp inp);
-
-    friend std::ostream& operator<<(std::ostream&, md5sum md5);
 
 private:
     void transform(const std::uint8_t block[blocksize]);
@@ -87,23 +77,10 @@ md5sum::update(Tp inp)
     return update(reinterpret_cast<const char*>(&inp), sizeof(Tp));
 }
 
-template <template <typename, typename...> class ContainerT, typename Tp,
-          typename... TailT>
-    requires(traits::is_string_literal<Tp>())
-std::string
-compute_md5sum(const ContainerT<Tp, TailT...>& inp)
-{
-    auto _val = md5sum{};
-    for(const auto& itr : inp)
-        _val.update(std::string_view{ inp });
-    _val.finalize();
-    return _val.hexdigest();
-}
-
 namespace
 {
 
-using size_type = typename md5sum::size_type;
+using size_type = md5sum::size_type;
 
 // Constants for md5sumTransform routine.
 constexpr std::uint32_t S11 = 7;
@@ -223,9 +200,12 @@ void
 decode(std::uint32_t output[], const std::uint8_t input[], size_type len)
 {
     for(unsigned int i = 0, j = 0; j < len; i++, j += 4)
-        output[i] = ((std::uint32_t) input[j]) | (((std::uint32_t) input[j + 1]) << 8) |
-                    (((std::uint32_t) input[j + 2]) << 16) |
-                    (((std::uint32_t) input[j + 3]) << 24);
+    {
+        output[i] = (static_cast<std::uint32_t>(input[j])) |
+                    ((static_cast<std::uint32_t>(input[j + 1])) << 8) |
+                    ((static_cast<std::uint32_t>(input[j + 2])) << 16) |
+                    ((static_cast<std::uint32_t>(input[j + 3])) << 24);
+    }
 }
 
 // encodes input (std::uint32_t) into output (unsigned char). Assumes len is
@@ -347,7 +327,10 @@ md5sum::update(const unsigned char input[], size_type length)
     size_type index = count[0] / 8 % blocksize;
 
     // Update number of bits
-    if((count[0] += (length << 3)) < (length << 3)) count[1]++;
+    if((count[0] += (length << 3)) < (length << 3))
+    {
+        count[1]++;
+    }
     count[1] += (length >> 29);
 
     // number of bytes we need to fill in buffer
@@ -363,7 +346,9 @@ md5sum::update(const unsigned char input[], size_type length)
 
         // transform chunks of blocksize (64 bytes)
         for(i = firstpart; i + blocksize <= length; i += blocksize)
+        {
             transform(&input[i]);
+        }
 
         index = 0;
     }
@@ -378,7 +363,7 @@ md5sum::update(const unsigned char input[], size_type length)
 md5sum&
 md5sum::update(const char input[], size_type length)
 {
-    return update((const unsigned char*) input, length);
+    return update(reinterpret_cast<const unsigned char*>(input), length);
 }
 
 // md5sum finalization. Ends an md5sum message-digest operation, writing the
@@ -423,40 +408,19 @@ md5sum::finalize()
 std::string
 md5sum::hexdigest() const
 {
-    if(!finalized) return std::string{};
+    if(!finalized)
+    {
+        return std::string{};
+    }
 
     char buf[33];
     for(int i = 0; i < 16; i++)
+    {
         snprintf(buf + i * 2, 3, "%02x", digest[i]);
+    }
     buf[32] = '\0';
 
     return std::string(buf);
 }
 
-std::string
-md5sum::hexliteral() const
-{
-    if(!finalized) return std::string{};
-
-    auto _oss = std::ostringstream{};
-    _oss << "X'";
-    for(auto itr : rawdigest())
-        _oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(itr);
-    _oss << "'";
-    return _oss.str();
-}
-
-std::ostream&
-operator<<(std::ostream& out, md5sum md5)
-{
-    return out << md5.hexdigest();
-}
-
-std::string
-compute_md5sum(std::string_view inp)
-{
-    return md5sum{ inp }.finalize().hexdigest();
-}
-
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

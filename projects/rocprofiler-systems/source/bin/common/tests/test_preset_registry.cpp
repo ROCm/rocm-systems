@@ -31,7 +31,9 @@ public:
         if(!m_path.empty())
         {
             for(const auto& f : m_files)
+            {
                 std::remove(f.c_str());
+            }
             ::rmdir(m_path.c_str());
         }
     }
@@ -162,7 +164,7 @@ TEST_F(preset_registry_test, explain_finds_by_name)
     ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
-    bool               found = registry.explain("balanced", "run", oss);
+    const bool         found = registry.explain("balanced", "run", oss);
     ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(found);
@@ -171,12 +173,12 @@ TEST_F(preset_registry_test, explain_finds_by_name)
 
 TEST_F(preset_registry_test, explain_returns_false_for_unknown_preset)
 {
-    temp_dir dir;
+    const temp_dir dir;
 
     ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
-    bool               found = registry.explain("nonexistent-preset", "run", oss);
+    const bool         found = registry.explain("nonexistent-preset", "run", oss);
     ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_FALSE(found);
@@ -270,7 +272,7 @@ TEST_F(preset_registry_test, explain_output_content)
     ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
-    bool               result = registry.explain("balanced", "run", oss);
+    const bool         result = registry.explain("balanced", "run", oss);
     ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(result);
@@ -283,7 +285,7 @@ TEST_F(preset_registry_test, explain_return_false_for_missing_preset)
 {
     preset_registry    registry;
     std::ostringstream oss;
-    bool               result = registry.explain("nonexistent", "run", oss);
+    const bool         result = registry.explain("nonexistent", "run", oss);
     EXPECT_FALSE(result);
 }
 

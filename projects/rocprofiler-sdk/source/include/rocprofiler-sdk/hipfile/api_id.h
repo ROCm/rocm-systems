@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/hipfile/details/hipfile_headers.h>
+
 /**
  * @brief ROCProfiler enumeration of hipFILE API tracing operations
  */
@@ -60,6 +62,12 @@ typedef enum rocprofiler_hipfile_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIPFILE_API_ID_hipFileSetParameterSizeT,
     ROCPROFILER_HIPFILE_API_ID_hipFileSetParameterBool,
     ROCPROFILER_HIPFILE_API_ID_hipFileSetParameterString,
+
+#if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
+    ROCPROFILER_HIPFILE_API_ID_hipFileGetStatsL1,
+    ROCPROFILER_HIPFILE_API_ID_hipFileGetStatsL2,
+    ROCPROFILER_HIPFILE_API_ID_hipFileGetStatsL3,
+#endif
 
     ROCPROFILER_HIPFILE_API_ID_LAST,
 } rocprofiler_hipfile_api_id_t;

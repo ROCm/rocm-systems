@@ -12,12 +12,24 @@
 
 Read and follow **[`.ai/rules/python-style.md`](.ai/rules/python-style.md)** before
 generating or modifying any Python code. These rules cover function design, naming,
-nesting, and code organization.
+nesting, code organization, and testing conventions.
 
-## Ruff and Tooling
+## Ruff
 
-All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff-tooling.md`](.ai/rules/ruff-tooling.md)**
+All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff.md`](.ai/rules/ruff.md)**
 for enforced rules including type annotations, f-strings, and `pathlib` usage.
+
+## CLI Options
+
+Read **[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md)** before working on
+any command-line option, whether adding one, changing one, reviewing one, or
+answering questions about one.
+
+## Tooling
+
+Scripts under `tools/` generate committed artifacts that must never be
+hand-edited. **[`CONTRIBUTING.md`](CONTRIBUTING.md)** says which change
+requires which script.
 
 ## Git Workflows
 

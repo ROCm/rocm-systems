@@ -212,7 +212,9 @@ TEST_F(help_system_test, topic_listing_lists_synthetic_and_domain_topics)
     EXPECT_NE(out.find("all"), std::string::npos);
     EXPECT_NE(out.find("Full help output"), std::string::npos);
     for(const auto* domain : { "gpu", "cpu", "rocm", "parallel" })
+    {
         EXPECT_NE(out.find(domain), std::string::npos);
+    }
 }
 
 // ============================================================================
@@ -222,8 +224,8 @@ TEST_F(help_system_test, topic_listing_lists_synthetic_and_domain_topics)
 TEST_F(help_system_test, topic_filter_extracts_matching_section)
 {
     std::ostringstream oss;
-    bool result = print_help_for_topic(synthetic_help, "tracing", "run", oss);
-    auto output = oss.str();
+    const bool result = print_help_for_topic(synthetic_help, "tracing", "run", oss);
+    auto       output = oss.str();
 
     EXPECT_TRUE(result);
     EXPECT_NE(output.find("--trace-file"), std::string::npos);
@@ -236,8 +238,8 @@ TEST_F(help_system_test, topic_filter_extracts_matching_section)
 TEST_F(help_system_test, topic_filter_extracts_multiple_groups)
 {
     std::ostringstream oss;
-    bool result = print_help_for_topic(synthetic_help, "preset", "run", oss);
-    auto output = oss.str();
+    const bool result = print_help_for_topic(synthetic_help, "preset", "run", oss);
+    auto       output = oss.str();
 
     EXPECT_TRUE(result);
     // "preset" topic maps to PRESET, DOMAIN, and EXPORT groups
@@ -253,8 +255,8 @@ TEST_F(help_system_test, topic_filter_extracts_multiple_groups)
 TEST_F(help_system_test, topic_filter_sampling_extracts_timer_options)
 {
     std::ostringstream oss;
-    bool result = print_help_for_topic(synthetic_help, "sampling", "run", oss);
-    auto output = oss.str();
+    const bool result = print_help_for_topic(synthetic_help, "sampling", "run", oss);
+    auto       output = oss.str();
 
     EXPECT_TRUE(result);
     EXPECT_NE(output.find("--sampling-freq"), std::string::npos);
@@ -265,8 +267,8 @@ TEST_F(help_system_test, topic_filter_sampling_extracts_timer_options)
 TEST_F(help_system_test, topic_filter_output_extracts_format_option)
 {
     std::ostringstream oss;
-    bool result = print_help_for_topic(synthetic_help, "output", "run", oss);
-    auto output = oss.str();
+    const bool result = print_help_for_topic(synthetic_help, "output", "run", oss);
+    auto       output = oss.str();
 
     EXPECT_TRUE(result);
     EXPECT_NE(output.find("--output-format"), std::string::npos);
@@ -277,14 +279,14 @@ TEST_F(help_system_test, topic_filter_output_extracts_format_option)
 TEST_F(help_system_test, topic_filter_returns_false_for_unknown_topic)
 {
     std::ostringstream oss;
-    bool result = print_help_for_topic(synthetic_help, "nonexistent", "run", oss);
+    const bool result = print_help_for_topic(synthetic_help, "nonexistent", "run", oss);
     EXPECT_FALSE(result);
 }
 
 TEST_F(help_system_test, topic_filter_debug_section)
 {
     std::ostringstream oss;
-    bool               result = print_help_for_topic(synthetic_help, "debug", "run", oss);
+    const bool         result = print_help_for_topic(synthetic_help, "debug", "run", oss);
     auto               output = oss.str();
 
     EXPECT_TRUE(result);
@@ -301,7 +303,7 @@ TEST_F(help_system_test, topic_filter_debug_section)
 TEST_F(help_system_test, domain_gpu_extracts_related_options)
 {
     std::ostringstream oss;
-    bool               result = print_help_for_domain(synthetic_help, "gpu", "run", oss);
+    const bool         result = print_help_for_domain(synthetic_help, "gpu", "run", oss);
     auto               output = oss.str();
 
     EXPECT_TRUE(result);
@@ -320,7 +322,7 @@ TEST_F(help_system_test, domain_gpu_extracts_related_options)
 TEST_F(help_system_test, domain_cpu_extracts_related_options)
 {
     std::ostringstream oss;
-    bool               result = print_help_for_domain(synthetic_help, "cpu", "run", oss);
+    const bool         result = print_help_for_domain(synthetic_help, "cpu", "run", oss);
     auto               output = oss.str();
 
     EXPECT_TRUE(result);
@@ -347,14 +349,14 @@ TEST_F(help_system_test, domain_cpu_include_continuation_lines)
 TEST_F(help_system_test, domain_return_false_for_unknown_domain)
 {
     std::ostringstream oss;
-    bool result = print_help_for_domain(synthetic_help, "nonexistent", "run", oss);
+    const bool result = print_help_for_domain(synthetic_help, "nonexistent", "run", oss);
     EXPECT_FALSE(result);
 }
 
 TEST_F(help_system_test, domain_rocm_extracts_related_options)
 {
     std::ostringstream oss;
-    bool               result = print_help_for_domain(synthetic_help, "rocm", "run", oss);
+    const bool         result = print_help_for_domain(synthetic_help, "rocm", "run", oss);
     auto               output = oss.str();
 
     EXPECT_TRUE(result);
@@ -370,7 +372,7 @@ TEST_F(help_system_test, domain_rocm_extracts_related_options)
 TEST_F(help_system_test, topic_filter_works_with_ansi_codes)
 {
     std::ostringstream oss;
-    bool               result = print_help_for_topic(ansi_help, "debug", "run", oss);
+    const bool         result = print_help_for_topic(ansi_help, "debug", "run", oss);
     auto               output = oss.str();
 
     EXPECT_TRUE(result);
@@ -383,7 +385,7 @@ TEST_F(help_system_test, topic_filter_works_with_ansi_codes)
 TEST_F(help_system_test, topic_filter_ansi_tracing_section)
 {
     std::ostringstream oss;
-    bool               result = print_help_for_topic(ansi_help, "tracing", "run", oss);
+    const bool         result = print_help_for_topic(ansi_help, "tracing", "run", oss);
     auto               output = oss.str();
 
     EXPECT_TRUE(result);
@@ -419,9 +421,11 @@ TEST_F(help_system_test, see_also_references_valid_topics_only)
             << "Source topic '" << topic
             << "' in get_related_topics_map() is not a known topic";
         for(const auto& target : related)
+        {
             EXPECT_TRUE(is_valid_topic(target))
                 << "Related topic '" << target << "' (under '" << topic
                 << "') is not a known topic";
+        }
     }
 }
 

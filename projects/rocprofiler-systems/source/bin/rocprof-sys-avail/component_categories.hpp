@@ -7,7 +7,7 @@
 #include "core/demangler.hpp"
 #include "defines.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <timemory/components/types.hpp>
 #include <timemory/enum.h>
@@ -29,19 +29,24 @@ struct component_categories
         auto _cleanup = [](std::string _type, const std::string& _pattern) {
             auto _pos = std::string::npos;
             while((_pos = _type.find(_pattern)) != std::string::npos)
+            {
                 _type = _type.erase(_pos, _pattern.length());
+            }
             return _type;
         };
         (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(fmt::format(
-            "component::{}", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))));
+        ((_v.emplace(fmt::format(
+             "component::{}", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::")))),
+         ...);
     }
 
     void operator()(std::set<std::string>& _v) const
     {
         if constexpr(!tim::concepts::is_placeholder<Type>::value)
+        {
             (*this)(_v, tim::trait::component_apis_t<Type>{});
+        }
     }
 };
 
@@ -51,7 +56,7 @@ struct component_categories<void>
     template <size_t... Idx>
     void operator()(std::set<std::string>& _v, std::index_sequence<Idx...>) const
     {
-        ROCPROFSYS_FOLD_EXPRESSION(component_categories<comp::enumerator_t<Idx>>{}(_v));
+        ((component_categories<comp::enumerator_t<Idx>>{}(_v)), ...);
     }
 
     void operator()(std::set<std::string>& _v) const

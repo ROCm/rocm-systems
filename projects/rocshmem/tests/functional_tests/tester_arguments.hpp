@@ -88,6 +88,7 @@ public:
   unsigned algorithm = 0;
   size_t min_msg_size = 1;
   size_t max_msg_size = 1 << 20;
+  bool max_msg_size_set = false;
   size_t max_volume_size = 0;
   unsigned wg_size = 64;
   unsigned thread_access = 64;
@@ -111,6 +112,7 @@ public:
   int loop_large = 10;
   int batch = 0;
   bool verif = true;
+  int num_wf = 0;
   size_t large_message_size = 32768;
 
   TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;

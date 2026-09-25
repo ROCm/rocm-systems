@@ -3,10 +3,9 @@
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 
-#include "rocjitsu/vm/plugins/plugin_abi.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 
 #include "util/dynamic_loader.h"
 #include "util/log.h"
@@ -18,6 +17,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(__linux__)
@@ -36,6 +36,42 @@ using plugin_detail::resolve_config;
 std::vector<util::LibraryHandle> &open_handles() {
   static std::vector<util::LibraryHandle> handles;
   return handles;
+}
+
+bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
+  if (!root.IsMap())
+    return false;
+  auto keys = root.AsMap().Keys();
+  for (size_t i = 0; i < keys.size(); ++i)
+    if (std::string_view(keys[i].AsKey()) == key)
+      return true;
+  return false;
+}
+
+bool parse_require_all_plugins(const flexbuffers::Reference &root) {
+  if (!map_has_key(root, "require_all_plugins"))
+    return false;
+
+  auto value = root.AsMap()["require_all_plugins"];
+  if (!value.IsBool())
+    throw std::invalid_argument("top-level 'require_all_plugins' must be a boolean");
+  return value.AsBool();
+}
+
+size_t configured_plugin_count(const flexbuffers::Reference &root, bool require_all_plugins) {
+  if (!root.IsMap())
+    return 0;
+  if (!map_has_key(root, "plugins"))
+    return 0;
+
+  auto plugins = root.AsMap()["plugins"];
+  if (!plugins.IsMap()) {
+    if (require_all_plugins)
+      throw std::invalid_argument(
+          "top-level 'plugins' must be an object when 'require_all_plugins' is true");
+    return 0;
+  }
+  return plugins.AsMap().size();
 }
 
 std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
@@ -92,15 +128,14 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   auto create_fn = util::lookup_symbol<PluginCreateFn>(handle, kPluginCreateSymbol);
   auto destroy_fn = util::lookup_symbol<PluginDestroyFn>(handle, kPluginDestroySymbol);
   if (!meta_fn || !create_fn || !destroy_fn) {
-    util::Logger::warn("plugin '", name, "': ", soname, " is missing required ABI exports");
+    util::Logger::warn("plugin '", name, "': ", soname, " is missing required exports");
     util::close_library(handle);
     return false;
   }
 
   const PluginMetadata *meta = meta_fn();
-  if (!meta || meta->abi != kPluginAbiVersion) {
-    util::Logger::warn("plugin '", name, "': ABI version mismatch (got ", meta ? meta->abi : -1,
-                       ", expected ", kPluginAbiVersion, ")");
+  if (!meta) {
+    util::Logger::warn("plugin '", name, "': metadata export returned null");
     util::close_library(handle);
     return false;
   }
@@ -123,7 +158,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   // Own the instance through the plugin's own destroy export so allocation and
-  // deallocation stay on the same side of the ABI boundary. Keep `handle` open
+  // deallocation stay on the same side of the dynamic-library boundary. Keep `handle` open
   // for the whole lifetime of `owned`: on the rejection path the instance is
   // destroyed via its PluginDeleter (the plugin's destroy_fn), which lives in
   // this library, so the library must still be loaded when that happens.
@@ -139,24 +174,24 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   open_handles().push_back(handle);
-  util::Logger::plugins("plugin '", name, "' loaded", (meta->version && *meta->version) ? " v" : "",
-                        (meta->version && *meta->version) ? meta->version : "");
+  util::Logger::plugins("plugin '", name, "' loaded");
   return true;
 }
 
-/// Configure output sinks on @p group from the optional top-level `sinks`
-/// object. Defaults to a single stderr sink when absent.
+/// Parse owned output sinks from the optional top-level `sinks` object.
+/// Defaults to a single stderr sink when absent.
 ///
 /// @code{.json}
 ///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
 /// @endcode
-void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &group) {
+PluginSinkConfig parse_sink_config(const flexbuffers::Reference &root) {
+  PluginSinkConfig config;
   flexbuffers::Reference sinks = root.IsMap() ? root.AsMap()["sinks"] : flexbuffers::Reference();
 
   // Default: stderr only.
   if (!sinks.IsMap()) {
-    group.add_sink(&StderrSink::instance());
-    return;
+    config.emplace<StderrSink>();
+    return config;
   }
 
   auto sinks_map = sinks.AsMap();
@@ -164,8 +199,8 @@ void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &g
   std::string dir = sinks_map["dir"].IsString() ? sinks_map["dir"].AsString().c_str() : "";
 
   if (!types.IsVector()) {
-    group.add_sink(&StderrSink::instance());
-    return;
+    config.emplace<StderrSink>();
+    return config;
   }
 
   auto vec = types.AsVector();
@@ -173,21 +208,22 @@ void configure_sinks(const flexbuffers::Reference &root, ExecutionPluginGroup &g
   for (size_t i = 0; i < vec.size(); ++i) {
     std::string token = vec[i].IsString() ? vec[i].AsString().c_str() : "";
     if (token == "stderr") {
-      group.add_sink(&StderrSink::instance());
+      config.emplace<StderrSink>();
       configured = true;
     } else if (token == "stdout") {
-      group.add_sink(&StdoutSink::instance());
+      config.emplace<StdoutSink>();
       configured = true;
     } else if (token == "file") {
       if (!dir.empty()) {
-        group.set_sink_dir(dir);
+        config.set_file_directory(dir);
         configured = true;
       } else
         util::Logger::warn("sink type 'file' requested but no 'dir' set");
     }
   }
   if (!configured)
-    group.add_sink(&StderrSink::instance());
+    config.emplace<StderrSink>();
+  return config;
 }
 
 } // namespace
@@ -219,26 +255,24 @@ int PluginLoader::load_from_config(const std::string &config_json, ExecutionPlug
 }
 
 std::shared_ptr<ExecutionPluginGroup>
-PluginLoader::configure_plugin_group(const std::string &config_json, const std::string &plugin_dir,
-                                     const simdojo::SimulationEngine::Config &engine_config) {
+PluginLoader::configure_plugin_group(const std::string &config_json,
+                                     const std::string &plugin_dir) {
   flexbuffers::Builder root_fbb;
   bool parsed = flexbuffer_from_json(config_json, root_fbb);
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
 
-  bool profiled =
-      root.IsMap() && root.AsMap()["profiled"].IsBool() && root.AsMap()["profiled"].AsBool();
-  if (profiled && engine_config.num_threads > 1) {
-    util::Logger::warn("profiled plugin execution requires num_threads=1 (got ",
-                       engine_config.num_threads, ")");
-    throw std::invalid_argument("profiled plugin execution requires num_threads=1");
+  if (map_has_key(root, "profiled"))
+    util::Logger::warn("hook profiling was removed; ignoring top-level 'profiled' config");
+
+  const bool require_all_plugins = parse_require_all_plugins(root);
+  const size_t requested_plugins = configured_plugin_count(root, require_all_plugins);
+  auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
+  const int loaded_plugins = load_from_config(config_json, *group, plugin_dir);
+  if (require_all_plugins && static_cast<size_t>(loaded_plugins) != requested_plugins) {
+    throw std::runtime_error("required plugin loading failed: loaded " +
+                             std::to_string(loaded_plugins) + " of " +
+                             std::to_string(requested_plugins) + " configured plugins");
   }
-
-  std::shared_ptr<ExecutionPluginGroup> group =
-      profiled ? std::make_shared<ProfiledExecutionPluginGroup>()
-               : std::make_shared<ExecutionPluginGroup>();
-
-  configure_sinks(root, *group);
-  load_from_config(config_json, *group, plugin_dir);
   return group;
 }
 

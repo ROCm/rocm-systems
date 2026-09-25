@@ -4,6 +4,7 @@
 /// @file buffer_operand_test.cpp
 /// @brief Regression tests for semantic legacy buffer operands.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -46,7 +47,7 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
     // VADDR=63, VDATA=68, raw SRSRC=1 (descriptor s[4:7]), SOFFSET=128 (zero).
     const uint32_t words[] = {tc.encoding | (tc.address_mode_in_hi_word ? 0u : mode.fields << 12),
                               0x8001443fu | (tc.address_mode_in_hi_word ? mode.fields << 22 : 0u)};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr) << tc.label;
     ASSERT_EQ(inst->mnemonic(), tc.mnemonic) << tc.label;
     ASSERT_GE(inst->num_src_operands(), 2) << tc.label;
@@ -83,7 +84,7 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
     // address components enabled to cover the acc fold together with VADDR
     // width and SRSRC scaling.
     const uint32_t words[] = {tc.encoding | (3u << 12), 0x8081443fu};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr) << tc.label;
 
     const auto vaddr = inst->src_operand(0)->to_register_ref();

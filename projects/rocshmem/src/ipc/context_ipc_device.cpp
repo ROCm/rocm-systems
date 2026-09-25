@@ -45,32 +45,30 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
   fence_pool = backend->fence_pool;
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
   ctx_id_ = ctx_id;
-
-  orders_.store = detail::atomic::rocshmem_memory_order::memory_order_seq_cst;
 }
 
 __device__ void IPCContext::putmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
   ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
   ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_nbi(void *dest, const void *source,
                                       size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
   ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
                                       size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
   ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
@@ -79,8 +77,8 @@ __device__ void IPCContext::fence() {
 }
 
 __device__ void IPCContext::fence(int pe) {
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_release>(pe);
+  ipcImpl_.ipcFence<atomic::memory_scope::system,
+                    atomic::memory_order::release>(pe);
 }
 
 __device__ void IPCContext::quiet() {
@@ -92,12 +90,12 @@ __device__ void IPCContext::pe_quiet(size_t pe) {
 }
 
 __device__ void *IPCContext::shmem_ptr(const void *dest, int pe) {
-  return ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  return ipcImpl_.ipcPeerPtr(dest, pe);
 }
 
 __device__ void IPCContext::putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
   __builtin_amdgcn_s_barrier();
@@ -105,45 +103,45 @@ __device__ void IPCContext::putmem_wg(void *dest, const void *source,
 
 __device__ void IPCContext::getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, remote, nelems, pe);
   __builtin_amdgcn_s_barrier();
 }
 
 __device__ void IPCContext::putmem_nbi_wg(void *dest, const void *source,
                                          size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi_wg(void *dest, const void *source,
                                          size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
                                            size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi_wave(void *dest, const void *source,
                                            size_t nelems, int pe) {
-  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 

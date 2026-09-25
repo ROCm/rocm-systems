@@ -33,7 +33,6 @@ SANITIZER_ORDER = ("thread", "undefined", "address")
 
 @dataclass
 class FailedTest:
-    workflow: str
     artifact: str
     name: str
 
@@ -215,7 +214,6 @@ def parse_junit(path: Path, mode: str) -> Optional[JUnitResult]:
         if has_failure or has_error:
             failed_tests.append(
                 FailedTest(
-                    workflow=group_label,
                     artifact=artifact,
                     name=testcase_name(testcase),
                 )
@@ -275,7 +273,6 @@ def total_summary(summaries: Iterable[Summary]) -> Summary:
         total.skipped += summary.skipped
         total.failed += summary.failed
         total.time_seconds += summary.time_seconds
-        total.failed_tests.extend(summary.failed_tests)
     return total
 
 
@@ -287,25 +284,32 @@ def summary_row(summary: Summary) -> str:
     )
 
 
-def build_failed_tests_section(failed_tests: Sequence[FailedTest]) -> List[str]:
+def build_failed_test_group(summary: Summary) -> List[str]:
+    """Render one workflow group's failures as a collapsible <details> block."""
+    lines = [
+        f"<details><summary>{summary.label} "
+        f"({format_count(len(summary.failed_tests))} failed)</summary>",
+        "",
+        "| Artifact | Failed Test |",
+        "|---|---|",
+    ]
+    for failed_test in summary.failed_tests[:50]:
+        lines.append(f"| `{failed_test.artifact}` | `{failed_test.name}` |")
+    if len(summary.failed_tests) > 50:
+        lines.append(f"| ... | {len(summary.failed_tests) - 50} more failed tests |")
+    lines.extend(["", "</details>", ""])
+    return lines
+
+
+def build_failed_tests_section(summaries: Sequence[Summary]) -> List[str]:
     lines = ["### Failed Tests", ""]
-    if not failed_tests:
+    groups_with_failures = [summary for summary in summaries if summary.failed_tests]
+    if not groups_with_failures:
         lines.append("No failed tests reported.")
         return lines
 
-    lines.extend(
-        [
-            "| Workflow | Artifact | Failed Test |",
-            "|---|---|---|",
-        ]
-    )
-    for failed_test in failed_tests[:50]:
-        lines.append(
-            f"| {failed_test.workflow} | `{failed_test.artifact}` | "
-            f"`{failed_test.name}` |"
-        )
-    if len(failed_tests) > 50:
-        lines.append(f"| ... | ... | {len(failed_tests) - 50} more failed tests |")
+    for summary in groups_with_failures:
+        lines.extend(build_failed_test_group(summary))
     return lines
 
 
@@ -342,13 +346,13 @@ def render_build_summary(
         "",
         f"Workflow jobs covered: **{total.runs}**",
         "",
-        "| Workflow | Runs | Avg Time | Tests | Skipped | Failed |",
+        "| Workflow | Runs | Avg Test Time | Tests | Skipped | Failed |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     lines.extend(summary_row(summary) for summary in ordered_summaries)
     lines.append(summary_row(total))
     lines.append("")
-    lines.extend(build_failed_tests_section(total.failed_tests))
+    lines.extend(build_failed_tests_section(ordered_summaries))
     return "\n".join(lines) + "\n"
 
 

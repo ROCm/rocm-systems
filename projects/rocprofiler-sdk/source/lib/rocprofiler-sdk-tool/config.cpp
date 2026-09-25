@@ -22,6 +22,7 @@
 //
 
 #include "config.hpp"
+#include "kernel_filter_range.hpp"
 
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
@@ -99,38 +100,6 @@ has_counter_format(std::string const& str)
     return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
                return (isalnum(ch) != 0 || ch == '_');
            }) != str.end();
-}
-
-// validate kernel names
-std::unordered_set<size_t>
-get_kernel_filter_range(const std::string& kernel_filter)
-{
-    if(kernel_filter.empty()) return {};
-
-    auto delim     = rocprofiler::sdk::parse::tokenize(kernel_filter, "[], ");
-    auto range_set = std::unordered_set<size_t>{};
-    for(const auto& itr : delim)
-    {
-        if(itr.find('-') != std::string::npos)
-        {
-            auto drange = rocprofiler::sdk::parse::tokenize(itr, "- ");
-
-            ROCP_FATAL_IF(drange.size() != 2)
-                << "bad range format for '" << itr << "'. Expected [A-B] where A and B are numbers";
-
-            size_t start_range = std::stoul(drange.front());
-            size_t end_range   = std::stoul(drange.back());
-            for(auto i = start_range; i <= end_range; i++)
-                range_set.emplace(i);
-        }
-        else
-        {
-            ROCP_FATAL_IF(itr.find_first_not_of("0123456789") != std::string::npos)
-                << "expected integer for " << itr << ". Non-integer value detected";
-            range_set.emplace(std::stoul(itr));
-        }
-    }
-    return range_set;
 }
 
 std::vector<att_perfcounter>

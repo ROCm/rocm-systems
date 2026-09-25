@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-roctracer-roctx-tracing
@@ -32,6 +32,7 @@ rocprofiler_add_integration_execute_test(
         ${TRANSPOSE_ROCTRACER_ROCTX_EXE}
     DEPENDS transpose-roctracer-roctx
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"

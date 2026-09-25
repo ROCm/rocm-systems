@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "computepartition_read_write.h"
 
 #include <gtest/gtest.h>
@@ -75,43 +57,45 @@ const uint32_t MAX_QPX_PARTITIONS = 4;
 // const uint32_t MAX_CPX_PARTITIONS = 8;
 
 static const std::string computePartitionString(
-    amdsmi_compute_partition_type_t computeParitionType) {
+    amdsmi_accelerator_partition_type_t computeParitionType) {
   /**
    * typedef enum {
-   *    AMDSMI_COMPUTE_PARTITION_INVALID = 0,
-   *    AMDSMI_COMPUTE_PARTITION_SPX,   //!< Single GPU mode (SPX)- All XCCs work
-   *                                    //!< together with shared memory
-   *    AMDSMI_COMPUTE_PARTITION_DPX,   //!< Dual GPU mode (DPX)- Half XCCs work
-   *                                    //!< together with shared memory
-   *    AMDSMI_COMPUTE_PARTITION_TPX,   //!< Triple GPU mode (TPX)- One-third XCCs
-   *                                    //!< work together with shared memory
-   *    AMDSMI_COMPUTE_PARTITION_QPX,   //!< Quad GPU mode (QPX)- Quarter XCCs
-   *                                    //!< work together with shared memory
-   *    AMDSMI_COMPUTE_PARTITION_CPX,  //!< Core mode (CPX)- Per-chip XCC with
-   *                                   //!< shared memory
-   * } amdsmi_compute_partition_type_t;
+   *    AMDSMI_ACCELERATOR_PARTITION_INVALID = 0,
+   *    AMDSMI_ACCELERATOR_PARTITION_SPX,   //!< Single GPU mode (SPX)- All XCCs work
+   *                                        //!< together with shared memory
+   *    AMDSMI_ACCELERATOR_PARTITION_DPX,   //!< Dual GPU mode (DPX)- Half XCCs work
+   *                                        //!< together with shared memory
+   *    AMDSMI_ACCELERATOR_PARTITION_TPX,   //!< Triple GPU mode (TPX)- One-third XCCs
+   *                                        //!< work together with shared memory
+   *    AMDSMI_ACCELERATOR_PARTITION_QPX,   //!< Quad GPU mode (QPX)- Quarter XCCs
+   *                                        //!< work together with shared memory
+   *    AMDSMI_ACCELERATOR_PARTITION_CPX,   //!< Core mode (CPX)- Per-chip XCC with
+   *                                        //!< shared memory
+   * } amdsmi_accelerator_partition_type_t;
    * */
   switch (computeParitionType) {
-    case AMDSMI_COMPUTE_PARTITION_SPX:
+    case AMDSMI_ACCELERATOR_PARTITION_SPX:
       return "SPX";
-    case AMDSMI_COMPUTE_PARTITION_DPX:
+    case AMDSMI_ACCELERATOR_PARTITION_DPX:
       return "DPX";
-    case AMDSMI_COMPUTE_PARTITION_TPX:
+    case AMDSMI_ACCELERATOR_PARTITION_TPX:
       return "TPX";
-    case AMDSMI_COMPUTE_PARTITION_QPX:
+    case AMDSMI_ACCELERATOR_PARTITION_QPX:
       return "QPX";
-    case AMDSMI_COMPUTE_PARTITION_CPX:
+    case AMDSMI_ACCELERATOR_PARTITION_CPX:
       return "CPX";
     default:
       return "N/A";
   }
 }
 
-static const std::map<std::string, amdsmi_compute_partition_type_t>
-    mapStringToSMIComputePartitionTypes{
-        {"SPX", AMDSMI_COMPUTE_PARTITION_SPX}, {"DPX", AMDSMI_COMPUTE_PARTITION_DPX},
-        {"TPX", AMDSMI_COMPUTE_PARTITION_TPX}, {"QPX", AMDSMI_COMPUTE_PARTITION_QPX},
-        {"CPX", AMDSMI_COMPUTE_PARTITION_CPX}, {"UNKNOWN", AMDSMI_COMPUTE_PARTITION_INVALID}};
+static const std::map<std::string, amdsmi_accelerator_partition_type_t>
+    mapStringToSMIComputePartitionTypes{{"SPX", AMDSMI_ACCELERATOR_PARTITION_SPX},
+                                        {"DPX", AMDSMI_ACCELERATOR_PARTITION_DPX},
+                                        {"TPX", AMDSMI_ACCELERATOR_PARTITION_TPX},
+                                        {"QPX", AMDSMI_ACCELERATOR_PARTITION_QPX},
+                                        {"CPX", AMDSMI_ACCELERATOR_PARTITION_CPX},
+                                        {"UNKNOWN", AMDSMI_ACCELERATOR_PARTITION_INVALID}};
 
 static const std::map<amdsmi_accelerator_partition_resource_type_t, std::string>
     resource_types_map = {
@@ -137,15 +121,14 @@ static const std::map<amdsmi_accelerator_partition_type_t, std::string> accelera
     {AMDSMI_ACCELERATOR_PARTITION_MAX, "AMDSMI_ACCELERATOR_PARTITION_MAX"},
 };
 
-static void system_wait(int seconds) {
+static void system_wait(uint32_t wait_time_seconds) {
   // Adding a delay - since changing partitions depends on gpus not
   // being in an active state, we'll wait a few seconds before starting
   // full testing
   auto start = std::chrono::high_resolution_clock::now();
-  int waitTime = seconds;
-  std::cout << "** Waiting for " << std::dec << waitTime << " seconds, for any GPU"
+  std::cout << "** Waiting for " << std::dec << wait_time_seconds << " seconds, for any GPU"
             << " activity to clear up. **" << std::endl;
-  sleep(waitTime);
+  sleep(wait_time_seconds);
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   std::cout << "** Waiting took " << duration.count() / 1000000 << " seconds **" << std::endl;
@@ -406,10 +389,10 @@ void TestComputePartitionReadWrite::Run(void) {
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
     }
-    for (int partition = static_cast<int>(AMDSMI_COMPUTE_PARTITION_SPX);
-         partition <= static_cast<int>(AMDSMI_COMPUTE_PARTITION_CPX); partition++) {
-      amdsmi_compute_partition_type_t updatePartition =
-          static_cast<amdsmi_compute_partition_type_t>(partition);
+    for (int partition = static_cast<int>(AMDSMI_ACCELERATOR_PARTITION_SPX);
+         partition <= static_cast<int>(AMDSMI_ACCELERATOR_PARTITION_CPX); partition++) {
+      amdsmi_accelerator_partition_type_t updatePartition =
+          static_cast<amdsmi_accelerator_partition_type_t>(partition);
 
       IF_VERB(STANDARD) {
         std::cout << "\t**"
@@ -419,7 +402,9 @@ void TestComputePartitionReadWrite::Run(void) {
 
       DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
-      auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles_[dv_ind], updatePartition);
+      auto ret_set = amdsmi_set_gpu_compute_partition(
+          processor_handles_[dv_ind],
+          static_cast<amdsmi_compute_partition_type_t>(updatePartition));
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set,
                             AMDSMI_STATUS_SETTING_UNAVAILABLE, AMDSMI_STATUS_NO_PERM,
                             AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NOT_SUPPORTED,
@@ -475,11 +460,13 @@ void TestComputePartitionReadWrite::Run(void) {
                                        std::string(current_char_computePartition)));
       }
     }
-    amdsmi_compute_partition_type_t updatePartition = static_cast<amdsmi_compute_partition_type_t>(
-        mapStringToSMIComputePartitionTypes.at(std::string(orig_char_computePartition)));
+    amdsmi_accelerator_partition_type_t updatePartition =
+        static_cast<amdsmi_accelerator_partition_type_t>(
+            mapStringToSMIComputePartitionTypes.at(std::string(orig_char_computePartition)));
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles_[dv_ind], updatePartition);
+    auto ret_set = amdsmi_set_gpu_compute_partition(
+        processor_handles_[dv_ind], static_cast<amdsmi_compute_partition_type_t>(updatePartition));
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set,
                           AMDSMI_STATUS_SETTING_UNAVAILABLE, AMDSMI_STATUS_NO_PERM,
                           AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NOT_SUPPORTED,
@@ -964,7 +951,7 @@ void TestComputePartitionReadWrite::Run(void) {
     }
     for (int partition = static_cast<int>(
              mapStringToSMIComputePartitionTypes.at(std::string(orig_char_computePartition)));
-         partition <= static_cast<int>(AMDSMI_COMPUTE_PARTITION_CPX); partition++) {
+         partition <= static_cast<int>(AMDSMI_ACCELERATOR_PARTITION_CPX); partition++) {
       uint32_t device_index2 = 0;
       amdsmi_processor_handle p_handle2 = {};
       smi_amdgpu_get_device_count(&current_num_devices);
@@ -982,10 +969,11 @@ void TestComputePartitionReadWrite::Run(void) {
         std::cout << "\t=========== END INDEX/p_handle DEVICE INFO 2 =============\n";
       }
 
-      amdsmi_compute_partition_type_t updatePartition =
-          static_cast<amdsmi_compute_partition_type_t>(partition);
+      amdsmi_accelerator_partition_type_t updatePartition =
+          static_cast<amdsmi_accelerator_partition_type_t>(partition);
       DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition", "", VERB(STANDARD));
-      auto ret_set = amdsmi_set_gpu_compute_partition(p_handle2, updatePartition);
+      auto ret_set = amdsmi_set_gpu_compute_partition(
+          p_handle2, static_cast<amdsmi_compute_partition_type_t>(updatePartition));
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set,
                             AMDSMI_STATUS_SETTING_UNAVAILABLE, AMDSMI_STATUS_NO_PERM,
                             AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NOT_SUPPORTED,
@@ -1047,14 +1035,16 @@ void TestComputePartitionReadWrite::Run(void) {
     smi_amdgpu_get_processor_handle_by_index(dv_ind, &p_handle3);
     smi_amdgpu_get_device_index(p_handle3, &device_index3);
 
-    amdsmi_compute_partition_type_t updatePartition = static_cast<amdsmi_compute_partition_type_t>(
-        mapStringToSMIComputePartitionTypes.at(std::string(orig_char_computePartition)));
+    amdsmi_accelerator_partition_type_t updatePartition =
+        static_cast<amdsmi_accelerator_partition_type_t>(
+            mapStringToSMIComputePartitionTypes.at(std::string(orig_char_computePartition)));
     IF_VERB(STANDARD) {
       std::cout << "\t**ABOUT TO GO BACK TO ORIGINAL PARTITION (" << orig_char_computePartition
                 << ")\n";
     }
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_compute_partition", "", VERB(STANDARD));
-    auto ret_set = amdsmi_set_gpu_compute_partition(p_handle3, updatePartition);
+    auto ret_set = amdsmi_set_gpu_compute_partition(
+        p_handle3, static_cast<amdsmi_compute_partition_type_t>(updatePartition));
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set, AMDSMI_STATUS_SUCCESS);
     checkPartitionIdChanges(processor_handles_, dv_ind, std::string(orig_char_computePartition),
                             isVerbose, true);

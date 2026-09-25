@@ -1,0 +1,56 @@
+# Check list for projects/cuid. Each disable below is here on its own merits.
+Checks:
+  bugprone*,
+  clang-analyzer*,
+  cert-*,
+  concurrency-*,
+  google*,
+  misc*,
+  modernize*,
+  -abseil*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -cert-dcl21-cpp,
+  -cert-err58-cpp,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -clang-diagnostic-sign-conversion,
+  -clang-diagnostic-unused-parameter,
+  -cppcoreguidelines*,
+  -cppcoreguidelines-pro*,
+  -google-readability*,
+  -google-runtime-int,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-non-copyable-objects,
+  -misc-unused-parameters,
+  -modernize-avoid-c-arrays,
+  -modernize-macro-to-enum,
+  -modernize-redundant-void-arg,
+  -modernize-use-auto,
+  -modernize-use-nodiscard,
+  -modernize-use-noexcept,
+  -modernize-use-nullptr,
+  -modernize-use-trailing-return-type,
+  -modernize-use-using,
+  -performance*,
+  -readability*,
+  readability-delete-null-pointer,
+
+# Notes:
+#
+#   +cert-*         libamdcuid handles key material and parses firmware tables
+#                   read from sysfs, so the CERT rules about buffer handling and
+#                   integer conversion earn their keep here. The two noisiest
+#                   and least relevant are disabled individually above:
+#                   dcl21-cpp (postfix operator return types) and err58-cpp
+#                   (throwing static initializers, which are gtest fixtures).
+#   +concurrency-*  CuidDeviceManager is a shared, mutex-guarded singleton
+#                   reached from the public C API, and the daemon serves
+#                   multiple clients.
+#   +misc-use-*     libamdcuid is a static library, so a file-scope helper
+#                   without internal linkage is exported to everything that
+#                   links it. Unnamed namespace is the idiom, per SF.22.
+#
+# WarningsAsErrors is clean today; everything else is advisory.
+HeaderFilterRegex: 'projects/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
+WarningsAsErrors: 'bugprone-*,cert-*,concurrency-*,clang-analyzer-*,misc-use-internal-linkage,misc-use-anonymous-namespace'

@@ -32,18 +32,22 @@ struct WaveSize {
 /// Identifies a memory event within a workgroup. Each memory instruction
 /// (LDS read/write, global load/store) creates an event via
 /// RaceDetector::allocateEventId(). The event ID is used to track the event
-/// through its lifecycle: registration, s_waitcnt completion, and barrier
+/// through its lifecycle: registration, wave-local completion, and barrier
 /// retirement. Strongly typed to prevent accidental mixing with wave IDs,
 /// register indices, or byte addresses.
 struct EventId {
-  int value;
+  static constexpr int kInvalidValue = -1;
+
+  int value = kInvalidValue;
+
+  bool isValid() const { return value != kInvalidValue; }
   bool operator==(EventId o) const { return value == o.value; }
   bool operator!=(EventId o) const { return value != o.value; }
   bool operator<(EventId o) const { return value < o.value; }
 };
 
 inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
-  auto it = std::find(list.begin(), list.end(), eventId);
+  auto it = std::ranges::find(list, eventId);
   if (it != list.end()) {
     std::swap(*it, list.back());
     list.pop_back();
@@ -52,45 +56,45 @@ inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId)
 
 /// Status of a memory event in the race detection lifecycle.
 enum class EventStatus {
-  ACTIVE,        // Pending. Unsafe for everyone.
-  WAVE_COMPLETE, // s_waitcnt passed. Safe for owning wave, unsafe for others.
-  RETIRED        // Fully retired (s_barrier). No longer referenced.
+  ACTIVE,        // Pending; in flight.
+  WAVE_COMPLETE, // Owning-wave wait passed; retained until retirement if needed.
+  RETIRED        // Fully retired; no longer referenced.
 };
 
 /// Describes a detected race condition. Used by the race detection layer
 /// to report violations without depending on any exception type.
 struct RaceViolation {
-  enum class Space { VGPR, SGPR, LDS };
+  enum class Space { VGPR, SGPR, TTMP, LDS };
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
   int lane;     ///< Lane within the wave, or -1 for scalar.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
+  EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
+
+  RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
+                EventId conflictingEvent)
+      : space(space), index(index), wave(wave), lane(lane), isWrite(isWrite),
+        workgroupId(workgroupId), conflictingEvent(conflictingEvent) {}
 };
 
-/// Pending memory event data dispatched to WaveRaceState by the plugin adapter.
-struct PendingMemoryEvent {
-  uint64_t pc;
-  MemoryEventType type;
-  std::vector<uint32_t> registers;
-  uint64_t execMask;
-  int waveSize;
-  uint8_t byteMask = 0xF;
-  // LDS events:
-  std::vector<uint32_t> laneBaseAddresses;
-  int bytesPerLane = 0;
-  // Dual-offset LDS events:
-  bool isDualOffset = false;
-  int32_t offset0 = 0;
-  int32_t offset1 = 0;
+struct WaitCounterUpdate {
+  amdgpu::WaitCounterType type;
+  int threshold;
 };
 
-/// Pending wait count data written by the s_waitcnt executor. Dispatched to
-/// WaveRaceState by Workgroup::run after tryExecute returns.
+/// Counter thresholds changed by one wait instruction. A wait can update one
+/// or more counters; counters absent from this list retain their prior state.
 struct PendingWaitCount {
-  int vmcnt = -1;
-  int lgkmcnt = -1;
+  void add(amdgpu::WaitCounterType type, int threshold) {
+    if (threshold >= 0)
+      updates.push_back({type, threshold});
+  }
+
+  [[nodiscard]] bool empty() const { return updates.empty(); }
+
+  std::vector<WaitCounterUpdate> updates;
 };
 
 } // namespace rocjitsu::plugins::race_detector

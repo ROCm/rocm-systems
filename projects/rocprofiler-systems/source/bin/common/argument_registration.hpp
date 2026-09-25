@@ -15,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 
 using argument_parser = tim::argparse::argument_parser;
@@ -61,13 +59,18 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         .dtype("string")
         .action([&state, env_updater](argument_parser& parser_ref) mutable {
             auto preset = parser_ref.get<std::string>("preset");
-            if(preset.empty()) return;
+            if(preset.empty())
+            {
+                return;
+            }
             state.active_preset_name = preset;
             auto settings            = state.registry.get_settings(preset);
             if(settings)
             {
                 for(const auto& [key, val] : *settings)
+                {
                     env_updater(key, val);
+                }
             }
             else
             {
@@ -237,5 +240,4 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         });
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

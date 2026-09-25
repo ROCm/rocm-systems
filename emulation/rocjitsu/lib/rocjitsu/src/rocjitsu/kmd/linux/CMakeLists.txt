@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_kmd
+    cwsr.cpp
     events.cpp
     guest_kfd.cpp
+    legacy_gpu_vm.cpp
     libc_passthrough.cpp
     linux_kfd.cpp
     remote_driver.cpp
@@ -13,4 +15,4 @@ rj_add_object_library(rocjitsu_kmd
     transport.cpp
 )
 target_include_directories(rocjitsu_kmd PRIVATE ${GENERATED_DIR})
-target_link_libraries(rocjitsu_kmd PUBLIC ${CMAKE_DL_LIBS} PRIVATE util_headers)
+target_link_libraries(rocjitsu_kmd PUBLIC ${CMAKE_DL_LIBS} PRIVATE util)

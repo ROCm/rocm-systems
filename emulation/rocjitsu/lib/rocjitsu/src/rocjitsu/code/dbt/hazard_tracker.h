@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 
 #include <cstdint>
 #include <vector>

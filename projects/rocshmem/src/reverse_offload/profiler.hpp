@@ -52,14 +52,14 @@ typedef NullStats<RO_NUM_STATS> ROStats;
 #endif
 
 class ProfilerProxy {
-  using ProxyT = DeviceProxy<HIPAllocator, ROStats>;
+  using ProxyT = DeviceProxy<ROStats>;
 
  public:
   ProfilerProxy() = default;
 
   explicit ProfilerProxy(size_t num_blocks,
-                         [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator())
-    : proxy_{num_blocks}, num_elem_{num_blocks} {
+                         const HIPAllocator& alloc = HIPAllocator())
+    : alloc_{alloc}, proxy_{num_blocks, alloc_}, num_elem_{num_blocks} {
 
     auto *stat{proxy_.get()};
     assert(stat);
@@ -93,6 +93,7 @@ class ProfilerProxy {
   }
 
  private:
+  HIPAllocator alloc_{};
   ProxyT proxy_{};
 
   size_t num_elem_{0};

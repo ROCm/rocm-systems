@@ -44,9 +44,23 @@ public:
         Init(agent_info);
     }
     bool IsGFX12() const override { return true; }
+    bool IsGFX1250() const override { return true; }
+
+    uint32_t EncodeSpmBlockIndex(uint32_t inst_index,
+                                 uint32_t sa_index,
+                                 uint32_t wgp_index) const override
+    {
+        return gfx12_cntx_prim::encode_spm_block_index(inst_index, sa_index, wgp_index);
+    }
+    uint32_t DecodeSpmInstanceIndex(const GpuBlockInfo* block_info,
+                                    uint32_t            block_index) const override
+    {
+        return gfx12_cntx_prim::decode_spm_instance_index(block_info, block_index);
+    }
 
     virtual int GetAccumLowID() const override { return 1; };
     virtual int GetAccumHiID() const override { return 1; };
+    virtual int GetSQGAccumID() const override { return 13; };
 
 protected:
     void ConstructBuilders(const AgentInfo* agent_info);
@@ -123,6 +137,7 @@ Mi450Factory::ConstructTable(const AgentInfo* agent_info)
     block_table_[__BLOCK_ID_HSA(GL1C)] = &Gl1cCounterBlockInfo;
     block_table_[__BLOCK_ID(GRBMH)]    = &GrbmhCounterBlockInfo;
     block_table_[__BLOCK_ID_HSA(SPI)]  = &SpiCounterBlockInfo;
+    block_table_[__BLOCK_ID(SP)]       = &SpCounterBlockInfo;
     block_table_[__BLOCK_ID(SQG)]      = &SqgCounterBlockInfo;
     block_table_[__BLOCK_ID(GC_UTCL1)] = &GcUtcl1CounterBlockInfo;
     // SA blocks

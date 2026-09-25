@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "mutual_exclusion.h"
 
 #include <gtest/gtest.h>
@@ -375,8 +357,9 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_vendor", "0", VERB(STANDARD));
-    ret = amdsmi_get_gpu_vram_vendor(processor_handles_[0], dmy_str, 10);
+    amdsmi_vram_info_t vram_info;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_vram_info", "0", VERB(STANDARD));
+    ret = amdsmi_get_gpu_vram_info(processor_handles_[0], &vram_info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
@@ -488,7 +471,7 @@ void TestMutualExclusion::Run(void) {
     amdsmi_dev_firmware_version_get
     amdsmi_dev_name_get
     amdsmi_dev_brand_get
-    amdsmi_get_gpu_vram_vendor
+    amdsmi_get_gpu_vram_info
     amdsmi_get_gpu_subsystem_name
     amdsmi_get_gpu_vendor_name
     amdsmi_get_gpu_pci_bandwidth

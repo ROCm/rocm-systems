@@ -8,6 +8,7 @@
 #error "multikernel_indirect_branch_test.cpp requires HAS_DEVICE_KERNELS"
 #endif
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -47,7 +48,7 @@ size_t count_text_mnemonic(const rocjitsu::AmdGpuCodeObject &co, rj_code_arch_t 
     size_t word_offset = 0;
     while (word_offset < word_count) {
       std::unique_ptr<rocjitsu::Instruction> inst(
-          decoder->decode(words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
+          decode_valid(*decoder, words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
       if (!inst) {
         ++word_offset;
         continue;
@@ -177,7 +178,7 @@ cfg_block_counts_by_kernel(const rocjitsu::AmdGpuCodeObject &co,
     return counts;
 
   auto blocks =
-      rocjitsu::BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
+      rocjitsu::build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
 
   for (const char *name : kernel_names) {
     const auto *kernel = kernel_translation_by_name(source_kernels, co, name);
@@ -283,7 +284,7 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   auto blocks =
-      rocjitsu::BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries);
+      rocjitsu::build_valid_blocks(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries);
   ASSERT_FALSE(blocks.empty());
 
   size_t recovered_swappc_blocks = 0;
@@ -323,13 +324,20 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   }
 
   std::ranges::sort(direct_scall_offsets);
-  // These are the three RJ_STATIC_SCALL_ISLAND sites in the checked-in
-  // fixture. Each target jumps to the join instead of returning, so its
-  // syntactic s_branch continuation is dead.
-  const std::vector<uint64_t> expected_direct_scall_offsets{0xbacu, 0xbdcu, 0xc10u};
+  // The fixture is compiled from multikernel_indirect_branch.hip at build time,
+  // so absolute text offsets move with the ROCm compiler and cannot be pinned
+  // to literals. What the CFG owes us is that every s_call_b64 the decoder
+  // finds in .text -- the three RJ_STATIC_SCALL_ISLAND sites -- came back as a
+  // direct-call terminator, each already checked above to be a tail transfer
+  // whose syntactic s_branch continuation is dead.
+  const size_t source_call = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64");
+  EXPECT_GE(source_call, 3u) << "fixture should carry the RJ_STATIC_SCALL_ISLAND sites";
   EXPECT_GE(recovered_swappc_blocks, 6u);
   EXPECT_GE(recovered_setpc_blocks, 3u);
-  EXPECT_EQ(direct_scall_offsets, expected_direct_scall_offsets);
+  EXPECT_EQ(direct_scall_offsets.size(), source_call)
+      << "every s_call_b64 in .text must terminate a block the CFG classified as a direct call";
+  EXPECT_TRUE(std::ranges::adjacent_find(direct_scall_offsets) == direct_scall_offsets.end())
+      << "each call site must be reported once";
 }
 
 TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel) {
@@ -360,7 +368,7 @@ TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel)
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   auto blocks =
-      rocjitsu::BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
+      rocjitsu::build_valid_blocks(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
   ASSERT_FALSE(blocks.empty());
 
   struct ExpectedKernelCfg {

@@ -1,17 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/plugins/plugin_abi.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 
 #include <cstdio>
 #include <cstdlib>
 
 #ifndef PLUGIN_FIXTURE_NAME
 #error "PLUGIN_FIXTURE_NAME must be defined"
-#endif
-
-#ifndef PLUGIN_FIXTURE_ABI
-#define PLUGIN_FIXTURE_ABI ::rocjitsu::kPluginAbiVersion
 #endif
 
 namespace {
@@ -31,7 +27,10 @@ public:
   BoundaryPlugin() : ExecutionPlugin("boundary") { trace("create"); }
   ~BoundaryPlugin() override { trace("destroy"); }
 
-  void onInit() override { sink().write("boundary:init\n"); }
+  void onInit() override {
+    trace("init");
+    sink().write("boundary:init\n");
+  }
 };
 
 __attribute__((destructor)) void on_unload() { trace("unload"); }
@@ -39,8 +38,8 @@ __attribute__((destructor)) void on_unload() { trace("unload"); }
 } // namespace
 
 extern "C" ROCJITSU_PLUGIN_EXPORT const rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() {
-  static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_ABI, PLUGIN_FIXTURE_NAME,
-                                                 "rocjitsu-tests", "1", "{}"};
+  trace("metadata");
+  static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_NAME, "{}"};
   return &metadata;
 }
 

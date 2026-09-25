@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
+from utils import csv_compression, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -454,7 +455,9 @@ def process_ml_api_trace_output(
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
+        Path(workload_dir).glob(
+            f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
+        )
     )
     counter_collection_csvs = [
         markers_file.parent
@@ -582,16 +585,20 @@ def process_ml_api_trace_output(
     return consolidated_df, ml_api_trace_path
 
 
-def is_workload_empty(path: str) -> None:
-    """Peek workload directory to verify valid profiling output"""
+def validate_workload(path: str) -> None:
+    """Validate workload directory contains readable, non-empty profiling output."""
     workload_dir = Path(path)
-    pmc_perf_path = workload_dir / "pmc_perf.csv"
+    pmc_perf_path = csv_compression.compressed_name(
+        workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    )
 
     # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
-        files_to_check = list(workload_dir.glob("results_*.csv"))
+        files_to_check = sorted(
+            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        )
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")
@@ -599,7 +606,24 @@ def is_workload_empty(path: str) -> None:
 
     # Validate files are not empty
     for file_path in files_to_check:
-        temp_df = pd.read_csv(file_path)
+        try:
+            # read_csv infers gzip from the .gz suffix.
+            temp_df = pd.read_csv(file_path)
+        except pd.errors.EmptyDataError:
+            console_error(
+                "profiling",
+                f"No counter data in {file_path}.\nProfiling data could be corrupt.",
+            )
+            return
+        except csv_compression.CORRUPT_CSV_ERRORS as e:
+            console_error(
+                "profiling",
+                f"Could not read {file_path}: {e}\n"
+                "The file is truncated or corrupt, which a profile run that was "
+                "killed mid-write leaves behind.\n"
+                "Please re-run 'rocprof-compute profile'.",
+            )
+            return
         if temp_df.dropna().empty:
             console_error(
                 "profiling",
@@ -786,7 +810,7 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.
     df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
     # Reset dispatch IDs
-    df["Dispatch_ID"] = range(len(df))
+    df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
 
 

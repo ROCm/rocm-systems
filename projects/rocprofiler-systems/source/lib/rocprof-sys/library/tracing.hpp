@@ -46,9 +46,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using interval_data_instances = thread_data<std::vector<bool>>;
 using hash_value_t            = core::perfetto::hash_value_t;
@@ -76,7 +74,6 @@ using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
 //
 extern ROCPROFSYS_HIDDEN_API bool debug_push;
 extern ROCPROFSYS_HIDDEN_API bool debug_pop;
-extern ROCPROFSYS_HIDDEN_API bool debug_user;
 extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
 void
@@ -229,7 +226,10 @@ inline void
 push_timemory(CategoryT, std::string_view name, Args&&... args)
 {
     // skip if category is disabled
-    if(category_push_disabled<CategoryT>()) return;
+    if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
 
     auto& _data = tracing::get_instrumentation_bundles();
     if(ROCPROFSYS_LIKELY(_data != nullptr))
@@ -248,7 +248,10 @@ get_timemory(CategoryT, std::string_view name)
 {
     using return_type = std::pair<instrumentation_bundle_t*, size_t>;
     // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>()) return return_type{ nullptr, -1 };
+    if(profile_pop_disabled<CategoryT>())
+    {
+        return return_type{ nullptr, -1 };
+    }
 
     auto  _hash = tim::hash::get_hash_id(name);
     auto& _data = tracing::get_instrumentation_bundles();
@@ -285,7 +288,10 @@ stop_timemory(CategoryT, std::string_view name, Args&&... args)
     using return_type = std::pair<instrumentation_bundle_t*, size_t>;
 
     // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>()) return return_type{ nullptr, -1 };
+    if(profile_pop_disabled<CategoryT>())
+    {
+        return return_type{ nullptr, -1 };
+    }
 
     auto&& _data = get_timemory(CategoryT{}, name);
     if(_data.first)
@@ -302,7 +308,9 @@ destroy_timemory(std::pair<instrumentation_bundle_t*, size_t> _data)
     {
         auto& _bundles = tracing::get_instrumentation_bundles();
         if(ROCPROFSYS_LIKELY(_bundles != nullptr))
+        {
             _bundles->destroy(_data.first, _data.second);
+        }
     }
 }
 
@@ -311,10 +319,16 @@ inline void
 pop_timemory(CategoryT, std::string_view name, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>()) return;
+    if(profile_pop_disabled<CategoryT>())
+    {
+        return;
+    }
 
     auto _data = stop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
-    if(_data.first) destroy_timemory(std::move(_data));
+    if(_data.first)
+    {
+        destroy_timemory(std::move(_data));
+    }
 }
 
 template <typename CategoryT, typename... Args>
@@ -322,7 +336,10 @@ inline void
 push_perfetto(CategoryT, const char* name, Args&&... args)
 {
     // skip if category is disabled
-    if(category_push_disabled<CategoryT>()) return;
+    if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
 
     if constexpr(sizeof...(Args) == 1 &&
                  std::is_invocable<Args..., ::perfetto::EventContext>::value)
@@ -406,7 +423,10 @@ inline void
 pop_perfetto(CategoryT, const char* name, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
-    if(tracing_pop_disabled<CategoryT>()) return;
+    if(tracing_pop_disabled<CategoryT>())
+    {
+        return;
+    }
 
     if constexpr(sizeof...(Args) == 1 &&
                  std::is_invocable<Args..., ::perfetto::EventContext>::value)
@@ -466,7 +486,10 @@ inline void
 push_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
-    if(category_push_disabled<CategoryT>()) return;
+    if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
 
     ++get_tracing_stack<CategoryT>();
     TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, get_perfetto_string(name), _ts,
@@ -478,7 +501,10 @@ inline void
 pop_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
-    if(tracing_pop_disabled<CategoryT>()) return;
+    if(tracing_pop_disabled<CategoryT>())
+    {
+        return;
+    }
 
     // decrement tracing stack
     --get_tracing_stack<CategoryT>();
@@ -494,7 +520,10 @@ push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
                     std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
-    if(category_push_disabled<CategoryT>()) return;
+    if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
 
     ++get_tracing_stack<CategoryT>();
     core::perfetto::push_perfetto_track(CategoryT{}, name, _track, _ts,
@@ -507,7 +536,10 @@ pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
                    std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
-    if(tracing_pop_disabled<CategoryT>()) return;
+    if(tracing_pop_disabled<CategoryT>())
+    {
+        return;
+    }
 
     // decrement tracing stack
     --get_tracing_stack<CategoryT>();
@@ -522,7 +554,10 @@ inline void
 mark_perfetto(CategoryT, const char* name, Args&&... args)
 {
     // skip if category is disabled
-    if(category_mark_disabled<CategoryT>()) return;
+    if(category_mark_disabled<CategoryT>())
+    {
+        return;
+    }
 
     if constexpr(sizeof...(Args) == 1 &&
                  std::is_invocable<Args..., ::perfetto::EventContext>::value)
@@ -574,7 +609,10 @@ inline void
 mark_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
-    if(category_mark_disabled<CategoryT>()) return;
+    if(category_mark_disabled<CategoryT>())
+    {
+        return;
+    }
 
     TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, get_perfetto_string(name), _ts,
                         std::forward<Args>(args)...);
@@ -586,7 +624,10 @@ mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
                     std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
-    if(category_mark_disabled<CategoryT>()) return;
+    if(category_mark_disabled<CategoryT>())
+    {
+        return;
+    }
 
     TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, get_perfetto_string(name), _track,
                         _ts, std::forward<Args>(args)...);
@@ -628,5 +669,4 @@ get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
     }
     return (_diff / _n);
 }
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing

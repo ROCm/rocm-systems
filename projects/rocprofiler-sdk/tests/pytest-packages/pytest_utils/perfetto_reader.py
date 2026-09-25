@@ -123,6 +123,28 @@ class PerfettoReader:
         self.max_depth = None
         self.configure(**kwargs)
 
+    def close(self):
+        """Stop all trace-processor subprocesses owned by this reader."""
+        trace_processors = self.trace_processor
+        self.trace_processor = []
+
+        first_error = None
+        for trace_processor in trace_processors:
+            try:
+                trace_processor.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+
+        if first_error is not None:
+            raise first_error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
     def configure(self, **kwargs):
 
         # pre-compile the regex patterns for extracting the func, file, and line info
@@ -349,10 +371,10 @@ class PerfettoReader:
                      counter_track.name as track_name,
                      ROW_NUMBER() OVER window AS rn
                   FROM counter JOIN counter_track ON counter.track_id = counter_track.id
-                  WHERE counter_track.name LIKE '%SCRATCH MEMORY%' 
+                  WHERE counter_track.name LIKE '%SCRATCH MEMORY%'
                   WINDOW window AS (PARTITION BY counter.value, track_id ORDER BY counter.ts)
             )
-            SELECT 
+            SELECT
                slice_id,
                track_id,
                'scratch_memory' as category,

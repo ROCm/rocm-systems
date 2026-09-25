@@ -88,6 +88,9 @@ std::string cuMemReason() {
   const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
   if (!cumem || std::strcmp(cumem, "1") != 0)
     return "Symmetric memory required (NCCL_CUMEM_ENABLE=1)";
+  extern int ncclCuMemRuntimeSupported();
+  if (!ncclCuMemRuntimeSupported())
+    return "Symmetric memory not supported on this platform (cuMem requires kernel dma-buf/P2PDMA support)";
   return "";
 }
 
@@ -135,9 +138,10 @@ int localRankOf(MPI_Comm world) {
  * ==================================================================== */
 
 /* [C1] GIN-only rail barrier: Init once, then Sync `iters` times. Each Sync
- * sends a SignalInc to the peer and waits for the local cell to reach the new
- * epoch, so completion after many rounds proves both ranks stayed in lockstep
- * (a broken epoch would deadlock at iter 1). barrierIndex 0 < railGinBarrierCount. */
+ * bumps cell (base + myRank) on every peer and waits on its own (base + peer)
+ * cell to reach the incremented shadow value, so completion after many rounds
+ * proves both ranks stayed in lockstep (broken shadow bookkeeping would
+ * deadlock at iter 1). barrierIndex 0 < railGinBarrierCount. */
 __global__ void k_ir_gin_barrier(int iters, struct ncclDevComm devComm) {
   /* ncclGin_C / the *_C session structs have no default ctor: the net is
    * constructed via its parameterized ctor, and the session is left as raw

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "ualoe_cb.h"
 
@@ -35,12 +16,16 @@
 #include <sys/queue.h>
 #include <unistd.h>
 
+#include "ualoe_cdev.h"
 #include "ualoe_log.h"
+
+#define UALOE_CB_NL_RCVBUF_SIZE (1024 * 1024)
 
 struct cfg_cb_ctx {
   struct nl_sock* sk;
   ualoe_event_callback_t callback;
   ualoe_handle_t handle;
+  ualoe_handle_t cdev_fd;
   int dev_id;
   void* user_context;
   uint32_t seq;
@@ -55,7 +40,8 @@ LIST_HEAD(cb_threads, cfg_cb_ctx);
 static struct cb_threads registered_cbs = LIST_HEAD_INITIALIZER(cb_threads);
 static pthread_mutex_t cb_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static const struct nla_policy cfg_timestamp_policy[] = {
+/* non-const: older libnl3 (e.g. Debian 10) omits const on nla_parse_nested() policy arg */
+static struct nla_policy cfg_timestamp_policy[] = {
     [CFG_EVT_ATTR_TS_SECS] = {.type = NLA_U64},
     [CFG_EVT_ATTR_TS_NSECS] = {.type = NLA_U64},
 };
@@ -93,6 +79,12 @@ static struct nla_policy cfg_netport_link_event_policy[] = {
     [CFG_EVT_ATTR_LOGICAL_IDX] = {.type = NLA_U32},
     [CFG_EVT_ATTR_LINK_DOWN] = {.type = NLA_U8},
     [CFG_EVT_ATTR_DEV_ID] = {.type = NLA_S32},
+};
+
+static struct nla_policy cfg_telemetry_ready_event_policy[] = {
+    [CFG_EVT_ATTR_TS] = {.type = NLA_NESTED},
+    [CFG_EVT_ATTR_DEV_ID] = {.type = NLA_S32},
+    [CFG_EVT_ATTR_GEN_COUNT] = {.type = NLA_U64},
 };
 
 static int ualoe_cb_parse_ts(struct nlattr* attr, struct timespec* ts) {
@@ -316,6 +308,46 @@ static int ualoe_cb_process_netport_link_event(struct nl_msg* msg, void* arg) {
   return NL_OK;
 }
 
+static int ualoe_cb_process_telemetry_ready_event(struct nl_msg* msg, void* arg) {
+  struct nlattr* attrs[CFG_EVT_ATTR_MAX + 1];
+  struct nlmsghdr* nlh = nlmsg_hdr(msg);
+  struct genlmsghdr* genlh = nlmsg_data(nlh);
+  struct cfg_cb_ctx* cb_ctx = arg;
+  ualoe_event_t event;
+  int dev_id, rc;
+
+  rc = nla_parse(attrs, CFG_EVT_ATTR_MAX, genlmsg_attrdata(genlh, 0), genlmsg_attrlen(genlh, 0),
+                 cfg_telemetry_ready_event_policy);
+  if (rc) return NL_OK;
+
+  if (!attrs[CFG_EVT_ATTR_DEV_ID]) {
+    ualoe_log_error("No DEV_ID attribute found in telemetry ready event\n");
+    return NL_OK;
+  }
+
+  dev_id = nla_get_s32(attrs[CFG_EVT_ATTR_DEV_ID]);
+  if (dev_id != cb_ctx->dev_id) {
+    return NL_OK;
+  }
+
+  if (!ualoe_cdev_is_telem_allocated(cb_ctx->cdev_fd)) return NL_OK;
+
+  if (!attrs[CFG_EVT_ATTR_TS] || !attrs[CFG_EVT_ATTR_GEN_COUNT]) {
+    ualoe_log_error("Missing attribute in telemetry ready event\n");
+    return NL_OK;
+  }
+
+  event.id = UALOE_EVENT_TELEMETRY_READY;
+
+  rc = ualoe_cb_parse_ts(attrs[CFG_EVT_ATTR_TS], &event.timestamp);
+  if (rc) return NL_OK;
+
+  event.u.telemetry_ready.generation_count = nla_get_u64(attrs[CFG_EVT_ATTR_GEN_COUNT]);
+
+  if (cb_ctx->callback) cb_ctx->callback(cb_ctx->user_context, cb_ctx->handle, event);
+  return NL_OK;
+}
+
 static int ualoe_cb_process_event(struct nl_msg* msg, void* arg) {
   struct nlmsghdr* nlh = nlmsg_hdr(msg);
   struct genlmsghdr* genlh = nlmsg_data(nlh);
@@ -327,16 +359,21 @@ static int ualoe_cb_process_event(struct nl_msg* msg, void* arg) {
       return ualoe_cb_process_ifoe_link_event(msg, arg);
     case CFG_EVT_CMD_NETPORT_LINK_EVENT:
       return ualoe_cb_process_netport_link_event(msg, arg);
+    case CFG_EVT_CMD_TELEMETRY_READY_EVENT:
+      return ualoe_cb_process_telemetry_ready_event(msg, arg);
     default:
-      ualoe_log_error("Unknown cmd in event message: %d\n", genlh->cmd);
       return NL_SKIP;
   }
 }
+
+#define EVENT_POLLER_BACKOFF_INIT_MS 10
+#define EVENT_POLLER_BACKOFF_MAX_MS 1000
 
 static void* ualoe_cb_event_poller(void* arg) {
   /* Callers must never hold cb_lock */
   struct cfg_cb_ctx* cb_ctx = arg;
   struct pollfd fds[2];
+  int backoff_ms = 0;
   int rc;
 
   fds[0].fd = nl_socket_get_fd(cb_ctx->sk);
@@ -359,8 +396,24 @@ static void* ualoe_cb_event_poller(void* arg) {
       rc = nl_recvmsgs_default(cb_ctx->sk);
       if (rc < 0) {
         ualoe_log_error("nl_recvmsgs_default failed: %d\n", rc);
-        break;
+        /*
+         * Transient errors (e.g. NLE_NOMEM during event
+         * bursts) should not kill the poller -- the socket
+         * is still valid, so keep polling.  Use exponential
+         * backoff to avoid spinning if the error persists.
+         */
+        if (backoff_ms == 0)
+          backoff_ms = EVENT_POLLER_BACKOFF_INIT_MS;
+        else if (backoff_ms < EVENT_POLLER_BACKOFF_MAX_MS)
+          backoff_ms *= 2;
+
+        /* Sleep but remain responsive to shutdown */
+        rc = poll(&fds[1], 1, backoff_ms);
+        if (rc > 0 && (fds[1].revents & POLLIN)) break;
+        continue;
       }
+      /* Successful receive -- reset backoff */
+      backoff_ms = 0;
     }
   }
 
@@ -368,20 +421,22 @@ static void* ualoe_cb_event_poller(void* arg) {
 }
 
 static void ualoe_cb_ctx_init(struct cfg_cb_ctx* cb_ctx, ualoe_handle_t handle, int dev_id,
-                              ualoe_event_callback_t callback, void* user_context) {
+                              ualoe_handle_t cdev_fd, ualoe_event_callback_t callback,
+                              void* user_context) {
   cb_ctx->seq = 0;
   cb_ctx->family_id = 0;
   cb_ctx->mcast_grp = 0;
   cb_ctx->dev_id = dev_id;
   cb_ctx->callback = callback;
   cb_ctx->handle = handle;
+  cb_ctx->cdev_fd = cdev_fd;
   cb_ctx->user_context = user_context;
   cb_ctx->tid = 0;
   cb_ctx->shutdown_fd = -1;
 }
 
-int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_event_callback_t callback,
-                  void* user_context) {
+int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_handle_t cdev_fd,
+                  ualoe_event_callback_t callback, void* user_context) {
   struct cfg_cb_ctx *cb_ctx, *iter;
   pthread_t tid;
   int rc;
@@ -389,7 +444,7 @@ int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_event_callback_t call
   cb_ctx = malloc(sizeof(*cb_ctx));
   if (!cb_ctx) return ENOMEM;
 
-  ualoe_cb_ctx_init(cb_ctx, handle, dev_id, callback, user_context);
+  ualoe_cb_ctx_init(cb_ctx, handle, dev_id, cdev_fd, callback, user_context);
 
   cb_ctx->shutdown_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (cb_ctx->shutdown_fd < 0) {
@@ -408,6 +463,10 @@ int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_event_callback_t call
     rc = -rc;
     goto free_nl_sock;
   }
+
+  /* Increase receive buffer to avoid drops during event bursts */
+  rc = nl_socket_set_buffer_size(cb_ctx->sk, UALOE_CB_NL_RCVBUF_SIZE, 0);
+  if (rc < 0) ualoe_log_error("Failed to set NL rx buffer size: %d\n", rc);
 
   cb_ctx->family_id = genl_ctrl_resolve(cb_ctx->sk, CFG_FAMILY_NAME);
   if (cb_ctx->family_id < 0) {
@@ -485,10 +544,10 @@ static void ualoe_cb_unreg(struct cfg_cb_ctx* cb_ctx) {
     ualoe_log_error("Failed to write to shutdown eventfd: %d\n", errno);
 
   rc = pthread_join(cb_ctx->tid, &res);
-  if (rc) ualoe_log_error("Failed to join cb thread rc=%d\n", rc);
-
-  if (res != PTHREAD_CANCELED)
-    ualoe_log_error("Handle %d's cb thread not canceled\n", cb_ctx->handle);
+  if (rc)
+    ualoe_log_error("Failed to join cb thread rc=%d\n", rc);
+  else if (res != NULL)
+    ualoe_log_error("Handle %d's cb thread exited abnormally\n", cb_ctx->handle);
 
   LIST_REMOVE(cb_ctx, lentry);
   nl_close(cb_ctx->sk);

@@ -26,6 +26,7 @@
 #include "ualoe_lib.h"
 
 void ualoe_cb_fini(ualoe_handle_t handle);
-int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_event_callback_t cb, void* user_ctx);
+int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_handle_t cdev_fd,
+                  ualoe_event_callback_t cb, void* user_ctx);
 
 #endif /* UALOE_CB_H */

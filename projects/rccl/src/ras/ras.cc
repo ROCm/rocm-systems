@@ -13,15 +13,21 @@
 #include "alloc.h"
 #include "checks.h"
 #include "comm.h"
+#include "diagnostics_log.h"
+#include "diagnostics.h"
 #include "nccl.h"
+#include "param/param.h"
+#include "profiler.h"
 #include "utils.h"
 #include "ras_internal.h"
 #include "os.h"
+#include "os_socket_pair.h"
 
 // Type of a notification from a local NCCL thread.
 typedef enum {
   RAS_ADD_RANKS = 0,
-  RAS_TERMINATE = 1
+  RAS_TERMINATE = 1,
+  RAS_RUN_DIAG = 2
 } rasNotificationType;
 
 // Used for communication from local NCCL threads to the RAS thread.
@@ -32,6 +38,9 @@ struct rasNotification {
       struct rasRankInit* ranks;
       int nranks;
     } addRanks;
+    struct {
+      struct rasDiagnosticsContext ctx;
+    } runDiag;
   };
 };
 static_assert(sizeof(struct rasNotification) <= PIPE_BUF, "The rasNotification structure is too large");
@@ -48,7 +57,7 @@ static std::thread rasThread;
 
 // Used for communication from regular NCCL threads to the RAS thread.
 static std::mutex rasNotificationMutex;
-static int rasNotificationPipe[2] = {-1, -1};
+static ncclSocketPairDescriptor rasNotificationPipe[2] = {NCCL_SOCKET_PAIR_INVALID, NCCL_SOCKET_PAIR_INVALID};
 
 // Data for the main poll() in the RAS thread.
 struct pollfd* rasPfds;
@@ -76,7 +85,8 @@ static void* rasThreadMain(void*);
 
 static void rasTerminate();
 
-NCCL_PARAM(RasTimeoutFactor, "RAS_TIMEOUT_FACTOR", 1);
+// enable to run passive RAS diagnostics
+NCCL_PARAM(RasDiagnostics, "RUN_RAS_DIAGNOSTICS", 0);
 
 //////////////////////////////////////////////////
 // Functions invoked from regular NCCL threads. //
@@ -95,7 +105,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 
       memcpy(&addr, &myRank->addr, sizeof(addr));
       (addr.sa.sa_family == AF_INET ? addr.sin.sin_port : addr.sin6.sin6_port) = htons(0);
-      NCCLCHECKGOTO(ncclSocketInit(&rasNetListeningSocket, &addr, NCCL_SOCKET_MAGIC, ncclSocketTypeRasNetwork,
+      NCCLCHECKGOTO(ncclSocketInit(&rasNetListeningSocket, &addr, ncclSocketDefaultMagic(), ncclSocketTypeRasNetwork,
                                    /*abortFlag*/ nullptr, /*asyncFlag*/ 1),
                     ret, fail);
       NCCLCHECKGOTO(ncclSocketListen(&rasNetListeningSocket), ret, fail);
@@ -103,7 +113,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 
       (void)rasClientInitSocket();
 
-      SYSCHECKGOTO(pipe(rasNotificationPipe), "pipe", ret, fail);
+      NCCLCHECKGOTO(ncclOsSocketPairCreate(rasNotificationPipe), ret, fail);
 
       rasThread = std::thread(rasThreadMain, nullptr);
       ncclSetThreadName(rasThread, "NCCL RAS");
@@ -135,8 +145,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 exit:
   return ret;
 fail:
-  if (rasNotificationPipe[1] != 0) (void)close(rasNotificationPipe[1]);
-  if (rasNotificationPipe[0] != 0) (void)close(rasNotificationPipe[0]);
+  (void)ncclOsSocketPairClose(rasNotificationPipe);
   (void)close(rasClientListeningSocket);
   (void)ncclSocketClose(&rasNetListeningSocket);
   goto exit;
@@ -181,6 +190,28 @@ ncclResult_t ncclRasAddRanks(struct rasRankInit* ranks, int nranks) {
   return ncclSuccess;
 }
 
+// Requests the RAS thread to run RAS diagnostics for this communicator.
+ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) {
+  struct rasNotification msg;
+  ncclResult_t ret = ncclSuccess;
+
+  memset(&msg, '\0', sizeof(msg));
+  msg.type = RAS_RUN_DIAG;
+  ret = rasDiagnosticsContextInit(&msg.runDiag.ctx, comm);
+  if (ret == ncclSuccess) {
+    if (comm != nullptr && comm->rank == 0) DIAG_PRINT("NCCL DIAG === RAS Diagnostics ===");
+    ret = rasLocalNotify(&msg);
+  }
+  if (ret != ncclSuccess) {
+    if (comm != nullptr) {
+      INFO(NCCL_RAS, "RAS diagnostics trigger returned %d for comm 0x%lx", ret, comm->commHash);
+    } else {
+      INFO(NCCL_RAS, "RAS diagnostics trigger returned %d", ret);
+    }
+  }
+  return ret;
+}
+
 // Internal function running on regular NCCL threads -- asynchronously notifies the RAS thread.
 static ncclResult_t rasLocalNotify(const struct rasNotification* msg) {
   if (!rasInitialized) return ncclSuccess;
@@ -190,8 +221,8 @@ static ncclResult_t rasLocalNotify(const struct rasNotification* msg) {
   std::lock_guard<std::mutex> lock(rasNotificationMutex);
   size_t done = 0;
   while (done < sizeof(*msg)) {
-    ssize_t written;
-    SYSCHECK(written = write(rasNotificationPipe[1], (char*)msg + done, sizeof(*msg) - done), "write");
+    size_t written;
+    NCCLCHECK(ncclOsSocketPairWrite(rasNotificationPipe[1], (char*)msg + done, sizeof(*msg) - done, &written));
     done += written;
   }
   return ncclSuccess;
@@ -207,16 +238,21 @@ static ncclResult_t rasLocalHandle(bool* terminate) {
 
   size_t done = 0;
   while (done < sizeof(msg)) {
-    ssize_t nread;
-    SYSCHECK(nread = read(rasNotificationPipe[0], (char*)&msg + done, sizeof(msg) - done), "read");
-    if (nread == 0) // EOF
+    size_t nread;
+    NCCLCHECK(ncclOsSocketPairRead(rasNotificationPipe[0], (char*)&msg + done, sizeof(msg) - done, &nread));
+    if (nread == 0) {
+      // EOF
       return ncclSystemError;
+    }
     done += nread;
   }
 
   if (msg.type == RAS_ADD_RANKS) {
     (void)rasLocalHandleAddRanks(msg.addRanks.ranks, msg.addRanks.nranks);
     // Not great if the above fails, but it shouldn't be critical; better to keep going.
+  } else if (msg.type == RAS_RUN_DIAG) {
+    ncclResult_t ret = rasLocalHandleRunDiag(&msg.runDiag.ctx);
+    if (ret != ncclSuccess) INFO(NCCL_RAS, "RAS diagnostics returned %d", ret);
   } else if (msg.type == RAS_TERMINATE) {
     INFO(NCCL_RAS, "RAS handling local termination request");
     *terminate = true;
@@ -237,10 +273,8 @@ static void rasThreadCleanup() {
 
   {
     std::lock_guard<std::mutex> lock(rasInitMutex);
-    (void)close(rasNotificationPipe[1]);
-    (void)close(rasNotificationPipe[0]);
+    (void)ncclOsSocketPairClose(rasNotificationPipe);
     // rasClientListeningSocket is taken care of by rasClientSupportTerminate().
-    rasNotificationPipe[0] = rasNotificationPipe[1] = -1;
     (void)ncclSocketClose(&rasNetListeningSocket);
     rasInitRefCount = 0;
     rasInitialized = false;
@@ -267,9 +301,10 @@ static void rasThreadCleanup() {
 // Behind the scenes allocates encapsulating rasMsgMeta structure, which includes local metadata stored in front
 // of the message.
 // Must use rasMsgFree to free.
+// ncclCallocQuiet is limited to rasMsgAlloc/rasMsgRecv: routine and keep-alive traffic otherwise floods ALLOC_HOST.
 ncclResult_t rasMsgAlloc(struct rasMsg** msg, size_t msgLen) {
   struct rasMsgMeta* meta = nullptr;
-  NCCLCHECK(ncclCalloc((char**)&meta, offsetof(struct rasMsgMeta, msg) + msgLen));
+  NCCLCHECK(ncclCallocQuiet((char**)&meta, offsetof(struct rasMsgMeta, msg) + msgLen));
   *msg = &meta->msg;
   // coverity[leaked_storage:FALSE] => rasMsgFree is used to free it
   return ncclSuccess;
@@ -310,7 +345,7 @@ void rasConnEnqueueMsg(struct rasConnection* conn, struct rasMsg* msg, size_t ms
          "RAS enqueued message type %d on a non-ready connection with %s "
          "(experiencingDelays %d, startRetryTime %.2fs, socket status %d)",
          msg->type, ncclSocketToString(&conn->addr, rasLine), conn->experiencingDelays,
-         (conn->startRetryTime ? (clockNano() - conn->startRetryTime) / 1e9 : 0.0),
+         (conn->startRetryTime ? (double)(clockNano() - conn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0),
          (conn->sock ? conn->sock->status : -1));
   }
 }
@@ -354,7 +389,7 @@ ncclResult_t rasMsgRecv(struct rasSocket* sock, struct rasMsg** msg, int* closed
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, &sock->recvLength, sizeof(sock->recvLength),
                                  &sock->recvOffset, closed));
     if (*closed || sock->recvOffset < sizeof(sock->recvLength)) return ncclSuccess;
-    NCCLCHECK(ncclCalloc((char**)&sock->recvMsg, sock->recvLength));
+    NCCLCHECK(ncclCallocQuiet((char**)&sock->recvMsg, sock->recvLength));
   }
   // Receive the body of the message.
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, ((char*)sock->recvMsg) - sizeof(sock->recvLength),
@@ -436,11 +471,11 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
     INFO(NCCL_RAS,
          "RAS found a matching existing connection (sendQ %sempty, experiencingDelays %d, startRetryTime %.2fs)",
          (ncclIntruQueueEmpty(&conn->sendQ) ? "" : "not "), conn->experiencingDelays,
-         (conn->startRetryTime ? (clockNano() - conn->startRetryTime) / 1e9 : 0.0));
+         (conn->startRetryTime ? (double)(clockNano() - conn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0));
 
     if (conn->sock) {
       INFO(NCCL_RAS, "RAS found an alternative existing socket (status %d, createTime %.2fs)", conn->sock->status,
-           (clockNano() - conn->sock->createTime) / 1e9);
+           (double)(clockNano() - conn->sock->createTime) / CLOCK_UNITS_PER_SEC);
       // In general we prefer to keep the newer connection, but "newer" can be a relative term: we may have
       // a race where both sides attempt to establish a connection at roughly the same time, so the other side's
       // incoming connection ends up looking newer than the locally-initiated one -- for *both* of them.
@@ -458,7 +493,8 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
         rasSocketTerminate(conn->sock);
       }
     }
-  } else { // conn == nullptr
+  } else {
+    // conn == nullptr
     NCCLCHECK(getNewConnEntry(&conn));
     memcpy(&conn->addr, &msg->connInit.listeningAddr, sizeof(conn->addr));
   }
@@ -546,6 +582,16 @@ void rasMsgHandleBCDeadPeer(struct rasCollRequest** pReq, size_t* pReqLen, bool*
   }
 }
 
+// Handles the profilerMask broadcast.
+void rasMsgHandleBCProfilerMask(struct rasCollRequest** pReq, size_t* pReqLen, bool* pDone) {
+  INFO(NCCL_RAS, "RAS handling profilerMask (mask 0x%x)", (*pReq)->profilerMask.eventMask);
+  *pReqLen = rasCollDataLength(RAS_BC_PROFILER_MASK);
+  ncclProfilerSetRasOverride((*pReq)->profilerMask.eventMask);
+  // A mask value has no "already known" terminal state, so keep propagating to every peer; the
+  // rootAddr/rootId history still bounds the broadcast.
+  *pDone = false;
+}
+
 // Attempts to immediately send a fatal NACK connInitAck response to a socket.  A bit of a hack (as it doesn't
 // follow our usual message queuing and polling convention) but, since this can be invoked only for newly opened
 // connections, and the message is tiny, it should be OK.  We can't use the regular path because the socket is
@@ -599,21 +645,22 @@ static void* rasThreadMain(void*) {
 
   // Main event loop of the RAS thread.
   for (int64_t nextWakeup = 0;;) {
-    int timeout, nEvents;
+    int timeoutMs, nEvents;
     int64_t now = clockNano();
     if (nextWakeup > 0) {
       // The "1" below helps avoid round-downs and especially zeroes.
-      if (nextWakeup > now) timeout = (nextWakeup - now) / (CLOCK_UNITS_PER_SEC / 1000) + 1;
-      else timeout = 1;
+      timeoutMs = std::max(nextWakeup - now, (int64_t)0) / (CLOCK_UNITS_PER_SEC / 1000) + 1;
     } else {
-      timeout = 1000; // 1 second.
+      timeoutMs = rasTimeoutFactorSec(1) * 1000;
     }
+    timeoutMs = std::min(timeoutMs, 1000); // At most 1 actual second.
 
-    nEvents = poll(rasPfds, nRasPfds, timeout);
+    nEvents = poll(rasPfds, nRasPfds, timeoutMs);
 
-    nextWakeup = clockNano() + CLOCK_UNITS_PER_SEC;
-    if (nEvents == -1 && errno != EINTR)
+    nextWakeup = clockNano() + rasTimeoutFactorNs(1); // 1 second (possibly stretched).
+    if (nEvents == -1 && errno != EINTR) {
       INFO(NCCL_RAS, "RAS continuing in spite of an unexpected error from poll: %s", strerror(errno));
+    }
 
     // Handle any poll-related events.
     for (int pollIdx = 0; pollIdx < nRasPfds && nEvents > 0; pollIdx++) {

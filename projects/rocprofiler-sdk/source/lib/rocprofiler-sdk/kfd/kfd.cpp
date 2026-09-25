@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/defines.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/utils.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -306,7 +307,6 @@ parse_event<KFD_EVENT_PAGE_MIGRATE_END>(const agent_id_map_t& agents, std::strin
         return {};
     }
 
-    // e.operation = static_cast<rocprofiler_kfd_event_page_migrate_operation_t>(operation);
     e.operation           = ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_END;
     e.start_address.value = page_to_bytes(_start_address);
     e.end_address.value   = page_to_bytes(_start_address + _size);
@@ -1577,6 +1577,23 @@ template <size_t... Inxs>
 rocprofiler_status_t init(std::index_sequence<Inxs...>)
 {
     static const small_vector<size_t> event_ids{Inxs...};
+
+    // On platforms without a usable KFD device node (e.g. WSL2, where only
+    // /dev/dxg is exposed), report the service as unavailable instead of
+    // aborting in kfd_device_fd(). init() runs only when a KFD buffer-tracing
+    // kind was explicitly requested, so this status reaches the caller of
+    // rocprofiler_configure_buffer_tracing_service rather than handing back a
+    // service that can never produce a record. The capability probe lives at
+    // the topology level (rocprofiler::agent) so KFD tracing and counter
+    // collection share a single source of truth.
+    if(!::rocprofiler::agent::kfd_device_available())
+    {
+        ROCP_WARNING << fmt::format(
+            "KFD device {} is not available; KFD event tracing is unavailable for this run",
+            kfd::KFD_DEVICE_PATH);
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
+
     // Check if version is more than 1.11
     auto ver = kfd::get_version();
     if(ver.major_version * 1000 + ver.minor_version > 1011)
@@ -1676,6 +1693,7 @@ init()
 void
 finalize()
 {
+    shutdown_kfd_profiler();
     config::reset();
 }
 

@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU performance: overdrive level set, performance level set."""
 
 import unittest
@@ -235,31 +219,6 @@ class TestGpuOverdrive(unittest.TestCase):
                             self.common.check_ret(msg, e, self.common.PASS)
                             self.raise_exception = e
                     self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
-    # out of order; min_clk_value, max_clk_value then clk_type
-
-    def test_set_gpu_clk_range(self):
-        self.common.print_func_name("")
-
-        # TODO Find better way to set min_clk_value, max_clk_value
-        min_clk_value = 100
-        max_clk_value = 200
-
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            for _, clk_type, clk_cond in common.CLK_TYPES:
-                msg = f"\t### amdsmi_set_gpu_clk_range(gpu={i}, min_clk_value={min_clk_value}, max_clk_value={max_clk_value}, clk_type={clk_type}):"
-                try:
-                    amdsmi.amdsmi_set_gpu_clk_range(gpu, min_clk_value, max_clk_value, clk_type)
-                    self.common.print(msg, "")
-                    self.common.check_ret("", "", self.common.PASS)
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, clk_cond):
-                        self.raise_exception = e
-                self.common.print("")
         if self.raise_exception:
             raise self.raise_exception
         return

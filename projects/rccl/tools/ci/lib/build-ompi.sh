@@ -57,7 +57,7 @@ ompi_cached() {
 }
 
 do_build_ompi() {
-  : "${ROCM_PATH:?build-ompi.sh: ROCM_PATH must be set to build OpenMPI (run fetch-rocm.sh first)}"
+  : "${ROCM_PATH:?build-ompi.sh: ROCM_PATH must be set to build OpenMPI (source .ci-out/rocm.env first)}"
   if [[ ! -x "${ROCM_PATH}/bin/hipcc" ]]; then
     echo "ERROR: ROCM_PATH=${ROCM_PATH} has no bin/hipcc" >&2
     exit 1

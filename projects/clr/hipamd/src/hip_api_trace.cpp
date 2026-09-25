@@ -64,7 +64,7 @@ hipError_t hipBindTextureToArray(const textureReference* tex, hipArray_const_t a
 hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
                                           hipMipmappedArray_const_t mipmappedArray,
                                           const hipChannelFormatDesc* desc);
-hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
+hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
 hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties);
 hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
 hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
@@ -101,6 +101,7 @@ hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
 hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device);
 hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value);
 hipError_t hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limit);
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device);
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
 hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
 hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
@@ -350,6 +351,7 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
                                     const hipGraphNode_t* dependencies, size_t numDependencies,
                                     const hipMemsetParams* memsetParams, hipCtx_t ctx);
 hipError_t hipInit(unsigned int flags);
+hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags);
 hipError_t hipIpcCloseMemHandle(void* devPtr);
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event);
 hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
@@ -937,6 +939,8 @@ hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
                                    hipMemAllocationType type);
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                    hipModule_t mod);
 }  // namespace hip
 
 namespace hip {
@@ -973,7 +977,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipBindTexture2D_fn = hip::hipBindTexture2D;
   ptrDispatchTable->hipBindTextureToArray_fn = hip::hipBindTextureToArray;
   ptrDispatchTable->hipBindTextureToMipmappedArray_fn = hip::hipBindTextureToMipmappedArray;
-  ptrDispatchTable->hipChooseDevice_fn = hip::hipChooseDevice;
+  ptrDispatchTable->hipChooseDevice_fn = hip::hipChooseDeviceR0600;
   ptrDispatchTable->hipChooseDeviceR0000_fn = hip::hipChooseDeviceR0000;
   ptrDispatchTable->hipConfigureCall_fn = hip::hipConfigureCall;
   ptrDispatchTable->hipCreateSurfaceObject_fn = hip::hipCreateSurfaceObject;
@@ -1018,6 +1022,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipDeviceGetTexture1DLinearMaxWidth_fn =
       hip::hipDeviceGetTexture1DLinearMaxWidth;
   ptrDispatchTable->hipDeviceGetUuid_fn = hip::hipDeviceGetUuid;
+  ptrDispatchTable->hipDeviceGetLuid_fn = hip::hipDeviceGetLuid;
   ptrDispatchTable->hipDeviceGraphMemTrim_fn = hip::hipDeviceGraphMemTrim;
   ptrDispatchTable->hipDevicePrimaryCtxGetState_fn = hip::hipDevicePrimaryCtxGetState;
   ptrDispatchTable->hipDevicePrimaryCtxRelease_fn = hip::hipDevicePrimaryCtxRelease;
@@ -1521,6 +1526,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxSynchronize_fn = hip::hipExecutionCtxSynchronize;
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
   ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
+  ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
+  ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2256,15 +2263,21 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemDiscardAndPrefetchBatchAsync_fn, 539);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDrvMemDiscardAndPrefetchBatchAsync_fn, 540);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetLuid_fn, 542);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
+HIP_ENFORCE_ABI(HipDispatchTable, hipInitDevice_fn, 543);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
+HIP_ENFORCE_ABI(HipDispatchTable, hipModuleEnumerateFunctions_fn, 544);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 542)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 545)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 31,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 34,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

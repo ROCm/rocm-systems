@@ -5,7 +5,7 @@
 #include "common/path.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -106,7 +106,10 @@ setup_output_env(const std::string& output_path)
 void
 setup_output_format_env(const std::vector<std::string>& formats)
 {
-    if(formats.empty()) return;
+    if(formats.empty())
+    {
+        return;
+    }
 
     auto has_format = [&formats](const std::string& fmt) {
         return std::find(formats.begin(), formats.end(), fmt) != formats.end();

@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool tests for summaries
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-summary
@@ -38,6 +38,7 @@ rocprofiler_add_integration_execute_test(
         "KERNEL_DISPATCH|MEMORY_COPY" ".*_API" -- $<TARGET_FILE:transpose> 2 500 10
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}" "ARBITRARY_ENV_VARIABLE=%tag%-trace-cmd-line"
     FIXTURES_SETUP rocprofv3-test-summary-cmd-line)

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/state.hpp"
+
 #include <cstdlib>
 #include <cxxabi.h>
 #include <functional>
@@ -13,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 
 struct cxa_demangle_wrapper_impl
@@ -43,7 +43,10 @@ struct demangler
 
     std::string demangle(std::string_view _mangled_name)
     {
-        if(_mangled_name.empty()) return {};
+        if(_mangled_name.empty())
+        {
+            return {};
+        }
 
         const auto result = try_get_from_cache(_mangled_name);
         if(result._found)
@@ -58,7 +61,7 @@ struct demangler
 private:
     std::shared_mutex                               m_mutex;
     std::map<std::string, std::string, std::less<>> m_cache;
-    using cache_iterator = typename decltype(m_cache)::iterator;
+    using cache_iterator = decltype(m_cache)::iterator;
 
     struct cache_result
     {
@@ -68,18 +71,22 @@ private:
 
     static std::string demangle_impl(const char* _mangled_name)
     {
-        int                                         _status = 0;
-        std::unique_ptr<char, decltype(&std::free)> _demangled(
+        int                                               _status = 0;
+        const std::unique_ptr<char, decltype(&std::free)> _demangled(
             DemanglerTp::demangle(_mangled_name, nullptr, nullptr, &_status), &std::free);
 
-        if(_status != 0 || !_demangled) return std::string{ _mangled_name };
+        if(_status != 0 || !_demangled)
+        {
+            return std::string{ _mangled_name };
+        }
 
         return std::string{ _demangled.get() };
     }
 
     cache_result try_get_from_cache(std::string_view _mangled_name)
     {
-        std::shared_lock<std::shared_mutex> _read_lock{ m_mutex };
+        auto _state_guard = state::thread::scoped(state::thread::Internal);
+        const std::shared_lock<std::shared_mutex> _read_lock{ m_mutex };
 
         auto _it = m_cache.find(_mangled_name);
         if(_it != m_cache.end())
@@ -92,7 +99,8 @@ private:
 
     std::string demangle_and_cache(std::string_view _mangled_name)
     {
-        std::unique_lock<std::shared_mutex> _write_lock{ m_mutex };
+        auto _state_guard = state::thread::scoped(state::thread::Internal);
+        const std::unique_lock<std::shared_mutex> _write_lock{ m_mutex };
 
         auto _it = m_cache.find(_mangled_name);
         if(_it != m_cache.end())
@@ -126,5 +134,4 @@ demangle(std::string_view name)
     return get_demangler().demangle(name);
 }
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

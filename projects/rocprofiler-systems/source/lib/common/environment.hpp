@@ -6,10 +6,9 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
-#include <spdlog/fmt/fmt.h>
-
-#include <timemory/utility/filepath.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +16,7 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -30,9 +30,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 /// @brief Production environment backend that forwards to the real POSIX
@@ -57,48 +55,6 @@ struct posix_env
     static char* getenv(const char* name) { return ::getenv(name); }
 };
 
-/// @brief Parse a string into a boolean.
-///
-/// Leading and trailing whitespace is trimmed before interpretation. All-digit
-/// strings are truthy when non-zero (an overflowing digit string is also truthy);
-/// other values are matched case-insensitively against the false tokens
-/// off/false/no/n/f/0 (anything else is truthy). An empty or all-whitespace string
-/// yields @p fallback.
-/// @param value    The string to interpret.
-/// @param fallback Returned when @p value is empty or all whitespace.
-/// @return The parsed boolean.
-[[nodiscard]] inline bool
-to_bool(std::string_view value, bool fallback = false)
-{
-    // trim leading/trailing whitespace before interpreting
-    constexpr std::string_view whitespace = " \t\n\r\f\v";
-    const auto                 first_pos  = value.find_first_not_of(whitespace);
-    if(first_pos == std::string_view::npos) return fallback;  // empty or all whitespace
-    const auto last_pos = value.find_last_not_of(whitespace);
-    value               = value.substr(first_pos, last_pos - first_pos + 1);
-
-    if(value.find_first_not_of("0123456789") == std::string_view::npos)
-    {
-        std::uint64_t numeric{};
-        const auto*   last   = value.data() + value.size();
-        const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);
-        if(ec == std::errc::result_out_of_range) return true;
-        if(ec == std::errc{} && ptr == last) return numeric != 0;
-        return true;
-    }
-
-    std::string lower{ value };
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char chr) { return std::tolower(chr); });
-
-    constexpr auto false_values = std::array{
-        std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
-        std::string_view{ "n" },   std::string_view{ "f" },
-    };
-    return !std::any_of(false_values.begin(), false_values.end(),
-                        [&lower](std::string_view val) { return lower == val; });
-}
-
 /// @brief Environment variable read/write facade, parameterised over the backend.
 ///
 /// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
@@ -112,7 +68,10 @@ struct environment
 private:
     static const char* fetch_raw_env(const char* env_id)
     {
-        if(env_id == nullptr || env_id[0] == '\0') return nullptr;
+        if(env_id == nullptr || env_id[0] == '\0')
+        {
+            return nullptr;
+        }
         return EnvType::getenv(env_id);
     }
 
@@ -126,7 +85,10 @@ private:
     static bool get_env_bool(const char* env_id, bool fallback)
     {
         const char* raw = fetch_raw_env(env_id);
-        if(!raw) return fallback;
+        if(!raw)
+        {
+            return fallback;
+        }
 
         const std::string_view env_sv{ raw };
         if(env_sv.empty())
@@ -134,25 +96,26 @@ private:
             throw std::runtime_error(
                 std::string{ "No boolean value provided for " }.append(env_id));
         }
-        return to_bool(env_sv, fallback);
+        return rocprofsys::utility::string::to_bool(env_sv, fallback);
     }
 
     template <typename Tp>
     static Tp get_env_float(const char* env_id, Tp fallback)
     {
         const char* raw = fetch_raw_env(env_id);
-        if(!raw) return fallback;
+        if(!raw)
+        {
+            return fallback;
+        }
 
         // Trim surrounding whitespace so values such as " 1.5 " still parse.
-        constexpr std::string_view whitespace = " \t\n\r\f\v";
-        std::string_view           token{ raw };
-        const auto                 first = token.find_first_not_of(whitespace);
-        if(first == std::string_view::npos)
+        const auto token =
+            utility::string::rtrim(utility::string::ltrim(std::string_view{ raw }));
+        if(token.empty())
         {
             LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to float", env_id);
             return fallback;
         }
-        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
 
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
         // Locale-independent, non-throwing parse mirroring the integral path: a
@@ -160,7 +123,10 @@ private:
         Tp          value{};
         const auto* end      = token.data() + token.size();
         const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end) return value;
+        if(ec == std::errc{} && ptr == end)
+        {
+            return value;
+        }
 #else
         // Fallback for standard libraries without floating-point from_chars
         // (libstdc++ < 11). std::stod is locale-sensitive (assumes C/POSIX locale).
@@ -182,18 +148,19 @@ private:
     static Tp get_env_integral(const char* env_id, Tp fallback)
     {
         const char* raw = fetch_raw_env(env_id);
-        if(!raw) return fallback;
+        if(!raw)
+        {
+            return fallback;
+        }
 
         // Trim surrounding whitespace so values such as " 42 " still parse.
-        constexpr std::string_view whitespace = " \t\n\r\f\v";
-        std::string_view           token{ raw };
-        const auto                 first = token.find_first_not_of(whitespace);
-        if(first == std::string_view::npos)
+        const auto token =
+            utility::string::rtrim(utility::string::ltrim(std::string_view{ raw }));
+        if(token.empty())
         {
             LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to integer", env_id);
             return fallback;
         }
-        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
 
         // std::from_chars parses against the exact target type: it rejects a
         // leading '-' for unsigned Tp and reports result_out_of_range, so
@@ -202,7 +169,10 @@ private:
         Tp          value{};
         const auto* end      = token.data() + token.size();
         const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end) return value;
+        if(ec == std::errc{} && ptr == end)
+        {
+            return value;
+        }
 
         LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer",
                   env_id, raw);
@@ -331,7 +301,10 @@ struct ROCPROFSYS_INTERNAL_API env_config
     /// @return The backend setenv result, or -1 when @c m_env_name is empty.
     auto operator()() const
     {
-        if(m_env_name.empty()) return -1;
+        if(m_env_name.empty())
+        {
+            return -1;
+        }
         LOG_DEBUG("setenv(\"{}\", \"{}\", {})", m_env_name, m_env_value, m_override);
         return EnvType::setenv(m_env_name.c_str(), m_env_value.c_str(), m_override);
     }
@@ -406,14 +379,17 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 
     env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
-                                      return std::string_view{ entry }.find(key) == 0;
+                                      return std::string_view{ entry }.starts_with(key);
                                   }),
                    env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.find(key) == 0) env_list.emplace_back(orig);
+        if(std::string_view{ orig }.starts_with(key))
+        {
+            env_list.emplace_back(orig);
+        }
     }
 }
 
@@ -457,7 +433,10 @@ discover_llvm_libdir_for_ompt()
     candidates.reserve(number_of_candidates);
 
     auto push_unique = [&](const std::string& candidate) {
-        if(candidate.empty()) return;
+        if(candidate.empty())
+        {
+            return;
+        }
         if(std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
         {
             candidates.emplace_back(candidate);
@@ -484,7 +463,7 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
@@ -505,21 +484,26 @@ discover_llvm_libdir_for_ompt()
 inline bool
 is_python_interpreter(std::string_view executable)
 {
-    if(executable.empty()) return false;
+    if(executable.empty())
+    {
+        return false;
+    }
 
-    const auto slash_pos = executable.rfind('/');
-    const auto basename  = (slash_pos != std::string_view::npos)
-                               ? executable.substr(slash_pos + 1)
-                               : executable;
+    const auto basename = path::filename(executable);
 
-    if(basename == "python" || basename == "python3") return true;
+    if(basename == "python" || basename == "python3")
+    {
+        return true;
+    }
 
     constexpr std::string_view python3_prefix = "python3.";
 
     const bool has_valid_prefix =
-        basename.size() > python3_prefix.size() &&
-        basename.substr(0, python3_prefix.size()) == python3_prefix;
-    if(!has_valid_prefix) return false;
+        basename.size() > python3_prefix.size() && basename.starts_with(python3_prefix);
+    if(!has_valid_prefix)
+    {
+        return false;
+    }
 
     const auto version_digits = basename.substr(python3_prefix.size());
 
@@ -537,14 +521,20 @@ is_python_interpreter(std::string_view executable)
 inline std::string
 discover_torch_libpath(const std::string& python_binary)
 {
-    if(python_binary.empty()) return {};
+    if(python_binary.empty())
+    {
+        return {};
+    }
 
     const auto is_safe_executable_path = [](const std::string& path) {
         // Allow only a conservative set of characters in the executable path to
         // avoid injection when used in a shell command.
-        for(unsigned char c : path)
+        for(const unsigned char c : path)
         {
-            if(std::isalnum(c) != 0) continue;
+            if(std::isalnum(c) != 0)
+            {
+                continue;
+            }
             switch(c)
             {
                 case '/':
@@ -581,10 +571,13 @@ discover_torch_libpath(const std::string& python_binary)
     {
         result.append(buffer);
         // stop if we've read the full line (torch path is printed on a single line)
-        if(!result.empty() && result.back() == '\n') break;
+        if(!result.empty() && result.back() == '\n')
+        {
+            break;
+        }
     }
 
-    int status = pclose(pipe);
+    const int status = pclose(pipe);
 
     if(status != 0 || result.empty())
     {
@@ -598,7 +591,10 @@ discover_torch_libpath(const std::string& python_binary)
         result.pop_back();
     }
 
-    if(result.empty()) return {};
+    if(result.empty())
+    {
+        return {};
+    }
 
     std::string torch_libdir = result + "/lib";
 
@@ -615,10 +611,10 @@ discover_torch_libpath(const std::string& python_binary)
 /// @brief How @ref update_env combines a new value with an existing entry.
 enum class update_mode : std::uint8_t
 {
-    REPLACE = 0,  ///< Overwrite the value and drop duplicate entries.
-    PREPEND,      ///< Insert the new value before the existing one.
-    APPEND,       ///< Insert the new value after the existing one.
-    WEAK,         ///< Update only when the current entry matches the original env.
+    replace = 0,  ///< Overwrite the value and drop duplicate entries.
+    prepend,      ///< Insert the new value before the existing one.
+    append,       ///< Insert the new value after the existing one.
+    weak,         ///< Update only when the current entry matches the original env.
 };
 
 /// @brief Render @p val as an environment-variable string.
@@ -636,11 +632,17 @@ to_env_string(Tp&& val)
     using T = std::decay_t<Tp>;
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
+    {
         return std::string{ val };
+    }
     else if constexpr(std::is_same_v<T, bool>)
+    {
         return val ? "true" : "false";
+    }
     else
+    {
         return std::to_string(val);
+    }
 }
 
 /// @brief Insert or update an "KEY=VALUE" entry in an environment vector.
@@ -653,21 +655,21 @@ to_env_string(Tp&& val)
 /// @param _mode         Combination strategy.
 /// @param _join_delim   Delimiter used when prepending/appending.
 /// @param _updated_envs Set receiving the names touched by this call.
-/// @param _original_envs Baseline entries consulted by @ref update_mode::WEAK.
+/// @param _original_envs Baseline entries consulted by @ref update_mode::weak.
 template <typename Tp, typename UpdatedEnvsT>
 inline void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode _mode, std::string_view _join_delim, UpdatedEnvsT& _updated_envs,
            const std::unordered_set<std::string>& _original_envs)
 {
-    using updated_value_t = typename UpdatedEnvsT::value_type;
+    using updated_value_t = UpdatedEnvsT::value_type;
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
     const auto _key         = fmt::format("{}=", _env_var);
 
     const auto matches_key = [&_key](const std::string& entry) {
-        return std::string_view{ entry }.find(_key) == 0;
+        return std::string_view{ entry }.starts_with(_key);
     };
 
     auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
@@ -679,24 +681,30 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
 
     switch(_mode)
     {
-        case update_mode::WEAK:
-            if(_original_envs.find(*first) == _original_envs.end()) return;
+        case update_mode::weak:
+            if(_original_envs.find(*first) == _original_envs.end())
+            {
+                return;
+            }
             *first = fmt::format("{}={}", _env_var, _env_val_str);
             return;
 
-        case update_mode::PREPEND:
-        case update_mode::APPEND:
+        case update_mode::prepend:
+        case update_mode::append:
         {
-            if(first->find(_env_val_str) != std::string::npos) return;
+            if(first->find(_env_val_str) != std::string::npos)
+            {
+                return;
+            }
             auto _val = first->substr(_key.size());
             *first =
-                (_mode == update_mode::PREPEND)
+                (_mode == update_mode::prepend)
                     ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
                     : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
             return;
         }
 
-        case update_mode::REPLACE:
+        case update_mode::replace:
             *first = fmt::format("{}={}", _env_var, _env_val_str);
             _environ.erase(std::remove_if(std::next(first), _environ.end(), matches_key),
                            _environ.end());
@@ -717,11 +725,20 @@ inline void
 add_torch_library_path(std::vector<std::string>& envp, std::string_view executable,
                        UpdatedEnvsT& updated_envs)
 {
-    if(executable.empty()) return;
-    if(!is_python_interpreter(executable)) return;
+    if(executable.empty())
+    {
+        return;
+    }
+    if(!is_python_interpreter(executable))
+    {
+        return;
+    }
 
     auto torch_libpath = discover_torch_libpath(std::string{ executable });
-    if(torch_libpath.empty()) return;
+    if(torch_libpath.empty())
+    {
+        return;
+    }
 
     std::unordered_set<std::string> seen{ torch_libpath };
     std::string                     result = torch_libpath;
@@ -729,17 +746,23 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
     constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
 
     auto is_ld_path = [&](const std::string& entry) {
-        return std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
+        return std::string_view{ entry }.starts_with(ld_prefix);
     };
 
     for(const auto& entry : envp)
     {
-        if(!is_ld_path(entry)) continue;
+        if(!is_ld_path(entry))
+        {
+            continue;
+        }
 
         std::istringstream stream{ entry.substr(ld_prefix.length()) };
         for(std::string path; std::getline(stream, path, ':');)
         {
-            if(!path.empty() && seen.insert(path).second) result += ":" + path;
+            if(!path.empty() && seen.insert(path).second)
+            {
+                result += ":" + path;
+            }
         }
     }
 
@@ -776,7 +799,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
     auto get_delimiter = [](std::string_view key) -> char {
         if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
            key == env_vars::ROCM_EVENTS)
+        {
             return ',';
+        }
         return ':';
     };
 
@@ -791,7 +816,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
         void add_unique(std::string part)
         {
             if(!part.empty() && seen.insert(part).second)
+            {
                 parts.emplace_back(std::move(part));
+            }
         }
     };
 
@@ -801,7 +828,10 @@ consolidate_env_entries(std::vector<std::string>& envp)
     auto parse_entry = [](std::string_view entry)
         -> std::optional<std::pair<std::string_view, std::string_view>> {
         auto eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos) return std::nullopt;
+        if(eq_pos == std::string_view::npos)
+        {
+            return std::nullopt;
+        }
         return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
     };
 
@@ -818,7 +848,10 @@ consolidate_env_entries(std::vector<std::string>& envp)
         result.append(key);
         result += '=';
 
-        if(parts.empty()) return result;
+        if(parts.empty())
+        {
+            return result;
+        }
 
         std::size_t total_parts_length = 0;
         for(const auto& part : parts)
@@ -831,7 +864,10 @@ consolidate_env_entries(std::vector<std::string>& envp)
         bool first = true;
         for(const auto& part : parts)
         {
-            if(!first) result += delim;
+            if(!first)
+            {
+                result += delim;
+            }
             result.append(part);
             first = false;
         }
@@ -883,5 +919,4 @@ consolidate_env_entries(std::vector<std::string>& envp)
     envp = std::move(result);
 }
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

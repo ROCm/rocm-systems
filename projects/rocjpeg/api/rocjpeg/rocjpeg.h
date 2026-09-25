@@ -30,7 +30,7 @@ THE SOFTWARE.
 /**
  * @file rocjpeg.h
  * @brief The AMD rocJPEG Library.
- * @defgroup group_amd_rocjepg rocJPEG: AMD ROCm JPEG Decode API
+ * @defgroup group_amd_rocjpeg rocJPEG: AMD ROCm JPEG Decode API
  * @brief rocJPEG API is a toolkit to decode JPEG images using a hardware-accelerated JPEG decoder on AMD’s GPUs.
 */
 
@@ -45,7 +45,6 @@ extern "C" {
 #define ROCJPEG_MAX_COMPONENT 4
 
 /**
- * @enum RocJpegStatus
  * @ingroup group_amd_rocjpeg
  * @brief Enumeration representing the status codes for the rocJPEG library.
  */
@@ -67,7 +66,6 @@ typedef enum {
 } RocJpegStatus;
 
 /**
- * @enum RocJpegChromaSubsampling
  * @ingroup group_amd_rocjpeg
  * @brief Enum representing the chroma subsampling options for JPEG encoding/decoding.
  *
@@ -107,7 +105,6 @@ typedef struct {
 } RocJpegImage;
 
 /**
- * @enum RocJpegOutputFormat
  * @ingroup group_amd_rocjpeg
  * @brief Enum representing the output format options for the RocJpegImage.
  *
@@ -166,7 +163,6 @@ typedef struct {
 } RocJpegDecodeParams;
 
 /**
- * @enum RocJpegBackend
  * @ingroup group_amd_rocjpeg
  * @brief The backend options for the rocJpeg library.
  *
@@ -187,7 +183,6 @@ typedef enum {
 typedef void* RocJpegStreamHandle;
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_handle);
  * @ingroup group_amd_rocjpeg
  * @brief Creates a RocJpegStreamHandle for JPEG stream processing.
  *
@@ -204,7 +199,6 @@ typedef void* RocJpegStreamHandle;
 RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t length, RocJpegStreamHandle jpeg_stream_handle);
  * @ingroup group_amd_rocjpeg
  * @brief Parses a JPEG stream.
  *
@@ -219,7 +213,6 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_ha
 RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t length, RocJpegStreamHandle jpeg_stream_handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegStreamDestroy(RocJpegStreamHandle jpeg_stream_handle);
  * @ingroup group_amd_rocjpeg
  * @brief Destroys a RocJpegStreamHandle object and releases associated resources.
  *
@@ -242,7 +235,6 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamDestroy(RocJpegStreamHandle jpeg_stream_ha
 typedef void *RocJpegHandle;
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, RocJpegHandle *handle);
  * @ingroup group_amd_rocjpeg
  * @brief Creates a RocJpegHandle for JPEG decoding.
  *
@@ -258,7 +250,6 @@ typedef void *RocJpegHandle;
 RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, RocJpegHandle *handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
  * @ingroup group_amd_rocjpeg
  * @brief Destroys a RocJpegHandle object.
  *
@@ -273,7 +264,6 @@ RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, Ro
 RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights);
  * @ingroup group_amd_rocjpeg
  * @brief Retrieves information about the JPEG image.
  *
@@ -296,7 +286,6 @@ RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
 RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
  * @ingroup group_amd_rocjpeg
  * @brief Decodes a JPEG image using the rocJPEG library.
  *
@@ -314,7 +303,6 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
 RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
  * @ingroup group_amd_rocjpeg
  * @brief Decodes a batch of JPEG images using the rocJPEG library.
  *
@@ -330,7 +318,6 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 
 /**
- * @fn extern const char* ROCDECAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
  * @ingroup group_amd_rocjpeg
  * @brief Retrieves the name of the error associated with the given RocJpegStatus.
  *
@@ -346,6 +333,13 @@ extern const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
  * @ingroup group_amd_rocjpeg
  * @brief Submits a JPEG decode operation without waiting for the output.
  *
+ * This function is one half of the rocJpegDecodeAsync/rocJpegDecodeSync pair. It submits the
+ * decode to hardware and returns immediately. The caller must subsequently call rocJpegDecodeSync()
+ * on the same handle to wait for completion and retrieve the decoded output.
+ * These two calls must not be issued concurrently on the same handle. The intended usage is a
+ * producer/consumer model where one thread calls rocJpegDecodeAsync() and a separate thread
+ * calls rocJpegDecodeSync().
+ *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handle The rocJPEG stream handle.
  * @param decode_params The decoding parameters.
@@ -357,16 +351,60 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamH
 /**
  * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
  * @ingroup group_amd_rocjpeg
- * @brief Synchronizes a pending asynchronous JPEG decode.
+ * @brief Synchronizes a pending asynchronous JPEG decode and retrieves the decoded output.
  *
- * This function must be used in conjunction with rocJpegDecodeAsync to ensure the decoding
- * is complete before accessing the decoded output.
+ * This function is one half of the rocJpegDecodeAsync/rocJpegDecodeSync pair. It must be called
+ * after rocJpegDecodeAsync() on the same handle to wait for the decode to complete and copy the
+ * result to the destination buffer. These two calls must not be issued concurrently on the same
+ * handle. The intended usage is a producer/consumer model where one thread calls
+ * rocJpegDecodeAsync() and a separate thread calls rocJpegDecodeSync().
  *
  * @param handle The rocJPEG handle.
  * @param destination A pointer to RocJpegImage where the decoded image will be stored.
  * @return A RocJpegStatus indicating the success or failure of the sync operation.
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+ * @ingroup group_amd_rocjpeg
+ * @brief Submits a batch of JPEG decode operations without waiting for the output.
+ *
+ * This function is one half of the rocJpegDecodeBatchedAsync/rocJpegDecodeBatchedSync pair. It
+ * submits all images in the batch to the hardware decoder and returns immediately without waiting
+ * for the decodes to complete or copying the results to the destination buffers. The caller must
+ * subsequently call rocJpegDecodeBatchedSync() on the same handle to wait for completion and
+ * retrieve the decoded output. These two calls must not be issued concurrently on the same handle.
+ * The intended usage is a producer/consumer model where one thread calls
+ * rocJpegDecodeBatchedAsync() and a separate thread calls rocJpegDecodeBatchedSync().
+ *
+ * @param handle The rocJPEG handle.
+ * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
+ * @param batch_size The number of JPEG streams in the batch.
+ * @param decode_params An array of RocJpegDecodeParams structs representing the decode parameters for each image.
+ * @param destinations An array of RocJpegImage structs representing the output decoded images.
+ * @return A RocJpegStatus indicating the success or failure of the submit operation.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
+
+/**
+ * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);
+ * @ingroup group_amd_rocjpeg
+ * @brief Synchronizes a pending asynchronous batched JPEG decode and retrieves the decoded output.
+ *
+ * This function is one half of the rocJpegDecodeBatchedAsync/rocJpegDecodeBatchedSync pair. It
+ * must be called after rocJpegDecodeBatchedAsync() on the same handle to wait for all submitted
+ * decodes in the batch to complete and copy the results to the destination buffers. These two
+ * calls must not be issued concurrently on the same handle. The intended usage is a
+ * producer/consumer model where one thread calls rocJpegDecodeBatchedAsync() and a separate
+ * thread calls rocJpegDecodeBatchedSync().
+ *
+ * @param handle The rocJPEG handle.
+ * @param destinations An array of RocJpegImage pointers identifying the pending batch, as passed to rocJpegDecodeBatchedAsync.
+ * @param batch_size The number of images in the batch.
+ * @return A RocJpegStatus indicating the success or failure of the sync operation.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size);
 
 #if defined(__cplusplus)
   }

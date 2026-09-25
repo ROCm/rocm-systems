@@ -19,21 +19,30 @@ void
 thread_deleter<void>::operator()() const
 {
     // called after thread info is deleted
-    if(!thread_info::exists()) return;
+    if(!thread_info::exists())
+    {
+        return;
+    }
 
     const auto& _info = thread_info::get();
     if(_info && _info->index_data)
     {
         auto _tid = _info->index_data->sequent_value;
 
-        if(!is_child_process()) component::pthread_create_gotcha::shutdown(_tid);
-        set_thread_state(ThreadState::Completed);
-        if(get_state() < State::Finalized && !is_child_process() && _tid == 0)
+        if(!is_child_process())
+        {
+            component::pthread_create_gotcha::shutdown(_tid);
+        }
+        state::thread::set(state::thread::Completed);
+        if(state::process::get() < state::process::Finalized && !is_child_process() &&
+           _tid == 0)
+        {
             rocprofsys_finalize_hidden();
+        }
     }
     else
     {
-        set_thread_state(ThreadState::Completed);
+        state::thread::set(state::thread::Completed);
     }
 }
 

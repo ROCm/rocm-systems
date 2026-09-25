@@ -14,10 +14,13 @@
     }  // namespace ::tim::cereal
 
 #include "common/defines.h"
+#include "common/pci_bdf.hpp"
+#include "core/gpu_visibility.hpp"
 #include "gpu.hpp"
 
 #include <timemory/manager.hpp>
 
+#include <set>
 #include <string>
 
 #include "core/agent_manager.hpp"
@@ -26,15 +29,20 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/version.h>
 
 #include "logger/debug.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <exception>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <vector>
 
-namespace rocprofsys
-{
-namespace gpu
+namespace rocprofsys::gpu
 {
 namespace
 {
@@ -44,7 +52,10 @@ namespace
 void
 check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
 {
-    if(_code == AMDSMI_STATUS_SUCCESS) return;
+    if(_code == AMDSMI_STATUS_SUCCESS)
+    {
+        return;
+    }
     const char* _msg = nullptr;
     auto        _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
@@ -63,7 +74,10 @@ std::atomic<bool> amdsmi_initialized{ false };
 bool
 amdsmi_init()
 {
-    if(amdsmi_initialized.exchange(true)) return true;
+    if(amdsmi_initialized.exchange(true))
+    {
+        return true;
+    }
 
     try
     {
@@ -96,17 +110,26 @@ query_rocm_agents()
             const auto* _agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
             agent       cur_agent;
             cur_agent.type =
-                (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                              : agent_type::CPU);
+                (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::gpu
+                                                              : agent_type::cpu);
             cur_agent.handle               = _agent->id.handle;
             cur_agent.device_id            = _agent->device_id;
             cur_agent.node_id              = _agent->node_id;
             cur_agent.logical_node_id      = _agent->logical_node_id;
             cur_agent.logical_node_type_id = _agent->logical_node_type_id;
-            cur_agent.name                 = std::string(_agent->name);
-            cur_agent.model_name           = std::string(_agent->model_name);
-            cur_agent.vendor_name          = std::string(_agent->vendor_name);
-            cur_agent.product_name         = std::string(_agent->product_name);
+            cur_agent.location_id          = _agent->location_id;
+            cur_agent.domain               = _agent->domain;
+#if(ROCPROFILER_VERSION >= 600)
+            // runtime_visibility.hip honors both ROCR_VISIBLE_DEVICES and
+            // HIP_VISIBLE_DEVICES (hip visibility requires hsa visibility).
+            cur_agent.hip_visible = (_agent->runtime_visibility.hip != 0);
+#else
+            cur_agent.hip_visible = true;
+#endif
+            cur_agent.name         = std::string(_agent->name);
+            cur_agent.model_name   = std::string(_agent->model_name);
+            cur_agent.vendor_name  = std::string(_agent->vendor_name);
+            cur_agent.product_name = std::string(_agent->product_name);
 
             cur_agent.agent_info = agent_info::to_json_string(*_agent);
 
@@ -132,8 +155,37 @@ query_rocm_agents()
 int
 device_count()
 {
-    static int _num_devices = query_rocm_agents();
+    static const int _num_devices = query_rocm_agents();
     return _num_devices;
+}
+
+std::optional<std::set<std::string>>
+get_visible_gpu_bdfs()
+{
+    // Ensure the rocprofiler-sdk agents (and their runtime_visibility) are populated.
+    // No GPU agents means the query found nothing to report on (or failed), so runtime
+    // visibility is unknown rather than empty.
+    if(device_count() == 0)
+    {
+        return std::nullopt;
+    }
+
+    std::set<std::string> _bdfs;
+    for(const auto& _agent :
+        get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
+    {
+        if(!_agent)
+        {
+            continue;
+        }
+        if(!_agent->hip_visible)
+        {
+            continue;
+        }
+        _bdfs.insert(
+            common::format_pci_bdf_from_location_id(_agent->domain, _agent->location_id));
+    }
+    return _bdfs;
 }
 
 bool
@@ -145,8 +197,8 @@ initialize_amdsmi()
 bool
 reinitialize_amdsmi()
 {
-    static std::mutex           mtx;
-    std::lock_guard<std::mutex> lock(mtx);
+    static std::mutex                 mtx;
+    const std::lock_guard<std::mutex> lock(mtx);
     amdsmi_initialized.store(false);
     return amdsmi_init();
 }
@@ -191,7 +243,10 @@ add_device_metadata(ArchiveT& ar)
 void
 add_device_metadata()
 {
-    if(device_count() == 0) return;
+    if(device_count() == 0)
+    {
+        return;
+    }
 
     ::tim::manager::add_metadata([](auto& ar) {
         try
@@ -301,10 +356,17 @@ get_processor_handles()
                 for(const auto& xcp : gpu_metrics.xcp_stats)
                 {
                     if(!v_busy_supported && has_valid_u16(xcp.vcn_busy))
+                    {
                         v_busy_supported = true;
+                    }
                     if(!j_busy_supported && has_valid_u16(xcp.jpeg_busy))
+                    {
                         j_busy_supported = true;
-                    if(v_busy_supported && j_busy_supported) break;
+                    }
+                    if(v_busy_supported && j_busy_supported)
+                    {
+                        break;
+                    }
                 }
 
                 // Check if XGMI metrics are supported (any value not at max)
@@ -334,42 +396,60 @@ get_processor_handles()
 bool
 vcn_is_device_level_only(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::vcn_device_level_only.size()) return false;
+    if(dev_id >= processors::vcn_device_level_only.size())
+    {
+        return false;
+    }
     return processors::vcn_device_level_only[dev_id];
 }
 
 bool
 jpeg_is_device_level_only(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::jpeg_device_level_only.size()) return false;
+    if(dev_id >= processors::jpeg_device_level_only.size())
+    {
+        return false;
+    }
     return processors::jpeg_device_level_only[dev_id];
 }
 
 bool
 is_vcn_busy_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::vcn_busy_supported.size()) return false;
+    if(dev_id >= processors::vcn_busy_supported.size())
+    {
+        return false;
+    }
     return processors::vcn_busy_supported[dev_id];
 }
 
 bool
 is_jpeg_busy_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::jpeg_busy_supported.size()) return false;
+    if(dev_id >= processors::jpeg_busy_supported.size())
+    {
+        return false;
+    }
     return processors::jpeg_busy_supported[dev_id];
 }
 
 bool
 is_xgmi_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::xgmi_supported.size()) return false;
+    if(dev_id >= processors::xgmi_supported.size())
+    {
+        return false;
+    }
     return processors::xgmi_supported[dev_id];
 }
 
 bool
 is_pcie_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::pcie_supported.size()) return false;
+    if(dev_id >= processors::pcie_supported.size())
+    {
+        return false;
+    }
     return processors::pcie_supported[dev_id];
 }
 
@@ -385,5 +465,4 @@ get_handle_from_id(std::uint32_t dev_id)
     return processors::processors_list[dev_id];
 }
 
-}  // namespace gpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::gpu

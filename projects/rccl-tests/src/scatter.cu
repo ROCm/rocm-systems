@@ -9,7 +9,7 @@
 #include "common.h"
 
 void ScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  *recvcount = (count/nranks) & -(16/eltSize);
+  *recvcount = (count/nranks) & ~(16/eltSize - 1);
   *sendcount = (*recvcount)*nranks;
   *sendInplaceOffset = 0;
   *recvInplaceOffset = *recvcount;
@@ -32,7 +32,7 @@ testResult_t ScatterInitData(struct threadArgs* args, ncclDataType_t type, ncclR
   return testSuccess;
 }
 
-void ScatterGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void ScatterGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -119,7 +119,7 @@ testResult_t ScatterRunTest(struct threadArgs* args, int root, ncclDataType_t ty
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = ScatterGetBuffSize,
-  .runTest = ScatterRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ ScatterGetBuffSize,
+  /* .runTest = */ ScatterRunTest
 };

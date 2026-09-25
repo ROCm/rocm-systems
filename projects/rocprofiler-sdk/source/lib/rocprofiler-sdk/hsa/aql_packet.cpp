@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/kfd/resource.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
@@ -154,22 +155,29 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
+    if(pool.kfd_memory)
+    {
+        *ptr = pool.kfd_memory->allocate(
+            size,
+            flags.host_access ? kfd::kfd_memory_kind_t::host : kfd::kfd_memory_kind_t::device);
+        return (*ptr || size == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
 
-    hsa_status_t status = HSA_STATUS_ERROR;
+    auto status = HSA_STATUS_ERROR;
     if(flags.host_access)
     {
         status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
-
         if(status == HSA_STATUS_SUCCESS)
             status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
     }
     else
     {
-        // Return page aligned data to avoid cache flush overlap
         status = pool.allocate_fn(
             pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
-        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        *ptr = reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(*ptr) + 0xFFF) & ~0xFFFul);
     }
     return status;
 }
@@ -180,7 +188,10 @@ TraceMemoryPool::Free(void* ptr, void* data)
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
-    if(pool.free_fn) pool.free_fn(ptr);
+    if(pool.kfd_memory)
+        pool.kfd_memory->deallocate(ptr);
+    else if(pool.free_fn)
+        pool.free_fn(ptr);
 }
 
 hsa_status_t
@@ -189,8 +200,21 @@ TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
-    if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
+    if(size == 0) return HSA_STATUS_SUCCESS;
+    if(!dst || !src) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if(pool.kfd_memory)
+    {
+        if(pool.kfd_memory->is_device_pointer(src))
+        {
+            if(!pool.kfd_copy_queue || !pool.kfd_copy_queue->copy(dst, src, size))
+                return HSA_STATUS_ERROR;
+        }
+        else
+            std::memcpy(dst, src, size);
+        return HSA_STATUS_SUCCESS;
+    }
 
+    if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
     return pool.api_copy_fn(dst, src, size);
 }
 
@@ -289,7 +313,7 @@ CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool
     codeobj.id        = id;
     codeobj.addr      = addr;
     codeobj.size      = size;
-    codeobj.agent     = tracepool.gpu_agent;
+    codeobj.agent     = tracepool.aql_agent;
     codeobj.isUnload  = bIsUnload;
     codeobj.fromStart = bFromStart;
 

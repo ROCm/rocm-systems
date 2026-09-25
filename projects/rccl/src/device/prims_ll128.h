@@ -16,11 +16,62 @@
 #endif
 #endif
 
+// 128-bit load for FIFO and non-registered user buffers. On gfx1250, sibling
+// P2P into a cacheable comm FIFO is not coherent under a nontemporal load; use
+// system-scope b128 there. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h (default
+// hipMalloc / cuMem hung; uncached did not). For registered user buffers, use
+// load128 which bypasses the cache.
+inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+#if RCCL_LL_FIFO_SYS_SCOPE
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+  v0 = u.u64[0];
+  v1 = u.u64[1];
+#else
+  v0 = __builtin_nontemporal_load((u64_gptr)ptr);
+  v1 = __builtin_nontemporal_load((u64_gptr)ptr + 1);
+#endif
+}
+
+// Plain (cacheable) 128-bit store. Used for non-registered user buffers, and off
+// gfx1250 it is also where store128Fifo sends the LL128 comm FIFO. Width is one
+// b128 so data and flag stay in a single transaction.
+inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+  *((v4u_gptr)ptr) = u.v;
+}
+
+// LL128 comm-FIFO store. Same 128-bit width as store128Plain (data+flag one
+// transaction). On gfx1250 the store is system-scope: a plain store to a
+// cacheable FIFO can retire in the writer's cache and never reach a sibling
+// partition's poll. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
+inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+#if RCCL_LL_FIFO_SYS_SCOPE
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  store128Plain(ptr, v0, v1);
+#endif
+}
+
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
-          int useAcc>
-class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata, Pipeline, useAcc>
+          int useAcc, int UserRegMode>
+class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>
   : public PrimitivesWithoutDirect<
-      Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
+      Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1, Acc = 2;
   ;
@@ -36,6 +87,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   const int threadsPerBlock;
   Fan fan;
   T* userBufs[3];
+  bool userRegUsed = false; // runtime: user buffers registered (cacheable) -> need cache-bypass
   struct ncclConnInfo* recvConn = NULL;
   volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t recvConnHead;
@@ -139,6 +191,51 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
   }
 
+  // User-buffer 128-bit access mode selection.
+  // Cache-bypassing (system-scope) loads/stores are only required when this op
+  // accesses a registered, potentially-cached user buffer directly. That needs
+  // both Direct != 0 (compile-time: this instantiation supports direct access)
+  // and registration actually being in use.
+  //
+  // Whether registration is in use can be resolved at compile time via the
+  // UserRegMode template parameter, which lets the caller instantiate clean
+  // single-path kernels:
+  //   UserRegMode==2 -> never registered: always plain/non-temporal, so the
+  //                     system-scope load128/store128 code is never emitted and
+  //                     the kernel keeps February-level occupancy.
+  //   UserRegMode==1 -> always registered: always system-scope cache-bypass.
+  //   UserRegMode==0 -> unknown at compile time: fall back to the per-op
+  //                     userRegUsed member (dual path, legacy behavior).
+  // When Direct == 0 the bypass folds away entirely regardless of UserRegMode.
+  __device__ __forceinline__ bool userBypass() const {
+    if (!Direct) {
+      return false;
+    }
+    if (UserRegMode == 1) {
+      return true;
+    }
+    if (UserRegMode == 2) {
+      return false;
+    }
+    return userRegUsed;
+  }
+  __device__ __forceinline__ void loadUser128(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+    if (userBypass()) {
+      load128(ptr, v0, v1);
+    } else {
+      load128NT(ptr, v0, v1);
+    }
+  }
+  __device__ __forceinline__ void storeUser128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+    // Non-registered stores use the plain cacheable path (February behavior) to
+    // recover store throughput; only the registered path keeps system-scope.
+    if (userBypass()) {
+      store128(ptr, v0, v1);
+    } else {
+      store128Plain(ptr, v0, v1);
+    }
+  }
+
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
     constexpr int EltPer16B = 16 / sizeof(T);
@@ -164,7 +261,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++) {
         if (!flagThread || g % 2 == 0) {
-          if (ix[g] * EltPer16B < eltN) load128((uint64_t*)(src + ix[g] * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
+          if (ix[g] * EltPer16B < eltN)
+            loadUser128((uint64_t*)(src + ix[g] * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
         }
       }
     } else {
@@ -176,7 +274,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++)
         if ((g * WARP_SIZE + wid) * 16 < misalignment + eltN * sizeof(T))
-          load128(src8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
+          loadUser128(src8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++)
         storeShmem128(shm8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
@@ -224,9 +322,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 0; g < WordPerThread / 2; g++) {
       int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
       if (!flagThread || g % 2 == 0) {
-        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN)
-          store128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
-        else storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
+        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
+          storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
+        } else {
+          storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
+        }
       }
     }
     __syncwarp();
@@ -255,13 +355,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         needReload = false;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+          load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
           needReload |= flagThread && (vr[u + 1] != flag);
         }
         needReload &= (0 == checkAbort(abort, 1, spins));
       } while (__any(needReload));
 #pragma unroll
-      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+      for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
     }
 
     /************* Finish register load **************/
@@ -299,14 +399,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
           needReload = false;
 #pragma unroll
           for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-            load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+            load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
             needReload |= flagThread && (vr[u + 1] != flag);
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
 
 #pragma unroll
-        for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+        for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
 
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
@@ -337,14 +437,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         uint64_t* ptr = sendPtr(i) + ll128Offset;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          store128(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+          store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
         }
       }
       uint64_t flag = sendFlag(0);
       uint64_t* ptr = sendPtr(0) + ll128Offset;
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-        store128(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+        store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
       }
     }
     /********************** End Send ************************/
@@ -368,6 +468,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
     barrier();
 
+    sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
     nelem -= DataEltPerSlice * warp;
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
@@ -398,6 +499,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
 
     barrier();
+
+    sqtt_marker_exit("PRIM_LL128_DATA_PROCESS");
 
     if (SEND)
       for (int i = 0; i < MaxSend; i++) sendStep[i] += 1;
@@ -471,9 +574,10 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+    userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    skip_fence = !ncclShmem.comm.gfx9CheapFenceOff;
+    skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
     // The cheap post-peer fence is only safe with global DWORDX4 builtins
     // (system-scope cache-bypassing stores); otherwise always use the full fence.

@@ -35,7 +35,7 @@ const char* hipApiName(uint32_t id) { return hip_api_name(id); }
 
 }  // namespace hip
 
-extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
-                                                          uint32_t operation_id, void* data)) {
+HIP_PUBLIC_API void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
+                                                              uint32_t operation_id, void* data)) {
   amd::activity_prof::report_activity.store(function, std::memory_order_release);
 }

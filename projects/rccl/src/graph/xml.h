@@ -17,6 +17,12 @@
 #include "archinfo.h"
 #include <cinttypes>
 
+#define PCI_NVSWITCH_CLASS "0x068000"
+#define PCI_GPU_CLASS "0x03"
+#define PCI_IBMNPU_CLASS "0x068001"
+// PCI device class for AMD accelerators ("Processing accelerators"), mapped to GPU in kvDictPciClass
+#define PCI_ACCELERATOR_CLASS "0x120000"
+
 // A few constraints to make the implementation easy
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
@@ -65,8 +71,6 @@ ncclResult_t ncclTopoFuseXml(struct ncclXml* dst, struct ncclXml* src);
 /* Relocate pointers in XML to (de-)serialize the structure */
 ncclResult_t ncclTopoConvertXml(struct ncclXml* xml, uintptr_t base, int exp);
 
-ncclResult_t ncclTopoGetStrFromSys(const char* path, const char* fileName, char* strValue);
-
 /**************/
 /* XML Struct */
 /* Functions  */
@@ -102,10 +106,19 @@ static ncclResult_t xmlGetAttr(struct ncclXmlNode* node, const char* attrName, c
   return ncclSuccess;
 }
 
+inline void printMissingTopoAttrHint(const char* attrName, const char* nodeName) {
+  if (strcmp(attrName, "busid") == 0 && strcmp(nodeName, "nic") == 0) {
+    INFO(NCCL_GRAPH, "HINT: In many cases this error indicates that NCCL could not obtain complete PCI topology "
+                     "information, which inside a container is often caused by running with '--net host'.");
+    INFO(NCCL_GRAPH, "HINT: To confirm, run the container without '--net host' (or provide a valid topology file).");
+  }
+}
+
 static ncclResult_t xmlGetAttrStr(struct ncclXmlNode* node, const char* attrName, const char** value) {
   NCCLCHECK(xmlGetAttr(node, attrName, value));
   if (*value == NULL) {
     WARN("Attribute %s of node %s not found", attrName, node->name);
+    printMissingTopoAttrHint(attrName, node->name);
     return ncclInternalError;
   }
   return ncclSuccess;
@@ -422,6 +435,14 @@ static ncclResult_t xmlAddTree(struct ncclXml* dst, struct ncclXmlNode* parent, 
 
 // Dictionary for STR -> INT conversions. No dictionary size information,
 // there needs to be a last element with str == NULL.
+
+inline void printMissingTopoDictValueHint() {
+  INFO(NCCL_GRAPH,
+       "HINT: In many cases this error indicates missing or faulty information in the provided topology file.");
+  INFO(NCCL_GRAPH, "HINT: To confirm, set NCCL_TOPO_DUMP_FILE=topo.xml to produce the topology NCCL has detected and "
+                   "compare to the one provided.");
+}
+
 struct kvDict {
   const char* str;
   int value;
@@ -437,6 +458,7 @@ static ncclResult_t kvConvertToInt(const char* str, int* value, struct kvDict* d
     d++;
   }
   INFO(NCCL_GRAPH, "KV Convert to int : could not find value of '%s' in dictionary, falling back to %d", str, d->value);
+  printMissingTopoDictValueHint();
   *value = d->value;
   return ncclSuccess;
 }
@@ -458,6 +480,7 @@ static ncclResult_t kvConvertToStr(int value, const char** str, struct kvDict* d
     d++;
   }
   WARN("KV Convert to str : could not find value %d in dictionary", value);
+  printMissingTopoDictValueHint();
   return ncclInternalError;
 }
 

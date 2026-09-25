@@ -31,40 +31,24 @@
 #include <cstring>
 #include <cassert>
 
+#include "memory/memory_allocator.hpp"
+
 namespace rocshmem {
 
-template <typename ALLOCATOR, typename T>
+template <typename T>
 class DeviceProxy {
  public:
   DeviceProxy() = default;
 
-  DeviceProxy(size_t num_elems) : num_elems_ {num_elems} {
-    /**
-     * @brief The allocation size of the internal memory
-     *
-    */
+  DeviceProxy(size_t num_elems, MemoryAllocator& alloc)
+      : num_elems_{num_elems} {
     size_t size_bytes = sizeof(T) * num_elems_;
-    /*
-     * Allocate memory and verify that the allocation worked.
-     */
     T* temp{nullptr};
-    allocator_.allocate(reinterpret_cast<void**>(&temp), size_bytes);
+    alloc.allocate(reinterpret_cast<void**>(&temp), size_bytes);
     assert(temp);
-
-    /*
-     * Default memory provided by the allocation to recognizable bytes.
-     */
     memset(static_cast<void*>(temp), 0, size_bytes);
-
-    /*
-     * Pass the memory into a unique ptr for tracking.
-     */
-    std::unique_ptr<T, Deleter> up{temp};
+    std::unique_ptr<T, Deleter> up{temp, Deleter{alloc}};
     up_ = std::move(up);
-
-    /*
-     * Set a c-style ptr for access by the device.
-     */
     ptr_ = up_.get();
   }
 
@@ -85,21 +69,15 @@ class DeviceProxy {
   __host__ __device__ T* get() { return ptr_; }
 
  private:
-  /**
-   * @brief Internal Deleter functor is required by up_ member
-   */
   class Deleter {
    public:
+    Deleter() = default;
+    explicit Deleter(const MemoryAllocator& a) : a_{a} {}
     void operator()(void* x) { a_.deallocate(x); }
 
    private:
-    ALLOCATOR a_;
+    MemoryAllocator a_{};
   };
-
-  /**
-   * @brief Externally provided allocator type.
-   */
-  ALLOCATOR allocator_{};
 
   /**
    * @brief Unique pointer for tracking the proxy.

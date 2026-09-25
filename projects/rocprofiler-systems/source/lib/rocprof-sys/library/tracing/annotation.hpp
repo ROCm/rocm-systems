@@ -9,7 +9,7 @@
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "rocprofiler-systems/annotation.h"  // in rocprof-sys-common-api
 #include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>
@@ -19,9 +19,7 @@
 
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using perfetto_event_context_t = ::perfetto::EventContext;
 
@@ -29,7 +27,7 @@ template <size_t Idx>
 struct annotation_value_type;
 
 template <size_t Idx>
-using annotation_value_type_t = typename annotation_value_type<Idx>::type;
+using annotation_value_type_t = annotation_value_type<Idx>::type;
 
 #define ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ENUM, TYPE)                                    \
     template <>                                                                          \
@@ -138,7 +136,9 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
     // the name to a null pointer, type to none, or value to a null pointer
     if(_annotation.name == nullptr || _annotation.type == 0 ||
        _annotation.value == nullptr)
+    {
         return;
+    }
 
     if(_annotation.type == Idx)
     {
@@ -168,7 +168,8 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
                              "{} which is outside of acceptable range [{}, {}]",
                              _annotation.name, _annotation.type,
                              ROCPROFSYS_VALUE_NONE + 1, ROCPROFSYS_VALUE_LAST - 1);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::exit(1);
             }
         }
@@ -187,14 +188,11 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
 void
 add_perfetto_annotation(perfetto_event_context_t&      ctx,
                         const rocprofsys_annotation_t& _annotation);
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing
 
 #include <timemory/operations/types/annotate.hpp>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t;
 
@@ -209,7 +207,7 @@ struct annotate<perfetto_event_context_t, Tp>
         }
         else
         {
-            using value_type = typename Tp::value_type;
+            using value_type = Tp::value_type;
             if constexpr(!std::is_void_v<value_type>)
             {
                 auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
@@ -260,5 +258,4 @@ struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
         return base_type::operator()(obj, _ctx);
     }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation

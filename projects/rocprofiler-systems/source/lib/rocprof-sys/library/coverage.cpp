@@ -4,11 +4,13 @@
 #include "library/coverage.hpp"
 #include "api.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
 #include <cstdint>
 
+#include <fmt/format.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/popen.hpp>
@@ -26,9 +28,7 @@
 #define ROCPROFSYS_SERIALIZE(MEMBER_VARIABLE)                                            \
     ar(::tim::cereal::make_nvp(#MEMBER_VARIABLE, MEMBER_VARIABLE))
 
-namespace rocprofsys
-{
-namespace coverage
+namespace rocprofsys::coverage
 {
 namespace
 {
@@ -82,10 +82,16 @@ post_process()
 {
     using data_tuple_t = coverage_data::data_tuple_t;
 
-    if(get_post_processed()) return;
+    if(get_post_processed())
+    {
+        return;
+    }
     get_post_processed() = true;
 
-    if(!config::get_use_code_coverage()) return;
+    if(!config::get_use_code_coverage())
+    {
+        return;
+    }
 
     auto& _coverage      = get_code_coverage();
     auto& _coverage_data = get_coverage_data();
@@ -102,7 +108,10 @@ post_process()
         auto _find         = [&_coverage_data, &_coverage_map](data_tuple_t&& _v) {
             auto& _cache = _coverage_map[std::get<0>(_v)][std::get<1>(_v)];
             auto  mitr   = _cache.find(std::get<2>(_v));
-            if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
+            if(mitr != _cache.end())
+            {
+                return std::make_pair(mitr->second, true);
+            }
 
             for(auto itr = _coverage_data.begin(); itr != _coverage_data.end(); ++itr)
             {
@@ -168,7 +177,10 @@ post_process()
         auto _find_in_tmp = [&_tmp, &_tmp_map](const auto& _v) {
             auto& _cache = _tmp_map[_v.module][_v.function];
             auto  mitr   = _cache.find(_v.address);
-            if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
+            if(mitr != _cache.end())
+            {
+                return std::make_pair(mitr->second, true);
+            }
 
             for(auto titr = _tmp.begin(); titr != _tmp.end(); ++titr)
             {
@@ -183,7 +195,10 @@ post_process()
         };
         for(auto&& itr : _coverage_data)
         {
-            if(!_find_in_tmp(itr).second) _tmp.emplace_back(itr);
+            if(!_find_in_tmp(itr).second)
+            {
+                _tmp.emplace_back(itr);
+            }
         }
         std::swap(_coverage_data, _tmp);
     }
@@ -212,24 +227,17 @@ post_process()
     {
         auto          _fname = tim::settings::compose_output_filename("coverage", ".txt");
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<code_coverage>{}(
                     _fname, std::string{ "coverage" });
+            }
             for(auto& itr : _coverage_data)
             {
-                // if(get_debug() && get_verbose() >= 2)
-                if(true)
-                {
-                    auto _addr = fmt::format("0x{:x}", itr.address);
-                    ofs << std::setw(8) << itr.count << "  " << std::setw(8) << _addr
-                        << "  " << itr.source << "\n";
-                }
-                else
-                {
-                    ofs << std::setw(8) << itr.count << "  " << itr.source << "\n";
-                }
+                auto addr = fmt::format("0x{:x}", itr.address);
+                ofs << fmt::format("{:>8}  {:>8}  {}\n", itr.count, addr, itr.source);
             }
         }
         else
@@ -258,11 +266,13 @@ post_process()
         }
         auto _fname = tim::settings::compose_output_filename("coverage", ".json");
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<code_coverage>{}(
                     _fname, std::string{ "coverage" });
+            }
             ofs << oss.str() << "\n";
         }
         else
@@ -272,8 +282,7 @@ post_process()
         }
     }
 }
-}  // namespace coverage
-}  // namespace rocprofsys
+}  // namespace rocprofsys::coverage
 
 //--------------------------------------------------------------------------------------//
 
@@ -283,7 +292,10 @@ extern "C" void
 rocprofsys_register_source_hidden(const char* file, const char* func, size_t line,
                                   size_t address, const char* source)
 {
-    if(coverage::get_post_processed()) return;
+    if(coverage::get_post_processed())
+    {
+        return;
+    }
 
     using coverage_data = coverage::coverage_data;
 
@@ -311,12 +323,19 @@ rocprofsys_register_source_hidden(const char* file, const char* func, size_t lin
 extern "C" void
 rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t address)
 {
-    if(coverage::get_post_processed()) return;
-    if(rocprofsys::get_state() < rocprofsys::State::Active &&
+    if(coverage::get_post_processed())
+    {
+        return;
+    }
+    if(rocprofsys::state::process::get() < rocprofsys::state::process::Active &&
        !rocprofsys_init_tooling_hidden())
+    {
         return;
-    else if(rocprofsys::get_state() >= rocprofsys::State::Finalized)
+    }
+    else if(rocprofsys::state::process::get() >= rocprofsys::state::process::Finalized)
+    {
         return;
+    }
 
     (*coverage::get_coverage_count())[file][func][address] += 1;
 }

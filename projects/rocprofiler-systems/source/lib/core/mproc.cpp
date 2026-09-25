@@ -14,9 +14,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace mproc
+namespace rocprofsys::mproc
 {
 std::set<int>
 get_concurrent_processes(int _ppid)
@@ -36,8 +34,14 @@ get_concurrent_processes(int _ppid)
         {
             int _v = -1;
             _ifs >> _v;
-            if(!_ifs.good() || _ifs.eof()) break;
-            if(_v < 0) continue;
+            if(!_ifs.good() || _ifs.eof())
+            {
+                break;
+            }
+            if(_v < 0)
+            {
+                continue;
+            }
             _children.emplace(_v);
         }
     }
@@ -50,7 +54,10 @@ get_process_index(int _pid, int _ppid)
     auto _children = get_concurrent_processes(_ppid);
     for(auto itr = _children.begin(); itr != _children.end(); ++itr)
     {
-        if(*itr == _pid) return std::distance(_children.begin(), itr);
+        if(*itr == _pid)
+        {
+            return std::distance(_children.begin(), itr);
+        }
     }
     return -1;
 }
@@ -76,13 +83,13 @@ wait_pid(pid_t _pid, int _opts)
 int
 diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 {
-    bool _normal_exit      = (WIFEXITED(_status) > 0);
-    bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
-    bool _core_dump        = (WCOREDUMP(_status) > 0);
-    bool _stopped          = (WIFSTOPPED(_status) > 0);
-    int  _exit_status      = WEXITSTATUS(_status);
-    int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
-    int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
+    const bool _normal_exit      = (WIFEXITED(_status) > 0);
+    const bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
+    const bool _core_dump        = (WCOREDUMP(_status) > 0);
+    const bool _stopped          = (WIFSTOPPED(_status) > 0);
+    int        _exit_status      = WEXITSTATUS(_status);
+    int        _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
+    int        _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
 
     LOG_TRACE("diagnosing status for process {} :: status: {}... normal exit: {}, "
               "unhandled signal: {}, core dump: {}, stopped: {}, exit status: {}, stop "
@@ -93,7 +100,10 @@ diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 
     if(!_normal_exit)
     {
-        if(_ec == 0) _ec = EXIT_FAILURE;
+        if(_ec == 0)
+        {
+            _ec = EXIT_FAILURE;
+        }
         LOG_ERROR("process {} terminated abnormally. exit code: {}", _pid, _ec);
     }
 
@@ -131,5 +141,4 @@ diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 
     return _ec;
 }
-}  // namespace mproc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::mproc

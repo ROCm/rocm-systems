@@ -12,7 +12,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/stack.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <cstddef>
@@ -21,9 +20,7 @@
 #include <map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 struct selected_entry
 {
@@ -44,5 +41,4 @@ selected_entry::contains(uintptr_t _v) const
     return (_v == address || (symbol_address > 0 && _v == symbol_address) ||
             symbol.ipaddr().contains(_v));
 }
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

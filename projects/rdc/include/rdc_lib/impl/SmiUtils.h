@@ -32,9 +32,23 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+
 // Count how many of the retired/bad-page records are pending retirement.
 // Returns 0 when records is null or count is 0.
 uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count);
+
+// Derives the memory-activity percentage (0..100) used to estimate current
+// memory bandwidth. Prefers the mem_activity_acc accumulator delta over the
+// firmware-timestamp window (which also reflects DMA/copy traffic) and never
+// drops below the instantaneous umc_activity_pct. Falls back to umc_activity_pct
+// when there is no previous sample or the firmware clock and accumulator did not
+// advance monotonically. Firmware timestamps are in 10ns units (1ms == 100000).
+double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
+                                   uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
+                                   uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts);
+
+// Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
+// a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
@@ -46,6 +60,18 @@ amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
 amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id);
 amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metrics_t* metrics);
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition);
+
+struct GpuHandleEntry {
+  amdsmi_processor_handle handle;
+  uint32_t socket_index;
+  uint32_t proc_index;
+};
+
+// Flat table of all AMD GPU handles, built on first use and cached. Thread-safe.
+const std::vector<GpuHandleEntry>& get_flat_gpu_table();
+
+// Invalidates the cache (thread-safe). Prefer a daemon restart after a partition-mode change.
+void reset_flat_gpu_table();
 
 }  // namespace rdc
 }  // namespace amd

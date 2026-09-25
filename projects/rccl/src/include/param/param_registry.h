@@ -10,7 +10,7 @@
 
 #include "nccl.h"
 #include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+#include "param/utils.h"
 
 #include <string>
 #include <unordered_map>
@@ -18,7 +18,7 @@
 
 // C-linkage singleton accessor — exported as "ncclParamRegistryInstance"
 // Returns a process-wide RegistryState so map and mutex share identity across DSOs.
-extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL void* ncclParamRegistryInstance();
+extern "C" void* ncclParamRegistryInstance();
 
 // ncclParamRegistry is a global singleton list of all parameters. Parameters
 // defined through the DEFINE_NCCL_PARAM macro are automatically registered here

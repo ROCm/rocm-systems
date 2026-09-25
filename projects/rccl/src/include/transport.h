@@ -19,7 +19,6 @@
 #define TRANSPORT_SHM 1
 #define TRANSPORT_NET 2
 #define TRANSPORT_COLLNET 3
-#define TRANSPORT_PROFILER 4
 
 #include "proxy.h"
 #include "comm.h"
@@ -29,7 +28,6 @@ extern struct ncclTransport p2pTransport;
 extern struct ncclTransport shmTransport;
 extern struct ncclTransport netTransport;
 extern struct ncclTransport collNetTransport;
-extern struct ncclTransport profilerTransport;
 
 extern struct ncclTransport* ncclTransports[];
 // Forward declarations
@@ -42,6 +40,8 @@ extern int64_t ncclParamNvlsEnable();
 
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) \
   (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
+
+// NOTE: struct ncclPeerInfo lives in comm.h in RCCL (upstream declares it here).
 
 #define CONNECT_SIZE 256
 #define NCCL_MAX_PAGE_SIZE (512L * 1024L * 1024L)
@@ -164,6 +164,7 @@ ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConne
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm);
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm);
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int nHeads, const int* heads);
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm);
 
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]);
@@ -193,7 +194,7 @@ ncclResult_t ncclRegisterCollNvlsBuffers(
   struct ncclComm* comm, struct ncclTaskColl* info, void* outRegBufSend[NCCL_MAX_LOCAL_RANKS],
   void* outRegBufRecv[NCCL_MAX_LOCAL_RANKS],
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, bool* regNeedConnect);
-ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskColl* info, int* recChannels);
+ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, ncclFunc_t func, int* recChannels);
 
 #if CUDART_VERSION >= 12010
 ncclResult_t ncclNvlsGroupCreate(struct ncclComm* comm, CUmulticastObjectProp* prop, int rank, unsigned int nranks,

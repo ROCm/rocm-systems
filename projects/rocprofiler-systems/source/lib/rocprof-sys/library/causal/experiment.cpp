@@ -7,7 +7,7 @@
 #include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
-#include "common/units.hpp"
+#include "common/path.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
@@ -39,9 +39,7 @@
 #include <thread>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 namespace
 {
@@ -56,6 +54,7 @@ std::int64_t global_scaling            = 1;
 std::int64_t global_scaling_increments = 0;
 bool         use_exp_speedup_scaling =
     get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP, false);
+constexpr auto k_ss_duration_width = 5;
 }  // namespace
 
 experiment::sample::sample(const base_type& _b, std::uint64_t _c)
@@ -67,8 +66,10 @@ experiment::sample::sample(const base_type& _b, std::uint64_t _c)
         for(const auto& itr : lineinfo.lines)
         {
             if(itr.inlined)
+            {
                 inlines.emplace_back(
                     binary::inlined_symbol{ itr.line, itr.location, itr.name });
+            }
         }
     }
 }
@@ -88,7 +89,10 @@ experiment::sample::operator<(const sample& _v) const
 const auto&
 experiment::sample::operator+=(const sample& _v) const
 {
-    if(*this == _v && this != &_v) count += _v.count;
+    if(*this == _v && this != &_v)
+    {
+        count += _v.count;
+    }
     return *this;
 }
 
@@ -141,7 +145,9 @@ experiment::record::serialize(ArchiveT& ar, const unsigned)
     {
         ar(cereal::make_nvp("samples", _samples));
         for(auto& itr : _samples)
+        {
             samples.emplace_back(std::move(itr));
+        }
     }
     else
     {
@@ -176,7 +182,9 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         fini_progress.clear();
         ar(cereal::make_nvp("progress_points", _ppts));
         for(auto itr : _ppts)
+        {
             fini_progress.emplace(itr.get_hash(), itr);
+        }
     }
     else
     {
@@ -184,12 +192,18 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         {
             auto ppts = fini_progress;
             for(auto& pitr : ppts)
+            {
                 pitr.second.set_hash(pitr.first);
+            }
             for(auto pitr : init_progress)
+            {
                 ppts[pitr.first] -= pitr.second;
+            }
             _ppts.reserve(ppts.size());
             for(auto& pitr : ppts)
+            {
                 _ppts.emplace_back(pitr.second);
+            }
         }
         ar(cereal::make_nvp("progress_points", _ppts));
     }
@@ -216,19 +230,28 @@ experiment::get_current_experiment()
 bool
 experiment::start()
 {
-    if(running && tracing::now() < start_time + experiment_time) return false;
+    if(running && tracing::now() < start_time + experiment_time)
+    {
+        return false;
+    }
 
     selection = sample_selection();
-    if(!selection) return false;
+    if(!selection)
+    {
+        return false;
+    }
 
     // sampling period in nanoseconds
-    sampling_period = backtrace_causal::get_period(units::nsec);
+    sampling_period = backtrace_causal::get_period();
 
     // experiment time is scaled up for longer speedups
     index           = experiment_history.size() + 1;
     virtual_speedup = sample_virtual_speedup();
     delay_scaling   = virtual_speedup / 100.0;
-    if(use_exp_speedup_scaling) scaling_factor *= (1.0 + delay_scaling);
+    if(use_exp_speedup_scaling)
+    {
+        scaling_factor *= (1.0 + delay_scaling);
+    }
 
     experiment_time = global_scaling * scaling_factor * sampling_period * batch_size;
     sample_delay    = sampling_period * delay_scaling;
@@ -238,7 +261,7 @@ experiment::start()
 
     LOG_INFO("Starting causal experiment #{}: {}", index, as_string());
 
-    if(get_state() < State::Finalized)
+    if(state::process::get() < state::process::Finalized)
     {
         current_experiment_value = *this;
         current_selected_count.store(0);
@@ -255,7 +278,7 @@ experiment::wait() const
     auto _wait = experiment_time - (_now - start_time);
     auto _end  = _now + _wait;
     auto _incr = std::min<std::uint64_t>(_wait / 100, 1000000);
-    while(tracing::now() < _end && get_state() < State::Finalized)
+    while(tracing::now() < _end && state::process::get() < state::process::Finalized)
     {
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _incr });
@@ -267,7 +290,10 @@ bool
 experiment::stop()
 {
     auto _now = tracing::now();
-    if(_now < start_time + experiment_time) return false;
+    if(_now < start_time + experiment_time)
+    {
+        return false;
+    }
 
     current_experiment.store(nullptr);
     selected        = current_selected_count.load();
@@ -287,14 +313,19 @@ experiment::stop()
     _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
-        auto         _pt  = fitr.second - init_progress[fitr.first];
-        std::int64_t _num = std::max<std::int64_t>(
+        auto               _pt  = fitr.second - init_progress[fitr.first];
+        const std::int64_t _num = std::max<std::int64_t>(
             { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
-        if(_num > 0) _prog_vals.emplace_back(_num);
+        if(_num > 0)
+        {
+            _prog_vals.emplace_back(_num);
+        }
     }
     std::sort(_prog_vals.begin(), _prog_vals.end());
     for(auto itr : _prog_vals)
+    {
         _prog_stats += itr;
+    }
 
     auto _nvals = _prog_vals.size();
     auto _medi  = (_nvals > 2) ? _prog_vals.at(_nvals / 2) : _prog_vals.front();
@@ -331,7 +362,10 @@ experiment::stop()
             global_scaling_increments);
     }
 
-    if(_high > 0) experiment_history.emplace_back(*this);
+    if(_high > 0)
+    {
+        experiment_history.emplace_back(*this);
+    }
 
     std::this_thread::sleep_for(
         std::chrono::nanoseconds{ 5 * sampling_period * batch_size });
@@ -343,19 +377,31 @@ std::string
 experiment::as_string() const
 {
     std::stringstream _ss{};
-    auto _dur = static_cast<double>(experiment_time) / static_cast<double>(units::sec);
+    const auto        dur = std::chrono::duration<double>{
+        std::chrono::nanoseconds{ experiment_time }
+    }.count();
     _ss << std::boolalpha << "speed-up: " << std::setw(3) << virtual_speedup
         << "%, period: " << std::setw(4) << std::fixed << std::setprecision(2)
-        << (sampling_period / static_cast<double>(units::msec)) << " msec";
+        << std::chrono::duration<double,
+                                 std::milli>{ std::chrono::duration<double, std::nano>{
+                                                  static_cast<double>(sampling_period) } }
+               .count()
+        << " msec";
     if(!config::get_causal_end_to_end())
-        _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
-            << _dur << " sec";
+    {
+        _ss << ", duration: " << std::setw(k_ss_duration_width) << std::fixed
+            << std::setprecision(3) << dur << " sec";
+    }
     _ss << " :: experiment: " << fmt::format("0x{:X}", selection.address) << " ";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
+    {
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
+    }
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
-        _ss << "[" << filepath::basename(selection.symbol.file) << ":"
+    {
+        _ss << "[" << path::filename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
+    }
 
     auto _patch = [](std::string _v) {
         auto _pos       = std::string::npos;
@@ -367,7 +413,9 @@ experiment::as_string() const
               strpair_t{ "::__cxx11::", "::" } })
         {
             while((_pos = _v.find(itr.first)) != std::string::npos)
+            {
                 _v = _v.replace(_pos, itr.first.length(), itr.second);
+            }
         }
         return _v;
     };
@@ -381,21 +429,30 @@ experiment::as_string() const
 std::uint64_t
 experiment::get_delay()
 {
-    if(!current_experiment.load()) return 0;
+    if(!current_experiment.load())
+    {
+        return 0;
+    }
     return current_experiment_value.sample_delay;
 }
 
 double
 experiment::get_delay_scaling()
 {
-    if(!current_experiment.load()) return 0;
+    if(!current_experiment.load())
+    {
+        return 0;
+    }
     return current_experiment_value.delay_scaling;
 }
 
 std::uint32_t
 experiment::get_index()
 {
-    if(!is_active()) return 0;
+    if(!is_active())
+    {
+        return 0;
+    }
     return current_experiment_value.index;
 }
 
@@ -417,7 +474,12 @@ experiment::is_selected(unwind_addr_t _stack)
     if(is_active())
     {
         for(auto itr : _stack)
-            if(itr > 0 && current_experiment_value.selection.contains(itr)) return true;
+        {
+            if(itr > 0 && current_experiment_value.selection.contains(itr))
+            {
+                return true;
+            }
+        }
     }
     return false;
 }
@@ -428,7 +490,12 @@ experiment::is_selected(container::c_array<std::uint64_t> _stack)
     if(is_active())
     {
         for(auto itr : _stack)
-            if(itr > 0 && current_experiment_value.selection.contains(itr)) return true;
+        {
+            if(itr > 0 && current_experiment_value.selection.contains(itr))
+            {
+                return true;
+            }
+        }
     }
     return false;
 }
@@ -436,7 +503,10 @@ experiment::is_selected(container::c_array<std::uint64_t> _stack)
 void
 experiment::add_selected()
 {
-    if(current_experiment.load() == nullptr) return;
+    if(current_experiment.load() == nullptr)
+    {
+        return;
+    }
     ++current_selected_count;
 }
 
@@ -467,7 +537,10 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     {
         for(auto& itr : experiment_history)
         {
-            if(itr.duration == 0 || itr.experiment_time == 0) continue;
+            if(itr.duration == 0 || itr.experiment_time == 0)
+            {
+                continue;
+            }
             current_record.experiments.emplace_back(std::move(itr));
         }
         experiment_history.clear();
@@ -479,8 +552,14 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         std::uint64_t _end_runtime = std::numeric_limits<std::uint64_t>::min();
         for(auto& itr : current_record.experiments)
         {
-            if(itr.duration == 0) continue;
-            if(itr.experiment_time == 0) continue;
+            if(itr.duration == 0)
+            {
+                continue;
+            }
+            if(itr.experiment_time == 0)
+            {
+                continue;
+            }
             _beg_runtime = std::min<std::uint64_t>(_beg_runtime, itr.start_time);
             _end_runtime = std::max<std::uint64_t>(_end_runtime, itr.end_time);
         }
@@ -508,7 +587,10 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         for(const auto& itr : _total_samples)
         {
             auto _entry = binary::lookup_ipaddr_entry<true>(itr.first);
-            if(_entry) _add_sample(sample{ *_entry, itr.second });
+            if(_entry)
+            {
+                _add_sample(sample{ *_entry, itr.second });
+            }
         }
 
         auto _binfo_cfg         = settings::compose_filename_config{};
@@ -517,7 +599,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         save_line_info(_binfo_cfg, config::get_verbose());
     }
 
-    bool _causal_output_reset =
+    const bool _causal_output_reset =
         config::get_setting_value<bool>(std::string{ env_vars::CAUSAL_FILE_RESET })
             .value_or(false);
 
@@ -542,11 +624,13 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
         auto _fname = tim::settings::compose_output_filename(_fname_base, "json", _cfg);
         auto ofs    = std::ofstream{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<experiment>{}(
                     _fname, std::string{ "causal_experiments" });
+            }
             ofs << oss.str() << "\n";
         }
         else
@@ -576,11 +660,13 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
     std::ofstream ofs{};
     ofs.setf(std::ios::fixed);
-    if(tim::filepath::open(ofs, _fname))
+    if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
     {
         if(get_verbose() >= 0)
+        {
             operation::file_output_message<experiment>{}(
                 _fname, std::string{ "causal_experiments" });
+        }
 
         ofs << _existing.str();
         ofs << "startup\ttime=" << current_record.startup << "\n";
@@ -590,7 +676,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             auto& _selection = itr.selection;
             auto& _line_info = _selection.symbol;
 
-            std::string _name =
+            const std::string _name =
                 (_selection.symbol_address > 0)
                     ? _line_info.func
                     : fmt::format("{}:{}", _line_info.file, _line_info.line);
@@ -613,23 +699,34 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
             auto ppts = itr.fini_progress;
             for(auto pitr : itr.init_progress)
+            {
                 ppts[pitr.first] -= pitr.second;
+            }
 
             for(auto pitr : ppts)
             {
                 // if(pitr.second.get_laps() == 0) continue;
-                if(get_causal_end_to_end() && pitr.second.get_laps() > 1) continue;
+                if(get_causal_end_to_end() && pitr.second.get_laps() > 1)
+                {
+                    continue;
+                }
                 if(pitr.second.is_throughput_point() && pitr.second.get_delta() != 0)
                 {
                     ofs << "throughput-point\tname="
                         << rocprofsys::utility::demangle(
                                tim::get_hash_identifier(pitr.first))
                         << "\tdelta=" << pitr.second.get_delta() << "\n";
-                    if(get_causal_end_to_end()) break;
+                    if(get_causal_end_to_end())
+                    {
+                        break;
+                    }
                 }
                 if(pitr.second.is_latency_point())
                 {
-                    if(get_causal_end_to_end()) continue;
+                    if(get_causal_end_to_end())
+                    {
+                        continue;
+                    }
                     auto _delta =
                         std::max<std::int64_t>(pitr.second.get_latency_delta(), 1);
                     ofs << "latency-point\tname="
@@ -649,7 +746,9 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             ofs << "samples\tlocation=" << itr.get_identifier()
                 << "\tcount=" << itr.count;
             if(config::get_debug())
+            {
                 ofs << "\taddress=" << fmt::format("0x{:X}", itr.address);
+            }
             ofs << "\n";
         }
     }
@@ -677,7 +776,8 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
 
     auto ifs   = std::ifstream{};
     auto _data = std::vector<experiment::record>{};
-    if(tim::filepath::open(ifs, _fname))
+    ifs.open(_fname);
+    if(ifs.is_open() && ifs.good())
     {
         auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
@@ -700,5 +800,4 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
 
     return _data;
 }
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

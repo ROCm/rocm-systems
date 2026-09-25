@@ -26,6 +26,7 @@
 #include <hip/hip_runtime.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define WIDTH 1024
 
@@ -122,7 +123,7 @@ pc_sampling_kernel(const int c)
 }
 
 int
-main()
+main(int argc, char** argv)
 {
     auto tid = roctx_thread_id_t{};
     // get the thread id recognized by rocprofiler-sdk from roctx
@@ -156,19 +157,22 @@ main()
         hipMemcpy(gpuTransposeMatrix, gpuMatrix, NUM * sizeof(float), hipMemcpyDeviceToDevice));
 
     // Set up simple kernels
-    constexpr auto   NUM_KERNELS              = 64;
-    constexpr size_t TARGET_KERNEL_ITERATIONS = NUM_KERNELS / 4;
-    float*           result                   = nullptr;
-    float            varA                     = 5.5;
-    float            varB                     = 11.7;
-    uint32_t         num_blocks               = BLOCK_SIZE;
+    constexpr auto NUM_KERNELS = size_t{64};
+    auto           num_kernels = NUM_KERNELS;
+    if(argc > 1) num_kernels = atoll(argv[1]);
+    const auto target_kernel_iterations = (num_kernels / 4 > 0) ? num_kernels / 4 : size_t{1};
+    float*     result                   = nullptr;
+    float      varA                     = 5.5;
+    float      varB                     = 11.7;
+    uint32_t   num_blocks               = BLOCK_SIZE;
+    if(argc > 2) num_blocks = static_cast<uint32_t>(atoi(argv[2]));
     checkHipErrors(hipMallocAsync(&result, sizeof(float), stream));
-    for(auto i = 0; i < NUM_KERNELS; ++i)
+    for(auto i = size_t{0}; i < num_kernels; ++i)
     {
         kernel_add<<<dim3(1), dim3(1), 0, stream>>>(varA++, varB++, result);
         kernel_mult<<<dim3(1), dim3(1), 0, stream>>>(varA++, varB++, result);
         // Run target kernel
-        if(i % TARGET_KERNEL_ITERATIONS == 0)
+        if(i % target_kernel_iterations == 0)
         {
             roctxProfilerResume(tid);
             hipLaunchKernelGGL(target_kernel,
@@ -180,10 +184,12 @@ main()
                                gpuMatrix,
                                WIDTH);
             // Use max(i, 1) to ensure at least 1 thread per block (i=0 would be invalid)
-            int threads_per_block = (i > 0 ? i : 1);
+            int threads_per_block = static_cast<int>(i > 0 ? i : 1);
             pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
             // Check for kernel launch errors
             checkHipErrors(hipGetLastError());
+            // Kernel launches are asynchronous; keep the profiler resumed until they complete.
+            checkHipErrors(hipDeviceSynchronize());
             roctxProfilerPause(tid);
         }
     }

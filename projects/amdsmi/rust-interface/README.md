@@ -78,10 +78,10 @@ fn main() {
                 Err(e) => eprintln!("Failed to get GPU vendor name: {}", e),
             }
 
-            // Get GPU VRAM vendor using the processor handle
-            match amdsmi_get_gpu_vram_vendor(processor_handle) {
-                Ok(gpu_vram_vendor) => println!("GPU VRAM Vendor: {}", gpu_vram_vendor),
-                Err(e) => eprintln!("Failed to get GPU VRAM vendor: {}", e),
+            // Get GPU VRAM info using the processor handle
+            match amdsmi_get_gpu_vram_info(processor_handle) {
+                Ok(gpu_vram_info) => println!("GPU VRAM Info: {:?}", gpu_vram_info),
+                Err(e) => eprintln!("Failed to get GPU VRAM info: {}", e),
             }
 
             // Get GPU BDF using the processor handle

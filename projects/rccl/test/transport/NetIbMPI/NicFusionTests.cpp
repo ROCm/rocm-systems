@@ -7,6 +7,7 @@
 #include "NetIbMPITestBase.hpp"
 
 #include <chrono>
+#include <cstddef>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -16,9 +17,8 @@ static constexpr int kConnectPollTimeoutSec = 30;
 // Virtual Device Tests
 
 TEST_F(NetIbMPITest, MakeVirtualDevice) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -46,9 +46,8 @@ TEST_F(NetIbMPITest, MakeVirtualDevice) {
 }
 
 TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -62,6 +61,31 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
     EXPECT_EQ(result, ncclInvalidUsage) << "Should fail with zero devices";
 }
 
+TEST_F(NetIbMPITest, MakeVirtualDeviceNegativeNdevs) {
+    // A negative count clears every per-device check, because the build loop never runs.
+    // Without an explicit bound it registers a vNIC with no constituent device.
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
+
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+
+    int ndevBefore = 0;
+    ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+    ncclNetVDeviceProps_t vProps;
+    memset(&vProps, 0, sizeof(vProps));
+    vProps.ndevs = -1;
+
+    int vdev = -1;
+    EXPECT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclInvalidUsage)
+        << "Should fail with a negative device count";
+
+    int ndevAfter = 0;
+    ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+    EXPECT_EQ(ndevAfter, ndevBefore) << "A rejected request must not register a device";
+}
+
 TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {
     // A multi-device merge must be rejected when NIC merging is disabled.
     // Requires NCCL_IB_MERGE_NICS=0 (config default is 1) so GTEST_SKIP otherwise.
@@ -70,9 +94,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {
         GTEST_SKIP() << "Set NCCL_IB_MERGE_NICS=0 to exercise the merge-disabled guard";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -111,9 +134,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceCrossNuma) {
     // still succeed. Picks a cross-NUMA pair by reading each device's numa_node
     // from sysfs (correct on any layout, no fixed indices); skips when no such
     // pair exists or merging is disabled.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
     if (mergeEnv && atoi(mergeEnv) == 0) {
@@ -158,9 +180,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
     // physical index >= the physical device count. The reported device count
     // (merged) is always >= the physical count, so using it as the index is
     // guaranteed out of range regardless of how many vNICs already exist.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -178,9 +199,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
 TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
     // Listing the same physical device twice must be deduped into a single-device
     // vNIC rather than rejected or double-counted.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     // Dedup yields a 1-device vNIC, which requires merging to be enabled
     // (NCCL_IB_MERGE_NICS defaults to 1). Skip only when it is explicitly off,
@@ -218,9 +238,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
 // NIC Fusion (vNIC) Tests
 
 TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -282,9 +301,8 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     // Skip when resiliency is enabled: asymmetric makeVDevice leaves stale
     // entries in the global IbCastMergedDevs table (IbCastNMergedDevs is not
@@ -398,9 +416,8 @@ TEST_F(NetIbMPITest, DisjointMergeRailLocal_VNic) {
     // Exercises CheckVProps' rail-local mismatch + ndevs-swap arms on accept,
     // reached when the two ranks' vNICs share no physical devices. Requires
     // NCCL_IB_WARN_RAIL_LOCAL=1 (defaults off) and >=5 physical NICs.
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -487,9 +504,8 @@ TEST_F(NetIbMPITest, DisjointMergeRailLocal_VNic) {
 }
 
 TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -564,9 +580,8 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -643,9 +658,8 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
 }
 
 TEST_F(NetIbMPITest, LargeTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -699,7 +713,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 
     // Extended timeout for 16MB transfer across doubled QPs.
     int sizes[1] = {0};
-    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeoutMs), ncclSuccess);
 
     // Full 64MB byte-by-byte verification
     // ncclIbMultiSend would corrupt data at QP split points.
@@ -710,9 +724,8 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, MixedSizes_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -774,7 +787,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         int sizes[1] = {0};
-        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeout : kDefaultTimeoutMs;
+        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
         ASSERT_EQ(WaitForCompletion(request, sizes, timeout), ncclSuccess);
 
         // Prevent request reuse race between iterations.
@@ -788,9 +801,8 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
 }
 
 TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -865,9 +877,8 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, Bidirectional_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1001,9 +1012,8 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
 }
 
 TEST_F(NetIbMPITest, FlushRepeated_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1091,9 +1101,8 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 }
 
 TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1168,7 +1177,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 // =============================================================================
 // Test: SendRecvDifferentMemoryTypes
 //
-// Creates a 2-NIC merged virtual device per rank (CreateMergedDevice(2, rank)).
+// Creates a 2-NIC merged virtual device per rank (CreateMergedDevice(2)).
 // Rank 0 (receiver) and Rank 1 (sender) each use their own merged device.
 // Tests all four memory type combinations: host→host, host→GPU, GPU→host, GPU→GPU.
 //
@@ -1180,18 +1189,17 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 //   - Flush semantics for GPU memory receives
 // =============================================================================
 TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(2, rank);
+    int mergedDev = CreateMergedDevice(2);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     ncclNetProperties_t mProps;
@@ -1309,18 +1317,17 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
 }
 
 TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly kExactTwoProcesses processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(3, rank);
+    int mergedDev = CreateMergedDevice(3);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     // Build test size list
@@ -1434,18 +1441,17 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
 }
 
 TEST_F(NetIbMPITest, MultidirectionalTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedSendDev = CreateMergedDevice(4, rank);
+    int mergedSendDev = CreateMergedDevice(4);
     if (mergedSendDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
     int mergedRecvDev = mergedSendDev;
 
@@ -1573,9 +1579,8 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
 }
 
 TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1583,9 +1588,9 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     // --- Init and discover devices ---
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(2, rank);
+    int mergedDev = CreateMergedDevice(2);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     // --- Parameters ---
@@ -1781,9 +1786,9 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 // Test: MergeMultipleDevices
 //
 // Tests makeVDevice() with increasing numbers of physical devices:
-//   - 3 devices: should succeed (within NCCL_NET_MAX_DEVS_PER_NIC = 4 limit)
-//   - 4 devices: should succeed (at the limit)
-//   - 5 devices: should fail (exceeds the limit)
+//   - below NCCL_NET_MAX_DEVS_PER_NIC: should succeed
+//   - at the limit:                    should succeed
+//   - above the limit:                 should fail, adding no device
 //
 // makeVDevice() is additive — each successful call appends a new merged device
 // to the device list. Physical devices remain visible (hiding is done by the
@@ -1791,15 +1796,23 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 //
 // =============================================================================
 TEST_F(NetIbMPITest, MergeMultipleDevices) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
+
+    // With merging off, every ndevs > 1 request is refused and the over-limit case would
+    // pass for the wrong reason.
+    const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
+    if (mergeEnv && atoi(mergeEnv) == 0) {
+        GTEST_SKIP() << "NIC merging disabled (NCCL_IB_MERGE_NICS=0)";
+    }
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
     int ndev = 0;
     ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
     ASSERT_GT(ndev, 0);
+
+    constexpr int kMaxDevsPerNic = NCCL_NET_MAX_DEVS_PER_NIC;
 
     // --- Collect all device properties and identify physical (non-merged) devices ---
     std::vector<ncclNetProperties_t> allProps(ndev);
@@ -1809,160 +1822,132 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
         memset(&allProps[i], 0, sizeof(ncclNetProperties_t));
         ASSERT_EQ(GetDeviceProperties(i, &allProps[i]), ncclSuccess);
 
-        bool isMerged = (allProps[i].name && strchr(allProps[i].name, '+') != nullptr);
-        if (!isMerged) {
+        // Only the init-time 1:1 vNICs wrap their own index; MakeVirtualDeviceDuplicateDevs
+        // leaves behind a deduped vNIC that also has ndevs == 1 but wraps a lower index.
+        if (allProps[i].vProps.ndevs == 1 && allProps[i].vProps.devs[0] == i) {
             physicalDevices.push_back(i);
         }
     }
 
-    if (physicalDevices.size() < 5) {
-        GTEST_SKIP() << "Need at least 5 physical (non-merged) IB devices, found "
-                     << physicalDevices.size();
+    if (physicalDevices.empty()) {
+        GTEST_SKIP() << "No physical IB devices found";
     }
 
-    // --- Find 5 physical devices with matching speed ---
+    // --- Take up to kMaxDevsPerNic physical devices sharing one speed ---
     int targetSpeed = allProps[physicalDevices[0]].speed;
     std::vector<int> selected;
 
-    for (size_t i = 0; i < physicalDevices.size() && selected.size() < 5; i++) {
+    for (size_t i = 0; i < physicalDevices.size() && (int)selected.size() < kMaxDevsPerNic; i++) {
         int devIdx = physicalDevices[i];
         if (allProps[devIdx].speed == targetSpeed) {
             selected.push_back(devIdx);
         }
     }
 
-    if (selected.size() < 5) {
-        GTEST_SKIP() << "Could not find 5 physical devices with matching speed. "
-                     << "Found " << selected.size() << " devices at speed " << targetSpeed;
+    const int mergeCount = (int)selected.size();
+    if (mergeCount < 2) {
+        GTEST_SKIP() << "Need at least 2 physical devices at a common speed, found " << mergeCount
+                     << " at speed " << targetSpeed;
     }
 
-    // =========================================================================
-    // Sub-test 1: Merge 3 devices (should succeed, under limit of 4)
-    // =========================================================================
-    {
+    // Merge selected[0..count-1] and check the resulting vNIC. Distinct indices only,
+    // so the merged device must report exactly `count` constituents.
+    auto expectMergeSucceeds = [&](int count) {
+        SCOPED_TRACE(testing::Message() << "merging " << count << " devices, limit " << kMaxDevsPerNic);
+
         int ndevBefore = 0;
         ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
         ncclNetVDeviceProps_t vProps;
         memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 3;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[1];
-        vProps.devs[2] = selected[2];
-
-        int vdev = -1;
-        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
-
-        EXPECT_EQ(result, ncclSuccess)
-            << "Merging 3 devices should succeed (within limit of 4)";
-
-        if (result == ncclSuccess) {
-            EXPECT_GE(vdev, 0) << "Virtual device index should be non-negative";
-
-            // Device count should increase by 1
-            int ndevAfter = 0;
-            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-            EXPECT_EQ(ndevAfter, ndevBefore + 1)
-                << "makeVDevice should add exactly one device";
-
-            // Verify the new merged device properties
-            ncclNetProperties_t vdevProps;
-            memset(&vdevProps, 0, sizeof(vdevProps));
-            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
-
-            // Name should contain two '+' separators (3 devices)
-            ASSERT_NE(vdevProps.name, nullptr);
-            std::string mergedName(vdevProps.name);
-            int plusCount = 0;
-            for (char c : mergedName) {
-                if (c == '+') plusCount++;
-            }
-            EXPECT_EQ(plusCount, 2)
-                << "3-device merge should have 2 '+' separators, got " << plusCount
-                << " in name '" << mergedName << "'";
-
-            // Speed should be sum of 3 constituents
-            int expectedSpeed = allProps[selected[0]].speed +
-                                allProps[selected[1]].speed +
-                                allProps[selected[2]].speed;
-            EXPECT_EQ(vdevProps.speed, expectedSpeed)
-                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        vProps.ndevs = count;
+        int expectedSpeed = 0;
+        for (int i = 0; i < count; i++) {
+            vProps.devs[i] = selected[i];
+            expectedSpeed += allProps[selected[i]].speed;
         }
-    }
-
-    // =========================================================================
-    // Sub-test 2: Merge 4 devices (should succeed, at the limit)
-    // =========================================================================
-    {
-        int ndevBefore = 0;
-        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
-
-        ncclNetVDeviceProps_t vProps;
-        memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 4;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[1];
-        vProps.devs[2] = selected[2];
-        vProps.devs[3] = selected[3];
 
         int vdev = -1;
-        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+        ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+            << "Merging " << count << " devices should succeed";
+        ASSERT_GE(vdev, 0) << "Virtual device index should be non-negative";
 
-        EXPECT_EQ(result, ncclSuccess)
-            << "Merging 4 devices should succeed (at the limit of NCCL_NET_MAX_DEVS_PER_NIC)";
+        int ndevAfter = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+        EXPECT_EQ(ndevAfter, ndevBefore + 1) << "makeVDevice should add exactly one device";
 
-        if (result == ncclSuccess) {
-            EXPECT_GE(vdev, 0);
+        ncclNetProperties_t vdevProps;
+        memset(&vdevProps, 0, sizeof(vdevProps));
+        ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+        ASSERT_NE(vdevProps.name, nullptr);
 
-            int ndevAfter = 0;
-            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-            EXPECT_EQ(ndevAfter, ndevBefore + 1);
-
-            ncclNetProperties_t vdevProps;
-            memset(&vdevProps, 0, sizeof(vdevProps));
-            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
-
-            // Name should contain three '+' separators (4 devices)
-            ASSERT_NE(vdevProps.name, nullptr);
-            std::string mergedName(vdevProps.name);
-            int plusCount = 0;
-            for (char c : mergedName) {
-                if (c == '+') plusCount++;
-            }
-            EXPECT_EQ(plusCount, 3)
-                << "4-device merge should have 3 '+' separators, got " << plusCount
-                << " in name '" << mergedName << "'";
-
-            // Speed should be sum of 4 constituents
-            int expectedSpeed = allProps[selected[0]].speed +
-                                allProps[selected[1]].speed +
-                                allProps[selected[2]].speed +
-                                allProps[selected[3]].speed;
-            EXPECT_EQ(vdevProps.speed, expectedSpeed)
-                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        std::string mergedName(vdevProps.name);
+        int plusCount = 0;
+        for (char c : mergedName) {
+            if (c == '+') plusCount++;
         }
+        EXPECT_EQ(plusCount, count - 1)
+            << count << "-device merge should have " << count - 1 << " '+' separators, got "
+            << plusCount << " in name '" << mergedName << "'";
+        EXPECT_EQ(vdevProps.speed, expectedSpeed)
+            << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+    };
+
+    // =========================================================================
+    // Sub-test 1: below the limit
+    // =========================================================================
+    if (mergeCount >= 3) {
+        ASSERT_NO_FATAL_FAILURE(expectMergeSucceeds(mergeCount - 1));
     }
 
     // =========================================================================
-    // Sub-test 3: Merge 5 devices (should FAIL, exceeds limit of 4)
+    // Sub-test 2: at the limit (or at the node's maximum, when it has fewer NICs)
+    // =========================================================================
+    ASSERT_NO_FATAL_FAILURE(expectMergeSucceeds(mergeCount));
+
+    if (mergeCount < kMaxDevsPerNic) {
+        TEST_INFO("Only %d same-speed NICs available; the ndevs == %d boundary was not exercised",
+                  mergeCount, kMaxDevsPerNic);
+    }
+
+    // =========================================================================
+    // Sub-test 3: above the limit — must be rejected, no device added
+    //
+    // ncclNetVDeviceProps_t::devs[] holds exactly NCCL_NET_MAX_DEVS_PER_NIC entries, so an
+    // over-limit request cannot be expressed in that struct. Pad a real props object with one
+    // spare devs[] slot: the plugin must reject on the ndevs count alone, before it ever
+    // indexes devs[], and a regressed guard that walks one entry too far stays inside memory
+    // this test owns.
     // =========================================================================
     {
         int ndevBefore = 0;
         ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
-        ncclNetVDeviceProps_t vProps;
-        memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 5;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[1];
-        vProps.devs[2] = selected[2];
-        vProps.devs[3] = selected[3];
+        constexpr int kOverLimit = kMaxDevsPerNic + 1;
+
+        // The spare slot below only extends devs[], and so only keeps a one-entry overrun inside
+        // this object, while devs[] is the trailing member of the struct.
+        static_assert(offsetof(ncclNetVDeviceProps_t, devs) + sizeof(ncclNetVDeviceProps_t::devs) ==
+                          sizeof(ncclNetVDeviceProps_t),
+                      "ncclNetVDeviceProps_t gained a member after devs[]");
+
+        union {
+            ncclNetVDeviceProps_t props;
+            char padded[sizeof(ncclNetVDeviceProps_t) + sizeof(int)];
+        } request;
+
+        memset(&request, 0, sizeof(request));
+        request.props.ndevs = kOverLimit;
+        for (int i = 0; i < kMaxDevsPerNic; i++) {
+            request.props.devs[i] = selected[i % mergeCount];
+        }
 
         int vdev = -1;
-        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+        ncclResult_t result = MakeVirtualDevice(&vdev, &request.props);
 
-        EXPECT_NE(result, ncclSuccess)
-            << "Merging 5 devices should fail (exceeds NCCL_NET_MAX_DEVS_PER_NIC = 4)";
+        EXPECT_EQ(result, ncclInvalidUsage)
+            << "Merging " << kOverLimit << " devices must be rejected (limit is "
+            << kMaxDevsPerNic << ")";
 
         // Device count should NOT have changed
         int ndevAfter = 0;
@@ -1973,9 +1958,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
 }
 
 TEST_F(NetIbMPITest, Reconnect_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -2063,18 +2047,17 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
 }
 
 TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int dev = CreateMergedDevice(3, rank);
+    int dev = CreateMergedDevice(3);
     if (dev == -1) {
-        GTEST_SKIP() << "Failed to create 3-NIC merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     {

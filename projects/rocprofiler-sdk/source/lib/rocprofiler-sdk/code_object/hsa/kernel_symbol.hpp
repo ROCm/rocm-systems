@@ -60,12 +60,14 @@ struct kernel_symbol
     kernel_symbol& operator=(const kernel_symbol&) = delete;
     kernel_symbol& operator                        =(kernel_symbol&&) noexcept;
 
-    std::atomic<bool>        beg_notified   = false;
-    std::atomic<bool>        end_notified   = false;
-    const std::string*       name           = nullptr;
-    hsa_executable_t         hsa_executable = {};
-    hsa_agent_t              hsa_agent      = {};
-    hsa_executable_symbol_t  hsa_symbol     = {};
+    std::atomic<bool> beg_notified = false;
+    std::atomic<bool> end_notified = false;
+    // zero until the symbol's host function is registered; identical for every context
+    std::atomic<uint64_t>    host_function_id = 0;
+    const std::string*       name             = nullptr;
+    hsa_executable_t         hsa_executable   = {};
+    hsa_agent_t              hsa_agent        = {};
+    hsa_executable_symbol_t  hsa_symbol       = {};
     kernel_symbol_data_t     rocp_data = common::init_public_api_struct(kernel_symbol_data_t{});
     synchronized_user_data_t user_data = {};
 };

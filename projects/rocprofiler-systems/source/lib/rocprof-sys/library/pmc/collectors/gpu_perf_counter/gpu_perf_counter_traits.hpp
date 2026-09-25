@@ -26,7 +26,7 @@ struct gpu_perf_counter_traits
     using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using backend_t         = typename BackendProvider::backend_t;
+    using backend_t         = BackendProvider::backend_t;
 
     static constexpr const char* device_name = "GPU";
 
@@ -86,7 +86,7 @@ struct gpu_perf_counter_traits
     {
         std::vector<device_entry> entries;
 
-        auto devices = provider->template get_devices<device_t>(device_type::GPU);
+        auto devices = provider->template get_devices<device_t>(device_type::gpu);
 
         for(auto& dev : devices)
         {

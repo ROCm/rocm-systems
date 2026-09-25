@@ -14,6 +14,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <pthread.h>
@@ -28,11 +29,7 @@
 #pragma weak pthread_barrier_wait
 #pragma weak kill
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 std::string
 unblocking_gotcha::label()
@@ -57,7 +54,10 @@ void
 unblocking_gotcha::configure()
 {
     unblocking_gotcha_t::get_initializer() = []() {
-        if(!config::get_use_causal()) return;
+        if(!config::get_use_causal())
+        {
+            return;
+        }
 
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 0, pthread_mutex_unlock);
         TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 1, pthread_spin_unlock);
@@ -71,9 +71,14 @@ unblocking_gotcha::configure()
     };
 }
 
+// Same fast_gotcha gap as blocking_gotcha: disable() does not uninstall the GOT
+// hook. delay::process() can sleep_for accumulated credits; skip it after shutdown.
+static std::atomic<bool> g_shutdown{ false };
+
 void
 unblocking_gotcha::shutdown()
 {
+    g_shutdown.store(true, std::memory_order_release);
     unblocking_gotcha_t::disable();
 }
 
@@ -83,7 +88,12 @@ Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
-    auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_args...);
+    }
+
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active)
     {
@@ -91,7 +101,7 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 
         if constexpr(Idx == pthread_barrier_wait_idx)
         {
-            std::int64_t _delay_value =
+            const std::int64_t _delay_value =
                 (_active) ? causal::delay::get_global().load() : 0;
 
             causal::sampling::block_backtrace_samples();
@@ -110,9 +120,17 @@ int
 unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
-    auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_pid, _sig);
+    }
 
-    if(_active && _pid == process::get_id()) causal::delay::process();
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+
+    if(_active && _pid == process::get_id())
+    {
+        causal::delay::process();
+    }
 
     causal::sampling::block_backtrace_samples();
     auto _ret = (*_func)(_pid, _sig);
@@ -120,8 +138,6 @@ unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
 
     return _ret;
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::causal::component::unblocking_gotcha)

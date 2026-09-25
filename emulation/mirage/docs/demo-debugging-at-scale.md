@@ -36,7 +36,7 @@ Debugging GPU code at scale is **expensive and slow**:
 - 🔬  When it crashes at 2am on node 47, you get a core dump and a prayer.
 
 > **What if every engineer could spin up a 2-node MI450X "cluster" on their laptop,
-> inspect every byte of state with `cat`, and re-run instantly?**
+> run it like any other command, and re-run instantly?**
 
 That is what **mirage + rocjitsu** does.
 
@@ -49,7 +49,7 @@ flowchart LR
     subgraph You["Your unchanged ROCm app"]
       A["python train.py / rccl-tests / pytest"]
     end
-    A --> M["mirage<br/>(UX · control plane · orchestration)"]
+    A --> M["mirage<br/>(UX · orchestration · process ownership)"]
     M --> R["rocjitsu<br/>(the GPU emulator)"]
     R --> V["Emulated GPU<br/>VM + KMD + topology"]
 ```
@@ -57,7 +57,7 @@ flowchart LR
 | Layer | What it is |
 | ----- | ---------- |
 | **rocjitsu** | The ROCm Just-In-time Suite — a software GPU **emulator** (functional or clocked). |
-| **mirage** | The user-facing **UX**: CLI + optional web dashboard that drives rocjitsu (and other backends) at scale. |
+| **mirage** | The user-facing **UX**: one CLI that drives rocjitsu (and other backends) at scale. |
 
 <!--
 Key framing: rocjitsu is the engine, mirage is the cockpit. The app never changes.
@@ -91,15 +91,15 @@ Six nouns. Learn these and you know the tool.
 
 | Concept | What it is |
 | ------- | ---------- |
-| **Emulator** | A backend that runs GPU code: `rocjitsu`, `rocjitsu-dbt`, `hotswap`, `noop`. |
+| **Emulator** | A backend that runs GPU code: `rocjitsu`, `rocjitsu-dbt`, `hotswap`. |
 | **Agent** | A hardware GPU definition — `MI300X`, `MI350X`, `MI450X`. |
 | **Topology** | A rack / node / GPU layout that references an agent. |
 | **Profile** | A reusable preset: emulator + topology + options. |
-| **Session** | A long-lived context (one host process) that hosts an emulator and runs execs. |
-| **Exec** | A single command invocation inside a session, with fully redirected stdio. |
+| **Session** | The emulated cluster **one `mirage run` holds in its own process**. It exists exactly as long as that command does. |
+| **Exec** | A command started in a live run's session from **another terminal**, running in *that* terminal. |
 
-> Flow: pick a **profile** → start a **session** → run **execs**.
-> `mirage run` does all three in one shot.
+> Flow: pick a **profile** → `mirage run` it → optionally `mirage exec` into it
+> from a second window while it's up.
 
 ---
 
@@ -108,16 +108,16 @@ Six nouns. Learn these and you know the tool.
 ```console
 $ mirage emulators
 NAME          INSTALLED  SUPPORTED  DESCRIPTION
-noop*         yes        yes        no-op emulator: runs commands directly
-rocjitsu      yes        yes        ROCm just-in-time GPU emulator
+rocjitsu*     yes        yes        ROCm just-in-time GPU emulator
 rocjitsu-dbt  yes        no         dynamic binary translation (needs real GPU)
 hotswap       no         yes        load-time ISA-rewriting backend
 * = default emulator for new profiles
 
 $ mirage profile create cdna4 --emulator rocjitsu --agent MI350X
-created profile 'cdna4'
+created profile cdna4
 
 $ mirage run --profile cdna4 -- python3 train.py
+mirage: session s-20260616-191636-3b41-0
 tiny_torch_ok
 ```
 
@@ -125,53 +125,66 @@ That last line came out of an **emulated MI350X**. No GPU was harmed.
 
 <!--
 Pause here. This is the "wow" — a torch workload on a laptop on a fake GPU.
+The session id on stderr is the only thing mirage prints of its own.
 -->
 
 ---
 
-# Architecture: one binary, three roles
+# Architecture: one binary, one process
 
-The single `mirage` executable is a control plane, a host, and a dashboard.
-The subcommand decides which role runs.
+There is no server. `mirage run` **is** the runtime: it brings a session up in
+its own address space, runs your command, and takes the session with it when it
+exits.
 
 ```mermaid
 flowchart TB
-    CLI["mirage [verb]<br/>control plane (ctl)"]
-    HOST["mirage host --session ID<br/>per-session worker"]
-    WEB["mirage webui<br/>optional dashboard"]
-    FS[("Filesystem<br/>XDG dirs: profiles, sessions, execs")]
+    CFG[("$XDG_CONFIG_HOME/mirage<br/>profiles · topologies · agents")]
+    RUN["mirage run<br/>owns the emulator, the containers,<br/>the workload — and its terminal"]
+    SOCK[["$XDG_RUNTIME_DIR/mirage/run/&lt;session&gt;.sock"]]
+    EX["mirage exec<br/>(another terminal)"]
 
-    CLI -->|"write def.json / exec defs"| FS
-    FS -->|"read health / status / stdout"| CLI
-    HOST -->|"write health.json continuously"| FS
-    FS -->|"poll exec/ for new work"| HOST
-    WEB --> FS
+    CFG --> RUN
+    RUN -->|"serves once ready"| SOCK
+    EX -->|"Request::Attach"| SOCK
+    SOCK -->|"SessionDescription"| EX
+    EX -->|"spawns its own children"| W["your command,<br/>in the exec's terminal"]
 ```
 
-> The CLI and the host **never talk over a socket**. They coordinate
-> *only* through files in the session directory.
+> The socket answers exactly **one** question: *how do I start a process in this
+> session?* Everything else — spawning, signalling, reaping, printing — belongs
+> to the process that owns the terminal it is happening in.
 
 ---
 
-# Why file-backed? (this is the debugging superpower)
+# Why no daemon? (this is the debugging superpower)
+
+Mirage used to have a supervisor daemon owning every session; before that, a
+detached per-session host coordinating through files. Both leaked, for the same
+reason: **a process nobody is responsible for is a process nobody reaps.**
 
 ```mermaid
 flowchart LR
-    subgraph disk["Everything is on disk"]
-      P["profile/*.json"]
-      S["session/[id]/def.json"]
-      H["session/[id]/health.json"]
-      E["exec/[id]/node/0/stdout"]
+    subgraph before["Machinery we deleted"]
+      B1["daemon + control socket"]
+      B2["health.json · pid files"]
+      B3["PTY · attach · log streams"]
+      B4["detached sessions"]
     end
-    LS["ls / cat / jq / tail -f"] --> disk
+    subgraph after["What replaced it"]
+      A1["the run process"]
+      A2["its liveness"]
+      A3["your real terminal"]
+      A4["Ctrl-C"]
+    end
+    before ==> after
 ```
 
-- **Inspectable** — read any state with `ls`, `cat`, `jq`. No IPC to trace.
-- **Crash-resilient** — a dead CLI or host doesn't lose state; restart and resume.
-- **No required daemon** — read-only commands work with nothing running.
-- **Scriptable** — every list/show takes `--json`; exit codes are predictable.
-
-> Debugging an emulated cluster becomes "read the files."
+- **Liveness is a fact, not an inference** — "is this session alive?" is "is that
+  process alive?". No heartbeat, no staleness ladder, no guessing.
+- **Teardown is closed-loop** — the run does not exit until every child is waited
+  on and every container is removed.
+- **The socket *is* the registration** — connecting either reaches the owner or
+  fails, and failing is how a stale entry is recognised.
 
 ---
 
@@ -180,14 +193,11 @@ flowchart LR
 ```mermaid
 flowchart TB
     root["mirage (root binary)"]
-    root --> ctl["mirage_ctl<br/>CLI verbs"]
-    root --> host["mirage_host<br/>per-session host"]
-    root --> core["mirage_core<br/>types · XDG paths · state I/O · traits"]
-    root --> cont["mirage_container<br/>podman/docker provider"]
-    root --> builtin["mirage_builtin<br/>embedded agents/topologies/profiles"]
-    root --> daemon["mirage_daemon<br/>web API (feature-gated)"]
-    daemon --> dash["mirage_dashboard<br/>React SPA"]
-    root -.link-only.-> noop["mirage_noop"]
+    root --> ctl["mirage_ctl<br/>CLI verbs · run · exec"]
+    root --> core["mirage_core<br/>types · XDG paths · proto · traits"]
+    ctl --> sup["mirage_supervisor<br/>session/exec/process engine"]
+    ctl --> builtin["mirage_builtin<br/>embedded agents/topologies/profiles"]
+    sup --> cont["mirage_container<br/>podman/docker provider"]
     root -.link-only.-> rj["mirage_rocjitsu (+ dbt)"]
     root -.link-only.-> hot["mirage_hotswap"]
     rj --> sys["rocjitsu_sys (FFI)"]
@@ -196,6 +206,10 @@ flowchart TB
 Backends are **link-only** — they self-register via `inventory`. Turn a
 Cargo feature on/off and the backend appears/disappears from `mirage emulators`.
 The binary never names a backend.
+
+```console
+$ cargo build --no-default-features --features rocjitsu
+```
 
 ---
 
@@ -206,9 +220,8 @@ The binary never names a backend.
 | **rocjitsu** | Pure software emulation. Synthesizes `/dev/kfd`, runs the ISA in `rj_vm`. | Debug anywhere — no GPU needed. **The headline.** |
 | **rocjitsu-dbt** | Dynamic Binary Translation: translates guest ISA → host GPU ISA, runs on real HW. | You *have* a GPU but want a *different* arch. |
 | **hotswap** | Load-time ISA rewriting. | Quick arch retargeting on real HW. |
-| **noop** | Runs the command directly, no emulation. | Exercise the tooling with zero deps. |
 
-All four share the **same** mirage UX. Switching is one flag:
+All three share the **same** mirage UX. Switching is one flag:
 
 ```console
 $ mirage run --profile cdna4 --emulator rocjitsu-dbt -- ./app
@@ -241,25 +254,26 @@ DRM + amdgpu APIs. The app thinks it's talking to a kernel driver.
 
 ---
 
-# rocjitsu: local mode vs daemon mode
+# rocjitsu: daemon mode vs in-process mode
 
 ```mermaid
 flowchart TB
-    subgraph local["LOCAL mode (default)"]
-      A1["App + interposer"] --> D1["SimulatedDriver<br/>VM in-process"]
+    subgraph daemonmode["DAEMON mode (the default)"]
+      A2["workload + interposer"] -->|"Unix socket + SCM_RIGHTS"| DD["rocjitsu daemon<br/>dlopen'd into the mirage run process<br/>(rocjitsu_sys FFI)"]
+      DD --> D2["one VM, shared by every<br/>process in the session"]
     end
-    subgraph daemon["DAEMON mode (--daemon)"]
-      A2["App + interposer"] -->|"Unix socket + SCM_RIGHTS"| DD["rocjitsu daemon<br/>(hosted in mirage host)"]
-      DD --> D2["VM (shared across processes)"]
+    subgraph local["IN-PROCESS mode (--in-process)"]
+      A1["workload + interposer"] --> D1["VM inside the workload itself"]
     end
 ```
 
-- **Local** — one process, one VM. Interposer reads the session's config directly.
-- **Daemon** — the VM lives in the mirage **host** process; the workload connects
-  over `$ROCJITSU_RUNTIME_DIR/daemon.sock`. GPU memory shared via **memfds / SCM_RIGHTS**.
-- mirage hosts the daemon **in-process via FFI** (`rocjitsu_sys`) — no separate CLI.
-
-> Daemon mode = multiple processes share **one** emulated GPU. Essential for scale.
+- **Daemon (default)** — the VM lives in the `mirage run` process; every workload's
+  interposer connects to `$ROCJITSU_RUNTIME_DIR/daemon.sock`. GPU memory is shared
+  via **memfds / SCM_RIGHTS**. `--daemon` is accepted for explicitness.
+- **In-process** — one VM per workload process, no sharing. Multi-GPU RCCL
+  collectives therefore need the daemon.
+- No separate rocjitsu CLI is involved, and no daemon outlives the run: it is
+  stopped, and its socket unlinked, on the way out.
 
 ---
 
@@ -280,95 +294,73 @@ flowchart TB
 
 ```console
 $ mirage topology create cdna4-2node --agent MI450X --num-nodes 2 --gpus-per-node 2
-created topology 'cdna4-2node'
+created topology cdna4-2node
 
-$ mirage topology show cdna4-2node --json | jq '{nodes:.num_nodes, gpus:.gpus_per_node, agent:.agent}'
+$ mirage topology show cdna4-2node | jq '{nodes:.num_nodes, gpus:.gpus_per_node, agent:.agent}'
 { "nodes": 2, "gpus": 2, "agent": "MI450X" }
 ```
 
-A **profile** binds this topology to an emulator + options.
+A **profile** binds this topology to an emulator + options. `mirage run` can
+override the counts for one run with `--num-nodes` / `--gpus-per-node`.
 
 ---
 
-# Startup: how rocjitsu boots on each box
+# Startup: how a run brings the cluster up
 
-The logical topology (nodes × GPUs) maps **1 node → 1 physical box**. On every
-box a `mirage host` boots the rocjitsu daemon, which brings the box's emulated
-GPUs online.
+The logical topology (nodes × GPUs) maps **1 node → 1 process** (or one container
+per node). One `mirage run` owns all of it, and one rocjitsu daemon — hosted
+inside that same process — serves every node's emulated GPUs.
 
 ```mermaid
 flowchart TB
-    subgraph plane["Control plane — real host (rank = None)"]
-      TOPO["Topology<br/>4 nodes × 2 GPUs · MI350X"]
-      ORCH["mirage orchestrator"]
-      TOPO --> ORCH
+    subgraph proc["mirage run — one process, one terminal"]
+      SESS["session bring-up<br/>topology: 4 nodes × 2 GPUs · MI350X"]
+      DAEM["rocjitsu daemon<br/>(in-proc FFI · rocjitsu_sys)"]
+      SESS --> DAEM
+      DAEM --> GPUS["8 × emul MI350X<br/>rj_vm instances"]
     end
 
-    ORCH -->|"launch_node(0)<br/>MIRAGE_RANK=0"| B0
-    ORCH -->|"launch_node(1)<br/>MIRAGE_RANK=1"| B1
-    ORCH -->|"launch_node(…)"| BE["…"]
-    ORCH -->|"launch_node(3)<br/>MIRAGE_RANK=3"| B3
+    SESS -->|"MIRAGE_RANK=0 · HEAD"| N0["node 0 workload"]
+    SESS -->|"MIRAGE_RANK=1"| N1["node 1 workload"]
+    SESS -->|"…"| NE["…"]
+    SESS -->|"MIRAGE_RANK=3"| N3["node 3 workload"]
 
-    subgraph B0["Box 0 — physical node (rank 0 · HEAD)"]
-      H0["mirage host --rank 0"] --> D0["rocjitsu daemon<br/>(in-proc FFI · rocjitsu_sys)"]
-      D0 --> G00["emul GPU 0<br/>rj_vm MI350X"]
-      D0 --> G01["emul GPU 1<br/>rj_vm MI350X"]
-    end
-    subgraph B1["Box 1 — physical node (rank 1)"]
-      H1["mirage host --rank 1"] --> D1["rocjitsu daemon<br/>(in-proc FFI)"]
-      D1 --> G10["emul GPU 0"]
-      D1 --> G11["emul GPU 1"]
-    end
-    subgraph B3["Box 3 — physical node (rank 3)"]
-      H3["mirage host --rank 3"] --> D3["rocjitsu daemon<br/>(in-proc FFI)"]
-      D3 --> G30["emul GPU 0"]
-      D3 --> G31["emul GPU 1"]
-    end
-
-    H1 -. "rendezvous: MIRAGE_HEAD_ADDR/PORT" .-> H0
-    H3 -. rendezvous .-> H0
+    N0 -.->|"$ROCJITSU_RUNTIME_DIR/daemon.sock"| DAEM
+    N1 -.-> DAEM
+    N3 -.-> DAEM
+    N1 -. "rendezvous: MIRAGE_HEAD_ADDR/PORT" .-> N0
+    N3 -. rendezvous .-> N0
 ```
 
-- **Box** = one physical node (or its container). Topology rank → box → one `mirage host`.
-- Each host hosts a **rocjitsu daemon in-process** (`rocjitsu_sys` FFI) — one daemon per box.
-- The daemon stands up `gpus-per-node` emulated `rj_vm` GPUs; workloads on that box
-  attach via `$ROCJITSU_RUNTIME_DIR/daemon.sock`.
-- Rank 0 is the **head**; every other box rendezvouses to it for collectives.
+- One workload **process per node** — or `--nproc-per-node` of them, each with
+  its own `RANK` and `LOCAL_RANK` and a shared `WORLD_SIZE`.
+- Rank 0 is the **head**; every other node rendezvouses to it for collectives.
+- Every node points at the **same** daemon socket, so the emulated GPUs are one
+  shared device fabric rather than N isolated ones.
 
 ---
 
-# Startup at scale: 32 boxes × 8 GPUs
+# Startup at scale: 32 nodes × 8 GPUs
 
-Same shape, more boxes. A `32 × 8` topology fans out to **32 physical boxes**,
-each running one `mirage host` + one rocjitsu daemon hosting **8 emulated GPUs** —
-**256 emulated GPUs** total, all on disk, all inspectable.
+Same shape, more nodes. A `32 × 8` topology fans out to **32 emulated nodes**
+backed by **256 emulated GPUs** — one run process, one command, one Ctrl-C.
 
 ```mermaid
 flowchart TB
-    subgraph plane["Control plane — real host (rank = None)"]
+    subgraph proc["mirage run"]
       TOPO["Topology<br/>32 nodes × 8 GPUs · MI350X<br/>= 256 emulated GPUs"]
-      ORCH["mirage orchestrator"]
-      TOPO --> ORCH
+      DAEM["rocjitsu daemon<br/>256 × rj_vm"]
+      TOPO --> DAEM
     end
 
-    ORCH -->|"launch_node(0)"| B0
-    ORCH -->|"launch_node(1)"| B1
-    ORCH -->|"launch_node(…)"| BE["… boxes 2 – 30 …"]
-    ORCH -->|"launch_node(31)"| B31
+    TOPO -->|"rank 0 · HEAD"| B0["node 0"]
+    TOPO -->|"rank 1"| B1["node 1"]
+    TOPO -->|"…"| BE["… nodes 2 – 30 …"]
+    TOPO -->|"rank 31"| B31["node 31"]
 
-    subgraph B0["Box 0 (rank 0 · HEAD)"]
-      H0["mirage host --rank 0"] --> D0["rocjitsu daemon"]
-      D0 --> GG0["8 × emul MI350X GPUs<br/>(rj_vm 0 … 7)"]
-    end
-    subgraph B1["Box 1 (rank 1)"]
-      H1["mirage host --rank 1"] --> D1["rocjitsu daemon"]
-      D1 --> GG1["8 × emul MI350X GPUs<br/>(rj_vm 0 … 7)"]
-    end
-    subgraph B31["Box 31 (rank 31)"]
-      H31["mirage host --rank 31"] --> D31["rocjitsu daemon"]
-      D31 --> GG31["8 × emul MI350X GPUs<br/>(rj_vm 0 … 7)"]
-    end
-
+    B0 -.-> DAEM
+    B1 -.-> DAEM
+    B31 -.-> DAEM
     B1 -. rendezvous .-> B0
     B31 -. rendezvous .-> B0
 ```
@@ -376,112 +368,122 @@ flowchart TB
 ```console
 $ mirage profile create super --emulator rocjitsu --agent MI350X \
       --num-nodes 32 --gpus-per-node 8
-$ mirage run --profile super -- mpirun -np 32 ./all_reduce_perf -b 8 -e 1G
+$ mirage run --profile super -- ./all_reduce_perf -b 8 -e 1G
 ```
 
-> 32 hosts, 32 daemons, 256 emulated GPUs — the boot pattern is identical to
-> one box, just replicated per rank.
+> The bring-up pattern is identical to one node, just replicated per rank —
+> and so is the teardown, which is what stops 32 nodes from becoming 32 leaks.
 
 ---
 
 # Containerization: one container per node
 
-When a profile requests an image, the **orchestrator** brings up one container
-per node, bind-mounts the session dir in, and runs a `mirage host` *inside* each.
+When a profile requests an image, the run brings up one container per node,
+bind-mounts the session scratch directory into each, and launches workloads into
+them through the provider's `exec`.
 
 ```mermaid
 flowchart TB
-    O["Orchestrator host<br/>(real machine, rank=None)"]
+    O["mirage run<br/>(real host)"]
     O -->|"pull image"| IMG[("registry")]
-    O -->|"create per-session network"| NET["mirage-[session] net"]
-    O -->|"launch_node(0)"| C0["container node 0<br/>mirage host --rank 0"]
-    O -->|"launch_node(1)"| C1["container node 1<br/>mirage host --rank 1"]
-    O -.->|bind-mount session dir| C0
-    O -.->|bind-mount session dir| C1
+    O -->|"create per-session network"| NET["mirage-&lt;session&gt;"]
+    O -->|"podman/docker run --rm (foreground child)"| C0["mirage-&lt;session&gt;-node-0"]
+    O -->|"podman/docker run --rm (foreground child)"| C1["mirage-&lt;session&gt;-node-1"]
+    O -.->|bind-mount session scratch| C0
+    O -.->|bind-mount session scratch| C1
 ```
 
-- Provider auto-detected: **podman** or **docker** (`--container-provider` to force).
-- podman gets `--group-add keep-groups`; docker gets explicit `/dev/kfd` + render nodes.
-- Per-node container ids are recorded in session state, shown by `session list`.
+- Provider auto-detected: **podman** or **docker** (`--container-provider`, or
+  `MIRAGE_CONTAINER_PROVIDER`, to force).
+- Containers are **not detached**. Each provider client is a child process mirage
+  owns: kill it and the container stops, and `--rm` removes it.
+- The container's foreground process is `sleep infinity`; workloads go in via
+  `provider exec -i` — plus `-t` for an interactive one-process exec on a real
+  terminal, since `provider exec` gives the in-container process pipes rather
+  than your descriptors.
+- podman gets `--group-add keep-groups`; docker gets explicit `/dev/kfd` + render
+  nodes and the named GPU groups.
 
 ---
 
 # Rank & head-node coordination
 
-The split: **orchestrator** owns containers + session health; **per-node hosts**
-own only their rank's execs.
+Every workload process is handed its place in the job. Mirage's variables are
+applied **last**, so a workload cannot break its own rendezvous by exporting
+`RANK` or `WORLD_SIZE` itself.
 
 ```mermaid
 flowchart TB
-    subgraph real["Real host"]
-      ORCH["Orchestrator host<br/>rank = None<br/>writes node/0/pid, health.json"]
+    RUN["mirage run"]
+    subgraph c0["node 0 (HEAD)"]
+      H0["workload"]
     end
-    subgraph c0["Container — rank 0 (HEAD)"]
-      H0["mirage host --rank 0"]
+    subgraph c1["node 1"]
+      H1["workload"]
     end
-    subgraph c1["Container — rank 1"]
-      H1["mirage host --rank 1"]
-    end
-    ORCH -->|"MIRAGE_RANK=0<br/>MIRAGE_HEAD_ADDR<br/>MIRAGE_HEAD_PORT"| H0
-    ORCH -->|"MIRAGE_RANK=1<br/>MIRAGE_HEAD_ADDR<br/>MIRAGE_HEAD_PORT"| H1
+    RUN -->|"MIRAGE_RANK=0<br/>MASTER_ADDR=localhost"| H0
+    RUN -->|"MIRAGE_RANK=1<br/>MASTER_ADDR=&lt;head&gt;"| H1
     H1 -.->|collectives| H0
 ```
 
-mirage injects into every node container:
+| Variable | Meaning |
+| -------- | ------- |
+| `MIRAGE_RANK` | This node's rank (0 = head). |
+| `RANK` / `LOCAL_RANK` / `WORLD_SIZE` | Per-process torch/RCCL identity across the whole job. |
+| `MIRAGE_HEAD_ADDR` / `MIRAGE_HEAD_PORT` | Where rank 0 lives. Mirrored as `MASTER_ADDR` / `MASTER_PORT` so `torch.distributed` initialises with no launcher. |
+| `NCCL_HOSTID` | `mirage-node-<rank>` — distinct per node, or RCCL rejects the emulated GPUs as duplicates. |
 
-- `MIRAGE_RANK` — this node's rank (0 = head).
-- `MIRAGE_HEAD_ADDR` / `MIRAGE_HEAD_PORT` — where rank 0 lives, for the workload's
-  own rendezvous (e.g. RCCL / torch.distributed init).
+Uncontainerised, the head is `127.0.0.1`; containerised, it is node 0's container
+name on the per-session network.
 
 ---
 
-# How a multi-node exec fans out
+# How a multi-node run fans out
 
 ```mermaid
 sequenceDiagram
-    participant CLI as mirage run (2 nodes)
-    participant ORCH as Orchestrator
-    participant H0 as host rank 0
-    participant H1 as host rank 1
-    CLI->>ORCH: session start (profile: 2-node)
-    ORCH->>ORCH: pull image, create network
-    ORCH->>H0: launch container (MIRAGE_RANK=0, HEAD_ADDR/PORT)
-    ORCH->>H1: launch container (MIRAGE_RANK=1, HEAD_ADDR/PORT)
-    ORCH-->>CLI: health = ready
-    CLI->>ORCH: exec start -- mpirun ... rccl_test
-    ORCH->>H0: exec/[id]/def.json appears
-    ORCH->>H1: exec/[id]/def.json appears
-    H0->>H0: run rank-0 child (emulated GPU 0..N)
-    H1->>H1: run rank-1 child (emulated GPU 0..N)
-    H0-->>CLI: node/0/stdout + exit_code
-    H1-->>CLI: node/1/stdout + exit_code
+    participant U as your terminal
+    participant RUN as mirage run (2 nodes)
+    participant N0 as node 0 process
+    participant N1 as node 1 process
+    U->>RUN: mirage run --profile cluster -- ./rccl_test
+    RUN->>RUN: resolve profile, inject emulator
+    RUN->>RUN: containers (if any), rocjitsu daemon
+    RUN->>RUN: build_specs(description, command)
+    RUN->>N0: spawn (MIRAGE_RANK=0, RANK=0, HEAD=...)
+    RUN->>N1: spawn (MIRAGE_RANK=1, RANK=1, HEAD=...)
+    N0-->>U: stdout / stderr (this terminal)
+    N1-->>U: stdout / stderr (this terminal)
+    RUN->>RUN: wait, then tear everything down
+    RUN-->>U: exit code of the workload
 ```
 
-Each node writes its **own** `node/<rank>/{pid,stdout,exit_code}`. The CLI merges them.
+`mirage exec` builds its process grid from the **same** `build_specs`, off the
+description the run hands back — so a command behaves identically whichever way
+it was started.
 
 ---
 
-# On-disk layout: a session you can read
+# What is (and is not) on disk
 
-```text
-$XDG_RUNTIME_DIR/mirage/session/<id>/
-├── def.json              # SessionDef (immutable)
-├── health.json           # {healthy, state, terminal}
-├── node/                 # one dir per rank
-│   ├── 0/{pid, host.log}
-│   └── 1/{pid, host.log}
-└── exec/
-    └── e-000000/
-        ├── def.json      # the command
-        ├── status.json   # {started, ended, exit_code, nodes{...}}
-        └── node/
-            ├── 0/{stdin, stdout, pid, exit_code}
-            └── 1/{stdin, stdout, pid, exit_code}
+```console
+$ mirage paths
+config:   /home/me/.config/mirage
+runtime:  /run/user/1000/mirage
+profiles: /home/me/.config/mirage/profile
+sessions: /run/user/1000/mirage/session
+runs:     /run/user/1000/mirage/run
 ```
 
-- `stdin` is a **FIFO** — `printf 'data\n' > node/0/stdin` feeds the child.
-- `stdout` is `O_APPEND` — `tail -f` it safely from anywhere.
-- All JSON writes are **atomic** (`.tmp.<pid>` then `rename`).
+- **Config is on disk** — profiles, topologies and agents are documents you
+  author, and they outlive every process.
+- **Session state is not.** There is no `def.json`, no `health.json`, no pid or
+  stdout files: that layout was an IPC channel between processes, and it made
+  lifecycle ambiguous — a crashed writer left state that looked live.
+- What remains under `session/<id>/` is a **scratch directory for the emulator**,
+  because emulator runtimes are configured by path (`rj_config.json`,
+  `config_path`, `daemon.sock`). It is removed with the session.
+- `run/<session>.sock` is the one socket, and it exists only while its run does.
 
 ---
 
@@ -489,52 +491,54 @@ $XDG_RUNTIME_DIR/mirage/session/<id>/
 
 ```console
 $ mirage profile create cdna4 --emulator rocjitsu --agent MI350X
-created profile 'cdna4'
+created profile cdna4
 
-$ sid=$(mirage session start --profile cdna4)
-$ echo $sid
-s-20260616-191636-f6c1
-
-$ mirage session show $sid --json | jq '{state:.health.state, healthy:.health.healthy}'
-{ "state": "ready", "healthy": true }
-
-$ mirage exec start $sid -- python3 tests/fixtures/ml/tiny_torch.py
+$ mirage run --profile cdna4 -- python3 tests/fixtures/ml/tiny_torch.py
+mirage: session s-20260616-191636-3b41-0
 tiny_torch_ok
 
-$ mirage session stop $sid
-stopped s-20260616-191636-f6c1
+$ echo $?
+0
 ```
 
-Lifecycle in the open: **create → ready → exec → stop**, every step inspectable.
+The workload **inherits this terminal**: stdout and stderr stay separate, so
+redirection works and byte-exact output is byte-exact.
+
+```console
+$ mirage run --profile cdna4 -- ./app > out.log 2> err.log
+$ mirage run --profile cdna4 -- bash          # and this is an interactive shell
+```
+
+There is no pseudo-terminal and no forwarding in between — which is exactly why
+both of those behave the way you'd expect.
 
 ---
 
-# DEMO 2 — inspect a live session
+# DEMO 2 — a second terminal: `mirage exec`
 
 ```console
-$ mirage paths
-config:   /home/me/.config/mirage
-runtime:  /run/user/1000/mirage
-sessions: /run/user/1000/mirage/session
+# Terminal 1 — hold a cluster up with a shell.
+$ mirage run --profile cdna4 -- bash
+mirage: session s-20260616-191636-3b41-0
+bash-5.2$
 
-$ ls $(mirage session dir $sid)
-def.json  health.json  node/  exec/
+# Terminal 2 — the run is the only one live, so no id is needed.
+$ ls $(mirage paths --json | jq -r .runs)
+s-20260616-191636-3b41-0.sock
 
-$ cat $(mirage session dir $sid)/health.json | jq
-{
-  "timestamp": "2026-06-16T19:16:36Z",
-  "healthy": true,
-  "state": "ready",
-  "terminal": false
-}
+$ mirage exec -- env | grep -E 'MIRAGE_|ROCJITSU|LD_PRELOAD'
+MIRAGE_RANK=0
+MIRAGE_HEAD_ADDR=localhost
+LD_PRELOAD=/.../lib/librocjitsu.so
+ROCJITSU_RUNTIME_DIR=/run/user/1000/mirage/session/s-20260616-191636-3b41-0
 
-$ tail -f $(mirage session dir $sid)/exec/e-000000/node/0/stdout
-[rj] vm online: agent MI350X gfx950
-loading code object ... ok
-tiny_torch_ok
+$ mirage exec -- python3 probe_gpu.py       # runs in *this* terminal
 ```
 
-No debugger attach, no IPC tracing — the truth is in the files.
+`mirage exec` asks the run one question (`Attach`), then spawns the process
+itself, as its own child, holding the socket open as a lease so the run does
+not tear the session down underneath it. Use `-s/--session <ID>` when several
+runs are up.
 
 ---
 
@@ -543,20 +547,24 @@ No debugger attach, no IPC tracing — the truth is in the files.
 ```console
 $ mirage profile create cluster --emulator rocjitsu --agent MI450X \
       --num-nodes 2 --gpus-per-node 2
-created profile 'cluster'
+created profile cluster
 
-$ mirage run --profile cluster -- mpirun -np 2 ./all_reduce_perf -b 8 -e 128M
-[rank 0] MIRAGE_RANK=0  HEAD=10.88.0.2:5000
-[rank 1] MIRAGE_RANK=1  HEAD=10.88.0.2:5000
-#                                          out-of-place
-#       size      count   type    time   algbw   busbw
-           8          2   float   12.4    0.00    0.00
-   134217728   33554432   float   18.7    7.18   13.6
-# Avg bus bandwidth : 6.81 GB/s
+$ mirage run --profile cluster -- ./all_reduce_perf -b 8 -e 128M
+mirage: session s-20260616-193312-3b41-0
+[0] #                                          out-of-place
+[0] #       size      count   type    time   algbw   busbw
+[0]            8          2   float   12.4    0.00    0.00
+[0]    134217728   33554432   float   18.7    7.18   13.6
+[1] # Avg bus bandwidth : 6.81 GB/s
 ```
 
-Two **emulated** nodes, a real collective, ranks coordinated through the
-head node — all on one machine.
+Two **emulated** nodes, a real collective, ranks coordinated through the head
+node — all on one machine.
+
+The `[rank]` labelling is the one thing worth knowing here: with several nodes writing
+to one terminal, unlabelled output says nothing about who wrote what. Capturing
+prefixes every line with its rank — at the cost of stdin, which is closed for
+all ranks.
 
 <!--
 Numbers are illustrative; the point is the topology + rank wiring works.
@@ -569,94 +577,93 @@ Numbers are illustrative; the point is the topology + rank wiring works.
 ```console
 $ mirage profile create boxed --emulator rocjitsu --agent MI350X --num-nodes 2 \
       --image rocm/dev-ubuntu:6.4 --container-provider podman
-created profile 'boxed'
+created profile boxed
 
-$ sid=$(mirage session start --profile boxed)
-$ mirage session list
-ID                       PROFILE  STATE    NODES  PROVIDER  IMAGE
-s-20260616-2003-9ab2     boxed    ready    2      podman    rocm/dev-ubuntu:6.4
+$ mirage run --profile boxed -- ./app &
+mirage: session s-20260616-200311-3b41-0
 
-$ mirage session show $sid --json | jq '.container.nodes'
-[
-  { "rank": 0, "cid": "f3a9c1...", "name": "mirage-s-..-0" },
-  { "rank": 1, "cid": "b71e44...", "name": "mirage-s-..-1" }
-]
+$ podman ps --format '{{.Names}}\t{{.Image}}'
+mirage-s-20260616-200311-3b41-0-node-0   rocm/dev-ubuntu:6.4
+mirage-s-20260616-200311-3b41-0-node-1   rocm/dev-ubuntu:6.4
+
+# ...and when the run is gone:
+$ podman ps -a --filter name=mirage- --format '{{.Names}}'
+$ podman network ls --filter name=mirage- --format '{{.Name}}'
 ```
 
-Each node is a container. Inside each, a `mirage host --rank <n>` runs
-the emulated GPU. The orchestrator wires the network + head node.
+Each node is a container, connected by a per-session network, with the emulated
+GPU served from the mirage process outside them. Nothing is detached and nothing
+survives: `--rm` plus an owning parent is the whole cleanup story.
 
 ---
 
 # DEMO 5 — debugging a crash
 
-A workload exits abnormally. mirage keeps everything for the post-mortem.
+A workload dies. mirage gets out of the way and gives you the truth.
 
 ```console
-$ mirage exec start $sid --keep -- python3 crashy_kernel.py
-RuntimeError: HIP error: invalid device function
-[exit code 1]
-
-$ mirage exec show $sid e-000003 --json | jq '{ended:.ended, code:.exit_code, nodes:.nodes}'
-{
-  "ended": true,
-  "code": 1,
-  "nodes": { "0": { "pid": 110934, "exit_code": 1 } }
-}
-
-$ mirage logs $sid e-000003 | tail -3
+$ mirage run --profile cdna4 -- python3 crashy_kernel.py
+mirage: session s-20260616-201455-3b41-0
 [rj] kernel launch: grid=(1024,1,1) block=(256,1,1)
 [rj] code object arch mismatch: gfx942 != gfx950
 RuntimeError: HIP error: invalid device function
+
+$ echo $?
+1
+
+# stderr is still stderr, so the emulator trace can be kept on its own.
+$ mirage run --profile cdna4 -- python3 crashy_kernel.py 2> rj.log
+$ grep 'arch mismatch' rj.log
+[rj] code object arch mismatch: gfx942 != gfx950
 ```
 
-`--keep` preserves the exec dir; the emulator's `[rj]` trace pinpoints the
-arch mismatch. Re-run instantly — no cluster queue.
+The workload's exit code **is** mirage's exit code (masked to a byte, so the
+shell's `128 + signal` convention survives). The `[rj]` trace pinpoints the arch
+mismatch. Re-run instantly — no cluster queue, no post-mortem archaeology.
 
 ---
 
-# DEMO 6 — attach, signal, follow
+# DEMO 6 — interrupting a long job
 
 ```console
-# Detached long-running job, kept for later attach.
-$ eid=$(mirage exec start $sid --detach --keep -- python3 long_train.py)
-$ echo $eid
-e-000004
-
-# Re-attach from another terminal; output replays + streams live.
-$ mirage attach $sid e-000004
-epoch 3/100  loss=2.14
-epoch 4/100  loss=1.98
-^P   # detach without killing
-
-# Follow just the log.
-$ mirage logs $sid e-000004 -f
-epoch 5/100  loss=1.81
-
-# Send it a signal.
-$ mirage exec signal $sid e-000004 TERM
-signalled e-000004 with SIGTERM
+$ mirage run --profile cluster -- python3 long_train.py
+mirage: session s-20260616-203901-3b41-0
+[0] epoch 3/100  loss=2.14
+[1] epoch 3/100  loss=2.16
+^C
+$ echo $?
+130
 ```
 
-stdin is a FIFO, stdout is append-only — attach/detach/replay all "just work."
+- Ctrl-C reaches **mirage**, not the workload: children lead their own process
+  groups, so the terminal's foreground group is the run alone.
+- Mirage forwards the signal, then waits — so the workload gets its chance to
+  clean up, and the session teardown still runs.
+- A **second** Ctrl-C means you are no longer waiting: the processes are
+  terminated outright.
+- `SIGTERM` takes the same path, so a CI runner cancelling a job doesn't strand a
+  container either.
 
 ---
 
-# DEMO 7 — daemon mode (shared emulated GPU)
+# DEMO 7 — the shared emulated GPU
 
 ```console
-$ mirage run --profile cdna4 --daemon -- sh -c \
+$ mirage run --profile cdna4 -- sh -c \
     'test -S $ROCJITSU_RUNTIME_DIR/daemon.sock && echo DAEMON_SOCKET_PRESENT'
 DAEMON_SOCKET_PRESENT
 
-$ mirage run --profile cdna4 --daemon -- env | grep -E 'LD_PRELOAD|ROCJITSU'
+$ mirage run --profile cdna4 -- env | grep -E 'LD_PRELOAD|ROCJITSU'
 LD_PRELOAD=/.../_rocm_sdk_devel/lib/librocjitsu.so
-ROCJITSU_RUNTIME_DIR=/run/user/1000/mirage/session/s-.../rocjitsu
+ROCJITSU_RUNTIME_DIR=/run/user/1000/mirage/session/s-20260616-204410-3b41-0
 ```
 
-- `--daemon` stands up the rocjitsu VM **in the mirage host** (in-process FFI).
-- The workload's interposer connects to the daemon socket first.
+- The rocjitsu VM is stood up **inside the mirage run process** (in-process FFI
+  via `rocjitsu_sys`), and every workload — every node, every `mirage exec` from
+  every other terminal — attaches to the same daemon socket.
 - Multiple processes → **one** shared emulated GPU, GPU memory via memfds.
+- `--in-process` opts out, one VM per workload, no sharing. Useful for isolating
+  a single-process bug; not for collectives.
 
 ---
 
@@ -674,29 +681,9 @@ $ mirage --config cfg.json -- ./app --flag
 ```
 
 A bare invocation with `--` and no recognized subcommand is routed to
-`mirage run`. `--attach` maps to `--daemon`. No script changes required.
-
----
-
-# The web dashboard (optional)
-
-```console
-$ cargo build --workspace --features webui
-$ mirage webui                      # serve on 127.0.0.1:5174
-$ mirage webui install              # register a systemd user service
-```
-
-```mermaid
-flowchart LR
-    B["Browser"] <-->|"HTTP + WebSocket"| D["mirage_daemon<br/>/api/*"]
-    D --> FS[("same XDG session files")]
-    D --> SPA["React SPA<br/>(profiles, sessions, execs, live logs)"]
-```
-
-- Cross-session view of every profile, session, and exec.
-- Live log streaming over WebSocket.
-- Reads the **same files** the CLI does — one source of truth.
-- Fully **opt-in**: plain `cargo build` pulls in **no** Node, no dashboard.
+`mirage run`. `--attach` maps to `--daemon` (mirage manages the daemon's
+lifetime, so "attach to a daemon" and "use a daemon" collapse to the same
+opt-in). No script changes required.
 
 ---
 
@@ -710,17 +697,22 @@ mirage ships an E2E matrix that is the full cross-product of how teams debug:
 | **Containerization** | `node`, `podman`, `docker` |
 | **Hardware** | `mi350x`, `mi450x` |
 | **Payload** | `tiny_torch` (1 node), `rccl` (2 nodes), `crash` (1 node) |
-| **Plugins** | `none`, `hazard-detection` |
+| **Plugins** | `none`, `race` |
 
 ```console
 $ cargo test --test matrix_e2e -- --nocapture
-mi350x  rocjitsu  node    tiny_torch  none              RAN
-mi450x  rocjitsu  podman  rccl        hazard-detection  RAN
-mi450x  rocjitsu-dbt node  tiny_torch none              SKIP (no translation GPU)
-... 14 ran, 4 skipped, 18 total
+mirage testing matrix — 72 combinations
+
+  COMBINATION (emulator+container+hw+payload+plugin)          RESULT
+  rocjitsu+node+mi350x+tiny_torch+none                        RAN
+  rocjitsu+podman+mi450x+rccl+none                            RAN
+  rocjitsu-dbt+node+mi350x+tiny_torch+none                    SKIP (no translation GPU)
+matrix summary: 36 ran, 36 skipped, 72 total
 ```
 
-Unsupported combos **skip with a reason** — same suite on a laptop, in CI, on a real host.
+Every row runs the same lifecycle — **create → run → ensure nothing survived the
+run → delete** — and unsupported combos **skip with a reason**, so the suite is
+meaningful on a laptop, in CI, and on a real host alike.
 
 ---
 
@@ -729,16 +721,16 @@ Unsupported combos **skip with a reason** — same suite on a laptop, in CI, on 
 Backends can advertise plugins that turn the emulator into a **bug finder**:
 
 ```console
-$ mirage profile create checked --emulator rocjitsu --agent MI350X \
-      --option plugin=hazard-detection
-created profile 'checked'
+$ mirage profile create checked --emulator rocjitsu --agent MI350X
+created profile checked
 
-$ mirage run --profile checked -- ./my_kernel
+$ mirage run --profile checked --plugin race -- ./my_kernel
 [rj hazard] data race: write @0x7f.. (wave 3) vs read @0x7f.. (wave 7)
 [rj hazard]   kernel: fused_attention  line 142
 RuntimeError: detected 1 memory hazard
 ```
 
+Plugins can be enabled per run with `--plugin <name>` or baked into a profile.
 Because it's an emulator, it sees **every** memory access — races that are
 non-deterministic on real hardware become **reproducible** here.
 
@@ -758,25 +750,29 @@ flowchart LR
       A1["Laptop = N-node cluster"]
       A2["Deterministic replay"]
       A3["Instant, local, private"]
-      A4["cat the files"]
+      A4["It's just a command"]
     end
     before ==> after
 ```
 
 - **Shift left** — catch multi-node bugs before you ever touch real silicon.
 - **Democratize** — every engineer gets an MI450X cluster.
-- **Inspectable** — the whole machine is files you can read.
+- **Ordinary** — a 256-GPU job is a foreground process with an exit code, a
+  terminal, and a Ctrl-C. Everything you already know about processes applies.
 
 ---
 
 # Recap
 
-- **rocjitsu** = software GPU emulator (interposer + VM, local or daemon).
-- **mirage** = the UX that runs it **at scale**: profiles, sessions, execs.
-- **Topology** models the rack; **containers** isolate each node.
-- **Rank + head-node** coordination via `MIRAGE_RANK` / `MIRAGE_HEAD_ADDR/PORT`.
-- **Everything on disk** → inspect, script, recover, replay.
-- One UX for **rocjitsu / rocjitsu-dbt / hotswap / noop**.
+- **rocjitsu** = software GPU emulator (interposer + VM, daemon or in-process).
+- **mirage** = the UX that runs it **at scale**: profiles, topologies, and one
+  command that owns everything it starts.
+- **`mirage run` is the runtime** — the session lives in that process and dies
+  with it. `mirage exec` borrows it from another terminal.
+- **Topology** models the rack; **containers** isolate each node; **rank + head**
+  wiring (`MIRAGE_RANK`, `MASTER_ADDR/PORT`, `WORLD_SIZE`) comes for free.
+- **`[rank]` labels** appear automatically once a job has more than one
+  process, so you always know which rank said what.
 
 ```console
 $ mirage profile create cdna4 --emulator rocjitsu --agent MI450X --num-nodes 2
@@ -786,5 +782,6 @@ $ mirage run --profile cdna4 -- ./your-rocm-app
 ## Questions?
 
 <!--
-Close: "Pick a profile, hit run. Your laptop is now a debuggable MI450X cluster."
+Close: "Pick a profile, hit run. Your laptop is now a debuggable MI450X cluster,
+and Ctrl-C is the cleanup."
 -->
