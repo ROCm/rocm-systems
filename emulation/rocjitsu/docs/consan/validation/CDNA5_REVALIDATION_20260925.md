@@ -522,3 +522,7 @@ the reviewed publication-drop spec uses the normal barrier-drop family. The
 catalog test now loads every maintained gfx1250 fault through the real admission
 parser; all 208 validation runner tests pass. No rejected launch is counted as
 an admitted trial.
+
+CLIP Default qualification (`clip-cap-default-{clean,fault}`) finishes at 3/8
+detections. All trials are admitted/reached, with complete analysis and healthy
+pre/post checks; clean passes and provenance files match. Next test `high`.
