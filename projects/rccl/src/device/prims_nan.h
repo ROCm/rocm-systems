@@ -68,8 +68,10 @@ struct ncclNanBits<hip_bfloat16> {
   static constexpr Bits Mant = 0x007Fu;
 };
 
-// 128-bit FIFO load, one per lane. The receive FIFO is this GPU's own memory,
-// so agent scope is enough to observe what the peer pushed into it.
+// 128-bit FIFO load and store, one per lane. Both go out at system scope:
+// measured on gfx950 SPX, cache-bypassing accesses plus a compiler-only fence
+// beat LL128's model of cacheable accesses plus a __threadfence_system() per
+// chunk (166 vs 161 GB/s at 1 GiB, and 136 vs 122 at 16 MiB).
 inline __device__ void loadNanLine(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
   union {
     v4u v;
@@ -85,9 +87,6 @@ inline __device__ void loadNanLine(const uint64_t* ptr, uint64_t& v0, uint64_t& 
   v1 = u.u64[1];
 }
 
-// 128-bit FIFO store, one per lane. Payload lands in the peer's buffer, and the
-// sentinel restore has to beat the peer's next write to the same slot, so both
-// go out at system scope.
 inline __device__ void storeNanLine(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   union {
     v4u v;
@@ -205,7 +204,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   inline __device__ void postRecv() {
     if (recvConnHeadPtr) {
-      // Compiler barrier only: keep sentinel stores from floating past the credit.
+      // The FIFO accesses are system-scope, so ordering the sentinel restore
+      // ahead of the credit needs only a compiler barrier here.
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       STORE(recvConnHeadPtr, recvConnHead += 1);
     }
@@ -326,15 +326,23 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     if (RECV) {
       for (int i = 0; i < MaxRecv && i < fan.nrecv(); i++) {
         uint64_t* ptr = recvPtr(i) + wireOffset;
-        bool needReload;
         int spins = 0;
+        // A pair that has already landed is never re-read: without this, one
+        // straggling line makes the whole warp re-fetch its entire slice on every
+        // spin iteration. The warp still leaves the spin together -- letting lanes
+        // exit independently was measurably worse below ~32 MiB.
+        bool pending[WordPerThread / 2];
+#pragma unroll
+        for (int u = 0; u < WordPerThread; u += 2) pending[u / 2] = pairLive(u, nWords);
+        bool needReload;
         do {
           needReload = false;
 #pragma unroll
           for (int u = 0; u < WordPerThread; u += 2) {
-            if (pairLive(u, nWords)) {
+            if (pending[u / 2]) {
               loadNanLine(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-              needReload |= anyNan(vr[u]) || anyNan(vr[u + 1]);
+              pending[u / 2] = anyNan(vr[u]) || anyNan(vr[u + 1]);
+              needReload |= pending[u / 2];
             }
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
