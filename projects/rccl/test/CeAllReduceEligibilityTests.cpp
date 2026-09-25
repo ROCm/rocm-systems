@@ -10,6 +10,7 @@
 #include "ce_coll.h"
 #include "collectives.h"
 #include "dev_runtime.h"
+#include "dev_runtime_internal.h"
 #include "bitops.h"
 #include "gtest/gtest.h"
 #include "nccl.h"
@@ -219,6 +220,22 @@ TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_PointerInWindowIsN
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 128, 1), 0);
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(nullptr, storage, 8), 0);
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, nullptr, 8), 0);
+}
+
+TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_UsesPeerMinimumSize)
+{
+    ncclDevrMemory memory{};
+    memory.lsaMinSize = 96;
+
+    ncclDevrWindow win{};
+    alignas(16) uint8_t storage[128];
+    win.memory = &memory;
+    win.userPtr = storage;
+    win.size = sizeof(storage);
+    win.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage + 32, 64), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 64), 0);
 }
 
 TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
