@@ -80,7 +80,8 @@ static int ncclIbNqpsForMultiplier(int qpMultiplier, int localNdevs, int remoteN
   int localNqps = qpMultiplier * localNdevs;
   int remoteNqps = qpMultiplier * remoteNdevs;
   int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
-  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d", funcName, maxNqps, localNqps, remoteNqps);
+  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d, qpPerDev=%d", funcName, maxNqps,
+       localNqps, remoteNqps, qpMultiplier);
   return maxNqps;
 }
 
