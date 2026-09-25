@@ -399,3 +399,8 @@ The normal GCC host build passes all 52 selected pipeline/evidence tests,
 including the new capacity-rejection diagnostic regression
 (`evidence-diagnostic-tests.log`). Only the host test target was rebuilt; live
 E2E jobs retain their existing hook and emulator binaries.
+
+D128 pressure finishes 1/8 at Default and 0/8 at SuperCollider sleep=15,
+with matching accepted clean runs and complete analysis on all healthy,
+admitted/reached trials (`pressure-lifetime-{default,sleep15}-{clean,fault}`).
+High Default calibration follows; numerical fault outcomes did not fail.

@@ -40,7 +40,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟨 default: all 3 filtered clean runs pass; fault trials pending | 🟨 delay-zero: all 3 filtered clean runs pass; fault trials pending |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: filtered clean pass; fault 1/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; detector 0/8 despite oracle failures 8/8 |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: clean pass; fault 8/8 with complete publication evidence | 🟨 sleep=15: filtered clean pass; fault 0/8 |
@@ -55,7 +55,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟧 default: 3/9 shards exceeded the 420 s client deadline; longer run pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟨 default: filtered clean pass; fault trials pending | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
+| Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟧 campaign interrupted by host OOM; bounded clean rerun pending | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
