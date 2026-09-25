@@ -1526,3 +1526,17 @@ the detector: selection, metadata integration, and completion ordering remain.
 Normal GCC build passed. Full host `ConSan*`: 986 passed, two existing
 live-inventory tests skipped (`tensor-address-host-tests.log`). All cgroup memory
 event counters remained zero during the concurrent workload campaigns/build.
+
+### TP2 higher qualifies; HGEMM Default campaign completes
+
+TP2's higher campaign detects 8/8 admitted and reached prefill fault trials,
+with complete coverage and healthy checks before/after every trial. All three
+clean workloads pass at higher (prefill/decode at the original higher root,
+combined at `tp2-lanes-higher-recovery-clean`). No bank-count override was used.
+The table is green at higher, the lowest passing preset; the prior high and
+high-plus-256-bank campaigns both detected 0/8.
+
+HGEMM's recovered exact-artifact Default campaign completes with 0/8 detections,
+all eight trials admitted/reached. It remains yellow and the queued high
+campaign proceeds. Qualification at high also requires its full-workload clean
+gate, not just the retained exact fault shard.
