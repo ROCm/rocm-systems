@@ -26,6 +26,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
 
 ### Resolved issues
 
