@@ -742,3 +742,10 @@ runner tests pass, including admission of every gfx1250 fault specification.
 The retained sparse ML client also passes numerically with marker zero after
 both address-bank fixes (`spmm-sc-saved-address-client.log`); full three-shard
 qualification remains required before changing its red cell.
+
+### TP1 decode high result
+
+`tp1-decode-cap-high-fault` completes eight admitted/reached trials with no
+detections and no oracle manifestations, matching the earlier Default result.
+Every trial has complete analysis and healthy before/after checks. The paired
+high clean run passed. The next preset to test is `higher`.
