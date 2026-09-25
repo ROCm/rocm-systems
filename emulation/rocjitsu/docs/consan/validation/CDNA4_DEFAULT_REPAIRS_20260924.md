@@ -102,7 +102,7 @@ The D128 block, D128 pressure, MFMA attention, and Stream-K arrival executables
 remain byte-for-byte unchanged (`tree-fixed/rebuilt-fixture-hashes.json`). Evidence: `tree-debug/regression-{before,after}.log` and
 `tree-debug/{native,max-0,max-1,max-2}.log`.
 
-## Remaining sampling searches
+## Initial sampling searches
 
 The fixed reviewed mutations were also tested at `max` with 64, 128, 256, and 512
 banks, each with its own clean comparator and prospective 6/8 contract. HipKittens BF16
@@ -131,7 +131,7 @@ admission or instrumentation failure.
 ## Evidence and verification
 
 Artifacts are retained under `/home/benjacob/consan-default-repairs-20260924/`. The
-final candidate hook is retained with SHA-256
+atomic-publication candidate hook is retained with SHA-256
 `59ce0ac2fbea2e2e31d83b822485cf765f6fb1f4b1bbdfc5821463be8d2619d9` (`hook-v4.json`).
 Qualification is in `streamk-arrival/{default,high,higher}-publication-v4-r1/`, with
 prospective specifications, matching controls and every trial's logs and health
@@ -196,8 +196,8 @@ The corrected candidate passes all 3,325 existing CPU/emulator tests, the expand
 lane-group regression, and all 436 physical tests (`cpu-lanes-v3.xml`,
 `lane-retention-v3-unit.log`, `lane-retention-v3-sparse-owner.log`, and
 `physical-lanes-v3.xml`). Its immutable hook is pinned in `hook-lanes-v3.json`.
-Fresh external clean rechecks and prospective fault matrices are running. The
-superseded comparison controllers stop after their current eight-trial batches;
+All 25 external clean rechecks pass with the corrected lane mapping. The
+superseded comparison controllers stopped after their current eight-trial batches;
 all completed evidence remains retained, including the rejected intermediate
 candidate's two emulator failures.
 
@@ -226,3 +226,32 @@ on the same LDS range. It is diagnostic evidence only and does not replace
 the original startup fault or qualify that yellow cell. The remaining startup
 case needs examination of staggered barriers and asynchronous direct-to-LDS
 completion; the retirement result alone does not establish its root cause.
+
+## Completed qualification and final regression matrix
+
+The corrected lane-retention hook also requalifies Tensile at `max` plus 64 banks
+with 8/8 detections (`tensile-gfx950-lds-positive/max-lanes-v3-banks-64/`).
+Together with histogram and softmax, this repairs three more Default cells.
+All 25 external clean rechecks are accepted (`clean-lanes-v3-summary.json`);
+each promoted nondefault bank setting has its own matching clean comparator.
+The completed-batch audit covers 35 matrices with no evidence errors.
+
+HipKittens remains yellow. Its diagnosis, deterministic reduced reproducer,
+and deferred implementation considerations are in
+[HIPKITTENS_CDNA4_ANALYSIS.md](HIPKITTENS_CDNA4_ANALYSIS.md). The user explicitly
+deferred that runtime change. No async-completion implementation was made.
+The nonexistent CDNA4 Jakub fixture is excluded from both the table and the
+physical validation catalog; all 380 Python harness tests pass after that
+correction (`consan-python-final-fixed3.xml`).
+
+Full GCC, standalone Clang+ASan, and standalone Clang+UBSan builds pass. The
+complete registered CTest matrices are running, with physical cases serialized
+under the shared GPU lock. Final registries, per-phase results, and live status
+are retained as `final-{gcc,asan,ubsan}-*`; the two sanitizer configurations are
+independent. The ISA generator suite has 2,213 passing tests and 46 skips after
+rerunning its two preprocessing tests with the configured TheRock C++ wrapper
+(`amdisa-final.xml`, `amdisa-preprocess-final.xml`). GCC's packed-F16 test now
+uses the established NaN-input payload policy while still requiring NaN outputs
+and exact finite, infinity, and clamped results. The final test matrix is not
+yet accepted: isolated rechecks remain for simulator timeouts and a GCC
+debugger smoke-test failure.
