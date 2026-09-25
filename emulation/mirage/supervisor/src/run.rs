@@ -743,6 +743,7 @@ mod tests {
             name: "p".to_string(),
             description: None,
             emulator: EmulatorDef {
+                extra: Default::default(),
                 emulator: "stub".to_string(),
                 plugins: Default::default(),
                 exec_mode: ExecMode::Functional,
