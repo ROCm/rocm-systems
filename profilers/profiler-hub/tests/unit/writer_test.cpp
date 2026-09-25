@@ -93,6 +93,23 @@ TEST_F(writer_test, register_node_info_is_readable_after_flush)
     EXPECT_EQ(nodes[0]->machine_id, "machine-1");
 }
 
+TEST_F(writer_test, get_storage_version_reads_schema_version_from_trace)
+{
+    auto writer = make_writer();
+
+    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+    writer->register_node_info(node_info);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    storage_t  storage{ m_db_path, m_uuid };
+    const auto version = storage.get_storage_version();
+
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
 TEST_F(writer_test, register_process_info_is_readable_after_flush)
 {
     auto writer = make_writer();
