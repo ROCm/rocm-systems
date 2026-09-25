@@ -5,6 +5,25 @@ Clang + UBSan, and Clang + ASan, including ConSan device tests on the emulator
 and the physical gfx1201. It is a regression gate, not a replacement for the
 external-workload qualification tables.
 
+## September 25 post-pull ConSan rerun
+
+Rebuilt revision `11f077a2c92` with GCC in `rocjitsu-gcc-build`
+(`RelWithDebInfo`, assertions and expensive checks enabled, ASan/UBSan disabled).
+The rebuild and all **3,773 ConSan tests passed**, with zero failures, skips,
+or disabled tests: 2,010 emulator device cases, 447 physical gfx1201 device
+cases, and 1,316 other ConSan checks. This rerun covers ConSan only; the broader
+publication matrix below is historical evidence from September 24.
+
+CTest ran with 24 workers in 80.27 seconds. Physical GPU cases were serialized
+with a CTest resource lock and `/tmp/rocjitsu-consan-destructive-gpu.lock`.
+The aggregate harness selected tests whose names or properties contain
+`consan`, retained their original CTest oracles, and preferred the newly built
+library over the SDK copy. No source fixes were needed.
+
+Build output, original test inventory, scheduling harness, CTest log, and JUnit
+results are retained locally under
+`/home/benoit/workspace/consan-validation/consan-rerun-20260925/`.
+
 ## Final qualification — all failures resolved
 
 The complete sanitizer matrix plus the explicit repair reruns has no outstanding
