@@ -113,6 +113,10 @@ concept backend =
                 record, args_callback, max_deref, callback_data)
         };
         { user_data.value = timestamp };
+        {
+            Backend::configure_external_correlation_id_request_service(
+                context, correlation_kinds, num_operations, correlation_cb, callback_data)
+        };
     };
 
 }  // namespace rocprofsys::policies::domain_service

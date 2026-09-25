@@ -142,8 +142,10 @@ private:
         result.add(buffered::k_memory_copy<SdkBackend, Externals>);
         result.add(buffered::k_scratch_memory<SdkBackend, Externals>);
 
+        constexpr auto k_memory_allocation_min_version =
+            version{ .major = 0, .minor = 6, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     version{ .major = 0, .minor = 6, .patch = 0 })
+                     k_memory_allocation_min_version)
         {
             result.add(buffered::k_memory_allocation<SdkBackend, Externals>);
         }
