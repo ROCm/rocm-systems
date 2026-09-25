@@ -287,14 +287,16 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->dispatch_spm) return;
 
-    auto* controller = hsa::get_queue_controller();
+    auto* controller  = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        was_enabled = true;
+        enabled     = false;
     });
 
-    if(controller)
+    if(controller && was_enabled)
     {
         // Drain in-flight dispatches, then disable serialization. The review of #8887 asked for
         // this sync to be kept and for SPM to stay visible to the enter hook and to serialization

@@ -162,10 +162,11 @@ struct registry_state
     // static teardown gives them the lifetime they had when the registry stored the contexts
     // by value, which is the lifetime all of those callers were written against.
     std::vector<context_ptr_t> retired = {};
-    // Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across
-    // the GPU drain, so for that window the context is still in the active array with no lock
-    // held. This set is what keeps start_context() and a second stop_context() from acting on
-    // that half-stopped state. Guarded by get_contexts_mutex().
+    // Context ids whose start or stop is in progress. stop_context() releases get_contexts_mutex()
+    // across the GPU drain, and start_context() releases it before publishing the active slot and
+    // starting the queue-interposed services, so in both windows the context is half-started or
+    // half-stopped with no lock held. This set is what keeps the other lifecycle callers from
+    // acting on that state. Guarded by get_contexts_mutex().
     std::unordered_set<uint64_t> stopping = {};
     std::condition_variable      cv       = {};
 };
@@ -309,6 +310,20 @@ get_contexts_mutex()
 {
     static auto _v = std::mutex{};
     return _v;
+}
+
+bool
+dispatch_counter_collection_service::intersects(
+    const dispatch_counter_collection_service& rhs) const
+{
+    if(agents.empty() || rhs.agents.empty()) return true;
+    const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
+    const auto& large = (agents.size() < rhs.agents.size()) ? rhs.agents : agents;
+    for(const auto& agent_id : small)
+    {
+        if(large.count(agent_id) > 0) return true;
+    }
+    return false;
 }
 
 bool
@@ -529,9 +544,14 @@ start_context(rocprofiler_context_id_t context_id)
             {
                 return ROCPROFILER_STATUS_SUCCESS;
             }
-            else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection)
+            else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection &&
+                    cfg->dispatch_counter_collection->intersects(*itr->dispatch_counter_collection))
             {
-                // conflicting context
+                // Conflicting context. Two counter-collection contexts can run concurrently as
+                // long as they target disjoint sets of GPU agents -- the hardware counters they
+                // program are per-agent, so contexts that never touch the same agent cannot
+                // contend. A context with no agent restriction claims every agent and therefore
+                // still conflicts with any other counter-collection context.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
             else if(cfg->dispatch_spm && itr->dispatch_spm &&
@@ -566,7 +586,26 @@ start_context(rocprofiler_context_id_t context_id)
         }
 
         get_num_active_contexts().fetch_add(1, std::memory_order_release);
+
+        // Once the lock drops, the slot is reserved but not yet published and the services are not
+        // yet started. Without this marker a concurrent start of an overlapping context scans past
+        // this one, set_dispatch_agents() rewrites the agent set that counters::start_context() is
+        // about to read, and stop_context() can tear the services down before they have started,
+        // leaving serialization and the callback thread held by a stopped context.
+        if(auto* _pending = get_stopping_contexts()) _pending->emplace(context_id.handle);
     }
+
+    bool _pending_released = false;
+    auto _release_pending  = [&context_id, &_pending_released]() {
+        if(_pending_released) return;
+        _pending_released = true;
+        {
+            auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+            if(auto* _pending = get_stopping_contexts()) _pending->erase(context_id.handle);
+        }
+        if(auto* _cv = get_contexts_cv()) _cv->notify_all();
+    };
+    auto _pending_guard = common::scope_destructor{[&_release_pending]() { _release_pending(); }};
 
     rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
 
@@ -595,6 +634,12 @@ start_context(rocprofiler_context_id_t context_id)
     if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
+
+    // Released before the services below: start_agent_ctx() calls the tool's profile callback
+    // synchronously, and a tool that calls back into the lifecycle API from there would wait on
+    // this marker forever.
+    _release_pending();
+
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
@@ -646,8 +691,10 @@ stop_context(rocprofiler_context_id_t idx)
         if(auto* _cv = get_contexts_cv()) _cv->notify_all();
     }};
 
-    // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), an
-    // unbounded wait on in-flight GPU work. Holding get_contexts_mutex() across it stalls every
+    // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), a
+    // bounded wait on in-flight GPU work -- it gives up after a slice and reports that it did,
+    // so teardown has to stay safe for completions that land after it returns rather than rely
+    // on the drain having finished. Holding get_contexts_mutex() across it stalls every
     // context lifecycle operation in the process behind one context's dispatches, and it puts the
     // mutex on the far side of a wait that the completion path has to get through -- so any future
     // completion-path read that took the mutex would deadlock rather than merely block.
