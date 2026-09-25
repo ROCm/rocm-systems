@@ -1429,3 +1429,17 @@ The catalog now declares this fault with eight trials and a six-detection
 threshold before outcomes. All 209 runner tests pass. Retained replay
 preparation is still live; no fault result is claimed until its exact object
 identity is bound and matching clean/fault execution completes.
+
+### TP2 large-bank high campaign completes below threshold
+
+`tp2-lanes-high-256-clean` passes baseline and instrumented prefill, decode
+and combined runs. All eight prefill fault trials are admitted/reached with
+complete analysis, healthy checks and recorded high/256-bank settings, but
+detect 0/8. The first trials record 29,052 accesses and 76 synchronization
+events, so the run is not globally unsampled.
+
+Reinspection of `tp2-pristine.asm` confirms that the selected pair is directly
+between the maximum store (VMA 0x231e4) and peer load (0x231fc), with producer
+retirement preserved and no remaining barrier between them after mutation.
+The next campaign `tp2-lanes-higher` increases sampling to higher with ordinary
+eight-bank capacity and checks all three clean workloads before prefill faults.

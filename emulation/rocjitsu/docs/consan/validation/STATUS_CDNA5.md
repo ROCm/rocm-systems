@@ -37,7 +37,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 default: filtered clean pass; fault 1/8 on repeat; high clean hits 360 s deadline | 🟧 sleep=15: clean run hits 360 s deadline; delay-zero clean previously passed |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher: filtered clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟨 high: prefill clean pass, fault 0/8; all 3 default clean runs pass; 256-bank trial next | 🟨 delay-zero: all 3 filtered clean runs pass; fault trials pending |
+| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟨 high + 256 banks: all 3 clean runs pass; prefill fault 0/8; higher running | 🟨 delay-zero: all 3 filtered clean runs pass; fault trials pending |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
