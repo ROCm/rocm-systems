@@ -2797,12 +2797,15 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
     return {};
 
   quantum_result_scratch_.resize(active_cu_scratch_.size());
-  uint32_t effective_threads =
-      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
+  // Keep the affinity lane count invariant while a command processor drains a
+  // dispatch. Capping it to the current active-CU count remaps a surviving CU
+  // whenever another CU becomes idle, splitting that CU's observer stream
+  // across host threads and forcing consumers to restore program order later.
+  const uint32_t effective_threads = dispatch_threads_;
   FunctionalQuantumResult result;
   if (shared_dispatch_pool_)
-    result =
-        shared_dispatch_pool_->run(active_cu_scratch_, effective_threads, quantum_result_scratch_);
+    result = shared_dispatch_pool_->run(active_cu_scratch_, effective_threads,
+                                        quantum_result_scratch_, this);
   else if (effective_threads > 1) {
     if (!local_dispatch_pool_ || local_dispatch_pool_->thread_count() < effective_threads)
       local_dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);

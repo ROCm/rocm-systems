@@ -21,6 +21,8 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -119,6 +121,64 @@ GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
   for (auto &cu : fixture.cus)
     cu->set_plugin_group(group);
   return gate;
+}
+
+class ThreadAffinityPlugin final : public ExecutionPlugin {
+public:
+  ThreadAffinityPlugin() : ExecutionPlugin("thread_affinity") {}
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t) override {
+    std::lock_guard lock(mutex_);
+    auto [it, inserted] = threads_.try_emplace(wf, std::this_thread::get_id());
+    if (!inserted && it->second != std::this_thread::get_id())
+      stable_ = false;
+  }
+
+  bool stable() const {
+    std::lock_guard lock(mutex_);
+    return stable_;
+  }
+
+  size_t observed_wavefronts() const {
+    std::lock_guard lock(mutex_);
+    return threads_.size();
+  }
+
+private:
+  mutable std::mutex mutex_;
+  std::unordered_map<const amdgpu::Wavefront *, std::thread::id> threads_;
+  bool stable_ = true;
+};
+
+TEST(CpuDispatchPoolTest, AffinityDomainKeepsEachCuOnOneHostThread) {
+  constexpr uint32_t kRounds = 32;
+  DispatchPoolFixture fixture(/*cu_count=*/16);
+  for (uint32_t i = 0; i < kRounds; ++i)
+    fixture.memory.write32(kProgramBase + i * sizeof(uint32_t), kSMovB32);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<ThreadAffinityPlugin>();
+  auto *affinity = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  for (auto &cu : fixture.cus)
+    cu->set_plugin_group(group);
+
+  amdgpu::CpuDispatchPool pool(/*threads=*/8);
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    std::array<amdgpu::FunctionalQuantumResult, 16> results{};
+    if ((round & 1u) == 0) {
+      EXPECT_NO_THROW(pool.run(fixture.tasks, /*threads=*/8, results, &fixture));
+    } else {
+      // Active CUs naturally disappear as waves retire. Keep the requested
+      // width fixed and prove that the surviving subset does not migrate.
+      auto active = std::span<amdgpu::ComputeUnitCore *>(fixture.tasks).subspan(5, 7);
+      auto active_results = std::span<amdgpu::FunctionalQuantumResult>(results).first(7);
+      EXPECT_NO_THROW(pool.run(active, /*threads=*/8, active_results, &fixture));
+    }
+  }
+
+  EXPECT_EQ(affinity->observed_wavefronts(), fixture.wfs.size());
+  EXPECT_TRUE(affinity->stable());
 }
 
 TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependently) {
