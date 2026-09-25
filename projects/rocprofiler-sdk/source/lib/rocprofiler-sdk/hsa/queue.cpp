@@ -432,7 +432,8 @@ WriteInterceptor(const void* packets,
     // it out of the snapshot window and registers it with async_started() so the agent-wide drain
     // can see it. process_packet_batch increments gls->dispatch_count per dispatch packet, so the
     // graph summary is unaffected by which path runs.
-    if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
+    if(graph_launch_active && no_real_consumers && !has_kernel_replay && !has_range_replay &&
+       !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
