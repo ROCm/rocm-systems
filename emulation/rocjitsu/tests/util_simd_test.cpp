@@ -479,18 +479,19 @@ TEST(UtilSimd, Log2_VectorMatchesScalar_BitExact) {
 }
 
 // Toolchain guard for the ternary VOP2 FMA/MAC/MAD SIMD fast path
-// (SIMD_VOP2_TERNARY). Those kernels use util::stdx::fma unconditionally under
-// has_stdx_simd, so it MUST be the single-rounded fused operation matching the
-// scalar std::fma in the generated bodies — a separate mul+add (two roundings)
-// would diverge silently. This sweeps full-range random bit patterns for all
-// three operands and asserts bit-exactness, EXCLUDING lanes with a NaN input:
+// (SIMD_VOP2_TERNARY) and the shared native-f32 FMA wrapper. Those paths use
+// util::stdx::fma and util::native_fma, respectively, so both MUST be the
+// single-rounded fused operation matching the scalar std::fma in the generated
+// bodies — a separate mul+add (two roundings) would diverge silently. This sweeps
+// full-range random bit patterns for all three operands and asserts
+// bit-exactness, EXCLUDING lanes with a NaN input:
 // for NaN inputs the packed and scalar FMA may propagate a different NaN
 // payload (toolchain-dependent, e.g. g++-13 picks the second multiplicand while
 // the packed form picks the first), and that NaN-payload divergence is an
-// accepted difference (the result is a NaN either way). Inf and Inf*0→NaN cases
-// ARE checked (they do match). If a finite/Inf lane diverges, drop
-// SIMD_VOP2_TERNARY rather than ship wrong math. The f16 forms inherit this
-// guard plus the f16<->f32 ones.
+// accepted difference (the result is a NaN either way). Results from non-NaN
+// inputs are checked, including any Inf and Inf*0→NaN cases in the corpus. If a
+// finite/Inf lane diverges, drop the affected SIMD path rather than ship wrong
+// math. The f16 forms inherit this guard plus the f16<->f32 ones.
 TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   using V = util::native<float>;
@@ -508,15 +509,20 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
     }
     V va(a, util::stdx::element_aligned), vb(b, util::stdx::element_aligned),
         vc(c, util::stdx::element_aligned);
-    alignas(V) float out[W];
-    util::stdx::fma(va, vb, vc).copy_to(out, util::stdx::element_aligned);
+    alignas(V) float stdx_out[W], native_out[W];
+    util::stdx::fma(va, vb, vc).copy_to(stdx_out, util::stdx::element_aligned);
+    util::native_fma(va, vb, vc).copy_to(native_out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
       if (is_nan_bits(std::bit_cast<uint32_t>(a[i])) ||
           is_nan_bits(std::bit_cast<uint32_t>(b[i])) || is_nan_bits(std::bit_cast<uint32_t>(c[i])))
         continue; // NaN-input payload divergence is accepted
       const float s = std::fma(a[i], b[i], c[i]);
-      ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(out[i]))
-          << "divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
+      ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(stdx_out[i]))
+          << "stdx::fma divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
+          << std::bit_cast<uint32_t>(a[i]) << " b=0x" << std::bit_cast<uint32_t>(b[i]) << " c=0x"
+          << std::bit_cast<uint32_t>(c[i]);
+      ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(native_out[i]))
+          << "native_fma divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
           << std::bit_cast<uint32_t>(a[i]) << " b=0x" << std::bit_cast<uint32_t>(b[i]) << " c=0x"
           << std::bit_cast<uint32_t>(c[i]);
     }
