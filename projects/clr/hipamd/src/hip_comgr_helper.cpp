@@ -84,16 +84,6 @@ static char getFeatureValue(std::string& input, std::string feature) {
   return res;
 }
 
-static bool getTargetIDValue(std::string& input, std::string& processor, char& sramecc_value,
-                             char& xnack_value) {
-  processor = trimName(input, ':');
-  sramecc_value = getFeatureValue(input, std::string(":sramecc"));
-  if (sramecc_value != ' ' && sramecc_value != '+' && sramecc_value != '-') return false;
-  xnack_value = getFeatureValue(input, std::string(":xnack"));
-  if (xnack_value != ' ' && xnack_value != '+' && xnack_value != '-') return false;
-  return true;
-}
-
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type) {
   comgr_helper::ComgrDataUniqueHandle data;
