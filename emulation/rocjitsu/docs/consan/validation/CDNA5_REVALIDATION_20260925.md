@@ -488,3 +488,17 @@ pairs are removed; earlier barriers and subsequent read-completion barriers
 remain. The stale barrier-move specs are replaced with these source-independent
 ISA-reviewed publication faults, each with eight predeclared trials per mode
 and minimum six detections.
+
+### Bounded sparse ML rerun and report-cap hook rebuild
+
+The bounded Default `tensile-spmm-f8-ml` run completed with all three clients
+hitting their 900 s deadline. The first two shards reported complete applicable
+coverage; the third ended with seven applicable code objects but only six
+coverage records. This is an incomplete timed-out clean qualification, not a
+qualified detector miss. Evidence: `bounded-clean-tensile/tensile-spmm-f8-ml/`
+`default/tensile-spmm-f8-ml/clean/default/result.json`.
+
+After that child exited, the held batch boundary allowed the shared hook to
+rebuild successfully with the tested explicit report-cap change. The scheduler
+resumed, and Qwen qualification now uses that hook. MXF4 remains orange until
+the queued full clean rerun with an explicit 256 MiB report cap completes.
