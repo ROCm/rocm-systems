@@ -93,6 +93,9 @@ public:
         rocprofiler_agent_id_t                   agent_id,
         rocprofiler_device_counting_service_cb_t cb,
         void*                                    user_data);
+    // Warns if an agent with gfx_target_version in [gfx1100, gfx1250) has
+    // power_dpm_force_performance_level set to 'auto' instead of a stable value.
+    static void check_power_performance_level();
 
 private:
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<counter_config>>> _configs;
