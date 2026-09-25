@@ -57,7 +57,9 @@ get_info_data(std::int64_t _tid)
 {
     auto& _v = get_info_data();
     if(!_v || _tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads)
+    {
         return empty_thread_local<thread_info>();
+    }
     return _v->at(_tid);
 }
 
@@ -66,7 +68,9 @@ get_index_data(std::int64_t _tid)
 {
     auto& _v = get_index_data();
     if(!_v || _tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads)
+    {
         return empty_thread_local<thread_index_data>();
+    }
     return _v->at(_tid);
 }
 
@@ -186,7 +190,9 @@ thread_info::init(bool _offset)
     auto                     _tid       = utility::get_thread_index();
 
     if((!_info_data) || (_tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads))
+    {
         return empty_thread_local<thread_info>();
+    }
 
     if(!_once && (_once = true))
     {
@@ -203,7 +209,10 @@ thread_info::init(bool _offset)
                                       ? &causal::delay::get_local(_sequent_tid)
                                       : &offset_causal_count;
 
-        if(_info->is_offset) state::thread::set(state::thread::Disabled);
+        if(_info->is_offset)
+        {
+            state::thread::set(state::thread::Disabled);
+        }
     }
 
     return _info_data->at(_tid);
@@ -212,7 +221,10 @@ thread_info::init(bool _offset)
 const std::optional<thread_info>&
 thread_info::get()
 {
-    if(!exists()) return empty_thread_local<thread_info>();
+    if(!exists())
+    {
+        return empty_thread_local<thread_info>();
+    }
     return get_info_data(utility::get_thread_index());
 }
 
@@ -232,7 +244,9 @@ thread_info::get(native_handle_t&& _tid)
         {
             if(itr && itr->index_data &&
                pthread_equal(itr->index_data->pthread_value, _tid) == 0)
+            {
                 return itr;
+            }
         }
     }
 
@@ -251,7 +265,10 @@ thread_info::get(std::thread::id _tid)
     {
         for(const auto& itr : *_v)
         {
-            if(itr && itr->index_data && itr->index_data->stl_value == _tid) return itr;
+            if(itr && itr->index_data && itr->index_data->stl_value == _tid)
+            {
+                return itr;
+            }
         }
     }
 
@@ -267,7 +284,9 @@ const std::optional<thread_info>&
 thread_info::get(std::int64_t _tid, ThreadIdType _type)
 {
     if(_type == ThreadIdType::InternalTID)
+    {
         return get_info_data(_tid);
+    }
     else if(_type == ThreadIdType::SystemTID)
     {
         const auto& _v = get_info_data();
@@ -276,7 +295,9 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
             for(const auto& itr : *_v)
             {
                 if(itr && itr->index_data && itr->index_data->system_value == _tid)
+                {
                     return itr;
+                }
             }
         }
     }
@@ -288,7 +309,9 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
             for(const auto& itr : *_v)
             {
                 if(itr && itr->index_data && itr->index_data->sequent_value == _tid)
+                {
                     return itr;
+                }
             }
         }
     }
@@ -317,9 +340,14 @@ void
 thread_info::set_start(std::uint64_t _ts, bool _force)
 {
     auto& _v = get_info_data(utility::get_thread_index());
-    if(!_v) init();
+    if(!_v)
+    {
+        init();
+    }
     if(_force || (_ts > 0 && (_v->lifetime.first == 0 || _ts < _v->lifetime.first)))
+    {
         _v->lifetime.first = _ts;
+    }
 }
 
 void
@@ -339,9 +367,13 @@ thread_info::set_stop(std::uint64_t _ts)
                 if(itr && itr->index_data && itr->index_data->internal_value != _tid)
                 {
                     if(itr->lifetime.second > _v->lifetime.second)
+                    {
                         itr->lifetime.second = _v->lifetime.second;
+                    }
                     else if(itr->lifetime.second == 0)
+                    {
                         itr->lifetime.second = _v->lifetime.second;
+                    }
                 }
             }
         }
@@ -381,8 +413,14 @@ thread_info::is_valid_lifetime(lifetime_data_t _v) const
 thread_info::lifetime_data_t
 thread_info::get_valid_lifetime(lifetime_data_t _v) const
 {
-    if(!is_valid_time(_v.first)) _v.first = lifetime.first;
-    if(!is_valid_time(_v.second)) _v.second = lifetime.second;
+    if(!is_valid_time(_v.first))
+    {
+        _v.first = lifetime.first;
+    }
+    if(!is_valid_time(_v.second))
+    {
+        _v.second = lifetime.second;
+    }
     return _v;
 }
 
@@ -397,7 +435,10 @@ thread_info::as_string() const
             << index_data->system_value << ", " << index_data->sequent_value << ", "
             << index_data->pthread_value << ", " << index_data->stl_value << ")";
     }
-    if(causal_count) _ss << ", causal count=" << *causal_count;
+    if(causal_count)
+    {
+        _ss << ", causal count=" << *causal_count;
+    }
     _ss << ", lifetime=(" << lifetime.first << ":" << lifetime.second << ")";
     return _ss.str();
 }

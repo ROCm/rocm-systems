@@ -1014,7 +1014,7 @@ def _gen_division_result(
     mode = 'f16_f64' if is_f64 else 'f32'
     L = ['  uint64_t exec = wf.exec();']
     if operation == 'fmas':
-        L.append('  const uint64_t vcc = wf.vcc();')
+        L.append('  const uint64_t vcc = wf.vcc_mask(exec);')
     elif is_vop3:
         L.append(
             f'  const uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_{mode}(), wf.ieee_mode(), inst_.omod);'

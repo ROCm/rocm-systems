@@ -552,6 +552,7 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
 }
 
 ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersion) {
+  NCCLCHECK(amd_smi_init());
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
     *fwVersion = 0;
     return ncclSuccess; // Firmware query not supported on WSL2

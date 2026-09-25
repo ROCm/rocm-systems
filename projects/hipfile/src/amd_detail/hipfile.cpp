@@ -21,6 +21,7 @@
 #include <bit>
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
@@ -813,6 +814,14 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
             ++numGpus;
 
             hipFilePerGpuStats_t &g{stats->per_gpu_stats[gpuId]};
+
+            try {
+                hipUUID uuid{Context<Hip>::get()->hipDeviceGetUuid(static_cast<int>(gpuId))};
+                static_assert(sizeof(uuid.bytes) == HIPFILE_GPU_UUID_LEN);
+                std::memcpy(g.uuid, uuid.bytes, HIPFILE_GPU_UUID_LEN);
+            }
+            catch (const Hip::RuntimeError &) {
+            }
 
             // Fastpath maps to nvfs; fallback maps to posix
             static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
