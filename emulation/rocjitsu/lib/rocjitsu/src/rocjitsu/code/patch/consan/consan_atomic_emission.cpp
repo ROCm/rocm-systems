@@ -561,9 +561,11 @@ bool publication_observation_supported(const AtomicEvidenceSourceView &source) {
       (site.raw_th == 0u ||
        ((site.mnemonic == "global_store_dword" || site.mnemonic == "flat_store_dword") &&
         site.raw_th == 2u));
-  return source.sequence && !source.relocates_polling_loop() &&
-         ((source.is_rmw() && operation) || store) && site.width_bits == 32 && site.data_vgpr &&
-         site.scope &&
+  // A decoded RMW can supply its observed transition without an ordering
+  // sequence. Such a modification carries neither release nor acquire roles.
+  // Keeping it opaque would invalidate a later observed acquire on this object.
+  return !source.relocates_polling_loop() && ((source.is_rmw() && operation) || store) &&
+         site.width_bits == 32 && site.data_vgpr && site.scope &&
          (store ||
           (site.returns_old_value && (site.returns_old_value.value()
                                           ? site.destination_vgpr.has_value()

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_evidence_planning.h"
 
 #include <functional>
@@ -1147,4 +1148,27 @@ TEST(ConSanAtomicFencePolicy, PublicationCompletenessIncludesUnclassifiableStore
 }
 
 } // namespace
+} // namespace rocjitsu::consan
+
+namespace rocjitsu::consan {
+TEST(ConSanAtomicFencePolicy, RelaxedPublicationTransitionNeedsNoOrderingSequence) {
+  for (const auto target :
+       {AtomicPolicyTarget{},
+        AtomicPolicyTarget{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250}}) {
+    detail::AtomicEvidenceSourceView source{
+        .site =
+            make_global_atomic_site(target, 32, "global_atomic_or_b32", SyncRmwOutcome::NoReturn),
+        .native_modification = true};
+    EXPECT_EQ(source.sequence, nullptr);
+    EXPECT_TRUE(detail::publication_observation_supported(source));
+    source.site.scope.reset();
+    EXPECT_FALSE(detail::publication_observation_supported(source));
+    source.site.scope = MemoryScope::Agent;
+    source.site.mnemonic = "global_atomic_xor_b32";
+    EXPECT_FALSE(detail::publication_observation_supported(source));
+    source.site.mnemonic = "global_store_b32";
+    source.native_modification = false;
+    EXPECT_FALSE(detail::publication_observation_supported(source));
+  }
+}
 } // namespace rocjitsu::consan
