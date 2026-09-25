@@ -427,6 +427,43 @@ TEST(SmfmacSimdExact, Cdna4DecodedForms) {
   run_all_forms(CDNA4_CASES);
 }
 
+TEST(SmfmacSimdExact, SparseGatherMatchesIndependentPhysicalLayoutOracle) {
+  for (const auto &test : {CDNA3_CASES[0], CDNA4_CASES[0]}) {
+    SCOPED_TRACE(::testing::Message() << test.name << " arch=" << static_cast<int>(test.arch));
+    SmfmacFixture fx(test.arch);
+    ASSERT_NE(fx.wf, nullptr);
+    restore(fx, std::vector<uint32_t>(static_cast<size_t>(STATE_REGS) * WF_SIZE, 0));
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0x44444444u);
+
+    // Use raw physical locations, independent of the implementation's layout
+    // helpers. A reg1/lane21/high is row5, second compressed element in its
+    // group (q3 on CDNA3, q5 on CDNA4). The nibble at metadata lane21 selects
+    // dense position 3, so B reg3/high at lane23 or lane39 is the only matching
+    // nonzero element. D reg1/lane23 is row5, column7: 2 * 3 = 6.
+    fx.cu->write_vgpr(fx.vbase + A_OFF + 1, 21, 0x40000000u);
+    fx.cu->write_vgpr(fx.vbase + INDEX_OFF, 21, 0x444444C4u);
+    const uint32_t b_lane = test.arch == ROCJITSU_CODE_ARCH_CDNA3 ? 23u : 39u;
+    fx.cu->write_vgpr(fx.vbase + B_OFF + 3, b_lane, 0x42000000u);
+
+    auto instruction = decode(test, A_OFF, B_OFF, INDEX_OFF);
+    ASSERT_NE(instruction, nullptr);
+    const auto initial = fx.snapshot(0, STATE_REGS);
+    std::vector<uint32_t> expected(static_cast<size_t>(test.dst_regs) * WF_SIZE, 0);
+    expected[WF_SIZE + 23] = 0x40C00000u;
+    ForceScalarGuard force_scalar_guard;
+    for (bool force_scalar : {true, false}) {
+      restore(fx, initial);
+      util::set_force_scalar_for_testing(force_scalar);
+      ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded())
+          << test.name
+          << (force_scalar ? ": scalar execution failed" : ": default execution failed");
+      EXPECT_EQ(fx.snapshot(DST_OFF, test.dst_regs), expected)
+          << test.name << (force_scalar ? ": scalar result" : ": default result");
+    }
+  }
+}
+
 TEST(SmfmacSimdExact, Cdna3DestinationAliasesEachSource) {
   SKIP_IF_NO_SIMD();
   if (util::native<float>::size() != 16)

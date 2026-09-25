@@ -4788,16 +4788,13 @@ inline float smfmac_decode_snapshot(const uint32_t (&words)[Words], uint32_t ele
 /// publishing D: tied accumulators and overlapping A/B/index registers then
 /// have the same read-before-write behavior as the scalar helpers. Selected K
 /// positions are resolved once per row; the FMA loop retains q,s order.
+#if defined(__AVX512F__) && __has_include(<experimental/simd>)
 template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename ExtractA,
           typename ExtractB>
-bool smfmac_try_avx512(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t idx_base,
-                       ExtractA, ExtractB) {
-#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+RJ_NOINLINE inline void smfmac_avx512_fast_body(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                                uint32_t idx_base) {
   static_assert((M == 16 && N == 16) || (M == 32 && N == 32));
   static_assert(K % 4 == 0);
-  if (util::force_scalar() || cu.wf_size() != 64 || util::native<float>::size() != 16)
-    return false;
-
   constexpr uint32_t compressed_k = K / 2;
   constexpr uint32_t a_regs = (M * compressed_k * smfmac_input_bits<ExtractA> + 2047) / 2048;
   constexpr uint32_t b_regs = (N * K * smfmac_input_bits<ExtractB> + 2047) / 2048;
@@ -4877,6 +4874,21 @@ bool smfmac_try_avx512(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_
       }
       writes.set_linear_word(out.reg * 64 + out.lane, std::bit_cast<uint32_t>(result));
     }
+}
+#endif
+
+/// Keep eligibility checks outside the stack-heavy implementation so
+/// forced-scalar and non-AVX-512 executions avoid its scratch frame.
+template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename ExtractA,
+          typename ExtractB>
+[[gnu::always_inline]] inline bool smfmac_try_avx512(auto &cu, uint32_t dst, uint32_t s0,
+                                                     uint32_t s1, uint32_t idx_base, ExtractA,
+                                                     ExtractB) {
+#if defined(__AVX512F__) && __has_include(<experimental/simd>)
+  if (util::force_scalar() || cu.wf_size() != 64 || util::native<float>::size() != 16)
+    return false;
+
+  smfmac_avx512_fast_body<Layout, M, N, K, ExtractA, ExtractB>(cu, dst, s0, s1, idx_base);
   return true;
 #else
   (void)cu;
