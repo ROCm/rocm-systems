@@ -131,6 +131,12 @@ function(add_rocshmem_targets)
         if(ENABLE_ROCSHMEM_GIN)
             set(_rocshmem_sdma_opt "-DUSE_SDMA=ON")
         endif()
+        # librocshmem.a is linked into librccl.so, so without this an ASAN
+        # build gets an uninstrumented rocSHMEM inside an instrumented library.
+        set(_rocshmem_asan_opt "")
+        if(BUILD_ADDRESS_SANITIZER)
+            set(_rocshmem_asan_opt "-DASAN=ON")
+        endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
         ExternalProject_Add(rocshmem_ext
@@ -148,7 +154,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_cmake_opts} "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
             INSTALL_COMMAND ""
         )
 

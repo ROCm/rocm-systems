@@ -199,8 +199,10 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 
-# Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
+# Adjust GPU architectures for Address Sanitizer builds; per-family rules are
+# in cmake/AsanGpuTargets.cmake.
 if (BUILD_ADDRESS_SANITIZER)
+  include(cmake/AsanGpuTargets.cmake)
   set(_suffix "asan")
   set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
   foreach(_clang_rt_name ${_clang_rt_names})
@@ -220,18 +222,13 @@ if (BUILD_ADDRESS_SANITIZER)
   endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
-  SET(amdgpu_targets "")
-  foreach(amdgpu_target IN LISTS GPU_TARGETS)
-    if(NOT amdgpu_target STREQUAL "")
-      string(FIND "${amdgpu_target}" ":xnack+" HAS_XNACK_SUFFIX)
-      if(HAS_XNACK_SUFFIX EQUAL -1)
-        list(APPEND amdgpu_targets "${amdgpu_target}:xnack+")
-      else()
-        list(APPEND amdgpu_targets "${amdgpu_target}")
-      endif()
-    endif()
-  endforeach()
-  SET(GPU_TARGETS "${amdgpu_targets}")
+  # Guarded so that "no targets at all" still reaches the curated diagnostic
+  # below. rocm_local_targets() reports failure as the literal "NOTFOUND",
+  # which if() treats as false along with the empty case.
+  if(GPU_TARGETS)
+    rccl_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+    message(STATUS "ASAN: GPU targets = ${GPU_TARGETS}")
+  endif()
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
