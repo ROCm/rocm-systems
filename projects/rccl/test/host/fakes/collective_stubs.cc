@@ -44,7 +44,6 @@ ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
 int64_t ncclParamEnqueueRearchEnable() { return 0; }
 
 // ce_coll.h
-ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
@@ -69,7 +68,6 @@ int ncclOsCpuCount(const ncclAffinity&) { ::abort(); }
 ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { ::abort(); }
 
 // transport.h -- only the connect/setup entry points group.cc references.
-ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }
