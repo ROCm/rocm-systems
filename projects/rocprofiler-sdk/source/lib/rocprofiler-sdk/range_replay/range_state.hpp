@@ -119,6 +119,14 @@ public:
     // Append a recorded dispatch, declining with PROGRAM_TOO_LARGE at the budget.
     bool add_dispatch(recorded_dispatch_t&& dispatch);
 
+    // Code objects are numbered in load order. The entry snapshot is taken when the range binds and
+    // holds the module variables (__device__ / __constant__ globals) of every code object loaded by
+    // then, so a kernel from a code object numbered above the watermark -- loaded lazily by HIP or
+    // by a JIT after the range began -- would replay with globals the snapshot cannot restore. Such
+    // a dispatch declines with CODE_OBJECT_CHANGED_IN_RANGE. A watermark of 0 means none was set.
+    void set_code_object_watermark(uint64_t newest_code_object_id);
+    bool admit_code_object(uint64_t code_object_id);
+
     const std::vector<recorded_dispatch_t>& dispatches() const { return m_dispatches; }
     std::vector<recorded_dispatch_t>&       dispatches() { return m_dispatches; }
 
@@ -129,6 +137,7 @@ private:
     rocprofiler_range_replay_status_t m_status     = ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
     std::vector<recorded_dispatch_t>  m_dispatches = {};
     size_t                            m_observed   = 0;
+    uint64_t                          m_code_object_watermark = 0;
 };
 
 // Cross-thread decline channel. Other threads (a foreign dispatch, an async copy) observe that a
@@ -225,5 +234,11 @@ note_foreign_dispatch(uint64_t agent_key);
 // would run without it.
 void
 note_device_write(uint64_t agent_key);
+
+// Called when a code object is about to be unloaded. Every bound range is declined, because its
+// recorded packets may point at the code being freed, and the kernarg layouts cached by kernel
+// object address are dropped, because a later load may reuse those addresses for other kernels.
+void
+note_code_object_unload();
 }  // namespace range_replay
 }  // namespace rocprofiler
