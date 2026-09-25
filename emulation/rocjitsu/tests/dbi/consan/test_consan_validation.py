@@ -4356,64 +4356,29 @@ class ConSanValidationTest(unittest.TestCase):
             "--gtest_filter=HipMoiRdna4D128AttentionBlock.*",
         )
 
-    def test_gfx1250_tp2_faults_distinguish_publication_and_dpp_phase(
-        self,
-    ) -> None:
+    def test_gfx1250_tp2_fault_targets_cross_wave_publication(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["tp2-family"]
-        fault = validation._load_fault(path, "gfx1250", workload, "barrier-drop")
+        fault = validation._load_fault(
+            path, "gfx1250", workload, "barrier-drop-attention-max-publication"
+        )
         environment = fault["environment"]
         site = environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
         sequence = environment["RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"]
-        kernel = "prefill_bs1$async_dispatch_25_attention_2x2xDx32x32xD"
-
-        self.assertIn(f"kernel={kernel}", site)
-        self.assertIn("pc=0x00000000000090cc", site)
-        self.assertIn("mnemonic=s_barrier_signal", site)
+        self.assertIn("fnv1a64:6a4133b943b7fa3e", site)
+        self.assertIn("pc=0x00000000000090f4", site)
+        self.assertIn("pc=0x00000000000090f8", sequence)
         self.assertIn(site.replace("|kind=barrier", "|event=barrier"), sequence)
-        self.assertIn(f"kernel={kernel}", sequence)
-        self.assertIn("pc=0x00000000000090d0", sequence)
-        self.assertIn("mnemonic=s_barrier_wait", sequence)
         command = validation._workload_command(
             Path("/workspace"), "gfx1250", workload, "fault", Path("/unused")
         )
         self.assertEqual(command[command.index("--mode") + 1], "prefill")
-        supercollider, trials = validation._fault_trials(fault, "supercollider")
-        self.assertEqual(supercollider["detector"], "detected")
-        self.assertEqual(supercollider["oracle"], "pass")
-        self.assertEqual(trials, [{}])
-        result, trials = validation._fault_trials(fault, "default")
-        self.assertEqual(result["detector"], "detected")
-        self.assertEqual(result["oracle"], "pass")
-        self.assertEqual(
-            result["environment"]["RJ_CONSAN_REQUIRE_DIAGNOSTICS"], "1"
-        )
-        self.assertEqual(trials, [{}])
-
-        dpp_fault = validation._load_fault(
-            path, "gfx1250", workload, "barrier-drop-dpp-phase"
-        )
-        dpp_environment = dpp_fault["environment"]
-        self.assertIn(
-            f"kernel={kernel}", dpp_environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        )
-        self.assertIn(
-            "pc=0x00000000000087b0",
-            dpp_environment["RJ_CONSAN_FAULT_SITE_IDENTITY"],
-        )
-        self.assertIn(
-            "pc=0x00000000000087f8",
-            dpp_environment["RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"],
-        )
-        self.assertEqual(
-            dpp_fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        self.assertIn(".text+0x90ac", dpp_fault["reach_witness"]["evidence"])
-        dpp_supercollider, trials = validation._fault_trials(dpp_fault, "supercollider")
-        self.assertEqual(dpp_supercollider["detector"], "not_detected")
-        self.assertEqual(dpp_supercollider["oracle"], "pass")
-        self.assertEqual(trials, [{}])
+        for profile in ("default", "supercollider"):
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], "statistical")
+            self.assertEqual(policy["minimum_detections"], 6)
+            self.assertEqual(policy["oracle"], "any")
+            self.assertEqual(trials, [{}] * 8)
 
     def test_gfx950_hip_matmul_fault_targets_fp16_tile_publication(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")

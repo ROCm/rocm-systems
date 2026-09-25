@@ -526,3 +526,15 @@ an admitted trial.
 CLIP Default qualification (`clip-cap-default-{clean,fault}`) finishes at 3/8
 detections. All trials are admitted/reached, with complete analysis and healthy
 pre/post checks; clean passes and provenance files match. Next test `high`.
+
+### TP2 publication fault refresh
+
+Fresh compilation matches inventory ELF `6a4133b943b7fa3e`. The attention
+maximum reduction writes `672+12*wave_id`, then reads
+`672+12*(lane_id&7)` after `.text+0x90f4/0x90f8`. The spec removes that pair
+and preserves entry and read-completion barriers. Replaced obsolete executable
+specs tied to ELF `a78b10652108d8d6`; those historical results remain in git.
+Evidence: `tp2-pristine.asm` and the fresh family inventory. Decode/combined
+are supporting clean-oracle rows with no standalone admitted fault families;
+the family publication fault runs prefill. Their empty inventories do not
+establish absence of LDS accesses.
