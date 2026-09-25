@@ -203,7 +203,7 @@ using detail::WorkitemOwnerDerivationPlan;
                                             const WorkgroupSources &workgroup_sources,
                                             uint32_t bank_count, uint16_t bank_vgpr,
                                             uint16_t temporary_vgpr, uint16_t owner_vgpr,
-                                            rj_code_arch_t arch) {
+                                            rj_code_arch_t arch, bool spread_lanes) {
   if (bank_count == 1)
     return InstructionSequence(words).emit(
         instrumentation::build_v_mov_b32_literal(bank_vgpr, 0, arch));
@@ -213,8 +213,27 @@ using detail::WorkitemOwnerDerivationPlan;
   // first-publisher slot. Barrier and atomic paths use the same owner-aware
   // hash, so synchronization metadata remains joined to the corresponding
   // access window.
-  return append_identity_hash(words, dispatch, workgroup_sources, owner_vgpr, bank_count, bank_vgpr,
-                              temporary_vgpr, temporary_vgpr, arch);
+  // Large bank tables can retain representatives from eight disjoint lane
+  // groups instead of having all 64 lanes race for the same wave slot. Atomic
+  // publication paths keep their existing owner-only attachment protocol.
+  const bool striped = spread_lanes && arch == ROCJITSU_CODE_ARCH_CDNA4 && bank_count >= 64u;
+  InstructionSequence sequence(words);
+  sequence.require(append_identity_hash(words, dispatch, workgroup_sources, owner_vgpr,
+                                        striped ? bank_count / 8u : bank_count, bank_vgpr,
+                                        temporary_vgpr, temporary_vgpr, arch));
+  if (striped) {
+    sequence.append(instrumentation::build_v_mbcnt_lo_u32_b32(temporary_vgpr, 0xc1u,
+                                                              scalar_positive_inline_u32(0), arch),
+                    instrumentation::build_v_mbcnt_hi_u32_b32(
+                        temporary_vgpr, 0xc1u, vector_source_vgpr(temporary_vgpr), arch),
+                    instrumentation::build_v_lshrrev_b32(
+                        temporary_vgpr, scalar_positive_inline_u32(3), temporary_vgpr, arch),
+                    instrumentation::build_v_lshlrev_b32(bank_vgpr, scalar_positive_inline_u32(3),
+                                                         bank_vgpr, arch),
+                    instrumentation::build_v_add_u32(bank_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                     bank_vgpr, arch));
+  }
+  return sequence.finish();
 }
 
 [[nodiscard]] bool append_workgroup_residue(std::vector<uint32_t> &words,
@@ -500,7 +519,7 @@ using detail::WorkitemOwnerDerivationPlan;
   if (runtime || plan.window_bank_count > 1) {
     require_emission(append_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources,
                                               plan.window_bank_count, bank_vgpr, high_vgpr,
-                                              owner_vgpr, arch),
+                                              owner_vgpr, arch, !plan.record_publication_sequence),
                      "ConSan probe could not select a window bank");
   } else {
     sequence.append(instrumentation::build_v_mov_b32_literal(bank_vgpr, 0, arch));

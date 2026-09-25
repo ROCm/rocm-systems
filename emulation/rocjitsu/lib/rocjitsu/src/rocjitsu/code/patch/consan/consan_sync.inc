@@ -208,7 +208,8 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
                             instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch));
     require_emission(append_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources,
                                               window.bank_count, bank_vgpr, value,
-                                              *plan.owner_epoch_vgprs.owner, arch),
+                                              *plan.owner_epoch_vgprs.owner, arch,
+                                              layout.publication_event_capacity == 0u),
                      "ConSan barrier failed at causal-window bank selection");
     if (window.first_slot != 0u) {
       // VALUE is dead after bank selection and is distinct from BANK. Use it

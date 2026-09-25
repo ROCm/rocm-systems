@@ -430,6 +430,14 @@ publishes an immutable representative through the report's publication
 protocol. A locally proven uniform address can also retain the participating
 lane mask, allowing the host to diagnose collisions within one instruction.
 
+On CDNA4, tables with at least 64 banks and no atomic-publication journal
+partition each wave bucket into eight lane groups (lanes 0–7, 8–15, and so on).
+Access and barrier probes use the same partition. This retains up to eight
+representatives per wave rather than letting every lane compete for one slot.
+The total bank count and allocation remain fixed; the tradeoff is fewer buckets
+for distinct wave/workgroup identities. Smaller tables and atomic-publication
+paths retain the owner-only mapping.
+
 The bank hash does not include the access address, barrier epoch, or loop
 iteration. An occupied bank is not searched around or replaced: the first
 successful publication wins. A matching window leaves its representative

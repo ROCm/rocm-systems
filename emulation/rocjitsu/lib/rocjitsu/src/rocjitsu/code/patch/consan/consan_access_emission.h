@@ -56,7 +56,7 @@ struct AccessEmissionPlan {
                                             const WorkgroupSources &workgroup_sources,
                                             uint32_t bank_count, uint16_t bank_vgpr,
                                             uint16_t temporary_vgpr, uint16_t owner_vgpr,
-                                            rj_code_arch_t arch);
+                                            rj_code_arch_t arch, bool spread_lanes = false);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_watchpoint_words(
     std::span<const uint8_t> bytes, const Candidate &candidate,

@@ -158,3 +158,28 @@ All physical work uses `/tmp/rocjitsu-consan-destructive-gpu.lock`, the venv The
 ROCm stack, and full native rocprofv3 allowlists (regenerated for the repaired tree). Only the tree fixture binary changed among the hip-moi validation rows; its
 original and repaired binaries, fresh native trace, allowlist, source patch,
 and commit pin are retained. The other four hip-moi binaries are unchanged.
+## Lane-retention follow-up
+
+The owner-only bank mapping makes every selected lane in a wave contend for
+one immutable representative. Tensile's wrong-address store uses the thread
+serial as its byte address, so 16-byte stores from neighboring lanes overlap.
+The old mapping retains wave-leading intervals `[0,16)`, `[64,80)`,
+`[128,144)`, and `[192,208)` and misses the actual overlapping pairs even with
+512 banks.
+
+The candidate partitions CDNA4 tables of at least 64 banks into eight lane
+groups per wave bucket when no atomic-publication journal is present. Access
+and barrier probes use the same mapping; atomic attachment remains unchanged.
+The bank allocation stays fixed. This trades wave/workgroup capacity for lane
+diversity and does not provide a complete dynamic history. The candidate now
+retains `[56,72)` and `[64,80)` and reports the genuine cross-wave write/write
+conflict at the unchanged injected store `.text+0x142c`.
+
+The matching 64-bank Tensile clean control passes with complete access/barrier
+coverage. Eight-trial qualification is running with the original reviewed
+mutation and full native allowlist. Regression checks pass: 3,325 existing
+CPU/emulator tests, the new full/sparse-EXEC lane-bank regression, 436 physical
+gfx950 tests, and 285 hook tests. Artifacts are `cpu-lanes-v1.xml`,
+`lane-retention-unit.log`, `physical-lanes-v1.xml`, `hooks-lanes-v1.xml`, and
+`tensile-gfx950-lds-positive/max-lanes-v1-banks-64/` under the repair root.
+The frozen candidate hook is recorded in `hook-lanes-v1.json`.
