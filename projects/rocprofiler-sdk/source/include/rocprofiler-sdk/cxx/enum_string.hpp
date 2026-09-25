@@ -1747,6 +1747,11 @@ ROCPROFILER_ENUM_INFO(rocprofiler_thread_trace_parameter_type_t,
                       ROCPROFILER_THREAD_TRACE_PARAMETER_LAST,
                       false,
                       not_operation);
+ROCPROFILER_ENUM_INFO(rocprofiler_thread_trace_resource_mode_t,
+                      ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT,
+                      ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_LAST,
+                      false,
+                      not_operation);
 
 ROCPROFILER_ENUM_INFO(rocprofiler_agent_version_t,
                       ROCPROFILER_AGENT_INFO_VERSION_NONE,
