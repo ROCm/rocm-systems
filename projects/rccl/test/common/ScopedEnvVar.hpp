@@ -7,27 +7,30 @@
 #pragma once
 
 #include <cstdlib>
+#include <optional>
 #include <string>
 
 namespace RcclUnitTesting
 {
+  // Sets (or, when value is nullptr, unsets) an environment variable for the
+  // lifetime of the object and restores the previous state on destruction.
   class ScopedEnvVar
   {
   public:
     ScopedEnvVar(const char* name, const char* value) : name_(name)
     {
       if (const char* current = std::getenv(name))
-      {
-        hadPreviousValue_ = true;
         previousValue_ = current;
-      }
-      setenv(name, value, 1);
+      if (value != nullptr)
+        setenv(name, value, 1);
+      else
+        unsetenv(name);
     }
 
     ~ScopedEnvVar()
     {
-      if (hadPreviousValue_)
-        setenv(name_.c_str(), previousValue_.c_str(), 1);
+      if (previousValue_)
+        setenv(name_.c_str(), previousValue_->c_str(), 1);
       else
         unsetenv(name_.c_str());
     }
@@ -37,7 +40,6 @@ namespace RcclUnitTesting
 
   private:
     std::string name_;
-    std::string previousValue_;
-    bool hadPreviousValue_ = false;
+    std::optional<std::string> previousValue_;
   };
 }
