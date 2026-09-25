@@ -1680,3 +1680,27 @@ Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,034 passed,
 two existing skips (`tensor-resources-tests.log`). Tensor-load classifier
 admission and end-to-end qualification are the next gate; no table cell is
 promoted by these unit tests alone.
+
+### Tensor-load admission and first full-workload resource result
+
+Default admits gfx1250 tensor LDS writes with descriptor geometry; tensor
+stores and SuperCollider value comparison remain independently unavailable.
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,034 passed,
+two existing skips (`tensor-admission-tests.log`).
+
+The first MXF8 explicit clean attempt used an isolated relink with stale hook
+objects and crashed in host inventory. The backtrace is in
+`tensor-default-mxf8-gdb.log`; rebuilding the complete `rocjitsu_dbi_hooks`
+target fixed it. Future isolated hooks must rebuild their object dependencies,
+not merely relink the updated DBT archive.
+
+`tensor-default-mxf8-clean-rebuilt` now inventories 78 access ranges and reaches
+resource planning, but exits 92 before execution because it cannot place scalar
+persistent identity for the wave-wide tensor owner. A direct log-level-2 replay
+(`tensor-default-mxf8-debug.log`) reports this rejection explicitly. This is
+not a numeric failure or a qualified clean result. The table stays orange with
+this narrower blocker. The pristine object's explicit SGPR references leave
+only s95 and s98..s105 unused, before transient instrumentation reservations.
+Next work must provide wave-uniform identity under pressure while preserving
+inactive lanes and correctly advancing synchronization epochs; simply allowing
+ordinary per-lane private state would not establish those properties.

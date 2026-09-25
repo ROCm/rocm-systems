@@ -362,9 +362,11 @@ AccessLoweringClassification classify_access_lowering(const ProgramSite &access,
     form.kind = AccessLoweringFormKind::TensorDescriptor;
     form.element_width_bits = 0u;
     form.address_vgpr.reset();
-    // Geometry normalization does not yet admit either observation mechanism.
-    // Admission requires wave-wide state preservation and completion handling.
-    replay = compare = Reason::TargetUnavailable;
+    // Default observes descriptor-defined LDS writes after transfer completion.
+    // Stores need global-bounds filtering; value comparison needs a separate
+    // tensor replay mechanism. Keep those paths explicitly unavailable.
+    replay = access.kind == LdsAccessKind::Write ? Reason::None : Reason::TargetUnavailable;
+    compare = Reason::TargetUnavailable;
   } else if (access.origin == AccessOrigin::DirectToLds) {
     form.kind = access.operands.address_vgpr ? AccessLoweringFormKind::DirectToLdsExplicitAddress
                                              : AccessLoweringFormKind::DirectToLdsLaneAddressed;

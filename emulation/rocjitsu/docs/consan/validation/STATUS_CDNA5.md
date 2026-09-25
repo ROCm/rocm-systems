@@ -45,7 +45,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟧 clean numerics pass; cross-wave tensor-DMA producers absent from LDS coverage | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟧 tensor loads modeled; full workload blocked by persistent scalar-identity allocation | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟧 clean numerics pass; 8 tensor-DMA accesses lack modeled LDS ranges | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 4 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 9 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
