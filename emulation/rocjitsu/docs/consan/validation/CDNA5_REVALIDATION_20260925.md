@@ -1898,3 +1898,22 @@ at 0x175c overlap at LDS byte 4352. Exact identities are verified against the
 retained inventory. The eight-trial specification is committed before outcomes.
 
 Mixed TDM fault-spec runner tests: 209 passed (`mixed-tdm-spec-tests.log`).
+
+### Remaining Default qualification in progress
+
+SGEMM quick's three outstanding profiler shards are retried serially by
+`sgemm-checkpointed-discovery.py`, each with a 3600 s client deadline and an
+immediate per-shard checkpoint. New artifacts are isolated in
+`discovery-sgemm-checkpointed`; earlier successful traces remain available.
+Both SGEMM table cells retain orange while discovery is incomplete.
+
+`mxf4-tdm-exact-replay-check` completes export and replay successfully, each
+with all sixteen numeric rows. Retained ELF `83048c74ead39756` has identical
+instruction addresses and encodings to the clean review, with regenerated
+labels changing the whole-ELF identity. The next fault draft targets the first
+MT32x32x256 publication: wave 2 tensor producer and wave 1 lane zero consumer
+at LDS byte 2176, dropping .text pairs 0x1754/0x1758 and 0x176c/0x1770 while
+preserving tensor completion at 0x1750. Exact site and sequence identities are
+verified against the retained export inventory. The draft stays outside the
+shared spec until the active mixed TDM campaigns finish. Full MXF4 TDM high
+clean qualification is running with the established 192 MiB report allowance.
