@@ -1831,3 +1831,20 @@ coverage gap. New full-shard runs using the memory-spill fix are in
 `tensor-memory-{mxf8,mxf4,mixed}-clean`. Completed clients already report full
 coverage (MXF8: 1046/1046 accesses and 204/204 barriers; mixed: 822/822 and
 204/204). Table promotions wait for each full campaign's accepted result.
+
+### Tensor-DMA clean qualification and MXF4 publication fault
+
+`tensor-memory-mxf8-clean` and `tensor-memory-mxf4-clean` are accepted across
+all six shards each, with numeric passes and complete applicable coverage.
+MXF4 uses a 192 MiB report allowance. Both cells move to yellow pending faults.
+`tensor-memory-mixed-clean` has complete coverage but only two numeric passes;
+the 512x512 shard reaches its 300 s client deadline. A longer retry is required.
+
+The reviewed MXF4 explicit fault targets ELF `32ebdb36a12bfc7f`, dropping both
+publication barrier pairs at .text 0x1754/0x1758 and 0x176c/0x1770 while retaining
+the tensor-completion wait at 0x1750. Wave 2's tensor producer and wave 1 lane 0's
+consumer at 0x1774 overlap at LDS byte 2176. Both retained problem sizes contain
+full DepthU=256 iterations. No ordinary LDS store supplies this publication.
+The exact site and sequence identities come from the pristine inventory;
+`mxf4-explicit-tensor-pristine.asm` records the reviewed main ELF disassembly.
+Validation runner tests: 209 passed (`tensor-mxf4-spec-tests.log`).
