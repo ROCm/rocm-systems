@@ -1129,3 +1129,19 @@ cell retains its measured default result and records the higher-preset timeout.
 analysis_complete=false, static_complete=false, and reason `analysis incomplete`.
 The supported ordinary accesses still show 70/70 patched, but this no longer
 conceals the unmodeled tensor-DMA accesses in the final coverage verdict.
+
+### Histogram higher confirms missed faults; HGEMM serial generation is insufficient
+
+`histc-cap-higher-clean` passes; all eight fault trials record higher, complete
+analysis and healthy checks. The detector misses 8/8 while the independent
+numerical oracle fails 7/8. This strengthens the evidence that the reviewed
+publication fault is meaningful. High/default-bank records retain only a few
+lane representatives; the existing lane-stripe retention path is restricted to
+CDNA4. A CDNA5 wave32 extension is being built and tested, leaving eight-bank
+behavior unchanged. Its E2E qualification is still required.
+
+Two fresh HGEMM runs with `--cpu-threads 1` both pass numerically but still
+produce different full ELF hashes (`hgemm-repro-single-worker-results.json`).
+Serial generation alone is not a reproducibility solution. The exact reviewed
+code objects need to be reused or generation made reproducible before another
+fault campaign can be admitted; no identity check has been weakened.

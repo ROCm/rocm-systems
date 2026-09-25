@@ -36,7 +36,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | --- | ---: | --- | --- | --- |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 default: filtered clean pass; fault 1/8 on repeat; high clean hits 360 s deadline | 🟧 sleep=15: clean run hits 360 s deadline; delay-zero clean previously passed |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 high: clean pass; fault 0/5 admitted before a 60 s trial timeout | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟨 high: filtered clean pass; fault 0/8; higher next | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟨 higher: clean pass; detector 0/8 despite oracle failures 7/8; retention fix under test | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟨 default: all 3 filtered clean runs pass; prefill fault 0/8; high next | 🟨 delay-zero: all 3 filtered clean runs pass; fault trials pending |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
@@ -59,9 +59,9 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟧 default: all 3 shards hit the 900 s client deadline; clean qualification incomplete | 🟥 delay-zero: subword transform fixed; clean mismatches persist and all 3 shards time out |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: clean pass; wave-private LDS, barrier drop does not create a cross-wave race | 🟨 delay-zero: clean pass; wave-private LDS, barrier drop does not create a cross-wave race |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 high: filtered clean pass; fault 0/8; higher next | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 higher: clean pass; detector 0/8 despite oracle failures 7/8; retention fix under test | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
-| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 high: filtered clean pass; fault 0/8; higher next | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 higher: clean pass; detector 0/8 despite oracle failures 7/8; retention fix under test | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟨 default: filtered clean pass; fault 0/8; high next | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) | 🟨 default: clean pass; same-lane LDS accesses, barrier drop does not create a race | 🟨 delay-zero: clean pass; same-lane LDS accesses, barrier drop does not create a race |
