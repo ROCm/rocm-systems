@@ -188,3 +188,24 @@ Tensile generation now defaults to two CPU workers per shard (`--cpu-threads`);
 outer campaign workload batches are serialized. Do not overlap discovery with
 large clean batches. The 38 Tensile validation tests pass with an assertion that
 the bounded worker setting reaches the actual Tensile driver invocation.
+
+### Tree producer-release fault qualification
+
+The fresh, precommitted producer-release fault has eight admitted/reached
+Default trials, two detected, with healthy before/after checks and complete
+coverage (`tree-publication-fault/.../summary.json`). The clean journal repair
+therefore establishes correctness but the default sampling preset is below the
+6/8 bar for this workload. The table records 2/8 while calibration proceeds.
+
+The first directories named `tree-high-clean` and `tree-high-fault` accidentally
+used default: setting `RJ_CONSAN_PRESET` on the parent is stripped by this runner.
+These directories provide **no high-preset evidence**. Use
+`CONSAN_VALIDATION_DEFAULT_PRESET=high` for both phases; the corrected run uses
+`tree-high-v2-clean` and `tree-high-v2-fault`. Verify each retained environment and
+hook configuration before accepting preset results.
+
+Bounded Tensile clean reruns use `bounded-clean-tensile`, one outer workload at a
+time and two generation workers per shard, all inside the shared 40 GiB slice.
+The observed campaign peak during this pass was approximately 5.3 GiB. The
+current HipKittens debugger reproduction still aborts during page-table unmap;
+its loaded emulator and ConSan libraries are the expected GCC build paths.
