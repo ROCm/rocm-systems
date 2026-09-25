@@ -101,7 +101,7 @@ those campaigns or extend their results to a different source revision.
   [CDNA4 / gfx950](validation/STATUS_CDNA4.md),
   [RDNA3 / gfx1100](validation/STATUS_RDNA3.md),
   [RDNA4 / gfx1201](validation/STATUS_RDNA4.md), and
-  [CDNA5 / gfx1250](validation/STATUS_GFX1250.md).
+  [CDNA5 / gfx1250](validation/STATUS_CDNA5.md).
 - [VALIDATION.md](validation/VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
 - [BENCHMARK.md](benchmark/BENCHMARK.md): the separate reproducible performance

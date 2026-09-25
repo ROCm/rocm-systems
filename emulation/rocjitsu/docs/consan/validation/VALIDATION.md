@@ -10,7 +10,7 @@ copying workload-specific commands into this document.
 The target ledgers record qualification state for
 [CDNA3 / gfx942](STATUS_CDNA3.md), [CDNA4 / gfx950](STATUS_CDNA4.md),
 [RDNA3 / gfx1100](STATUS_RDNA3.md), [RDNA4 / gfx1201](STATUS_RDNA4.md), and
-[CDNA5 / gfx1250](STATUS_GFX1250.md). A ledger is not a substitute for rerunning
+[CDNA5 / gfx1250](STATUS_CDNA5.md). A ledger is not a substitute for rerunning
 the gates after a relevant source, toolchain, workload, or runtime change.
 
 ## First step for revalidation: generate and apply kernel allowlists
