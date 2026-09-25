@@ -2729,6 +2729,8 @@ void requireWholeCaptureInvalidated(hipStream_t origin, const std::vector<hipStr
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(origin, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
+
+  static_cast<void>(hipGetLastError());
 }
 }  // namespace
 
