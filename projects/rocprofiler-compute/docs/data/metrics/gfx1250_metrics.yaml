@@ -52,7 +52,7 @@ System Speed-of-Light:
     unit: GIOP/s
   Active WGPs:
     rst: Average number of WGPs that had at least one active wavefront in a cycle.
-    unit: Count
+    unit: WGPs per Cycle
   IPC:
     rst: Average number of instructions per active WGP cycle.
     unit: Instructions per Cycle

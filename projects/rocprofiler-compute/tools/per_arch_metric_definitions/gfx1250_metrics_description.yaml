@@ -70,7 +70,7 @@ System Speed-of-Light:
   Active WGPs:
     plain: Average number of WGPs that had at least one active wavefront in a cycle.
     rst: Average number of WGPs that had at least one active wavefront in a cycle.
-    unit: Count
+    unit: WGPs per Cycle
   IPC:
     plain: Average number of instructions per active WGP cycle.
     rst: Average number of instructions per active WGP cycle.
