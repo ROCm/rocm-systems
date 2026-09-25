@@ -1471,7 +1471,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
-            ("barrier-move",),
+            ("barrier-drop",),
         )
 
     def test_run_uses_target_resolved_workload_timeout(self) -> None:
@@ -4634,6 +4634,13 @@ class ConSanValidationTest(unittest.TestCase):
         catalog = json.loads(path.read_text())
         available = {w["id"] for w in validation._manifest("gfx1250")["workloads"]}
         self.assertLessEqual(set(catalog["workloads"]), available)
+        for workload_id, entry in catalog["workloads"].items():
+            for fault in entry["faults"]:
+                with self.subTest(workload=workload_id, fault=fault["id"]):
+                    validation._load_fault(
+                        path, "gfx1250", validation.WORKLOAD_BY_ID[workload_id],
+                        fault["id"],
+                    )
 
     def test_overhead_uses_bracketing_baseline_mean_and_maximum_mode(self) -> None:
         results = [

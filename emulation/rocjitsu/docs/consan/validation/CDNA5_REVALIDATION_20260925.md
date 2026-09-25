@@ -512,3 +512,13 @@ writes address 2944, which thread 16 reads after the publication barrier.
 The spec removes only `.text+0x4b98/0x4bec`, preserving the final pair.
 Evidence: `clip-pristine.asm`, `clip-notes.txt`, and the fresh CLIP inventory.
 Eight trials per mode and a six-detection threshold are fixed before runs.
+
+### TP1 manifest admission repair
+
+The current-hook TP1 prefill clean run passes with complete 228/228 accesses
+and 42/42 barriers. Its first fault launch was rejected before execution by a
+stale gfx1250-only barrier-move manifest override. Removed that override so
+the reviewed publication-drop spec uses the normal barrier-drop family. The
+catalog test now loads every maintained gfx1250 fault through the real admission
+parser; all 208 validation runner tests pass. No rejected launch is counted as
+an admitted trial.

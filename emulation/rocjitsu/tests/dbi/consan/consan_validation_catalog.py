@@ -1371,11 +1371,6 @@ def _workload_for_target(target: str, workload_id: str) -> Workload:
 
 
 def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
-    if target == "gfx1250" and workload.id in (
-        "tp1-prefill",
-        "tp1-decode-combined",
-    ):
-        return ("barrier-move",)
     families = workload.fault_families
     if not families:
         # Supporting rows may deliberately carry only an exact oracle and
