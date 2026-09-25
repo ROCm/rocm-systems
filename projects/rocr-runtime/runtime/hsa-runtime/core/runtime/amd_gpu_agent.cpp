@@ -4094,8 +4094,11 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     per_xcc_host_buffer_size = 2 * per_xcc_buffer_share;
   }
 
-  // Ensure minimum viable buffer size (at least 2x sample size for double-buffering)
-  per_xcc_host_buffer_size = std::max(per_xcc_host_buffer_size, 2 * session.sample_size());
+  // Ensure minimum viable buffer size (at least 2x sample size for double-buffering). Host
+  // buffers must hold whole samples: the overflow clamp writes up to the free space, and a
+  // partial sample would misalign every record read after it.
+  per_xcc_host_buffer_size = std::max(AlignDown(per_xcc_host_buffer_size, session.sample_size()),
+                                      2 * session.sample_size());
   trap_buffer_size = std::max(trap_buffer_size, session.sample_size());
 
   // Total host buffer ~= 2 * buffer_size (reasonable overhead, not num_xcc multiplier)
