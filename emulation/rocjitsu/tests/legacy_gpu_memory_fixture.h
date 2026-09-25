@@ -67,20 +67,25 @@ public:
   using GpuMemory::read32;
   using GpuMemory::write32;
 
-  void register_process(uint32_t vmid, amdgpu::LegacyPageTable *page_table,
-                        util::DistributedSharedMutex *page_table_mutex,
-                        const uint64_t *page_table_generation = nullptr,
-                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {}) {
+  void
+  register_process(uint32_t vmid, amdgpu::LegacyPageTable *page_table,
+                   util::DistributedSharedMutex *page_table_mutex,
+                   const uint64_t *page_table_generation = nullptr,
+                   std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
+                   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch = {},
+                   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state = {}) {
     unregister_process(vmid);
-    const amdgpu::AddressSpaceHandle handle =
-        legacy_vm_.register_address_space(vmid, {.page_table = page_table,
-                                                 .page_table_mutex = page_table_mutex,
-                                                 .page_table_generation = page_table_generation,
-                                                 .request_mutex = std::move(request_mutex),
-                                                 .client_pid = client_pids_[vmid],
-                                                 .client_mem_fd = -1,
-                                                 .passthrough = passthrough_,
-                                                 .fault_reporter = fault_reporter_});
+    const amdgpu::AddressSpaceHandle handle = legacy_vm_.register_address_space(
+        vmid, {.page_table = page_table,
+               .page_table_mutex = page_table_mutex,
+               .page_table_generation = page_table_generation,
+               .request_mutex = std::move(request_mutex),
+               .mutation_epoch = std::move(mutation_epoch),
+               .page_table_cache_state = std::move(page_table_cache_state),
+               .client_pid = client_pids_[vmid],
+               .client_mem_fd = -1,
+               .passthrough = passthrough_,
+               .fault_reporter = fault_reporter_});
     if (handle) {
       handles_[vmid] = handle;
       if (amdgpu::LegacyAddressSpace *address_space = legacy_vm_.address_space(vmid))

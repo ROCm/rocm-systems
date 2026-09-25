@@ -65,6 +65,7 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -1130,6 +1131,150 @@ TEST(GpuMemoryTest, PageTableEntryMutationsInvalidateCachedPtes) {
 
   process.set_page_mtype(kBaseVa, new_page.size(), amdgpu::Mtype::CC);
   EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+}
+
+TEST(GpuMemoryTest, AccessBatchRetainsImmutablePteUntilQuantumExit) {
+  // Isolate the writer-waits-for-reader protocol so a lock-order regression is
+  // a bounded test failure rather than a hung suite.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    rocjitsu::test::LegacyGpuMemoryFixture memory("batched_pte_memory");
+    constexpr uint32_t kPid = 17;
+    constexpr uint64_t kBaseVa = 0x41000000;
+    constexpr size_t kOffset = 0x123;
+    constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+    KfdProcess process(kPid);
+    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> old_page{};
+    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+    old_page[kOffset] = 0x11;
+    new_page[kOffset] = 0x22;
+    process.map_pages(kBaseVa, old_page.data(), old_page.size(), amdgpu::Mtype::RW,
+                      KfdProcess::HostExtentOwner::Driver);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation(), process.page_table_request_mutex(),
+                            process.page_table_mutation_epoch(), process.page_table_cache_state());
+
+    // Populate the copied-PTE cache before the batch so its first access takes
+    // the retained-admission fast path rather than the locked refill path.
+    if (memory.read8(kAddr, kPid) != old_page[kOffset])
+      _exit(1);
+
+    auto state = process.page_table_cache_state();
+    std::atomic<bool> mutation_complete{false};
+    std::thread mutator;
+    {
+      const amdgpu::LegacyAddressSpace::AccessBatchGuard batch;
+      if (memory.read8(kAddr, kPid) != old_page[kOffset])
+        _exit(2);
+      const uint64_t admitted_generation = state->generation();
+      mutator = std::thread([&] {
+        process.remap_page_host_ptrs(kBaseVa, old_page.data(), new_page.data(), new_page.size());
+        mutation_complete.store(true, std::memory_order_release);
+      });
+
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (state->generation() == admitted_generation) {
+        if (std::chrono::steady_clock::now() >= deadline)
+          _exit(3);
+        std::this_thread::yield();
+      }
+      if (mutation_complete.load(std::memory_order_acquire))
+        _exit(4);
+
+      // The writer has invalidated this generation and is waiting. The retained
+      // immutable snapshot remains valid until the bounded batch exits.
+      if (memory.read8(kAddr, kPid) != old_page[kOffset])
+        _exit(5);
+    }
+
+    mutator.join();
+    if (!mutation_complete.load(std::memory_order_acquire))
+      _exit(6);
+    if (memory.read8(kAddr, kPid) != new_page[kOffset])
+      _exit(7);
+    memory.unregister_process(kPid);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child status: " << status;
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST(GpuMemoryTest, AccessBatchDropsAdmissionsBeforeLockedPteRefill) {
+  // A mutation can hold the page-table lock while draining an admitted copied
+  // PTE. A miss must drop the admission before entering that locked refill.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    rocjitsu::test::LegacyGpuMemoryFixture memory("batched_pte_refill_memory");
+    constexpr uint32_t kPid = 18;
+    constexpr uint64_t kFirstVa = 0x42000000;
+    constexpr uint64_t kSecondVa = kFirstVa + KfdProcess::kPageSize;
+    constexpr size_t kOffset = 0x45;
+
+    KfdProcess process(kPid);
+    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> old_page{};
+    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> new_page{};
+    alignas(KfdProcess::kPageSize) std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+    old_page[kOffset] = 0x31;
+    new_page[kOffset] = 0x32;
+    second_page[kOffset] = 0x41;
+    process.map_pages(kFirstVa, old_page.data(), old_page.size(), amdgpu::Mtype::RW,
+                      KfdProcess::HostExtentOwner::Driver);
+    process.map_pages(kSecondVa, second_page.data(), second_page.size(), amdgpu::Mtype::RW,
+                      KfdProcess::HostExtentOwner::Driver);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation(), process.page_table_request_mutex(),
+                            process.page_table_mutation_epoch(), process.page_table_cache_state());
+
+    if (memory.read8(kFirstVa + kOffset, kPid) != old_page[kOffset])
+      _exit(1);
+    auto state = process.page_table_cache_state();
+    std::atomic<bool> mutation_complete{false};
+    std::thread mutator;
+    {
+      const amdgpu::LegacyAddressSpace::AccessBatchGuard batch;
+      if (memory.read8(kFirstVa + kOffset, kPid) != old_page[kOffset])
+        _exit(2);
+      const uint64_t admitted_generation = state->generation();
+      mutator = std::thread([&] {
+        process.remap_page_host_ptrs(kFirstVa, old_page.data(), new_page.data(), new_page.size());
+        mutation_complete.store(true, std::memory_order_release);
+      });
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (state->generation() == admitted_generation) {
+        if (std::chrono::steady_clock::now() >= deadline)
+          _exit(3);
+        std::this_thread::yield();
+      }
+      if (mutation_complete.load(std::memory_order_acquire))
+        _exit(4);
+
+      // This uncached page forces the slow refill. It must release the first
+      // page's admission, let the writer finish, and then observe stable data.
+      if (memory.read8(kSecondVa + kOffset, kPid) != second_page[kOffset])
+        _exit(5);
+      mutator.join();
+      if (!mutation_complete.load(std::memory_order_acquire))
+        _exit(6);
+      if (memory.read8(kFirstVa + kOffset, kPid) != new_page[kOffset])
+        _exit(7);
+    }
+
+    memory.unregister_process(kPid);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child status: " << status;
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST(GpuMemoryTest, UnalignedMappingUsesGpuPageOffsetForHostTranslation) {

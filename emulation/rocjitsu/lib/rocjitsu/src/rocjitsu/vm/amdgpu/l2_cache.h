@@ -206,11 +206,12 @@ public:
       }
       if (gpu_vm_ == nullptr)
         return VmAccessOutcome::Unavailable;
-      std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-      if (!vm_access)
-        return VmAccessOutcome::Faulted;
-      return vm_access->atomic_modify(addr, size, [&](std::span<std::byte> target) {
-        fn(reinterpret_cast<uint8_t *>(target.data()), 0);
+      return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+        if (!vm_access)
+          return VmAccessOutcome::Faulted;
+        return vm_access->atomic_modify(addr, size, [&](std::span<std::byte> target) {
+          fn(reinterpret_cast<uint8_t *>(target.data()), 0);
+        });
       });
     } else {
       assert((size == sizeof(uint32_t) || size == sizeof(uint64_t)) &&

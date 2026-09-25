@@ -24,7 +24,42 @@
 
 namespace rocjitsu::amdgpu {
 
+class GpuVm;
+class GpuVmAccess;
 class GpuVmAccessState;
+
+/// @brief Retain immutable VM snapshots and their read-side lifetime lease for
+/// one bounded functional execution quantum.
+///
+/// @details The simulator does not publish frontend reconfiguration while a CU
+/// quantum is running. Holding each binding's shared access lease until that
+/// quantum returns therefore matches the existing operation-scoped lifetime
+/// rule while avoiding a mutex round trip for every instruction and memory
+/// operation. Writers still revoke the state under the exclusive side and wait
+/// for the bounded quantum to finish. Nested guards share the outer batch.
+class GpuVmAccessBatchGuard {
+public:
+  GpuVmAccessBatchGuard();
+  ~GpuVmAccessBatchGuard();
+
+  [[nodiscard]] static bool active();
+
+  GpuVmAccessBatchGuard(const GpuVmAccessBatchGuard &) = delete;
+  GpuVmAccessBatchGuard &operator=(const GpuVmAccessBatchGuard &) = delete;
+  GpuVmAccessBatchGuard(GpuVmAccessBatchGuard &&) = delete;
+  GpuVmAccessBatchGuard &operator=(GpuVmAccessBatchGuard &&) = delete;
+
+private:
+  friend class GpuVm;
+  friend class GpuVmAccess;
+
+  [[nodiscard]] static const GpuVmAccess *find_snapshot(const GpuVm *vm, AddressSpaceHandle handle);
+  [[nodiscard]] static const GpuVmAccess *find_snapshot_vmid(const GpuVm *vm, uint32_t vmid);
+  static void release_access_states();
+  static void retain_snapshot(const GpuVm *vm, AddressSpaceHandle handle,
+                              const GpuVmAccess &access);
+  [[nodiscard]] static bool retain_access_state(const std::shared_ptr<GpuVmAccessState> &state);
+};
 
 /// @brief Operation whose permissions must be checked by an address-space walk.
 enum class VmAccessKind : uint8_t { Read, Write, Execute, Atomic };
@@ -538,6 +573,7 @@ private:
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
                                            bool report_fault) const;
+  [[nodiscard]] std::shared_lock<std::shared_mutex> lock_access_state() const;
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;
@@ -635,6 +671,26 @@ public:
   /// @details The lookup and snapshot occur under one lock, so unregister and
   /// VMID reuse cannot substitute a different generation between them.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vmid(uint32_t vmid) const;
+  /// @brief Borrow a cached snapshot for the active functional quantum.
+  /// @details These forms avoid copying snapshot ownership on every emulated
+  /// instruction. The returned pointer remains valid until the outermost
+  /// GpuVmAccessBatchGuard on this thread exits. Calling without an active
+  /// batch is a programming error.
+  [[nodiscard]] const GpuVmAccess *borrow_snapshot(AddressSpaceHandle handle) const;
+  [[nodiscard]] const GpuVmAccess *borrow_snapshot_vmid(uint32_t vmid) const;
+
+  /// @brief Run one operation against the current VMID snapshot.
+  /// @details Functional execution borrows the snapshot retained by the
+  /// active quantum. Other callers receive an owning operation snapshot, so
+  /// the callback has identical lifetime and invalidation semantics in both
+  /// paths and cannot let a borrowed pointer escape its valid scope.
+  template <typename Operation>
+  decltype(auto) with_vmid_snapshot(uint32_t vmid, Operation &&operation) const {
+    if (GpuVmAccessBatchGuard::active())
+      return std::invoke(std::forward<Operation>(operation), borrow_snapshot_vmid(vmid));
+    const std::optional<GpuVmAccess> access = snapshot_vmid(vmid);
+    return std::invoke(std::forward<Operation>(operation), access ? &*access : nullptr);
+  }
 
   [[nodiscard]] VmTranslationResult translate(AddressSpaceHandle handle, uint64_t address,
                                               std::size_t size, VmAccessKind access) const;

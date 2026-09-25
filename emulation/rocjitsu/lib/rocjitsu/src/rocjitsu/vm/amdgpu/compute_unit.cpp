@@ -1407,7 +1407,8 @@ template <bool EnableAsync>
     }
   };
 
-  std::optional<GpuVmAccess> vm_access;
+  std::optional<GpuVmAccess> owned_vm_access;
+  const GpuVmAccess *vm_access = nullptr;
   if (active->address_space() || vmid != 0) {
     if (gpu_vm_ == nullptr) {
       drain_async_window();
@@ -1416,8 +1417,14 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    vm_access = active->address_space() ? gpu_vm_->snapshot(active->address_space())
-                                        : gpu_vm_->snapshot_vmid(vmid);
+    if (GpuVmAccessBatchGuard::active()) {
+      vm_access = active->address_space() ? gpu_vm_->borrow_snapshot(active->address_space())
+                                          : gpu_vm_->borrow_snapshot_vmid(vmid);
+    } else {
+      owned_vm_access = active->address_space() ? gpu_vm_->snapshot(active->address_space())
+                                                : gpu_vm_->snapshot_vmid(vmid);
+      vm_access = owned_vm_access ? &*owned_vm_access : nullptr;
+    }
     if (!vm_access) {
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -1427,7 +1434,7 @@ template <bool EnableAsync>
       return;
     }
   }
-  const bool vm_address_space = vm_access.has_value();
+  const bool vm_address_space = vm_access != nullptr;
 
   rj_code_binary_inst_t words[4];
   static_assert(sizeof(words) == InstructionCache::kFetchBytes,
@@ -1521,9 +1528,8 @@ template <bool EnableAsync>
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words, first.size(), first.begin());
-        issuer =
-            admission->inspect(*decoder_, inst_cache_, *memory_, vm_access ? &*vm_access : nullptr,
-                               active->pc, vmid, active->num_vgprs(), storage->has_accvgprs, first);
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+                                    active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }
     }
