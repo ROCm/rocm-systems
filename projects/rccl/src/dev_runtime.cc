@@ -2262,6 +2262,11 @@ bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win) {
   return win != NULL && win->memory != NULL && win->memory->globalHasSysmemSegment;
 }
 
+size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win) {
+  if (win == nullptr) return 0;
+  return win->memory != nullptr ? win->memory->lsaMinSize : win->size;
+}
+
 void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr) {
   memcpy(dstRankPtr, srcRankPtr, offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank));
 }

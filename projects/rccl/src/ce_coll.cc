@@ -2163,7 +2163,9 @@ int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void cons
   if (win == nullptr || recvbuff == nullptr) return 0;
   const uintptr_t winStart = (uintptr_t)win->userPtr;
   const uintptr_t recvStart = (uintptr_t)recvbuff;
-  return recvStart >= winStart && totalBytes <= win->size && recvStart - winStart <= win->size - totalBytes;
+  const size_t peerSafeSize = ncclDevrWindowLsaMinSize(win);
+  return recvStart >= winStart && totalBytes <= peerSafeSize &&
+         recvStart - winStart <= peerSafeSize - totalBytes;
 }
 
 size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes) {
@@ -2231,7 +2233,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   uint32_t* signalBuffer = ceColl->signalBuffer;
   void* peerSig = nullptr;
   void* peerSignalAddr = nullptr;
-  bool fastPath = false;
+  bool fastPath = profilerArgs != nullptr && profilerArgs->allReduceFastPath;
   size_t mySlotOffset = 0;
   uint8_t* myRecvSlot = nullptr;
   size_t recvSlotOffset = 0;
@@ -2261,26 +2263,12 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (recvWin == nullptr) {
     NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
   }
-  if (recvWin != nullptr && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-    // A pointer-only window lookup is insufficient: Phase 3 writes the complete
-    // receive range through peer mappings. Fall back to the temporary CE window
-    // unless [recvbuff, recvbuff + totalBytes) is contained in recvWin.
-    fastPath = ncclCeRecvRangeContainedInWindow(recvWin, recvbuff, totalBytes) != 0;
-  }
-  // Ranks that disagree on fastPath issue different ncclMemOpSync counts (one on
-  // the LSA path, two inside ncclCeAllGather) and hang on ceSeqNum. AND the flag
-  // the same way isSymmetricKernelRequested agrees window eligibility.
-  if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
-    std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
-    flags[(size_t)comm->rank] = fastPath ? 1 : 0;
-    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)), ret, fail);
-    for (int r = 0; r < comm->nRanks; r++) {
-      if (flags[(size_t)r] == 0) {
-        fastPath = false;
-        break;
-      }
-    }
-  }
+  // The scheduler agrees this bit across ranks during launch preparation. Do
+  // not perform host-blocking bootstrap collectives from the per-comm launch:
+  // grouped comms may be driven serially by one host thread.
+  fastPath = fastPath && recvWin != nullptr &&
+             (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+             ncclCeRecvRangeContainedInWindow(recvWin, recvbuff, totalBytes) != 0;
   collArgs.recvWin = recvWin;
 
   // !fastPath AllGather is chunked through one ceARTmpBuf slot, so the message
@@ -2584,6 +2572,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->sendWin = task->sendWin;
   plan->ceCollArgs->recvWin = task->recvWin;
   plan->ceCollArgs->useDda = task->useDda;
+  plan->ceCollArgs->allReduceFastPath = task->ceAllReduceFastPath;
   plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
   plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
   plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;

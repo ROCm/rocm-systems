@@ -259,6 +259,7 @@ struct ncclTaskColl {
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
   bool useDda; // true if CE is using DDA staging
+  bool ceAllReduceFastPath; // cross-rank-agreed direct receive-window path
   void** ddaPeerBases; // host-side table of every rank's DDA scratch base pointer
   void* sendMhandle;
   void* recvMhandle;

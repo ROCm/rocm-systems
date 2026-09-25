@@ -66,6 +66,13 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t func, int op, nccl
   return g_ceScratchAvailable(comm, func, op, type, regType);
 }
 int ncclCeLocalReduceBlocks(ncclDataType_t type, size_t count) { return g_ceLocalReduceBlocks(type, count); }
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes) {
+  if (win == nullptr || recvbuff == nullptr) return 0;
+  const uintptr_t winStart = reinterpret_cast<uintptr_t>(win->userPtr);
+  const uintptr_t recvStart = reinterpret_cast<uintptr_t>(recvbuff);
+  return recvStart >= winStart && totalBytes <= win->size &&
+         recvStart - winStart <= win->size - totalBytes;
+}
 bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                          struct ncclDevrWindow*, struct ncclDevrWindow*) {
   return g_hierCeAvailable;
