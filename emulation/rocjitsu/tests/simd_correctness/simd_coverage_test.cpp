@@ -243,6 +243,20 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
                                                 wf.fp_denorm_mode_f16_f64(), iteration & 1,
                                                 wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
         }
+        if constexpr (!Bf16 && Op == PackedFloatOp::FMA) {
+          const auto is_nan = [](uint32_t bits) {
+            return (bits & 0x7c00u) == 0x7c00u && (bits & 0x03ffu) != 0;
+          };
+          // As in the packed-instruction equivalence tests, NaN-input FMA
+          // payload selection is host-toolchain dependent. GCC may commute
+          // multiplicands differently at the two inlined call sites. Require
+          // a NaN result on both paths, while retaining exact comparisons for
+          // clamped results and for every finite/Inf-input operation.
+          if ((is_nan(a[i]) || is_nan(b[i]) || is_nan(c[i])) && is_nan(expected)) {
+            ASSERT_TRUE(is_nan(actual[i])) << mode << ":" << iteration;
+            continue;
+          }
+        }
         ASSERT_EQ(actual[i], expected)
             << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
       }
