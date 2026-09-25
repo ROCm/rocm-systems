@@ -2252,11 +2252,11 @@ typedef struct hsa_pitched_ptr_s {
 } hsa_pitched_ptr_t;
 
 /**
- * @brief One end of a box in a HSA_AMD_MEMORY_COPY_OP_RECT operation.
+ * @brief Pitched memory and the origin of a rectangular region within it.
  *
- * @c rect_src and @c rect_dst are arrays of this type.  The offset carries x in
- * bytes, and y and z in rows and layers.  Requirements match the corresponding
- * arguments of hsa_amd_memory_async_copy_rect.
+ * @c pitched_ptr identifies the allocation. Its base, pitch, and slice must be
+ * 4-byte aligned, and pitch and slice are in bytes. @c offset is the origin of
+ * the region: x in bytes, y in rows, and z in layers.
  */
 typedef struct hsa_amd_memory_copy_rect_ptr_s {
   hsa_pitched_ptr_t pitched_ptr;
