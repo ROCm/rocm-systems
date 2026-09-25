@@ -252,3 +252,13 @@ workload accesses and no applicable ConSan code object. This rules out inserted
 workload probes as a necessary trigger. The hook/runtime lifecycle now deserves
 priority; the failure is not evidence that the numerical kernel itself is wrong.
 The diagnostic is `hipkittens-copy-only-diagnostic.log`.
+
+D128 SuperCollider sleep=15 finished: clean passes, eight faults admitted/reached,
+zero detected, zero numerical failures (`d128-sleep15-fault/.../summary.json`).
+The cell remains yellow. Preloading the ConSan DSO without registering it as an
+HSA tool completes HipKittens cleanly (`hipkittens-preload-only-diagnostic.log`),
+whereas registering the tool with zero applicable workload instrumentation still
+corrupts the heap. This isolates the trigger to active tool behavior rather than
+merely loading the shared library; the precise corrupting operation is not yet
+identified. Removing ConSan environment settings is not a disable test: the
+hook defaults to Default instrumentation.
