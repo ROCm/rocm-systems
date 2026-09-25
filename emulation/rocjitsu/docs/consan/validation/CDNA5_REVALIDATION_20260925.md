@@ -1848,3 +1848,14 @@ full DepthU=256 iterations. No ordinary LDS store supplies this publication.
 The exact site and sequence identities come from the pristine inventory;
 `mxf4-explicit-tensor-pristine.asm` records the reviewed main ELF disassembly.
 Validation runner tests: 209 passed (`tensor-mxf4-spec-tests.log`).
+
+### MXF4 explicit tensor publication qualified
+
+`tensor-memory-mxf4-explicit-high-clean` is accepted with 50/50 accesses,
+32/32 barriers and 4/4 atomic/fence sites. The matching immutable memory-spill
+hook is used by both reviewed fault campaigns. `tensor-mxf4-default-fault`
+completes eight admitted/reached trials with zero detections;
+`tensor-mxf4-high-fault` completes eight with eight detections and healthy
+emulator checks. All numeric oracles pass independently in both campaigns.
+The Default cell is green at `high`, the lowest qualifying preset tested at or
+above default. These E2E checks test the reviewed spec committed in 1fc167feec1.
