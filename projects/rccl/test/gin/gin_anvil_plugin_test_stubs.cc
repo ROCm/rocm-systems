@@ -57,6 +57,10 @@ int ncclDebugLevel = NCCL_LOG_VERSION;
 uint64_t ncclDebugMask = NCCL_INIT;
 thread_local int ncclDebugNoWarn = 0;
 
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
+
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line,
                   const char* fmt, ...) {
   (void)level;

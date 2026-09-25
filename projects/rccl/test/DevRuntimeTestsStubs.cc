@@ -117,6 +117,10 @@ int64_t ncclParamEnqueueRearchEnable() { return 0; }
 // Returns the NCCL_PARAM default so window registration is not opted out.
 int64_t ncclParamWinEnable() { return 1; }
 
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
+
 // ---------------------------------------------------------------------------
 // Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------
