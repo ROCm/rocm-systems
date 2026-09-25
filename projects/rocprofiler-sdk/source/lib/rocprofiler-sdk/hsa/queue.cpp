@@ -47,6 +47,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -324,6 +325,15 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                      packet.instrumentation_packets,
                                                      dispatch_time);
 
+        // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
+        // it explicitly here.
+        spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                             packet.kernel_packet,
+                                             _session,
+                                             packet,
+                                             packet.instrumentation_packets,
+                                             dispatch_time);
+
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
             .wlock([&](auto& serializer) {
@@ -458,11 +468,11 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    // Counter collection, thread trace and PC sampling no longer register a queue-controller
-    // callback, so none of them counts toward get_notifiers(); detect them explicitly so a run
-    // that uses only one of them still enters the interceptor.
+    // None of counter collection, thread trace, PC sampling or SPM registers a queue-controller
+    // callback any more, so none of them counts toward get_notifiers(); detect them explicitly
+    // so a run that uses only one of them still enters the interceptor.
     //
-    // Each is scoped to this queue's agent: a counters context restricted via set_agents(), a
+    // Each check is scoped to this queue's agent: a context restricted via set_agents(), a
     // tracer configured per agent, and a PC sampling service configured per agent must leave
     // queues on the other agents on the fast path instead of paying interception and losing
     // batching for dispatches the corresponding enter hook would filter out anyway.
@@ -470,9 +480,10 @@ WriteInterceptor(const void* packets,
     const bool  counters_active     = counters::is_active_on_agent(rocp_agent->id);
     const bool  thread_trace_active = thread_trace::is_active_on_agent(rocp_agent->id);
     const bool  pc_sampling_active  = pc_sampling::is_configured_on_agent(rocp_agent->id);
+    const bool  spm_active          = spm::is_active_on_agent(rocp_agent->id);
     const bool  no_real_consumers =
         (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active &&
-         !pc_sampling_active &&
+         !pc_sampling_active && !spm_active &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
@@ -896,6 +907,19 @@ WriteInterceptor(const void* packets,
                 _packet_data.instrumentation_packets,
                 _packet_data.is_serialized);
 
+            // SPM is migrated off the per-queue callback registry: call its hook explicitly
+            // (the other services still flow through signal_callback above).
+            spm::kernel_dispatch_phase_enter_hook(
+                &queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
+
             bool inserted_before = false;
             if(_packet_data.is_serialized)
             {
@@ -1264,9 +1288,9 @@ WriteInterceptor(const void* packets,
         }
     });
 
-    // Counter collection and thread trace require per-packet mode; neither participates in the
-    // registry above.
-    if(counters_active || thread_trace_active) should_batch_packets = false;
+    // Counter collection, thread trace and SPM require per-packet mode; none of them
+    // participates in the registry above.
+    if(counters_active || thread_trace_active || spm_active) should_batch_packets = false;
 
     if(should_batch_packets)
     {
