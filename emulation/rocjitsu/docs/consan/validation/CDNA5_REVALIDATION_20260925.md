@@ -375,3 +375,27 @@ is removed together, preserving surrounding reuse and reduction barriers.
 The complete row still executes both full-KV and wide-key variants; this fault
 qualifies the preselected full-KV publication. Eight trials per mode, minimum
 six detections, are declared before running them.
+
+### Tensile MXF4 Default rejection diagnosis
+
+A bounded GDB replay of the retained client confirms rejection during automatic
+preparation, before lowering (`mxf4-evidence-after-exec.log`). The typed evidence
+plan is `InsufficientReportCapacity/PerBufferCeiling`: 152,288,376 bytes required
+versus 134,217,728 allowed. Its inventory contains 2,448 access ranges, 544
+barrier events and 15,376 atomic events, producing 17,824 watchpoint/sync slots
+and 1,140,736 publication events. The existing environment setting cannot exceed
+the same hard ceiling. Earlier placement-breakpoint runs reproduced exit 92 but
+did not locate the cause; GDB breakpoints must be installed after launcher exec.
+The pipeline now reports the reason, required bytes and ceiling when rejecting
+an incomplete report plan. A regression checks the diagnostic and fail-closed
+behavior. The active campaign still uses the unchanged hook until a safe rebuild
+boundary. A capacity-policy change or smaller complete dispatch inventory still
+needs evaluation; no coverage or evidence requirement has been relaxed.
+
+Tensile HGEMM Default completed its full clean row under the bounded scheduler
+(`bounded-clean-tensile/tensile-sk-hgemm-quick/default`); fault trials remain pending.
+
+The normal GCC host build passes all 52 selected pipeline/evidence tests,
+including the new capacity-rejection diagnostic regression
+(`evidence-diagnostic-tests.log`). Only the host test target was rebuilt; live
+E2E jobs retain their existing hook and emulator binaries.

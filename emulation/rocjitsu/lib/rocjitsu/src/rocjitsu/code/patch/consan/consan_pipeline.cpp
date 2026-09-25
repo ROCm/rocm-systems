@@ -836,6 +836,15 @@ TransformTransaction::execute(std::optional<TransformArtifacts> supplied_artifac
   bool binding_ready = mode == Mode::None;
   if (result.evidence_requirements) {
     if (!evidence_is_complete(*result.evidence_requirements)) {
+      if (const auto *report = std::get_if<ReportRequirements>(&*result.evidence_requirements)) {
+        result.warnings.emplace_back(
+            "ConSan runtime evidence plan is incomplete: report-reason=" +
+            std::string(auto_report_plan_reason_name(report->abi_plan.reason)) +
+            ", required-bytes=" + std::to_string(report->abi_plan.required_bytes) +
+            ", ceiling-bytes=" + std::to_string(report->abi_plan.ceiling_bytes));
+      } else {
+        result.warnings.emplace_back("ConSan SuperCollider runtime evidence plan is incomplete");
+      }
       result.outcome = TransformOutcome::Unsupported;
       result.replacement.clear();
       result.private_lowering_.patches.clear();

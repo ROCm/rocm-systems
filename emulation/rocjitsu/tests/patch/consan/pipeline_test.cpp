@@ -633,6 +633,27 @@ TEST(ConSanPipeline, EvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCapab
   }
 }
 
+TEST(ConSanPipeline, ReportCapacityRejectionExplainsRequiredBytesAndCeiling) {
+  Request request = make_request();
+  request.auto_report_buffer_size = sizeof(ReportHeader);
+  const TransformResult result = transform(
+      make_rdna4_supported_lds_code_object(), request, TransformPolicy{}, enabled_runtime_policy(),
+      DebugOverrides{}, complete_runtime_capabilities(), BoundRuntimeResources{});
+  ASSERT_TRUE(result.evidence_requirements);
+  const auto &report = std::get<ReportRequirements>(*result.evidence_requirements);
+  ASSERT_EQ(report.abi_plan.reason, AutoReportPlanReason::PerBufferCeiling);
+  EXPECT_EQ(result.outcome, TransformOutcome::Unsupported);
+  EXPECT_EQ(result.install_action(true), InstallAction::Reject);
+  EXPECT_TRUE(result.replacement.empty());
+  const std::string expected =
+      "ConSan runtime evidence plan is incomplete: report-reason=per_buffer_ceiling, "
+      "required-bytes=" +
+      std::to_string(report.abi_plan.required_bytes) +
+      ", ceiling-bytes=" + std::to_string(sizeof(ReportHeader));
+  EXPECT_NE(std::find(result.warnings.begin(), result.warnings.end(), expected),
+            result.warnings.end());
+}
+
 TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyMode) {
   constexpr std::array<uint32_t, 1> kTextWords = {0xBFB00000u};
   const std::vector<uint8_t> bytes =
