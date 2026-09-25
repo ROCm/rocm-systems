@@ -65,7 +65,10 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue*                           queu
                                 hsa::inst_pkt_t&                            inst_pkt,
                                 kernel_dispatch::profiling_time             dispatch_time);
 
-// True if any context currently has dispatch counter collection active.
+// True if any context in the active list has a dispatch counter collection service. This is not
+// the service's enabled flag: counters::stop_context() clears that flag first and then drains
+// while the context is still in the active list, and for that window this stays true so the
+// enter hook keeps coordinating the serialized -> unserialized transition.
 bool
 is_any_active();
 
