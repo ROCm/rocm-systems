@@ -536,6 +536,7 @@ def test_time_window_clamps_start_before_trace(db_input):
     result = _run_rocpd_query(db_input, "--start", "0")
 
     assert result.returncode == 0, result.stderr
-    assert "# WARNING:" in result.stderr
-    assert "using time window" in result.stderr
+    assert "\n###\n### WARNING: " in result.stderr
+    assert "\n### Using time window [" in result.stderr
+    assert " nsec instead\n###\n\n" in result.stderr
     assert "Traceback" not in result.stderr
