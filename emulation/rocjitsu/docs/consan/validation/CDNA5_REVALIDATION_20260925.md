@@ -1764,7 +1764,7 @@ Together with the accepted high clean and complete tensor coverage, MXF8
 explicit is green at high, the lowest passing preset tested from default upward.
 
 `tensor-private-f16-transposes-clean` passes numerics and complete coverage in
-all four objects: aggregated 736/736 accesses and 176/176 barriers. Its Default
+all four objects; its coverage summary reports 736/736 accesses and 176/176 barriers. Its Default
 cell moves to yellow pending reviewed fault qualification.
 
 `tensor-private-mxf8-tdm-clean` rejects all six shards before execution.
@@ -1787,7 +1787,23 @@ The MXF8 TDM retry now executes clients and reaches coverage reporting rather
 than rejecting at scalar-prologue planning; some sites still need memory-backed
 scalar preservation. Its full-shard qualification is still running.
 `tensor-fallback-spmm-all-clean` is accepted across all four bounded process
-shards and nine objects, with passing numeric oracles and aggregated coverage
-526/526 accesses, 136/136 barriers. The sparse TDM all row moves to yellow
+shards, with passing numeric oracles and complete coverage in every recorded
+verdict. These include multiple generated objects per shard; 526/526 accesses
+and 136/136 barriers in the result summary are not a total over every client. The sparse TDM all row moves to yellow
 pending a reviewed fault. `tensor-fallback-mxf4-tdm-clean` rejects six shards
 before execution; its table cell records this current allocation-triage state.
+
+### Current remaining TDM gaps
+
+`tensor-fallback-mxf8-tdm-clean` finishes with six numeric passes but incomplete
+coverage (reported access 1028/1046, barrier 140/204, atomic and fence 20/24).
+The remaining tensor/sync sites require preservation through memory-backed
+scalar spills; the cell now records that gap.
+
+`tensor-fallback-mxf4-debug.log` identifies MXF4's earlier rejection as report
+capacity, not scalar placement: required bytes 153,518,712 exceed the default
+134,217,728-byte report cap. A 201,326,592-byte (192 MiB) allowance is being
+checked in `tensor-fallback-mxf4-192m-clean`, under the same aggregate cgroup cap.
+The sparse TDM-all table entry counts four scheduled clean process shards;
+those runs contain multiple generated objects per shard. Coverage summary
+counts are not presented as a total over every client.
