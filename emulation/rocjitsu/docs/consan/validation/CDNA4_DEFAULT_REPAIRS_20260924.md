@@ -211,3 +211,18 @@ GPU probes; the completed-matrix audit reports zero errors. Evidence is in
 `pytorch-norm-softmax/max-lanes-v3-banks-256/`. An earlier intermediate build recorded 6/8 at 128 banks, but its two
 emulator regressions disqualify it from promotion; that result remains evidence,
 not a replacement for the corrected-build qualification.
+
+Histogram also qualifies with the corrected mapping: `max` plus 128 banks passes
+its matching clean control and detects 8/8 unchanged publication faults. All
+trials are admitted/reached with complete coverage and healthy GPU probes.
+Evidence is in `pytorch-torch-histc/max-lanes-v3-banks-128/`; the completed-matrix
+audit now covers 34 batches with zero errors.
+
+HipKittens BF16's original startup fault still detects 0/8 at 128 and 256 banks.
+A separately reviewed retirement-barrier control at `.text+0xb64` detects 8/8
+with a passing matching clean run (`max-retirement-control-v3-banks-128/`).
+The control exposes a read at `.text+0xa34` racing with a write at `.text+0xbac`
+on the same LDS range. It is diagnostic evidence only and does not replace
+the original startup fault or qualify that yellow cell. The remaining startup
+case needs examination of staggered barriers and asynchronous direct-to-LDS
+completion; the retirement result alone does not establish its root cause.
