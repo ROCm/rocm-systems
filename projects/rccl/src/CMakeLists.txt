@@ -436,6 +436,7 @@ set(SRC_FILES
   misc/archinfo.cc
   misc/argcheck.cc
   misc/gdr_peermem.cc
+  misc/gdr_probe.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
   misc/ionicdvsymbols.cc

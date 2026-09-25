@@ -75,6 +75,8 @@ extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
                                 unsigned /*flags*/)>
     g_hipHostMalloc;
+// Defaults to hipErrorInvalidValue with *ptr = nullptr, the fail-loud floor's behaviour.
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/)> g_hipMalloc;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipHostFree;
 extern int g_deviceCount;
