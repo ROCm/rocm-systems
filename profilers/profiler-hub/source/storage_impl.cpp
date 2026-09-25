@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "storage_impl.hpp"
+#include "debug.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+
+#include <fmt/format.h>
 
 #include <memory>
 #include <stdexcept>
@@ -14,6 +17,15 @@
 
 namespace profiler_hub
 {
+
+namespace
+{
+struct metadata_row_t
+{
+    std::string tag;
+    std::string value;
+};
+}  // namespace
 
 struct storage_t::impl::database_factory_t
 {
@@ -62,11 +74,51 @@ storage_t::impl::get_uuid() const
 profiler_hub::version_t
 storage_t::impl::get_storage_version() const
 {
-    return m_version;
+    if(m_version.has_value())
+    {
+        return m_version.value();
+    }
+
+    auto backend = create_database(storage_type_t::read);
+
+    const auto table = fmt::format("rocpd_metadata_{}", backend->get_uuid());
+    const auto query = fmt::format("SELECT tag, value FROM {} WHERE tag IN "
+                                   "('schema_version_major', 'schema_version_minor', "
+                                   "'schema_version_patch')",
+                                   table);
+
+    profiler_hub::version_t version{ .major = 0, .minor = 0, .patch = 0 };
+    try
+    {
+        auto executor = backend->create_read_statement_executor<metadata_row_t>(
+            query, &metadata_row_t::tag, &metadata_row_t::value);
+
+        for(const auto& row : executor().to_vector())
+        {
+            if(row.tag == "schema_version_major")
+            {
+                version.major = static_cast<std::uint32_t>(std::stoul(row.value));
+            }
+            else if(row.tag == "schema_version_minor")
+            {
+                version.minor = static_cast<std::uint32_t>(std::stoul(row.value));
+            }
+            else if(row.tag == "schema_version_patch")
+            {
+                version.patch = static_cast<std::uint32_t>(std::stoul(row.value));
+            }
+        }
+    } catch(const std::exception& err)
+    {
+        LOG_ERROR("Failed to read schema version from '{}': {}", table, err.what());
+    }
+
+    m_version = version;
+    return version;
 }
 
 std::shared_ptr<data_storage::sqlite_backend>
-storage_t::impl::create_database(const storage_type_t& storage_type)
+storage_t::impl::create_database(const storage_type_t& storage_type) const
 {
     if(!m_database)
     {

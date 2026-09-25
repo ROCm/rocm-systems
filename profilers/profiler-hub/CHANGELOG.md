@@ -27,6 +27,10 @@ downstream consumer of the library.
   `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
   and stub declarations for a planned async task API (`ph_future_get`/`ph_future_wait`/
   `ph_future_cancel`/`ph_future_free`, not yet implemented).
+- `ph_get_schema_version()`/`storage_t::get_storage_version()` now read the
+  schema version actually stamped in the opened trace's `rocpd_metadata`
+  table, instead of returning the profiler-hub library's own version (which
+  can legitimately differ from the trace's schema version).
 - `reader_types.hpp`: `track_info_t` now carries `id`, `event_count`, and `agent_id`.
 - `reader_types.hpp`: new `track_kind_t` enum, and `track_info_t` gains
   `category`, `queue_id`, `stream_id` fields. `reader_t::get_all_tracks()`
