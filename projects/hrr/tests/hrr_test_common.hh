@@ -61,6 +61,9 @@
 #define HRR_HIP_CHECK(expr)                                                     \
   do {                                                                          \
     hipError_t _hrr_err = (expr);                                              \
+    if (_hrr_err == hipErrorNoDevice) {                                        \
+      HRR_SKIP_CASE("no ROCm-capable device is detected");                     \
+    }                                                                          \
     INFO("HIP call failed: " #expr);                                           \
     INFO("hipError_t: " << static_cast<int>(_hrr_err));                        \
     INFO("hipGetErrorString: " << hipGetErrorString(_hrr_err));                \
@@ -86,6 +89,16 @@
 // a tier that could not run from being indistinguishable, in a JUnit report or
 // a --summary, from one that ran and passed.
 #define HRR_SKIP_CASE(message) SKIP(message)
+
+inline bool hrr_gpu_available() {
+  int count = 0;
+  return hipGetDeviceCount(&count) == hipSuccess && count > 0;
+}
+
+inline void hrr_skip_without_gpu() {
+  if (!hrr_gpu_available())
+    HRR_SKIP_CASE("no ROCm-capable device is detected");
+}
 
 // ---------------------------------------------------------------------------
 // Shared capture/replay helpers.
@@ -316,6 +329,7 @@ inline std::string hrr_test_exe() {
 inline std::string hrr_spawn_direct(const std::string& direct_case,
                                     const fs::path& cap_path,
                                     const char* what = "Capture") {
+  hrr_skip_without_gpu();
   hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());

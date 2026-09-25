@@ -72,9 +72,16 @@ def main() -> int:
 
     # A crash can leave syntactically valid, but incomplete, JUnit without a
     # failed case. Preserve the raw transcript only for that exceptional path.
-    if completed.returncode and counts["FAIL"] == 0:
+    # Catch2 returns 4 when the selected cases were all skipped; that is not a
+    # crash and must not dump the banner.
+    if completed.returncode and counts["FAIL"] == 0 and counts["SKIP"] == 0:
         print("\nCatch2 terminated without a JUnit failure:")
         print(completed.stdout, end="")
+    # Catch2 uses 4 for "tests were skipped / none ran". That is a skip, not a
+    # failed suite: returning it would paint gfx90a red after every GPU case
+    # correctly skipped for hipErrorNoDevice.
+    if completed.returncode == 4 and counts["FAIL"] == 0:
+        return 0
     return completed.returncode
 
 

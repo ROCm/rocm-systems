@@ -338,7 +338,12 @@ jobs:
           # every workload fails hipSetDevice with hipErrorNoDevice. Use the
           # resolved 1-GPU runner and leave the two-device tier to gfx950.
           - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
-          - { family: gfx950, runner: "linux-gfx950-8gpu-ccs-ossci-rocm", devices: "0,1" }
+          # gfx950 uses an 8-GPU machine so T3 (two devices) can run. Do not
+          # pin HIP_VISIBLE_DEVICES to 0,1: on the CCS pool those indices can
+          # be empty even though the job has GPUs, and every test then fails
+          # hipSetDevice with hipErrorNoDevice. Leave the job's devices as
+          # the runner exposed them.
+          - { family: gfx950, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
           - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
           - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
           - { family: gfx120x, runner: "${{ needs.ci_config.outputs.gfx120x_runner }}" }

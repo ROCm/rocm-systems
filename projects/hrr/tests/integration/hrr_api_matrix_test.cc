@@ -50,8 +50,6 @@
  * coverage report.
  */
 
-#include "hrr_test_process.hh"
-
 #include "hrr_test_common.hh"
 #include "hrr_api_matrix_expectations.h"
 
@@ -336,6 +334,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
 void run_tier(const std::string& tier) {
   const HrrTierFloor& floor = tier_floor(tier);
 
+  if (visible_device_count() < 1) {
+    HRR_SKIP_CASE("no ROCm-capable device is detected");
+  }
   if (floor.gpus > 1 && visible_device_count() < floor.gpus) {
     HRR_SKIP_CASE("tier requires at least two visible GPUs");
   }
