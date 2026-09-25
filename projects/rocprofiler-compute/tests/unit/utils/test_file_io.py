@@ -21,6 +21,13 @@ from utils.file_io import (
 
 KERNEL_SYMBOLS_COLUMNS = ["Kernel_Name", "Kernel_Short_Name"]
 
+ROCPD_COUNTER_HEADER = (
+    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+)
+ROCPD_COUNTER_ROW_PREFIX = "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,"
+
 
 def _raw_pmc() -> pd.DataFrame:
     """Flat raw_pmc DataFrame for create_df_kernel_top_stats tests."""
@@ -231,11 +238,11 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     shape of the data, so a workload with no profiling_config.yaml is still read
     correctly instead of being handed to the parser one counter at a time."""
     long_form_csv = (
-        "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
-        "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
-        "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
-        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
-        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
+        ROCPD_COUNTER_HEADER
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "SQ_WAVES,4\n"
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "SQ_BUSY_CYCLES,100\n"
     )
     common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", long_form_csv)
 
@@ -247,9 +254,28 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     assert "Counter_Name" not in df.columns
 
 
+def test_create_df_pmc_combines_result_files_of_one_workload(tmp_path) -> None:
+    """Counters split across passes land on the same dispatch row."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
+    )
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_1.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_BUSY_CYCLES,100\n",
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert len(df) == 1
+    assert df["SQ_WAVES"].iloc[0] == 4
+    assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
+    assert df["Dispatch_Unit"].iloc[0] == 1
+
+
 def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:
-    """A wide result file was written by a removed backend; analyze only
-    supports the rocpd long format, so it is rejected with a re-profile error."""
+    """Only the rocpd long format is supported, so a wide counter file errors
+    out with a re-profile message instead of being read as counter data."""
     wide_csv = (
         "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
         "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
@@ -266,11 +292,34 @@ def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
     assert create_df_pmc(str(tmp_path), verbose=0).empty
 
 
-def test_create_df_pmc_ignores_legacy_pmc_file(tmp_path) -> None:
-    """The legacy PMC file is never an analysis input."""
-    common.write_pmc_perf(tmp_path, "Kernel_Name,GPU_ID\nkernel_a,0\n")
+def test_create_df_pmc_errors_on_header_only_result_file(tmp_path) -> None:
+    """A pass that recorded no dispatch is bad profiling output, not empty data."""
+    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", ROCPD_COUNTER_HEADER)
 
-    assert create_df_pmc(str(tmp_path), verbose=0).empty
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_create_df_pmc_errors_on_empty_pass_beside_a_good_one(tmp_path) -> None:
+    """One unreadable pass fails the run rather than analyzing a partial set."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
+    )
+    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_create_df_pmc_errors_on_truncated_result_file(tmp_path) -> None:
+    """A profile run killed mid-write leaves a partial gzip behind."""
+    rows = "".join(f"{ROCPD_COUNTER_ROW_PREFIX}SQ_WAVES,{i}\n" for i in range(2000))
+    whole = gzip.compress((ROCPD_COUNTER_HEADER + rows).encode("utf-8"))
+    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(whole[: len(whole) // 2])
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
 
 
 def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):

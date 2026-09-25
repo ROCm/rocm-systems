@@ -69,6 +69,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Analyze mode produces less warning noise. Repeated warnings are de-duplicated, and messages for metrics that evaluate to N/A moved to debug level.
 
+* Analyze mode uses less disk space. It reads the profiling output directly instead of writing an extra merged copy of all counter data into the workload directory.
+
+* Analyze mode now stops as soon as it finds unreadable profiling data, instead of continuing with an incomplete set of counters.
+
 * Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
 
 ### Resolved issues

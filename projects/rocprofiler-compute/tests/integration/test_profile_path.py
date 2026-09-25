@@ -83,14 +83,8 @@ def test_path_rocpd(
     # Validate profile outputs (results_*.csv for rocpd format)
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
 
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-
-    assert not common.pmc_perf_path(workload_dir).exists()
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

@@ -822,7 +822,7 @@ LONG_FORM_PMC_PERF = (
 
 
 def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
-    """The reader consumes compressed ROCPD result artifacts."""
+    """The reader consumes compressed rocpd result artifacts."""
     common.write_result_csv(tmp_path, LONG_FORM_PMC_PERF)
 
     analyzer = db_analysis(MagicMock(verbose=0), {})
@@ -835,10 +835,8 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
 
 
 def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
-    """A debug intermediate is not treated as profile input."""
-    (tmp_path / f"{schema.PMC_PERF_FILE_PREFIX}.csv").write_text(LONG_FORM_PMC_PERF)
-
-    analyzer = db_analysis(MagicMock(), {})
+    """A workload with no counter artifacts, such as a PC-sampling-only run."""
+    analyzer = db_analysis(MagicMock(verbose=0), {})
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 

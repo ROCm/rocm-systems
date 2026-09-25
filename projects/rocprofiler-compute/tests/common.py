@@ -13,7 +13,7 @@ from threading import Thread
 from typing import Set
 from unittest.mock import Mock
 
-from utils import csv_compression, schema
+from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -71,12 +71,6 @@ def check_file_pattern(pattern, file_path):
     return len(re.findall(pattern, content)) != 0
 
 
-def pmc_perf_path(workload_dir):
-    """Path of the merged counter intermediate analyze writes and reads back."""
-    name = f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-    return csv_compression.compressed_name(Path(workload_dir) / name)
-
-
 def write_gzip_csv(path, text):
     """Write text to a gzip CSV through the interface the source uses."""
     with csv_compression.open_gzip_csv_write(path) as f:
@@ -84,13 +78,8 @@ def write_gzip_csv(path, text):
     return Path(path)
 
 
-def write_pmc_perf(workload_dir, text):
-    """Write the merged counter intermediate into workload_dir."""
-    return write_gzip_csv(pmc_perf_path(workload_dir), text)
-
-
 def write_result_csv(workload_dir, text, pass_index=0):
-    """Write a compressed ROCPD counter artifact into workload_dir."""
+    """Write a compressed rocpd counter artifact into workload_dir."""
     return write_gzip_csv(workload_dir / f"results_pmc_perf_{pass_index}.csv.gz", text)
 
 

@@ -119,9 +119,10 @@ the only boundary that combines them.
 
 Eliminate `pmc_perf.csv` generation step, so analysis converts profile output directly to pandas dataframe in memory.
 
-Currently, EVERY analyze run materializes `pmc_perf.csv` and then reads it back.
+The first analyze run of a workload writes `pmc_perf.csv` and every later run reads it back.
 Therefore all profile formats go through a CSV regardless of how they were stored.
-This has performance cost and defeats the point of supporting varied storage and adds large csv pivot cost on big workloads.
+This keeps a full second on-disk copy of the counter data, which is significant on big workloads.
+It is also reused whenever it is present, so re-profiling into an existing workload directory leaves analyze reading stale counters.
 Also this introduces unnecessary dependency as any output format reader is forced to also produce a CSV just so downstream analyze code can read it.
 
 Essentially, `pmc_perf.csv` is an intermediate not a public contract, so analyze should not depend on it.

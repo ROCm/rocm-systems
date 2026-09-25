@@ -89,11 +89,9 @@ def test_roof_rocpd(
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     assert (Path(workload_dir) / "roofline.csv").exists()
 
-    # A roof-only workload has no PMC result artifacts to export.
+    # A roof-only workload has no PMC result artifacts to read.
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-
-    assert not common.pmc_perf_path(workload_dir).exists()
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
