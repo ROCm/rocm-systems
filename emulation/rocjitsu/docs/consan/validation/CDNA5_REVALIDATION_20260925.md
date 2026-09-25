@@ -625,3 +625,14 @@ holding other supervising CLIs between trials while already spawned children
 finish normally. Its PID/state file records every held process, and its final
 cleanup resumes held CLIs. No physical-GPU lock is changed. Retry affected
 batches under lower contention before interpreting timeout results.
+
+MXF8/F4 TDM SuperCollider also finishes with two of three clean shards passing
+(768/768 applicable accesses each), while the third reaches the 300-second
+client deadline without an analysis verdict. Its orange cell now reflects
+this completed rerun. Evidence: `bounded-clean-tensile/`
+`tensile-sk-mxf8f4gemm-tdm/supercollider/.../result.json`.
+
+TP1 prefill Default finishes with 0/8 admitted/reached detections. This
+corroborates the sampling shortfall seen at high, whose batch was truncated
+by a timeout after five admitted trials; the cell retains the latest high
+result while that retry is pending.
