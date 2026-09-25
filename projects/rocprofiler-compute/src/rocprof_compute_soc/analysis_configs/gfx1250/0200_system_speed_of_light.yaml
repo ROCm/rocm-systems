@@ -94,7 +94,7 @@ Panel Config:
         WMMA FLOPs (MXFP8):
           value: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * 131072 / 1000
+          peak: $max_sclk * $cu_per_gpu * 4 * 4096 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP6):
           value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM(End_Timestamp - Start_Timestamp)
