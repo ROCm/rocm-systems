@@ -1485,3 +1485,29 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   REQUIRE(ret < 128);  // ...with a clean error, not a crash
 }
 #endif  // !_WIN32
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_FailedMemcpy3D_Direct under capture: a host-to-device
+ *     hipMemcpy3D whose extent is far larger than both buffers, which the
+ *     runtime rejects.
+ *   - The workload exits cleanly and the archive holds no hipMemcpy3D. Before
+ *     the copy was success-gated, capture hashed extent-many bytes from the
+ *     4 KiB host buffer and faulted.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_failed_memcpy3d"};
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_FailedMemcpy3D_Direct\"");
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const auto counts = hrr_info_api_counts(cap.path);
+  CHECK(counts.count("hipMalloc3D") == 1);  // the capture was live
+  CHECK(counts.count("hipMemcpy3D") == 0);
+}

@@ -311,7 +311,11 @@ static void serialize_kernel_launch(
   // raw stream handle as first payload field after header (for replay stream routing)
   push_u64(reinterpret_cast<uint64_t>(stream));
 
-  uint16_t name_len = static_cast<uint16_t>(std::strlen(kernel_name));
+  // name_len is a uint16_t on the wire; a longer name is dropped loudly below
+  // rather than recorded truncated.
+  const size_t kernel_name_len = std::strlen(kernel_name);
+  const bool name_oversized = kernel_name_len > UINT16_MAX;
+  uint16_t name_len = name_oversized ? 0 : static_cast<uint16_t>(kernel_name_len);
   push_u16(name_len);
   push_bytes(kernel_name, name_len);
   push_u64(co_hash.lo); push_u64(co_hash.hi);  // code object identity (0 = unknown)
@@ -425,13 +429,14 @@ static void serialize_kernel_launch(
   // case the launch cannot be recorded faithfully: drop it LOUDLY and mark the
   // whole archive incomplete so replay/validation can never silently treat a
   // capture missing a GPU launch (and its downstream writes) as faithful.
-  if (arg_oversized || payload.size() > UINT32_MAX) {
+  if (arg_oversized || name_oversized || payload.size() > UINT32_MAX) {
     LogPrintfError("[HRR capture] Kernel launch for '%s' cannot be serialized "
-                   "(payload=%zu bytes, oversized_by_value_arg=%s) — dropping the "
-                   "event and marking the capture INCOMPLETE. Replay of this "
+                   "(payload=%zu bytes, oversized_by_value_arg=%s, name_len=%zu): dropping "
+                   "the event and marking the capture INCOMPLETE. Replay of this "
                    "archive will be unfaithful (this launch and its effects are "
                    "absent).",
-                   kernel_name, payload.size(), arg_oversized ? "yes" : "no");
+                   kernel_name, payload.size(), arg_oversized ? "yes" : "no",
+                   kernel_name_len);
     hrr_cap::writer::mark_incomplete(
         "kernel launch payload exceeds wire-format limits");
     return;
@@ -1079,19 +1084,24 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
 }
 
 // ---------------------------------------------------------------------------
-// hipMemPoolSetAttribute — value is void* to a scalar; copy 8 bytes inline.
+// hipMemPoolSetAttribute: value is void* to a scalar, stored inline in the low
+// bytes of value_u64 (an int for the three reuse policies, uint64_t otherwise).
 // ---------------------------------------------------------------------------
 
 hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
                                           hipMemPoolAttr attr,
                                           void* value) {
   hipError_t r = g_real_table.hipMemPoolSetAttribute_fn(mem_pool, attr, value);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemPoolSetAttribute a{};
   a.ret      = static_cast<int32_t>(r);
   a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
   a.attr     = static_cast<int32_t>(attr);
   a.value    = reinterpret_cast<uint64_t>(value);
-  if (value) std::memcpy(&a.value_u64, value, sizeof(a.value_u64));
+  const bool int_valued = attr == hipMemPoolReuseFollowEventDependencies ||
+                          attr == hipMemPoolReuseAllowOpportunistic ||
+                          attr == hipMemPoolReuseAllowInternalDependencies;
+  if (value) std::memcpy(&a.value_u64, value, int_valued ? sizeof(int) : sizeof(a.value_u64));
   hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLSETATTRIBUTE, &a.hdr, sizeof(a));
   return r;
 }
@@ -1116,9 +1126,12 @@ hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
 // hipMemcpy3D / hipMemcpy3DAsync — inline parms + H2D blob + D2H expected blob
 // ---------------------------------------------------------------------------
 
-// Helper: compute byte count from 3D extent
+// Helper: compute byte count from 3D extent. 0 when the product overflows.
 static size_t memcpy3d_byte_count(const struct hipMemcpy3DParms* p) {
-  return p->extent.width * p->extent.height * p->extent.depth;
+  const size_t w = p->extent.width, h = p->extent.height, d = p->extent.depth;
+  if (w == 0 || h == 0 || d == 0) return 0;
+  if (h > SIZE_MAX / w || d > SIZE_MAX / (w * h)) return 0;
+  return w * h * d;
 }
 
 // Helper shared by all four 3D variants.
@@ -1159,8 +1172,12 @@ static void capture_memcpy3d_impl(
   hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
 }
 
+// Success-gated like the 2D and driver-style copies below. A copy the runtime
+// rejected has an extent nothing validated, so blobbing w*h*d bytes of its host
+// side would read past the caller's buffer.
 hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p) {
   hipError_t r = g_real_table.hipMemcpy3D_fn(p);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3D a{};
   a.ret = static_cast<int32_t>(r);
   capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3D, p, nullptr, false);
@@ -1169,6 +1186,7 @@ hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p) {
 
 hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpy3DAsync_fn(p, stream);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3DAsync a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
@@ -1178,6 +1196,7 @@ hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_
 
 hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p) {
   hipError_t r = g_real_table.hipMemcpy3D_spt_fn(p);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3D_spt a{};
   a.ret = static_cast<int32_t>(r);
   capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3D_SPT, p, nullptr, false);
@@ -1186,6 +1205,7 @@ hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p) {
 
 hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpy3DAsync_spt_fn(p, stream);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3DAsync_spt a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
