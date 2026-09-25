@@ -410,7 +410,7 @@ PtracerGrantVerdict ptracer_grant_verdict(std::optional<pid_t> launched_daemon_p
   // daemon. Nothing here can identify the peer, and no check could be added that
   // would: a secret shared with the daemon authenticates nothing against an
   // attacker of this UID, who reads whatever this client can. The peer is
-  // trusted, and every such grant says so.
+  // trusted, and each such grant is logged only when DRIVER tracing is enabled.
   return PtracerGrantVerdict::GrantUnverifiedPeer;
 }
 
