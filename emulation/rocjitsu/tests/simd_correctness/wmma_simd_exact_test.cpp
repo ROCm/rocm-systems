@@ -26,8 +26,7 @@ constexpr uint32_t BF16_IN_REGS = 8, BF16_DST = 112, BF16_DST_REGS = 4;
 constexpr uint32_t INDEX_KEY = 0;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 constexpr uint32_t SCALE_A = 100, SCALE_B = 104;
-constexpr bool kHasBf16F32NativeSimd =
-    util::has_stdx_simd && util::native_width_v<float> == 16;
+constexpr bool kHasBf16F32NativeSimd = util::has_stdx_simd && util::native_width_v<float> == 16;
 
 using WmmaF32SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
                                uint32_t, uint32_t);
@@ -337,9 +336,9 @@ TEST(WmmaSimdExact, Bf16F32MixedPackLayout) {
     SCOPED_TRACE(path);
     seed_state();
     util::set_force_scalar_for_testing(force_scalar);
-    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(
-        *fx.cu, fx.vbase + BF16_DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC,
-        amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + BF16_DST, fx.vbase + S0,
+                                            fx.vbase + S1, fx.vbase + ACC, amdgpu::ACC_FROM_VGPR,
+                                            /*c_modifier=*/0);
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
         const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
