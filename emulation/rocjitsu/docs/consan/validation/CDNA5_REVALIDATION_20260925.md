@@ -1110,3 +1110,22 @@ mode. Its SuperCollider fixture explicitly enables the LDS probe.
 A separate `tensor-inventory-hook/librocjitsu_dbi_hooks.so` has been linked for
 `tensor-inventory-mxf8-clean`. That external-workload check is still running;
 active campaigns continue using their retained shared or saved-address hooks.
+
+### Sort qualifies at high; histogram and Qwen next steps
+
+`sort-cap-high-clean` passes baseline and high with complete 234/234 access and
+80/80 barrier coverage. `sort-cap-high-fault` detects 8/8 admitted/reached faults;
+all trials record high, complete analysis and healthy pre/post checks. Hook and
+allowlist hashes match the clean provenance. Default was 4/8, so high is the
+lowest passing preset and the cell is green.
+
+`histc-cap-high-clean` passes and `histc-cap-high-fault` completes eight healthy,
+fully analyzed trials at high with zero detections. Higher is the next preset.
+`qwen-cap-high-verified-clean` passes baseline but the actual high clean hits its
+360 s deadline (return code 124). No high fault trial is inferred. The Default
+cell retains its measured default result and records the higher-preset timeout.
+
+`tensor-inventory-mxf8-clean` with the separate new hook reports
+analysis_complete=false, static_complete=false, and reason `analysis incomplete`.
+The supported ordinary accesses still show 70/70 patched, but this no longer
+conceals the unmodeled tensor-DMA accesses in the final coverage verdict.
