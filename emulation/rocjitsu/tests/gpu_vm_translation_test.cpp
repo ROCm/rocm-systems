@@ -21,6 +21,7 @@
 #include <mutex>
 #include <span>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -681,6 +682,169 @@ TEST(GpuVmTranslation, InvalidationDrainsAnInFlightAccessAndRevokesOldSnapshots)
   ASSERT_TRUE(current_access);
   EXPECT_NE(current_access->cache_namespace(), old_access->cache_namespace());
   EXPECT_EQ(current_access->read(0, stale_value), VmAccessOutcome::Complete);
+}
+
+TEST(GpuVmTranslation, AccessBatchRetainsStateUntilQuantumExit) {
+  GpuVm gpu_vm;
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  auto translator = std::make_shared<ByteTranslator>();
+  physical->system[0] = std::byte{0x2a};
+  const AddressSpaceHandle handle = gpu_vm.register_translated(7, translator, physical);
+  ASSERT_TRUE(handle);
+
+  std::optional<GpuVmAccess> access;
+  std::future<bool> invalidation;
+  {
+    const GpuVmAccessBatchGuard batch;
+    access = gpu_vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    std::array<std::byte, 1> value{};
+    ASSERT_EQ(access->read(0, value), VmAccessOutcome::Complete);
+    EXPECT_EQ(value[0], std::byte{0x2a});
+
+    invalidation = std::async(std::launch::async, [&] { return gpu_vm.invalidate(handle); });
+    EXPECT_EQ(invalidation.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  }
+
+  EXPECT_TRUE(invalidation.get());
+  std::array<std::byte, 1> stale_value{std::byte{0x5a}};
+  EXPECT_EQ(access->read(0, stale_value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(stale_value[0], std::byte{0x5a});
+}
+
+TEST(GpuVmTranslation, AccessBatchReusesVmidSnapshotWhileInvalidationWaits) {
+  // A VMID lookup is the legacy execution hot path. Once its first operation
+  // retains the binding for this quantum, later lookups must reuse that
+  // snapshot instead of blocking on an invalidator that owns the registry lock.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    GpuVm gpu_vm;
+    auto physical = std::make_shared<TestPhysicalMemory>();
+    auto translator = std::make_shared<ByteTranslator>();
+    physical->system[0] = std::byte{0x2a};
+    const AddressSpaceHandle handle = gpu_vm.register_translated(7, translator, physical);
+    if (!handle)
+      _exit(1);
+
+    std::future<bool> invalidation;
+    {
+      const GpuVmAccessBatchGuard batch;
+      const GpuVmAccess *first = gpu_vm.borrow_snapshot_vmid(7);
+      if (first == nullptr)
+        _exit(2);
+      std::array<std::byte, 1> value{};
+      if (first->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x2a})
+        _exit(3);
+
+      invalidation = std::async(std::launch::async, [&] { return gpu_vm.invalidate(handle); });
+      if (invalidation.wait_for(std::chrono::milliseconds(50)) != std::future_status::timeout)
+        _exit(4);
+
+      const GpuVmAccess *repeated = gpu_vm.borrow_snapshot_vmid(7);
+      if (repeated != first || repeated->read(0, value) != VmAccessOutcome::Complete ||
+          value[0] != std::byte{0x2a})
+        _exit(5);
+    }
+    if (!invalidation.get())
+      _exit(6);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST(GpuVmTranslation, ScopedVmidOperationBorrowsTheQuantumSnapshot) {
+  GpuVm gpu_vm;
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  auto translator = std::make_shared<ByteTranslator>();
+  physical->system[0] = std::byte{0x2a};
+  const AddressSpaceHandle handle = gpu_vm.register_translated(7, translator, physical);
+  ASSERT_TRUE(handle);
+
+  const GpuVmAccess *first = nullptr;
+  {
+    const GpuVmAccessBatchGuard batch;
+    EXPECT_TRUE(gpu_vm.with_vmid_snapshot(7, [&](const GpuVmAccess *access) {
+      first = access;
+      std::array<std::byte, 1> value{};
+      return access != nullptr && access->read(0, value) == VmAccessOutcome::Complete &&
+             value[0] == std::byte{0x2a};
+    }));
+    EXPECT_TRUE(
+        gpu_vm.with_vmid_snapshot(7, [&](const GpuVmAccess *access) { return access == first; }));
+  }
+
+  EXPECT_TRUE(
+      gpu_vm.with_vmid_snapshot(7, [](const GpuVmAccess *access) { return access != nullptr; }));
+}
+
+TEST(GpuVmTranslation, AccessBatchDropsStateLeasesBeforeSnapshotMiss) {
+  // Isolate the cross-binding lock-order case so a regression becomes a
+  // bounded failure instead of hanging the test process.
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    alarm(10);
+    GpuVm gpu_vm;
+    auto first_physical = std::make_shared<TestPhysicalMemory>();
+    auto second_physical = std::make_shared<TestPhysicalMemory>();
+    auto translator = std::make_shared<ByteTranslator>();
+    first_physical->system[0] = std::byte{0x11};
+    second_physical->system[0] = std::byte{0x22};
+    const AddressSpaceHandle first = gpu_vm.register_translated(7, translator, first_physical);
+    const AddressSpaceHandle second =
+        gpu_vm.register_unrouted_address_space(8, translator, second_physical);
+    if (!first || !second)
+      _exit(1);
+
+    std::atomic<bool> invalidation_started{false};
+    std::atomic<bool> invalidation_complete{false};
+    std::thread invalidator;
+    {
+      const GpuVmAccessBatchGuard batch;
+      auto first_access = gpu_vm.snapshot(first);
+      if (!first_access)
+        _exit(2);
+      std::array<std::byte, 1> value{};
+      if (first_access->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x11})
+        _exit(3);
+
+      invalidator = std::thread([&] {
+        invalidation_started.store(true, std::memory_order_release);
+        const bool invalidated = gpu_vm.invalidate(first);
+        invalidation_complete.store(invalidated, std::memory_order_release);
+      });
+      while (!invalidation_started.load(std::memory_order_acquire))
+        std::this_thread::yield();
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      if (invalidation_complete.load(std::memory_order_acquire))
+        _exit(4);
+
+      // The invalidator owns the VM registry lock while draining first. A miss
+      // for second must release first's retained state before taking that lock.
+      auto second_access = gpu_vm.snapshot(second);
+      if (!second_access)
+        _exit(5);
+      value[0] = std::byte{0};
+      if (second_access->read(0, value) != VmAccessOutcome::Complete || value[0] != std::byte{0x22})
+        _exit(6);
+    }
+
+    invalidator.join();
+    if (!invalidation_complete.load(std::memory_order_acquire))
+      _exit(7);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child status: " << status;
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST(GpuVmTranslation, DeviceGartPublishesOnInvalidateAndRejectsItsHandleAfterReset) {
