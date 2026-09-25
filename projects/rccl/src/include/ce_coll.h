@@ -18,9 +18,20 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
-// and the reduced output goes to the user recvbuff)
-#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
+// Selection marker for the hierarchical CE path. Defined once because the
+// scale-out MPI tests assert on this exact text.
+#define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
+
+// Total payload capacity of one reusable CE AllReduce staging slot. Messages
+// larger than this are pipelined; sizing each slot to ceArStagingBytes per-rank
+// wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
+#define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
+
+// Fallback 2-shot max cap for rcclCeAr2ShotMax() when no arch table is present.
+// Independent of NCCL_CE_AR_STAGING_BYTES (which governs buffer allocation).
+#ifndef NCCL_CE_AR_TMPBUF_DEFAULT_BYTES
+#define NCCL_CE_AR_TMPBUF_DEFAULT_BYTES (256ULL * 1024 * 1024)
+#endif
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
@@ -30,10 +41,9 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf. ncclCeInit sizes the buffer from this
-// value, so every runtime offset must stay within it.
+// Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
-  return (size_t)NCCL_CE_AR_MAX_MSG_BYTES / (size_t)nRanks;
+  return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
 }
 
 // Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
@@ -59,7 +69,14 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
+enum ncclCeMethodId {
+  ncclCeMethodId_AllGather_UC,
+  ncclCeMethodId_AllGather_MC,
+  ncclCeMethodId_Count
+};
+
 struct ncclCeColl {
+  bool initialized;
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
   size_t baseUCSymReadyOffset;
@@ -73,6 +90,7 @@ struct ncclCeColl {
   bool useCompletePtr;
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
+  int64_t agMulticastThreshold;  // user override (>=0); -1 -> use cost model
   struct ncclDevrWindow* ceSyncWin;
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
@@ -86,6 +104,8 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  size_t ceArMaxBytes;     // 2-shot staging cap, resolved at init: env RCCL_CE_AR_MAX_MSG_BYTES > arch ceArMax
+  size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
@@ -121,6 +141,7 @@ struct alignas(16) ncclCeCollArgs {
 
   void* collApiEventHandle;  // Parent API event handle for profiler hierarchy
   void* ceCollProfHandle;    // CE collective profiler event handle
+  uint64_t userTag;          // Per-call profiler annotation (0 == untagged)
   bool useDda;
   void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
   void*
@@ -143,7 +164,7 @@ struct ncclCeBatchOpsParams {
 };
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                     ncclSymRegType_t winRegType);
+                     ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                             ncclSymRegType_t winRegType);
@@ -151,7 +172,12 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDe
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                         ncclSymRegType_t winRegType);
+                         ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
+
+// True when an admitted CE task must run on the hierarchical path. The launch
+// site and the selection marker share this so they cannot disagree about which
+// algorithm a task got.
+bool ncclHierCeDispatch(struct ncclComm* comm);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
@@ -174,6 +200,8 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
 
 ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
+int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace);
+
 ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
 ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
@@ -187,6 +215,10 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// Same gates as AlltoAllv, then ncclCeAvailable (single-node CE; not hier).
+bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                            bool hasSysmemSegment, bool capturing);
+
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
@@ -195,7 +227,8 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
-                             struct ncclDevrWindow* recvWin = nullptr);
+                             struct ncclDevrWindow* recvWin = nullptr,
+                             struct ncclCeCollArgs* profilerArgs = nullptr);
 
 // Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
 // (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce

@@ -25,6 +25,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -73,7 +74,7 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
 }  // close annotate_perfetto
 
 [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
-parse_kfd_migration_node_pair(const std::string& args_str)
+parse_kfd_migration_node_pair(std::string_view args_str)
 {
     std::string src_agent;
     std::string dst_agent;
@@ -113,7 +114,7 @@ parse_kfd_migration_node_pair(const std::string& args_str)
 
 [[nodiscard]] std::optional<std::uint32_t>
 resolve_kfd_migration_gpu_bucket(
-    const std::string&                                   args_str,
+    std::string_view                                     args_str,
     const std::unordered_map<std::uint32_t, agent_type>& node_type_cache)
 {
     auto ids = parse_kfd_migration_node_pair(args_str);
@@ -128,17 +129,26 @@ resolve_kfd_migration_gpu_bucket(
 
     const auto src_type = find_type(src_node_id);
     const auto dst_type = find_type(dst_node_id);
-    if(!src_type.has_value() || !dst_type.has_value()) return std::nullopt;
+    if(!src_type.has_value() || !dst_type.has_value())
+    {
+        return std::nullopt;
+    }
 
-    if(*src_type == agent_type::CPU && *dst_type == agent_type::GPU) return dst_node_id;
-    if(*src_type == agent_type::GPU) return src_node_id;
+    if(*src_type == agent_type::cpu && *dst_type == agent_type::gpu)
+    {
+        return dst_node_id;
+    }
+    if(*src_type == agent_type::gpu)
+    {
+        return src_node_id;
+    }
 
     return std::nullopt;
 }
 
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, std::uint64_t hash_arg)
+get_track(CategoryT, const std::string& name, std::uint64_t hash_arg)
 {
     auto _uuid = core::perfetto::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
@@ -337,11 +347,10 @@ void
 write_sampling_track_data(const struct backtrace_region_sample& _sample,
                           bool                                  use_annotations)
 {
-    auto _track_name = _sample.track_name;
-    auto _thread_id  = _sample.thread_id;
-    auto _main_name  = _sample.name;
+    auto thread_id = _sample.thread_id;
+    auto main_name = _sample.name;
 
-    auto _track = get_track(Category{}, _track_name, _thread_id);
+    auto track = get_track(Category{}, std::string{ _sample.track_name }, thread_id);
 
     auto add_annotations = [&](::perfetto::EventContext& ctx) {
         if(!use_annotations) return;
@@ -358,8 +367,7 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
                 auto backtrace = nlohmann::json::parse(_call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back(
-                        { key.c_str(), val.template get<std::string>() });
+                    annotations.push_back({ key, val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -369,9 +377,9 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
         annotate_perfetto(ctx, annotations);
     };
 
-    core::perfetto::push_perfetto_track(Category{}, _main_name.c_str(), _track,
+    core::perfetto::push_perfetto_track(Category{}, main_name.data(), track,
                                         _sample.start_timestamp, add_annotations);
-    core::perfetto::pop_perfetto_track(Category{}, _main_name.c_str(), _track,
+    core::perfetto::pop_perfetto_track(Category{}, main_name.data(), track,
                                        _sample.end_timestamp);
 }
 
@@ -381,26 +389,26 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
 {
     const auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
 
-    const auto _track_name = _sample.track_name;
-    const auto _timestamp  = _sample.timestamp_ns;
+    const auto track_name = std::string(_sample.track_name);
+    const auto timestamp  = _sample.timestamp_ns;
 
     const std::string _name       = event_metadata.value("name", "");
     const std::string _event_type = event_metadata.value("event_type", "");
     const std::string _target     = event_metadata.value("target", "");
 
-    const auto _track_uuid = std::hash<std::string>{}(_track_name);
+    const auto track_uuid = std::hash<std::string>{}(track_name);
 
-    auto _track                   = get_track(CategoryT{}, _track_name, _track_uuid);
+    auto track                    = get_track(CategoryT{}, track_name, track_uuid);
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!use_annotations) return;
 
-        annotate_perfetto(ctx, { { "timestamp_ns", _timestamp },
+        annotate_perfetto(ctx, { { "timestamp_ns", timestamp },
                                  { "event_type", _event_type },
                                  { "target", _target } });
     };
 
     TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::DynamicString{ _name },
-                        _track, _timestamp, add_perfetto_annotations);
+                        track, timestamp, add_perfetto_annotations);
 }
 
 // Dispatch to write_in_time_sample_data with the correct category type
@@ -477,9 +485,11 @@ perfetto_processor_t::perfetto_processor_t(
     {
         if(!agent_ptr) continue;
         m_kfd_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
-        if(agent_ptr->type == agent_type::GPU)
+        if(agent_ptr->type == agent_type::gpu)
+        {
             m_kfd_node_to_gpu_index_cache[agent_ptr->node_id] =
                 static_cast<std::uint32_t>(agent_ptr->device_type_index);
+        }
     }
 }
 
@@ -811,7 +821,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                                                       { "corr_id", _corr_id } };
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            annotations.push_back({ arg.arg_name, arg.arg_value });
         }
 
         if(!_rs.call_stack.empty())
@@ -821,8 +831,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                 auto backtrace = nlohmann::json::parse(_rs.call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back(
-                        { key.c_str(), val.template get<std::string>() });
+                    annotations.push_back({ key, val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -836,23 +845,26 @@ perfetto_processor_t::handle(const region_sample& _rs)
     // Emit on the originating thread's track so multi-threaded runs keep one track
     // per thread (as the live path does implicitly via the calling thread), instead
     // of collapsing every thread onto the single replay thread.
-    auto _thread_track = get_thread_track(_rs.thread_id);
+    // ThreadTrack -> Track slicing here is the intended Perfetto SDK usage: Track
+    // is the plain uuid carrier that all concrete track types decay to.
+    // NOLINTNEXTLINE(cppcoreguidelines-slicing)
+    const ::perfetto::Track thread_track = get_thread_track(_rs.thread_id);
 
     auto emit_trace = [&](auto category_tag) {
         using CategoryT = decltype(category_tag);
         if(_corr_id != 0)
         {
             core::perfetto::push_perfetto_track(
-                CategoryT{}, _name.c_str(), _thread_track, _beg_ts,
+                CategoryT{}, _name.data(), thread_track, _beg_ts,
                 ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
         }
         else
         {
-            core::perfetto::push_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
+            core::perfetto::push_perfetto_track(CategoryT{}, _name.data(), thread_track,
                                                 _beg_ts, add_annotations);
         }
 
-        core::perfetto::pop_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
+        core::perfetto::pop_perfetto_track(CategoryT{}, _name.data(), thread_track,
                                            _end_ts);
     };
 
@@ -1197,12 +1209,12 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             } } }
     };
 
-    const auto _track_name = _pmc.track_name;
-    const auto _value      = _pmc.value;
-    const auto _beg_ts     = _pmc.timestamp_ns;
-    const auto _device_id  = _pmc.device_id;
+    const auto track_name = std::string(_pmc.track_name);
+    const auto value      = _pmc.value;
+    const auto beg_ts     = _pmc.timestamp_ns;
+    const auto device_id  = _pmc.device_id;
 
-    auto track_key = std::hash<std::string>{}(_track_name + std::to_string(_device_id));
+    auto track_key = std::hash<std::string>{}(track_name + std::to_string(device_id));
 
     auto track_it = PMC_TRACK_MAP.find(_pmc.category_enum_id);
     if(track_it != PMC_TRACK_MAP.end())
@@ -1211,15 +1223,15 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
         if(!track_info.exists_fn(track_key))
         {
-            track_info.emplace_fn(track_key, _track_name, track_info.default_units);
+            track_info.emplace_fn(track_key, track_name, track_info.default_units);
         }
 
-        track_info.trace_fn(track_key, 0, _beg_ts, _value);
+        track_info.trace_fn(track_key, 0, beg_ts, value);
     }
     else
     {
         LOG_WARNING("Unknown PMC event category_enum_id: {} for track '{}'",
-                    _pmc.category_enum_id, _track_name);
+                    _pmc.category_enum_id, track_name);
     }
 }
 
@@ -1444,8 +1456,10 @@ template <typename CategoryT>
 void
 perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 {
-    const auto _track_hash = std::hash<std::string>{}(sample.track_name);
-    auto       _track      = get_track(CategoryT{}, sample.track_name, _track_hash);
+    const auto track_name = std::string(sample.track_name);
+    const auto name       = sample.name;
+    const auto track_hash = std::hash<std::string>{}(track_name);
+    auto       track      = get_track(CategoryT{}, track_name, track_hash);
 
     auto add_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -1458,7 +1472,7 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
         auto args = process_arguments_string(sample.args_str);
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            annotations.push_back({ arg.arg_name, arg.arg_value });
         }
 
         annotate_perfetto(ctx, annotations);
@@ -1466,15 +1480,15 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 
     if(sample.start_timestamp == sample.end_timestamp)
     {
-        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                            ::perfetto::DynamicString{ sample.name }, _track,
+        const ::perfetto::DynamicString dynamic_name{ name.data(), name.size() };
+        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, dynamic_name, track,
                             sample.start_timestamp, add_annotations);
     }
     else
     {
-        core::perfetto::push_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
+        core::perfetto::push_perfetto_track(CategoryT{}, name.data(), track,
                                             sample.start_timestamp, add_annotations);
-        core::perfetto::pop_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
+        core::perfetto::pop_perfetto_track(CategoryT{}, name.data(), track,
                                            sample.end_timestamp);
     }
 }
@@ -1553,7 +1567,7 @@ perfetto_processor_t::handle(const kfd_sample& sample)
 {
     using handler_fn = void (perfetto_processor_t::*)(const kfd_sample&);
 
-    static const std::array<std::pair<std::string_view, handler_fn>, 6> dispatch{ {
+    static const std::array<std::pair<std::string_view, handler_fn>, 8> k_dispatch{ {
         { trait::name<category::rocm_kfd_page_fault>::value,
           &perfetto_processor_t::handle_kfd_page_fault },
         { trait::name<category::rocm_kfd_page_migrate>::value,
@@ -1568,12 +1582,15 @@ perfetto_processor_t::handle(const kfd_sample& sample)
         { trait::name<category::rocm_kfd_event_dropped_events>::value,
           &perfetto_processor_t::emit_kfd_event<
               category::rocm_kfd_event_dropped_events> },
+        { trait::name<category::rocm_kfd_event_page_fault>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_page_fault> },
+        { trait::name<category::rocm_kfd_event_page_migrate>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_page_migrate> },
     } };
 
-    const auto entry =
-        std::find_if(dispatch.begin(), dispatch.end(),
-                     [&](const auto& row) { return row.first == sample.category; });
-    if(entry == dispatch.end())
+    const auto entry = std::ranges::find_if(
+        k_dispatch, [&](const auto& row) { return row.first == sample.category; });
+    if(entry == k_dispatch.end())
     {
         LOG_WARNING("Unknown KFD category: {}", sample.category);
         return;

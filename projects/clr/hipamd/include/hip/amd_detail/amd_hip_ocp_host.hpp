@@ -423,14 +423,38 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool inrange(__hip
   return !(isnan<E, sat>(val) || isinf<E, sat>(val));
 }
 
+// Reinterpret the raw encoding `bits` as the destination float type T.
+// This must never be a value cast: nan()/inf()/zero() return bit patterns, and
+// converting e.g. the bit pattern 0x8000 (fp16 -0.0) as an integer would yield
+// the fp16 *number* 32768.0 (0x7800) instead.
+template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T from_bits(__hip_uint32_t bits) {
+  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
+  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float), "");
+  union {
+    float f32;
+    __amd_fp16_storage_t fp16[2];
+    __amd_bf16_storage_t bf16[2];
+    __hip_uint32_t u32;
+  } u;
+  u.u32 = bits;
+  if constexpr (__hip_internal::is_same<T, float>())
+    return u.f32;
+  else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
+    return u.fp16[0];
+  else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
+    return u.bf16[0];
+  else
+    __builtin_trap();
+}
+
 template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makenan(Encoding E, __hip_uint32_t sign) {
   switch (E) {
     case Encoding::E5M10:
-      return (T)nan<Encoding::E5M10, false>(sign);
+      return from_bits<T>(nan<Encoding::E5M10, false>(sign));
     case Encoding::E8M7:
-      return (T)nan<Encoding::E8M7, false>(sign);
+      return from_bits<T>(nan<Encoding::E8M7, false>(sign));
     case Encoding::IEEE754:
-      return (T)F32(nan<Encoding::IEEE754, false>(sign));
+      return from_bits<T>(nan<Encoding::IEEE754, false>(sign));
     default:
       __builtin_trap();
       // Unreachable
@@ -441,11 +465,11 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makenan(Encoding E, __hip_
 template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makeinf(Encoding E, __hip_uint32_t sign) {
   switch (E) {
     case Encoding::E5M10:
-      return (T)inf<Encoding::E5M10, false>(sign);
+      return from_bits<T>(inf<Encoding::E5M10, false>(sign));
     case Encoding::E8M7:
-      return (T)inf<Encoding::E8M7, false>(sign);
+      return from_bits<T>(inf<Encoding::E8M7, false>(sign));
     case Encoding::IEEE754:
-      return (T)F32(inf<Encoding::IEEE754, false>(sign));
+      return from_bits<T>(inf<Encoding::IEEE754, false>(sign));
     default:
       __builtin_trap();
       // Unreachable
@@ -456,11 +480,11 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makeinf(Encoding E, __hip_
 template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makezero(Encoding E, __hip_uint32_t sign) {
   switch (E) {
     case Encoding::E5M10:
-      return (T)zero<Encoding::E5M10, false>(sign);
+      return from_bits<T>(zero<Encoding::E5M10, false>(sign));
     case Encoding::E8M7:
-      return (T)zero<Encoding::E8M7, false>(sign);
+      return from_bits<T>(zero<Encoding::E8M7, false>(sign));
     case Encoding::IEEE754:
-      return (T)F32(zero<Encoding::IEEE754, false>(sign));
+      return from_bits<T>(zero<Encoding::IEEE754, false>(sign));
     default:
       __builtin_trap();
       // Unreachable
@@ -542,21 +566,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(__hip_uint32_t u32, __hip_int8_t scale_
 
   auto dst = sign | (dstExp << dstEnc.ManBits) | dstMan;
 
-  union {
-    float f32;
-    __amd_fp16_storage_t fp16[2];
-    __amd_bf16_storage_t bf16[2];
-    __hip_uint32_t u32;
-  } u;
-  u.u32 = dst;
-  if constexpr (__hip_internal::is_same<T, float>())
-    return u.f32;
-  else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
-    return u.fp16[0];
-  else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
-    return u.bf16[0];
-  else
-    __builtin_trap();
+  return from_bits<T>(dst);
 }
 
 template <typename T, Encoding E, bool sat>

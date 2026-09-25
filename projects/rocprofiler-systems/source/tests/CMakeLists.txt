@@ -6,7 +6,12 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-units-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
+    $<TARGET_OBJECTS:control-posix-clock-tests>
+    $<TARGET_OBJECTS:control-steady-clock-tests>
+    $<TARGET_OBJECTS:control-session-scope-tests>
+    $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
@@ -20,6 +25,8 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
     $<TARGET_OBJECTS:rocprofiler-sdk-components-unit-tests>
+    $<TARGET_OBJECTS:buffered-domains-unit-tests>
+    $<TARGET_OBJECTS:callback-domains-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )

@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
 #include "util/intrusive_list.h"
@@ -14,6 +15,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -191,6 +193,8 @@ public:
   /// Each derived instruction class sets this to a trampoline that calls
   /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
   /// and must not be called. No virtual dispatch.
+  /// This is a low-level backend callback. AMDGPU callers should use the CU's
+  /// execute_instruction() API to reset and check simulator execution failures.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -283,6 +287,13 @@ public:
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+
+  /// @brief Return decoded AMDGPU memory-issue metadata, when present.
+  /// @details AMDGPU generated memory-instruction constructors populate this
+  /// descriptor. Other architectures and non-memory instructions return nullptr.
+  [[nodiscard]] const amdgpu::MemoryIssueInfo *amdgpu_memory_issue_info() const {
+    return memory_issue_info_.empty() ? nullptr : &memory_issue_info_;
+  }
 
   uint64_t flags() const { return flags_; }
 
@@ -380,6 +391,26 @@ public:
 protected:
   friend class Decoder;
 
+  void
+  set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
+                        bool exec_masked = true) {
+    memory_issue_info_ = {};
+    memory_issue_info_.exec_masked = exec_masked;
+    for (const auto obligation : counter_obligations) {
+      if (!obligation.valid())
+        continue;
+      if (memory_issue_info_.num_counter_obligations_ ==
+          amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS) {
+        assert(false && "too many memory counter obligations");
+        break;
+      }
+      memory_issue_info_.counter_obligations_[memory_issue_info_.num_counter_obligations_++] =
+          obligation;
+    }
+    assert(!memory_issue_info_.empty());
+    flags_ |= MEMORY_OP;
+  }
+
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
   /// @brief Instruction's source operands (max 6). KEEP IN SYNC with
@@ -393,6 +424,10 @@ protected:
   uint8_t num_dst_ = 0;
   /// @brief Whether read/write operands are rendered only in destination position.
   bool omit_repeated_destination_sources_ = false;
+  static_assert(sizeof(amdgpu::MemoryIssueInfo) <= 6,
+                "memory issue metadata must fit Instruction's existing padding");
+  /// @brief AMDGPU issue metadata; kept here to use padding before disassembly_.
+  amdgpu::MemoryIssueInfo memory_issue_info_;
   /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
   /// The default matches mnemonic(); encoding decorations may override it.
   virtual void append_mnemonic(std::string &out) const { out += mnemonic_; }

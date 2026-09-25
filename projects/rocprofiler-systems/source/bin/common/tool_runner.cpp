@@ -48,7 +48,7 @@ namespace
 {
 using rocprofsys::common::update_mode;
 using parser_t     = argparse::argument_parser;
-using parser_err_t = typename parser_t::result_type;
+using parser_err_t = parser_t::result_type;
 
 constexpr int    HELP_PADDING          = 8;
 constexpr int    MAX_DESC_WIDTH        = 120;
@@ -202,13 +202,13 @@ needs_full_parse(int argc, char** argv)
         auto arg = std::string_view{ argv[arg_idx] };
         if(arg == "--" || arg == "-?" || arg == "-h" || arg == "--help" ||
            arg == "--version" || arg == "--export-config" ||
-           arg.find("--export-config=") == 0 || arg == "--list-presets" ||
-           arg == "--explain" || arg.find("--explain=") == 0)
+           arg.starts_with("--export-config=") || arg == "--list-presets" ||
+           arg == "--explain" || arg.starts_with("--explain="))
         {
             return true;
         }
     }
-    return argc > 1 && argv[1] != nullptr && std::string_view{ argv[1] }.find('-') == 0;
+    return argc > 1 && argv[1] != nullptr && std::string_view{ argv[1] }.starts_with('-');
 }
 
 bool
@@ -325,7 +325,7 @@ tool_runner::get_initial_environment()
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
        !llvm_dir.empty())
     {
-        data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::APPEND);
+        data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::append);
         // Also mutate the live process env: any dlopen() that happens before
         // execvpe (e.g. OMPT runtime discovery) reads the real environ, not
         // data.env.current.

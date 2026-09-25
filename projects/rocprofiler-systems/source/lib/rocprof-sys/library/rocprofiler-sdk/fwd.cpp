@@ -17,9 +17,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -44,7 +42,7 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
                             rocprofiler_counter_id_t* counters, size_t num_counters,
                             void* user_data)
 {
-    using value_type = typename agent_counter_info_map_t::mapped_type;
+    using value_type = agent_counter_info_map_t::mapped_type;
 
     auto* data_v = static_cast<agent_counter_info_map_t*>(user_data);
     data_v->emplace(agent_id, value_type{});
@@ -254,8 +252,7 @@ client_data::set_agents()
         }
     };
 
-    fill_agents(agent_type::GPU, gpu_agents);
-    fill_agents(agent_type::CPU, cpu_agents);
+    fill_agents(agent_type::gpu, gpu_agents);
+    fill_agents(agent_type::cpu, cpu_agents);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

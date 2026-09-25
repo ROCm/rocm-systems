@@ -30,6 +30,7 @@ static constexpr status_t k_status_error                  = -1;
 static constexpr status_t k_status_buffer_busy            = -2;
 static constexpr status_t k_status_hsa_not_loaded         = -3;
 static constexpr status_t k_status_error_invalid_argument = -4;
+static constexpr status_t k_status_error_not_implemented  = -5;
 
 struct context_id
 {
@@ -78,6 +79,11 @@ struct timestamp
 {
     std::uint64_t value{};
     bool          operator==(const timestamp&) const = default;
+};
+struct correlation_id
+{
+    std::uint64_t ancestor{};
+    bool          operator==(const correlation_id&) const = default;
 };
 
 using counter_flag_t   = std::uint32_t;
@@ -137,8 +143,39 @@ using device_counting_agent_cb_t = void*;
 using device_counting_svc_cb_t   = void*;
 using dispatch_counting_svc_cb   = void*;
 using dispatch_counting_rec_cb   = void*;
+using callback_phase             = int;
 
 struct callback_tracing_record_t
+{
+    callback_phase phase = 0;
+};
+
+// record_header_t mirrors rocprofiler_record_header_t: buffered_callback_dispatcher
+// dereferences ->payload on every element of the header array it iterates.
+struct record_header_t
+{
+    std::uint32_t category = 0;
+    std::uint32_t kind     = 0;
+    void*         payload  = nullptr;
+};
+
+// The kfd_*_record stubs below each mirror one rocprofiler_buffer_tracing_kfd_*_record_t
+// type. backend<Sdk> only re-exports them as type aliases; no field is read here.
+struct kfd_page_fault_record
+{};
+struct kfd_page_migrate_record
+{};
+struct kfd_queue_record
+{};
+struct kfd_event_queue_record
+{};
+struct kfd_event_unmap_record
+{};
+struct kfd_event_dropped_record
+{};
+struct kfd_event_page_migrate_record
+{};
+struct kfd_event_page_fault_record
 {};
 
 // ─── Tracing-name table stub ────────────────────────────────────────────────
@@ -341,6 +378,7 @@ struct mock_sdk
     using counter_flag_t                       = testing::counter_flag_t;
     using user_data_t                          = testing::user_data;
     using timestamp_t                          = testing::timestamp;
+    using correlation_id_t                     = testing::correlation_id;
     using available_counters_cb_t              = testing::available_counters_cb_t;
     using device_counting_agent_cb_t           = testing::device_counting_agent_cb_t;
     using device_counting_service_cb_t         = testing::device_counting_svc_cb_t;
@@ -356,6 +394,7 @@ struct mock_sdk
     using external_correlation_id_request_cb_t = testing::ext_correlation_req_cb_t;
     using internal_thread_library_cb_t         = testing::internal_thread_cb_t;
     using callback_tracing_record              = testing::callback_tracing_record_t;
+    using callback_phase_t                     = testing::callback_phase;
     using callback_tracing_operation_args_cb_t = testing::tracing_op_args_cb_t;
     using available_dimensions_cb_t            = testing::available_dimensions_cb_t;
     using counter_info_version_id_t            = testing::counter_info_ver;
@@ -365,6 +404,15 @@ struct mock_sdk
     using dispatch_counting_record_cb          = testing::dispatch_counting_rec_cb;
     using callback_name_info_t                 = testing::name_info<>;
     using buffer_name_info_t                   = testing::name_info<>;
+    using record_header_t                      = testing::record_header_t;
+    using kfd_page_fault_record                = testing::kfd_page_fault_record;
+    using kfd_page_migrate_record              = testing::kfd_page_migrate_record;
+    using kfd_queue_record                     = testing::kfd_queue_record;
+    using kfd_event_queue_record               = testing::kfd_event_queue_record;
+    using kfd_event_unmap_record               = testing::kfd_event_unmap_record;
+    using kfd_event_dropped_record             = testing::kfd_event_dropped_record;
+    using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
+    using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
@@ -376,11 +424,21 @@ struct mock_sdk
     static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED = k_status_hsa_not_loaded;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         k_status_error_invalid_argument;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        k_status_error_not_implemented;
 
     // ── Counter constants ─────────────────────────────────────────────────────
     static constexpr counter_flag_t            COUNTER_FLAG_NONE      = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_0 = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 = 1;
+
+    // ── Callback phase constants ──────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER = 0;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = 1;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = 2;
 
     // ── Callback/buffer tracing kind constants ────────────────────────────────
     // Only backend<Sdk>'s unconditional constants — ROCPROFILER_VERSION is

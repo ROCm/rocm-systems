@@ -12,7 +12,6 @@
 #include "library/perf.hpp"
 
 #include <timemory/components/base.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
 #include <timemory/utility/unwind.hpp>
@@ -20,11 +19,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 struct overflow : comp::empty_base
 {
@@ -87,6 +82,4 @@ private:
     std::uint32_t         m_index    = 0;
     causal::unwind_addr_t m_stack    = {};
 };
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component

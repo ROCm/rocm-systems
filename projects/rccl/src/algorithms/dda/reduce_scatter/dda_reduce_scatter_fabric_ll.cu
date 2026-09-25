@@ -23,7 +23,7 @@
 
 namespace {
 
-using dda::common::kDdaLLMaxBytes;
+using dda::common::kDdaLLRsMaxBytes;
 using dda::common::kDdaLLRsSlotStridePkts;
 using dda::common::LLPacket16;
 
@@ -117,8 +117,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (bytes % 16 != 0) {
     return false;
   }
-  // expand from 8B to 16B
-  if (bytes * 2 > kDdaLLMaxBytes) {
+  // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
+  if (bytes > kDdaLLRsMaxBytes) {
     return false;
   }
   if (ddaLLRsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {

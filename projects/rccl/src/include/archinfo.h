@@ -56,4 +56,9 @@ inline int rcclLL128ElemsPerThreadFromArch(char const* arch) {
   return linesPerThread * rcclLL128DataElemsFromArch(arch);
 }
 
+/* Host Code: Must match NCCL_LL128_SHMEM_ELEMS_PER_THREAD in device code for the same arch. */
+inline int rcclLL128ShmemElemsPerThreadFromArch(char const* arch) {
+  return IsArchMatch(arch, "gfx1250") ? 32 : 8;
+}
+
 #endif // ARCHINFO_H

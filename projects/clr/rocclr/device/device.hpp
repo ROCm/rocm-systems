@@ -115,6 +115,11 @@ enum MemRangeAttribute : uint32_t {
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
 };
 
+// DMA-BUF mapping-type flags for GetHandleForAddressRange
+enum MemRangeDmaBufMappingType : uint64_t {
+  MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
+};
+
 //! Maps hipFuncCache_t to group memory carveout percentage.
 //! PreferL1 maps to 1% (not 0%) because 0 means "no preference" in the
 //! AQL packet's group_mem_carveout field; 1% is the minimum value that
@@ -988,7 +993,8 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                 unsigned long long flags) {
     return false;
   }
 
@@ -2263,7 +2269,12 @@ class Device : public RuntimeObject {
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
-  virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  //! Create a barrier packet that waits on num_deps signals. num_deps == 1
+  //! yields a single-signal barrier where the device has one; otherwise a
+  //! barrier-AND (up to five dep_signal slots). dep_signal[0] and the
+  //! single-signal field share an offset, so callers patch slot 0 either way.
+  //! num_deps == 0 is a completion-only barrier.
+  virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
 
@@ -2438,7 +2449,8 @@ class Device : public RuntimeObject {
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
+  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);

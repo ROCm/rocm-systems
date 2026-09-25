@@ -8,11 +8,14 @@
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "logger/debug.hpp"
 
+#include "policies/rocprofiler-sdk/gpu_perf_counters/backend.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -22,60 +25,14 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-// Contract the GPU perf-counter collector requires of its backend (rocprofiler-sdk).
-template <typename Backend>
-concept backend_contract = requires(
-    Backend backend, typename Backend::context_id_t context,
-    typename Backend::agent_id_t agent, typename Backend::buffer_id_t buffer,
-    typename Backend::user_data_t user_data, typename Backend::counter_flag_t flags,
-    typename Backend::counter_record_t  record,
-    typename Backend::counter_record_t* records,
-    typename Backend::counter_id_t* counter_id, typename Backend::counter_id_t counter,
-    typename Backend::counter_id_t*                counters,
-    typename Backend::counter_config_id_t*         config,
-    typename Backend::available_counters_cb_t      counter_cb,
-    typename Backend::device_counting_service_cb_t service_cb, size_t* record_count,
-    void* data) {
-    {
-        Backend::make_agent_id(std::uint64_t{})
-    } -> std::same_as<typename Backend::agent_id_t>;
-    { backend.create_context(&context) } -> std::same_as<typename Backend::status_t>;
-    { backend.start_context(context) } -> std::same_as<typename Backend::status_t>;
-    { backend.stop_context(context) } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.sample_device_counting_service(context, user_data, flags, records,
-                                               record_count)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.query_record_counter_id(record, counter_id)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.query_counter_details(counter)
-    } -> std::same_as<std::vector<counter_metadata>>;
-    {
-        backend.iterate_agent_supported_counters(agent, counter_cb, data)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.create_counter_config(agent, counters, size_t{}, config)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.configure_device_counting_service(context, buffer, agent, service_cb,
-                                                  data)
-    } -> std::same_as<typename Backend::status_t>;
-    // Status/flag constants read directly by device<Backend> during sampling.
-    { Backend::flag_none } -> std::convertible_to<typename Backend::counter_flag_t>;
-    { Backend::status_success } -> std::convertible_to<typename Backend::status_t>;
-    { Backend::status_hsa_not_loaded } -> std::convertible_to<typename Backend::status_t>;
-};
-
-template <backend_contract Backend>
+template <policies::gpu_perf_counters::backend Backend>
 class device
 {
 public:
-    device(std::shared_ptr<Backend> backend, typename Backend::context_id_t context,
-           std::shared_ptr<rocprofsys::agent>    agent,
-           typename Backend::counter_config_id_t counter_config,
-           std::vector<counter_metadata>         counter_meta)
+    device(std::shared_ptr<Backend> backend, Backend::context_id_t context,
+           std::shared_ptr<rocprofsys::agent> agent,
+           Backend::counter_config_id_t       counter_config,
+           std::vector<counter_metadata>      counter_meta)
     : m_backend_api{ std::move(backend) }
     , m_context{ context }
     , m_agent{ std::move(agent) }
@@ -170,30 +127,31 @@ public:
     {
         if(m_context_started) return;
 
-        auto status = m_backend_api->start_context(m_context);
-        if(status == Backend::status_success)
+        try
         {
+            m_backend_api->start_context(m_context);
             m_context_started = true;
             m_prev_values.clear();
             LOG_DEBUG("GPU PMC context started for device {}.",
                       m_agent->device_type_index);
-        }
-        else
+        } catch(const std::exception& e)
         {
             // HSA may not be initialized yet at this call site. The hsa_init callback
             // registered in tool_init will call start() again once HSA is live.
-            LOG_DEBUG("GPU PMC context start deferred for device {} (status={}).",
-                      m_agent->device_type_index, static_cast<int>(status));
+            LOG_DEBUG("GPU PMC context start deferred for device {} ({}).",
+                      m_agent->device_type_index, e.what());
         }
     }
 
     void stop()
     {
-        auto status = m_backend_api->stop_context(m_context);
-        if(status != Backend::status_success)
+        try
         {
-            LOG_WARNING("Failed to stop context for device {} (status={})",
-                        m_agent->device_type_index, static_cast<int>(status));
+            m_backend_api->stop_context(m_context);
+        } catch(const std::exception& e)
+        {
+            LOG_WARNING("Failed to stop context for device {} ({})",
+                        m_agent->device_type_index, e.what());
         }
     }
 
@@ -202,9 +160,9 @@ private:
     static constexpr size_t k_record_buffer_min_size        = 256;
 
     std::shared_ptr<Backend>                        m_backend_api;
-    typename Backend::context_id_t                  m_context;
+    Backend::context_id_t                           m_context;
     std::shared_ptr<rocprofsys::agent>              m_agent;
-    typename Backend::counter_config_id_t           m_counter_config;
+    Backend::counter_config_id_t                    m_counter_config;
     std::vector<counter_metadata>                   m_counter_meta;
     std::vector<typename Backend::counter_record_t> m_record_buffer;
     metrics                                         m_result_cache;

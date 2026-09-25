@@ -24,12 +24,70 @@ from rocm_kpack.coff.kpack_transform import HIPF_MAGIC as COFF_HIPF_MAGIC
 from rocm_kpack.coff.kpack_transform import HIPK_MAGIC as COFF_HIPK_MAGIC
 from rocm_kpack.coff.kpack_transform import WRAPPER_SIZE as COFF_WRAPPER_SIZE
 from rocm_kpack.coff.surgery import CoffSurgery
-from rocm_kpack.database_handlers import MIOpenHandler, RocBLASHandler
+from rocm_kpack.database_handlers import AotritonHandler, MIOpenHandler, RocBLASHandler
 from rocm_kpack.elf.kpack_transform import HIPF_MAGIC as ELF_HIPF_MAGIC
 from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.kpack_transform import kpack_offload_binary
 from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
+
+
+@pytest.mark.parametrize(
+    "bundle_key,image_arch",
+    [("gfx11", "gfx11xx"), ("gfx12_0", "gfx120x"), ("gfx942", "gfx942")],
+)
+def test_aotriton_split_then_verify(tmp_path, toolchain, bundle_key, image_arch):
+    input_dir = tmp_path / "input"
+    prefix = "ml-libs/aotriton/stage"
+    relative_kernel = Path(f"lib/aotriton.images/amd-{image_arch}/flash/kernel.aks2")
+    kernel = input_dir / prefix / relative_kernel
+    kernel.parent.mkdir(parents=True)
+    kernel.write_bytes(b"kernel payload")
+    write_artifact_manifest(input_dir, [prefix])
+    output_dir = tmp_path / "output"
+    splitter = ArtifactSplitter(
+        artifact_prefix="aotriton_lib",
+        toolchain=toolchain,
+        database_handlers=[AotritonHandler()],
+    )
+    splitter.split(input_dir, output_dir)
+    artifact = output_dir / f"aotriton_lib_{bundle_key}"
+    assert (artifact / prefix / relative_kernel).read_bytes() == b"kernel payload"
+    verifier = ArtifactVerifier(output_dir, toolchain)
+    assert verifier.run_all_checks(), verifier.results
+
+
+@pytest.mark.parametrize(
+    "bundle_key,image_arch,payload_path,accepted",
+    [
+        ("gfx11", "gfx11xx", "flash/kernel.aks2", True),
+        ("gfx12_0", "gfx120x", "flash/kernel.aks2", True),
+        ("gfx942", "gfx942", "flash/kernel.aks2", True),
+        ("gfx11", "gfx120x", "flash/kernel.aks2", False),
+        ("gfx12_0", "gfx11xx", "flash/kernel.aks2", False),
+        ("gfx12_1", "gfx120x", "flash/kernel.aks2", False),
+        ("gfx11", "gfx11xx", "gfx942/kernel.aks2", False),
+        ("gfx11", "gfx11xx", "flash/kernel_gfx942.aks2", False),
+        ("gfx1250", "gfx1250-strict", "flash/kernel.aks2", False),
+        ("gfx1250-strict", "gfx1250", "flash/kernel.aks2", False),
+    ],
+)
+def test_verifier_aotriton_layout(
+    tmp_path, toolchain, bundle_key, image_arch, payload_path, accepted
+):
+    artifact = tmp_path / f"aotriton_lib_{bundle_key}"
+    kernel = (
+        artifact
+        / "ml-libs/aotriton/stage/lib/aotriton.images"
+        / f"amd-{image_arch}"
+        / payload_path
+    )
+    kernel.parent.mkdir(parents=True)
+    kernel.write_bytes(b"kernel payload")
+    verifier = ArtifactVerifier(tmp_path, toolchain)
+    verifier._check_architecture_separation([artifact])
+    result = verifier.results[-1]
+    assert result.passed == accepted, result.details
 
 
 class TestBaseArch:

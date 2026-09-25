@@ -1,6 +1,29 @@
 # Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 ROCM_PATH ?= /opt/rocm
 HIPCC = $(ROCM_PATH)/bin/hipcc
+
+# Probe compiler. Not hipcc: its HIP driver mode pulls cuda_wrappers/bits/c++config.h,
+# which clashes with recent libstdc++ and makes a valid probe fail.
+# Locate it the same way toolchain-linux.cmake does (bin/ then llvm/bin/); a
+# missing probe compiler must fail loudly, not silently degrade a probe to "no"
+# and recompile the colliding UALoE compat types this build set out to avoid.
+# Use ifeq rather than ?= so an explicitly empty override (PROBE_CXX= make)
+# still triggers detection instead of being treated as already set.
+ifeq ($(strip $(PROBE_CXX)),)
+PROBE_CXX := $(shell \
+  for c in $(ROCM_PATH)/bin/amdclang++ $(ROCM_PATH)/llvm/bin/amdclang++ $(ROCM_PATH)/llvm/bin/clang++; do \
+    if [ -x "$$c" ]; then echo "$$c"; break; fi; \
+  done)
+endif
+ifeq ($(strip $(PROBE_CXX)),)
+$(error Cannot find amdclang++/clang++ under $(ROCM_PATH)/bin or $(ROCM_PATH)/llvm/bin. Set PROBE_CXX explicitly.)
+endif
+# Resolve PROBE_CXX (absolute path or bare name on PATH) and confirm the target
+# is executable. Testing -x on the resolved path catches the exists-but-not-
+# runnable case that a bare command -v would still report as found.
+ifeq ($(shell p=$$(command -v $(PROBE_CXX) 2>/dev/null); [ -n "$$p" ] && [ -x "$$p" ] && echo ok),)
+$(error PROBE_CXX ($(PROBE_CXX)) is not executable. Set PROBE_CXX to a valid C++ compiler.)
+endif
 HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -inplace -quiet-warnings
 
@@ -29,11 +52,19 @@ NCCL_OS_DEFINE := -DNCCL_OS_WINDOWS
 endif
 
 # topo_expl bypasses RCCL's CMake configuration, so reproduce the two
-# compile-time feature probes needed by headers it imports.
+# compile-time feature probes needed by headers it imports. Probes compile a
+# real temp file (like CMake's check_cxx_source_compiles) with the plain
+# compiler PROBE_CXX rather than piping through hipcc's HIP driver.
+PROBE_TMP := $(shell mktemp --suffix=.cpp)
+ifeq ($(strip $(PROBE_TMP)),)
+$(error Failed to create a temp file for the feature probes. Check that TMPDIR is writable.)
+endif
+
 HAVE_HIP_FABRIC_API := $(shell printf '%s\n' \
   '#include <hip/hip_runtime_api.h>' \
-  'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' | \
-  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include - \
+  'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' \
+  > $(PROBE_TMP) && \
+  $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_HIP_FABRIC_API),yes)
 FEATURE_DEFINES += -DHIP_FABRIC_API
@@ -41,12 +72,28 @@ endif
 
 HAVE_AMDSMI_FABRIC_API := $(shell printf '%s\n' \
   '#include <amd_smi/amdsmi.h>' \
-  'int main() { amdsmi_fabric_info_t info{}; (void)info; }' | \
-  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include - \
+  'int main() { amdsmi_fabric_info_t info{}; (void)info; }' \
+  > $(PROBE_TMP) && \
+  $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_AMDSMI_FABRIC_API),yes)
 FEATURE_DEFINES += -DAMDSMI_FABRIC_DIRECT
 endif
+
+# ROCm 10.2+ can ship fabric telemetry enumerators without amdsmi_fabric_info_t
+# / AMDSMI_FABRIC_MAX_LOCAL_GPUS. Without this probe, amdsmi_wrap.h emits
+# compat typedefs that collide with the system header (extra topo_expl compile).
+HAVE_AMDSMI_FABRIC_TELEMETRY := $(shell printf '%s\n' \
+  '#include <amd_smi/amdsmi.h>' \
+  'int main() { amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN; (void)cat; }' \
+  > $(PROBE_TMP) && \
+  $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include $(PROBE_TMP) \
+  >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_AMDSMI_FABRIC_TELEMETRY),yes)
+FEATURE_DEFINES += -DAMDSMI_HEADER_HAS_FABRIC_TELEMETRY -DAMDSMI_FABRIC_DIRECT
+endif
+
+PROBE_CLEANUP := $(shell rm -f $(PROBE_TMP))
 
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
@@ -55,6 +102,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 		   -Ihipify_rccl/include/nccl_device \
            -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
+           -DUSE_AMDSMI \
            $(NCCL_OS_DEFINE) $(FEATURE_DEFINES) \
            -lpthread
 
@@ -70,6 +118,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/xml.cc \
 			hipify_rccl/graph/rome_models.cc \
 			hipify_rccl/graph/archinfo.cc \
+			hipify_rccl/graph/rccl_graph_gen.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
 			hipify_rccl/rccl_wrap.cc \
@@ -79,31 +128,13 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 
 files = $(TOPO_EXPL_FILES) $(RCCL_FILES)
 
-FMT_DIR     := third_party/fmt
-FMT_INCLUDE := $(FMT_DIR)/include
-FMT_HEADER  := $(FMT_INCLUDE)/fmt/format.h
-FMT_GIT     := https://github.com/fmtlib/fmt.git
+# hipify stages all of src/include, so a header imported here can reach
+# <fmt/format.h> (hip_rocm_version_info.h does, even though nothing topo_expl
+# compiles includes it today). Point at the vendored header-only copy the CMake
+# build uses: no fmt package, no network, and nothing to link.
+CXXFLAGS += -I../../external/fmt/include -DFMT_HEADER_ONLY=1
 
-# Probe for <fmt/format.h> using a portable pipe (no <<< here-string)
-HAVE_FMT := $(shell echo '#include <fmt/format.h>' | \
-               $(HIPCC) -xc++ -std=c++17 -E - >/dev/null 2>&1 && echo yes || echo no)
-
-ifeq ($(HAVE_FMT),no)
-  CXXFLAGS += -I$(FMT_INCLUDE)
-  NEED_FMT  := 1
-endif
-
-ifeq ($(NEED_FMT),1)
-$(FMT_HEADER):
-	rm -rf third_party/fmt
-	@echo ">>> fmt not found; cloning $(FMT_GIT) ..."
-	@mkdir -p $(dir $(FMT_DIR))
-	@git clone --depth=1  $(FMT_GIT) $(FMT_DIR)
-else
-$(FMT_HEADER):
-endif
-
-all: $(FMT_HEADER) hipify $(EXE)
+all: hipify $(EXE)
 	@echo "Built with ROCm version: $(ROCM_MAJOR).$(ROCM_MINOR).$(ROCM_PATCH) (ROCM_VERSION=$(ROCM_VERSION))"
 
 $(EXE): $(files)
@@ -126,7 +157,7 @@ hipify:
 	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"
 	# (relative path), so mirror those headers under hipify_rccl/device/symmetric/.
 	cp -a ../../src/device/symmetric/*.h hipify_rccl/device/symmetric/
-	cp -a ../../src/enqueue.cc hipify_rccl/
+	cp -a ../../src/enqueue/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/rccl_wrap.cc hipify_rccl/

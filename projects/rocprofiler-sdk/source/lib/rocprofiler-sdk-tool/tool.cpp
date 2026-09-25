@@ -84,6 +84,7 @@
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/pc_sampling.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -1846,13 +1847,40 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                 auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
                     cur_header->payload);
 
-                auto pc_sample_tool_record =
-                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
-                        *pc_sample, get_instruction_index(pc_sample->pc));
+                auto instruction_index = get_instruction_index(pc_sample->pc);
 
-                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
-                                                     domain_type::PC_SAMPLING_STOCHASTIC);
-                valid_samples_cnt++;
+                // For unknown code objects/agents, we simply provide samples as is.
+                // In other cases, we try to verify them first.
+                auto verification_status = ROCPROFILER_STATUS_SUCCESS;
+                if(pc_sample->pc.code_object_id != ROCPROFILER_CODE_OBJECT_ID_NONE)
+                {
+                    if(auto agent_id = CHECK_NOTNULL(tool_metadata)
+                                           ->get_code_object_agent(pc_sample->pc.code_object_id))
+                    {
+                        if(const auto* agent = tool_metadata->get_agent(*agent_id))
+                        {
+                            verification_status = rocprofiler::sdk::pc_sampling::verify_sample(
+                                *pc_sample,
+                                tool_metadata->get_instruction(instruction_index),
+                                agent->gfx_target_version);
+                        }
+                    }
+                }
+
+                if(verification_status == ROCPROFILER_STATUS_ERROR)
+                {
+                    invalid_samples_cnt++;
+                }
+                else
+                {
+                    auto pc_sample_tool_record =
+                        rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
+                            *pc_sample, instruction_index);
+
+                    rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                         domain_type::PC_SAMPLING_STOCHASTIC);
+                    valid_samples_cnt++;
+                }
             }
             else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
             {
@@ -3031,6 +3059,24 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                         ? resolve_ompt_ops(tool::get_config().ompt_trace_operations)
                         : std::vector<rocprofiler_tracing_operation_t>{};
 
+    auto is_kfd_service = [](rocprofiler_buffer_tracing_kind_t kind) {
+        switch(kind)
+        {
+            case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
+            case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU:
+            case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS:
+            case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE:
+            case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT:
+            case ROCPROFILER_BUFFER_TRACING_KFD_QUEUE: return true;
+            default: return false;
+        }
+    };
+    auto kfd_service_unavailable = [](rocprofiler_status_t status) {
+        return status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL ||
+               status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    };
+    auto kfd_configure_status = ROCPROFILER_STATUS_SUCCESS;
+
     for(auto&& itr : {buffer_service_config{tool::get_config().kernel_trace,
                                             ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                             get_buffers().kernel_trace},
@@ -3112,6 +3158,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     {
         if(itr.option)
         {
+            if(is_kfd_service(itr.kind) && kfd_service_unavailable(kfd_configure_status)) continue;
+
             // in sdk callback overhead benchmarking, we don't want to use the buffer services
             if(tool::get_config().benchmark_mode == tool::config::benchmark::sdk_callback_overhead)
                 continue;
@@ -3146,10 +3194,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 (!itr.operations.empty()) ? itr.operations.data() : nullptr;
             size_t num_operations = itr.operations.size();
 
-            ROCPROFILER_CALL(
-                rocprofiler_configure_buffer_tracing_service(
-                    get_client_ctx(), itr.kind, operations, num_operations, itr.buffer_id),
-                "buffer tracing service configure");
+            auto status = rocprofiler_configure_buffer_tracing_service(
+                get_client_ctx(), itr.kind, operations, num_operations, itr.buffer_id);
+            if(is_kfd_service(itr.kind) && kfd_service_unavailable(status))
+            {
+                kfd_configure_status = status;
+                ROCP_WARNING << "KFD buffer tracing is unavailable: "
+                             << rocprofiler_get_status_string(status)
+                             << " Continuing with the other requested trace services.";
+                continue;
+            }
+            ROCPROFILER_CALL(status, "buffer tracing service configure");
         }
     }
 

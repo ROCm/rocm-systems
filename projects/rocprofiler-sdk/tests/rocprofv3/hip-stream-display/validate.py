@@ -24,7 +24,6 @@
 
 import sys
 import pytest
-import json
 
 from collections import defaultdict
 
@@ -99,7 +98,7 @@ def test_stream_trace(json_data):
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    assert pftrace_data.empty == False
+    assert pftrace_data.empty is False
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,

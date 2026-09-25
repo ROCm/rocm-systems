@@ -11,7 +11,6 @@
 #include <cstdint>
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/macros/language.hpp>
 
 #include <fstream>
 #include <optional>
@@ -26,12 +25,10 @@
 #    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
 #endif
 
-namespace rocprofsys
-{
 //
 //      Initialization routines
 //
-inline namespace config
+namespace rocprofsys::inline config
 {
 using signal_handler_t = void (*)(void);
 
@@ -274,12 +271,6 @@ get_perfetto_backend();
 std::string
 get_perfetto_output_filename();
 
-double
-get_trace_delay();
-
-double
-get_trace_duration();
-
 std::string
 get_trace_region();
 
@@ -484,5 +475,4 @@ get_causal_source_exclude();
 
 std::vector<std::string>
 get_causal_function_exclude();
-}  // namespace config
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline config

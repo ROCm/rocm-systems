@@ -87,7 +87,7 @@ inline int ncclTypeSize(ncclDataType_t type) {
 #define NCCL_MODE_PTR 2
 struct ncclConnFifo {
   int mode;
-  int offset;
+  ssize_t offset;
   ssize_t size;
   void* ptr;
 };
@@ -430,6 +430,10 @@ static constexpr int PatUsed = 0x1, PatSkipped = 0x2;
 
 struct ncclPatStep {
   int recvDim, sendDim, recvOffset, sendOffset, stepOffset, postRecv, postSend, nelem, last, flags;
+  // PAT algo computation thread step number; -1 while the slot is free.
+  int step;
+  // This PAT group's offset within the shared NVLS slot.
+  int nvlsOffset;
   size_t inpIx, outIx;
 };
 
@@ -446,12 +450,20 @@ struct ncclPatPeer {
 };
 
 #define NCCL_SHMEM_PAT_STEPS 32
+static constexpr int NCCL_PAT_NDIMS = 32;
 struct ncclPatShmem {
   struct ncclPatStep patSteps[NCCL_SHMEM_PAT_STEPS];
   int parallelFactor;
+  bool patGroupFenceNeeded;
   long long int localAccSize;
-  struct ncclPatPeer sendDims[32]; // Should cover 2^32 ranks
-  struct ncclPatPeer recvDims[32];
+  // First 32 entries cover PAT dimensions; entry 32 is reused for the local
+  // NVLS peer in multi-RPN PAT.
+  struct ncclPatPeer sendDims[NCCL_PAT_NDIMS + 1];
+  struct ncclPatPeer recvDims[NCCL_PAT_NDIMS + 1];
+  // Per-rail FIFO write pointers for patScatter (used in reduce_scatter)
+  void* patScatterDsts[NCCL_MAX_NVLS_ARITY];
+  // Per-rail FIFO read pointers for patGather (used in all_gather)
+  void* patGatherSrcs[NCCL_MAX_NVLS_ARITY];
 };
 
 template <typename T>
@@ -475,6 +487,7 @@ class PatRSAlgorithm {
   int aggDelta;
   int scale;
   int phase;
+  int psIdx;
 
   __device__ __host__ ssize_t min(ssize_t a, ssize_t b) {
     return (a < b) ? a : b;
@@ -540,6 +553,7 @@ public:
                                      size_t count, int chunkCount, int rank, int nranks)
     : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks) {
     parallelFactor = maxParallelFactor;
+    psIdx = 0;
     aggDelta = nrPow2 = (1 << log2Up(nranks));
 
     aggFactor = 1;
@@ -569,6 +583,8 @@ public:
     ps->nelem = nelem;
     ps->outIx = offset;
     ps->stepOffset = stepOffset;
+    ps->nvlsOffset = (psIdx % parallelFactor) * nelem;
+    psIdx++;
     int skip = 0;
     if (a >= lastA) {
       skip = 1;
@@ -734,6 +750,7 @@ class PatAGAlgorithm {
   int aggDelta;
   int scale;
   int phase;
+  int psIdx;
 
   // AS computation
   int asDim;
@@ -812,6 +829,7 @@ public:
     : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks),
       sharedConns(sharedConns) {
     parallelFactor = maxParallelFactor;
+    psIdx = 0;
     aggDelta = nrPow2 = (1 << log2Up(nranks));
 
     aggFactor = 1;
@@ -841,6 +859,8 @@ public:
     ps->last = 0;
     ps->nelem = nelem;
     ps->inpIx = offset;
+    ps->nvlsOffset = (psIdx % parallelFactor) * nelem;
+    psIdx++;
     int skip = 0;
     if (a >= lastA) {
       skip = 1;

@@ -7,9 +7,7 @@
 #include <set>
 #include <string>
 
-namespace rocprofsys
-{
-namespace pmc
+namespace rocprofsys::pmc
 {
 
 /**
@@ -31,8 +29,8 @@ struct version
  */
 enum class device_type : std::uint8_t
 {
-    GPU,  ///< GPU device
-    NIC   ///< Network interface device
+    gpu,  ///< GPU device
+    nic   ///< Network interface device
 };
 
 /**
@@ -40,9 +38,9 @@ enum class device_type : std::uint8_t
  */
 enum class device_selection_mode : std::uint8_t
 {
-    ALL,      ///< Include all devices
-    NONE,     ///< Exclude all devices
-    SPECIFIC  ///< Include only specific devices by index
+    all,      ///< Include all devices
+    none,     ///< Exclude all devices
+    specific  ///< Include only specific devices by index
 };
 
 /**
@@ -50,7 +48,7 @@ enum class device_selection_mode : std::uint8_t
  */
 struct device_filter
 {
-    device_selection_mode mode = device_selection_mode::ALL;
+    device_selection_mode mode = device_selection_mode::all;
     std::set<size_t>      indices;  ///< Device indices when mode is SPECIFIC
 };
 
@@ -62,9 +60,8 @@ struct device_filter
  */
 struct nic_device_filter
 {
-    device_selection_mode mode = device_selection_mode::ALL;
+    device_selection_mode mode = device_selection_mode::all;
     std::set<std::string> names;  ///< Device names when mode is SPECIFIC
 };
 
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc

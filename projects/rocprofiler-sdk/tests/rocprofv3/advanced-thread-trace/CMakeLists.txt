@@ -197,11 +197,26 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-multiqueue-plus-pmc
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input --pmc
-            SQ_WAVES -o out -- $<TARGET_FILE:vector-ops>
+            SQ_WAVES -o pmc -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-plus-pmc)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    DISCOVERY_ARGS -k test_counter_collection_with_att
+    ARGS --att-pmc-input
+         ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/pmc_results.json
+    FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # Check for conflict PMC + activity
 rocprofiler_add_integration_execute_test(
@@ -349,6 +364,12 @@ if(attdecoder_FOUND
         FAIL_REGULAR_EXPRESSION "AssertionError")
 endif()
 
+# Other SIMD file tests. Requires both a supported arch (gfx11/12) AND the
+# rocprof-trace-decoder library: the test sets ROCPROF_ATT_LIBRARY_PATH and aborts with
+# "rocprof-trace-decoder library path not found" when the decoder is absent (e.g. WSL, or
+# any environment without the decoder installed). Gate on IS_DISABLED (which is ON when
+# attdecoder is not found) like the other ATT tests, so it is skipped rather than failing
+# when the decoder is unavailable.
 set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
 
 rocprofiler_add_integration_execute_test(
@@ -381,7 +402,7 @@ rocprofiler_add_integration_validate_test(
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)
 list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
-if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
+if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$" AND NOT IS_DISABLED)
     set(IS_DISABLED_OTHER_SIMD OFF)
 endif()
 
@@ -453,8 +474,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
-    FAIL_REGULAR_EXPRESSION
-        "--selected-regions and --att-consecutive-kernels are mutually exclusive")
+    FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
 
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
 
@@ -470,7 +490,6 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    SKIP_REGULAR_EXPRESSION "HW Exception by GPU"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
 
 rocprofiler_add_integration_validate_test(
@@ -484,6 +503,35 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+set(ATT_HSA_FALLBACK_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-hsa-fallback-out")
+
+# End-to-end rocprofv3 run on the HSA queue/signal backend instead of KFD.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-fallback
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_HSA_FALLBACK_OUT_DIR} --att
+            --output-format json -o out -- $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT
+        "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR};ROCPROFILER_SQTT_FORCE_HSA=1"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-hsa-fallback)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-fallback
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-fallback
+    ARGS --att-shaderdata-out-dir ${ATT_HSA_FALLBACK_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")

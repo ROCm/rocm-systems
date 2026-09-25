@@ -339,6 +339,9 @@ Once all NCCL operations are complete, the communicator will transition to the *
 query that state with ncclCommGetAsyncError.
 If a communicator is marked as nonblocking, this operation is nonblocking; otherwise, it is blocking.
 
+ncclCommFinalize is an intra-node collective call. When a single thread finalizes multiple ranks
+(multiple GPUs per thread), the calls must be grouped with ncclGroupStart/ncclGroupEnd to avoid a hang.
+
 Related link: :c:func:`ncclCommFinalize`
 
 Destroying a communicator
@@ -561,6 +564,8 @@ Here is an example showing how to initialize and split a communicator in a non-b
 The *checkTimeout* function needs to be provided by users to determine what is the longest time the application should wait for
 NCCL initialization; likewise, users can apply other methods to detect errors besides a timeout function. Similar methods can be applied
 to NCCL finalization as well.
+
+.. _communicators_qos:
 
 ******************
 Quality of Service

@@ -3155,3 +3155,59 @@ fn the_suite_can_actually_run() {
     // for a missing emulator runtime. See `assert_suite_can_run`.
     harness::assert_suite_can_run();
 }
+
+#[test]
+fn thread_overrides_reach_the_generated_rocjitsu_config() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("thread-overrides");
+    let show_config = r#"cat "$(cat "$ROCJITSU_RUNTIME_DIR/config_path")""#;
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "thread-overrides",
+        "--in-process",
+        "-o",
+        "cpu_thread_budget=64",
+        "-o",
+        "num_threads=4",
+        "-o",
+        "cpu_dispatch_threads=17",
+        "-o",
+        "async_helper_threads=8",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(config["cpu_thread_budget"], 64);
+    assert_eq!(config["num_threads"], 4);
+    assert_eq!(config["cpu_dispatch_threads"], 17);
+    assert_eq!(config["async_helper_threads"], 8);
+    assert!(
+        config["thread_allocations"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty())
+    );
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "thread-overrides",
+        "--in-process",
+        "--gpus-per-node",
+        "2",
+        "-o",
+        "num_threads=0",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(config["num_threads"], 1);
+    assert_eq!(config["async_helper_threads"], 0);
+    assert_eq!(config["vm"]["gpu"]["num_gpus"], 2);
+}

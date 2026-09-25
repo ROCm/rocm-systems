@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/perfetto/sinks/per_pid_file_sink.hpp"
-#include "core/perfetto/sinks/io_helpers.hpp"
+#include "core/perfetto/sinks/file_output.hpp"
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
 #include "logger/debug.hpp"
 
+#include <span>
 #include <string>
 #include <utility>
 
@@ -19,7 +20,7 @@ per_pid_file_sink::per_pid_file_sink(pid_t parent_pid, output_file_registry& reg
 {}
 
 void
-per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
+per_pid_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
 {
     if(bytes.empty()) return;
 
@@ -29,8 +30,7 @@ per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
                   ? config::get_perfetto_output_filename()
                   : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
 
-    if(!perfetto_sink_detail::write_proto_to(filename, bytes.data(), bytes.size(),
-                                             m_registry.get()))
+    if(!write_proto_to(filename, bytes.data(), bytes.size(), m_registry.get()))
     {
         LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", filename, pid);
     }

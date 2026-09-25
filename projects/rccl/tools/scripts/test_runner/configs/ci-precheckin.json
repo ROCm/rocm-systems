@@ -162,6 +162,17 @@
         {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_init_faultinj": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-faultinj",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsFaultInj", "description": "Host-only init.cc microtests, ENABLE_FAULT_INJECTION arm (the one that ships); covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_enqueue": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroEnqueue",
@@ -171,6 +182,17 @@
       "timeout": 60,
       "tests": [
         {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_symkernels": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroSymKernels",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
       ]
     }
   },
@@ -212,9 +234,21 @@
       "enabled": true
     },
     {
+      "name": "RCCL Microtests - init.cc (fault injection)",
+      "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
+      "config": "unit_tests_micro_init_faultinj",
+      "enabled": true
+    },
+    {
       "name": "RCCL Microtests - enqueue.cc",
       "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_enqueue",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - sym_kernels.cc",
+      "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_symkernels",
       "enabled": true
     }
   ]

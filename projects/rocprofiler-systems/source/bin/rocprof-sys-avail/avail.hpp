@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 #include "defines.hpp"
 #include <cstdint>
@@ -32,9 +33,7 @@
 
 //======================================================================================//
 
-namespace tim
-{
-namespace cereal
+namespace tim::cereal
 {
 class SettingsTextArchive
 : public OutputArchive<SettingsTextArchive>
@@ -99,9 +98,7 @@ public:
         current_entry->insert({ "identifier", name });
         std::string       func   = name;
         const std::string prefix = TIMEMORY_SETTINGS_PREFIX;
-        func                     = func.erase(0, prefix.length());
-        std::transform(func.begin(), func.end(), func.begin(),
-                       [](char& c) { return tolower(c); });
+        func = rocprofsys::utility::string::to_lower(func.erase(0, prefix.length()));
         {
             std::stringstream ss;
             ss << "settings::" << func << "()";
@@ -123,7 +120,7 @@ public:
 
 public:
     template <typename Tp>
-    inline void saveValue(Tp _val)
+    void saveValue(Tp _val)
     {
         std::stringstream ssval;
         ssval << std::boolalpha << _val;
@@ -305,8 +302,7 @@ TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive&, const SizeTag<T>&)
     // nothing to do here, we don't explicitly save the size
 }
 
-}  // namespace cereal
-}  // namespace tim
+}  // namespace tim::cereal
 
 // register archives for polymorphic support
 TIMEMORY_CEREAL_REGISTER_ARCHIVE(SettingsTextArchive)

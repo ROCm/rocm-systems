@@ -2405,10 +2405,16 @@ uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags) const {
     return 0;
   }
 
+  uint64_t hsa_mem_flags = 0;
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (uncached && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
 
   // We only allow pinned memory at this time.
-  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0,
+  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, hsa_mem_flags,
                                                     &hsa_vmem_handle);
 
   if (hsa_status != HSA_STATUS_SUCCESS) {
@@ -2508,7 +2514,9 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  if (flags.uncached_ && isa().versionMajor() == 12) {
+
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (flags.uncached_ && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
@@ -4086,17 +4094,37 @@ void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
 }
 
 // ================================================================================================
-uint8_t* Device::CreateBarrierPacket() const {
+uint8_t* Device::CreateBarrierPacket(int num_deps) const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
       (1 << HSA_PACKET_HEADER_BARRIER) |
       (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
+  static constexpr uint16_t kBarrierValueNopHeader =
+      (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+
   static_assert(sizeof(hsa_barrier_and_packet_t) == 64, "AQL packet size must be 64 bytes");
+  static_assert(sizeof(hsa_amd_barrier_value_packet_t) == 64, "AQL packet size must be 64 bytes");
+
   auto* raw = new uint8_t[64]();
-  auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-  pkt->header = kBarrierNopHeader;
+  if (num_deps == 1 && settings().barrier_value_packet_) {
+    auto* pkt = reinterpret_cast<hsa_amd_barrier_value_packet_t*>(raw);
+    pkt->header.header = kBarrierValueNopHeader;
+    pkt->header.AmdFormat = HSA_AMD_PACKET_TYPE_BARRIER_VALUE;
+    // The awaited signal is a completion signal: it rests armed at 1 and the GPU
+    // decrements it to 0 when the producer finishes. So "producer done" is
+    // (signal & mask) < 1. ApplyHwEventPatches fills in the signal handle.
+    pkt->value = kInitSignalValueOne;
+    pkt->mask = std::numeric_limits<int64_t>::max();
+    pkt->cond = HSA_SIGNAL_CONDITION_LT;
+  } else {
+    auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
+    pkt->header = kBarrierNopHeader;
+  }
   return raw;
 }
 
@@ -4125,7 +4153,8 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       ps->flags_.done_ = false;
       ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
-      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
+      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
+      // Slot 0 also covers a barrier-value packet: its signal aliases dep_signal[0].
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->dep_signal[patch.dep_slot] = sig;
     }
@@ -4235,6 +4264,22 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
     status = Hsa::memory_get_preferred_copy_engine(peerAgent, copyAgent, &preferredMask);
   }
 
+  const bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
+
+  // maxSdmaWriteMask_ describes CPU<->GPU traffic and includes the H2D/D2H blit
+  // slots, which ROCr refuses to drive a P2P copy on. The engines it does accept
+  // for an inter-GPU copy are the ones reported for the peer direction, so use
+  // those as the valid set instead. That query only lists engines which are idle
+  // at the time of the call, so keep the union per peer to stay correct once all
+  // of them are busy.
+  if (is_inter_gpu) {
+    uint32_t& peer_engine_mask = peer_engine_mask_[peerAgent.handle];
+    peer_engine_mask |= freeEngineMask;
+    if (peer_engine_mask != 0) {
+      validEngineMask = peer_engine_mask;
+    }
+  }
+
   // Constrain to valid engines
   freeEngineMask &= validEngineMask;
   preferredMask &= validEngineMask;
@@ -4248,8 +4293,6 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
-
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated
     candidate_mask = validEngineMask & preferredMask;

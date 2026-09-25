@@ -64,7 +64,7 @@
 [submodule "projects/rocprofiler-systems/external/timemory"]
 	path = projects/rocprofiler-systems/external/timemory
 	url = https://github.com/ROCm/timemory.git
-	branch = rocprofiler-systems-cppstd20
+	branch = rocprofiler-systems
 	shallow = true
 [submodule "projects/rocprofiler-systems/external/perfetto"]
 	path = projects/rocprofiler-systems/external/perfetto
@@ -90,10 +90,6 @@
 [submodule "projects/rocprofiler-systems/external/googletest"]
 	path = projects/rocprofiler-systems/external/googletest
 	url = https://github.com/google/googletest.git
-	shallow = true
-[submodule "projects/rocprofiler-systems/external/filesystem"]
-	path = projects/rocprofiler-systems/external/filesystem
-	url = https://github.com/gulrak/filesystem.git
 	shallow = true
 [submodule "projects/rocprofiler-systems/external/spdlog"]
 	path = projects/rocprofiler-systems/external/spdlog
