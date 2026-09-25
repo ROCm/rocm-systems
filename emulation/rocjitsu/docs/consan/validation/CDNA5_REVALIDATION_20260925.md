@@ -709,3 +709,11 @@ now returns zero, numerically PASSED, marker zero / mismatch false, and complete
 2448/2448 applicable access coverage (`mxf4-saved-address-fix6-client.log`).
 Full six-shard qualification is running in `mxf4-saved-address-clean`; this
 single-client diagnostic does not qualify the entire table cell.
+
+### Qwen Default fault result
+
+`qwen-cap-default-fault/qwen-prefill/faults/barrier-drop-reduction-publication/summary.json`
+finishes eight admitted and reached trials with zero detections and zero oracle
+manifestations. Each result has complete analysis and healthy before/after
+checks. Default clean passed. The next `high` preset is now running as a fresh
+clean/fault bundle in `qwen-cap-high-*`, retaining the same reviewed fault site.
