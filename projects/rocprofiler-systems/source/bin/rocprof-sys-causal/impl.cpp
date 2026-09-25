@@ -65,7 +65,10 @@ get_signal_handler(int _sig)
 void
 create_signal_handler(int sig, signal_handler& sh, void (*func)(int))
 {
-    if(sig < 1) return;
+    if(sig < 1)
+    {
+        return;
+    }
     sh.m_custom_sigaction.sa_handler = func;
     sigemptyset(&sh.m_custom_sigaction.sa_mask);
     sh.m_custom_sigaction.sa_flags = SA_RESTART;
@@ -93,7 +96,10 @@ int
 get_verbose()
 {
     const auto* _log_level = std::getenv(env_vars::LOG_LEVEL);
-    if(_log_level != nullptr) verbose = env_vars::log_level_to_verbose(_log_level);
+    if(_log_level != nullptr)
+    {
+        verbose = env_vars::log_level_to_verbose(_log_level);
+    }
     return verbose;
 }
 
@@ -101,7 +107,9 @@ void
 forward_signals(const std::set<int>& _signals)
 {
     for(auto itr : _signals)
+    {
         create_signal_handler(itr, get_signal_handler(itr), &forward_signal);
+    }
 }
 
 void
@@ -232,7 +240,10 @@ add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
             return std::string_view{ entry }.starts_with(_key);
         });
 
-    if(exists) return;
+    if(exists)
+    {
+        return;
+    }
 
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
                                    update_mode::replace, ":", updated_envs,
@@ -259,7 +270,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             std::stringstream msg;
             msg << "Error in command:";
             for(int i = 0; i < argc; ++i)
+            {
                 msg << " " << argv[i];
+            }
             msg << "\n\n";
             stream(std::cerr, color::fatal()) << msg.str();
             std::cerr << std::flush;
@@ -310,8 +323,10 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
 
     auto _cols = std::get<0>(console::get_columns());
     if(_cols > parser.get_help_width() + 8)
+    {
         parser.set_description_width(
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
+    }
 
     parser.start_group("DEBUG OPTIONS", "");
 
@@ -393,7 +408,10 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         .action([&](parser_t& p) {
             _generate_configs = true;
             auto _dir         = p.get<std::string>("generate-configs");
-            if(!_dir.empty()) _config_folder = std::move(_dir);
+            if(!_dir.empty())
+            {
+                _config_folder = std::move(_dir);
+            }
 
             try
             {
@@ -655,18 +673,31 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
 
     auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
     if(help_check(parser, argc, argv))
+    {
         help_action(parser);
+    }
     else if(_cerr)
+    {
         throw std::runtime_error(_cerr.what());
+    }
 
-    if(_niterations < 1) _niterations = 1;
+    if(_niterations < 1)
+    {
+        _niterations = 1;
+    }
     auto _get_size = [](const auto& _v) { return std::max<size_t>(_v.size(), 1); };
 
     auto _causal_envs_tmp = std::vector<std::map<std::string_view, std::string>>{};
     auto _fill = [&_causal_envs_tmp](std::string_view _env_var, const auto& _data,
                                      bool _quote) {
-        if(_data.empty()) return;
-        if(_causal_envs_tmp.empty()) _causal_envs_tmp.emplace_back();
+        if(_data.empty())
+        {
+            return;
+        }
+        if(_causal_envs_tmp.empty())
+        {
+            _causal_envs_tmp.emplace_back();
+        }
         auto _tmp = _causal_envs_tmp;
         _causal_envs_tmp.clear();
         _causal_envs_tmp.reserve(_data.size() * _tmp.size());
@@ -714,7 +745,10 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     _fill(env_vars::CAUSAL_FIXED_SPEEDUP, _virtual_speedups, false);
 
     // make sure at least one env exists
-    if(_causal_envs_tmp.empty()) _causal_envs_tmp.emplace_back();
+    if(_causal_envs_tmp.empty())
+    {
+        _causal_envs_tmp.emplace_back();
+    }
 
     // duplicate for the number of iterations
     _causal_envs.clear();
@@ -722,7 +756,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     for(std::int64_t i = 0; i < _niterations; ++i)
     {
         for(const auto& itr : _causal_envs_tmp)
+        {
             _causal_envs.emplace_back(itr);
+        }
     }
 
     if(_generate_configs)
@@ -763,7 +799,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             }
         }
         for(const auto& itr : _omni_env_m)
+        {
             _omni_env.emplace_back(itr.first, itr.second);
+        }
 
         _causal_envs_tmp = std::move(_causal_envs);
         _causal_envs.clear();
@@ -772,20 +810,28 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                         const std::map<std::string_view, std::string>& _data) {
                 size_t _width = 0;
                 for(const auto& itr : _omni_env)
+                {
                     _width = std::max(_width, itr.first.length());
+                }
 
                 for(const auto& itr : _data)
+                {
                     _width = std::max(_width, itr.first.length());
+                }
 
                 _os << "# rocprofsys common settings\n";
                 for(const auto& itr : _omni_env)
+                {
                     _os << std::setw(_width + 1) << std::left << itr.first << " = "
                         << itr.second << "\n";
+                }
 
                 _os << "\n# rocprofsys causal settings\n";
                 for(const auto& itr : _data)
+                {
                     _os << std::setw(_width + 1) << std::left << itr.first << " = "
                         << itr.second << "\n";
+                }
             };
 
         const int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
@@ -806,7 +852,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     }
 
     if(_reset)
+    {
         _causal_envs.front().emplace(env_vars::CAUSAL_FILE_RESET, std::string{ "true" });
+    }
 
     return _outv;
 }

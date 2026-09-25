@@ -387,7 +387,10 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
 
     auto insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
                                        const char* track_name, double value) {
-        if(!is_enabled) return;
+        if(!is_enabled)
+        {
+            return;
+        }
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
         pmc_data.event = event;
@@ -453,7 +456,10 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
 
     auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
                                   const auto& format_name) {
-        if(!is_enabled) return;
+        if(!is_enabled)
+        {
+            return;
+        }
         for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
         {
             const auto& arr = get_array(m.xcp_stats[xcp]);
@@ -486,10 +492,16 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
 
     auto insert_device_level_metrics = [&](const std::string_view base_name,
                                            bool is_enabled, const auto& arr) {
-        if(!is_enabled) return;
+        if(!is_enabled)
+        {
+            return;
+        }
         for(std::size_t i = 0; i < arr.size(); ++i)
         {
-            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16)
+            {
+                continue;
+            }
 
             auto pmc_name   = fmt::format("{}_{}", base_name, i);
             auto track_name = pmc_name;
@@ -532,10 +544,16 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
     // XGMI data accumulators (per-link arrays)
     auto insert_xgmi_link_metrics = [&](const std::string& base_track_name,
                                         bool is_enabled, const auto& arr) {
-        if(!is_enabled) return;
+        if(!is_enabled)
+        {
+            return;
+        }
         for(size_t i = 0; i < arr.size(); ++i)
         {
-            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64) continue;
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64)
+            {
+                continue;
+            }
 
             const std::string pmc_name = info::format_link_pmc_name(base_track_name, i);
             const std::string track_name =
@@ -577,7 +595,10 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
 
     auto insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
                                        const char* track_name, std::uint64_t value) {
-        if(!is_enabled) return;
+        if(!is_enabled)
+        {
+            return;
+        }
 
         LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
                   track_name, value);
@@ -643,7 +664,10 @@ void
 rocpd_processor_t::handle(
     [[maybe_unused]] const gpu_perf_counter_sample& gpu_perf_counter)
 {
-    if(gpu_perf_counter.entries.empty()) return;
+    if(gpu_perf_counter.entries.empty())
+    {
+        return;
+    }
 
     const auto*  name         = "rocm_counter_collection";
     const auto&  process_info = m_metadata->get_process_info();
@@ -668,7 +692,10 @@ rocpd_processor_t::handle(
     {
         auto name_info = m_metadata->find_gpu_perf_counter_by_id(
             gpu_perf_counter.device_id, entry.counter_id);
-        if(!name_info) continue;
+        if(!name_info)
+        {
+            continue;
+        }
 
         const auto& info = name_info->get();
 
@@ -938,7 +965,10 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
         track.name       = kfd.track_name;
         track.node_id    = n_info.id;
         track.process_id = process_info.pid;
-        if(kfd.system_tid.has_value()) track.thread_id = kfd.system_tid.value();
+        if(kfd.system_tid.has_value())
+        {
+            track.thread_id = kfd.system_tid.value();
+        }
 
         profiler_hub::writer_types::sample_data_t sample;
         sample.timestamp = kfd.start_timestamp;

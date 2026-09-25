@@ -39,7 +39,9 @@ void
 serialize_uint64(std::vector<std::uint8_t>& data, std::uint64_t val)
 {
     for(int i = 0; i < 8; ++i)
+    {
         data.push_back(static_cast<std::uint8_t>((val >> (i * 8)) & 0xFF));
+    }
 }
 
 void
@@ -49,7 +51,9 @@ serialize_uint64_vector(std::vector<std::uint8_t>&        data,
     for(std::uint8_t i = 0; i < count; ++i)
     {
         for(int j = 0; j < 8; ++j)
+        {
             data.push_back(static_cast<std::uint8_t>((vec[i] >> (j * 8)) & 0xFF));
+        }
     }
 }
 
@@ -58,7 +62,9 @@ std::uint8_t
 deserialize_uint8(const std::vector<std::uint8_t>& data, size_t& offset)
 {
     if(offset >= data.size())
+    {
         throw std::runtime_error("Invalid serialized data: unexpected end");
+    }
     return data[offset++];
 }
 
@@ -66,7 +72,9 @@ std::uint16_t
 deserialize_uint16(const std::vector<std::uint8_t>& data, size_t& offset)
 {
     if(offset + 1 >= data.size())
+    {
         throw std::runtime_error("Invalid serialized data: unexpected end");
+    }
     const std::uint16_t value = static_cast<std::uint16_t>(data[offset]) |
                                 (static_cast<std::uint16_t>(data[offset + 1]) << 8);
     offset += 2;
@@ -77,10 +85,14 @@ std::uint64_t
 deserialize_uint64(const std::vector<std::uint8_t>& data, size_t& offset)
 {
     if(offset + 7 >= data.size())
+    {
         throw std::runtime_error("Invalid serialized data: unexpected end");
+    }
     std::uint64_t value = 0;
     for(int i = 0; i < 8; ++i)
+    {
         value |= (static_cast<std::uint64_t>(data[offset + i]) << (i * 8));
+    }
     offset += 8;
     return value;
 }
@@ -92,7 +104,9 @@ deserialize_uint16_vector(const std::vector<std::uint8_t>& data, size_t& offset,
     std::vector<std::uint16_t> values;
     values.reserve(count);
     for(std::uint8_t i = 0; i < count; ++i)
+    {
         values.push_back(deserialize_uint16(data, offset));
+    }
     return values;
 }
 
@@ -103,7 +117,9 @@ deserialize_uint64_vector(const std::vector<std::uint8_t>& data, size_t& offset,
     std::vector<std::uint64_t> values;
     values.reserve(count);
     for(std::uint8_t i = 0; i < count; ++i)
+    {
         values.push_back(deserialize_uint64(data, offset));
+    }
     return values;
 }
 }  // namespace
@@ -184,16 +200,24 @@ serialize_gpu_metrics(const gpu_metrics_t&              metrics,
 
     // Serialize per-XCP sizes
     for(const std::uint8_t size : vcn_xcp_sizes)
+    {
         serialize_uint8(result, size);
+    }
 
     for(const std::uint8_t size : jpeg_xcp_sizes)
+    {
         serialize_uint8(result, size);
+    }
 
     // Serialize the flattened data
     if(settings.vcn_activity && vcn_count > 0)
+    {
         serialize_uint16_vector(result, vcn_data_flat, vcn_count);
+    }
     if(settings.jpeg_activity && jpeg_count > 0)
+    {
         serialize_uint16_vector(result, jpeg_data_flat, jpeg_count);
+    }
     if(settings.xgmi)
     {
         serialize_uint16(result, metrics.xgmi_link_width);
@@ -241,9 +265,13 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
     std::vector<std::uint8_t> vcn_xcp_sizes;
     std::vector<std::uint8_t> jpeg_xcp_sizes;
     for(std::uint8_t i = 0; i < vcn_xcp_count; ++i)
+    {
         vcn_xcp_sizes.push_back(deserialize_uint8(serialized_data, offset));
+    }
     for(std::uint8_t i = 0; i < jpeg_xcp_count; ++i)
+    {
         jpeg_xcp_sizes.push_back(deserialize_uint8(serialized_data, offset));
+    }
 
     // Deserialize VCN data and reconstruct structure
     if(is_vcn_enabled && vcn_count > 0)

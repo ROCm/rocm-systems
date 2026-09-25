@@ -214,7 +214,10 @@ shutdown_gpu_hw_collector()
 
     LOG_DEBUG("Shutting down rocprofiler-sdk GPU hardware counter collector.");
 
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->shutdown();
+    }
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -224,7 +227,10 @@ void
 reinit_if_pending()
 {
     bool _expected = true;
-    if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
+    if(!g_reinit_pending.compare_exchange_strong(_expected, false))
+    {
+        return;
+    }
 
     LOG_DEBUG("Performing deferred PMC reinit after fork.");
     shutdown_amd_smi_collectors();
@@ -270,7 +276,10 @@ sample()
         slice.sample(timestamp);
     }
 #if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->sample(timestamp);
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->sample(timestamp);
+    }
 #endif
 }
 
@@ -339,7 +348,10 @@ post_process()
     }
     g_collector_slices.clear();
 #if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->post_process();
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->post_process();
+    }
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
