@@ -1204,6 +1204,20 @@ TEST(EffectiveConfigTest, AcceptsTheCommentsAndBareKeysTheConfigParserAccepts) {
             "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
 }
 
+TEST(EffectiveConfigTest, PreservesCommentsAdjacentToScalarValues) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"cpu_thread_budget":32/*,}*/})", 4),
+            R"({"cpu_thread_budget":4/*,}*/})");
+  EXPECT_EQ(config::json_with_cpu_thread_budget("{\"cpu_thread_budget\":32// ceiling\n}", 4),
+            "{\"cpu_thread_budget\":4// ceiling\n}");
+}
+
+TEST(EffectiveConfigTest, MatchesSingleQuotedAndEscapedQuotedFieldNames) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({'cpu_thread_budget':32})", 4),
+            R"({'cpu_thread_budget':4})");
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"cpu_thread_budge\u0074":32})", 4),
+            R"({"cpu_thread_budge\u0074":4})");
+}
+
 TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
   EXPECT_THROW((void)config::json_with_cpu_thread_budget("[1]", 1), std::runtime_error);
 }
