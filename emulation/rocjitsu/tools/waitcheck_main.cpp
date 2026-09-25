@@ -96,7 +96,7 @@ struct ScanTotals {
   size_t instructions_analyzed = 0;
   size_t memory_events_tracked = 0;
   size_t diagnostics = 0;
-  bool diagnostics_truncated = false;
+  bool diagnostics_lower_bound = false;
   size_t counter_parity_fields = 0;
   size_t counter_parity_exact = 0;
   size_t counter_underaccounting = 0;
@@ -1186,15 +1186,11 @@ void print_diagnostics(const std::string &input_path, rj_code_target_id_t target
     std::cout << "  consumer " << diag.section_name << "+" << hex_offset(diag.section_offset)
               << ": " << diag.instruction << "\n";
   }
-  if (report.diagnostics.size() > limit) {
-    std::cout << "omitted " << (report.diagnostics.size() - limit) << " additional diagnostic(s)\n";
-  } else if (report.diagnostics_truncated) {
-    if (report.diagnostics_observed > limit) {
-      std::cout << "omitted at least " << (report.diagnostics_observed - limit)
-                << " diagnostic(s) after limit\n";
-    } else {
-      std::cout << "omitted additional diagnostic(s) after limit\n";
-    }
+  if (report.diagnostics_observed > limit) {
+    std::cout << "omitted " << (report.stopped_early ? "at least " : "")
+              << (report.diagnostics_observed - limit) << " diagnostic(s) after limit\n";
+  } else if (report.stopped_early) {
+    std::cout << "analysis stopped early; additional diagnostics may exist\n";
   }
 }
 
@@ -1241,8 +1237,7 @@ void print_summary(const std::string &input_path, rj_code_target_id_t target,
     std::cout << ":kernel=.text+" << hex_offset(*kernel_entry);
   std::cout << ": instructions=" << count_label(report.instructions_analyzed, report.stopped_early)
             << " memory-events=" << count_label(report.memory_events_tracked, report.stopped_early)
-            << " diagnostics="
-            << count_label(report.diagnostics_observed, report.diagnostics_truncated);
+            << " diagnostics=" << count_label(report.diagnostics_observed, report.stopped_early);
   if (report.counter_parity_fields_checked != 0 || report.counter_underaccounting_observed != 0) {
     std::cout << " parity-fields=" << report.counter_parity_fields_checked
               << " parity-exact=" << report.counter_parity_exact
@@ -1378,7 +1373,7 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   totals.instructions_analyzed += report.instructions_analyzed;
   totals.memory_events_tracked += report.memory_events_tracked;
   totals.diagnostics += report.diagnostics_observed;
-  totals.diagnostics_truncated = totals.diagnostics_truncated || report.diagnostics_truncated;
+  totals.diagnostics_lower_bound = totals.diagnostics_lower_bound || report.stopped_early;
   totals.counter_parity_fields += report.counter_parity_fields_checked;
   totals.counter_parity_exact += report.counter_parity_exact;
   totals.counter_underaccounting += report.counter_underaccounting_observed;
@@ -1835,7 +1830,7 @@ int main(int argc, char **argv) {
               << " kernels=" << totals.kernels_analyzed << "/" << totals.kernels_discovered
               << " instructions=" << totals.instructions_analyzed
               << " memory-events=" << totals.memory_events_tracked
-              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated);
+              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_lower_bound);
     if (options.check_counter_parity) {
       std::cout << " parity-fields=" << totals.counter_parity_fields
                 << " parity-exact=" << totals.counter_parity_exact
@@ -1847,7 +1842,7 @@ int main(int argc, char **argv) {
   } else if (batch_mode) {
     std::cout << "rj_waitcheck: scanned inputs=" << totals.inputs << " skipped=" << totals.skipped
               << " code-objects=" << totals.code_objects
-              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_truncated);
+              << " diagnostics=" << count_label(totals.diagnostics, totals.diagnostics_lower_bound);
     if (options.check_counter_parity) {
       std::cout << " counter-underaccounting=" << totals.counter_underaccounting
                 << " unmodeled-waits=" << totals.counter_unmodeled_waits;

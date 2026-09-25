@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -617,8 +617,8 @@ void print_waitcheck_summary(const WaitcheckReport &report, const CodeObjectInfo
                              rj_code_target_id_t target, uint32_t index) {
   std::cout << "waitcheck " << rj_code_target_name(target) << "[" << index
             << "]: instructions=" << report.instructions_analyzed
-            << " memory-events=" << report.memory_events_tracked << " diagnostics="
-            << count_label(report.diagnostics_observed, report.diagnostics_truncated)
+            << " memory-events=" << report.memory_events_tracked
+            << " diagnostics=" << count_label(report.diagnostics_observed, report.stopped_early)
             << " retained=" << report.diagnostics.size() << "\n";
 
   struct KernelGroup {

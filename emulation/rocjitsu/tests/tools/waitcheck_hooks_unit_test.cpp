@@ -445,6 +445,22 @@ TEST_F(WaitcheckHooksTest, ReportOnlyModeChainsHazardToRuntimeOncePerReader) {
   EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
 }
 
+TEST_F(WaitcheckHooksTest, StorageCapReportsExactTotalAndOmittedCount) {
+  for (bool clean : {false, true}) {
+    const CapturedCall captured =
+        load_memory(rocjitsu::waitcheck_test::make_diagnostic_count_code_object(80, clean));
+    EXPECT_EQ(captured.status, clean ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+    if (clean) {
+      EXPECT_TRUE(captured.stderr_text.empty()) << captured.stderr_text;
+    } else {
+      EXPECT_TRUE(contains(captured.stderr_text, "rocjitsu-waitcheck: 80 waitcnt hazard(s)"))
+          << captured.stderr_text;
+      EXPECT_TRUE(contains(captured.stderr_text, "omitted 48 diagnostic(s) after limit"))
+          << captured.stderr_text;
+    }
+  }
+}
+
 TEST_F(WaitcheckHooksTest, FileReaderIsCheckedAtLoad) {
   const auto bytes = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();
   TempFile file = write_temp_bytes(bytes);

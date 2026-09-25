@@ -1219,8 +1219,6 @@ private:
         events, [&](const PendingEvent &existing) { return same_event_identity(existing, event); });
   }
 
-  [[nodiscard]] bool diagnostics_available() const { return !report_.diagnostics_truncated; }
-
   [[nodiscard]] bool should_stop_after_diagnostic() const { return report_.stopped_early; }
 
   void prepare_cfg_path_filter(const std::vector<BasicBlock *> &blocks,
@@ -1409,11 +1407,6 @@ private:
     } else {
       report_.diagnostics_truncated = true;
       return;
-    }
-
-    if (options_.max_diagnostics != std::numeric_limits<size_t>::max() &&
-        report_.diagnostics.size() >= options_.max_diagnostics) {
-      report_.diagnostics_truncated = true;
     }
   }
 
@@ -5357,7 +5350,8 @@ private:
                            uint64_t section_offset, uint64_t file_offset, rj_code_arch_t arch,
                            bool emit_diagnostics) {
     const bool record_stats = emit_diagnostics;
-    const bool emit_report_diagnostics = emit_diagnostics && diagnostics_available();
+    // The cap limits stored details, not detection or the observed count.
+    const bool emit_report_diagnostics = emit_diagnostics;
     const bool immediately_after_mode_setreg = std::exchange(state.vgpr_msb_setreg_hazard, false);
     const bool previous_vm_vsrc_zero_wait = std::exchange(state.previous_vm_vsrc_zero_wait, false);
     const bool current_vm_vsrc_zero_wait = is_vm_vsrc_zero_wait(inst);
