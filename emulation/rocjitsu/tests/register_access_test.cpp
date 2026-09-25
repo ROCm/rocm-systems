@@ -1269,7 +1269,7 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
 // or bytes 2-3. Reading or preserving the other half inside the 32-bit
 // register file must neither expose its value nor create another callback.
 TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
-  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, 8);
   ASSERT_NE(fx.wf, nullptr);
   uint32_t reg = fx.vgpr_base() + 5;
   constexpr uint32_t lane = 3;
@@ -1304,6 +1304,122 @@ TEST(RegisterAccessTest, Packed16ReadsAndWritesObserveSelectedByteHalves) {
   ASSERT_EQ(fx.plugin->writes.size(), 1u);
   EXPECT_EQ(fx.plugin->writes[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
   EXPECT_EQ(fx.cu->read_vgpr(reg, lane), 0x33441122u);
+}
+
+TEST(RegisterAccessTest, Packed16DppObservesSelectedPhysicalLanesAndHalves) {
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, 8);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(0b0101);
+  const uint32_t base = fx.vgpr_base();
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    fx.cu->write_vgpr(base + 1, lane, ((0xc000u + lane) << 16) | 0x1234u);
+  rdna4::Operand source(16, rdna4::OperandType::OPR_VGPR, 129, true);
+  RegisterAccess regs(*fx.wf);
+  std::optional<StagedOperand> staged;
+  // Swap adjacent lanes: active destinations 0 and 2 read inactive sources 1 and 3.
+  const auto plan =
+      dpp::make_dpp_plan(fx.wf->wf_size(), 0xb1, 0xf, 0xf, false, true, fx.wf->exec(), true);
+  dpp::apply_dpp(source, plan, fx.wf->exec(), staged, *fx.wf);
+  ASSERT_TRUE(staged.has_value());
+  EXPECT_EQ(regs.read_lane(*staged, 0), 0xc001u);
+  EXPECT_EQ(regs.read_lane(*staged, 2), 0xc003u);
+  ASSERT_EQ(fx.plugin->reads.size(), 2u);
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(fx.plugin->reads[i].physical_reg, base + 1);
+    EXPECT_EQ(fx.plugin->reads[i].lane_mask, uint64_t{1} << (2 * i + 1));
+    EXPECT_EQ(fx.plugin->reads[i].byte_mask, ExecutionPlugin::kHighHalfByteMask);
+  }
+  staged.reset();
+  fx.plugin->reads.clear();
+  dpp::apply_source_modifiers(source, staged, *fx.wf, 0x8000, true, false);
+  ASSERT_TRUE(staged.has_value());
+  EXPECT_EQ(regs.read_lane(*staged, 0), 0x4000u);
+  EXPECT_EQ(regs.read_lane(*staged, 2), 0x4002u);
+  ASSERT_EQ(fx.plugin->reads.size(), 2u);
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(fx.plugin->reads[i].physical_reg, base + 1);
+    EXPECT_EQ(fx.plugin->reads[i].lane_mask, uint64_t{1} << (2 * i));
+    EXPECT_EQ(fx.plugin->reads[i].byte_mask, ExecutionPlugin::kHighHalfByteMask);
+  }
+  fx.plugin->reads.clear();
+  fx.plugin->writes.clear();
+  rdna4::Operand outside_src(16, rdna4::OperandType::OPR_VGPR, 128 + 8, true);
+  rdna4::Operand outside_dst(16, rdna4::OperandType::OPR_VGPR, 128 + 8, false, true);
+  EXPECT_EQ(regs.read_lane(outside_src, 0), 0u);
+  regs.write_lane(outside_dst, 0, 0xbeefu);
+  EXPECT_TRUE(fx.plugin->reads.empty());
+  EXPECT_TRUE(fx.plugin->writes.empty());
+}
+
+TEST(RegisterAccessTest, Packed16DppObservesBroadcastSourcesOnceAndSkipsSuppressedReads) {
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, 8);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(0xf);
+  const uint32_t reg = fx.vgpr_base() + 1;
+  fx.cu->write_vgpr(reg, 3, 0xc2001234);
+  rdna4::Operand source(16, rdna4::OperandType::OPR_VGPR, 129, true);
+  RegisterAccess regs(*fx.wf);
+  std::optional<StagedOperand> staged;
+  // All four destinations broadcast lane 3.
+  const auto broadcast =
+      dpp::make_dpp_plan(fx.wf->wf_size(), 0xff, 0xf, 0xf, false, true, fx.wf->exec(), true);
+  dpp::apply_dpp(source, broadcast, fx.wf->exec(), staged, *fx.wf);
+  ASSERT_TRUE(staged.has_value());
+  for (uint32_t lane = 0; lane < 4; ++lane)
+    EXPECT_EQ(regs.read_lane(*staged, lane), 0xc200u);
+  ASSERT_EQ(fx.plugin->reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->reads[0].physical_reg, reg);
+  EXPECT_EQ(fx.plugin->reads[0].lane_mask, 1u << 3);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
+
+  fx.wf->set_exec(1);
+  for (bool bound : {false, true}) {
+    fx.plugin->reads.clear();
+    const auto missing = dpp::make_dpp_plan(fx.wf->wf_size(), dpp::ROW_SHR1, 0xf, 0xf, bound, true,
+                                            fx.wf->exec(), true);
+    dpp::apply_dpp(source, missing, fx.wf->exec(), staged, *fx.wf);
+    EXPECT_TRUE(fx.plugin->reads.empty());
+    EXPECT_EQ(regs.read_lane(*staged, 0), 0u);
+  }
+  for (uint32_t fi : {0u, 1u}) {
+    fx.plugin->reads.clear();
+    // DPP8 broadcasts inactive lane 3. FI controls whether it is read.
+    dpp::apply_dpp8(source, 3, fi, staged, *fx.wf);
+    EXPECT_EQ(regs.read_lane(*staged, 0), fi ? 0xc200u : 0u);
+    ASSERT_EQ(fx.plugin->reads.size(), fi);
+    if (fi) {
+      EXPECT_EQ(fx.plugin->reads[0].physical_reg, reg);
+      EXPECT_EQ(fx.plugin->reads[0].lane_mask, 1u << 3);
+      EXPECT_EQ(fx.plugin->reads[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
+    }
+  }
+}
+
+TEST(RegisterAccessTest, Packed16PhysicalMappingIncludesSourceAndDestinationMsb) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5, kSgprsPerWave, 1, 1024);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+  fx.wf->set_vgpr_msb_mode(1 | (2 << 2) | (3 << 6));
+  const uint32_t base = fx.vgpr_base();
+  RegisterAccess regs(*fx.wf);
+  for (auto role : {VgprMsbRole::Src0, VgprMsbRole::Src1}) {
+    const uint32_t reg = base + (fx.wf->vgpr_msb_for_role(role) << 8) + 1;
+    fx.cu->write_vgpr(reg, 0, 0xc2001234);
+    cdna5::Operand source(16, cdna5::OperandType::OPR_VGPR, 129, true);
+    source.set_vgpr_msb_role(role);
+    EXPECT_EQ(regs.read_lane(source, 0), 0xc200u);
+    ASSERT_EQ(fx.plugin->reads.back().physical_reg, reg);
+    EXPECT_EQ(fx.plugin->reads.back().byte_mask, ExecutionPlugin::kHighHalfByteMask);
+  }
+  const uint32_t dst_reg = base + (3u << 8) + 1;
+  fx.cu->write_vgpr(dst_reg, 0, 0xc2001234);
+  cdna5::Operand dst(16, cdna5::OperandType::OPR_VGPR, 129, false, true);
+  dst.set_vgpr_msb_role(VgprMsbRole::Dst);
+  regs.write_lane(dst, 0, 0x4000);
+  EXPECT_EQ(fx.cu->read_vgpr(dst_reg, 0), 0x40001234u);
+  ASSERT_EQ(fx.plugin->writes.size(), 1u);
+  EXPECT_EQ(fx.plugin->writes[0].physical_reg, dst_reg);
+  EXPECT_EQ(fx.plugin->writes[0].byte_mask, ExecutionPlugin::kHighHalfByteMask);
 }
 
 TEST(RegisterAccessTest, OperandWrite64ViewObservesBothPhysicalRegisters) {

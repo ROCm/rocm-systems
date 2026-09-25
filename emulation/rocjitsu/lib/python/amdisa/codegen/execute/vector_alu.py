@@ -434,8 +434,12 @@ def gen_vector_unary(
             'trunc': 'std::trunc(s)',
             'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
-            'exp2': 'std::exp2(s)',
-            'log2': 'std::log2(s)',
+            'exp2': 'amdgpu::transcendental::log_exp_f16<false>(s, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'log2': 'amdgpu::transcendental::log_exp_f16<true>(s, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'sin': 'std::sin(s * 6.2831853071795864f)',
             'cos': 'std::cos(s * 6.2831853071795864f)',
             'abs': 'std::fabs(s)',
@@ -444,7 +448,17 @@ def gen_vector_unary(
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
+            if op in ('log2', 'exp2'):
+                L.extend(
+                    [
+                        '    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod('
+                        'wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod);',
+                        '    result = amdgpu::fp_mode::apply_omod_f16(result, effective_omod, wf.fp16_ovfl());',
+                        '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);',
+                    ]
+                )
+            else:
+                L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
             )
@@ -472,8 +486,10 @@ def gen_vector_unary(
             'trunc': 'std::trunc(s)',
             'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
-            'exp2': 'amdgpu::transcendental::exp_f32(s)',
-            'log2': 'amdgpu::transcendental::log_f32(s)',
+            'exp2': 'amdgpu::transcendental::exp_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'log2': 'amdgpu::transcendental::log_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'sin': 'amdgpu::transcendental::sin_f32(s, wf.fp_denorm_mode_f32(), '
             'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'cos': 'amdgpu::transcendental::cos_f32(s, wf.fp_denorm_mode_f32(), '

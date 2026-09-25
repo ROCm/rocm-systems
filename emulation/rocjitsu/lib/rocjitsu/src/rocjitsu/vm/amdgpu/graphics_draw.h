@@ -85,6 +85,9 @@ private:
   uint32_t depth_width_ = 0, depth_height_ = 0, depth_swizzle_ = 0;
   uint32_t depth_bytes_ = 0;
   uint64_t depth_base_ = 0;
+  uint64_t depth_slice_size_ = 0;
+  uint32_t depth_first_layer_ = 0, depth_last_layer_ = 0;
+  uint32_t depth_pitch_ = 0, depth_tail_x_ = 0, depth_tail_y_ = 0;
   std::optional<uint64_t> depth_metadata_;
   uint32_t depth_clear_ = 0;
   bool attachments_prepared_ = false;

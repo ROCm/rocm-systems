@@ -9,6 +9,8 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
@@ -131,7 +133,8 @@ class LoweringContext:
     mode_sensitive_f16_dst: bool = True
     mode_arithmetic: bool = True
     dx9_zero_fma: bool = False
-    fma_flush_output: str | None = None
+    flush_nearest_f32: bool = False
+    arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
 
 
@@ -210,6 +213,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         'V_FMA_DX9_ZERO_F32',
         'V_FMAC_DX9_ZERO_F32',
     )
+    ctx.flush_nearest_f32 = block.instruction_name in FLUSH_NEAREST_F32_OPS
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -558,10 +562,10 @@ def _mode_arithmetic(
     arguments += [f'wf.fp_round_mode_{mode}()', f'wf.fp_denorm_mode_{mode}()']
     if operation == 'FMA' and ctx.dx9_zero_fma:
         operation = 'FMA_DX9_ZERO'
-    if width == 32 and operation in ('FMA', 'FMA_DX9_ZERO'):
+    if width == 32 and operation in ('ADD', 'MUL', 'FMA', 'FMA_DX9_ZERO'):
         arguments += ['wf.cu().arch()', 'wf.ieee_mode()']
-        if ctx.fma_flush_output is not None:
-            arguments.append(ctx.fma_flush_output)
+        if ctx.arithmetic_flush_output is not None:
+            arguments.append(ctx.arithmetic_flush_output)
     helper = 'arithmetic_f16' if width == 16 else 'arithmetic'
     return (
         f'amdgpu::fp_mode::{helper}<amdgpu::fp_mode::Arithmetic::{operation}>'
@@ -1968,6 +1972,23 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             'wf.fp_denorm_mode_f32(), '
             'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
         )
+    if (
+        len(args) == 1
+        and callee in ('log', 'log2', 'exp', 'exp2')
+        and node.ty in (SemaType.F16, SemaType.F32)
+    ):
+        function = 'log' if callee.startswith('log') else 'exp'
+        if node.ty == SemaType.F16:
+            logarithm = 'true' if function == 'log' else 'false'
+            return (
+                f'amdgpu::transcendental::log_exp_f16<{logarithm}>({args[0]}, '
+                'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+                'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+            )
+        return (
+            f'amdgpu::transcendental::{function}_f32({args[0]}, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        )
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:
@@ -2085,26 +2106,36 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
         )
     else:
-        # DX9 FMA disables output denormals independently of MODE, so those
-        # bits cannot suppress its output modifier.
-        denorm_expr = '0' if ctx.dx9_zero_fma else 'wf.fp_denorm_mode_f32()'
+        # DX9 FMA and LOG/EXP disable output denormals independently of MODE,
+        # so those bits cannot suppress their output modifiers.
+        force_output_flush = ctx.dx9_zero_fma or ctx.flush_nearest_f32
+        denorm_expr = '0' if force_output_flush else 'wf.fp_denorm_mode_f32()'
         omod_expr = (
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
             f'{denorm_expr}, wf.ieee_mode(), inst_.omod)'
         )
-    fma_f32 = node.ty == SemaType.F32 and any(
-        n.kind == SemaNodeKind.FMA for n in node.children[1].walk()
+    arithmetic_f32 = (
+        node.ty == SemaType.F32
+        and ctx.mode_arithmetic
+        and any(
+            n.kind in (SemaNodeKind.ADD, SemaNodeKind.MUL, SemaNodeKind.FMA)
+            for n in node.children[1].walk()
+        )
     )
     rhs = _lower_expr(
         node.children[1],
-        replace(ctx, fma_flush_output=f'({omod_expr} != 0)') if fma_f32 else ctx,
+        (
+            replace(ctx, arithmetic_flush_output=f'({omod_expr} != 0)')
+            if arithmetic_f32
+            else ctx
+        ),
     )
     if node.ty in (SemaType.F32, SemaType.F64) and any(
         child.kind == SemaNodeKind.LDEXP for child in node.children[1].walk()
     ):
         return f'amdgpu::div_apply_omod({rhs}, wf.fp_round_mode_{mode}(), {omod_expr})'
-    if fma_f32:
-        # The FMA helper already establishes MODE and restores the host state.
+    if arithmetic_f32:
+        # The arithmetic helper establishes MODE and restores the host state.
         # Only active scaling needs a second environment, after the operation.
         return (
             f'[&]() {{ float v = {rhs};'
@@ -2118,6 +2149,10 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
+    if node.ty == SemaType.F16 and any(
+        _contains_call(node.children[1], op) for op in ('log', 'log2', 'exp', 'exp2')
+    ):
+        return f'amdgpu::fp_mode::apply_omod_f16({rhs}, {omod_expr}, wf.fp16_ovfl())'
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
         f' const uint32_t effective_omod = {omod_expr};'

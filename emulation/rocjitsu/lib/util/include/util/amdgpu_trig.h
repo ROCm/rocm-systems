@@ -24,7 +24,6 @@ struct Coefficient {
 // second cosine, in sixteen intervals covering the first octant. Staged
 // integer arithmetic follows captures from gfx1100 and gfx1201; it avoids
 // dependence on host rounding, denormal controls, or libm argument reduction.
-// The polynomial is not an exhaustive bit-exact hardware mapping.
 inline constexpr Coefficient coefficients[2][16] = {{{0, 3294200, 0, -1322},
                                                      {3292874, 3290232, -3968, -1320},
                                                      {6577818, 3278340, -7928, -1312},
@@ -145,7 +144,7 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
   uint32_t fraction = reduced - (index << 24);
   const auto c = coefficients[table][index];
   uint32_t result;
-  if (table && reduced < 46592)
+  if (table && reduced - unsigned(reflected) < 46592)
     result = 0x3f800000;
   else if (!table && !reduced)
     result = 0;
@@ -153,9 +152,18 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
     uint32_t square_input = (fraction - unsigned(reflected)) >> 7;
     // Every interval has a nonpositive quadratic correction. Keep its
     // magnitude unsigned so the wide-integer fallback follows the same path.
-    uint64_t inner = static_cast<uint64_t>(-int64_t{c.quadratic} * (int64_t{1} << 24) -
-                                           int64_t{c.cubic} * fraction);
-    U128 quadratic_product = U128{inner} * square_input * square_input;
+    // The inner coefficient retains eighteen coordinate bits. Cosine uses
+    // the ones-complement distance from the right endpoint. Round the
+    // coefficient to seven fractional bits in its table units (Q33 overall).
+    uint32_t inner_coordinate = c.cubic <= 0 ? fraction - unsigned(reflected)
+                                             : (1u << 24) - fraction + unsigned(reflected) - 1;
+    inner_coordinate &= ~63u;
+    uint64_t inner_value =
+        c.cubic <= 0 ? static_cast<uint64_t>(-int64_t{c.quadratic} * (int64_t{1} << 24) -
+                                             int64_t{c.cubic} * inner_coordinate)
+                     : static_cast<uint64_t>(-int64_t{c.quadratic + c.cubic} * (int64_t{1} << 24) +
+                                             int64_t{c.cubic} * inner_coordinate);
+    uint64_t staged_inner = round_even(inner_value, 17);
     // Sine near zero retains more product bits. The zero-origin interval
     // normalizes in groups of four bits to cover reduced phases near zero.
     if (!table && index < 2) {
@@ -164,15 +172,20 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
       unsigned offset_shift = index ? 0 : 4 * (width < 25 ? (25 - width) / 4 : 0);
       uint64_t linear_input = index ? uint64_t{linear_fraction(fraction, 2, reflected)}
                                     : uint64_t{fraction} << offset_shift;
-      if (!index && reflected && (linear_input & 0xfffff) == 0)
+      // Saturation follows the normalized field, even when the linear
+      // input uses an additional four offset bits.
+      if (!index && reflected && ((uint64_t{fraction} << normalization) & 0xfffff) == 0)
         --linear_input;
       unsigned linear_precision = index ? 30 : 32 + normalization;
       unsigned quadratic_precision = 34 + normalization;
       int64_t linear =
           static_cast<int64_t>((uint64_t{static_cast<uint32_t>(c.linear)} * linear_input) >>
                                (50 + offset_shift - linear_precision));
-      int64_t quadratic =
-          -static_cast<int64_t>(round_even(quadratic_product, 84 - quadratic_precision));
+      // Truncate the square before multiplying by the rounded coefficient.
+      unsigned square_precision = std::min(34u, 24 + normalization);
+      uint64_t staged_square = (uint64_t{square_input} * square_input) >> (34 - square_precision);
+      int64_t quadratic = -static_cast<int64_t>(round_even(
+          U128{staged_inner} * staged_square, 33 + square_precision - quadratic_precision));
       int64_t sum = (int64_t{c.constant} << (quadratic_precision - 26)) +
                     (linear << (quadratic_precision - linear_precision)) + quadratic;
       result = fixed_to_float(static_cast<uint64_t>(sum), quadratic_precision);
@@ -183,11 +196,15 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
       unsigned precision = absolute >= (uint64_t{1} << 45) ? 28 : 29;
       int64_t linear = static_cast<int64_t>(round_even(absolute, 50 - precision)) *
                        (product < 0 ? -1 : 1) * (precision == 28 ? 2 : 1);
-      const U128 bias = U128{1} << 50;
-      int64_t quadratic = quadratic_product <= bias
-                              ? 0
-                              : -static_cast<int64_t>(static_cast<uint64_t>(
-                                    (quadratic_product - bias + (U128{1} << 56) - 1) >> 56));
+      uint64_t staged_square = (uint64_t{square_input} * square_input) >> 10;
+      uint64_t quadratic_product = staged_inner * staged_square;
+      // Round the quadratic product to 34 fractional bits, capped at
+      // 24 significant bits, before flooring the negative correction to Q28.
+      const uint64_t bias = uint64_t{1} << (quadratic_product >= (uint64_t{1} << 47) ? 23 : 22);
+      int64_t quadratic =
+          quadratic_product <= bias
+              ? 0
+              : -static_cast<int64_t>((quadratic_product - bias + (uint64_t{1} << 29) - 1) >> 29);
       int64_t sum = int64_t{c.constant} * 8 + linear + quadratic * 2;
       result = fixed_to_float(static_cast<uint64_t>(sum), 29);
     }

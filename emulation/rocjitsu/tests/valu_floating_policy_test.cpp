@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -32,6 +33,7 @@
 #include <array>
 #include <bit>
 #include <cfenv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -45,19 +47,20 @@ namespace {
 
 class InstructionPolicyMachine {
 public:
-  explicit InstructionPolicyMachine(rj_code_arch_t arch)
+  explicit InstructionPolicyMachine(rj_code_arch_t arch, uint32_t vgprs = 256,
+                                    uint32_t wave_size = 0)
       : memory_("policy_memory"), cache_("policy_cache") {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
-    config.vgprs_per_wf = 256;
+    config.vgprs_per_wf = vgprs;
     config.lds_size_kb = 64;
     cache_.set_backing_memory(&memory_);
     compute_unit_ =
         amdgpu::ComputeUnitCore::create("instruction_policy", config, &memory_, &cache_);
     decoder_ = Decoder::create(arch);
-    wave_ = compute_unit_->dispatch_wf(0, 0, 106, 256);
+    wave_ = compute_unit_->dispatch_wf(0, 0, 106, vgprs, wave_size);
     wave_->set_exec(1);
     base_ = wave_->vgpr_alloc().base;
   }
@@ -72,6 +75,22 @@ public:
     compute_unit_->write_vgpr(base_ + 6, 0, 0xfacebeef);
     execute(words);
     return compute_unit_->read_vgpr(base_ + 6, 0);
+  }
+  std::array<uint32_t, 64> run_lanes(const std::array<uint32_t, 2> &words,
+                                     const std::array<uint32_t, 64> &a,
+                                     const std::array<uint32_t, 64> &b, uint64_t active) {
+    wave_->set_mode_raw(0xf0);
+    wave_->set_exec(active);
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+      compute_unit_->write_vgpr(base_, lane, a[lane]);
+      compute_unit_->write_vgpr(base_ + 1, lane, b[lane]);
+      compute_unit_->write_vgpr(base_ + 6, lane, 0xa55a5a5a);
+    }
+    execute(words);
+    std::array<uint32_t, 64> result{};
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+      result[lane] = compute_unit_->read_vgpr(base_ + 6, lane);
+    return result;
   }
   template <size_t N>
   uint32_t run_scalar(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b,
@@ -663,6 +682,26 @@ TEST(ValuFloatingPolicy, ReciprocalSquareRootUsesSharedMappingAcrossProfiles) {
   }
 }
 
+TEST(ValuFloatingPolicy, LogarithmUsesSharedMappingAcrossProfiles) {
+  // All profiles use the shared approximation; these raw finite witnesses
+  // have hardware qualification on RDNA3/4. LOG ignores rounding/denormal MODE.
+  const uint32_t captured[][2] = {
+      {0x3f7c0000u, 0xbcba1f74u}, {0x3f7e0001u, 0xbc396380u}, {0x3f800005u, 0x3566d4c6u},
+      {0x3f810000u, 0x3c37f286u}, {0x3f820001u, 0x3cb73d0fu}, {0x3f835d48u, 0x3d19508bu},
+      {0x3f860001u, 0x3d8759dbu},
+  };
+  for (rj_code_arch_t arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    const auto words = unary_words(arch, 2);
+    for (uint32_t ieee : {0u, 1u})
+      for (uint32_t mode = 0; mode < 16; ++mode) {
+        const uint32_t raw_mode = 0xc0u | (mode & 3u) | ((mode >> 2) << 4) | (ieee << 9);
+        for (const auto &sample : captured)
+          witness("log_f32_shared", arch, machine.run(words, sample[0], 0, 0, raw_mode), sample[1]);
+      }
+  }
+}
+
 TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
   // All profiles support F16 input denormals; the shared mapping meets the
   // stricter 0.51-ULP bound of older RDNA/CDNA profiles.
@@ -889,6 +928,106 @@ TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesReplicateBothHalves) {
     const std::array<uint32_t, 2> words = rdna4::build_vop3p(
         opcode, {.vdst = 6, .src0 = 242, .src1 = 242, .src2 = 128, .opsel_hi = 3});
     EXPECT_EQ(machine.run(words, 0), 0x40000000u);
+  }
+}
+TEST(ValuFloatingPolicy, DppFloatingSourceAbsoluteAndNegate) {
+  for (const auto arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    std::array<uint32_t, 2> words{};
+#define ADD_DPP(ARCH, ENUM)                                                                        \
+  case ENUM:                                                                                       \
+    words[0] =                                                                                     \
+        ARCH::build_vop2(ARCH::kVAddF32Vop2, {.src0 = amdgpu::SRC_DPP, .vsrc1 = 1, .vdst = 6})[0]; \
+    break;
+    switch (arch) {
+      ADD_DPP(cdna1, ROCJITSU_CODE_ARCH_CDNA1)
+      ADD_DPP(cdna2, ROCJITSU_CODE_ARCH_CDNA2)
+      ADD_DPP(cdna3, ROCJITSU_CODE_ARCH_CDNA3)
+      ADD_DPP(cdna4, ROCJITSU_CODE_ARCH_CDNA4)
+      ADD_DPP(cdna5, ROCJITSU_CODE_ARCH_CDNA5)
+      ADD_DPP(rdna1, ROCJITSU_CODE_ARCH_RDNA1)
+      ADD_DPP(rdna2, ROCJITSU_CODE_ARCH_RDNA2)
+      ADD_DPP(rdna3, ROCJITSU_CODE_ARCH_RDNA3)
+      ADD_DPP(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5)
+      ADD_DPP(rdna4, ROCJITSU_CODE_ARCH_RDNA4)
+    default:
+      FAIL();
+    }
+#undef ADD_DPP
+    for (uint32_t modifiers = 0; modifiers < 16; ++modifiers) {
+      SCOPED_TRACE(testing::Message() << "arch=" << unsigned(arch) << " modifiers=" << modifiers);
+      // Identity quad permutation. ABS precedes NEG for each floating source.
+      words[1] = 0xff000000u | (0xe4u << 8) | (modifiers << 20);
+      float a = modifiers & 2 ? 2.0f : -2.0f;
+      float b = modifiers & 8 ? 3.0f : -3.0f;
+      if (modifiers & 1)
+        a = -a;
+      if (modifiers & 4)
+        b = -b;
+      EXPECT_EQ(machine.run(words, 0xc0000000, 0xc0400000), std::bit_cast<uint32_t>(a + b));
+    }
+  }
+}
+
+// The full-active wave32 matrix was captured bit-for-bit on gfx1100 and gfx1201.
+// Every sum is exactly representable, so host rounding does not define the oracle.
+TEST(ValuFloatingPolicy, DppTrue16SelectsHalvesBeforeSourceModifiers) {
+  std::array<uint32_t, 64> a{}, b{};
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    const uint32_t step = (lane & 3) * 0x100;
+    a[lane] = ((0xc800 + step) << 16) | (0x4000 + step);
+    b[lane] = ((0x4600 + step) << 16) | (0xc000 + step);
+  }
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (uint32_t wave_size : {32u, 64u}) {
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && wave_size == 64)
+        continue;
+      for (uint32_t vgprs : {8u, 256u}) {
+        InstructionPolicyMachine machine(arch, vgprs, wave_size);
+        for (uint64_t active : {~uint64_t{0}, uint64_t{0x5555555555555555}}) {
+          for (uint32_t swap : {0u, 1u}) {
+            for (uint32_t halves = 0; halves < 8; ++halves) {
+              for (uint32_t modifiers = 0; modifiers < 16; ++modifiers) {
+                SCOPED_TRACE(testing::Message()
+                             << "arch=" << unsigned(arch) << " vgprs=" << vgprs << " wave_size="
+                             << wave_size << " active=" << active << " swap=" << swap
+                             << " halves=" << halves << " modifiers=" << modifiers);
+                const uint32_t a_shift = (halves & 1) ? 16 : 0;
+                const uint32_t b_shift = (halves & 2) ? 16 : 0;
+                const uint32_t dst_shift = (halves & 4) ? 16 : 0;
+                // V_ADD_F16 e32 and DPP16 have identical encodings on these targets.
+                const uint32_t dst = 6 + (dst_shift ? 128 : 0);
+                const uint32_t src1 = 1 + (b_shift ? 128 : 0);
+                const std::array<uint32_t, 2> words = {0x640000fau | (dst << 17) | (src1 << 9),
+                                                       0xff040000u | (modifiers << 20) |
+                                                           ((swap ? 0xb1u : 0xe4u) << 8) |
+                                                           (a_shift ? 128u : 0u)};
+                const auto got = machine.run_lanes(words, a, b, active);
+                for (uint32_t lane = 0; lane < wave_size; ++lane) {
+                  uint32_t expected = 0xa55a5a5a;
+                  if (active & (uint64_t{1} << lane)) {
+                    float av = util::f16_to_f32(a[lane ^ swap] >> a_shift);
+                    float bv = util::f16_to_f32(b[lane] >> b_shift);
+                    if (modifiers & 2)
+                      av = std::abs(av);
+                    if (modifiers & 8)
+                      bv = std::abs(bv);
+                    if (modifiers & 1)
+                      av = -av;
+                    if (modifiers & 4)
+                      bv = -bv;
+                    expected = (expected & ~(0xffffu << dst_shift)) |
+                               (uint32_t{util::f32_to_f16(av + bv)} << dst_shift);
+                  }
+                  EXPECT_EQ(got[lane], expected) << "lane=" << lane;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 } // namespace

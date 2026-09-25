@@ -4,6 +4,8 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
+#include "util/amdgpu_exp.h"
+#include "util/amdgpu_log.h"
 #include "util/amdgpu_rcp.h"
 #include "util/amdgpu_rsq.h"
 #include "util/bit.h"
@@ -531,7 +533,8 @@ inline native<float> f16_to_f32_simd(native<uint32_t> v) {
   // set bit of mant; mant is in 1..1023 (< 2^24) so the int->float cast is
   // exact and p = floor(log2(mant)) reads straight out of the f32 exponent.
   const native<float> mf = stdx::static_simd_cast<native<float>>(mant);
-  const U p = (std::bit_cast<U>(mf) >> 23) - 127u;
+  U p = (std::bit_cast<U>(mf) >> 23) - 127u;
+  stdx::where(mant == 0u, p) = 0u;
   // Scalar k = 10 - p shifts; exp_final = 1 - k = p - 9; exp field = p + 103.
   const U dn = sign31 | ((p + 103u) << 23) | (((mant << (10u - p)) & 0x3FFu) << 13);
   stdx::where(exp == 0u && mant != 0u, bits) = dn;
@@ -592,12 +595,10 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   // Denormal (fe 102..112): m' = fm|0x800000, shift right by sh=126-fe (14..24)
   // with round-to-nearest-even.
   const U mm = fm | 0x800000u;
-  // sh = 126 - fe is in [14,24] for the real denormal range (fe 102..112), but
-  // lanes with fe < 102 (flushed to zero below) yield sh up to 126. Clamp to 31
-  // so the shifts here never hit undefined/masked behaviour; those lanes are
-  // overwritten by the `fe < 102` flush, so the clamped value is discarded.
+  // Only denormal-result lanes use these shifts. Keep every lane in [14,24]
+  // so both sh and sh-1 are valid, including discarded normal/special lanes.
   U sh = 126u - fe;
-  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe < 102u || fe > 112u, sh) = 14u;
   const U drb = (mm >> (sh - 1u)) & 1u;
   const U mask_lo = (1u << (sh - 1u)) - 1u;
   U dsticky(0u);
@@ -649,7 +650,7 @@ inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
 
   const U mm = fm | 0x800000u;
   U sh = 126u - fe;
-  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe < 102u || fe > 112u, sh) = 14u;
   stdx::where(fe <= 112u, out) = sign | (mm >> sh);
 
   stdx::where(fe < 102u, out) = sign;
@@ -828,8 +829,8 @@ inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)
 /// Flush f32 denormals to sign-preserving zero (FTZ). Branchless vector port of
 /// `amdgpu::transcendental::flush_denorm_f32`: a lane with biased exponent 0 and
 /// nonzero mantissa becomes ±0 (sign preserved); every other lane (normal, Inf,
-/// NaN, ±0) passes through unchanged. AMD transcendental micro-ops always run in
-/// FTZ mode, so the f32 sqrt/exp/log SIMD ports below funnel through this.
+/// NaN, ±0) passes through unchanged. The host-arithmetic SQRT path below uses
+/// this input flush; the shared LOG/EXP mappings handle denormals internally.
 inline native<float> flush_denorm_f32_simd(native<float> v) {
   using U = native<uint32_t>;
   U b = std::bit_cast<U>(v);
@@ -839,12 +840,12 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 
 /// Vector ports of `amdgpu::transcendental::*_f32`, mirroring the scalar
 /// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
-/// forced-scalar path on every lane. RCP and RSQ use shared integer hardware mappings;
-/// the other helpers use host arithmetic with explicit NaN and FTZ handling.
+/// forced-scalar path on every lane. RCP, RSQ, LOG and EXP use shared integer
+/// hardware mappings; SQRT uses host arithmetic with explicit NaN and FTZ handling.
 /// F16 operations use promoted inputs; RSQ additionally applies the F16 input-denormal mode.
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
-// lanes (negative sqrt or log) to match the scalar refs.
+// SQRT lanes to match the scalar reference.
 inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
 
 inline native<float> rcp_f32_simd(native<float> a) {
@@ -871,21 +872,14 @@ inline native<float> sqrt_f32_simd(native<float> a) {
   return r;
 }
 
-inline native<float> log_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = stdx::log2(x); // input-flush only; scalar log_f32 has no out-flush
-  stdx::where(x < native<float>(0.0f), r) = kQNaN;
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
 }
 
-inline native<float> exp_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = flush_denorm_f32_simd(stdx::exp2(x));
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
 }
 
 /// Branchless SWAR population count over a uint32 vector. Each lane holds

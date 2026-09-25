@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/image_cube.h"
 #include "rocjitsu/vm/amdgpu/image_filter.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 
@@ -26,6 +27,8 @@ namespace rocjitsu::amdgpu {
 
 enum class ImageSampleMode { Implicit, Zero, Explicit, Bias, Derivatives, Derivatives16 };
 
+using ImageLodResults = std::array<std::array<float, 2>, 64>;
+
 inline double round_sample_fixed8(double value) {
   const double scaled = value * 256, lo = std::floor(scaled);
   const double part = scaled - lo;
@@ -38,15 +41,17 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
                                    uint32_t mask, bool d16, bool unsupported_flags,
                                    uint32_t sampler = ~0u,
                                    ImageSampleMode sample_mode = ImageSampleMode::Implicit,
-                                   bool a16 = false) {
+                                   bool a16 = false, ImageLodResults *queried_lods = nullptr) {
   const auto unsupported = [&] {
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return false;
   };
   const auto arch = wf.cu().arch();
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool query = queried_lods != nullptr;
   if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
-      unsupported_flags || (dim != 0 && dim != 1 && dim != 3 && dim != 5) || !mask)
+      unsupported_flags || (dim != 0 && dim != 1 && dim != 3 && dim != 5) || !mask ||
+      (query && (d16 || (mask & ~3u))))
     return unsupported();
   std::array<uint32_t, 8> r{};
   for (uint32_t i = 0; i < r.size(); ++i)
@@ -75,10 +80,11 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t first_layer = (r[4] >> 16) & (gfx12 ? 0x3fff : 0x1fff);
   const uint32_t last_layer = is_array ? r[4] & (gfx12 ? 0x3fff : 0x1fff) : 0;
   if ((type != 8 && type != 9 && !is_array) || (dim == 0 && type != 8) ||
-      (type == 8 && (height != 1 || swizzle)) || (!is_array && (r[4] >> 16)) || !bytes ||
+      (type == 8 && (height != 1 || (!query && swizzle))) || (!is_array && (r[4] >> 16)) ||
+      (!query && !bytes) ||
       (is_array && (first_layer > last_layer || (r[4] & (gfx12 ? 0xc000c000u : 0xe000e000u)))) ||
       first_level > last_level || last_level > max_level ||
-      (max_level && ((!is_array && r[4]) || compressed)) ||
+      (!query && max_level && ((!is_array && r[4]) || compressed)) ||
       (!d.is_load &&
        (d.image_srgb || (mask != 15 && !(mask == 1 && format >= 20 && format <= 22)))))
     return unsupported();
@@ -86,8 +92,11 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
                    last_layer - first_layer < 5))
     return unsupported();
   const uint32_t resource_width = width, resource_height = height;
+  // Queries use descriptor extents without requiring a supported memory layout.
   const auto mip =
-      image_mip_layout(gfx12, swizzle, bytes, width, height, max_level + 1, first_level);
+      query ? std::optional<ImageMipLayout>{{.width = std::max(1u, width >> first_level),
+                                             .height = std::max(1u, height >> first_level)}}
+            : image_mip_layout(gfx12, swizzle, bytes, width, height, max_level + 1, first_level);
   if (!mip)
     return unsupported();
   width = mip->width;
@@ -131,7 +140,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     perf_mip = gfx12 ? ((s[2] >> 30) | ((s[3] & 3) << 2)) : (s[1] >> 24) & 15;
     const auto supported_wrap = [](uint32_t wrap) { return wrap <= 3 || wrap == 6; };
     if (!supported_wrap(wrap_x) || !supported_wrap(wrap_y) ||
-        (s[0] & ((7u << 12) | (3u << 29) | (3u << 19))) || (s[2] & (3u << 24)) || mip_filter > 2)
+        (s[0] & ((query ? 0u : (7u << 12)) | (3u << 29) | (3u << 19))) || (s[2] & (3u << 24)) ||
+        mip_filter > 2)
       return unsupported();
     seamless_cube = dim == 3 && !(s[0] & (1u << 28));
     if (seamless_cube)
@@ -151,13 +161,14 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     // RGBA8 UNORM/sRGB and one-, two- or four-component floating-point filtering.
     const bool filterable = format == 42 || format == 13 || format == 29 || format == 57 ||
                             format == 22 || format == 50 || format == 63;
-    if (min_lod > max_lod || ((min_filter || mag_filter || mip_filter == 2) && !filterable))
+    if (min_lod > max_lod ||
+        (!query && (min_filter || mag_filter || mip_filter == 2) && !filterable))
       return unsupported();
     if (sample_mode == ImageSampleMode::Bias)
       coordinate_offset = 1;
     else if (derivatives)
       coordinate_offset = g16 ? 2 : 4;
-    if (min_filter || mag_filter || mip_filter == 2 || wrap_x == 6 || wrap_y == 6) {
+    if (!query && (min_filter || mag_filter || mip_filter == 2 || wrap_x == 6 || wrap_y == 6)) {
       if ((s[3] >> 30) == 3)
         return unsupported(); // Custom border-color tables.
       d.image_sample = std::make_unique<ImageSampleAccess>();
@@ -201,7 +212,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t pitch_field = r[4] & (gfx12 ? 0xffff : 0x3fff);
   // Word 4 describes the last accessible layer for arrays, not custom pitch.
   const uint32_t pitch = type == 9 && swizzle == 0 && pitch_field ? pitch_field + 1 : mip->pitch;
-  if (compressed) {
+  if (compressed && !query) {
     const bool depth = swizzle == 24 || swizzle == 28;
     if ((type != 9 && type != 13) || (depth && type == 13) || max_level ||
         (depth ? (bytes != 2 && bytes != 4) : (swizzle != 27 && swizzle != 31)))
@@ -253,7 +264,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
         u -= 1;
         v -= 1;
       }
-      if (dim == 5) {
+      if (dim == 5 && !query) {
         const double slice = read(coordinate_offset + 2, lane);
         if (!std::isfinite(slice))
           return unsupported();
@@ -263,6 +274,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             std::clamp(std::trunc(slice), 0.0, double(last_layer - first_layer)));
       }
       double lod = 0;
+      bool zero_footprint = false;
       uint32_t filter_count = 1;
       double sample_step_u = 0, sample_step_v = 0;
       if (sample_mode == ImageSampleMode::Explicit) {
@@ -270,7 +282,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
               lod_bias;
       } else if (sample_mode == ImageSampleMode::Zero) {
         lod = lod_bias;
-      } else if (max_level || min_filter != mag_filter || (min_filter & 2) || (mag_filter & 2)) {
+      } else if (query || max_level || min_filter != mag_filter || (min_filter & 2) ||
+                 (mag_filter & 2)) {
         double dxu, dxv, dyu, dyv;
         std::array<int, 4> gradient_rounding{};
         std::array<bool, 4> reflected_coordinates{};
@@ -356,11 +369,12 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
         const auto footprint_axes = image_footprint(dxu, dxv, dyu, dyv, normalized ? width : 1,
                                                     normalized ? height : 1, gradient_rounding);
         const auto [major_lod, minor_lod] = footprint_axes.lods;
+        zero_footprint = footprint_axes.norms[0] == 0 && footprint_axes.norms[1] == 0;
         if ((min_filter & 2) || (mag_filter & 2)) {
           lod = std::max(minor_lod, major_lod - std::countr_zero(max_anisotropy) * 256) / 256.0;
           filter_count = image_anisotropic_filter_count(footprint_axes, max_anisotropy,
                                                         aniso_threshold, aniso_bias, perf_mod);
-          if (filter_count > 1) {
+          if (filter_count > 1 && !query) {
             const auto [direction_u, direction_v] =
                 footprint_axes.direction(normalized ? width : 1, normalized ? height : 1);
             const auto unbiased_count = image_anisotropic_filter_count(
@@ -383,6 +397,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       }
       if (!std::isfinite(lod))
         return unsupported();
+      const double raw_lod = zero_footprint ? 0 : lod;
       lod = round_sample_fixed8(std::clamp(lod, min_lod, max_lod));
       const uint32_t selected_filter = lod <= 0 ? mag_filter : min_filter;
       const bool linear = selected_filter & 1;
@@ -390,6 +405,15 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
         filter_count = 1;
       lod = mip_filter ? std::clamp(lod, 0.0, double(last_level - first_level)) : 0;
       const uint32_t level = first_level + uint32_t(std::floor(lod + (mip_filter == 1 ? 0.5 : 0)));
+      if (query) {
+        double clamped_lod = level - first_level;
+        if (mip_filter == 2)
+          clamped_lod += image_mip_fraction(static_cast<uint32_t>((lod - std::floor(lod)) * 256),
+                                            perf_mip, perf_mod) /
+                         256.0;
+        (*queried_lods)[lane] = {static_cast<float>(clamped_lod), static_cast<float>(raw_lod)};
+        continue;
+      }
       if (wrap_x == 3)
         u = std::abs(u);
       if (wrap_y == 3)
@@ -558,6 +582,28 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   if (!d.is_load)
     capture_buffer_format_store(wf, d, d.dst_reg_base);
   return true;
+}
+
+/// Compute LODs before writing any lane: VDATA may alias quad coordinates,
+/// including coordinates supplied by lanes outside EXEC.
+inline void execute_image_lod(Wavefront &wf, uint32_t resource, uint32_t sampler, uint32_t data,
+                              std::array<uint32_t, 7> coords, uint32_t dim, uint32_t mask, bool d16,
+                              bool unsupported_flags, bool a16) {
+  VectorMemState state(GLOBAL_MEM);
+  state.is_load = true;
+  ImageLodResults results{};
+  if (!prepare_image_transfer(wf, state, resource, data, coords, dim, mask, d16, unsupported_flags,
+                              sampler, ImageSampleMode::Implicit, a16, &results))
+    return;
+  RegisterAccess regs(wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(wf.exec() & (uint64_t{1} << lane)))
+      continue;
+    uint32_t dst = wf.vgpr_alloc().base + data;
+    for (uint32_t component = 0; component < 2; ++component)
+      if (mask & (1u << component))
+        regs.write_vgpr(dst++, lane, std::bit_cast<uint32_t>(results[lane][component]));
+  }
 }
 
 } // namespace rocjitsu::amdgpu

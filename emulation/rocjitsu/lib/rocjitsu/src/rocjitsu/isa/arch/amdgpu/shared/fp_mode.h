@@ -726,6 +726,24 @@ inline float apply_omod_f32(float value, uint32_t omod) {
   return value;
 }
 
+/// @brief Scale an already rounded half result represented in F32.
+/// @details Preserve NaNs, flush input subnormals, and round scaling to F16.
+inline float apply_omod_f16(float value, uint32_t omod, bool fp16_ovfl) {
+  if (omod == 0)
+    return value;
+  const uint32_t magnitude = std::bit_cast<uint32_t>(value) & 0x7fffffffu;
+  if (magnitude > 0x7f800000u)
+    return value;
+  if (magnitude < 0x38800000u)
+    return 0.0f;
+  // A half value scaled by a power of two is exact in F32, including infinity.
+  value *= omod == 3 ? 0.5f : omod == 2 ? 4.0f : 2.0f;
+  uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
+  if ((result & 0x7c00u) == 0)
+    result &= 0x8000u;
+  return util::f16_to_f32(result);
+}
+
 inline double finalize_omod_f64(double value, uint32_t omod) {
   if (omod == 0)
     return value;
@@ -793,17 +811,27 @@ inline Float arithmetic(Float lhs, Float rhs, Float addend, uint32_t round_mode,
                                                    detail::evaluate_arithmetic<operation, Float>);
 }
 
-/// @brief F32 FMA combines MODE arithmetic with architecture-specific NaN selection.
+/// @brief F32 arithmetic combines MODE with architectural NaN and tininess policies.
 template <Arithmetic operation>
 inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
                         uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
                         bool force_output_flush = false) {
-  static_assert(operation == Arithmetic::FMA || operation == Arithmetic::FMA_DX9_ZERO);
+  static_assert(operation == Arithmetic::ADD || operation == Arithmetic::MUL ||
+                operation == Arithmetic::FMA || operation == Arithmetic::FMA_DX9_ZERO);
   // DX9 FMA flushes all inputs and the output, independently of MODE.
   if constexpr (operation == Arithmetic::FMA_DX9_ZERO)
     denorm_mode = 0;
   return detail::arithmetic_with_policy<operation>(
       lhs, rhs, addend, round_mode, denorm_mode, [=](float a, float b, float c) {
+        // Exact FMA forms preserve binary arithmetic's rounding, NaN order,
+        // signed zeros and tininess detection before exponent packing.
+        if constexpr (operation == Arithmetic::ADD) {
+          c = b;
+          b = 1.0f;
+        } else if constexpr (operation == Arithmetic::MUL) {
+          c = std::bit_cast<float>((std::bit_cast<uint32_t>(a) ^ std::bit_cast<uint32_t>(b)) &
+                                   0x80000000u);
+        }
         if constexpr (operation == Arithmetic::FMA_DX9_ZERO)
           if ((std::bit_cast<uint32_t>(a) & 0x7fffffffu) == 0 ||
               (std::bit_cast<uint32_t>(b) & 0x7fffffffu) == 0) {

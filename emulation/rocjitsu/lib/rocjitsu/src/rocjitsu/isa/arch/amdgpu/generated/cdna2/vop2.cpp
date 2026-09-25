@@ -39,6 +39,8 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -112,6 +114,8 @@ VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -182,6 +186,8 @@ VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -253,6 +259,8 @@ VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -324,6 +332,8 @@ VFmacF64Vop2::VFmacF64Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -372,6 +382,8 @@ VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -443,6 +455,8 @@ VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -515,6 +529,8 @@ VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -588,6 +604,8 @@ VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -660,6 +678,8 @@ VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -732,6 +752,8 @@ VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -802,6 +824,8 @@ VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -872,6 +896,8 @@ VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -942,6 +968,8 @@ VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1012,6 +1040,8 @@ VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1082,6 +1112,8 @@ VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1153,6 +1185,8 @@ VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1226,6 +1260,8 @@ VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1299,6 +1335,8 @@ VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1371,6 +1409,8 @@ VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1441,6 +1481,8 @@ VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1511,6 +1553,8 @@ VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1580,6 +1624,8 @@ VMacF32Vop2::VMacF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -1713,6 +1759,8 @@ VAddCoU32Vop2::VAddCoU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1788,6 +1836,8 @@ VSubCoU32Vop2::VSubCoU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1863,6 +1913,8 @@ VSubrevCoU32Vop2::VSubrevCoU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -1941,6 +1993,8 @@ VAddcCoU32Vop2::VAddcCoU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2019,6 +2073,8 @@ VSubbCoU32Vop2::VSubbCoU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2097,6 +2153,8 @@ VSubbrevCoU32Vop2::VSubbrevCoU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2172,6 +2230,8 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2249,6 +2309,8 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2327,6 +2389,8 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2405,6 +2469,8 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2481,6 +2547,8 @@ VMacF16Vop2::VMacF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -2634,6 +2702,8 @@ VAddU16Vop2::VAddU16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2711,6 +2781,8 @@ VSubU16Vop2::VSubU16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2789,6 +2861,8 @@ VSubrevU16Vop2::VSubrevU16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2868,6 +2942,8 @@ VMulLoU16Vop2::VMulLoU16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -2947,6 +3023,8 @@ VLshlrevB16Vop2::VLshlrevB16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3027,6 +3105,8 @@ VLshrrevB16Vop2::VLshrrevB16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3107,6 +3187,8 @@ VAshrrevI16Vop2::VAshrrevI16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3186,6 +3268,8 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3263,6 +3347,8 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3340,6 +3426,8 @@ VMaxU16Vop2::VMaxU16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3417,6 +3505,8 @@ VMaxI16Vop2::VMaxI16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3494,6 +3584,8 @@ VMinU16Vop2::VMinU16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3571,6 +3663,8 @@ VMinI16Vop2::VMinI16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3648,6 +3742,8 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3725,6 +3821,8 @@ VAddU32Vop2::VAddU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3795,6 +3893,8 @@ VSubU32Vop2::VSubU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3866,6 +3966,8 @@ VSubrevU32Vop2::VSubrevU32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -3936,6 +4038,8 @@ VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -3984,6 +4088,8 @@ VDot2cI32I16Vop2::VDot2cI32I16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4032,6 +4138,8 @@ VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4080,6 +4188,8 @@ VDot8cI32I4Vop2::VDot8cI32I4Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4128,6 +4238,8 @@ VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4178,6 +4290,8 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
@@ -4249,6 +4363,8 @@ VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);
+    dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);

@@ -137,6 +137,7 @@ private:
   std::optional<Literal32Widening> literal32_widening_;
   bool packed_16bit_source_ = false;
   bool packed_16bit_dst_ = false;
+  std::optional<uint32_t> resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const;
 };
 
 } // namespace rdna3
