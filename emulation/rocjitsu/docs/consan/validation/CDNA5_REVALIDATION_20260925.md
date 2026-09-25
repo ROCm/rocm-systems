@@ -462,3 +462,17 @@ the observed MXF4 inventory: a 256 MiB cap admits all 152,288,376 required bytes
 and all publication-event slots, while the unchanged default still rejects it.
 This host test binary contains no HsaHooksUnitTest suite; hook/E2E confirmation
 is pending the safe rebuild after the active Tensile workload completes.
+
+### Cluster-load/sync dependency review
+
+Both maintained clean profiles pass (`filtered-clean/pytorch-cluster-load-sync`).
+The fresh barrier ELF `3e2955ef8a5cb650` contains one `ds_store_b32 v1,v2` and
+one `ds_load_b32 v1,v1`. Between them, the address VGPR is unchanged. It is
+`4 * (32 * wave_id + lane_id)` masked to the CTA's 256-element LDS region;
+each lane owns its slot. The source stores and reloads the same blocked layout
+without redistribution. The companion clustered copy kernel only reads/writes
+global memory, also without a producer/consumer handoff. Dropping the cluster
+or workgroup barriers therefore does not create an inter-wave LDS race in
+this workload. Its yellow cells now explain this instead of promising an
+unreviewed barrier fault. No synthetic barrier-drop result is counted as a
+false negative or detection qualification.
