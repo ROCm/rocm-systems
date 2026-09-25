@@ -599,3 +599,29 @@ and the 64-wide launch necessarily executes the first reduction iteration.
 The spec removes this pair only and predeclares eight trials per mode.
 Evidence: `norm-reduce-pristine.asm`, `norm-review-images`, and
 `discovery-pytorch-matched/pytorch-norm-softmax/trace-0/hocher/373598_kernel_trace.csv`.
+
+### MXF4 mismatch localized to the wrong LDS address bank
+
+The report-word watchpoint catches solution 6 (MT256x256x256), wave 3, writing
+marker one at runtime PC `0x7fef9adf2de0`. Its kernel descriptor is at
+`0x7fef9ac19dc0`; the matching retained ELF descriptor is VMA `0x19dc0`, so
+the report write is VMA `0x1f2de0`. The preceding instrumented sequence is:
+original `ds_load_b128 v[550:553], v548` under bank mode `0x82`, then reset
+to bank zero and replay `ds_load_b128 v[0:3], v36`. The first comparison
+therefore compares data fetched using different address registers. This is a
+ConSan false positive; the replay must preserve the original address bank
+while keeping scratch destinations in bank zero. Evidence:
+`mxf4-watch6-registers-gdb.log`, `mxf4-watch6-symbols.txt`, and
+`mxf4-first-mismatch.asm`. A source repair and regression test are next.
+
+### CPU contention and TP1 high timeout
+
+TP1 prefill high clean passes. Five admitted/reached fault trials have no
+detection; trial six exceeds its 60-second deadline before admission, so
+this is not an eight-trial result. Host load exceeded 300 on 32 CPUs while
+RAM remained below 28 GiB. The memory cap alone does not bound CPU contention.
+The external `fault-cpu-steward.py` now admits at most two whole fault bundles,
+holding other supervising CLIs between trials while already spawned children
+finish normally. Its PID/state file records every held process, and its final
+cleanup resumes held CLIs. No physical-GPU lock is changed. Retry affected
+batches under lower contention before interpreting timeout results.
