@@ -877,7 +877,6 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // the per-node `gpus_per_node` is what the config requests.
     let mut sim = serde_json::json!({
         "max_ticks": 100000u64,
-        "num_threads": 1u32,
     });
     merge_config(
         &mut sim,
@@ -892,9 +891,9 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // would quietly outrank `--exec-mode`. Functional and clocked are
     // different runs with different results; the profile decides, and
     // this is asserted after both merges so nothing can take it back.
-    // `max_ticks` and `num_threads` are seeded above instead, where a
-    // document may still override them: they are defaults mirage has no
-    // opinion about, not a claim about how the session runs.
+    // `max_ticks` is seeded above instead, where a document may still
+    // override it: it is a default mirage has no opinion about, not a
+    // claim about how the session runs.
     if let Some(map) = sim.as_object_mut() {
         map.insert("exec_mode".to_string(), exec_mode.into());
     }
@@ -1882,6 +1881,24 @@ mod tests {
     }
 
     #[test]
+    fn single_gpu_builtin_keeps_native_thread_policy_unpinned() {
+        let mut def = def_with_gpus(1);
+        if let MaybeRef::Owned(topology) = &mut def.topology {
+            topology.agent = MaybeRef::Owned(
+                mirage_builtin::agents::agent("mi350x").expect("builtin mi350x agent"),
+            );
+        }
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let allocations = json["thread_allocations"].as_array().unwrap();
+
+        assert!(json.get("num_threads").is_none());
+        assert!(allocations.iter().any(|choice| choice["num_threads"] == 8));
+    }
+
+    #[test]
     fn unknown_target_has_no_implicit_thread_policy() {
         let SimConfig::Synthesised(bytes) = resolve_sim_config(&def_with_gpus(1)).unwrap() else {
             panic!("expected generated config");
@@ -2001,8 +2018,8 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
         };
         let default = decode(&def);
-        assert_eq!(default["num_threads"], 1);
         for key in [
+            "num_threads",
             "cpu_dispatch_threads",
             "cpu_thread_budget",
             "async_helper_threads",
