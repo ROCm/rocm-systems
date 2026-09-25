@@ -29,6 +29,13 @@ downstream consumer of the library.
   headers under their own subdirectory, mirroring the language-scoped
   layout other public interfaces (e.g. a future C ABI) will use.
 
+### Fixed
+
+- `storage_t::get_storage_version()` now reads the schema version actually
+  stamped in the opened trace's `rocpd_metadata` table, instead of returning
+  the profiler-hub library's own version (which can legitimately differ from
+  the trace's schema version).
+
 ## [0.2.0] - 2026-09-02
 
 ### Added
