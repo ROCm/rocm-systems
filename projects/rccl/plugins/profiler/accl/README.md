@@ -69,7 +69,9 @@ The last line of every file is a summary, written on every clean finalize:
 ```json
 {"summary": {"dropped_collectives": 0, "leaked_collectives": 0,
              "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
-             "overflow_proxy_ops": 0, "coll_pool_size": 256,
+             "overflow_proxy_ops": 0,
+             "outstanding_proxy_ops": 0, "outstanding_proxy_steps": 0,
+             "coll_pool_size": 256,
              "proxy_op_pool_size": 1024, "proxy_step_pool_size": 4096,
              "max_proxy_ops_per_coll": 256, "complete": true}}
 ```
@@ -81,7 +83,15 @@ The last line of every file is a summary, written on every clean finalize:
   proxy step pool; the affected records understate the proxy decomposition.
 - `overflow_proxy_ops` — the op completed, but its collective already held
   `max_proxy_ops_per_coll` ops, so its timings were discarded.
-- `complete` — false if any of the five counters is non-zero. **A file with no
+- `outstanding_proxy_ops` / `outstanding_proxy_steps` — still held at finalize
+  because their stop had not arrived. Their slots are deliberately *not*
+  reclaimed: proxy events are delivered straight from the proxy progress thread,
+  which is shared across communicators and can outlive one comm's teardown, so
+  releasing them could free the context under a live caller. The context is
+  freed by whichever stop arrives last; if none ever does, one fixed-size
+  context per affected communicator is retained until the process exits. The
+  output file is always closed at finalize, so no descriptor is held.
+- `complete` — false if any of the seven counters is non-zero. **A file with no
   summary line at all means the process did not reach finalize**, so its data is
   also suspect.
   `accl_report.py` warns on stderr in both cases; do not compare an incomplete run
