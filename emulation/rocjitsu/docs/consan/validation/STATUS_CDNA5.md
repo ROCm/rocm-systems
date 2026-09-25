@@ -47,7 +47,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟧 clean numerics pass; cross-wave tensor-DMA producers absent from LDS coverage | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟧 clean numerics pass; 8 tensor-DMA accesses lack modeled LDS ranges | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 4 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 default: all 3 clean shards pass at 1800 s; tensor-DMA producer coverage under review | 🟧 delay-zero: 2/3 clean shards pass; third hits the 300 s client deadline |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |

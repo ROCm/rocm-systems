@@ -1309,3 +1309,13 @@ analysis and healthy checks, then stops after the third attempt times out at
 not an admitted detector miss. `norm-cap-high-long` reruns matching clean and
 the full eight-trial batch with a 240 s deadline and fresh artifact roots.
 The table reports the completed 2/2 fraction without claiming qualification.
+
+### Sparse FP16 tensor-DMA transpose coverage audit
+
+`tdm-default-coverage-audit/tensile-spmm-tdm-f16-transposes` exits zero
+and validates seven numerical rows across four passing clients. With the
+updated inventory accounting, every applicable code object reports 184
+discovered accesses: 168 supported/patched and 16 unsupported tensor-DMA
+accesses. Dynamic evidence is complete, but static analysis is incomplete.
+The Default cell changes from yellow to orange for missing range support.
+This does not claim a numerical regression or a completed fault campaign.
