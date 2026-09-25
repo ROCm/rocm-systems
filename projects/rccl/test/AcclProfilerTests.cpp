@@ -119,15 +119,35 @@ static std::string ProfilerDirRoot(const ScopedProfilerDir& dir) {
     return inherited ? std::string(inherited) : dir.path();
 }
 
-// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
-// Must be called inside the isolated child, since the filename embeds its pid.
-static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
+// The path the plugin writes for `commHashHex` under `dir`. Must be called
+// inside the isolated child, since the filename embeds its pid.
+static std::string ProfilerOutputPath(const char* dir, const char* commHashHex) {
     char hostname[256] = {0};
     gethostname(hostname, sizeof(hostname) - 1);
     char path[1024];
     snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
              dir, hostname, (int)getpid(), commHashHex);
-    std::ifstream ifs(path);
+    return std::string(path);
+}
+
+// Number of currently-open descriptors pointing at `path`, via /proc/self/fd.
+// Used to observe the FILE* itself rather than a proxy for it.
+static int OpenFdCountFor(const std::string& path) {
+    int n = 0;
+    std::error_code ec;
+    std::filesystem::directory_iterator it("/proc/self/fd", ec);
+    if (ec) return -1;
+    for (const auto& entry : it) {
+        std::error_code lec;
+        const auto target = std::filesystem::read_symlink(entry.path(), lec);
+        if (!lec && target.string() == path) n++;
+    }
+    return n;
+}
+
+// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
+static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
+    std::ifstream ifs(ProfilerOutputPath(dir, commHashHex));
     if (!ifs.good()) return std::string();
     std::stringstream ss;
     ss << ifs.rdbuf();
@@ -350,14 +370,8 @@ TEST(AcclProfilerInit, EmptyOutputDirFallsBackToTmp) {
 
             // No ScopedProfilerDir owns /tmp, so remove our own file. The name
             // carries this pid and the comm hash, so nothing else can match.
-            char host[256] = {0};
-            gethostname(host, sizeof(host) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                     "/tmp/accl_profiler_rank0_%s_pid%d_0xd113.jsonl",
-                     host, (int)getpid());
             std::error_code ec;
-            std::filesystem::remove(path, ec);
+            std::filesystem::remove(ProfilerOutputPath("/tmp", "0xd113"), ec);
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", ""}}
     );
@@ -1291,6 +1305,88 @@ static void DriveProxyOpWithTimings(void* ctx, void* coll, int isSend,
         usleep(2000);
     }
     ASSERT_EQ(acclPluginStopEvent(step), 0);
+}
+
+// A proxy op or step still held at finalize keeps the context alive, and must:
+// that handle may still be delivered, since proxy events come straight from the
+// proxy progress thread, which is shared via comm->sharedRes and outlives one
+// comm's teardown. So the loss cannot be reclaimed -- it has to be REPORTED,
+// or a run that silently dropped proxy timing reads as clean. Three kinds never
+// reach acclFreeProxyOp/acclFreeProxyStep on their own: an op with no
+// collective parent, an op whose stop never arrives (coll->proxyOpIndices is
+// filled at op STOP, so the coll drain cannot see it), and any unstopped step.
+//
+// The output descriptor is a shared process limit rather than a fixed per-comm
+// cost, so it is released at finalize even though the context is not.
+TEST(AcclProfilerLifecycle, OutstandingProxyEventsAreReportedAtFinalize) {
+    ScopedProfilerDir dir("orphanproxy");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.OutstandingProxyEventsAreReportedAtFinalize",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D5, &mask, "orphan_proxy_test",
+                                     1, 8, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 41, 1);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+
+            ncclProfilerEventDescr_v5_t od;
+            memset(&od, 0, sizeof(od));
+            od.type = ncclProfileProxyOp;
+            od.parentObj = coll;
+            od.proxyOp.channelId = 0;
+            od.proxyOp.nSteps = 1;
+            od.proxyOp.isSend = 1;
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+
+            // The same op with no collective parent: in no index list at all.
+            od.parentObj = nullptr;
+            void* parentlessOp = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &parentlessOp, &od), 0);
+            ASSERT_NE(parentlessOp, nullptr);
+
+            ncclProfilerEventDescr_v5_t sd;
+            memset(&sd, 0, sizeof(sd));
+            sd.type = ncclProfileProxyStep;
+            sd.parentObj = op;
+            sd.proxyStep.step = 0;
+            void* step = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+            ASSERT_NE(step, nullptr);
+
+            // Deliberately no stop for any of the three.
+            const std::string path = ProfilerOutputPath(dir.c_str(), "0xd1d5");
+            ASSERT_EQ(OpenFdCountFor(path), 1)
+                << "plugin did not open " << path;
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            EXPECT_EQ(OpenFdCountFor(path), 0)
+                << "output file still open after finalize: a context held by an "
+                   "outstanding proxy event would hold the descriptor forever";
+
+            const std::string summary = ReadSummaryLine(dir.c_str(), "0xd1d5");
+            ASSERT_FALSE(summary.empty());
+            EXPECT_EQ(JsonNumber(summary, "outstanding_proxy_ops"), 2.0);
+            EXPECT_EQ(JsonNumber(summary, "outstanding_proxy_steps"), 1.0);
+            // The loss has to reach the consumer; it cannot be reclaimed.
+            EXPECT_NE(summary.find("\"complete\":false"), std::string::npos);
+
+            // The other half of the contract: those handles are still live, so
+            // their late stops must find a context, not freed memory. Each
+            // releases its reference, and the last one tears the context down.
+            EXPECT_EQ(acclPluginStopEvent(step), 0);
+            EXPECT_EQ(acclPluginStopEvent(op), 0);
+            EXPECT_EQ(acclPluginStopEvent(parentlessOp), 0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
 }
 
 TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {

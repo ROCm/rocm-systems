@@ -176,12 +176,15 @@ def print_drop_warnings(summaries: List[dict]):
     total_dropped_ops = sum(s.get('dropped_proxy_ops', 0) for s in summaries)
     total_dropped_steps = sum(s.get('dropped_proxy_steps', 0) for s in summaries)
     total_overflow_ops = sum(s.get('overflow_proxy_ops', 0) for s in summaries)
+    total_outstanding_ops = sum(s.get('outstanding_proxy_ops', 0) for s in summaries)
+    total_outstanding_steps = sum(s.get('outstanding_proxy_steps', 0) for s in summaries)
     # `complete` is the plugin's own verdict and covers every counter it tracks,
     # including any added later; trust it over the counters we happen to read.
     # Pre-`complete` files have no flag, so absence must not read as incomplete.
     any_incomplete = any(not s.get('complete', True) for s in summaries)
     if not (any_incomplete or total_dropped or total_leaked
-            or total_dropped_ops or total_dropped_steps or total_overflow_ops):
+            or total_dropped_ops or total_dropped_steps or total_overflow_ops
+            or total_outstanding_ops or total_outstanding_steps):
         return
     print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
           f"dropped (coll pool exhausted, "
@@ -189,7 +192,9 @@ def print_drop_warnings(summaries: List[dict]):
           f"{total_leaked} slots leaked (teardown-skipped kernel events), "
           f"{total_dropped_ops} proxy ops dropped, "
           f"{total_dropped_steps} proxy steps dropped, "
-          f"{total_overflow_ops} proxy ops discarded (per-collective limit). "
+          f"{total_overflow_ops} proxy ops discarded (per-collective limit), "
+          f"{total_outstanding_ops} proxy ops and {total_outstanding_steps} proxy "
+          f"steps still outstanding at finalize. "
           f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
 
 
