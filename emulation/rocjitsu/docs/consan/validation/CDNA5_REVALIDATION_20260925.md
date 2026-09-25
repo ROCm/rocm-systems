@@ -1557,3 +1557,12 @@ Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*` pass: 1,026 passe
 two existing live-inventory tests skipped (`tensor-address-dword-tests.log`).
 That includes all 40 selected tensor-DMA emulator tests and the full ConSan
 suite.
+
+### F8 GEMM high qualifies on the complete workload
+
+`f8gemm-full-high-recovery-clean` completes all nine maintained problem-size
+shards at high. Every client exits zero with accepted, complete coverage; each
+shard checks 12 numeric rows. Together with the matching retained fault-shard
+clean run and the prior eight admitted/reached high detections, this qualifies
+the row green at high. Default previously detected 0/8. The queued HGEMM
+full-high clean campaign can now use the released worker slots.
