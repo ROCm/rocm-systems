@@ -126,19 +126,19 @@ Panel Config:
       metric:
         LDS Load Requests:
           value: ROUND(SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom), 0)
-          unit: (Wavefronts + $normUnit)
+          unit: (Requests + $normUnit)
         LDS Store Requests:
           value: ROUND(SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom), 0)
-          unit: (Wavefronts + $normUnit)
+          unit: (Requests + $normUnit)
         LDS Atomic Requests:
           value: ROUND(SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom), 0)
-          unit: (Wavefronts + $normUnit)
+          unit: (Requests + $normUnit)
         Async Load Requests:
           value: ROUND(SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom), 0)
-          unit: (Wavefronts + $normUnit)
+          unit: (Requests + $normUnit)
         Async Store Requests:
           value: ROUND(SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom), 0)
-          unit: (Wavefronts + $normUnit)
+          unit: (Requests + $normUnit)
         LDS Utilization:
           value: ROUND(100 * SUM(TX_VMW_LDS_INPUT_ACTIVE_sum) / SUM(TX_VMW_VMW_BUSY_sum), 0)
           unit: Percent
