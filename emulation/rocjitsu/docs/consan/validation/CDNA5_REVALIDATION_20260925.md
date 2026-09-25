@@ -1054,3 +1054,12 @@ allowlist SHA256 `2777a4f8c8de649bdd002d83cd5a325ed3afa57f853a33ca85593c61bd6ed2
 This refreshes the green cell against the shared hook containing the lifetime
 fixes. The tensor-DMA inventory change is still a separate build and is not
 claimed by this result. Tree requalification follows in the same queue.
+
+### Tree atomic-OR requalified after lifetime fixes
+
+`tree-current-high-clean` passes baseline and high correctness with complete
+coverage. `tree-current-high-fault` detects all 8 admitted/reached producer-release
+faults. Every trial records high, complete analysis, and healthy pre/post checks.
+Clean and fault hook/allowlist hashes match. The green cell is now refreshed
+against the same lifetime-fixed shared hook used for D128-block requalification;
+the separately building tensor-DMA inventory change is not included.
