@@ -52,6 +52,7 @@ CONST_VERSION_INFO = {
 PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
 DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
+STATS_OUTPUT_FORMATS = ("csv", "json")
 
 
 class dotdict(dict):
@@ -123,6 +124,36 @@ def warn_deprecated_output_formats(output_formats):
             "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
             "output is needed."
         )
+
+
+def warn_unsupported_stats_output_formats(stats_enabled, output_formats):
+    if not stats_enabled:
+        return
+
+    requested_formats = list(
+        dict.fromkeys(
+            str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
+        )
+    )
+    if any(itr in STATS_OUTPUT_FORMATS for itr in requested_formats):
+        return
+
+    if "rocpd" in requested_formats:
+        recovery = (
+            "use `rocpd summary -i <database>.db` to generate statistics from the "
+            "rocpd database"
+        )
+    else:
+        recovery = (
+            "add `--output-format rocpd` and use `rocpd summary -i <database>.db` to "
+            "generate statistics from the rocpd database"
+        )
+
+    warning(
+        f"--stats has no effect for the requested output format(s) "
+        f"{', '.join(requested_formats)}; {recovery}. Direct csv and json output also "
+        "support --stats."
+    )
 
 
 def format_help(formatter, w=120, h=40):
@@ -1802,6 +1833,7 @@ def run(app_args, args, **kwargs):
     effective_output_formats.extend(
         re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
     )
+    warn_unsupported_stats_output_formats(args.stats, effective_output_formats)
     if args.hipfile_trace or args.rocshmem_trace:
         warn_deprecated_output_formats(effective_output_formats)
 
