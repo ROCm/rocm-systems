@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/consan/consan_packed_fields.h"
 #include "rocjitsu/code/patch/consan/consan_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -386,8 +387,9 @@ using detail::WorkitemOwnerDerivationPlan;
   const uint32_t low_literal = static_cast<uint32_t>(
       watchpoint::valid_mask | (static_cast<uint64_t>(kind) << watchpoint::access_kind_shift) |
       generation_field);
-  const uint32_t encoded_byte_count = encode_byte_count(access_range.byte_width)
-                                      << (watchpoint::count_shift - 32u);
+  const bool tensor = access_range.geometry == AccessRangeGeometry::TensorDescriptor;
+  const uint32_t encoded_byte_count =
+      tensor ? 0u : encode_byte_count(access_range.byte_width) << (watchpoint::count_shift - 32u);
   const uint32_t encoded_generation_high = static_cast<uint32_t>(generation_field >> 32u);
   const uint64_t entry_address = plan.supercollider_report_buffer_address +
                                  plan.watchpoints_offset +
@@ -466,7 +468,9 @@ using detail::WorkitemOwnerDerivationPlan;
                                            : std::nullopt,
                                        errors, guest_instruction_word_count))
       return std::nullopt;
-    if (!append_lds_wait(words, arch))
+    if (tensor)
+      words.push_back(build_sopp_encoding(arch, cdna5::kSWaitTensorcntSopp, 0));
+    else if (!append_lds_wait(words, arch))
       return std::nullopt;
   }
 
@@ -485,6 +489,57 @@ using detail::WorkitemOwnerDerivationPlan;
       instrumentation::build_s_cselect_b32(publication_scc_save_sgpr, scalar_positive_inline_u32(1),
                                            scalar_positive_inline_u32(0), arch),
       instrumentation::build_s_mov_b64(selection_vcc_save_sgpr, kAmdGpuVccLo, arch));
+  if (tensor) {
+    const uint16_t address = plan.scratch_vgpr + plan.base_scratch_vgpr_count;
+    const uint16_t count = address + 1u;
+    const uint16_t hash = plan.scratch_vgpr + 5u;
+    const uint16_t iteration_hash = plan.scratch_vgpr + 6u;
+    // Hash each wave/lane/epoch independently of the eventual retention bank.
+    // The final full-width mixing restores the high bit masked by the bucket
+    // helper, so mul_hi can select positions across the complete tile.
+    require_emission(append_identity_hash(words, plan.dispatch_id, plan.workgroup_sources,
+                                          owner_vgpr, 0x80000000u, hash, tmp_vgpr, high_vgpr, arch),
+                     "ConSan tensor probe could not seed its element selection");
+    sequence.append(
+        instrumentation::build_v_mbcnt_lo_u32_b32(tmp_vgpr, kScalarInlineNegativeOneOperand,
+                                                  scalar_positive_inline_u32(0), arch),
+        instrumentation::build_v_xor_b32(hash, vector_source_vgpr(tmp_vgpr), hash, arch),
+        instrumentation::build_v_xor_b32(hash, vector_source_vgpr(*plan.owner_epoch_vgprs.epoch),
+                                         hash, arch),
+        instrumentation::build_v_mul_lo_u32_literal(hash, tmp_vgpr, 0x9e3779b9u, hash, arch),
+        instrumentation::build_v_lshrrev_b32(tmp_vgpr, scalar_positive_inline_u32(16), hash, arch),
+        instrumentation::build_v_xor_b32(hash, vector_source_vgpr(tmp_vgpr), hash, arch),
+        instrumentation::build_v_mul_lo_u32_literal(iteration_hash, tmp_vgpr, 0x85ebca6bu, hash,
+                                                    arch));
+    require_emission(
+        append_select_tensor_load_element(words, candidate.site(), hash, iteration_hash, address,
+                                          count, plan.scratch_vgpr, arch) &&
+            append_materialize_tensor_load_lds_address(words, candidate.site(), address, address,
+                                                       plan.scratch_vgpr, arch),
+        "ConSan tensor probe could not select a descriptor element");
+    sequence
+        .append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), count, arch))
+        .branch(restore_label, InstructionSequence::BranchKind::VccZero);
+    // Tensor completion can also signal an LDS atomic barrier. Until its
+    // ordering edge is modeled, record incomplete synchronization explicitly.
+    const uint16_t descriptor = (*candidate.site().operands.tensor_descriptor_sgprs)[1];
+    const auto ordinary_completion = sequence.make_label();
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, descriptor, arch));
+    sequence
+        .append(
+            instrumentation::build_v_and_b32_literal(tmp_vgpr, 1u << 18u, tmp_vgpr, arch),
+            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch))
+        .branch(ordinary_completion, InstructionSequence::BranchKind::VccNonzero);
+    require_emission(
+        append_atomic_fetch_add_one_u32(words,
+                                        plan.supercollider_report_buffer_address +
+                                            offsetof(ReportHeader, unsupported_sync_count),
+                                        tmp_vgpr, plan.scratch_vgpr, arch),
+        "ConSan tensor probe could not report unmodeled completion");
+    sequence.branch(restore_label, InstructionSequence::BranchKind::Unconditional)
+        .bind_label(ordinary_completion);
+    lds_byte_offset_vgpr = address;
+  }
   // Publication has several nested EXEC-narrowing paths. Some paths reuse the
   // publication-save pair after an earlier narrowing, so that pair is not a
   // reliable copy of the guest mask at the common exit. Keep the otherwise
@@ -715,6 +770,22 @@ using detail::WorkitemOwnerDerivationPlan;
                               high_vgpr,
                               scalar_positive_inline_u32(watchpoint::start_byte_shift - 32u),
                               effective_lds_byte_offset_vgpr, arch));
+  if (tensor) {
+    const uint16_t descriptor = (*candidate.site().operands.tensor_descriptor_sgprs)[1];
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, descriptor, arch));
+    sequence.append(instrumentation::build_v_lshrrev_b32(tmp_vgpr, scalar_positive_inline_u32(16),
+                                                         tmp_vgpr, arch),
+                    instrumentation::build_v_and_b32_literal(tmp_vgpr, 3u, tmp_vgpr, arch));
+    // Reuse the tile-count temporary after the inactive-descriptor gate.
+    const uint16_t width = plan.scratch_vgpr + plan.base_scratch_vgpr_count + 1u;
+    words.push_back(build_v_mov_b32_e32(width, scalar_positive_inline_u32(1), arch));
+    sequence.append(
+        instrumentation::build_v_lshlrev_b32(width, vector_source_vgpr(tmp_vgpr), width, arch),
+        instrumentation::build_v_add_u32_literal(width, 0xffffffffu, width, arch),
+        instrumentation::build_v_lshlrev_b32(
+            width, scalar_positive_inline_u32(watchpoint::count_shift - 32u), width, arch),
+        instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(width), high_vgpr, arch));
+  }
   require_emission(append_add_literal_field(words, high_vgpr,
                                             encoded_byte_count | encoded_generation_high, tmp_vgpr,
                                             arch),
@@ -858,6 +929,48 @@ build_direct_watchpoint_words(std::span<const uint8_t> bytes, const Candidate &c
   }
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
+  const bool tensor =
+      candidate.site().lowering.form &&
+      candidate.site().lowering.form->kind == AccessLoweringFormKind::TensorDescriptor;
+  const uint16_t tensor_exec_archive = plan.scratch_vgpr + plan.base_scratch_vgpr_count + 2u;
+  if (tensor) {
+    const auto uniform_source = [](const WorkgroupSource &source) {
+      return source.is_well_formed() && !source.vector_src && !source.private_offset;
+    };
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 || candidate.site().kind != LdsAccessKind::Write ||
+        !plan.dispatch_id.is_well_formed() || plan.dispatch_id.private_offset ||
+        !plan.workgroup_sources.x.scalar_src || !uniform_source(plan.workgroup_sources.x) ||
+        !uniform_source(plan.workgroup_sources.y) || !uniform_source(plan.workgroup_sources.z) ||
+        !uniform_source(plan.workgroup_sources.cluster_workgroup_id) ||
+        !plan.tensor_full_wave_resources || !plan.persistent_sgprs.complete() ||
+        !plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch ||
+        plan.automatic_private_epoch || plan.spill_backed_operand_recovery ||
+        !candidate.site().operands.tensor_descriptor_sgprs ||
+        static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count > 256u ||
+        *plan.owner_epoch_vgprs.owner <= tensor_exec_archive ||
+        *plan.owner_epoch_vgprs.epoch <= tensor_exec_archive ||
+        *plan.owner_epoch_vgprs.owner >= plan.scratch_vgpr + plan.scratch_vgpr_count ||
+        *plan.owner_epoch_vgprs.epoch >= plan.scratch_vgpr + plan.scratch_vgpr_count ||
+        plan.owner_epoch_vgprs.owner == plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
+        plan.base_scratch_vgpr_count < 8u ||
+        plan.scratch_vgpr_count < plan.base_scratch_vgpr_count + 5u || access_ranges.size() != 1u ||
+        access_ranges.front().geometry != AccessRangeGeometry::TensorDescriptor) {
+      errors.emplace_back(
+          "ConSan tensor probe requires full-wave resources and scalar owner/epoch state");
+      return std::nullopt;
+    }
+    if (!sequence.emit_all(
+            instrumentation::build_s_mov_b64(*plan.exec_save_sgpr, kAmdGpuExecLo, arch),
+            instrumentation::build_v_writelane_b32(tensor_exec_archive, *plan.exec_save_sgpr, 0,
+                                                   arch),
+            instrumentation::build_v_writelane_b32(tensor_exec_archive, *plan.exec_save_sgpr + 1u,
+                                                   1, arch),
+            instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand,
+                                             arch))) {
+      errors.emplace_back("ConSan tensor probe could not archive guest EXEC");
+      return std::nullopt;
+    }
+  }
   const bool has_banked_guest_operands =
       target->has_selectable_vgpr_bank && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address = access_requires_high_bank_address_capture(candidate, arch);
@@ -999,6 +1112,15 @@ build_direct_watchpoint_words(std::span<const uint8_t> bytes, const Candidate &c
     if (!plan.spill_backed_operand_recovery && range_index == 0u && guest_instruction_word_count)
       *guest_instruction_word_count = range_guest_instruction_word_count;
     if (!sequence.emit(*range_words))
+      return std::nullopt;
+  }
+  if (tensor) {
+    sequence.append(
+        instrumentation::build_v_readlane_b32(*plan.exec_save_sgpr, tensor_exec_archive, 0, arch),
+        instrumentation::build_v_readlane_b32(*plan.exec_save_sgpr + 1u, tensor_exec_archive, 1,
+                                              arch),
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, *plan.exec_save_sgpr, arch));
+    if (!sequence.finish(arch))
       return std::nullopt;
   }
   return words;

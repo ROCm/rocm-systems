@@ -18,6 +18,9 @@ struct AccessEmissionPlan {
   bool check = false;
   bool record_publication_sequence = false;
   bool uniform_lds_address = false;
+  // Caller has allocated dead VGPRs or saved every lane before a tensor body.
+  // The descriptor and publication SGPRs must also be disjoint and preserved.
+  bool tensor_full_wave_resources = false;
   SuperColliderDelayMode supercollider_delay_mode = SuperColliderDelayMode::Nop;
   uint32_t delay_count = 0;
   uint32_t delay_variable_source = 0;

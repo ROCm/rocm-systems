@@ -55,6 +55,8 @@ struct Candidate {
   /// inventory displacement must not be applied a second time. Admitted
   /// native sites always carry a representable decoded displacement.
   [[nodiscard]] uint32_t lowering_offset(const AccessRange &range) const {
+    if (range.geometry == AccessRangeGeometry::TensorDescriptor)
+      return 0u;
     return site().lowering.form &&
                    (site().lowering.form->kind == AccessLoweringFormKind::FlatVectorAddress ||
                     site().lowering.form->kind == AccessLoweringFormKind::FlatScalarVectorAddress)

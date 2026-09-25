@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+#include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -29,6 +31,156 @@ TensorCase tile(std::array<uint32_t, 5> dimensions) {
   result.d2[3] = dimensions[3] << 16;
   result.d3[2] = dimensions[4] << 16;
   return result;
+}
+
+TEST(ConSanTensor, DefaultProbeExecutesDmaAndPublishesRuntimeWidthWithGuestStatePreserved) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  const auto tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 12, .vaddr2 = 124, .vaddr3 = 124});
+  std::vector<uint32_t> guest(tensor.begin(), tensor.end());
+  guest.push_back(build_s_endpgm(arch));
+  const auto bytes = make_gfx1250_code_object(guest, "tensor_default_emission");
+  const auto inventory = test_lower_consan(bytes, test_options());
+  ASSERT_EQ(inventory.program_inventory.access_sites().size(), 1u);
+  const auto &site = inventory.program_inventory.access_sites().front();
+  const Candidate candidate(site);
+  detail::AccessEmissionPlan plan;
+  plan.tensor_full_wave_resources = true;
+  plan.supercollider_report_buffer_address = 0x200000;
+  plan.report_generation = 1;
+  plan.exec_save_sgpr = 88;
+  plan.persistent_sgprs.set_owner_epoch(80, 81);
+  plan.owner_epoch_vgprs = {.owner = 31, .epoch = 32};
+  plan.dispatch_id.literal = 5;
+  plan.workgroup_sources.x = WorkgroupSource::scalar(82);
+  plan.scratch_vgpr = 20;
+  plan.base_scratch_vgpr_count = 8;
+  plan.scratch_vgpr_count = 13;
+  plan.watchpoints_offset = 0x1000;
+  plan.causal_windows_offset = 0x2000;
+  plan.pending_acquires_offset = 0x3000;
+  plan.pending_acquire_owner_bank_count = 1;
+  std::vector<std::string> errors;
+  uint32_t guest_offset = 0, guest_size = 0;
+  const auto probe = detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch,
+                                                           errors, &guest_offset, &guest_size);
+  ASSERT_TRUE(probe) << testing::PrintToString(errors);
+  EXPECT_EQ(guest_size, 3u);
+  ASSERT_LE(guest_offset / 4 + guest_size, probe->size());
+  EXPECT_TRUE(std::equal(tensor.begin(), tensor.end(), probe->begin() + guest_offset / 4));
+  SpillManager manager(0, 256);
+  const auto spill = build_vgpr_spill_sequence(manager, 20, 13, arch);
+  ASSERT_TRUE(spill);
+  const auto full_spill = detail::tensor_full_wave_spill(*spill, 96, arch);
+  ASSERT_TRUE(full_spill);
+  auto words = full_spill->save_words;
+  words.insert(words.end(), probe->begin(), probe->end());
+  words.insert(words.end(), full_spill->restore_words.begin(), full_spill->restore_words.end());
+  for (const auto [active, global_in_bounds, atomic_barrier] :
+       {std::array<bool, 3>{true, true, false}, std::array<bool, 3>{false, true, false},
+        std::array<bool, 3>{true, false, false}, std::array<bool, 3>{true, true, true},
+        std::array<bool, 3>{false, true, true}}) {
+    for (uint32_t size_log2 = 0; size_log2 < 4; ++size_log2) {
+      for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+        SCOPED_TRACE(atomic_barrier);
+        SCOPED_TRACE(global_in_bounds);
+        SCOPED_TRACE(active);
+        SCOPED_TRACE(size_log2);
+        SCOPED_TRACE(exec);
+        amdgpu::GpuMemory memory("tensor_probe_mem");
+        amdgpu::L2Cache l2("tensor_probe_l2");
+        l2.set_backing_memory(&memory);
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 106;
+        config.vgprs_per_wf = 64;
+        config.lds_size_kb = 4;
+        auto cu = amdgpu::ComputeUnitCore::create("tensor_probe", config, &memory, &l2);
+        ASSERT_NE(cu, nullptr);
+        auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+        ASSERT_NE(wave, nullptr);
+        const auto lds_base = cu->allocate_lds(4096);
+        ASSERT_NE(lds_base, UINT32_MAX);
+        wave->set_lds_base(lds_base);
+        wave->set_scratch_base(0x400000);
+        wave->set_scratch_lane_size(256);
+        const auto sb = wave->sgpr_alloc().base;
+        const auto vb = wave->vgpr_alloc().base;
+        cu->write_sgpr(sb, active ? 1u : 0u);
+        cu->write_sgpr(sb + 1, 0);
+        cu->write_sgpr(sb + 2, 0x100000);
+        cu->write_sgpr(sb + 3, 0x80000000u);
+        cu->write_sgpr(sb + 12, (size_log2 << 16) | (atomic_barrier ? 1u << 18 : 0u));
+        cu->write_sgpr(sb + 13,
+                       (global_in_bounds ? 16u << 16 : 0u) | (atomic_barrier ? 512u >> 3 : 0u));
+        cu->write_sgpr(sb + 14, 0);
+        cu->write_sgpr(sb + 15, 16u << 16);
+        for (uint32_t reg = 16; reg < 20; ++reg)
+          cu->write_sgpr(sb + reg, 0);
+        cu->lds().write64(wave->lds_base() + 512, 0);
+        cu->write_sgpr(sb + 80, 2);
+        cu->write_sgpr(sb + 81, 3);
+        cu->write_sgpr(sb + 82, 4);
+        for (uint32_t byte = 0; byte < (16u << size_log2); ++byte) {
+          memory.write8(0x100000 + byte, static_cast<uint8_t>(byte + 1));
+          cu->lds().write8(wave->lds_base() + byte, 0x5a);
+        }
+        for (uint32_t byte = 0; byte < 0x4000; byte += 4)
+          memory.write32(0x200000 + byte, 0);
+        for (uint32_t reg = 20; reg < 33; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(vb + reg, lane, 0xaaaa0000u + reg * 32 + lane);
+        for (size_t i = 0; i < words.size(); ++i)
+          memory.write32(i * 4, words[i]);
+        wave->set_exec(exec);
+        wave->set_vcc(0x12345678);
+        wave->write_scc(true);
+        wave->pc = 0;
+        size_t steps = 0;
+        while (wave->pc < words.size() * 4 && steps++ < words.size() * 100)
+          cu->step();
+        cu->flush_all();
+        ASSERT_EQ(wave->pc, words.size() * 4);
+        const auto entry = decode_watchpoint_entry(memory.read64(0x201000));
+        EXPECT_EQ(entry.valid, active && !atomic_barrier);
+        if (entry.valid) {
+          EXPECT_EQ(entry.kind, ShadowAccessKind::Write);
+          EXPECT_EQ(entry.owner_id, 2u);
+          EXPECT_EQ(entry.epoch, 3u);
+          EXPECT_EQ(entry.byte_count, 1u << size_log2);
+          EXPECT_LT(entry.start_byte, 16u << size_log2);
+          EXPECT_EQ(entry.start_byte % (1u << size_log2), 0u);
+        }
+        EXPECT_EQ(memory.read32(0x200000 + offsetof(ReportHeader, unsupported_sync_count)) != 0,
+                  active && atomic_barrier);
+        EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512) != 0, active && atomic_barrier);
+        for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
+          EXPECT_EQ(cu->lds().read8(wave->lds_base() + byte),
+                    active ? (global_in_bounds ? static_cast<uint8_t>(byte + 1) : uint8_t{0})
+                           : uint8_t{0x5a});
+        EXPECT_EQ(wave->exec(), exec);
+        EXPECT_EQ(wave->vcc(), 0x12345678u);
+        EXPECT_TRUE(wave->read_scc());
+        for (uint32_t reg = 20; reg < 33; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xaaaa0000u + reg * 32 + lane);
+        EXPECT_EQ(cu->read_sgpr(sb), active ? 1u : 0u);
+        EXPECT_EQ(cu->read_sgpr(sb + 12), (size_log2 << 16) | (atomic_barrier ? 1u << 18 : 0u));
+        EXPECT_EQ(cu->read_sgpr(sb + 80), 2u);
+        EXPECT_EQ(cu->read_sgpr(sb + 81), 3u);
+        wave->halt();
+      }
+    }
+  }
+  plan.tensor_full_wave_resources = false;
+  EXPECT_FALSE(
+      detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
+  plan.tensor_full_wave_resources = true;
+  plan.workgroup_sources.x = WorkgroupSource::vector(1);
+  EXPECT_FALSE(
+      detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
 }
 
 TEST(ConSanTensor, FullWaveScratchSpillPreservesInactiveAndEmptyExecLanes) {

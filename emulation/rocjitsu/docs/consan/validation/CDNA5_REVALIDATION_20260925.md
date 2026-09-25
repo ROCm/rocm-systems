@@ -1638,3 +1638,28 @@ preset is high in each result. `qwen-high-long-clean` provides the matching
 accepted high clean run with complete coverage and the 1200 s allowance.
 Default previously detected 0/8 and 1/8 in separate campaigns. Qwen is green at
 high; the interrupted earlier campaign is not pooled into this result.
+
+### Default tensor-load metadata emission executes on gfx1250
+
+The Default access emitter now consumes descriptor-defined load ranges. It
+executes the original DMA once, waits for TENSORCNT, samples a tile element and
+iteration, materializes the padded LDS address, and publishes the descriptor's
+runtime element width through the existing causal-window/watchpoint ABI.
+The body archives incoming EXEC and observes the wave-wide transfer with full
+EXEC. It requires explicitly preserved full-wave scratch and scalar owner,
+epoch, dispatch and workgroup sources. Runtime count zero suppresses observation;
+global out-of-bounds zero-fill still produces an LDS-write observation.
+Descriptors requesting atomic-barrier completion increment unsupported-sync
+accounting and do not claim a fully modeled observation.
+
+The execution test runs 60 descriptor/mask combinations: four element widths,
+three EXEC masks, and five active/disabled/bounds/completion cases. It executes
+real scratch preservation, DMA, metadata atomics and restoration. It checks
+numeric LDS output, decoded watchpoint address/width/owner/epoch, completion
+accounting, original EXEC/VCC/SCC, and every borrowed VGPR lane. This is a direct
+emitter test, not an admitted workload qualification. Resource planning and
+wave-wide barrier integration still gate detector admission, so tensor rows
+remain orange.
+
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,032 passed,
+two existing live-inventory tests skipped (`tensor-probe-tests.log`).

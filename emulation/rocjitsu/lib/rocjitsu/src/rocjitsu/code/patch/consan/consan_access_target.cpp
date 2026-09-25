@@ -77,7 +77,8 @@ candidate_lds_byte_offset_vgpr(const Candidate &candidate, std::vector<std::stri
   // Direct-to-LDS candidates materialize their lane or explicit target
   // address into dedicated scratch before this placeholder is consumed.
   if (form.kind == AccessLoweringFormKind::DirectToLdsLaneAddressed ||
-      form.kind == AccessLoweringFormKind::DirectToLdsExplicitAddress) {
+      form.kind == AccessLoweringFormKind::DirectToLdsExplicitAddress ||
+      form.kind == AccessLoweringFormKind::TensorDescriptor) {
     return 0u;
   }
   if (!form.address_vgpr || form.address_vgpr_count == 0u) {
