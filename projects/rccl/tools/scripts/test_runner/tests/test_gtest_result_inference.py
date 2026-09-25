@@ -21,6 +21,7 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 from lib.test_executor import (
     TestExecutor,
@@ -158,10 +159,34 @@ class TestInferFromJsonFile(unittest.TestCase):
             os.unlink(path)
 
     def test_missing_json_falls_back_to_exit_code(self):
+        """Exit 0 with no report uses the stdout fallback.
+
+        A non-zero exit returns FAILED before the file is opened, so it does
+        not exercise this path. The patch fails the test if exit 0 stops
+        calling the fallback.
+        """
         missing = os.path.join(tempfile.gettempdir(), "rccl-no-such-gtest-report.json")
         self.assertFalse(os.path.exists(missing))
-        self.assertEqual(infer_gtest_result_from_json_file(missing, 0), "PASSED")
-        self.assertEqual(infer_gtest_result_from_json_file(missing, 1), "FAILED")
+        with patch(
+            "lib.test_executor.infer_gtest_result_from_output",
+            return_value="PASSED",
+        ) as fallback:
+            self.assertEqual(infer_gtest_result_from_json_file(missing, 0), "PASSED")
+        fallback.assert_called_once_with("", 0)
+
+    def test_nonzero_exit_fails_even_when_json_passed(self):
+        """A passing report must not override a non-zero process exit."""
+        path = _write_json({
+            "tests": 1,
+            "testsuites": [
+                {"name": "Suite", "testsuite": [{"name": "Case", "result": "COMPLETED"}]}
+            ],
+        })
+        try:
+            self.assertEqual(infer_gtest_result_from_json_file(path, 0), "PASSED")
+            self.assertEqual(infer_gtest_result_from_json_file(path, 1), "FAILED")
+        finally:
+            os.unlink(path)
 
     def test_leaf_without_result_agrees_with_details(self):
         path = _write_json({
@@ -788,36 +813,51 @@ class TestDisabledConfigAccounting(unittest.TestCase):
 
     def test_print_summary_adds_disabled_into_total_and_unique(self):
         ex = self._executor()
-        ex.test_suites = ["Unit Tests", "NET IB"]
-        ex.test_names = ["ArgCheck", "InitA"]
-        ex.test_results = ["PASSED", "DISABLED"]
-        ex.test_durations = [1.5, 0.0]
+        # NET IB is first so a DISABLED leaf that leaked into the issue tree
+        # would be a non-last suite and render as "+- NET IB". CE Tests is the
+        # non-last real issue suite, so that glyph is reachable.
+        ex.test_suites = ["NET IB", "CE Tests", "Socket Tests", "Unit Tests"]
+        ex.test_names = ["InitA", "AlltoAll", "SendRecv", "ArgCheck"]
+        ex.test_results = ["DISABLED", "FAILED", "SKIPPED", "PASSED"]
+        ex.test_durations = [0.0, 0.4, 0.2, 1.5]
         ex.test_case_counts = [
-            {"cases": 1, "passed": 1, "failed": 0, "skipped": 0,
-             "timeout": 0, "disabled": 0},
             {"cases": 1, "passed": 0, "failed": 0, "skipped": 0,
              "timeout": 0, "disabled": 1},
+            {"cases": 1, "passed": 0, "failed": 1, "skipped": 0,
+             "timeout": 0, "disabled": 0},
+            {"cases": 1, "passed": 0, "failed": 0, "skipped": 1,
+             "timeout": 0, "disabled": 0},
+            {"cases": 1, "passed": 1, "failed": 0, "skipped": 0,
+             "timeout": 0, "disabled": 0},
         ]
-        passed_id = make_run_identity_key(binary="rccl-UnitTests")
         disabled_id = make_run_identity_key(extra="disabled:NET IB:InitA")
+        failed_id = make_run_identity_key(binary="rccl-CE")
+        skipped_id = make_run_identity_key(binary="rccl-Socket")
+        passed_id = make_run_identity_key(binary="rccl-UnitTests")
         ex.test_case_details = [
-            [_leaf("ArgCheckTest.Ok", "PASSED", passed_id)],
             [_leaf("NetIbMPITest.InitA", "DISABLED", disabled_id)],
+            [_leaf("CeMPI.AlltoAll", "FAILED", failed_id)],
+            [_leaf("Socket.SendRecv", "SKIPPED", skipped_id)],
+            [_leaf("ArgCheckTest.Ok", "PASSED", passed_id)],
         ]
-        ex.test_run_identities = [passed_id, disabled_id]
-        ex.test_executed = [True, False]
+        ex.test_run_identities = [disabled_id, failed_id, skipped_id, passed_id]
+        ex.test_executed = [False, True, True, True]
         buf = io.StringIO()
         with redirect_stdout(buf):
             ex.print_summary()
         out = buf.getvalue()
         self.assertIn("DISABLED", out)
-        self.assertRegex(out, r"Config entries:\s+2")
+        self.assertRegex(out, r"Config entries:\s+4")
         self.assertRegex(out, r"Passed:\s+1")
+        self.assertRegex(out, r"Failed:\s+1")
+        self.assertRegex(out, r"Skipped:\s+1")
         self.assertRegex(out, r"Disabled:\s+1")
-        self.assertRegex(out, r"Total:\s+2")
-        self.assertRegex(out, r"Unique:\s+2")
-        self.assertRegex(out, r"Disabled:\s+1")
-        self.assertNotIn("Failed/skipped/timeout cases:\n  +- NET IB", out)
+        self.assertRegex(out, r"Total:\s+4")
+        self.assertRegex(out, r"Unique:\s+4")
+        issue = out.split("Failed/skipped/timeout cases:", 1)[1].split("Duplicate cases:", 1)[0]
+        self.assertIn("\n  +- CE Tests\n", issue)
+        self.assertIn("\n  `- Socket Tests\n", issue)
+        self.assertNotIn("NET IB", issue)
 
     def _assert_count_invariants(self, summary):
         TestUniqueAndDuplicateCases()._assert_count_invariants(summary)
