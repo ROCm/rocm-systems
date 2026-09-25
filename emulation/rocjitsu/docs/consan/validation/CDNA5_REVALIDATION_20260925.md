@@ -1466,10 +1466,12 @@ the corresponding clean campaign. Aggregate memory remained about 20 GiB,
 with all cgroup memory event counters zero.
 
 Qwen's high clean run passed with the 1200 s allowance. Four completed fault
-trials detected the reviewed race with healthy checks; the remaining trials
-are resumed, so qualification remains yellow. The campaign's original spec
-snapshot is used after checking that its Qwen entry exactly matches the current
-spec; unrelated newly added Tensile entries changed the whole-spec hash.
-HGEMM's exact Default fault campaign is similarly resumed using its matching
-snapshot. TP2 resumes only its unfinished combined clean run before faults;
-its prefill/decode clean results and combined baseline are retained.
+trials detected the reviewed race with healthy checks; qualification remains
+yellow. Attempted `--resume` recovery was rejected by the source-revision
+provenance guard even with a matching fault-spec snapshot. No provenance
+checks were weakened. Fresh `qwen-high-recovery-fault` and
+`hgemm-exact-default-recovery-fault` roots run all eight trials again; the old
+completed trials remain separately retained evidence. TP2 reruns its unfinished
+combined clean run in `tp2-lanes-higher-recovery-clean` before starting a fresh
+fault campaign. Its already completed prefill/decode clean results and combined
+baseline remain retained at the original root.
