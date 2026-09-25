@@ -14,6 +14,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <pthread.h>
@@ -28,11 +29,7 @@
 #pragma weak pthread_barrier_wait
 #pragma weak kill
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 std::string
 unblocking_gotcha::label()
@@ -71,9 +68,14 @@ unblocking_gotcha::configure()
     };
 }
 
+// Same fast_gotcha gap as blocking_gotcha: disable() does not uninstall the GOT
+// hook. delay::process() can sleep_for accumulated credits; skip it after shutdown.
+static std::atomic<bool> g_shutdown{ false };
+
 void
 unblocking_gotcha::shutdown()
 {
+    g_shutdown.store(true, std::memory_order_release);
     unblocking_gotcha_t::disable();
 }
 
@@ -83,6 +85,11 @@ Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_args...);
+    }
+
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active)
@@ -110,6 +117,11 @@ int
 unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_pid, _sig);
+    }
+
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active && _pid == process::get_id()) causal::delay::process();
@@ -120,8 +132,6 @@ unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
 
     return _ret;
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::causal::component::unblocking_gotcha)

@@ -31,7 +31,7 @@
 #include <span>
 #include <vector>
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
@@ -87,8 +87,7 @@ public:
   [[nodiscard]] bool has_expand_rule(uint16_t encoding_id, uint16_t opcode) const {
     if (!has_expand_rule_encoding(encoding_id))
       return false;
-    return std::binary_search(expand_rule_keys_.begin(), expand_rule_keys_.end(),
-                              packed_rule_key(encoding_id, opcode));
+    return std::ranges::binary_search(expand_rule_keys_, packed_rule_key(encoding_id, opcode));
   }
 
   /// @brief Whether a registered non-opcode-keyed rewrite matches @p inst.

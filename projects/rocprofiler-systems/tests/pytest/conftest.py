@@ -252,6 +252,16 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "build_only: prevents the test from being run in install mode",  # TheRock CI runs in install mode
     )
+    config.addinivalue_line(
+        "markers",
+        "cap_perfmon: mark test as requiring CAP_PERFMON; skipped when the process "
+        "lacks this Linux capability (needed for GPU hardware performance counters)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "disable_archs(*archs): skip test when the detected GPU architecture is in "
+        "the provided set; each arg may be a str or an iterable of str",
+    )
 
     # See pytest_collection_modifyitems
     generic_functional_markers = [
@@ -601,6 +611,31 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
             except Exception as e:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
+        if "cap_perfmon" in item.keywords:
+            if not rocprof_config.capabilities.cap_perfmon:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason="Test requires CAP_PERFMON capability; "
+                        "either enable it or use CAP_SYS_ADMIN as a general override"
+                    )
+                )
+        if "disable_archs" in item.keywords:
+            marker = item.get_closest_marker("disable_archs")
+            disabled: set = set()
+            for arg in marker.args:
+                if isinstance(arg, str):
+                    disabled.add(arg)
+                else:
+                    disabled.update(arg)
+            if disabled:
+                info = get_gpu_info()
+                overlap = disabled.intersection(info.architectures)
+                if overlap:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason="Test disabled on " + ", ".join(sorted(overlap))
+                        )
+                    )
         if "multi_gpu" in item.keywords:
             num_gpu = item.get_closest_marker("multi_gpu").args[0]
             info = get_gpu_info()
@@ -811,12 +846,9 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_events_usable:
+    if caps.papi_nic_events is not None:
         return None
-    return (
-        "Requires PAPI network events and perf_event_paranoid <= 2 "
-        "(or CAP_PERFMON or CAP_SYS_ADMIN) to be available"
-    )
+    return "Requires PAPI network events to be available"
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1257,6 +1289,8 @@ def _ctest_generate_tests(
         "depends_on",
         "serialize",
         "class_name",
+        "cap_perfmon",
+        "disable_archs",
     }
     no_report_args_markers = {"rocpd"}
     only_report_args_markers = {"mpi_implementation"}
@@ -1916,6 +1950,9 @@ def _cleanup_temp_patterns() -> list[str]:
                 f"{d}/rocprofsys-*.tmp",
                 f"{d}/buffered_storage*.bin",
                 f"{d}/metadata*.json",
+                f"{d}/perfetto-*.pftrace",
+                f"{d}/perfetto_trace*.pftrace",
+                # retained so stale artifacts from older builds are cleaned too
                 f"{d}/perfetto-*.proto",
                 f"{d}/perfetto_trace*.proto",
                 f"{d}/hsa-*.tmp",
@@ -2541,7 +2578,7 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
 
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
-        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)
+        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.pftrace)
         pass_regex: (Optional) Regex patterns that must be found in validation.stdout
         fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
         skip_on_fail: If True, skip instead of fail when validation fails

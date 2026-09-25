@@ -23,11 +23,9 @@
 # THE SOFTWARE.
 
 import csv
-import pandas as pd
 import pytest
 import json
 import os
-import io
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list

@@ -142,7 +142,8 @@ jobs:
     - name: black format
       working-directory: projects/rocprofiler-sdk
       run: |
-        black .
+        # Version number is also enforced in cmake/rocprofiler_formatting.cmake
+        black --required-version 26 .
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Python code not formatted. Run black...\n"
           echo -e "\nFiles:\n"

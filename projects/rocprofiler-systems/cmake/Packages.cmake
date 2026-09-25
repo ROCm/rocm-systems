@@ -56,6 +56,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-fmt
+    "Provides fmt library"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
     "Provides spdlog library"
 )
@@ -163,33 +166,9 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(ROCmVersion)
+find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 
-if(NOT ROCmVersion_FOUND)
-    find_package(
-        hip
-        ${rocprofiler_systems_FIND_QUIETLY}
-        REQUIRED
-        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-    )
-    find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-endif()
-
-if(NOT ROCmVersion_FOUND)
-    rocm_version_compute("${hip_VERSION}" _local)
-
-    foreach(_V ${ROCmVersion_VARIABLES})
-        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-        set(_LOCAL_VAR _local_${_V}_VERSION)
-        set(ROCmVersion_${_V}_VERSION
-            "${${_LOCAL_VAR}}"
-            CACHE STRING
-            "ROCm ${_V} version"
-        )
-        rocm_version_watch_for_change(${_CACHE_VAR})
-    endforeach()
-else()
+if(ROCmVersion_DIR)
     list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
 endif()
 
@@ -623,6 +602,14 @@ include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #
+# Fmt
+#
+# ----------------------------------------------------------------------------------------#
+
+include(FmtLib)
+
+# ----------------------------------------------------------------------------------------#
+#
 # Spdlog
 #
 # ----------------------------------------------------------------------------------------#
@@ -645,24 +632,6 @@ include(NlohmannJson)
 
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
-    include(GhcFilesystem)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# ELFIO
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_BUILD_DEVICETRACE)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH set-offset-support
-    )
-
-    add_subdirectory(external/elfio)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -812,7 +781,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH rocprofiler-systems-cppstd20
+    REPO_BRANCH rocprofiler-systems
 )
 
 rocprofiler_systems_save_variables(

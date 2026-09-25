@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_dbt_config dbt_guest_config.cpp)
-target_link_libraries(rocjitsu_dbt_config PRIVATE flatbuffers)
+target_link_libraries(
+    rocjitsu_dbt_config
+    PRIVATE flatbuffers rocjitsu_ip_discovery
+)
 target_include_directories(rocjitsu_dbt_config PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_dbt_config flatbuffers_schemas)
 
@@ -10,6 +13,9 @@ rj_add_object_library(rocjitsu_config config_loader.cpp checkpoint.cpp)
 
 # Config loader depends on FlatBuffers library (for runtime JSON parsing)
 # and on the generated schema headers.
-target_link_libraries(rocjitsu_config PRIVATE flatbuffers rocjitsu_dbt_config)
+target_link_libraries(
+    rocjitsu_config
+    PRIVATE flatbuffers rocjitsu_dbt_config rocjitsu_ip_discovery
+)
 target_include_directories(rocjitsu_config PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_config flatbuffers_schemas)

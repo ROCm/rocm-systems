@@ -25,7 +25,6 @@
 import sys
 import pytest
 import re
-import os
 
 from collections import Counter
 
@@ -80,7 +79,7 @@ def check_tot_data(tot_data):
                 assert f"fib(n={n})" in tot_data.keys()
 
             assert tot_data[f"inefficient({value})"] == num_iterations
-            assert tot_data[f"sum"] == num_iterations
+            assert tot_data["sum"] == num_iterations
             sum_msg = find_key_with_substring(tot_data, "sum(nelem=")
             assert tot_data[sum_msg] == num_iterations
 

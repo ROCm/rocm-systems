@@ -33,10 +33,19 @@ enum class ServerSignalAction {
 /// @brief Serve a PCI function on @p socket_path until the process is signalled.
 /// @param[in] config_path Simulation config describing the GPU to present.
 /// @param[in] socket_path Filesystem path of the AF_UNIX socket to listen on.
+/// @param[in] ready_fd Optional pipe descriptor notified after the socket is ready.
 /// @returns A process exit status: zero on an orderly shutdown.
 /// @details Blocks. A VMM such as QEMU connects to the socket and presents the
 /// function to its guest as a real PCI device. Which GPU is presented comes from
 /// the config, so a different part is a different config file.
-int run_vfio_server(const std::string &config_path, const std::string &socket_path);
+int run_vfio_server(const std::string &config_path, const std::string &socket_path,
+                    int ready_fd = -1);
+
+/// @brief Run the server and request a simulation failure after readiness.
+/// @details Test-only entry point for proving that an engine failure after the
+/// socket becomes usable terminates the server and propagates its status.
+int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
+                                              const std::string &socket_path, int ready_fd,
+                                              int exit_code);
 
 } // namespace rocjitsu

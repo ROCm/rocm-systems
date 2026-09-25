@@ -4,6 +4,8 @@
 /// @file translate_gfx1250_test.cpp
 /// @brief CPU-only tests for gfx1250 revision translation.
 
+#include "../amdgpu_elf_test_support.h"
+#include "../elf_test_support.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -42,8 +44,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "support/elf_test_support.h"
-#include "support/translate_test_support.h"
 #include "util/data_types.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -59,6 +59,7 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <bit>
 #include <cassert>
+#include <cfenv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -93,7 +94,10 @@ make_gfx1250_image_with_live_sgprs(const std::array<uint32_t, N> &instruction_wo
         cdna5::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr), .sdst = kGfx1250M0Operand})[0]);
   }
   words.push_back(kGfx1250SEndpgm);
-  return test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  test_support::write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                               EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  return image;
 }
 
 void enable_kernarg_segment_ptr_sgpr(std::vector<uint8_t> &image, uint32_t kernarg_size = 16) {
@@ -2142,8 +2146,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarPreservesReservedBytesAfterTextGrowth
 
   const auto sidecar_kd = read_virtual_lds_sidecar_descriptor_for_test(result.elf_bytes, "kernel");
   ASSERT_TRUE(sidecar_kd.has_value());
-  EXPECT_TRUE(std::equal(std::begin(sidecar_kd->reserved1), std::end(sidecar_kd->reserved1),
-                         reserved1_pattern.begin()))
+  EXPECT_TRUE(std::ranges::equal(sidecar_kd->reserved1, reserved1_pattern))
       << "sidecar reserved1 was not copied from the source descriptor snapshot";
 }
 
@@ -2357,7 +2360,7 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
   EXPECT_EQ((target_words[0] >> 16) & 0x7fu, cdna5::kSCbranchScc1Sopp);
   EXPECT_EQ(target_words[1], marker);
   const auto translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-  EXPECT_EQ(std::count(target_words, target_words + translated_word_count, marker), 2);
+  EXPECT_EQ(std::ranges::count(target_words, target_words + translated_word_count, marker), 2);
 
   rocjitsu::BinaryTranslator verifier(
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
@@ -3493,8 +3496,8 @@ TEST(BinaryTranslatorE2E, FullSgprConditionalPreservesPoolAfterUnconditionalBran
     }
     const size_t first_slot = i + rocjitsu::kGeneratedIslandPoolHeaderWords;
     const size_t past_slots = first_slot + rocjitsu::kDirectBranchIslandPoolSlots;
-    if (std::any_of(target_words + first_slot, target_words + past_slots,
-                    [&](uint32_t word) { return word != unused_slot; })) {
+    if (std::ranges::any_of(target_words + first_slot, target_words + past_slots,
+                            [&](uint32_t word) { return word != unused_slot; })) {
       found_live_skipped_pool = true;
       break;
     }
@@ -3916,13 +3919,11 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaEmitsShiftAndCarryAdd) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
-  const bool has_shift = std::any_of(decoded.begin(), decoded.end(), [](const auto &inst) {
-    return inst->mnemonic() == "v_lshlrev_b64";
-  });
+  const bool has_shift = std::ranges::any_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_lshlrev_b64"; });
   EXPECT_TRUE(has_shift) << "lowering must materialize the shift, not drop it";
-  const bool has_add = std::any_of(decoded.begin(), decoded.end(), [](const auto &inst) {
-    return inst->mnemonic() == "v_add_co_u32";
-  });
+  const bool has_add = std::ranges::any_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_add_co_u32"; });
   EXPECT_TRUE(has_add) << "lowering must emit the 64-bit carry add";
 }
 
@@ -3949,9 +3950,8 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaHandlesDestinationAliasingAddend) {
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
 
-  const auto shift = std::find_if(decoded.begin(), decoded.end(), [](const auto &inst) {
-    return inst->mnemonic() == "v_lshlrev_b64";
-  });
+  const auto shift = std::ranges::find_if(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "v_lshlrev_b64"; });
   ASSERT_NE(shift, decoded.end()) << "lowering must materialize the shift";
   // The shift destination must not be v2/v3 (the aliased addend); it must land in
   // a separate scratch pair so the following add can still read the addend.
@@ -6970,8 +6970,8 @@ TEST(BinaryTranslatorE2E, EndpgmAfterTrapTerminatesCfgBeforeFollowingFunction) {
   // The trailing S_ENDPGM (a real terminator) prevents a bogus fallthrough into
   // the following ELF function bytes, so the unrecovered S_SETPC_B64 is never
   // reached and translation does not emit it.
-  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
-                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+  EXPECT_TRUE(std::ranges::none_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
 }
 
 TEST(BinaryTranslatorE2E, ResumableTrapFallsThroughAndDoesNotHideFollowingCode) {
@@ -7020,8 +7020,8 @@ TEST(BinaryTranslatorE2E, RocrAbortTrapTerminatesCfgBeforeFollowingCode) {
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_FALSE(decoded.empty());
   EXPECT_EQ(decoded[0]->mnemonic(), "s_trap");
-  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
-                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+  EXPECT_TRUE(std::ranges::none_of(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
 }
 
 TEST(BinaryTranslatorE2E, RocrAbortDeadEdgeDoesNotPoisonRecoveredCall) {
@@ -7100,9 +7100,8 @@ TEST(BinaryTranslatorE2E, RejectsUnrecoveredIndirectBranchInstructions) {
     EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
         result, rocjitsu::DiagnosticKind::Legalization,
         "indirect branch or call target recovery is not implemented"));
-    const auto diagnostic =
-        std::find_if(result.diagnostics.begin(), result.diagnostics.end(),
-                     [&](const auto &d) { return d.mnemonic == test_case.mnemonic; });
+    const auto diagnostic = std::ranges::find_if(
+        result.diagnostics, [&](const auto &d) { return d.mnemonic == test_case.mnemonic; });
     EXPECT_NE(diagnostic, result.diagnostics.end());
   }
 }
@@ -7754,7 +7753,7 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand 
     }
     borrowed_a_carrier =
         borrowed_a_carrier || std::string_view(inst->mnemonic()) == "v_readfirstlane_b32_e32";
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     index += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
   // A caller that walled off the SGPRs asked for the carrier path. Without this
@@ -7799,6 +7798,45 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3PackReplacementMatchesReferenceConversion) 
             << fp16_ovfl << " write_high=" << write_high;
       }
     }
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3PackRoundsSubnormalTiesToEven) {
+  // Midpoints between successive E5M3 values from zero to the smallest normal,
+  // in F32 bits. The E5M3 quantum is 2^-17, including the normal boundary.
+  constexpr std::array<uint32_t, 8> kMidpoints = {0x36800000u, 0x37400000u, 0x37a00000u,
+                                                  0x37e00000u, 0x38100000u, 0x38300000u,
+                                                  0x38500000u, 0x38700000u};
+  constexpr uint32_t kDstInitial = 0xa5a5a5a5u;
+  struct RestoreRounding {
+    int saved = std::fegetround();
+    ~RestoreRounding() { std::fesetround(saved); }
+  } restore_rounding;
+  for (int rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(rounding), 0);
+    SCOPED_TRACE(rounding);
+    for (const bool fp16_ovfl : {false, true}) {
+      for (const bool write_high : {false, true}) {
+        for (uint32_t lower = 0; lower < kMidpoints.size(); ++lower) {
+          for (const int32_t delta : {-1, 0, 1}) {
+            const uint32_t magnitude = kMidpoints[lower] + delta;
+            // E5M3 encodes magnitude only, so exercise both signs and sources.
+            const auto produced = run_gfx1250_e5m3_replacement(
+                cdna5::kVCvtPkFp8F32Vop3, static_cast<uint8_t>(write_high ? 8 : 0),
+                e5m3_vgpr(magnitude), e5m3_vgpr(magnitude | 0x80000000u), kDstInitial, fp16_ovfl);
+            ASSERT_TRUE(produced.has_value());
+            const uint32_t byte = delta < 0 ? lower : delta > 0 ? lower + 1 : (lower + 1) & ~1u;
+            const uint32_t packed = byte | (byte << 8);
+            const uint32_t expected = write_high ? ((kDstInitial & 0x0000ffffu) | (packed << 16))
+                                                 : ((kDstInitial & 0xffff0000u) | packed);
+            EXPECT_EQ(produced->vdst, expected)
+                << "lower=" << lower << " delta=" << delta << " fp16_ovfl=" << fp16_ovfl
+                << " write_high=" << write_high;
+          }
+        }
+      }
+    }
+    EXPECT_EQ(std::fegetround(), rounding);
   }
 }
 
@@ -8089,8 +8127,8 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   const auto contains_word = [&](uint32_t value) {
-    return std::any_of(target_words, target_words + target_word_count,
-                       [&](uint32_t w) { return w == value; });
+    return std::ranges::any_of(target_words, target_words + target_word_count,
+                               [&](uint32_t w) { return w == value; });
   };
   EXPECT_TRUE(contains_word(0xffu)) << "missing E5M3 NaN threshold literal 0xff";
   EXPECT_TRUE(contains_word(0xf7u)) << "missing E5M3 exponent-clamp literal 0xf7";
@@ -9536,7 +9574,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, words.data()));
     EXPECT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f16_16x16x128_fp8_fp8");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   auto run_lowered = [&] {
@@ -9544,7 +9582,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
       std::unique_ptr<rocjitsu::Instruction> inst(
           decode_valid(*decoder, body_words.data() + offset));
       ASSERT_NE(inst, nullptr);
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     }
   };
@@ -10904,10 +10942,13 @@ TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) 
   constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
   constexpr auto original_mode =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  constexpr uint32_t kModeLiteral =
+      static_cast<uint32_t>(rocjitsu::amdgpu::set_vgpr_msb_to_mode_layout(0x01))
+      << rocjitsu::amdgpu::VGPR_MSB_MODE_SHIFT;
   constexpr auto addtid = cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {original_mode[0], 1u << 2, addtid[0], addtid[1], kGfx1250SEndpgm});
+      {original_mode[0], kModeLiteral, addtid[0], addtid[1], kGfx1250SEndpgm});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   rocjitsu::BinaryTranslator translator(
       ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
@@ -11255,9 +11296,13 @@ TEST(BinaryTranslatorE2E, Gfx1250AddtidStoreModeUsesSrc1BankNotSrc0) {
   constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
   constexpr auto original_mode =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
-  // The literal supplies the low eight bits written into MODE[19:12], whose
-  // layout is {SRC2,SRC1,SRC0,DST}.
-  constexpr uint32_t kModeLiteral = (1u << 2) | (2u << 4); // SRC0 bank 1, SRC1 bank 2.
+  // Public LLVM's gfx1250 fixup contract takes the bank layout from the
+  // unshifted source bits[19:12]. Encode SRC0 bank 1 and SRC1 bank 2 in those
+  // source bits rather than in the ordinary HWREG field payload.
+  constexpr uint8_t kInitialSetLayout = 0x09;
+  constexpr uint32_t kModeLiteral =
+      static_cast<uint32_t>(rocjitsu::amdgpu::set_vgpr_msb_to_mode_layout(kInitialSetLayout))
+      << rocjitsu::amdgpu::VGPR_MSB_MODE_SHIFT;
   constexpr auto addtid = cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
@@ -13069,7 +13114,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f32_32x16x128_f4");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   }
   const std::vector<uint32_t> run_a = snapshot_destination();
 
@@ -13090,7 +13135,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   for (size_t offset = 0; offset < body_words.size();) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, body_words.data() + offset));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     ++executed;
   }
@@ -14231,6 +14276,8 @@ translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words,
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   words.push_back(kGfx1250SEndpgm);
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::test_support::write_value_for_test<uint32_t>(
+      image, offsetof(rocjitsu::Elf64_Ehdr, e_flags), rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
 
   rocjitsu::BinaryTranslator translator(
@@ -14586,7 +14633,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     if (std::string_view(inst->mnemonic()) == "s_endpgm")
       break;
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
 

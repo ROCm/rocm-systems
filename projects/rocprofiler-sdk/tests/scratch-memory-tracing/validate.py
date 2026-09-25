@@ -24,9 +24,12 @@
 
 import sys
 import pytest
-import json
 
 from collections import defaultdict
+
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_scratch_memory_unavailable,
+)
 
 
 # helper function
@@ -63,6 +66,12 @@ def test_data_structure(input_data):
     node_exists("host_functions", sdk_data["callback_records"])
     node_exists("hsa_api_traces", sdk_data["callback_records"])
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
+    # WSL/no-KFD: scratch allocations are not surfaced under dxg scheduling
+    # (no /dev/kfd), so the trace has zero scratch-memory records. Skip the
+    # scratch checks below in that case; real-KFD platforms still validate.
+    skip_if_scratch_memory_unavailable(
+        sdk_data["callback_records"].get("scratch_memory_traces")
+    )
     # Each scratch allocation produces a phase-enter and phase-exit callback record.
     # The workload only exercises the GPUs visible to it (which may be a subset of
     # all detected agents), so require at least one complete allocation (2 records).
@@ -200,6 +209,11 @@ def test_scratch_memory_tracking(input_data):
     scratch_callback_data = callback_records["scratch_memory_traces"]
     scratch_buffer_data = buffer_records["scratch_memory_traces"]
 
+    # WSL/no-KFD: scratch allocations are not surfaced under dxg scheduling
+    # (no /dev/kfd), so no scratch is reported on any agent. Skip rather than
+    # fail; real-KFD platforms still validate.
+    skip_if_scratch_memory_unavailable(scratch_buffer_data)
+
     assert len(scratch_callback_data) == 2 * len(scratch_buffer_data)
 
     _, cb_op_names = get_operation(callback_records, "SCRATCH_MEMORY")
@@ -247,9 +261,12 @@ def test_scratch_memory_tracking(input_data):
     bf_threads = defaultdict(list)
 
     # fetch node["payload"]
-    pl = lambda x: x["payload"]
+    def pl(x):
+        return x["payload"]
+
     # fetch node
-    rc = lambda x: x
+    def rc(x):
+        return x
 
     for node in scratch_callback_data:
         cb_threads[rc(node)["thread_id"]].append(node)

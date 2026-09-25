@@ -92,6 +92,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     if (has_vaddr)
       vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
     d.scratch_swizzle = true;
+    d.requires_scratch_backing = true;
     d.scratch_addr_stride = lane_count * kScratchInterleave;
     d.scratch_lane_mask = exec;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -156,6 +157,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
         addr = scratch_base + (priv_off / kScratchInterleave) * lane_count * kScratchInterleave +
                static_cast<uint64_t>(lane) * kScratchInterleave + (priv_off % kScratchInterleave);
         d.scratch_swizzle = true;
+        d.requires_scratch_backing = true;
         d.scratch_addr_stride = lane_count * kScratchInterleave;
         d.scratch_lane_mask |= 1ULL << lane;
       }

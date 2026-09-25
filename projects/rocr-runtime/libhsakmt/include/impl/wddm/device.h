@@ -64,6 +64,7 @@
 #include "impl/wddm/types.h"
 #include "impl/wddm/gpu_memory.h"
 #include "impl/wddm/cmd_util.h"
+#include "hsakmt/hsakmttypes.h"
 
 namespace wsl {
 namespace thunk {
@@ -111,6 +112,9 @@ public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
   static constexpr uint32_t kNumberOfHsaEvents = 1024;   //!< Note: may change in the future to 8K, KMD should define it
   static constexpr uint32_t kAqlPayloadId = 1 << 24;
+  // DXUMD_SCHEDULERIDENTIFIER_COMPUTE0 from the KMD scheduler enum (kdx_umd.h,
+  // not on this include path). The PM4 path must run on COMPUTE0.
+  static constexpr uint32_t kSchedulerIdCompute0 = 5;
 
   WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
@@ -215,7 +219,8 @@ public:
   uint32_t LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt);
   uint32_t GetCmdbufSize(void) const { return cmdbuf_size_; }
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size_; }
-  static uint32_t GetAqlFrameNum(void) { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlFrameNum(void) const { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlMergeLimit(void) const { return cmdbuf_aql_merge_limit_; }
 
   bool AllocUserQueueMemFromUMD(void) const {
     // stage 1 HWS queue memory is allocated by KMD.
@@ -252,6 +257,10 @@ public:
 private:
   bool Escape(void* priv_data, uint32_t priv_size, bool hw_access) const;
   NTSTATUS ParseDeviceInfo(void);
+  uint64_t AllocateCwsrSize(uint64_t* out_ctx_size = nullptr, uint64_t* out_debug_size = nullptr) const;
+  void FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
+                      uint64_t debug_memory_size, uint32_t num_xcc,
+                      volatile HSAint64* error_reason, HSAuint32 error_event_id);
   void DestroyDeviceInfo(void);
   bool CreateDevice(void);
   bool DestroyDevice(void);
@@ -286,7 +295,12 @@ private:
 
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
-  static const uint32_t cmdbuf_aql_frame_num_;
+  // Both narrowed by InitCmdbufInfo(): the ring so it keeps fitting in a fixed
+  // byte budget as the frame size grows, the merge limit so a run of merged
+  // AQL packets stays inside one frame.
+  static constexpr uint32_t kMaxAqlFrameNum = 0x1000;
+  uint32_t cmdbuf_aql_frame_num_ = kMaxAqlFrameNum;
+  uint32_t cmdbuf_aql_merge_limit_ = kMaxAqlFrameNum;
   uint32_t node_id_;
   // device info
   Wkmi::DeviceInfo device_info_;

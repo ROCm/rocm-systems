@@ -15,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 
 struct cxa_demangle_wrapper_impl
@@ -60,7 +58,7 @@ struct demangler
 private:
     std::shared_mutex                               m_mutex;
     std::map<std::string, std::string, std::less<>> m_cache;
-    using cache_iterator = typename decltype(m_cache)::iterator;
+    using cache_iterator = decltype(m_cache)::iterator;
 
     struct cache_result
     {
@@ -130,5 +128,4 @@ demangle(std::string_view name)
     return get_demangler().demangle(name);
 }
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

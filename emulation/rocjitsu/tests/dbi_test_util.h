@@ -42,6 +42,7 @@ namespace rocjitsu::test {
 // inline 1..64 = 129..192).
 inline constexpr uint32_t kMovV3V2 = 0x7E060302u;   // v_mov_b32 v3, v2 -> reads v2.
 inline constexpr uint32_t kMovV2Zero = 0x7E040280u; // v_mov_b32 v2, 0  -> clobbers v2.
+inline constexpr uint32_t kMovV0Zero = 0x7E000280u; // v_mov_b32 v0, 0  -> clobbers v0.
 inline constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads s8 (s8 live).
 inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
 inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
@@ -51,6 +52,8 @@ inline constexpr uint32_t kMovV5V1 = 0x7E0A0301u;   // v_mov_b32 v5, v1 -> reads
 inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads v2 into v5.
 inline constexpr uint32_t kMovV5V3 = 0x7E0A0303u;   // v_mov_b32 v5, v3 -> reads v3 into v5.
 inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
+inline constexpr uint32_t kMovV1V0 = 0x7E020300u;   // v_mov_b32 v1, v0 -> reads v0 into v1.
+inline constexpr uint32_t kMovV3V0 = 0x7E060300u;   // v_mov_b32 v3, v0 -> reads v0 into v3.
 
 // v_mov_b32 v{dst}, <inline const K> for K in [0, 64]. vdst occupies bits [24:17];
 // inline constant 0 is encoded as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
@@ -104,6 +107,12 @@ inline constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
 // rejected because it would return through a corrupted PC.
 inline constexpr uint32_t kProbeMovS30_0 = 0xbe9e0080u;
 
+// v_mov_b32 v0, v31 (GFX9 family): reads v31 without defining it first. v31 is
+// where the device-function ABI delivers workitem_id_x, put there by the
+// kernel's own prologue, so a probe body containing this has an implicit
+// live-in that a trampoline at an arbitrary site cannot supply.
+inline constexpr uint32_t kProbeMovV0FromV31 = 0x7e00031fu;
+
 // Distinguishable leading marker words for multi-probe layout tests. Each is a
 // harmless, self-contained op the probe verifier accepts (not a call, scratch
 // access, nor a write to the link pair). They must not collide with the anchor
@@ -147,12 +156,11 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows;
 // `kd_crosses_section` shrinks the .rodata sh_size below sizeof(KD) so the 64-byte `.kd`
 // descriptor extends past its owning section into the adjacent one.
-inline std::vector<uint8_t>
-make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
-                       uint32_t granulated_sgpr_count, uint32_t e_flags,
-                       uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
-                       bool unterminated_kd_name = false, bool wrap_section_header_table = false,
-                       bool wrap_symtab_range = false, bool kd_crosses_section = false) {
+inline std::vector<uint8_t> make_amdgpu_kernel_elf(
+    const std::vector<uint32_t> &text_words, uint32_t private_bytes, uint32_t granulated_sgpr_count,
+    uint32_t e_flags, uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
+    bool unterminated_kd_name = false, bool wrap_section_header_table = false,
+    bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -236,6 +244,14 @@ make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                   granulated_vgpr_count);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
+  // RDNA opts into Wave32 through this bit; a clear bit is Wave64. CDNA has no
+  // such field, so setting it there would describe a kernel that cannot exist.
+  // Braced deliberately: AMDHSA_BITS_SET expands to two unbraced statements, so
+  // an unbraced `if` would run the second one unconditionally.
+  if (wave32) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    1);
+  }
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
@@ -326,6 +342,22 @@ inline std::vector<uint8_t> make_gfx1200_kernel_elf(const std::vector<uint32_t> 
                                                     uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
                                 EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset);
+}
+
+// The same target ELF with the descriptor's Wave32 bit set. A separate builder
+// rather than a parameter: make_gfx1200_kernel_elf is taken by address as part
+// of a per-arch factory triple, so its signature is pinned by that use. RDNA is
+// the only family with a wave size to choose, so there is no CDNA counterpart.
+inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                           uint32_t private_bytes,
+                                                           uint32_t granulated_sgpr_count = 3,
+                                                           uint32_t granulated_vgpr_count = 0,
+                                                           uint32_t accum_offset = 0) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset,
+                                /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+                                /*kd_crosses_section=*/false, /*wave32=*/true);
 }
 
 // gfx950 target ELF whose `.kd` symbol name runs to the end of its string table

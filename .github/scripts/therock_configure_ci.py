@@ -150,6 +150,8 @@ SKIPPABLE_PATH_PATTERNS = [
     "*/.wordlist.txt",
     "projects/*/docs/*",
     "shared/*/docs/*",
+    # Vendored API headers are not yet integrated into TheRock builds.
+    "runtimes/api-headers/*",
     # Changes to experimental code do not run standard build/test workflows.
     "experimental/*",
     # WSL support files (should these still be excluded?)
@@ -185,9 +187,10 @@ def get_pr_labels(args) -> List[str]:
 
 def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     """Returns true if any files under projects/rccl/ were modified."""
-    if modified_paths is None:
+    rccl_paths = [p for p in modified_paths if p.startswith("projects/rccl/")]
+    if not rccl_paths:
         return False
-    return any(path.startswith("projects/rccl/") for path in modified_paths)
+    return any(not is_path_skippable(p) for p in rccl_paths)
 
 
 def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:

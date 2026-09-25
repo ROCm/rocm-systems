@@ -2318,6 +2318,36 @@ void VirtMemoryTestInterProcess::ChildProcessImpl() {
   ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
   ASSERT_SUCCESS(hsa_amd_vmem_map(addrRange, 10 * rec_mem_granule, 0, imported_handle, 0));
 
+  // Verify set_access api works on an imported handle for every CPU and GPU agent
+  {
+    std::vector<hsa_agent_t> cpus;
+    std::vector<hsa_agent_t> gpus;
+    EXPECT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+    EXPECT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+
+    // gpu agents
+    std::vector<hsa_amd_memory_access_desc_t> gpu_desc;
+    for (const auto& gpu : gpus) gpu_desc.push_back({HSA_ACCESS_PERMISSION_RW, gpu});
+    PROCESS_LOG("Child: set_access on imported handle for all available GPU agents\n");
+    EXPECT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * rec_mem_granule, gpu_desc.data(), gpu_desc.size()));
+    for (const auto& d : gpu_desc) {
+      hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+      EXPECT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, d.agent_handle));
+      EXPECT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+    }
+
+    // cpu agents
+    std::vector<hsa_amd_memory_access_desc_t> cpu_desc;
+    for (const auto& cpu : cpus) cpu_desc.push_back({HSA_ACCESS_PERMISSION_RW, cpu});
+    PROCESS_LOG("Child: set_access on imported handle for all available CPU agents\n");
+    EXPECT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * rec_mem_granule, cpu_desc.data(), cpu_desc.size()));
+    for (const auto& d : cpu_desc) {
+      hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+      EXPECT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, d.agent_handle));
+      EXPECT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+    }
+  }
+
   ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, 10 * rec_mem_granule));
 
   PROCESS_LOG("Child: Signalling parent process\n");
@@ -2590,6 +2620,142 @@ void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(void) {
   }
 }
 
+void VirtMemoryTestBasic::ExportShareableHandlePcieMapping(hsa_agent_t agent,
+                                                           hsa_amd_memory_pool_t pool) {
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  const size_t alloc_size = pool_i.alloc_granule * 10;
+  hsa_amd_vmem_alloc_handle_t exported_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_NONE, 0, &exported_handle));
+
+  /* Request the dmabuf be mapped over PCIe (BAR)
+   * and fail if this is not supported on this system. */
+  int dmabuf_fd = -1;
+  hsa_status_t status = hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle,
+                                                             HSA_AMD_DMABUF_MAPPING_TYPE_PCIE);
+
+  /* PCIe dma-buf mapping is only supported on large-BAR enabled or xgmi connected devices.
+   * Unsupported devices return HSA_STATUS_ERROR_NOT_SUPPORTED - treat that as a
+   * valid, hardware-gated outcome rather than a test failure. */
+  if (status == HSA_STATUS_ERROR_NOT_SUPPORTED) {
+    if (verbosity() > 0) {
+      std::cout << "    PCIe dma-buf mapping not supported on this agent - Skipping." << std::endl;
+    }
+    ASSERT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+    return;
+  }
+
+  ASSERT_SUCCESS(status);
+  ASSERT_GE(dmabuf_fd, 0);
+
+  /* The PCIe-mapped fd must round-trip back into a usable vmem handle. */
+  hsa_amd_vmem_alloc_handle_t imported_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
+
+  ASSERT_EQ(close(dmabuf_fd), 0);
+
+  /* A round-tripped handle is not enough: prove the PCIe-mapped memory is actually usable by
+   * the agent. Map it, grant the agent RW access, and DMA a known pattern host->device->host
+   * through the agent, verifying the bytes survive the trip over the PCIe BAR. */
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  ASSERT_FALSE(cpus.empty());
+  hsa_agent_t cpu_agent = cpus[0];
+
+  hsa_amd_memory_pool_t system_pool = {};
+  ASSERT_SUCCESS(
+      hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetGlobalMemoryPool, &system_pool));
+
+  const unsigned int element_count = alloc_size / sizeof(unsigned int);
+  unsigned int* host_src = nullptr;
+  unsigned int* host_dst = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(system_pool, alloc_size, 0,
+                                              reinterpret_cast<void**>(&host_src)));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(system_pool, alloc_size, 0,
+                                              reinterpret_cast<void**>(&host_dst)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &agent, nullptr, host_src));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &agent, nullptr, host_dst));
+  for (unsigned int i = 0; i < element_count; ++i) {
+    host_src[i] = i;
+  }
+  memset(host_dst, 0, alloc_size);
+
+  void* dev_ptr = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&dev_ptr, alloc_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(dev_ptr, alloc_size, 0, imported_handle, 0));
+
+  hsa_amd_memory_access_desc_t perms[] = {{HSA_ACCESS_PERMISSION_RW, agent}};
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(dev_ptr, alloc_size, perms, ARRAY_SIZE(perms)));
+
+  hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+  ASSERT_SUCCESS(hsa_amd_vmem_get_access(dev_ptr, &perm, agent));
+  ASSERT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+
+  hsa_signal_t signal = {0};
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &signal));
+
+  ASSERT_SUCCESS(
+      hsa_amd_memory_async_copy(dev_ptr, agent, host_src, cpu_agent, alloc_size, 0, nullptr, signal));
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
+  hsa_signal_store_relaxed(signal, 1);
+
+  ASSERT_SUCCESS(
+      hsa_amd_memory_async_copy(host_dst, cpu_agent, dev_ptr, agent, alloc_size, 0, nullptr, signal));
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
+
+  for (unsigned int i = 0; i < element_count; ++i) {
+    ASSERT_EQ(host_dst[i], host_src[i]);
+  }
+
+  ASSERT_SUCCESS(hsa_signal_destroy(signal));
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_ptr, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(dev_ptr, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(host_dst));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(host_src));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+}
+
+void VirtMemoryTestBasic::ExportShareableHandlePcieMapping(void) {
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("Export Shareable Handle - PCIe DMA-BUF Mapping");
+  }
+
+  bool supp = false;
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, (void*)&supp));
+  if (!supp) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  if (gpus.empty()) return;
+
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
+    hsa_amd_memory_pool_t gpu_pool = {};
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
+    if (gpu_pool.handle == 0) continue;
+    ExportShareableHandlePcieMapping(gpus[i], gpu_pool);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
 void VirtMemoryTestBasic::TestFabricExportAcceleratorReadiness(hsa_agent_t gpu_agent,
                                                                hsa_amd_memory_pool_t pool) {
   const auto read_accel_state = [](int32_t drm_render_minor, char* state_out) {
@@ -2732,6 +2898,175 @@ void VirtMemoryTestBasic::TestFabricExportAcceleratorReadiness(void) {
       continue;
     }
     TestFabricExportAcceleratorReadiness(gpu, gpu_pool);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+// Fabric handles need both a runtime that knows the query and a system that supports them.
+// Runtimes predating the query report an error rather than false, so treat any failure as
+// unsupported instead of failing the test.
+static bool FabricHandlesSupported() {
+  bool supported = false;
+  if (hsa_system_get_info(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED, &supported) !=
+      HSA_STATUS_SUCCESS) {
+    return false;
+  }
+  return supported;
+}
+
+// Queries hsa_amd_pointer_info() on a mapped VMM address. Both variants are exercised:
+// without an accessible-agent list, and with one, which is what rocprofiler-sdk's copy
+// interceptor uses when it attributes a hipMemcpyAsync.
+static void QueryVmemPointerInfo(void* addr) {
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(addr, &info, nullptr, nullptr, nullptr));
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+
+  hsa_amd_pointer_info_t info_agents = {};
+  info_agents.size = sizeof(info_agents);
+  uint32_t num_agents = 0;
+  hsa_agent_t* accessible = nullptr;
+  ASSERT_SUCCESS(hsa_amd_pointer_info(addr, &info_agents, malloc, &num_agents, &accessible));
+  EXPECT_EQ(info_agents.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  if (accessible != nullptr) free(accessible);
+}
+
+void VirtMemoryTestBasic::FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent,
+                                                          hsa_amd_memory_pool_t pool) {
+  if (!FabricHandlesSupported()) {
+    if (verbosity() > 0) {
+      std::cout << "    Fabric handles not supported on this system - Skipping." << std::endl;
+    }
+    return;
+  }
+
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  const size_t alloc_size = pool_i.alloc_granule;
+  hsa_amd_vmem_alloc_handle_t exported_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_PINNED, 0, &exported_handle));
+
+  hsa_fabric_handle_t fabric_handle = {};
+  if (hsa_amd_vmem_export_fabric_handle(&fabric_handle, exported_handle, 0) !=
+      HSA_STATUS_SUCCESS) {
+    /* Fabric export requires the UALink accelerator to be ready on this GPU. */
+    if (verbosity() > 0) {
+      std::cout << "    Fabric export unavailable on this GPU - Skipping." << std::endl;
+    }
+    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+    return;
+  }
+
+  hsa_amd_vmem_alloc_handle_t imported_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_import_fabric_handle(fabric_handle, &imported_handle));
+
+  void* addr = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr, alloc_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addr, alloc_size, 0, imported_handle, 0));
+
+  /* ROCM-30769: an imported handle has no local MemoryRegion, so resolving an agent owner
+   * through it dereferences NULL. */
+  if (verbosity() > 0) {
+    std::cout << "    Pointer info on fabric-imported VA " << addr << std::endl;
+  }
+  QueryVmemPointerInfo(addr);
+
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
+}
+
+void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
+                                                          hsa_amd_memory_pool_t pool) {
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  const size_t alloc_size = pool_i.alloc_granule;
+  hsa_amd_vmem_alloc_handle_t exported_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_NONE, 0, &exported_handle));
+
+  int dmabuf_fd = -1;
+  ASSERT_SUCCESS(hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle, 0));
+  ASSERT_GE(dmabuf_fd, 0);
+
+  hsa_amd_vmem_alloc_handle_t imported_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
+  ASSERT_EQ(close(dmabuf_fd), 0);
+
+  void* addr = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr, alloc_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addr, alloc_size, 0, imported_handle, 0));
+
+  hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, gpu_agent};
+  EXPECT_SUCCESS(hsa_amd_vmem_set_access(addr, alloc_size, &access_desc, 1));
+
+  /* ROCM-30769: same NULL MemoryRegion as the fabric path above, reachable without UALink. */
+  if (verbosity() > 0) {
+    std::cout << "    Pointer info on dmabuf-imported VA " << addr << std::endl;
+  }
+  QueryVmemPointerInfo(addr);
+
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
+}
+
+void VirtMemoryTestBasic::TestImportedHandlePointerInfo(void) {
+  std::vector<hsa_agent_t> gpus;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("Imported Handle Pointer Info Test");
+  }
+
+  bool vmem_supported = false;
+  ASSERT_SUCCESS(
+      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported));
+  if (!vmem_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  if (gpus.empty()) {
+    if (verbosity() > 0) {
+      std::cout << "    No GPU agents available - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  const bool fabric_supported = FabricHandlesSupported();
+  if (!fabric_supported && verbosity() > 0) {
+    std::cout << "    Fabric handles not supported on this system - dmabuf import only."
+              << std::endl;
+  }
+
+  for (hsa_agent_t gpu : gpus) {
+    hsa_amd_memory_pool_t gpu_pool = {};
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(gpu, rocrtst::GetGlobalMemoryPool, &gpu_pool));
+    if (gpu_pool.handle == 0) {
+      continue;
+    }
+    DmaBufImportedHandlePointerInfo(gpu, gpu_pool);
+    if (fabric_supported) {
+      FabricImportedHandlePointerInfo(gpu, gpu_pool);
+    }
   }
 
   if (verbosity() > 0) {

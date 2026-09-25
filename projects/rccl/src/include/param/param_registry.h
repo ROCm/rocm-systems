@@ -10,7 +10,7 @@
 
 #include "nccl.h"
 #include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+#include "param/utils.h"
 
 #include <string>
 #include <unordered_map>

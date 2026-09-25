@@ -6,8 +6,7 @@
 #
 
 # Include common build rules
-include ../../../../../makefiles/common.mk
-include ../../../../../makefiles/examples.mk
+include ../../../makefiles/rccl_examples.mk
 
 # Target executable
 TARGET = alltoall_gin
@@ -19,10 +18,15 @@ COMMON_SRC = ../../../common/src
 # Build configuration
 INCLUDES += -I$(COMMON_INC)
 
-# Source files
-SOURCES = main.cu $(COMMON_SRC)/utils.cc
-OBJECTS = $(SOURCES:.cu=.o)
-OBJECTS := $(OBJECTS:.cc=.o)
+# Source files (.cu is hipified into $(HIPIFY_DIR) at build time)
+# utils.cc is a shared helper in common/src, compiled per-example into a local
+# utils.o so parallel example builds do not race on one shared object.
+# vpath NAME DIR tells make to search DIR for the prerequisite NAME, so the
+# %.o: %.cc rule below finds utils.cc in $(COMMON_SRC) and builds a local utils.o.
+SOURCES = main.cu utils.cc
+vpath utils.cc $(COMMON_SRC)
+OBJECTS = $(patsubst %.cu,$(HIPIFY_DIR)/%.cu.o,$(filter %.cu,$(SOURCES))) \
+          $(patsubst %.cc,%.o,$(filter %.cc,$(SOURCES)))
 
 # Default target
 all: $(TARGET)
@@ -37,9 +41,6 @@ endif
 	@echo "Built target $@"
 
 # Compile source files
-%.o: %.cu
-	$(NVCC) $(NVCUFLAGS) $(INCLUDES) -c $< -o $@
-
 %.o: %.cc
 ifeq ($(MPI),1)
 	$(MPICXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
@@ -60,7 +61,7 @@ endif
 
 # Clean build artifacts
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -rf $(OBJECTS) $(TARGET) $(HIPIFY_DIR)
 
 # Install target
 install: $(TARGET)

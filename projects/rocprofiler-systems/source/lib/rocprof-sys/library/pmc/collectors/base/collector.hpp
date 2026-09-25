@@ -38,21 +38,21 @@ struct collector
 
     // Type aliases from traits
     using traits_t          = Traits;
-    using metrics_t         = typename Traits::metrics_t;
-    using enabled_metrics_t = typename Traits::enabled_metrics_t;
-    using device_t          = typename Traits::device_t;
-    using device_ptr_t      = typename Traits::device_ptr_t;
-    using container_t       = typename Traits::container_t;
-    using backend_t         = typename Traits::backend_t;
+    using metrics_t         = Traits::metrics_t;
+    using enabled_metrics_t = Traits::enabled_metrics_t;
+    using device_t          = Traits::device_t;
+    using device_ptr_t      = Traits::device_ptr_t;
+    using container_t       = Traits::container_t;
+    using backend_t         = Traits::backend_t;
 
     // Type aliases from config
     using device_provider = DeviceProvider;
-    using SettingsApi     = typename Config::SettingsApi;
-    using PerfettoApi     = typename Config::PerfettoApi;
-    using CacheApi        = typename Config::CacheApi;
+    using SettingsApi     = Config::SettingsApi;
+    using PerfettoApi     = Config::PerfettoApi;
+    using CacheApi        = Config::CacheApi;
 
     // Device entry type from traits (contains device + cached supported metrics)
-    using device_entry     = typename Traits::device_entry;
+    using device_entry     = Traits::device_entry;
     using device_entries_t = std::vector<device_entry>;
 
     /**

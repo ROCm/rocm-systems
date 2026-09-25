@@ -414,6 +414,12 @@ DecodeResult decodeFlatStoreShortD16HiFlat(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeFlatStoreShortFlat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalAtomicCsubFlat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadDwordAddtidFlat(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalStoreDwordAddtidFlat(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
@@ -2005,13 +2011,13 @@ DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
 DecodeResult DecoderImpl::subDecodeMubuf(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Mubuf::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mubuf[op.op](opcode, emit_error);
+  return sub_decode_mubuf[op.op | (op.opm << 7)](opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::subDecodeMtbuf(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Mtbuf::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mtbuf[op.op](opcode, emit_error);
+  return sub_decode_mtbuf[op.op | (op.opm << 3)](opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::subDecodeMimg(const MachineInst *opcode,
@@ -4643,8 +4649,8 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalLoadDwordAddtidFlat,
+    &detail::decodeGlobalStoreDwordAddtidFlat,
     &detail::decodeFlatStoreByteFlat,
     &detail::decodeFlatStoreByteD16HiFlat,
     &detail::decodeFlatStoreShortFlat,
@@ -4673,7 +4679,7 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatAtomicCmpswapFlat,
     &detail::decodeFlatAtomicAddFlat,
     &detail::decodeFlatAtomicSubFlat,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalAtomicCsubFlat,
     &detail::decodeFlatAtomicSminFlat,
     &detail::decodeFlatAtomicUminFlat,
     &detail::decodeFlatAtomicSmaxFlat,

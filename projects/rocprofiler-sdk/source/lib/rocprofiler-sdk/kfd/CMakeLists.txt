@@ -1,10 +1,19 @@
 #
 #
 set(ROCPROFILER_LIB_KFD_EVENT_SOURCES
-    abi.cpp dlog_abi.cpp kfd.cpp doorbell_map.cpp kfd_correlation.cpp kfd_profiler.cpp
-    kfd_reader.cpp signal_less.cpp)
+    abi.cpp
+    dlog_abi.cpp
+    kfd.cpp
+    doorbell_map.cpp
+    kfd_correlation.cpp
+    kfd_profiler.cpp
+    kfd_reader.cpp
+    signal_less.cpp
+    resource.cpp)
 set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
+    capabilities.hpp
     defines.hpp
+    resource.hpp
     kfd.hpp
     utils.hpp
     kfd_dlog_uapi.h
@@ -13,6 +22,7 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     stream_geometry.hpp
     correlation_types.hpp
     doorbell_map.hpp
+    env_parse.hpp
     kfd_correlation.hpp
     poll_reader.hpp
     kfd_profiler.hpp

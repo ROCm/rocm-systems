@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -177,7 +178,9 @@ parse_cpu_info()
                     }
                 }
 
-                if(itr.find("vendor_id") == 0)
+                if(itr.find("processor") == 0) info_v.processor = get_stol(value);
+#if defined(__x86_64__) || defined(_M_X64)
+                else if(itr.find("vendor_id") == 0)
                     info_v.vendor_id = value;
                 else if(itr.find("model name") == 0)
                 {
@@ -186,8 +189,6 @@ parse_cpu_info()
                     info_v.model_name =
                         sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
                 }
-                else if(itr.find("processor") == 0)
-                    info_v.processor = get_stol(value);
                 else if(itr.find("cpu family") == 0)
                     info_v.family = get_stol(value);
                 else if(itr.find("model") == 0 && itr.find("model name") != 0)
@@ -198,6 +199,15 @@ parse_cpu_info()
                     info_v.core_id = get_stol(value);
                 else if(itr.find("apicid") == 0)
                     info_v.apicid = get_stol(value);
+#elif defined(__powerpc64__) || defined(__PPC64__)
+                // On POWER, "cpu" holds the model name (e.g. "POWER10, altivec supported")
+                else if(itr.find("cpu") == 0)
+                {
+                    info_v.model_name = value;
+                    info_v.model_name =
+                        sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
+                }
+#endif
             }
             else
             {
@@ -211,6 +221,24 @@ parse_cpu_info()
                     << fmt::format("Encountered unexpected /proc/cpuinfo line format: '{}'", itr);
             }
         }
+
+#if !defined(__x86_64__) && !defined(_M_X64)
+        // Default x86-specific fields that have no equivalent on this architecture.
+        // Use processor index as a proxy for apicid to allow CPU agent matching.
+        if(info_v.family < 0) info_v.family = 0;
+        if(info_v.model < 0) info_v.model = 0;
+        if(info_v.physical_id < 0) info_v.physical_id = 0;
+        if(info_v.core_id < 0) info_v.core_id = 0;
+        if(info_v.apicid < 0) info_v.apicid = info_v.processor;
+        if(info_v.vendor_id.empty()) info_v.vendor_id = "Unknown";
+        if(info_v.model_name.empty()) info_v.model_name = "Unknown";
+#    if !defined(__powerpc64__) && !defined(__PPC64__)
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "Some /proc/cpuinfo fields could not be parsed for processor {} on this "
+            "architecture; using defaults",
+            info_v.processor);
+#    endif  // !ppc64le
+#endif
 
         if(info_v.is_valid())
             processor_info.emplace_back(info_v);
@@ -335,11 +363,10 @@ read_map(const std::string& fname)
 
 template <typename MapT, typename Tp>
 void
-read_property(const MapT& data, const std::string& label, Tp& value)
+read_property_value(const MapT& data, const std::string& label, Tp& value)
 {
     using mutable_type = std::remove_const_t<Tp>;
 
-    get_agent_available_properties().insert(label);
     if constexpr(std::is_enum<Tp>::value)
     {
         using value_type = std::underlying_type_t<mutable_type>;
@@ -347,7 +374,7 @@ read_property(const MapT& data, const std::string& label, Tp& value)
         static_assert(!std::is_enum<value_type>::value, "Expected non-enum type");
 
         auto value_v = static_cast<value_type>(value);
-        read_property(data, label, value_v);
+        read_property_value(data, label, value_v);
         if constexpr(std::is_const<Tp>::value)
             const_cast<mutable_type&>(value) = static_cast<mutable_type>(value_v);
         else
@@ -396,6 +423,14 @@ read_property(const MapT& data, const std::string& label, Tp& value)
         else
             value = static_cast<Tp>(local_value);
     }
+}
+
+template <typename MapT, typename Tp>
+void
+read_property(const MapT& data, const std::string& label, Tp& value)
+{
+    get_agent_available_properties().insert(label);
+    read_property_value(data, label, value);
 }
 
 // Candidate locations for the KFD sysfs topology root, in priority order.
@@ -489,7 +524,8 @@ enumerate()
         // we may have been able to open the properties file but if it was empty, we ignore it
         if(properties.empty()) continue;
 
-        auto agent_info                 = common::init_public_api_struct(rocprofiler_agent_t{});
+        auto  internal_info             = platform::agent_info{};
+        auto& agent_info                = common::init_public_api_struct(internal_info.public_info);
         agent_info.type                 = ROCPROFILER_AGENT_TYPE_NONE;
         agent_info.logical_node_id      = idcount++;
         agent_info.node_id              = node_id;
@@ -580,6 +616,11 @@ enumerate()
         read_property(properties, "num_cp_queues", agent_info.num_cp_queues);
         read_property(properties, "max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute);
 
+        if(properties.count("cwsr_size") > 0)
+            read_property_value(properties, "cwsr_size", internal_info.cwsr_size);
+        if(properties.count("ctl_stack_size") > 0)
+            read_property_value(properties, "ctl_stack_size", internal_info.ctl_stack_size);
+
         agent_info.name         = "";
         agent_info.product_name = "";
         agent_info.vendor_name  = "";
@@ -619,9 +660,9 @@ enumerate()
                         agent_info.node_id,
                         agent_info.gfx_target_version);
 
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
+                    auto major = ROCPROFILER_GFXIP_MAJOR(agent_info.gfx_target_version);
+                    auto minor = ROCPROFILER_GFXIP_MINOR(agent_info.gfx_target_version);
+                    auto step  = ROCPROFILER_GFXIP_STEPPING(agent_info.gfx_target_version);
                     agent_info.name =
                         common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
                             ->c_str();
@@ -662,9 +703,9 @@ enumerate()
                         major_version,
                         minor_version);
 
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
+                    auto major = ROCPROFILER_GFXIP_MAJOR(agent_info.gfx_target_version);
+                    auto minor = ROCPROFILER_GFXIP_MINOR(agent_info.gfx_target_version);
+                    auto step  = ROCPROFILER_GFXIP_STEPPING(agent_info.gfx_target_version);
 
                     agent_info.name =
                         common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
@@ -803,12 +844,12 @@ enumerate()
 
         update_agent_runtime_visibility(agent_info);
 
-        data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
+        data.emplace_back(new platform::agent_info{internal_info}, [](platform::agent_info* ptr) {
             if(ptr)
             {
-                delete[] ptr->mem_banks;
-                delete[] ptr->caches;
-                delete[] ptr->io_links;
+                delete[] ptr->public_info.mem_banks;
+                delete[] ptr->public_info.caches;
+                delete[] ptr->public_info.io_links;
             }
             delete ptr;
         });

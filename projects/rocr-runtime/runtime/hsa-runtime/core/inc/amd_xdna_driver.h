@@ -43,10 +43,9 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
-#include <array>
-#include <climits>
-#include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
@@ -61,21 +60,6 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
-  /// @brief BO handle information.
-  struct BOHandle {
-    /// Mapped address.
-    void* vaddr = nullptr;
-    /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
-    uint32_t handle = 0;
-    /// Size in bytes.
-    size_t size = 0;
-
-    constexpr BOHandle() = default;
-    constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
-        : vaddr{vaddr}, handle{handle}, size{size} {}
-    constexpr bool IsValid() const { return handle != 0; }
-  };
-
 public:
   XdnaDriver(std::string devnode_name);
 
@@ -116,8 +100,14 @@ public:
   /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[in] num_core_tiles number of core tiles to give the queue's hardware context. The
+  /// driver divides this by the number of core rows to get a column count, so a value smaller
+  /// than one row's worth of tiles asks for zero columns and is rejected.
+  /// @param[in] device_id PCI device ID of the agent the queue dispatches to, resolved here so
+  /// dispatch does not look the device type up per batch
   /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
-  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** queue_metadata) const;
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles, uint16_t device_id,
+                                     void** queue_metadata) const;
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
@@ -154,10 +144,13 @@ public:
   /// driver needs to create a new hardware context.
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
-  /// @param[in] num_core_tiles number of core tiles in the AIE device
   /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On failure this is the prefix the
+  /// device got through before it stopped, so the caller can consume exactly those and leave the
+  /// failing packet and everything after it in the ring.
   hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
-                              uint64_t num_pkts, uint32_t num_core_tiles, const core::Agent& agent);
+                              uint64_t num_pkts, const core::Agent& agent, uint64_t* num_completed);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -187,13 +180,6 @@ public:
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
  private:
-  /// @brief Destroys @p bo_handle.
-  ///
-  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
-  ///
-  /// @param[in,out] bo_handle BO handle to destroy.
-  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
-
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
@@ -202,20 +188,6 @@ public:
 
   /// @brief Free device accessible heap (dev heap) space.
   hsa_status_t FreeDeviceHeap();
-
-  /// @brief Creates a command BO and returns it to @p bo_info.
-  ///
-  /// @param[in] size size of memory to allocate
-  /// @param[out] bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
-
-  /// @brief Returns true if @p vaddr lies within the dev heap mapping.
-  ///
-  /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so
-  /// FreeMemory must not unmap them. This lets FreeMemory distinguish those from
-  /// BO_SHAREs (which own an independent mmap) by the VA alone, without the caller
-  /// tracking mapping ownership.
-  bool IsDevHeapVA(const void* vaddr) const;
 
   /// @brief Device heap BO.
   ///

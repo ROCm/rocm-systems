@@ -161,7 +161,7 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
@@ -900,6 +900,8 @@ std::string Operand::name() const {
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ == 192u)
+      return "64";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
@@ -1534,6 +1536,26 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
                          reg_width};
     break;
   }
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
   default:
     break;
   }

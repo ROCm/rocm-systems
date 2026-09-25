@@ -3,9 +3,9 @@
 
 #include "rocjitsu/code/relocation_function_table.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -19,6 +19,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -371,25 +372,49 @@ bool object_defines_only_kernels(const AmdGpuCodeObject &object) {
       function_names, [&](std::string_view name) { return descriptor_names.contains(name); });
 }
 
-static std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
-                                                                   bool externally_resolvable_only);
+// Shared ELF walk for the offset and range APIs. It validates function entries but deliberately
+// preserves each nonzero st_size verbatim: existing offset consumers do not depend on the rest of
+// the extent being valid, while discover_text_function_symbol_ranges() applies that stricter
+// contract before exposing ranges.
+static std::vector<TextFunctionSymbolRange>
+discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
+                                         bool externally_resolvable_only);
 
 std::vector<uint64_t>
 discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object) {
   std::vector<uint64_t> offsets;
-  for (uint64_t offset :
-       discover_text_function_symbol_offsets(object, /*externally_resolvable_only=*/true))
-    offsets.push_back(offset);
+  for (const TextFunctionSymbolRange &range :
+       discover_text_function_symbol_candidates(object, /*externally_resolvable_only=*/true))
+    offsets.push_back(range.start_offset);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
   return offsets;
 }
 
 std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object) {
-  return discover_text_function_symbol_offsets(object, /*externally_resolvable_only=*/false);
+  std::vector<uint64_t> offsets;
+  for (const TextFunctionSymbolRange &range :
+       discover_text_function_symbol_candidates(object, /*externally_resolvable_only=*/false))
+    offsets.push_back(range.start_offset);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
 }
 
-static std::vector<uint64_t>
-discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
-                                      bool externally_resolvable_only) {
+std::vector<TextFunctionSymbolRange>
+discover_text_function_symbol_ranges(const AmdGpuCodeObject &object) {
+  std::vector<TextFunctionSymbolRange> ranges =
+      discover_text_function_symbol_candidates(object, /*externally_resolvable_only=*/false);
+  if (object.text_sections().size() != 1)
+    return {};
+  const uint64_t text_size = object.text_sections().front()->size();
+  std::erase_if(ranges, [text_size](const TextFunctionSymbolRange &range) {
+    return (range.size % sizeof(uint32_t)) != 0 || range.size > text_size - range.start_offset;
+  });
+  return ranges;
+}
+
+static std::vector<TextFunctionSymbolRange>
+discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
+                                         bool externally_resolvable_only) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
   const std::span<const uint8_t> image(bytes, object.image_size());
   Elf64_Ehdr ehdr{};
@@ -412,7 +437,7 @@ discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
   if (!text_index)
     return {};
 
-  std::vector<uint64_t> offsets;
+  std::vector<TextFunctionSymbolRange> ranges;
   for (const Elf64_Shdr &symtab : sections) {
     if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
         symtab.sh_entsize != sizeof(Elf64_Sym) ||
@@ -444,12 +469,16 @@ discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
       }
       if (offset >= text_size || (offset % sizeof(uint32_t)) != 0)
         continue;
-      offsets.push_back(offset);
+      ranges.push_back({.start_offset = offset, .size = symbol.st_size});
     }
   }
-  std::ranges::sort(offsets);
-  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
-  return offsets;
+  const auto range_key = [](const TextFunctionSymbolRange &range) {
+    return std::pair{range.start_offset, range.size};
+  };
+  std::ranges::sort(ranges, {}, range_key);
+  const auto duplicate_tail = std::ranges::unique(ranges, {}, range_key);
+  ranges.erase(duplicate_tail.begin(), duplicate_tail.end());
+  return ranges;
 }
 
 std::vector<uint64_t>

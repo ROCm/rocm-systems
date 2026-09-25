@@ -9,8 +9,8 @@
 // Perfetto/database/AMD-SMI dependencies.
 //
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
-#include <spdlog/fmt/fmt.h>
 
 #include <array>
 #include <cstdint>

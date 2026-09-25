@@ -21,10 +21,13 @@ namespace RcclUnitTesting
 {
 
 // Use the production rcclDdaEnabled() from rccl_common.h directly.
-// Threshold constants kDdaAlltoAllGfx{942,950,1250}ThresholdBytes are also in rccl_common.h.
 
 inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t datatype) {
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
+}
+
+inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
+  return rcclDdaEntryThreshold(comm, ncclFuncAlltoAll);
 }
 
 inline bool testRcclDdaAlltoAllThresholdEnabled(
@@ -34,9 +37,7 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
   return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
-      kDdaAlltoAllGfx942ThresholdBytes,
-      kDdaAlltoAllGfx950ThresholdBytes,
-      kDdaAlltoAllGfx1250ThresholdBytes);
+      testDdaAlltoAllThreshold(comm));
 }
 
 // Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.
@@ -54,6 +55,9 @@ struct DdaAlltoAllMockComm
 {
     ncclComm comm{};
     char archNameBuf[64]{};
+
+    DdaAlltoAllMockComm(const DdaAlltoAllMockComm&)            = delete;
+    DdaAlltoAllMockComm& operator=(const DdaAlltoAllMockComm&) = delete;
 
     DdaAlltoAllMockComm() { reset("gfx950:sramecc+:xnack-"); }
 
@@ -73,7 +77,12 @@ struct DdaAlltoAllMockComm
 
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
-    kDdaAlltoAllGfx942ThresholdBytes /
+    4194304UL /
+    (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// Per-rank float32 count whose 8-rank AlltoAll totals exactly 1 MiB (gfx1250 LL128 ceiling).
+constexpr size_t kAlltoAllFloat32CountAt1MbLL128Threshold =
+    1048576UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).

@@ -13,7 +13,6 @@
 
 #include <timemory/components/definition.hpp>
 #include <timemory/enum.h>
-#include <timemory/utility/macros.hpp>
 
 #include <utility>
 
@@ -22,7 +21,7 @@ std::vector<info_type>
 get_component_info()
 {
     using index_seq_t = std::make_index_sequence<EndV>;
-    using enum_list_t = typename enumerated_list<tim::type_list<>, index_seq_t>::type;
+    using enum_list_t = enumerated_list<tim::type_list<>, index_seq_t>::type;
 
     auto _info = std::vector<info_type>{};
     return get_availability<>{}(enum_list_t{}, _info);

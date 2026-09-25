@@ -74,7 +74,7 @@ def generate_put_api_x():
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_api_x("wave", type_, tname_)
-    
+
     expanded_code += """
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
@@ -133,7 +133,7 @@ def generate_get_api_x():
  */\n"""
     for type_, tname_ in types:
         expanded_code += get_api_x("wave", type_, tname_)
-    
+
     expanded_code += """
 /**
  * @brief Reads contiguous data of \p nelems elements from \p source on \p pe
@@ -166,7 +166,7 @@ def put_nbi_api_x(GRAN, T, TNAME):
         f"    size_t nelems, int pe);\n"
         f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_put_nbi_{GRAN}(\n"
         f"    {T} *dest, const {T} *source, size_t nelems, int pe);\n\n"
-    )    
+    )
 
 
 def generate_put_nbi_api_x():

@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/containers/aligned_static_vector.hpp"
 #include "core/containers/stable_vector.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -14,7 +15,6 @@
 #include "library/thread_data_growth.hpp"
 #include "library/thread_deleter.hpp"
 
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <array>
@@ -80,7 +80,7 @@ struct thread_data : base_thread_data<thread_data<Tp, Tag, MaxThreads>>
     using this_type  = thread_data<Tp, Tag, MaxThreads>;
     using value_type = unique_ptr_t<Tp>;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
     using functor_type = std::function<value_type()>;
 
     template <typename... Args>
@@ -176,7 +176,7 @@ thread_data<Tp, Tag, MaxThreads>::instance()
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-typename thread_data<Tp, Tag, MaxThreads>::array_type&
+thread_data<Tp, Tag, MaxThreads>::array_type&
 thread_data<Tp, Tag, MaxThreads>::instances()
 {
     return private_instance()->m_data;
@@ -193,7 +193,7 @@ thread_data<Tp, Tag, MaxThreads>::instance(construct_on_thread&& _t, Args&&... _
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
-typename thread_data<Tp, Tag, MaxThreads>::array_type&
+thread_data<Tp, Tag, MaxThreads>::array_type&
 thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
 {
     static auto& _v = [&]() -> array_type& {
@@ -223,7 +223,7 @@ struct thread_data<std::optional<Tp>, Tag, MaxThreads>
     using value_type   = std::optional<Tp>;
     using functor_type = std::function<value_type()>;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
 
     thread_data()  = default;
     ~thread_data() = default;
@@ -344,7 +344,7 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
     // construct outside of lambda to prevent data-race
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
-        container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
+        container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
@@ -392,7 +392,7 @@ struct thread_data<identity<Tp>, Tag, MaxThreads>
     using this_type  = thread_data<identity<Tp>, Tag, MaxThreads>;
     using value_type = Tp;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
     using functor_type = std::function<value_type()>;
 
     thread_data()  = default;
@@ -512,7 +512,7 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
     // construct outside of lambda to prevent data-race
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
-        container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
+        container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
@@ -560,9 +560,9 @@ struct component_bundle_cache_impl
     using allocator_type = tim::data::ring_buffer_allocator<bundle_type>;
     using array_type     = std::vector<bundle_type*>;
 
-    using iterator         = typename array_type::iterator;
-    using const_iterator   = typename array_type::const_iterator;
-    using reverse_iterator = typename array_type::reverse_iterator;
+    using iterator         = array_type::iterator;
+    using const_iterator   = array_type::const_iterator;
+    using reverse_iterator = array_type::reverse_iterator;
 
     component_bundle_cache_impl()  = default;
     ~component_bundle_cache_impl() = default;

@@ -42,6 +42,23 @@
 #define AMDSMI_FABRIC_DIRECT 0
 #endif
 
+// CMake's AMDSMI_FABRIC_API probe can be cached from a machine whose amd_smi.h
+// had UALoE types, then reused against a ROCm tree that only has the pre-UALoE
+// header (host unit tests and hipify TUs still get -DAMDSMI_FABRIC_DIRECT).
+// Classic UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS. ROCm 7.14 can
+// already declare fabric telemetry enumerators without that macro. If CMake
+// detected those enumerators (AMDSMI_HEADER_HAS_FABRIC_TELEMETRY), keep the
+// system types. If CMake already set AMDSMI_FABRIC_DIRECT, do not force it
+// off just because MAX_LOCAL_GPUS is missing. Only emit wrap compat types when
+// fabric is not enabled.
+#if AMDSMI_DIRECT && defined(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+#undef AMDSMI_FABRIC_DIRECT
+#define AMDSMI_FABRIC_DIRECT 1
+#elif AMDSMI_DIRECT && !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS) && !AMDSMI_FABRIC_DIRECT
+#undef AMDSMI_FABRIC_DIRECT
+#define AMDSMI_FABRIC_DIRECT 0
+#endif
+
 #if !AMDSMI_DIRECT
 /*************************************************************************
  * Pre-UALoE AMDSMI Definitions
@@ -483,19 +500,46 @@ constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
 constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
 constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
+constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
+constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
+constexpr size_t kAmdSmiFabricReserved8GpuEnd = 284;
+constexpr size_t kAmdSmiFabricReserved16GpuEnd = 316;
+constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
+
+// Compat types (AMDSMI_FABRIC_DIRECT=0) declare amdsmi_fabric_info_v1_t here and
+// can assert the full v1 field layout. Installed amd_smi.h can expose
+// amdsmi_fabric_info_t without v1 (ROCm 7.14 telemetry headers); naming v1_t
+// there is a compile error. amdsmi_wrap.cc still needs amdSmiFabricLayoutIs8Gpu
+// on the DIRECT=1 path, so classify from the outer struct size instead.
+#if !AMDSMI_FABRIC_DIRECT
 constexpr bool amdSmiFabricLayoutIs8Gpu =
   sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState8GpuOffset - sizeof(uint32_t) &&
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState8GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 224;
 
-constexpr bool amdSmiFabricLayoutIs16Gpu =
-  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+constexpr bool amdSmiFabricV1WindowIsAt16GpuOffsets =
+  sizeof(amdsmi_fabric_info_v1_t) == 244 &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
-  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
-  offsetof(amdsmi_fabric_info_t, reserved) == 256;
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset;
 
-static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
+constexpr bool amdSmiFabricLayoutIs16Gpu =
+  amdSmiFabricV1WindowIsAt16GpuOffsets && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+  offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
+
+constexpr bool amdSmiFabricLayoutIsExtendedUnion =
+  amdSmiFabricV1WindowIsAt16GpuOffsets && kAmdSmiFabricHeaderIsExtended &&
+  offsetof(amdsmi_fabric_info_t, reserved) >= kAmdSmiFabricV1PayloadEnd;
+
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
+              "unsupported amdsmi fabric layout");
+#else
+constexpr bool amdSmiFabricLayoutIs8Gpu = sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize;
+constexpr bool amdSmiFabricLayoutIs16Gpu = sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize;
+constexpr bool amdSmiFabricLayoutIsExtendedUnion = kAmdSmiFabricHeaderIsExtended;
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
+              "unsupported amdsmi fabric layout");
+#endif
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -563,7 +607,7 @@ inline uint32_t amdSmiFabricInfoVersion(const FabricInfoT& info) {
 }
 
 template <typename FabricInfoT>
-inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info) {
+inline auto amdSmiFabricInfoV1(const FabricInfoT& info) {
   if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
     return &info.fabric_info.v1;
   } else {
@@ -578,33 +622,81 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
 // 16-GPU runtime.
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
+// Must cover the declared struct: amdSmiFabricInfoBufferAsInfo casts the array to amdsmi_fabric_info_t*.
+// No slack past that, so on a non-extended header the detector's top window is empty and sees no over-write.
+constexpr size_t kAmdSmiFabricInfoBufferSize =
+  kAmdSmiFabricHeaderIsExtended ? sizeof(amdsmi_fabric_info_t) : kAmdSmiFabricInfo16GpuSize;
+
 struct alignas(amdsmi_fabric_info_t) amdSmiFabricInfoBuffer {
-  unsigned char bytes[kAmdSmiFabricInfo16GpuSize];
+  unsigned char bytes[kAmdSmiFabricInfoBufferSize];
 };
 
 enum class amdSmiFabricRuntimeLayout {
   EightGpu,
   SixteenGpu,
+  ExtendedUnion,
   Unknown,
 };
 
+// Zero the request header so it matches the per-device call; the payload stays canary by design.
 inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
   memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
+  memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadBegin);
 }
 
 inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer& buffer) {
   return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
 }
 
-inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
-  bool tailIsCanary = true;
-  bool tailIsZero = true;
-  for (size_t i = kAmdSmiFabricInfo8GpuSize; i < kAmdSmiFabricInfo16GpuSize; ++i) {
-    tailIsCanary &= buffer.bytes[i] == kAmdSmiFabricBufferCanary;
-    tailIsZero &= buffer.bytes[i] == 0;
+inline bool amdSmiFabricWindowAllCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+  for (size_t i = begin; i < end; ++i) {
+    if (buffer.bytes[i] != kAmdSmiFabricBufferCanary) {
+      return false;
+    }
   }
-  if (tailIsCanary) return amdSmiFabricRuntimeLayout::EightGpu;
-  if (tailIsZero) return amdSmiFabricRuntimeLayout::SixteenGpu;
+  return true;
+}
+
+inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+  for (size_t i = begin; i < end; ++i) {
+    if (buffer.bytes[i] == kAmdSmiFabricBufferCanary) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
+                kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricReserved8GpuEnd &&
+                kAmdSmiFabricReserved8GpuEnd < kAmdSmiFabricInfo8GpuSize &&
+                kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricReserved16GpuEnd &&
+                kAmdSmiFabricReserved16GpuEnd < kAmdSmiFabricInfo16GpuSize &&
+                kAmdSmiFabricInfo16GpuSize <= kAmdSmiFabricInfoBufferSize,
+              "fabric probe windows are out of order");
+
+// Write extents: 256 = 27.x field-wise, 288 = 8-GPU whole-object, 320 = 16-GPU whole-object.
+// Confirmation reads only the reserved windows, which every writer zero-fills. The v1 payload is
+// live data that can legitimately hold a 0xA5 byte, so it is only tested for having been touched.
+inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
+  const bool wroteV1 =
+    !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
+  const bool wrote8GpuTail =
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricReserved8GpuEnd);
+  const bool wrote16GpuTail =
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd);
+  const bool nothingBeyond16Gpu =
+    amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize);
+
+  if (wroteV1 && amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
+    return amdSmiFabricRuntimeLayout::ExtendedUnion;
+  }
+  if (wroteV1 && wrote8GpuTail &&
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
+    return amdSmiFabricRuntimeLayout::EightGpu;
+  }
+  if (wroteV1 && wrote8GpuTail && wrote16GpuTail && nothingBeyond16Gpu) {
+    return amdSmiFabricRuntimeLayout::SixteenGpu;
+  }
   return amdSmiFabricRuntimeLayout::Unknown;
 }
 
