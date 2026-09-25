@@ -2775,6 +2775,34 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad)
   EXPECT_EQ(body.back(), kSelectGuestVgprBank);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeSavesGfx1250HighBankAliasedAddress) {
+  for (uint8_t bank = 1; bank <= 3; ++bank) {
+    SCOPED_TRACE(unsigned(bank));
+    const uint8_t guest_mode = static_cast<uint8_t>(bank | (bank << 6));
+    const auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 36, .vdst = 36});
+    std::vector<uint32_t> text_words = {0xBF860000u | guest_mode, load[0], load[1]};
+    text_words.resize(64u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+    text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    Options options;
+    options.mode = Mode::SuperCollider;
+    options.probe_lds_check_trap = true;
+    options.scratch_vgpr = 4;
+    const auto result = test_lower_consan(
+        make_gfx1250_code_object(text_words, "banked_lds_aliased_address"), options);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified());
+    ASSERT_EQ(result.patches.size(), 1u);
+    const auto body = emitted_patch_words(result, result.patches.front());
+    ASSERT_GE(body.size(), 6u);
+    EXPECT_EQ(body[0], 0xBF860000u | (uint32_t{guest_mode} << 8u) | bank);
+    EXPECT_EQ(body[1], build_v_mov_b32_e32(8, vector_source_vgpr(36), ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_EQ(body[2], 0xBF860000u | (uint32_t{bank} << 8u) | guest_mode);
+    EXPECT_EQ(body[3], load[0]);
+    EXPECT_EQ(body[4], load[1]);
+    EXPECT_EQ(body.back(), 0xBF860000u | guest_mode);
+  }
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeKeepsGfx1250ReplayAddressBank) {
   for (uint8_t bank = 1; bank <= 3; ++bank) {
     for (bool store : {false, true}) {

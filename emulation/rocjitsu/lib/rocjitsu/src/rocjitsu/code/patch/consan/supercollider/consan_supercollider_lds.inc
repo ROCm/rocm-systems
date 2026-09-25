@@ -600,9 +600,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           guest_instruction_word_offset =
               static_cast<uint32_t>(wrapped.size() + 3u + *guest_instruction_word_offset - 1u);
         }
-        wrapped.push_back(*select_low);
+        // Save the guest address into low-bank scratch before the load.
+        // Only Src0 retains its guest bank; selecting bank zero here would
+        // save a different VGPR whenever the address lives above v255.
+        const uint8_t guest_mode = static_cast<uint8_t>(*candidate.selectable_vgpr_bank_mode);
+        const uint8_t address_mode =
+            amdgpu::vgpr_msb_bank_for_role(guest_mode, amdgpu::VgprMsbRole::Src0).value_or(0u);
+        const auto select_address =
+            instrumentation::build_s_set_vgpr_msb_transition(guest_mode, address_mode, arch);
+        const auto restore_address =
+            instrumentation::build_s_set_vgpr_msb_transition(address_mode, guest_mode, arch);
+        if (!select_address || !restore_address) {
+          result.errors.emplace_back(
+              "ConSan LDS check/trap proof could not select preserved address bank");
+          return;
+        }
+        wrapped.push_back(*select_address);
         wrapped.push_back(words->front());
-        wrapped.push_back(*restore_guest);
+        wrapped.push_back(*restore_address);
         wrapped.insert(wrapped.end(), words->begin() + 1u, words->begin() + guest_prefix_words);
       } else {
         if (guest_instruction_word_offset) {

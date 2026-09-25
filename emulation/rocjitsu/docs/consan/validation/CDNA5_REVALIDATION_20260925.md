@@ -688,3 +688,24 @@ exit 124 after 360 s with no final analysis verdict. Baseline passed in 70 s.
 The driver correctly stopped before starting fault trials. Earlier delay-zero
 clean evidence remains valid, but sleep=15 qualification needs a longer rerun
 with less CPU contention; the table now exposes that blocker.
+
+### Second MXF4 address-bank failure: saved address
+
+The isolated first fix moved the first mismatch to patched ELF PC `0x1fa4d4`
+(`mxf4-watch-address-gdb.log`, `mxf4-second-mismatch.asm`). Before the guest
+`ds_load_b128 v[804:807], v549 offset:992`, the preserved-address move copied
+low-bank `v37` into scratch `v4`. The replay therefore still read another LDS
+address. Preserve Src0's guest bank while selecting low-bank destination for
+this move, and then restore the complete guest mode for the original access.
+The regression covers all three high banks and the preexisting low-address /
+high-destination test still passes. `saved-address-verified.log` reports all
+129 selected ConSan check/trap and SuperCollider host tests passing. The earlier
+`saved-address-after.log` used overly strict instruction encoding expectations;
+the final test accounts for the transition encoder clearing and setting the
+retained source bank, which is semantically equivalent.
+
+With the isolated `saved-address-hook`, the original retained MXF4 solution 6
+now returns zero, numerically PASSED, marker zero / mismatch false, and complete
+2448/2448 applicable access coverage (`mxf4-saved-address-fix6-client.log`).
+Full six-shard qualification is running in `mxf4-saved-address-clean`; this
+single-client diagnostic does not qualify the entire table cell.
