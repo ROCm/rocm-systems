@@ -1063,3 +1063,12 @@ faults. Every trial records high, complete analysis, and healthy pre/post checks
 Clean and fault hook/allowlist hashes match. The green cell is now refreshed
 against the same lifetime-fixed shared hook used for D128-block requalification;
 the separately building tensor-DMA inventory change is not included.
+
+### Topk Default completes below the sampling threshold
+
+`topk-cap-default-fault-retry` completes all eight admitted/reached trials with
+complete analysis and healthy pre/post checks: 0/8 detections and 0/8 oracle
+manifestations. Its matching clean already passed. The cell now records the
+measured result. `topk-high-queue.py` waits for the running corrected Default
+preset queue to finish, then launches matching high clean/fault qualification
+in fresh roots. No lower-than-default preset is tested.
