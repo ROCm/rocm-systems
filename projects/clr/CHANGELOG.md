@@ -9,6 +9,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
 
+### Resolved issues
+* A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
+
 ## HIP 10.1.0 for ROCm 10.1.0
 
 ### Added

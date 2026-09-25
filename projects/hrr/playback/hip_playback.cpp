@@ -1046,6 +1046,17 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
 // Stored in co_modules keyed by the full 32-char hex hash — collision-free
 // and consistent with load_module(), so kernel name scans find it automatically.
 
+// A well-formed offload bundle starts with one of the two magics the bundler
+// emits: the clang text magic, or the compressed-bundle "CCOB" magic.
+static bool is_offload_bundle(const void* p, size_t n) {
+    if (!p) return false;
+    static const char kClangMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+    const size_t kClangMagicLen = sizeof(kClangMagic) - 1;  // 24, no NUL
+    if (n >= kClangMagicLen && std::memcmp(p, kClangMagic, kClangMagicLen) == 0) return true;
+    if (n >= 4 && std::memcmp(p, "CCOB", 4) == 0) return true;
+    return false;
+}
+
 hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
                                            const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(payload);
@@ -1058,10 +1069,12 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     std::string hex = hrr::hash_hex(blob_hash_lo, blob_hash_hi);
 
     // Deduplicate: if already loaded (e.g. multiple __hipRegisterFatBinary events
-    // for the same binary), skip the load.
+    // for the same binary), skip the load. Binaries already known to hold no code
+    // for this GPU are skipped the same way.
     {
         std::shared_lock lk(ctx.map_mutex);
         if (ctx.co_modules.count(hex)) return hipSuccess;
+        if (ctx.co_no_device_code.count(hex)) return hipSuccess;
     }
 
     size_t sz = 0;
@@ -1074,6 +1087,23 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     hipModule_t mod = nullptr;
     hipError_t err = hipModuleLoadData(&mod, blob);
     if (err != hipSuccess) {
+        // A bundle with nothing built for the live GPU is expected, not a defect:
+        // see co_no_device_code. Launches are assumed not to reference it because
+        // the archive is replayed on the capture's architecture — nothing checks
+        // that, so on a cross-arch replay this is where missing kernels start.
+        // Only a well-formed bundle qualifies; anything else is a damaged blob
+        // and is reported below.
+        if ((err == hipErrorInvalidImage || err == hipErrorNoBinaryForGpu) &&
+            is_offload_bundle(blob, sz)) {
+            {
+                std::unique_lock lk(ctx.map_mutex);
+                ctx.co_no_device_code.insert(hex);
+            }
+            if (ctx.verbose)
+                fprintf(stderr, "[HRR] Fat binary %s holds no code for this GPU — skipped\n",
+                        hex.c_str());
+            return hipSuccess;
+        }
         fprintf(stderr, "[HRR] __hipRegisterFatBinary: hipModuleLoadData failed: %d (%s)\n",
                 err, hipGetErrorString(err));
         return hipSuccess;  // non-fatal

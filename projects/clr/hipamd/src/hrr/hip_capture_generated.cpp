@@ -4101,18 +4101,6 @@ static hipError_t capture_hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* 
 }
 
 // Generated shim
-static hipError_t capture_hipModuleUnload(hipModule_t module) {
-  hipError_t r = g_real_table.hipModuleUnload_fn(module);
-  if (r == hipSuccess) {
-    hrr_args_hipModuleUnload a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.module = reinterpret_cast<uint64_t>(module);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMODULEUNLOAD, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk) {
   hipError_t r = g_real_table.hipOccupancyMaxActiveBlocksPerMultiprocessor_fn(numBlocks, f, blockSize, dynSharedMemPerBlk);
   if (r == hipSuccess) {
@@ -7482,6 +7470,7 @@ extern hipError_t capture_hipModuleLaunchKernel(hipFunction_t f, unsigned int gr
 extern hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname);
 extern hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image);
 extern hipError_t capture_hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions, hipJitOption* options, void** optionValues);
+extern hipError_t capture_hipModuleUnload(hipModule_t module);
 extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags);
 extern hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream);

@@ -96,6 +96,9 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipModuleLoadData",
     "hipModuleLoadDataEx",
     "hipModuleLoad",
+    # Module unload — drop the program's code-object hash so a recycled
+    # amd::Program address cannot hit a stale g_prog_hash entry.
+    "hipModuleUnload",
     # Memcpy H2D variants — blob snapshotting of host src data to disk
     "hipMemcpy",
     "hipMemcpyAsync",

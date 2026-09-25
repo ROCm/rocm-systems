@@ -625,7 +625,8 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
  * ----------------
  *   - Capture Unit_HRR_StreamWriteValue_Direct (hipStreamWriteValue32 /
  *     hipStreamWriteValue64, including one hipExtStreamWriteValueIncrement
- *     write) and replay it.  Replay must reproduce every written value.
+ *     write when the headers define it) and replay it.  Replay must
+ *     reproduce every written value.
  *   - Replay with HIP_HRR_D2H_EXACT=1.  This is deliberate, not decoration:
  *     with the default tolerant validator a lost 32-bit write is accepted as
  *     "f64 within tolerance" on any blob whose length is a multiple of 8, and
