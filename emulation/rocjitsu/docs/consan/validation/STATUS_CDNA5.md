@@ -45,7 +45,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) |  |  |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) |  |  |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) |  |  |
-| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) |  |  |
+| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending |  |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) |  |  |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) |  |  |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) |  |  |
@@ -57,7 +57,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) |  |  |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) |  |  |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) |  |  |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) |  |  |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟧 default: 30 s timeout during patching; longer clean run pending |  |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) |  |  |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) |  |  |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) |  |  |
