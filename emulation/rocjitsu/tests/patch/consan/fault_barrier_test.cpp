@@ -1004,6 +1004,87 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
   }));
 }
 
+TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCdna4FullBarriersAsOneMutation) {
+  const std::array<uint32_t, 4> text_words = {
+      0xBF8A0000u, // first full s_barrier
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+      0xBF8A0000u, // second full s_barrier
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "exact_grouped_barrier_drop");
+  Options inventory_options;
+  inventory_options.mode = Mode::SuperCollider;
+  const TransformArtifacts inventory = test_semantic_inventory(bytes, inventory_options);
+  std::vector<const SyncSequence *> sequences;
+  for (const SyncSequence &sequence : inventory.program_inventory.sync().sync_sequences)
+    if (sequence.operation == SyncOperation::BarrierFull)
+      sequences.push_back(&sequence);
+  ASSERT_EQ(sequences.size(), 2u);
+  const auto site_for = [&](const SyncSequence &sequence) {
+    return std::ranges::find_if(inventory.fault_sites, [&](const FaultSite &site) {
+      return test_sync_sequence(inventory, site) == &sequence;
+    });
+  };
+  const auto first_site = site_for(*sequences[0]);
+  const auto second_site = site_for(*sequences[1]);
+  ASSERT_NE(first_site, inventory.fault_sites.end());
+  ASSERT_NE(second_site, inventory.fault_sites.end());
+
+  Options options = inventory_options;
+  options.fault_drop_barrier = true;
+  options.fault_require_exactly_one = true;
+  options.fault_site_identity = first_site->identity;
+  options.fault_barrier_sequence_identity = sequences[0]->identity;
+  options.fault_barrier_companion_site_identity = second_site->identity;
+  options.fault_barrier_companion_sequence_identity = sequences[1]->identity;
+  options.fault_dry_run = true;
+  const TransformArtifacts dry_run = test_lower_consan(bytes, options);
+  ASSERT_TRUE(dry_run.errors.empty()) << testing::PrintToString(dry_run.errors);
+  ASSERT_EQ(dry_run.fault_plans.size(), 1u);
+  EXPECT_EQ(dry_run.mutation.fault.planned, 1u);
+  ASSERT_EQ(dry_run.fault_plans.front().ordered_member_identities.size(), 2u);
+  EXPECT_TRUE(dry_run.fault_plans.front().logical_sequence_identity->starts_with("barrier-group["));
+
+  options.fault_dry_run = false;
+  const TransformArtifacts execution = test_lower_consan(bytes, options);
+  ASSERT_EQ(execution.outcome, TransformOutcome::ModifiedValid)
+      << testing::PrintToString(execution.errors);
+  EXPECT_EQ(execution.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(execution.mutation.fault.applied, 1u);
+  ASSERT_EQ(execution.patches.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(execution.patches, [](const PatchInfo &patch) {
+    return patch.phase == PatchPhase::Mutation && patch.kind == PatchKind::InlineBarrierNopRewrite;
+  }));
+  AmdGpuCodeObject patched(execution.replacement.data(), execution.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
+  EXPECT_EQ(text[0], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(text[1], text_words[1]);
+  EXPECT_EQ(text[2], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(text[3], text_words[3]);
+
+  for (bool reverse : {false, true}) {
+    Options invalid = options;
+    invalid.fault_barrier_companion_site_identity = first_site->identity;
+    invalid.fault_barrier_companion_sequence_identity = sequences[0]->identity;
+    if (reverse) {
+      invalid.fault_site_identity = second_site->identity;
+      invalid.fault_barrier_sequence_identity = sequences[1]->identity;
+    }
+    const TransformArtifacts rejected = test_lower_consan(bytes, invalid);
+    EXPECT_EQ(rejected.mutation.fault.applied, 0u);
+    EXPECT_FALSE(rejected.errors.empty());
+  }
+
+  TransformArtifacts corrupted = execution;
+  corrupted.patches.pop_back();
+  const std::vector<std::string> validation_errors = validate_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("complete exact whole-barrier drop group") != std::string::npos;
+  }));
+}
+
 TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsWithoutWrites) {
   const std::array<uint32_t, 7> text_words = {
       0xBE804EC1u, 0xBF94FFFFu, 0xD8340000u, 0x00000000u, 0xBE804EC1u, 0xBF94FFFFu, 0xBFB00000u,

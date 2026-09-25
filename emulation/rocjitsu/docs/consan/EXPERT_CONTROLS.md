@@ -145,6 +145,13 @@ dry-run inventory when the selected family needs them. If an exact site occurs
 in more than one code-object load, `RJ_CONSAN_FAULT_LOAD_OCCURRENCE=N` selects
 the one-based occurrence for a live exactly-one run.
 
+A grouped barrier drop requires exact site and sequence identities for both
+selected barriers. Each must be a complete full barrier: a standalone
+`s_barrier`, or a qualified signal/wait pair. The two barriers must be ordered,
+disjoint, and have identical container and execution owners. All physical
+members are rewritten as one mutation; selecting a group does not permit
+dropping an unqualified half of a signal/wait pair.
+
 The complete fault-selection controls are:
 
 | Variable | Use |

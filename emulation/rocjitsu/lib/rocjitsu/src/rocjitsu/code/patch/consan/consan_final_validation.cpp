@@ -1107,17 +1107,20 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const auto pair_resolution = resolve_exact_barrier_drop_pair(pristine_faults, selection);
+      const auto pair_resolution = resolve_exact_barrier_drop_pair(
+          pristine_faults, selection, sequence_identities.size() == 2u);
       const auto &pair = pair_resolution.pair;
       const size_t member_count = static_cast<size_t>(
           std::ranges::count_if(exact_barrier_drop_patches, [&](const auto *patch) {
             return patch->fault_sequence_identity == sequence_identity;
           }));
-      metadata_matches &= pair.has_value() && member_count == 2u;
+      metadata_matches &=
+          pair.has_value() && member_count == (pair && pair->companion != nullptr ? 2u : 1u);
       if (!pair)
         continue;
       const ProgramSite *primary_source = pristine_faults.source(*pair->primary);
-      const ProgramSite *companion_source = pristine_faults.source(*pair->companion);
+      const ProgramSite *companion_source =
+          pair->companion == nullptr ? primary_source : pristine_faults.source(*pair->companion);
       metadata_matches &= primary_source != nullptr && companion_source != nullptr;
       if (primary_source == nullptr || companion_source == nullptr)
         continue;
@@ -1126,9 +1129,11 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       for (const PatchInfo *patch : exact_barrier_drop_patches) {
         if (patch->fault_sequence_identity != sequence_identity)
           continue;
-        metadata_matches &= patch->fault_primary_identity == pair->primary->identity &&
-                            patch->fault_companion_identity == pair->companion->identity &&
-                            patch->original_size == sizeof(uint32_t);
+        metadata_matches &=
+            patch->fault_primary_identity == pair->primary->identity &&
+            patch->fault_companion_identity ==
+                (pair->companion == nullptr ? std::string{} : pair->companion->identity) &&
+            patch->original_size == sizeof(uint32_t);
         found_primary |= patch->anchor_offset == primary_source->text_offset();
         found_companion |= patch->anchor_offset == companion_source->text_offset();
       }
@@ -1150,7 +1155,9 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       };
       const auto group_resolution = resolve_exact_barrier_drop_group(pristine_faults, selection);
       const auto &group = group_resolution.group;
-      metadata_matches &= exact_barrier_drop_patches.size() == 4u && group &&
+      const size_t expected_members =
+          pairs[0].sequence->member_event_ids.size() + pairs[1].sequence->member_event_ids.size();
+      metadata_matches &= exact_barrier_drop_patches.size() == expected_members && group &&
                           result.mutation.applied_fault_logical_identity ==
                               exact_barrier_drop_group_identity(*group);
     } else {
@@ -2152,7 +2159,9 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       if (!actual_vgprs || *actual_vgprs < requirement.required_vgpr_count) {
         errors.emplace_back(
             "ConSan final validation found insufficient descriptor VGPRs for kernel '" +
-            original_kernel.name + "'");
+            original_kernel.name +
+            "': required=" + std::to_string(requirement.required_vgpr_count) +
+            " allocated=" + (actual_vgprs ? std::to_string(*actual_vgprs) : "unknown"));
       }
     }
     const uint16_t replacement_sgpr_count =

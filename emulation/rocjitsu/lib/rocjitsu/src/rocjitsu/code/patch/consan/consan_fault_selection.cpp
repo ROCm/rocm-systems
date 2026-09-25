@@ -35,7 +35,8 @@ namespace {
 exact_barrier_drop_pair_range(const FaultSelectionView &inventory,
                               const ExactBarrierDropPair &pair) {
   const ProgramSite *primary = inventory.source(*pair.primary);
-  const ProgramSite *companion = inventory.source(*pair.companion);
+  const ProgramSite *companion =
+      pair.companion == nullptr ? primary : inventory.source(*pair.companion);
   if (primary == nullptr || companion == nullptr)
     return {};
   const uint64_t begin = std::min(primary->text_offset(), companion->text_offset());
@@ -181,7 +182,8 @@ select_ordinary_acquire_mutation_target(const FaultSelectionView &inventory,
 }
 
 ExactBarrierDropPairResolution resolve_exact_barrier_drop_pair(const FaultSelectionView &inventory,
-                                                               const FaultSelection &selection) {
+                                                               const FaultSelection &selection,
+                                                               bool allow_full_singleton) {
   using Issue = ExactBarrierDropPairIssue;
   const SynchronizationInventoryView sync = inventory.program_inventory.sync();
   if (selection.primary_site_identity.empty() || selection.primary_sequence_identity.empty()) {
@@ -195,7 +197,9 @@ ExactBarrierDropPairResolution resolve_exact_barrier_drop_pair(const FaultSelect
   const std::vector<ExecutionOwner> sequence_owners = sync.execution_owners(*sequence);
   if (sequence->kind != SyncKind::Barrier || sequence->operation != SyncOperation::BarrierFull ||
       !sync_confidence_meets(sequence->confidence, SemanticConfidence::Conservative) ||
-      sequence->member_event_ids.size() != 2u || !sequence_has_exact_members(sync, *sequence) ||
+      (sequence->member_event_ids.size() != 2u &&
+       !(allow_full_singleton && sequence->member_event_ids.size() == 1u)) ||
+      !sequence_has_exact_members(sync, *sequence) ||
       !execution_owners_include_requested_kernel(sequence_owners, inventory,
                                                  selection.kernel_name_filter)) {
     return {.pair = std::nullopt, .issue = Issue::SequenceNotQualified};
@@ -249,10 +253,11 @@ ExactBarrierDropPairResolution resolve_exact_barrier_drop_pair(const FaultSelect
   }
   const ProgramSite *primary_source = inventory.source(*primary);
   const ProgramSite *companion_source =
-      companion == nullptr ? nullptr : inventory.source(*companion);
+      companion == nullptr ? primary_source : inventory.source(*companion);
   if (primary_source == nullptr || companion_source == nullptr ||
       primary_source->size() != sizeof(uint32_t) || companion_source->size() != sizeof(uint32_t) ||
-      primary_source->decoded_file_offset() == companion_source->decoded_file_offset()) {
+      (companion != nullptr &&
+       primary_source->decoded_file_offset() == companion_source->decoded_file_offset())) {
     return {.pair = std::nullopt, .issue = Issue::InvalidPairGeometry};
   }
   return {.pair = ExactBarrierDropPair{&*sequence, primary, companion}, .issue = Issue::None};
@@ -270,7 +275,7 @@ resolve_exact_barrier_drop_group(const FaultSelectionView &inventory,
   FaultSelection first_selection = selection;
   first_selection.companion_site_identity = {};
   first_selection.companion_sequence_identity = {};
-  const auto first = resolve_exact_barrier_drop_pair(inventory, first_selection);
+  const auto first = resolve_exact_barrier_drop_pair(inventory, first_selection, true);
   if (!first.pair)
     return {.group = std::nullopt, .issue = Issue::FirstPairRejected, .member_issue = first.issue};
   FaultSelection second_selection = selection;
@@ -278,7 +283,7 @@ resolve_exact_barrier_drop_group(const FaultSelectionView &inventory,
   second_selection.primary_sequence_identity = selection.companion_sequence_identity;
   second_selection.companion_site_identity = {};
   second_selection.companion_sequence_identity = {};
-  const auto second = resolve_exact_barrier_drop_pair(inventory, second_selection);
+  const auto second = resolve_exact_barrier_drop_pair(inventory, second_selection, true);
   if (!second.pair)
     return {
         .group = std::nullopt, .issue = Issue::SecondPairRejected, .member_issue = second.issue};

@@ -58,7 +58,8 @@ struct OrdinaryAcquireMutationTarget {
   const SyncSequence *sequence = nullptr;
 };
 
-/// A complete exact two-member logical barrier and its two physical sites.
+/// A complete exact logical barrier. A singleton full barrier, admitted only
+/// within an explicit group, has no companion site.
 struct ExactBarrierDropPair {
   const SyncSequence *sequence = nullptr;
   const FaultSite *primary = nullptr;
@@ -133,7 +134,7 @@ select_ordinary_acquire_mutation_target(const FaultSelectionView &inventory,
 
 [[nodiscard]] ExactBarrierDropPairResolution
 resolve_exact_barrier_drop_pair(const FaultSelectionView &inventory,
-                                const FaultSelection &selection);
+                                const FaultSelection &selection, bool allow_full_singleton = false);
 
 [[nodiscard]] ExactBarrierDropGroupResolution
 resolve_exact_barrier_drop_group(const FaultSelectionView &inventory,

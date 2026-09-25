@@ -910,6 +910,7 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
     } else {
       members = {pair->primary, pair->companion};
     }
+    std::erase(members, nullptr);
     std::ranges::sort(members, [&](const FaultSite *lhs, const FaultSite *rhs) {
       return result.source(*lhs)->text_offset() < result.source(*rhs)->text_offset();
     });
@@ -940,7 +941,8 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
       info.trampoline_offset = source.text_offset();
       info.original_size = source.size();
       info.fault_primary_identity = owning_pair.primary->identity;
-      info.fault_companion_identity = owning_pair.companion->identity;
+      if (owning_pair.companion != nullptr)
+        info.fault_companion_identity = owning_pair.companion->identity;
       info.fault_sequence_identity = owning_pair.sequence->identity;
       result.patches.push_back(std::move(info));
       result.note_event_mutation(member->source_site, SyncEventMutationKind::Destroyed);
@@ -949,7 +951,8 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
     result.mutation.applied_fault_logical_identity =
         group ? exact_barrier_drop_group_identity(*group) : pair->sequence->identity;
     result.warnings.emplace_back(group ? "ConSan exact grouped-barrier fault transactionally "
-                                         "rewrote four physical members"
+                                         "rewrote " +
+                                             std::to_string(members.size()) + " physical members"
                                        : "ConSan exact whole-barrier fault transactionally rewrote "
                                          "both logical members");
     return;
