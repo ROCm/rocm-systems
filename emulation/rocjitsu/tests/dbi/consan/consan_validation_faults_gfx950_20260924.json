@@ -2,7 +2,7 @@
   "schema_version": 2,
   "target": "gfx950",
   "review_required": false,
-  "evidence_model": "Reviewed physical gfx950 reproduction recipes, September 24, 2026. These recipes do not assert qualification: below-bar settings retain the 6/8 requirement; arrival/tree Default retain the last admitted setting high because higher/max clean controls were rejected. Exact reviewed mutations and generated full-workload rocprofv3 allowlists. Prospective statistical bar: 6 detections in 8 admitted/reached trials, matching clean control, complete coverage and healthy pre/post probes. See docs/consan/validation/CDNA4_REVALIDATION_20260924.md.",
+  "evidence_model": "Reviewed physical gfx950 reproduction recipes, September 24, 2026. These recipes do not assert qualification: below-bar settings retain the 6/8 requirement; Arrival Default now qualifies at higher with the repaired CDNA4 publication journal and complete release-boundary mutation; tree Default retains high because denser clean controls still fail its independent oracle. Exact reviewed mutations and generated full-workload rocprofv3 allowlists. Prospective statistical bar: 6 detections in 8 admitted/reached trials, matching clean control, complete coverage and healthy pre/post probes. See docs/consan/validation/CDNA4_REVALIDATION_20260924.md and CDNA4_DEFAULT_REPAIRS_20260924.md.",
   "workloads": {
     "clip-bf16": {
       "faults": [
@@ -1428,7 +1428,7 @@
           "family": "atomic-weaken-order",
           "reach_witness": {
             "kind": "reviewed-unconditional-final-isa",
-            "evidence": "Reviewed the returning global_atomic_add at .text+0x88f4 on the arrival counter, unlike metadata atomics elsewhere. Source028 line176 performs acq_rel fetch_add by active producer leaders after publishing partials. Final ISA buffer_wbl2 sc1 at0x88e8, release wait0x88f0 and acquire buffer_inv sc1 at0x8900 bracket this atomic. Weaken associated ordering only; preserve address, value, and atomic add. The returned count elects the final reducer. Native rocprofv3 discovery confirms dispatch. Require exact-one grouped installation, bounded completion, and pre/post health. Retain this selector across preset and delay searches."
+            "evidence": "Reviewed the returning global_atomic_add at .text+0x88f4 on the arrival counter, unlike metadata atomics elsewhere. Source028 line176 performs acq_rel fetch_add by active producer leaders after publishing partials. Final ISA buffer_wbl2 sc1 at0x88e8, release wait0x88f0 and acquire buffer_inv sc1 at0x8900 bracket this atomic. Weaken associated ordering only; preserve address, value, and atomic add. The returned count elects the final reducer. Native rocprofv3 discovery confirms dispatch. Require exact-one grouped installation, bounded completion, and pre/post health. Retain this selector across preset and delay searches. Follow-up repair removes both buffer_wbl2 and the combined VM/LDS wait as one release-boundary fault, preserving the selected atomic add and later acquire."
           },
           "environment": {
             "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:c1be296009b431fd|kernel=_ZN12_GLOBAL__N_135mfma_streamk_arrival_counter_kernelILN7hip_moi19atomic_memory_orderE3EEEvNS1_7context11storage_refEPKDv4_DF16_S7_PiPf|kind=atomic|pc=0x00000000000088f4|mnemonic=global_atomic_add|occurrence=65",
@@ -1441,28 +1441,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 }
               ]
             },

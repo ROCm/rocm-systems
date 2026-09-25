@@ -1,5 +1,8 @@
 # CDNA4 revalidation, September 24, 2026
 
+This report records the initial campaign. See the [Default repair follow-up](CDNA4_DEFAULT_REPAIRS_20260924.md)
+for subsequent fixes and qualification.
+
 The physical gfx950 campaign follows the fault qualification rules in
 [STATUS_RDNA4.md](STATUS_RDNA4.md). The current per-workload state is in
 [STATUS_CDNA4.md](STATUS_CDNA4.md). All 50 cells have been regenerated: **20
