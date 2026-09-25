@@ -1917,3 +1917,26 @@ preserving tensor completion at 0x1750. Exact site and sequence identities are
 verified against the retained export inventory. The draft stays outside the
 shared spec until the active mixed TDM campaigns finish. Full MXF4 TDM high
 clean qualification is running with the established 192 MiB report allowance.
+
+### Mixed TDM qualified; MXF4 and sparse FP16 faults reviewed
+
+`tensor-memory-mixed-tdm-high-clean` passes all three shards with complete
+coverage. `mixed-tdm-exact-high-fault` is accepted with 8/8 admitted and reached
+detections; the matching default campaign detects 0/8. All numeric oracles
+pass independently, and emulator health checks pass. The Default cell is green
+at high. `tensor-memory-mxf4-tdm-high-clean` also passes all six shards with the
+192 MiB report allowance and complete coverage; its reviewed fault is now in
+the spec, bound to retained ELF `83048c74ead39756` as documented above.
+
+Sparse FP16's `sparse-f16-tdm-exact-replay-check` passes export and replay of
+all four transpose objects. In the NN object, retained ELF `a15f10c4485383a4`,
+wave 2's tensor A descriptor targets LDS 2048 and wave 1 lane zero's ordinary
+read at .text 0x1784 targets the same byte. The single first publication pair
+at .text 0x1778/0x177c follows preserved tensor completion at 0x1740. Subsequent
+prefetch targets the other ping-pong bank. The executed 128x128x256 case contains
+full DU128 iterations; the first pair is unconditional on that path. Exact
+instruction encodings match the pristine clean review and exact identities
+are verified against the retained export inventory. Eight trials and a minimum
+of six detections are committed for each fault before outcomes.
+
+MXF4/sparse FP16 spec runner tests: 209 passed (`mxf4-sparse-f16-spec-tests.log`).
