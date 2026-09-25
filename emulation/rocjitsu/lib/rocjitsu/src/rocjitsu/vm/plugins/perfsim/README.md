@@ -62,9 +62,12 @@ The 1 GiB value is only an example, not a recommended default. A larger budget
 trades host memory for trace coverage, and some known traces exceed even 1 GiB.
 
 For a launcher that issues setup or helper kernels, `dispatch_name` identifies
-an exact kernel name in the replay diagnostics. Every supported dispatch still
-follows the normal staging lifecycle and is forwarded to the backend, preserving
-the backend input stream. After replaying a matching dispatch, the adapter emits
+an exact dispatch display name in the replay diagnostics. Copy the name quoted
+in RocJITsu's `dispatch #N d=ID "name"` log, not the raw ELF name shown as
+`symbol="..."`: the adapter compares `kernelNameOrUnknown()`, and those two
+names can differ. Every supported dispatch still follows the normal staging
+lifecycle and is forwarded to the backend, preserving the backend input stream.
+After replaying a matching dispatch, the adapter emits
 `[rocjitsu:perfsim] selected dispatch <id> replayed`; a report consumer can use
 that ID to distinguish the target report from helper reports. Omitting the field
 or setting it to an empty string disables the marker:
