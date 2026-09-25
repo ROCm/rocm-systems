@@ -668,6 +668,38 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
 
+  // Count, but deliberately do NOT release, proxy ops and steps still held at
+  // finalize. Three classes never reach acclFreeProxyOp/acclFreeProxyStep on
+  // their own: an op with no coll parent, an op whose stop never arrives
+  // (coll->proxyOpIndices is filled at op STOP, so the coll drain above cannot
+  // see it), and any unstopped step.
+  //
+  // Draining them would be a use-after-free. Unlike the profiler thread's work
+  // queue, which ncclProfilerThreadDestroy quiesces and purges by context
+  // before we are called, proxy op and step callbacks are issued straight from
+  // the proxy progress thread (src/plugin/profiler.cc:748,783,794,812,845), and
+  // that thread is shared through comm->sharedRes: ncclProxyDestroy only tears
+  // it down for the last comm using it, so a split-comm teardown finalizes this
+  // context with events for it still in flight. Releasing their references here
+  // could take refCount to zero and free the context under a live caller.
+  //
+  // So the reference stays, and whichever stop arrives last frees the context.
+  // If a stop never arrives -- an aborted proxy thread -- this context is
+  // retained for the life of the process. The cost is bounded: one
+  // acclCommContext per affected communicator, and the output file is closed
+  // below regardless, so no descriptor is held.
+  pthread_mutex_lock(&ctx->proxyOpPoolMutex);
+  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+    if (ctx->proxyOpPoolUsed[i]) ctx->outstandingProxyOps++;
+  }
+  pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+
+  pthread_mutex_lock(&ctx->proxyStepPoolMutex);
+  for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
+    if (ctx->proxyStepPoolUsed[i]) ctx->outstandingProxySteps++;
+  }
+  pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+
   // Write the drop summary while the output file is still open, under the lock
   // acclWriteRecord uses, so the summary cannot land inside a record. The file
   // is closed by acclCtxUnref once the last reference goes away.
@@ -685,16 +717,22 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     // both clear the flag.
     int writeError = ferror(ctx->outputFile) != 0;
     int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0 &&
-                    dOps == 0 && dSteps == 0 && oOps == 0 && !writeError);
+                    dOps == 0 && dSteps == 0 && oOps == 0 &&
+                    ctx->outstandingProxyOps == 0 &&
+                    ctx->outstandingProxySteps == 0 &&
+                    !writeError);
     fprintf(ctx->outputFile,
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
       "\"dropped_proxy_ops\":%lu,\"dropped_proxy_steps\":%lu,"
       "\"overflow_proxy_ops\":%lu,"
+      "\"outstanding_proxy_ops\":%lu,\"outstanding_proxy_steps\":%lu,"
       "\"coll_pool_size\":%d,\"proxy_op_pool_size\":%d,\"proxy_step_pool_size\":%d,"
       "\"max_proxy_ops_per_coll\":%d,\"complete\":%s}}\n",
       (unsigned long)ctx->droppedCollectives,
       (unsigned long)ctx->leakedCollectives,
       (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+      (unsigned long)ctx->outstandingProxyOps,
+      (unsigned long)ctx->outstandingProxySteps,
       ACCL_COLL_POOL_SIZE, ACCL_PROXY_OP_POOL_SIZE, ACCL_PROXY_STEP_POOL_SIZE,
       ACCL_MAX_PROXY_OPS, complete ? "true" : "false");
     fflush(ctx->outputFile);
@@ -702,11 +740,13 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE: %lu collectives dropped "
                 "(coll pool exhausted), %lu slots leaked (teardown-skipped kernel "
                 "events), %lu proxy ops dropped, %lu proxy steps dropped, %lu proxy "
-                "ops discarded (more than %d on one collective)",
+                "ops discarded (more than %d on one collective), %lu proxy ops and "
+                "%lu proxy steps still outstanding",
                 ctx->rank, (unsigned long)ctx->droppedCollectives,
                 (unsigned long)ctx->leakedCollectives,
                 (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
-                ACCL_MAX_PROXY_OPS);
+                ACCL_MAX_PROXY_OPS, (unsigned long)ctx->outstandingProxyOps,
+                (unsigned long)ctx->outstandingProxySteps);
     }
     if (writeError) {
       // Say it separately: when writes are failing the summary above may not
@@ -714,10 +754,20 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       ACCL_WARN("ACCL Profiler: rank=%d hit a write error on %s; the records on "
                 "disk are truncated", ctx->rank, ctx->outputPath);
     }
+    // Close here rather than leaving it to acclCtxUnref. A context held by an
+    // outstanding proxy op or step is not freed at finalize and may never be,
+    // so deferring would hold a descriptor for the life of the process -- and
+    // descriptors, unlike the fixed-size context, are a shared process limit.
+    // Nothing legitimate is lost: the summary above is the documented last line
+    // of the file, so a record written after it would violate that contract,
+    // and acclWriteRecord already drops writes once outputFile is NULL.
+    fclose(ctx->outputFile);
+    ctx->outputFile = NULL;
   }
   pthread_mutex_unlock(&ctx->outputMutex);
 
-  // Drop the init reference; outstanding proxy ops/steps hold their own.
+  // Drop the init reference. Outstanding proxy ops and steps hold their own, so
+  // the context survives here exactly when one of them may still be delivered.
   acclCtxUnref(ctx);
   return ncclSuccess;
 }

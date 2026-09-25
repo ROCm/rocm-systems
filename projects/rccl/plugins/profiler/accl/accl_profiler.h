@@ -188,6 +188,10 @@ struct acclCommContext {
   uint64_t    droppedProxyOps;      // proxy-op pool was full: this op is unprofiled
   uint64_t    droppedProxySteps;    // proxy-step pool was full: this step is unprofiled
   uint64_t    overflowProxyOps;     // op completed but the coll already held ACCL_MAX_PROXY_OPS
+  // Still held at finalize: their stop never arrived. Counted there, never
+  // released there -- see acclPluginFinalize. Written only on that thread.
+  uint64_t    outstandingProxyOps;
+  uint64_t    outstandingProxySteps;
   int         proxyOpPoolWarned;    // one-shot guards, as for the coll pool above
   int         proxyStepPoolWarned;
   uint64_t    commHash;
