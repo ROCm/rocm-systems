@@ -331,3 +331,17 @@ variant uses four 160-byte regions within each CTA. Their ordinary LDS accesses
 use the corresponding wave region. A dropped workgroup barrier therefore needs
 further dependency review before it can count as an injected inter-wave race;
 no TDM fault has been selected or run from this inventory yet.
+
+### WMMA attention publication fault refresh
+
+The old helper-function fault identity is stale. Fresh inventory and pristine
+ISA select the FastContextPolicy K/V publication instead: subgroup zero's K/V
+stores precede the two split pairs at `.text+0x153a4/0x153bc` and
+`0x153c0/0x153c4`; peer K loads follow. Both pairs implement one logical source
+barrier and must be removed together. Initialization and later score/reuse
+barriers remain. Artifacts: `wmma-lifetime-inventory`, `wmma-pristine.asm`.
+The replacement spec predeclares eight trials per mode, minimum six detections.
+
+Tree SuperCollider sleep=15 completes 0/8 detections with accepted matching clean,
+eight admitted/reached trials, complete analysis and healthy pre/post checks.
+Evidence: `tree-lifetime-sleep15-{clean,fault}`.

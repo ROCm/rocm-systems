@@ -250,21 +250,49 @@
     "wmma-attention": {
       "faults": [
         {
-          "id": "barrier-drop",
+          "id": "barrier-drop-kv-publication-group",
           "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh wmma-lifetime-inventory ELF 20ba00dfe0830983. Source 010_gfx1250_wmma_attention_block_test.hip:255-267 has subgroup zero publish K/V fragments, then every subgroup reads K at line 269. In wmma-pristine.asm (.text VMA 0x2400), K stores 0x175f0/0x175fc and V stores 0x17784/0x17790 precede EXEC restore 0x17798. Drop both split pairs at .text+0x153a4/0x153bc and 0x153c0/0x153c4, representing that logical publication. Peer K reads follow at VMA 0x17918/0x17920. Preserve initialization, score publication and reuse barriers. The maintained command runs SampledFastContextMatchesHostReference, whose nonempty key loop unconditionally reaches this edge. Eight trials per mode with minimum six detections are declared before outcomes."
+          },
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:fd2fc2a236f84b02|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:fd2fc2a236f84b02|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:fd2fc2a236f84b02|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009190|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:20ba00dfe0830983|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x00000000000153a4|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:20ba00dfe0830983|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000153a4|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:20ba00dfe0830983|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000153bc|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:20ba00dfe0830983|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x00000000000153c0|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:20ba00dfe0830983|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000153c0|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:20ba00dfe0830983|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv16_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000153c4|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }
