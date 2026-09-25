@@ -867,3 +867,25 @@ exact commands and selected environment in `requeued-default-jobs.json`; SC
 commands are retained in `deferred-supercollider-jobs.json`. The outer sequential
 preset driver is held without a subprocess deadline and resumes after its
 requeued child. No qualification is inferred from the interrupted preflights.
+
+### Default mode, sort and histogram results; preset audit
+
+`mode-cap-high-clean` passes baseline and instrumented correctness with complete
+244/244 access and 102/102 barrier coverage. `mode-cap-high-fault` detects all
+8 admitted/reached faults; each trial has complete analysis and healthy checks
+before and after. The clean run and every trial record `RJ_CONSAN_PRESET=high`,
+and their hook and allowlist hashes match. Default previously detected 0/8, so
+high is the lowest passing tested preset and this cell is green.
+
+`sort-cap-default-fault-retry` completes 8 healthy, fully analyzed trials with
+4 detections and 4 oracle manifestations. `histc-cap-default-fault` completes
+8 healthy, fully analyzed trials with zero detections or oracle manifestations.
+Both stay yellow; high clean/fault campaigns are queued.
+
+A campaign script audit found that `qwen-cap-high.py` assigned high and then
+assigned default. Its artifacts correctly record default; the directory name
+must not be used as preset evidence. `qwen-cap-high-verified.py` removes the
+overwrite and uses fresh artifact roots, queued after the existing run ends.
+The TP1 longer-deadline retry was rejected because its artifact directory already
+existed; `tp1-cap-high-long-retry.py` now uses fresh roots. These errors do not
+establish a detector result at the intended preset or deadline.
