@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -34,15 +35,80 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <fmt/format.h>
+
+#include <fstream>
+
 namespace rocprofiler
 {
 namespace counters
 {
+void
+CounterController::check_power_performance_level()
+{
+    // Check if power_dpm_force_performance_level is set to profile_standard
+    // for GPU agents that support counter collection. gfx1100 up to (but not
+    // including) gfx1250 requires profile_standard for stable counter
+    // collection; other GFX IPs do not.
+    constexpr auto min_gfx_target_version = 110000;
+    constexpr auto max_gfx_target_version = 125000;
+
+    for(const auto* agent : agent::get_agents())
+    {
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        if(agent->gfx_target_version < min_gfx_target_version ||
+           agent->gfx_target_version >= max_gfx_target_version)
+            continue;
+
+        auto perf_path = common::filesystem::path{"/sys/class/drm"} /
+                         fmt::format("renderD{}", agent->drm_render_minor) / "device" /
+                         "power_dpm_force_performance_level";
+
+        if(!common::filesystem::exists(perf_path)) continue;
+
+        std::ifstream perf_file(perf_path.string());
+        if(!perf_file.is_open())
+        {
+            fmt::print(stderr,
+                       "[rocprofiler-sdk] Warning: Could not open path {} to get "
+                       "power_dpm_force_performance_level.\n",
+                       perf_path.string());
+            continue;
+        }
+
+        std::string perf_level{};
+        std::getline(perf_file, perf_level);
+        if(perf_level.empty())
+        {
+            fmt::print(stderr,
+                       "[rocprofiler-sdk] Warning: Could not get "
+                       "power_dpm_force_performance_level for Agent {} (renderD{}). Set it to "
+                       "one of 'profile_standard, low, high, manual' (e.g. via rocm-smi) for "
+                       "stable GPU counter collection.\n",
+                       agent->node_id,
+                       agent->drm_render_minor);
+        }
+        else if(perf_level == "auto")
+        {
+            fmt::print(stderr,
+                       "[rocprofiler-sdk] Warning: Agent {} (renderD{}) has "
+                       "power_dpm_force_performance_level='{}'. Set it to one of "
+                       "'profile_standard, low, high, manual' (e.g. via rocm-smi) for stable "
+                       "GPU counter collection.\n",
+                       agent->node_id,
+                       agent->drm_render_minor,
+                       perf_level);
+        }
+    }
+}
+
 CounterController::CounterController()
 {
     // Pre-read metrics map file to catch failures during initial setup.
     rocprofiler::counters::loadMetrics();
     rocprofiler::counters::check_installed_firmware_restrictions();
+    check_power_performance_level();
 }
 
 // Adds a counter collection profile to our global cache.
