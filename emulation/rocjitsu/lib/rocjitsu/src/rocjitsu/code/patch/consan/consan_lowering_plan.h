@@ -41,6 +41,7 @@ struct PersistentStateFacts {
   size_t atomic_count = 0;
   size_t barrier_count = 0;
   bool has_operational_dynamic_stack_owner = false;
+  bool has_wave_wide_tensor_owner = false;
 };
 
 struct PersistentStateDemand {
@@ -50,6 +51,7 @@ struct PersistentStateDemand {
   bool private_workgroup_tuple_supported = false;
   bool private_state_supported = false;
   bool scalar_state_required_for_private_or_overflow = false;
+  bool wave_wide_scalar_state_required = false;
 };
 
 /// Permission to retry placement with scratch overlapping short-lived guest
@@ -96,13 +98,15 @@ struct EvidencePlanningContext {
 /// Exact target-neutral facts used by ConSan to size one barrier probe. The
 /// common resource solver projects these facts but does not interpret them.
 struct BarrierScratchFacts {
+  bool wave_wide_tensor_owner = false;
   bool automatic_private_epoch = false;
   bool persistent_scalar_state_complete = false;
 };
 
 [[nodiscard]] inline BarrierScratchFacts
 project_barrier_scratch_facts(const OperatingPoint &point) {
-  return {point.automatic_private_epoch, point.persistent_sgprs.complete()};
+  return {.automatic_private_epoch = point.automatic_private_epoch,
+          .persistent_scalar_state_complete = point.persistent_sgprs.complete()};
 }
 
 [[nodiscard]] EvidenceRequirements

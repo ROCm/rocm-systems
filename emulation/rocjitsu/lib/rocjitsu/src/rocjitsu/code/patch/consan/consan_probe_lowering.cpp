@@ -35,6 +35,7 @@
 #include "rocjitsu/code/patch/consan/consan_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_window_emission.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
@@ -200,6 +201,8 @@ void apply_probe_patches(std::span<const uint8_t> bytes, const Options &options,
 }
 
 uint16_t barrier_scratch_vgpr_count(const BarrierScratchFacts &facts) {
+  if (facts.wave_wide_tensor_owner)
+    return 10u; // Seven temporaries, scalar owner/epoch materialization, EXEC archive.
   return facts.automatic_private_epoch || facts.persistent_scalar_state_complete ? 9u : 7u;
 }
 
@@ -210,16 +213,19 @@ PersistentStateDemand plan_persistent_state_demand(const Request &request,
   demand.needs_entry_workgroup_tuple =
       (facts.access_count || facts.atomic_count || facts.barrier_count) &&
       !detail::has_exact_entry_workgroup_capture(point);
-  demand.private_workgroup_tuple_supported = demand.needs_entry_workgroup_tuple;
+  demand.wave_wide_scalar_state_required = facts.has_wave_wide_tensor_owner;
+  demand.private_workgroup_tuple_supported =
+      demand.needs_entry_workgroup_tuple && !demand.wave_wide_scalar_state_required;
   // A synchronization-aware ConSan probe must preserve one owner identity
   // from kernel entry through both access and sync sites. Access-only ConSan
   // objects retain the cheaper private-state choice.
   demand.needs_persistent_state =
-      point.initialize_owner_epoch || demand.needs_entry_workgroup_tuple || request.track_atomics ||
-      request.track_barriers ||
+      demand.wave_wide_scalar_state_required || point.initialize_owner_epoch ||
+      demand.needs_entry_workgroup_tuple || request.track_atomics || request.track_barriers ||
       (request.runtime_sample_stride > 1u || request.cell_selector().stride > 1u);
   demand.synchronization_requires_persistent_owner = facts.atomic_count || facts.barrier_count;
-  demand.private_state_supported = request.owner_source == OwnerSource::WorkitemId;
+  demand.private_state_supported =
+      request.owner_source == OwnerSource::WorkitemId && !demand.wave_wide_scalar_state_required;
   demand.scalar_state_required_for_private_or_overflow = facts.has_operational_dynamic_stack_owner;
   return demand;
 }

@@ -175,6 +175,22 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
     if (!probe)
       continue;
     auto &spill = probe->spill;
+    if (access_resource_facts.wave_wide_tensor) {
+      if (probe->scalar_spill || candidate_point.automatic_private_epoch ||
+          !candidate_point.persistent_sgprs.complete() || !candidate_point.exec_save_sgpr) {
+        result.warnings.emplace_back(
+            "ConSan tensor access needs unborrowed scalar identity and scratch state");
+        continue;
+      }
+      if (spill) {
+        auto full_wave = tensor_full_wave_spill(*spill, *candidate_point.exec_save_sgpr, arch);
+        if (!full_wave) {
+          result.warnings.emplace_back("ConSan tensor access could not preserve full-wave scratch");
+          continue;
+        }
+        spill = std::move(full_wave);
+      }
+    }
     bool spill_overlaps_guest_operands = false;
     bool spill_backed_operand_recovery = false;
     if (spill && planned_spill_backed_operand_recovery &&
@@ -231,6 +247,7 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
         .check = options.device_conflict_check,
         .record_publication_sequence = layout.publication_event_capacity != 0u,
         .uniform_lds_address = candidate.site().uniform_lds_address,
+        .tensor_full_wave_resources = access_resource_facts.wave_wide_tensor,
         .supercollider_delay_mode = options.supercollider_delay_mode,
         .delay_count = options.supercollider_delay_nops,
         .delay_variable_source = options.supercollider_delay_var_ssrc,
@@ -246,12 +263,15 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
         .workgroup_sources = *workgroup_sources,
         .owner_epoch_vgprs = owner_epoch_vgprs,
         .scratch_vgpr = resources->base,
-        .base_scratch_vgpr_count = static_cast<uint16_t>(
-            (options.device_conflict_check ? 7u : 5u) +
-            (options.runtime_sample_stride > 1u || options.cell_selector().stride > 1u ||
-                     window_bank_count > 1u
-                 ? 1u
-                 : 0u)),
+        .base_scratch_vgpr_count =
+            access_resource_facts.wave_wide_tensor
+                ? uint16_t{8}
+                : static_cast<uint16_t>((options.device_conflict_check ? 7u : 5u) +
+                                        (options.runtime_sample_stride > 1u ||
+                                                 options.cell_selector().stride > 1u ||
+                                                 window_bank_count > 1u
+                                             ? 1u
+                                             : 0u)),
         .scratch_vgpr_count = expected_scratch_count,
         .supports_native_lds_spill_recovery =
             access_resource_facts.supports_native_lds_spill_recovery,

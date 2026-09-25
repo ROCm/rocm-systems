@@ -4,6 +4,9 @@ void append_operational_resource_plans(ResourcePlanningState &state, const Debug
                                        std::vector<CandidateResourcePlan> &plans) {
   const Request &request = problem.request();
   const ModeProbeVocabulary &evidence = *mode_probe_vocabulary(problem.observation_plan().mode);
+  const auto tensor_owners = problem.observation_plan().mode == Mode::Default
+                                 ? tensor_execution_owner_kernels(problem.inventory())
+                                 : std::vector<ProgramContainerId>{};
   if (request.track_barriers) {
     std::vector<BarrierEvidenceSitePlan> candidates = build_barrier_evidence_site_plans(
         problem.inventory(), problem.observation_plan(), evidence.barrier, errors);
@@ -18,7 +21,10 @@ void append_operational_resource_plans(ResourcePlanningState &state, const Debug
       }
       const uint64_t text_offset = source->text_offset();
       const auto scratch_count_for = [&](const OperatingPoint &site_point) {
-        return barrier_scratch_vgpr_count(project_barrier_scratch_facts(site_point));
+        auto facts = project_barrier_scratch_facts(site_point);
+        facts.wave_wide_tensor_owner =
+            site_has_tensor_owner(problem.inventory(), *source, tensor_owners);
+        return barrier_scratch_vgpr_count(facts);
       };
       OperatingPoint site_point = point;
       const uint16_t scratch_count = scratch_count_for(site_point);

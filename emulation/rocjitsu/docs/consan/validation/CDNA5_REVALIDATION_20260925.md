@@ -1663,3 +1663,20 @@ remain orange.
 
 Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,032 passed,
 two existing live-inventory tests skipped (`tensor-probe-tests.log`).
+
+### Tensor-owner resources and full-wave barrier tracking
+
+Default tensor owners now require scalar persistent identity. Tensor probes
+reserve 13 scratch VGPRs and preserve all lanes when spilling. Barriers in a
+kernel that owns tensor accesses (including shared-helper ownership) reserve
+an EXEC archive, inspect causal windows with full EXEC, and advance the scalar
+epoch even when incoming EXEC is empty. Guest barrier execution, EXEC, VCC,
+SCC and spilled VGPR lanes are preserved. Borrowed scalar identity and dynamic
+spill frames remain explicitly unsupported for this path.
+
+The emitted-barrier execution test covers full, partial and empty EXEC with
+forced scratch spills; persistent-state policy also has a regression test.
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,034 passed,
+two existing skips (`tensor-resources-tests.log`). Tensor-load classifier
+admission and end-to-end qualification are the next gate; no table cell is
+promoted by these unit tests alone.

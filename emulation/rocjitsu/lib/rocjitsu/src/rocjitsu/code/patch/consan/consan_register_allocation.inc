@@ -2922,6 +2922,11 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
   std::vector<PrologueScratchVgprAssignment> &prologue_scratch_assignments =
       update.prologue_scratch_assignments;
   PersistentStateFacts persistent_facts;
+  persistent_facts.has_wave_wide_tensor_owner =
+      request.mode == Mode::Default &&
+      std::ranges::any_of(program_inventory.access_sites(), [](const ProgramSite &site) {
+        return site.origin == AccessOrigin::TensorLds;
+      });
   bool has_selectable_bank_transition_owner = false;
   for (const CandidateResourcePlan &plan : resource_plans) {
     if (plan.source == RegisterAllocationSource::Unsupported || plan.owner_kernel_ids.empty()) {
@@ -3309,8 +3314,9 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
       scalar_model != ScalarPlacementModel::Unsupported &&
       scalar_model != ScalarPlacementModel::DescriptorPartitioned &&
       !debug.test_force_private_epoch &&
-      persistent_demand.scalar_state_required_for_private_or_overflow &&
-      (persistent_end > persistent_vgpr_limit || prefer_private_epoch);
+      (persistent_demand.wave_wide_scalar_state_required ||
+       (persistent_demand.scalar_state_required_for_private_or_overflow &&
+        (persistent_end > persistent_vgpr_limit || prefer_private_epoch)));
   if (rdna_needs_scalar_epoch) {
     const std::string rdna_arch_name = rj_code_arch_name(arch);
 
@@ -3319,10 +3325,10 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     const std::vector<ProgramContainerId> scalar_owners = scalar_owner_kernel_ids(resource_plans);
     const auto resolved_contexts = resolve_scalar_owner_contexts(scalar_state, scalar_owners);
     if (!resolved_contexts) {
-      if (has_dynamic_stack_owner) {
+      if (has_dynamic_stack_owner || persistent_demand.wave_wide_scalar_state_required) {
         update.rejection = PlacementRejection::PersistentStateUnavailable;
         diagnostics.emplace_back("ConSan could not resolve every " + rdna_arch_name +
-                                 " dynamic-stack scalar-state owner");
+                                 " required scalar-state owner");
         return update;
       }
       diagnostics.emplace_back("ConSan could not resolve every " + rdna_arch_name +
@@ -3331,7 +3337,7 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     }
     auto prologue_scratch = plan_scalar_prologue_scratch(scalar_state, *resolved_contexts, true);
     if (!prologue_scratch) {
-      if (has_dynamic_stack_owner)
+      if (has_dynamic_stack_owner || persistent_demand.wave_wide_scalar_state_required)
         update.rejection = PlacementRejection::PersistentStateUnavailable;
       diagnostics.emplace_back("ConSan could not place entry-local VGPR scratch for " +
                                rdna_arch_name + " scalar persistent state");
@@ -3351,7 +3357,8 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     std::optional<uint16_t> scalar_base =
         tail_domain.select_first(resolved_contexts->tail_floor, scalar_count);
     const uint32_t hole_limit = std::min<uint32_t>(resolved_contexts->tail_floor, scalar_limit);
-    if (has_dynamic_stack_owner && !scalar_base && scalar_references.control_flow_closed &&
+    if ((has_dynamic_stack_owner || persistent_demand.wave_wide_scalar_state_required) &&
+        !scalar_base && scalar_references.control_flow_closed &&
         !scalar_references.uses_indirect_sgprs) {
       ScalarPlacementDomain hole_domain(arch, static_cast<uint16_t>(hole_limit),
                                         resolved_contexts->summaries,
@@ -3371,6 +3378,12 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
           std::string(needs_exact_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
           " state for an " + rdna_arch_name + " " + "default" +
           " owner without growing the VGPR allocation");
+      return update;
+    }
+    if (persistent_demand.wave_wide_scalar_state_required) {
+      update.rejection = PlacementRejection::PersistentStateUnavailable;
+      diagnostics.emplace_back(
+          "ConSan could not place persistent scalar identity for a wave-wide tensor owner");
       return update;
     }
     if (has_dynamic_stack_owner) {

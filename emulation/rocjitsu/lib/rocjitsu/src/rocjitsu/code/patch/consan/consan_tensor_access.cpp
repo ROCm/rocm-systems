@@ -3,12 +3,46 @@
 #include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_dispatch_identity_source.h"
 #include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_native_abi.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
+#include <algorithm>
+
 namespace rocjitsu::consan::detail {
+
+std::vector<ProgramContainerId> tensor_execution_owner_kernels(const ProgramInventory &inventory) {
+  std::vector<ProgramContainerId> result;
+  for (const ProgramSite &site : inventory.access_sites()) {
+    if (site.origin != AccessOrigin::TensorLds)
+      continue;
+    const auto owners = inventory.execution_owner_kernels(site);
+    result.insert(result.end(), owners.begin(), owners.end());
+  }
+  std::ranges::sort(result);
+  result.erase(std::ranges::unique(result).begin(), result.end());
+  return result;
+}
+
+bool site_has_tensor_owner(const ProgramInventory &inventory, const ProgramSite &site,
+                           std::span<const ProgramContainerId> tensor_owners) {
+  const auto owners = inventory.execution_owner_kernels(site);
+  return std::ranges::any_of(owners, [&](ProgramContainerId owner) {
+    return std::ranges::binary_search(tensor_owners, owner);
+  });
+}
+
+bool tensor_identity_sources_are_wave_uniform(const DispatchIdentity &dispatch,
+                                              const WorkgroupSources &workgroup) {
+  const auto uniform_source = [](const WorkgroupSource &source) {
+    return source.is_well_formed() && !source.vector_src && !source.private_offset;
+  };
+  return dispatch.is_well_formed() && !dispatch.private_offset && workgroup.x.scalar_src &&
+         uniform_source(workgroup.x) && uniform_source(workgroup.y) &&
+         uniform_source(workgroup.z) && uniform_source(workgroup.cluster_workgroup_id);
+}
 
 std::optional<VgprSpillSequence> tensor_full_wave_spill(const VgprSpillSequence &spill,
                                                         uint16_t exec_save_sgpr,

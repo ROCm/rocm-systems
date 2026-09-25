@@ -73,6 +73,8 @@ struct SyncEmissionPlan {
   WorkgroupSources workgroup_sources;
   OwnerEpochVgprSources owner_epoch_vgprs;
   uint16_t scratch_vgpr = 0;
+  /// Full-wave barrier bodies archive guest EXEC here after full-wave spills.
+  std::optional<uint16_t> wave_exec_archive_vgpr = std::nullopt;
   /// Selectable-bank state at a relocated polling-loop header. Such a loop is
   /// admitted only when its complete relocated span is proven to exit in bank
   /// zero, which is the state required by the following instrumentation.

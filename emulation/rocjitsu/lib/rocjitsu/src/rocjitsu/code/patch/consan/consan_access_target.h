@@ -11,6 +11,7 @@ namespace rocjitsu::consan::detail {
 /// resource transaction. ConSan consumes this value without inspecting a
 /// concrete architecture or the complete mutable ConSan operating point.
 struct AccessResourceFacts {
+  bool wave_wide_tensor = false;
   uint16_t address_scratch_vgpr_count = 0;
   uint16_t two_address_replay_vgpr_count = 0;
   uint16_t dynamic_stack_reservoir_vgpr_count = 0;

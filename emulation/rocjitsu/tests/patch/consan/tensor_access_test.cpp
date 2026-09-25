@@ -183,6 +183,90 @@ TEST(ConSanTensor, DefaultProbeExecutesDmaAndPublishesRuntimeWidthWithGuestState
       detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
 }
 
+TEST(ConSanTensor, TensorOwnerBarrierAdvancesScalarEpochWithEmptyExecAndPreservesAllLanes) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  std::vector<uint32_t> guest{build_s_nop(0, arch), 0xd8340000u, 0x00000100u};
+  const auto tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 12, .vaddr2 = 124, .vaddr3 = 124});
+  guest.insert(guest.end(), tensor.begin(), tensor.end());
+  guest.push_back(0xbe804ec1u); // s_barrier_signal -1
+  guest.push_back(0xbf94ffffu); // s_barrier_wait -1
+  guest.resize(512, build_s_nop(0, arch));
+  guest.push_back(build_s_endpgm(arch));
+  TestOptions options = test_options();
+  options.exec_save_sgpr = 88;
+  options.persistent_sgprs.set_owner_epoch(80, 81);
+  options.persistent_sgprs.exact_workgroup = PersistentWorkgroupRegisters{82, 83, 84};
+  options.test_force_vgpr_spill = true;
+  options.track_barriers = true;
+  options.track_atomics = false;
+  options.report_buffer_address = 0x200000;
+  options.report_buffer_size = direct_report_bytes(8);
+  const auto result = test_lower_consan(make_gfx1250_code_object(guest, "tensor_barrier"), options);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.warnings);
+  const auto barrier =
+      std::ranges::find(result.patches, PatchKind::TrampolineSyncMetadata, &PatchInfo::kind);
+  ASSERT_NE(barrier, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(test_persistent_sgpr_state(result).complete());
+  ASSERT_TRUE(barrier->scratch_vgpr);
+  EXPECT_EQ(barrier->spilled_vgpr_count, 10u);
+  const auto owners = detail::tensor_execution_owner_kernels(result.program_inventory);
+  ASSERT_EQ(owners.size(), 1u);
+  const auto cave = emitted_patch_words(result, *barrier);
+  ASSERT_FALSE(cave.empty());
+  const uint64_t begin = barrier->trampoline_offset;
+  const uint64_t end = begin + cave.size() * 4;
+  for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+    SCOPED_TRACE(exec);
+    amdgpu::GpuMemory memory("tensor_barrier_mem");
+    amdgpu::L2Cache l2("tensor_barrier_l2");
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 4;
+    auto cu = amdgpu::ComputeUnitCore::create("tensor_barrier", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf(0, begin, 106, 64, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_scratch_base(0x400000);
+    wave->set_scratch_lane_size(256);
+    const auto sb = wave->sgpr_alloc().base;
+    const auto vb = wave->vgpr_alloc().base;
+    for (uint16_t reg = 0; reg < 106; ++reg)
+      cu->write_sgpr(sb + reg, 0);
+    const auto &state = test_persistent_sgpr_state(result);
+    cu->write_sgpr(sb + *state.owner(), 0);
+    cu->write_sgpr(sb + *state.epoch(), 7);
+    for (uint16_t reg = 0; reg < 64; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0xa5a50000u + reg * 32 + lane);
+    for (uint64_t offset = 0; offset < options.report_buffer_size; offset += 4)
+      memory.write32(0x200000 + offset, 0);
+    for (size_t i = 0; i < cave.size(); ++i)
+      memory.write32(begin + i * 4, cave[i]);
+    wave->set_exec(exec);
+    wave->set_vcc(0x12345678);
+    wave->write_scc(true);
+    size_t steps = 0;
+    while (wave->pc >= begin && wave->pc < end && steps++ < cave.size() * 100)
+      cu->step();
+    cu->flush_all();
+    EXPECT_TRUE(wave->pc < begin || wave->pc >= end);
+    EXPECT_EQ(cu->read_sgpr(sb + *state.epoch()), 8u);
+    EXPECT_EQ(wave->exec(), exec);
+    EXPECT_EQ(wave->vcc(), 0x12345678u);
+    EXPECT_TRUE(wave->read_scc());
+    for (uint16_t reg = *barrier->scratch_vgpr; reg < *barrier->scratch_vgpr + 10; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5a50000u + reg * 32 + lane);
+    wave->halt();
+  }
+}
+
 TEST(ConSanTensor, FullWaveScratchSpillPreservesInactiveAndEmptyExecLanes) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   SpillManager manager(0, 256);

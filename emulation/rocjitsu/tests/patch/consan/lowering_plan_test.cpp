@@ -238,5 +238,20 @@ TEST(ConSanLoweringPlan, PersistentStateFollowsConsumers) {
   EXPECT_TRUE(demand.private_workgroup_tuple_supported);
 }
 
+TEST(ConSanLoweringPlan, TensorOwnersRequireWaveUniformPersistentState) {
+  Request request;
+  request.track_barriers = false;
+  request.track_atomics = false;
+  OperatingPoint point;
+  point.initialize_owner_epoch = false;
+  auto demand = plan_persistent_state_demand(
+      request, point, {.access_count = 1u, .has_wave_wide_tensor_owner = true});
+  EXPECT_TRUE(demand.needs_persistent_state);
+  EXPECT_TRUE(demand.needs_entry_workgroup_tuple);
+  EXPECT_TRUE(demand.wave_wide_scalar_state_required);
+  EXPECT_FALSE(demand.private_state_supported);
+  EXPECT_FALSE(demand.private_workgroup_tuple_supported);
+}
+
 } // namespace
 } // namespace rocjitsu::consan

@@ -934,14 +934,8 @@ build_direct_watchpoint_words(std::span<const uint8_t> bytes, const Candidate &c
       candidate.site().lowering.form->kind == AccessLoweringFormKind::TensorDescriptor;
   const uint16_t tensor_exec_archive = plan.scratch_vgpr + plan.base_scratch_vgpr_count + 2u;
   if (tensor) {
-    const auto uniform_source = [](const WorkgroupSource &source) {
-      return source.is_well_formed() && !source.vector_src && !source.private_offset;
-    };
     if (arch != ROCJITSU_CODE_ARCH_CDNA5 || candidate.site().kind != LdsAccessKind::Write ||
-        !plan.dispatch_id.is_well_formed() || plan.dispatch_id.private_offset ||
-        !plan.workgroup_sources.x.scalar_src || !uniform_source(plan.workgroup_sources.x) ||
-        !uniform_source(plan.workgroup_sources.y) || !uniform_source(plan.workgroup_sources.z) ||
-        !uniform_source(plan.workgroup_sources.cluster_workgroup_id) ||
+        !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources) ||
         !plan.tensor_full_wave_resources || !plan.persistent_sgprs.complete() ||
         !plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch ||
         plan.automatic_private_epoch || plan.spill_backed_operand_recovery ||

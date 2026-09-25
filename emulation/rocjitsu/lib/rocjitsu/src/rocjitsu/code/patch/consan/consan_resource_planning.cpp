@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan_lowering_plan.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 #include <algorithm>
 #include <array>
 #include <iterator>

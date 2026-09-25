@@ -25,6 +25,9 @@ AccessResourceFacts resolve_access_resource_facts(const OperatingPoint &point,
   const bool requires_flat_materialization =
       candidate_requires_flat_address_materialization(candidate);
   return {
+      .wave_wide_tensor =
+          candidate.site().lowering.form &&
+          candidate.site().lowering.form->kind == AccessLoweringFormKind::TensorDescriptor,
       .address_scratch_vgpr_count = flat_address_scratch_count != 0u
                                         ? flat_address_scratch_count
                                         : static_cast<uint16_t>(needs_address_capture),

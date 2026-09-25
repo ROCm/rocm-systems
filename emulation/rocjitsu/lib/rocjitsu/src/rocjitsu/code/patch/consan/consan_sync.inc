@@ -12,6 +12,7 @@ struct BarrierCandidate {
   uint64_t owner_descriptor_file_offset = 0;
   std::vector<BarrierWindow> windows;
   bool uses_cluster_workgroup_id = false;
+  bool wave_wide_tensor_owner = false;
 };
 
 /// Resolve one exact, immutable emission product at the ConSan sync planning
@@ -88,6 +89,14 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
     std::optional<uint16_t> selectable_vgpr_bank_mode, std::optional<uint16_t> wave_sched_mode,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   const bool scalar_persistent = plan.persistent_sgprs.complete();
+  if (plan.wave_exec_archive_vgpr &&
+      (arch != ROCJITSU_CODE_ARCH_CDNA5 || !scalar_persistent || scalar_spill || private_layout ||
+       *plan.wave_exec_archive_vgpr != plan.scratch_vgpr + 9u ||
+       *plan.wave_exec_archive_vgpr >= 256u ||
+       !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources))) {
+    errors.emplace_back("ConSan wave-wide barrier lacks full-wave scalar identity resources");
+    return std::nullopt;
+  }
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
       !plan.workitem_owner || candidate.owner_descriptor_file_offset == 0u ||
       static_cast<uint32_t>(plan.scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
@@ -182,6 +191,16 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
+  if (plan.wave_exec_archive_vgpr) {
+    require_emission.append(
+        "ConSan wave-wide barrier could not archive guest EXEC",
+        instrumentation::build_s_mov_b64(*plan.exec_save_sgpr, kAmdGpuExecLo, arch),
+        instrumentation::build_v_writelane_b32(*plan.wave_exec_archive_vgpr, *plan.exec_save_sgpr,
+                                               0, arch),
+        instrumentation::build_v_writelane_b32(*plan.wave_exec_archive_vgpr,
+                                               *plan.exec_save_sgpr + 1u, 1, arch),
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch));
+  }
   // Runtime sampling selects LDS addresses, not workgroups. Every workgroup
   // which reaches the guest barrier must therefore inspect its banked causal
   // window and advance its epoch. A separate workgroup-residue gate can skip a
@@ -426,6 +445,15 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
   }
   require_emission(append_restore_special_state(words, plan.special_state, arch),
                    "ConSan barrier failed at special-state restore");
+  if (plan.wave_exec_archive_vgpr) {
+    require_emission.append(
+        "ConSan wave-wide barrier could not restore guest EXEC",
+        instrumentation::build_v_readlane_b32(*plan.exec_save_sgpr, *plan.wave_exec_archive_vgpr, 0,
+                                              arch),
+        instrumentation::build_v_readlane_b32(*plan.exec_save_sgpr + 1u,
+                                              *plan.wave_exec_archive_vgpr, 1, arch),
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, *plan.exec_save_sgpr, arch));
+  }
   sequence.bind_label(fast_return_label);
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
@@ -505,6 +533,7 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
                                         ProbeIntentKind::BarrierEpoch, result.errors);
   if (!result.errors.empty())
     return;
+  const auto tensor_owners = tensor_execution_owner_kernels(result.program_inventory);
   std::vector<BarrierCandidate> candidates;
   for (const BarrierEvidenceSitePlan &barrier_plan : barrier_plans) {
     const SyncSequence *sequence_ptr =
@@ -648,8 +677,11 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
     }
     const uint64_t owner_descriptor =
         result.program_inventory.kernel(sequence_owners.front())->descriptor_file_offset;
+    const auto *source_site = result.program_inventory.program_site(barrier_plan.source_site);
+    const bool wave_wide =
+        source_site && site_has_tensor_owner(result.program_inventory, *source_site, tensor_owners);
     candidates.push_back({&sequence, barrier_plan, barrier_site, owner_descriptor,
-                          std::move(windows), uses_cluster_workgroup_id});
+                          std::move(windows), uses_cluster_workgroup_id, wave_wide});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -723,10 +755,11 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
       resource_plan_index = existing->second;
       plan = result.resource_plans[resource_plan_index];
     } else {
-      plan = plan_resource_site(resource_state, options, options, operating_point,
-                                ResourceSiteKind::Barrier, index, site.text_offset,
-                                candidate.barrier.source_site,
-                                operating_point.automatic_private_epoch ? 9u : 7u);
+      plan = plan_resource_site(
+          resource_state, options, options, operating_point, ResourceSiteKind::Barrier, index,
+          site.text_offset, candidate.barrier.source_site,
+          candidate.wave_wide_tensor_owner ? 10u
+                                           : (operating_point.automatic_private_epoch ? 9u : 7u));
       plan.intent_ids = {candidate.barrier.evidence_intent};
       result.resource_plans.push_back(plan);
       resource_plan_index = result.resource_plans.size() - 1u;
@@ -745,9 +778,12 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
           "ConSan barrier lost its owner-local persistent or transient assignment");
       continue;
     }
-    const uint16_t scratch_count =
-        candidate_point.automatic_private_epoch || candidate_point.persistent_sgprs.complete() ? 9u
-                                                                                               : 7u;
+    const uint16_t scratch_count = candidate.wave_wide_tensor_owner
+                                       ? 10u
+                                       : (candidate_point.automatic_private_epoch ||
+                                                  candidate_point.persistent_sgprs.complete()
+                                              ? 9u
+                                              : 7u);
     if (plan.scratch_vgpr_count != scratch_count) {
       plan = plan_resource_site(resource_state, options, options, candidate_point,
                                 ResourceSiteKind::Barrier, index, site.text_offset,
@@ -773,6 +809,24 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
                              candidate_point.has_compact_scalar_spill(), result.warnings);
     if (!probe)
       continue;
+    if (candidate.wave_wide_tensor_owner) {
+      if (probe->scalar_spill || probe->private_layout ||
+          !candidate_point.persistent_sgprs.complete() || !candidate_point.exec_save_sgpr) {
+        result.warnings.emplace_back(
+            "ConSan wave-wide barrier needs unborrowed scalar identity and scratch state");
+        continue;
+      }
+      if (probe->spill) {
+        auto full_wave =
+            tensor_full_wave_spill(*probe->spill, *candidate_point.exec_save_sgpr, arch);
+        if (!full_wave) {
+          result.warnings.emplace_back(
+              "ConSan wave-wide barrier could not preserve full-wave scratch");
+          continue;
+        }
+        probe->spill = std::move(full_wave);
+      }
+    }
     note_probe_private_requirements(private_requirements, *probe);
     note_descriptor_requirements(descriptor_requirements, probe->resources);
     selected.push_back({std::move(*probe), std::move(candidate), std::move(candidate_point)});
@@ -794,7 +848,7 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
       result.errors.emplace_back("ConSan barrier lost its source container");
       return;
     }
-    const auto emission_plan = plan_sync_emission(
+    auto emission_plan = plan_sync_emission(
         options, options, planned.point, result.operating_point,
         planned.resources.owner_descriptor_file_offsets,
         planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
@@ -803,6 +857,8 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
         /*transient_assignment_already_resolved=*/true, "sampled barrier sync", result.errors);
     if (!emission_plan)
       return;
+    if (planned.candidate.wave_wide_tensor_owner)
+      emission_plan->wave_exec_archive_vgpr = planned.resources.base + 9u;
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
         selectable_vgpr_bank_mode_at(arch, active_bytes, container->text_file_offset,
                                      container->entry_text_offset, site.file_offset);

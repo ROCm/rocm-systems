@@ -5,11 +5,24 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/rj_code.h"
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace rocjitsu::consan {
 struct ProgramSite;
+struct ProgramContainerId;
+class ProgramInventory;
+struct DispatchIdentity;
+struct WorkgroupSources;
 namespace detail {
+
+/// Owners which may execute wave-wide tensor accesses, including shared helpers.
+[[nodiscard]] std::vector<ProgramContainerId>
+tensor_execution_owner_kernels(const ProgramInventory &inventory);
+[[nodiscard]] bool site_has_tensor_owner(const ProgramInventory &inventory, const ProgramSite &site,
+                                         std::span<const ProgramContainerId> tensor_owners);
+[[nodiscard]] bool tensor_identity_sources_are_wave_uniform(const DispatchIdentity &dispatch,
+                                                            const WorkgroupSources &workgroup);
 
 /// Wrap a fixed-stack VGPR spill/fill so both preserve all wave lanes, even
 /// when the guest EXEC is empty. Each bracket restores its incoming EXEC.
