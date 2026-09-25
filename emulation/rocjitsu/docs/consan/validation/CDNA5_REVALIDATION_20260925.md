@@ -1188,3 +1188,18 @@ Default produced no observations; high with the old eight-bank layout produced
 in this search. Two additional candidate-hook campaigns check atomic publication
 (tree) and barrier handling (D128 pressure) with 256 banks; those results remain
 pending and are not claimed here.
+
+### Lane-retention atomic-publication regression and seeded Tensile rebuilds
+
+`tree-lanes-high-256-clean` passes baseline and candidate-hook clean correctness.
+Its fault campaign detects 8/8 admitted/reached producer-release faults with
+complete analysis and healthy checks throughout. This exercises atomic publication
+with the new large-table lane retention. The normal tree cell continues to show
+its existing qualifying high configuration without adding a second preset.
+D128 pressure's corresponding regression remains in progress.
+
+`hgemm-repro-seeded-results.json` records two successful serial-generation client
+runs with `PYTHONHASHSEED=0`. Full ELF hashes still differ. Neither worker-count
+nor Python hash-seed controls make fresh generation suitable for exact reviewed
+fault identities. The next route is reuse of reviewed client artifacts, retaining
+full code-object identity and numerical-oracle checks.
