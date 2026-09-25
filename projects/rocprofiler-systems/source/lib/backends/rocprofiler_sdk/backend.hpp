@@ -10,8 +10,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <fmt/format.h>
 #include <memory>
+#include <stack>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -44,6 +46,7 @@ template <typename Wrapper>
 struct backend
 {
     using status_t                     = Wrapper::status_t;
+    using thread_id_t                  = Wrapper::thread_id;
     using context_id_t                 = Wrapper::context_id;
     using agent_id_t                   = Wrapper::agent_id;
     using buffer_id_t                  = Wrapper::buffer_id;
@@ -85,6 +88,18 @@ struct backend
     using buffer_name_info_t             = Wrapper::buffer_name_info_t;
     using record_header_t                = Wrapper::record_header_t;
     using correlation_id_t               = Wrapper::correlation_id_t;
+    using kernel_dispatch_record_t       = Wrapper::kernel_dispatch_record;
+    using memory_copy_record_t           = Wrapper::memory_copy_record;
+    using scratch_memory_record_t        = Wrapper::scratch_memory_record;
+#if ROCPROFILER_VERSION >= 700
+    using async_correlation_id_t    = Wrapper::async_correlation_id_t;
+    using tracing_hip_stream_data_t = Wrapper::hip_stream_data;
+    using hip_stream_operation_t    = Wrapper::hip_stream_operation_t;
+#endif
+    using stream_id_t = Wrapper::stream_id;
+#if ROCPROFILER_VERSION >= 600
+    using memory_allocation_record_t = Wrapper::memory_alloc_record;
+#endif
 
     static constexpr auto           compile_time_version = Wrapper::compile_time_version;
     static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
@@ -136,6 +151,11 @@ struct backend
 #if ROCPROFILER_VERSION >= 700
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCJPEG_API =
         Wrapper::CALLBACK_TRACING_ROCJPEG_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIP_STREAM =
+        Wrapper::CALLBACK_TRACING_HIP_STREAM;
+
+    // ─── HIP stream operation constants ──────────────────────────────────────────
+    static constexpr hip_stream_operation_t HIP_STREAM_SET = Wrapper::HIP_STREAM_SET;
 #endif
 
 #if ROCPROFILER_VERSION >= 10304
@@ -178,6 +198,20 @@ struct backend
 #if ROCPROFILER_VERSION >= 600
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_MEMORY_ALLOCATION =
         Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION;
+#endif
+
+    // ─── External correlation request kind constants ────────────────────────────
+    static constexpr external_correlation_request_kind_t
+        EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH =
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH;
+    static constexpr external_correlation_request_kind_t
+        EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY =
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY;
+
+#if ROCPROFILER_VERSION >= 600
+    static constexpr external_correlation_request_kind_t
+        EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION =
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION;
 #endif
 
 #if ROCPROFILER_VERSION >= 10202
@@ -543,10 +577,58 @@ public:
         {
             return correlation_id.ancestor;
         }
-        else
+        return 0;
+    }
+
+#if ROCPROFILER_VERSION >= 700
+    static std::uint64_t get_parent_stack_id(
+        [[maybe_unused]] const async_correlation_id_t& correlation_id)
+    {
+        return 0;
+    }
+#endif
+
+    static std::uint64_t get_memory_copy_dst_address(
+        [[maybe_unused]] const memory_copy_record_t& record)
+    {
+        if constexpr(requires { record.dst_address.value; })
         {
-            return 0;
+            return record.dst_address.value;
         }
+        return 0;
+    }
+
+    static std::uint64_t get_memory_copy_src_address(
+        [[maybe_unused]] const memory_copy_record_t& record)
+    {
+        if constexpr(requires { record.src_address.value; })
+        {
+            return record.src_address.value;
+        }
+        return 0;
+    }
+
+#if ROCPROFILER_VERSION >= 600
+    static std::uint64_t get_memory_allocation_address(
+        [[maybe_unused]] const memory_allocation_record_t& record)
+    {
+        if constexpr(requires { record.address.value; })
+        {
+            return record.address.value;
+        }
+        return static_cast<std::uint64_t>(record.address.handle);
+    }
+#endif
+
+    static std::uint64_t get_scratch_memory_allocation_size(
+        const scratch_memory_record_t& record)
+    {
+        if constexpr(requires { record.allocation_size; })
+        {
+            return record.allocation_size;
+        }
+
+        return 0;
     }
 };
 
