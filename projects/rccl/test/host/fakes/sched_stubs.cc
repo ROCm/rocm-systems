@@ -32,6 +32,9 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm*,
                                         struct ncclKernelPlan*) {
   FailLoudUnfaked("sched_stubs", "ncclSymmetricTaskScheduler");
 }
+void convertSymTaskDevOp(struct ncclComm*, struct ncclTaskColl*) {
+  FailLoudUnfaked("sched_stubs", "convertSymTaskDevOp");
+}
 
 // scheduler/allgatherv_sched.cc
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm*, struct ncclKernelPlan*,
