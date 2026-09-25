@@ -209,3 +209,22 @@ time and two generation workers per shard, all inside the shared 40 GiB slice.
 The observed campaign peak during this pass was approximately 5.3 GiB. The
 current HipKittens debugger reproduction still aborts during page-table unmap;
 its loaded emulator and ConSan libraries are the expected GCC build paths.
+
+### Tree high evidence audit and further Tensile clean results
+
+The correctly configured `tree-high-v2` clean passes and eight admitted/reached
+fault trials all report the expected producer/consumer LDS conflicts. Clean/fault
+provenance file sets match, all retained environments select high, and health
+checks pass. However, fault reports have `incomplete_publication_pairs=3` and
+`dynamic_complete=false`: weakening the producer release leaves its relaxed RMW
+captured as an opaque modification. This invalidates the publication object for
+analysis. Despite the runner summary accepting 8/8, the table remains yellow.
+A prepared fix observes supported relaxed RMW transitions without inventing
+release/acquire roles; it still needs compilation and regression verification.
+
+Bounded Tensile MXF8 TDM passes clean in both modes across every shard. MXF4 TDM
+Default rejects all six shards with `outcome=unsupported` before execution,
+exit 92 inside the client (driver return 1). This is an orange transform blocker,
+not an OOM or a completed clean run. Evidence is under `bounded-clean-tensile`.
+HipKittens also corrupts the heap with SuperCollider trap reporting, ruling out
+the automatic four-byte report allocation as a necessary trigger for that repro.

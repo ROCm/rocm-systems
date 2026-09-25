@@ -43,15 +43,15 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 default: filtered clean pass after publication fix; fault 2/8; high pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 high: clean pass; fault reports 8/8, but publication evidence incomplete | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟥 default: heap corruption at teardown after instrumented run | 🟥 delay-zero: heap corruption at teardown after instrumented run |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 campaign interrupted by host OOM; bounded clean rerun pending | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
-| Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
-| Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟧 campaign interrupted by host OOM; bounded clean rerun pending | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
+| Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟧 default: transform rejected as unsupported before execution (all 6 shards) | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟧 campaign interrupted by host OOM; bounded clean rerun pending | 🟧 campaign interrupted by host OOM; bounded clean rerun pending |
