@@ -27,8 +27,10 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/registration/attach.hpp"
 #include "lib/rocprofiler-sdk/tests/common.hpp"
 
 #include <gtest/gtest.h>
@@ -209,6 +211,36 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* tool_data)
     cb_data->client_workflow_count++;
 }
 }  // namespace
+
+TEST(rocprofiler_lib, configure_attach_uses_configure_symbol_owner)
+{
+    auto* handle = dlopen(ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE, RTLD_LAZY | RTLD_LOCAL);
+    ASSERT_NE(handle, nullptr) << dlerror();
+    auto close_handle = rocprofiler::common::scope_destructor{[handle]() { dlclose(handle); }};
+
+    auto configure         = rocprofiler_configure_func_t{};
+    auto attach            = rocprofiler_configure_attach_func_t{};
+    *(void**) (&configure) = dlsym(handle, "rocprofiler_configure");
+    *(void**) (&attach)    = dlsym(handle, "rocprofiler_configure_attach");
+    ASSERT_NE(configure, nullptr);
+    ASSERT_NE(attach, nullptr);
+
+    auto* foreign_symbol = dlsym(RTLD_DEFAULT, "malloc");
+    ASSERT_NE(foreign_symbol, nullptr);
+
+    auto foreign_configure         = rocprofiler_configure_func_t{};
+    auto foreign_attach            = rocprofiler_configure_attach_func_t{};
+    *(void**) (&foreign_configure) = foreign_symbol;
+    *(void**) (&foreign_attach)    = foreign_symbol;
+
+    EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(configure, attach), attach);
+    EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(configure, foreign_attach),
+              attach);
+    EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(foreign_configure, attach),
+              nullptr);
+    EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(nullptr, attach), nullptr);
+    EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(configure, nullptr), nullptr);
+}
 
 TEST(rocprofiler_lib, registration_lambda_no_result)
 {
