@@ -1162,3 +1162,12 @@ passes 983 tests with two benchmark tests skipped (`cdna5-lane-retention-host.lo
 A separate `lane-retention-hook` is running matching clean and eight fault trials
 for histogram at high plus 256 banks (`histc-lanes-high-256-{clean,fault}`).
 This is not yet an E2E qualification or a claim that the yellow cell is fixed.
+
+### TP1 prefill completes the longer high batch
+
+`tp1-cap-high-long-retry-clean` passes baseline and high. The corresponding
+fault batch completes all eight admitted/reached trials at recorded high,
+with complete analysis and healthy pre/post checks, but detects 0/8. This
+supersedes the partial five-trial result cut short by the original 60 s deadline.
+A new `tp1-cap-higher` clean/fault campaign advances to higher with a 600 s
+outer deadline and fresh roots; no repeat at low or default is requested.
