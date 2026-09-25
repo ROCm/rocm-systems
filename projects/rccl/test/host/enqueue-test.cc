@@ -3321,3 +3321,76 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
             ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
                                           ncclScalarHostImmediate, rc.get()));
 }
+// ===========================================================================
+// collTaskAppend -- symkExtract tag (enqueue.cc:3508-3511)
+//
+// collTaskAppend is static inside enqueue.cc and in scope here via the
+// ENQUEUE_CC_PATH textual include. The two cases below pin that a
+// non-symmetric decision writes RCCL_SYMK_EXTRACT_DENY and RCCL_SYMMETRIC
+// writes RCCL_SYMK_EXTRACT_ALLOW. A third case pins decisionValid=false →
+// RCCL_SYMK_EXTRACT_NONE. The consumer (ncclMakeSymmetricTaskList) is a
+// fail-loud stub in test/host/fakes/sched_stubs.cc and is not reachable here;
+// only the tag written onto the task is checked.
+// ===========================================================================
+
+// Minimal comm that satisfies collTaskAppend without entering the Broadcast /
+// AllGatherV branch and without GPU allocation.
+struct CollTaskComm {
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  CollTaskComm() { storage->nRanks = 4; }
+  ncclComm* get() { return storage.get(); }
+};
+
+static ncclInfo MakeCollInfo(ncclComm* comm, bool decisionValid, int algo) {
+  ncclInfo info{};
+  info.comm          = comm;
+  info.coll          = ncclFuncAllReduce;
+  info.op            = ncclSum;
+  info.datatype      = ncclFloat32;
+  info.count         = static_cast<size_t>(comm->nRanks);
+  info.chunkSteps    = 1;
+  info.sliceSteps    = 1;
+  info.decisionValid = decisionValid;
+  info.decision.algo = algo;
+  return info;
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NonSymmetricDecision_WritesDeny) {
+  // decisionValid=true, algo != RCCL_SYMMETRIC → symkExtract must be DENY so
+  // ncclMakeSymmetricTaskList does not extract the task even when buffers are
+  // registered.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, NCCL_ALGO_RING);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_DENY, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_SymmetricDecision_WritesAllow) {
+  // decisionValid=true, algo == RCCL_SYMMETRIC → symkExtract must be ALLOW so
+  // ncclMakeSymmetricTaskList can extract the task.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_SYMMETRIC);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_ALLOW, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
+  // decisionValid=false → symkExtract must stay NONE so the extractor uses
+  // window inspection rather than a stale/absent selector result.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
+}

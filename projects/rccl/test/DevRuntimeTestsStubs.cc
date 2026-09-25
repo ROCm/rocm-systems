@@ -111,6 +111,10 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
 }
 int64_t ncclParamEnqueueRearchEnable() { return 0; }
 
+// Emitted by init.cc in the real build; dev_runtime.cc only declares it extern.
+// Returns the NCCL_PARAM default so window registration is not opted out.
+int64_t ncclParamWinEnable() { return 1; }
+
 // ---------------------------------------------------------------------------
 // Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------
