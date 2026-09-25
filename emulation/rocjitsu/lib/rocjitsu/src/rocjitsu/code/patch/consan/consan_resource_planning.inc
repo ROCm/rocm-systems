@@ -42,6 +42,14 @@ void append_operational_resource_plans(ResourcePlanningState &state, const Debug
   if (request.track_atomics) {
     std::vector<AtomicEvidenceSitePlan> candidates = build_atomic_evidence_site_plans(
         problem.inventory(), problem.observation_plan(), evidence.atomic, errors);
+    // Journal-only modifications execute instrumentation too. They must take
+    // part in the same register-placement and persistent-state proof as the
+    // ordering observers, before owner-local scalar windows are selected.
+    auto modifications =
+        build_atomic_evidence_site_plans(problem.inventory(), problem.observation_plan(),
+                                         ProbeIntentKind::PublicationModification, errors);
+    candidates.insert(candidates.end(), std::make_move_iterator(modifications.begin()),
+                      std::make_move_iterator(modifications.end()));
     if (!errors.empty())
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {

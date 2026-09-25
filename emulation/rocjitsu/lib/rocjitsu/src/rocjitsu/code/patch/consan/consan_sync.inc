@@ -937,7 +937,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
         {std::move(atomic), std::move(*source), semantics, 0, 1, false, std::nullopt});
   }
   const bool capture_publications =
-      arch == ROCJITSU_CODE_ARCH_RDNA4 && layout.publication_event_capacity != 0u &&
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      layout.publication_event_capacity != 0u &&
       std::ranges::all_of(candidates, [](const Candidate &candidate) {
         return candidate.source.is_rmw() ||
                (candidate.source.event &&
@@ -1545,8 +1546,11 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
                            planned.candidate.selected_slot, planned.candidate.bank_count, layout,
                            result.errors, &guest_instruction_offset, planned.leading_guest_words,
                            planned.trailing_guest_words, &emitted_guest_size);
-    if (!words)
+    if (!words) {
+      result.errors.emplace_back("ConSan atomic sync could not emit evidence at text offset " +
+                                 std::to_string(planned.candidate.source.site.text_offset));
       return;
+    }
     PatchInfo patch;
     patch.kind = PatchKind::TrampolineSyncMetadata;
     patch.anchor_offset = planned.physical_anchor_offset;

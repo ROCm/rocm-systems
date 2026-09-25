@@ -300,7 +300,13 @@ bool plan_report_layout(const AutoReportInventory &inventory, AutoReportPlan &pl
   const uint64_t pending_owner_bank_count =
       inventory.atomic_event_count == 0u ? 1u : kPendingAcquireOwnerBankCount;
   const auto pending_acquire_count = util::checked_mul(sync_slot_count, pending_owner_bank_count);
-  if (!pending_acquire_count) {
+  // Publication records are per active lane, unlike the per-wave pending
+  // acquire slots. Budget a wave64 of records per causal slot. This remains a
+  // bounded journal: repeated modifications can still overflow and must fail
+  // the completeness gate.
+  const auto publication_count =
+      util::checked_mul<uint64_t>(sync_slot_count, inventory.atomic_event_count == 0u ? 0u : 64u);
+  if (!pending_acquire_count || !publication_count) {
     plan.reason = AutoReportPlanReason::AbiCapacityOverflow;
     return false;
   }
@@ -313,9 +319,8 @@ bool plan_report_layout(const AutoReportInventory &inventory, AutoReportPlan &pl
                                          layout.sync_metadata_offset),
        report_region<PendingAcquireSlot>(*pending_acquire_count, layout.pending_acquire_capacity,
                                          layout.pending_acquires_offset),
-       report_region<PublicationRecord>(
-           inventory.atomic_event_count == 0u ? 0u : *pending_acquire_count,
-           layout.publication_event_capacity, layout.publication_events_offset)},
+       report_region<PublicationRecord>(*publication_count, layout.publication_event_capacity,
+                                        layout.publication_events_offset)},
       plan, cursor);
 }
 

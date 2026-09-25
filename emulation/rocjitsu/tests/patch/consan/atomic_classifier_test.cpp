@@ -2,11 +2,79 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/targets/cdna4/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 namespace rocjitsu::consan {
 namespace {
+
+TEST(ConSan, Cdna4PublicationObservationPreservesEncoding) {
+  for (uint32_t segment : {0u, 2u})
+    for (uint32_t op : {28u, 66u, 73u})
+      for (uint32_t flags : {0u, 1u, 2u, 3u}) {
+        cdna4::FlatGlblMachineInst original{};
+        original.encoding = 0x37;
+        original.seg = segment;
+        original.op = op;
+        original.offset = segment == 0u ? 0xffcu : 0x1ffcu;
+        original.addr = 18;
+        original.data = 23;
+        original.saddr = 6;
+        original.nt = flags & 1u;
+        original.sc1 = (flags >> 1u) & 1u;
+        original.vdst = 255;
+        const auto result = detail::build_cdna4_publication_observation(
+            {reinterpret_cast<const uint8_t *>(&original), sizeof(original)}, 42, op == 28u);
+        ASSERT_TRUE(result);
+        auto expected = original;
+        expected.sc0 = 1;
+        expected.vdst = 42;
+        if (op == 28u)
+          expected.op = cdna4::kFlatAtomicSwapFlat;
+        EXPECT_EQ(std::memcmp(result->data(), &expected, sizeof(expected)), 0);
+      }
+}
+
+TEST(ConSan, Cdna4PublicationObservationRejectsUnsupportedForms) {
+  cdna4::FlatGlblMachineInst original{};
+  original.encoding = 0x37;
+  original.seg = 2;
+  original.op = cdna4::kFlatAtomicAddFlat;
+  const auto build = [&](const auto &raw, uint16_t destination = 42, bool store = false) {
+    return detail::build_cdna4_publication_observation(
+        {reinterpret_cast<const uint8_t *>(&raw), sizeof(raw)}, destination, store);
+  };
+  ASSERT_TRUE(build(original));
+  EXPECT_FALSE(build(original, 256));
+  EXPECT_FALSE(build(original, 42, true));
+  for (uint32_t bit : {13u, 16u, 26u}) {
+    auto raw = original;
+    std::array<uint32_t, 2> words;
+    std::memcpy(words.data(), &raw, sizeof(raw));
+    words[0] ^= 1u << bit; // SVE, returning SC0, bad encoding
+    std::memcpy(&raw, words.data(), sizeof(raw));
+    EXPECT_FALSE(build(raw));
+  }
+  for (uint32_t segment : {1u, 3u}) {
+    auto raw = original;
+    raw.seg = segment;
+    EXPECT_FALSE(build(raw));
+  }
+  for (uint32_t op : {20u, 64u, 65u, 77u, 98u, 105u}) {
+    auto raw = original;
+    raw.op = op; // load, swap, CAS, floating or wide RMW
+    EXPECT_FALSE(build(raw));
+  }
+  auto raw = original;
+  raw.acc = 1;
+  EXPECT_FALSE(build(raw));
+  raw = original;
+  raw.seg = 0;
+  raw.offset = 0x1000;
+  EXPECT_FALSE(build(raw)); // FLAT reserved offset bit
+  EXPECT_FALSE(detail::build_cdna4_publication_observation({}, 42, false));
+}
 
 TEST(ConSan, AtomicObservationReturnRewritePreservesOperationAndAddress) {
   for (uint32_t family : {0xecu, 0xeeu})
@@ -205,10 +273,10 @@ TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) 
   }
 }
 
-TEST(ConSanAtomicClassifier, FlatDisplacementsAreMaterializedOnlyForExtendedEncodings) {
+TEST(ConSanAtomicClassifier, FlatDisplacementsRespectTargetEncodingRanges) {
   for (const auto &target : kAtomicTargets) {
     SCOPED_TRACE(target.arch);
-    for (const int32_t offset : {-(1 << 23), -12, 12, (1 << 23) - 1}) {
+    for (const int32_t offset : {-(1 << 23), -12, 12, 4095, 4096, (1 << 23) - 1}) {
       SCOPED_TRACE(offset);
       for (const bool rmw : {false, true}) {
         auto site = exact_flat_atomic(target);
@@ -219,7 +287,8 @@ TEST(ConSanAtomicClassifier, FlatDisplacementsAreMaterializedOnlyForExtendedEnco
           site.destination_vgpr.reset();
         }
         const auto classification = classify_atomic_lowering(site, target.arch, rmw);
-        if (target.instruction_size != 12u) {
+        if (target.instruction_size != 12u &&
+            !(target.arch == ROCJITSU_CODE_ARCH_CDNA4 && offset >= 0 && offset <= 4095)) {
           EXPECT_FALSE(classification.address_available());
           continue;
         }

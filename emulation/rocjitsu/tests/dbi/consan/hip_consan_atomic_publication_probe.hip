@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
-// Manual gfx1201 diagnostic for the known atomic-publication false positive.
+// Manual gfx1201/gfx950 diagnostic for the known atomic-publication false positive.
 // See docs/consan/validation/ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md.
 // COUNT, BARRIER, RELAXED, EXTRA_FENCE, ACTIVE_LANES, OR_COUNTER, and
 // ATOMIC_REPEATS and BOOKKEEPING select comparison and journal-capacity arms.
@@ -25,7 +25,7 @@
 #define ATOMIC_REPEATS 1
 #endif
 static_assert(ATOMIC_REPEATS >= 1 && (!OR_COUNTER || ATOMIC_REPEATS == 1));
-static_assert(ACTIVE_LANES >= 1 && ACTIVE_LANES <= 32);
+static_assert(ACTIVE_LANES >= 1 && ACTIVE_LANES <= 64);
 #ifndef COUNT
 #define COUNT 8
 #endif
@@ -37,8 +37,8 @@ static_assert(ACTIVE_LANES >= 1 && ACTIVE_LANES <= 32);
 #endif
 __global__ void publication(int *counter, int *output) {
   __shared__ volatile int partials[2][ACTIVE_LANES][COUNT];
-  int wave = threadIdx.x / 32;
-  int lane = threadIdx.x % 32;
+  int wave = threadIdx.x / warpSize;
+  int lane = threadIdx.x % warpSize;
   int old = -1;
   if (lane < ACTIVE_LANES) {
 #pragma unroll
@@ -91,7 +91,11 @@ int main() {
   HIP(hipMalloc(&output, sizeof(host)));
   HIP(hipMemset(counter, 0, (ACTIVE_LANES + 4 * BOOKKEEPING) * sizeof(int)));
   HIP(hipMemset(output, 0, sizeof(host)));
-  publication<<<1, 64>>>(counter, output);
+  int wave_size;
+  HIP(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
+  if (ACTIVE_LANES > wave_size)
+    return 5;
+  publication<<<1, 2 * wave_size>>>(counter, output);
   HIP(hipDeviceSynchronize());
   HIP(hipMemcpy(host, output, sizeof(host), hipMemcpyDeviceToHost));
   for (int lane = 0; lane < ACTIVE_LANES; ++lane)

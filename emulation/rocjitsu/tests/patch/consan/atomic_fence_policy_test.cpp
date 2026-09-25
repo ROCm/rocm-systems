@@ -1034,97 +1034,116 @@ TEST(ConSanAtomicFencePolicy, NoPublicationModificationLogWithoutPublicationObse
 }
 
 TEST(ConSanAtomicFencePolicy, PublicationModificationsDoNotRequireSynchronizationSequences) {
-  auto atomic = make_global_atomic_site({}, 128);
-  atomic.scope.reset();
-  auto store = make_global_store_site({}, 64);
-  store.scope.reset();
-  store.width_bits = 128;
-  store.mnemonic = "global_store_b128";
-  const auto event = make_atomic_event(32);
-  const auto inventory = build_atomic_inventory({event}, {make_atomic_sequence(event)},
-                                                {make_global_atomic_site(), atomic}, {store});
-  auto request = atomic_request(Mode::Default);
-  request.publication_modifications_enabled = true;
-  const std::array windows{DirectionalAccessAvailability{
-      .owner = inventory.kernels().front().id, .read = true, .write = true}};
-  request.directional_access_windows = windows;
-  const auto policy = plan_atomic_fence_observation(inventory, request);
-  ASSERT_TRUE(policy.valid());
-  ASSERT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted)
-      << static_cast<int>(policy.plan.atomic_site_decisions.front().reason);
-  EXPECT_EQ(std::ranges::count(policy.plan.probe_intents, ProbeIntentKind::PublicationModification,
-                               &ProbeIntent::kind),
-            2);
-  std::vector<std::string> errors;
-  auto plans = detail::build_atomic_evidence_site_plans(
-      inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
-  ASSERT_TRUE(errors.empty());
-  ASSERT_EQ(plans.size(), 2u);
-  for (const auto &plan : plans) {
-    EXPECT_TRUE(plan.publication_modification);
-    EXPECT_TRUE(plan.is_well_formed());
-    EXPECT_FALSE(plan.sequence.valid());
-    const auto source = detail::resolve_atomic_evidence_source(inventory, plan);
-    ASSERT_TRUE(source);
-    EXPECT_EQ(source->sequence, nullptr);
-    EXPECT_FALSE(source->relocates_polling_loop());
-    EXPECT_FALSE(policy.plan.intent(plan.evidence_intent)->synchronization_association);
-  }
-  EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, plans[0])->is_rmw());
-  EXPECT_TRUE(detail::resolve_atomic_evidence_source(inventory, plans[1])->is_rmw());
-  EXPECT_EQ(plans[0].lowering_form.data_register_count, 4u);
-  EXPECT_EQ(plans[0].lowering_form.destination_register_count, 0u);
-  const auto observations = detail::build_atomic_evidence_site_plans(
-      inventory, policy.plan, ProbeIntentKind::AtomicOrdering, errors);
-  plans.insert(plans.begin(), observations.begin(), observations.end());
-  const auto coverage = detail::publication_modification_coverage(inventory, plans);
-  EXPECT_TRUE(coverage.complete());
-  EXPECT_EQ(coverage.required, 3u);
-  EXPECT_EQ(coverage.covered, 3u);
-  const auto omitted = detail::publication_modification_coverage(
-      inventory, std::span<const detail::AtomicEvidenceSitePlan>(plans).first(2));
-  EXPECT_FALSE(omitted.complete());
-  EXPECT_EQ(omitted.required, 3u);
-  EXPECT_EQ(omitted.covered, 2u);
-  ASSERT_EQ(omitted.missing.size(), 1u);
-  EXPECT_EQ(omitted.missing.front(), plans[2].source_site);
+  for (const AtomicPolicyTarget target :
+       {AtomicPolicyTarget{},
+        AtomicPolicyTarget{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950}}) {
+    const std::string mnemonic =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? "global_atomic_add" : "global_atomic_add_u32";
 
-  const std::vector<std::string> excluded{"another_kernel"};
-  request.kernel_name_allowlist = excluded;
-  EXPECT_TRUE(plan_atomic_fence_observation(inventory, request).plan.probe_intents.empty());
+    auto atomic = make_global_atomic_site(target, 128, mnemonic);
+    atomic.scope.reset();
+    auto store = make_global_store_site(target, 64);
+    store.scope.reset();
+    store.width_bits = 128;
+    store.mnemonic =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? "global_store_dwordx4" : "global_store_b128";
+    const auto event = make_atomic_event(32, SyncRmwOutcome::ReturnsOldValue,
+                                         SyncAddressSource::GlobalScalarVector, mnemonic);
+    const auto inventory = build_atomic_inventory(
+        {event}, {make_atomic_sequence(event)},
+        {make_global_atomic_site(target, 32, mnemonic), atomic}, {store}, {}, target);
+    auto request = atomic_request(Mode::Default);
+    request.publication_modifications_enabled = true;
+    const std::array windows{DirectionalAccessAvailability{
+        .owner = inventory.kernels().front().id, .read = true, .write = true}};
+    request.directional_access_windows = windows;
+    const auto policy = plan_atomic_fence_observation(inventory, request);
+    ASSERT_TRUE(policy.valid());
+    ASSERT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted)
+        << static_cast<int>(policy.plan.atomic_site_decisions.front().reason);
+    EXPECT_EQ(std::ranges::count(policy.plan.probe_intents,
+                                 ProbeIntentKind::PublicationModification, &ProbeIntent::kind),
+              2);
+    std::vector<std::string> errors;
+    auto plans = detail::build_atomic_evidence_site_plans(
+        inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
+    ASSERT_TRUE(errors.empty());
+    ASSERT_EQ(plans.size(), 2u);
+    for (const auto &plan : plans) {
+      EXPECT_TRUE(plan.publication_modification);
+      EXPECT_TRUE(plan.is_well_formed());
+      EXPECT_FALSE(plan.sequence.valid());
+      const auto source = detail::resolve_atomic_evidence_source(inventory, plan);
+      ASSERT_TRUE(source);
+      EXPECT_EQ(source->sequence, nullptr);
+      EXPECT_FALSE(source->relocates_polling_loop());
+      EXPECT_FALSE(policy.plan.intent(plan.evidence_intent)->synchronization_association);
+    }
+    EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, plans[0])->is_rmw());
+    EXPECT_TRUE(detail::resolve_atomic_evidence_source(inventory, plans[1])->is_rmw());
+    EXPECT_EQ(plans[0].lowering_form.data_register_count, 4u);
+    EXPECT_EQ(plans[0].lowering_form.destination_register_count, 0u);
+    const auto observations = detail::build_atomic_evidence_site_plans(
+        inventory, policy.plan, ProbeIntentKind::AtomicOrdering, errors);
+    plans.insert(plans.begin(), observations.begin(), observations.end());
+    const auto coverage = detail::publication_modification_coverage(inventory, plans);
+    EXPECT_TRUE(coverage.complete());
+    EXPECT_EQ(coverage.required, 3u);
+    EXPECT_EQ(coverage.covered, 3u);
+    const auto omitted = detail::publication_modification_coverage(
+        inventory, std::span<const detail::AtomicEvidenceSitePlan>(plans).first(2));
+    EXPECT_FALSE(omitted.complete());
+    EXPECT_EQ(omitted.required, 3u);
+    EXPECT_EQ(omitted.covered, 2u);
+    ASSERT_EQ(omitted.missing.size(), 1u);
+    EXPECT_EQ(omitted.missing.front(), plans[2].source_site);
+
+    const std::vector<std::string> excluded{"another_kernel"};
+    request.kernel_name_allowlist = excluded;
+    EXPECT_TRUE(plan_atomic_fence_observation(inventory, request).plan.probe_intents.empty());
+  }
 }
 
 TEST(ConSanAtomicFencePolicy, PublicationCompletenessIncludesUnclassifiableStores) {
-  auto store = make_global_store_site({}, 64);
-  store.data_vgpr.reset();
-  const auto event = make_atomic_event(32);
-  const auto inventory = build_atomic_inventory(
-      {event}, {make_atomic_sequence(event)},
-      {make_global_atomic_site(), make_global_atomic_site({}, 128)}, {store});
-  auto request = atomic_request(Mode::Default);
-  request.publication_modifications_enabled = true;
-  const std::array windows{DirectionalAccessAvailability{
-      .owner = inventory.kernels().front().id, .read = true, .write = true}};
-  request.directional_access_windows = windows;
-  const auto policy = plan_atomic_fence_observation(inventory, request);
-  ASSERT_TRUE(policy.valid());
-  ASSERT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted)
-      << static_cast<int>(policy.plan.atomic_site_decisions.front().reason);
-  std::vector<std::string> errors;
-  auto plans = detail::build_atomic_evidence_site_plans(
-      inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
-  ASSERT_TRUE(errors.empty());
-  ASSERT_EQ(plans.size(), 1u);
-  const auto observations = detail::build_atomic_evidence_site_plans(
-      inventory, policy.plan, ProbeIntentKind::AtomicOrdering, errors);
-  plans.insert(plans.begin(), observations.begin(), observations.end());
-  const auto coverage = detail::publication_modification_coverage(inventory, plans);
-  EXPECT_TRUE(coverage.valid);
-  EXPECT_FALSE(coverage.complete());
-  EXPECT_EQ(coverage.required, 3u);
-  EXPECT_EQ(coverage.covered, 2u);
-  ASSERT_EQ(coverage.missing.size(), 1u);
-  EXPECT_EQ(inventory.program_site(coverage.missing.front())->text_offset(), 64u);
+  for (const AtomicPolicyTarget target :
+       {AtomicPolicyTarget{},
+        AtomicPolicyTarget{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950}}) {
+    const std::string mnemonic =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4 ? "global_atomic_add" : "global_atomic_add_u32";
+
+    auto store = make_global_store_site(target, 64);
+    store.data_vgpr.reset();
+    const auto event = make_atomic_event(32, SyncRmwOutcome::ReturnsOldValue,
+                                         SyncAddressSource::GlobalScalarVector, mnemonic);
+    const auto inventory = build_atomic_inventory({event}, {make_atomic_sequence(event)},
+                                                  {make_global_atomic_site(target, 32, mnemonic),
+                                                   make_global_atomic_site(target, 128, mnemonic)},
+                                                  {store}, {}, target);
+    auto request = atomic_request(Mode::Default);
+    request.publication_modifications_enabled = true;
+    const std::array windows{DirectionalAccessAvailability{
+        .owner = inventory.kernels().front().id, .read = true, .write = true}};
+    request.directional_access_windows = windows;
+    const auto policy = plan_atomic_fence_observation(inventory, request);
+    ASSERT_TRUE(policy.valid());
+    ASSERT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted)
+        << static_cast<int>(policy.plan.atomic_site_decisions.front().reason);
+    std::vector<std::string> errors;
+    auto plans = detail::build_atomic_evidence_site_plans(
+        inventory, policy.plan, ProbeIntentKind::PublicationModification, errors);
+    ASSERT_TRUE(errors.empty());
+    ASSERT_EQ(plans.size(), 1u);
+    const auto observations = detail::build_atomic_evidence_site_plans(
+        inventory, policy.plan, ProbeIntentKind::AtomicOrdering, errors);
+    plans.insert(plans.begin(), observations.begin(), observations.end());
+    const auto coverage = detail::publication_modification_coverage(inventory, plans);
+    EXPECT_TRUE(coverage.valid);
+    EXPECT_FALSE(coverage.complete());
+    EXPECT_EQ(coverage.required, 3u);
+    EXPECT_EQ(coverage.covered, 2u);
+    ASSERT_EQ(coverage.missing.size(), 1u);
+    EXPECT_EQ(inventory.program_site(coverage.missing.front())->text_offset(), 64u);
+  }
 }
 
 } // namespace

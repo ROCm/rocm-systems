@@ -221,8 +221,9 @@ ObservationProduct assemble_observation_product(const ProgramInventory &inventor
     }
     AtomicFencePolicyResult atomic_fence = plan_atomic_fence_observation(
         inventory,
-        {.publication_modifications_enabled =
-             inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4 && request.mode == Mode::Default,
+        {.publication_modifications_enabled = (inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
+                                               inventory.arch() == ROCJITSU_CODE_ARCH_CDNA4) &&
+                                              request.mode == Mode::Default,
          .mode = request.mode,
          .tracking_enabled = request.atomic_fence_tracking_enabled,
          .directional_access_windows = directional_access_windows,

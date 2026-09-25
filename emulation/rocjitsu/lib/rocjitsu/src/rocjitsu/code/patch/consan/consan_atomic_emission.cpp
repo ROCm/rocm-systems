@@ -17,6 +17,7 @@
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
+#include "rocjitsu/code/patch/consan/targets/cdna4/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 #include <algorithm>
@@ -190,16 +191,24 @@ std::optional<SyncRole> atomic_role(AtomicEventKind kind, bool is_rmw) {
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.insert(words.end(), leading_guest_words.begin(), leading_guest_words.end());
   if (observation_vgpr) {
-    if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+    const auto append_rewrite = [&](const auto &rewritten) {
+      if (!rewritten)
+        return false;
+      words.insert(words.end(), rewritten->begin(), rewritten->end());
+      return true;
+    };
+    const auto instruction = bytes.subspan(site.file_offset, site.size);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (!append_rewrite(
+              build_cdna4_publication_observation(instruction, *observation_vgpr, !is_rmw)))
+        return false;
+    } else if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      if (!append_rewrite(is_rmw ? build_rdna4_atomic_observation(instruction, *observation_vgpr)
+                                 : build_rdna4_store_observation(instruction, *observation_vgpr)))
+        return false;
+    } else {
       return false;
-    const auto rewritten =
-        is_rmw ? build_rdna4_atomic_observation(bytes.subspan(site.file_offset, site.size),
-                                                *observation_vgpr)
-               : build_rdna4_store_observation(bytes.subspan(site.file_offset, site.size),
-                                               *observation_vgpr);
-    if (!rewritten)
-      return false;
-    words.insert(words.end(), rewritten->begin(), rewritten->end());
+    }
   } else {
     for (uint64_t offset = 0; offset < site.size; offset += sizeof(uint32_t)) {
       uint32_t word = 0;
@@ -488,6 +497,32 @@ struct AtomicPreludeState {
   }
   if (!guest_first) {
     if (!defer_guest) {
+      // Effective-address materialization preserves VCC/SCC by borrowing the
+      // scalar window. Its snapshot is correct, but the original instruction
+      // still consumes its original scalar operands, including a base that
+      // aliases that window. Restore the saved guest scalars before replay.
+      const auto scalar_operand_overlaps = [&](std::optional<uint16_t> base, uint16_t count) {
+        return scalar_spill && base &&
+               range_overlaps(*base, count, scalar_spill->sgpr_base, scalar_spill->sgpr_count);
+      };
+      if (address_plan.requires_materialization() &&
+          (scalar_operand_overlaps(lowering_form.scalar_base_sgpr, 2u) ||
+           scalar_operand_overlaps(lowering_form.scalar_offset_sgpr, 1u))) {
+        // An aligned-store guard borrows the same scalars again around replay;
+        // it needs a separate operand-preservation contract before admission.
+        if (store_alignment_vgpr ||
+            (scalar_spill->memory_transfer_vgpr &&
+             (range_overlaps(*scalar_spill->memory_transfer_vgpr, 1u, saved_address, 2u) ||
+              std::ranges::any_of(input_snapshots, [&](const auto &snapshot) {
+                return snapshot.first == *scalar_spill->memory_transfer_vgpr;
+              })))) {
+          errors.emplace_back(
+              "ConSan atomic replay cannot restore borrowed scalar address operands");
+          return false;
+        }
+        words.insert(words.end(), scalar_spill->restore_words.begin(),
+                     scalar_spill->restore_words.end());
+      }
       if (!append_guest())
         return false;
     }
@@ -504,20 +539,30 @@ struct AtomicPreludeState {
 
 bool publication_observation_supported(const AtomicEvidenceSourceView &source) {
   const auto &site = source.site;
+  const bool cdna_rmw = site.mnemonic == "global_atomic_add" ||
+                        site.mnemonic == "flat_atomic_add" || site.mnemonic == "global_atomic_or" ||
+                        site.mnemonic == "flat_atomic_or";
   const bool operation =
       site.mnemonic == "global_atomic_add_u32" || site.mnemonic == "flat_atomic_add_u32" ||
+      site.mnemonic == "global_atomic_add" || site.mnemonic == "flat_atomic_add" ||
+      site.mnemonic == "global_atomic_or" || site.mnemonic == "flat_atomic_or" ||
       site.mnemonic == "global_atomic_or_b32" || site.mnemonic == "flat_atomic_or_b32" ||
       (atomic_is_compare_exchange(site) && site.returns_old_value.value_or(false));
-  const bool store = !source.is_rmw() && source.sequence &&
-                     source.sequence->operation == SyncOperation::OrdinaryStore &&
-                     (site.mnemonic == "global_store_b32" || site.mnemonic == "flat_store_b32") &&
-                     site.raw_th == 0u;
+  const bool store =
+      !source.is_rmw() && source.sequence &&
+      source.sequence->operation == SyncOperation::OrdinaryStore &&
+      (site.mnemonic == "global_store_b32" || site.mnemonic == "flat_store_b32" ||
+       site.mnemonic == "global_store_dword" || site.mnemonic == "flat_store_dword") &&
+      (site.raw_th == 0u ||
+       ((site.mnemonic == "global_store_dword" || site.mnemonic == "flat_store_dword") &&
+        site.raw_th == 2u));
   return source.sequence && !source.relocates_polling_loop() &&
          ((source.is_rmw() && operation) || store) && site.width_bits == 32 && site.data_vgpr &&
          site.scope &&
-         (store || (site.returns_old_value &&
-                    (site.returns_old_value.value() ? site.destination_vgpr.has_value()
-                                                    : site.raw_th == 0u)));
+         (store ||
+          (site.returns_old_value && (site.returns_old_value.value()
+                                          ? site.destination_vgpr.has_value()
+                                          : site.raw_th == 0u || (cdna_rmw && site.raw_th == 2u))));
 }
 
 std::optional<std::vector<uint32_t>> build_publication_cave_words(
@@ -592,7 +637,10 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
       .require(append_atomic_snapshot_wait(words, loaded_private, arch))
       .require(append_save_special_state(words, plan.special_state, arch))
       .append(instrumentation::build_s_mov_b64(saved_exec, kAmdGpuExecLo, arch));
-  if (!opaque && source.site.mnemonic.find("_add_") != std::string::npos)
+  if (!opaque &&
+      (source.site.mnemonic == "global_atomic_add_u32" ||
+       source.site.mnemonic == "flat_atomic_add_u32" ||
+       source.site.mnemonic == "global_atomic_add" || source.site.mnemonic == "flat_atomic_add"))
     sequence.append(
         instrumentation::build_v_add_u32(written, vector_source_vgpr(observed), written, arch));
   else if (!opaque && !cas && !store) {
@@ -608,9 +656,10 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
   sequence
       .require(append_atomic_fetch_add_one_u32(
           words, report + offsetof(ReportHeader, publication_event_count), index, base, arch))
-      .append(instrumentation::build_v_cmp_gt_u32_literal_vcc(layout.publication_event_capacity,
-                                                              index, arch),
-              instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
+      .append(
+          instrumentation::build_v_mov_b32_literal(ticket, layout.publication_event_capacity, arch),
+          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(ticket), index, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
   const auto overflow = sequence.make_label();
   const auto finish = sequence.make_label();
   sequence.branch(overflow, InstructionSequence::BranchKind::ExecZero)
@@ -702,10 +751,11 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
   // Overflow is sticky even if an extremely long execution wraps the slot
   // counter. No out-of-range lane may address the bounded record allocation.
   sequence.bind_label(overflow)
-      .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch),
-              instrumentation::build_v_cmp_gt_u32_literal_vcc(layout.publication_event_capacity,
-                                                              index, arch),
-              instrumentation::build_s_andn2_b64(kAmdGpuExecLo, saved_exec, kAmdGpuVccLo, arch))
+      .append(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch),
+          instrumentation::build_v_mov_b32_literal(ticket, layout.publication_event_capacity, arch),
+          instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(ticket), index, arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, saved_exec, kAmdGpuVccLo, arch))
       .branch(finish, InstructionSequence::BranchKind::ExecZero)
       .require(
           record.materialize_address(report + offsetof(ReportHeader, publication_dropped_count)))

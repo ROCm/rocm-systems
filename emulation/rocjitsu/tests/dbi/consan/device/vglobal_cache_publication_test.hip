@@ -49,7 +49,7 @@ __device__ __forceinline__ void release_vglobal(uint32_t *flag) {
   const uint32_t one = 1u;
 #if defined(__gfx942__) || defined(__gfx950__)
   asm volatile("buffer_wbl2 sc1\n\t"
-               "s_waitcnt vmcnt(0)\n\t"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
                "global_atomic_add %0, %1, off sc1\n\t"
                "s_waitcnt vmcnt(0)\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :

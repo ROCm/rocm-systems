@@ -4,6 +4,7 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
+#include "rocjitsu/code/patch/consan/consan_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/consan_packed_fields.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -3234,6 +3235,125 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
       plan, /*vcc_save_sgpr=*/80, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(materialization);
   EXPECT_TRUE(materialization->empty());
+}
+
+TEST(ConSan, Cdna4PublicationReplaysWideAtomicWithBorrowedScalarAddress) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest =
+      cdna4::build_flat(cdna4::kFlatAtomicSwapX2Flat,
+                        {.seg = 2, .sc0 = 1, .addr = 0, .data = 4, .saddr = 2, .vdst = 0});
+  detail::AtomicEvidenceSourceView source;
+  source.native_modification = true;
+  source.site.size = sizeof(guest);
+  source.site.width_bits = 64;
+  source.site.address_vgpr = 0;
+  source.site.data_vgpr = 4;
+  source.site.destination_vgpr = 0;
+  source.site.scalar_address_sgpr = 2;
+  source.site.raw_saddr = 2;
+  source.site.raw_ioffset = 0;
+  source.site.raw_vaddr = 0;
+  source.site.raw_vdata = 4;
+  source.site.raw_th = 1;
+  source.site.scope = MemoryScope::Agent;
+  source.site.returns_old_value = true;
+  source.site.mnemonic = "global_atomic_swap_x2";
+  const auto classification = classify_atomic_lowering(source.site, arch);
+  ASSERT_TRUE(classification.address_available());
+  ASSERT_TRUE(classification.form);
+  const auto address = plan_atomic_address(*classification.form, 56, detail::atomic_scratch_count(),
+                                           RegisterAllocationSource::DescriptorGrowth);
+  ASSERT_TRUE(address.supported());
+  auto scalar_spill = build_lane_sgpr_spill_sequence(0, 8, 80, 0, arch);
+  ASSERT_TRUE(scalar_spill);
+  detail::SyncEmissionPlan plan;
+  plan.supercollider_report_buffer_address = 0x20000;
+  plan.exec_save_sgpr = 0;
+  plan.special_state = detail::SpecialStateSgprs{2, 4};
+  plan.dispatch_id.literal = 1;
+  plan.owner_epoch_vgprs = {.owner = 62, .epoch = 63};
+  plan.scratch_vgpr = 56;
+  ReportBufferLayout layout;
+  layout.publication_event_capacity = 8;
+  layout.publication_events_offset = 256;
+  std::vector<std::string> errors;
+  uint32_t guest_offset = 0, guest_size = 0;
+  const auto words = detail::build_publication_cave_words(
+      {reinterpret_cast<const uint8_t *>(guest.data()), sizeof(guest)}, source,
+      *classification.form, 0, address, plan, nullptr, &*scalar_spill, nullptr, arch, layout,
+      errors, &guest_offset, &guest_size, detail::PublicationCapture::OpaqueModification);
+  ASSERT_TRUE(words) << testing::PrintToString(errors);
+  const size_t prefix_words = (guest_offset + guest_size) / sizeof(uint32_t);
+  ASSERT_LE(prefix_words, words->size());
+  amdgpu::GpuMemory memory("publication_scalar_replay_mem");
+  amdgpu::L2Cache l2("publication_scalar_replay_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("publication_scalar_replay", config, &memory, &l2);
+  ASSERT_TRUE(cu);
+  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_TRUE(wave);
+  for (size_t i = 0; i < prefix_words; ++i)
+    memory.write32(i * sizeof(uint32_t), (*words)[i]);
+  constexpr uint64_t location = 0x10008;
+  memory.write32(location, 0x12345678);
+  memory.write32(location + 4, 0xabcdef01);
+  wave->set_exec(1);
+  wave->set_vcc(0xffffffffffffffffull);
+  wave->write_scc(true);
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, 0x10000);
+  cu->write_sgpr(wave->sgpr_alloc().base + 3, 0);
+  const auto base = wave->vgpr_alloc().base;
+  cu->write_vgpr(base, 0, 8);
+  cu->write_vgpr(base + 4, 0, 0x87654321);
+  cu->write_vgpr(base + 5, 0, 0x10fedcba);
+  size_t steps = 0;
+  while (wave->pc < prefix_words * sizeof(uint32_t)) {
+    ASSERT_LT(steps++, prefix_words);
+    cu->step();
+  }
+  cu->flush_all();
+  EXPECT_EQ(memory.read32(location), 0x87654321u);
+  EXPECT_EQ(memory.read32(location + 4), 0x10fedcbau);
+  EXPECT_EQ(cu->read_vgpr(base, 0), 0x12345678u);
+  EXPECT_EQ(cu->read_vgpr(base + 1, 0), 0xabcdef01u);
+  EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 2), 0x10000u);
+  EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 3), 0u);
+  EXPECT_EQ(wave->vcc(), 0xffffffffffffffffull);
+  EXPECT_TRUE(wave->read_scc());
+  wave->halt();
+}
+
+TEST(ConSan, Cdna4PublicationLdsCompletionUsesCommunicationAfterCachePrefix) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (bool drain_lds : {false, true}) {
+    const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+    const auto atomic = build_cdna4_flat_atomic_add_u32(2, 4, 5, true, 2, arch);
+    ASSERT_TRUE(atomic);
+    std::vector<uint32_t> words(release.begin(), release.end());
+    words.push_back(drain_lds ? 0xBF8C0070u : 0xBF8C0F70u);
+    words.insert(words.end(), atomic->begin(), atomic->end());
+    words.push_back(build_s_endpgm(arch));
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
+    const auto result = test_semantic_inventory(make_cdna4_lds_code_object(words), options);
+    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+    const auto sequences = result.program_inventory.sync().sync_sequences;
+    const auto found = std::ranges::find_if(
+        sequences, [](const auto &sequence) { return sequence.kind == SyncKind::Atomic; });
+    ASSERT_NE(found, sequences.end());
+    EXPECT_EQ(found->memory_role, SyncMemoryRole::Release);
+    EXPECT_EQ(found->begin_text_offset, 0u);
+    if (drain_lds)
+      EXPECT_EQ(found->lds_release_wait_text_offset, 8u);
+    else
+      EXPECT_FALSE(found->lds_release_wait_text_offset);
+  }
 }
 
 TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {

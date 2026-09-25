@@ -52,6 +52,52 @@ TEST(ConSan, PublicationStoreCaptureRemovesMemoryClauseWithoutOrderingSequence) 
       1u);
 }
 
+TEST(ConSan, Cdna4PublicationCapturesReturningAndNonReturningRmwWithOpaqueStores) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (bool returns_old : {false, true}) {
+    for (uint16_t opcode : {cdna4::kFlatAtomicAddFlat, cdna4::kFlatAtomicOrFlat}) {
+      std::vector<uint32_t> words{0xD81A0000u, 0x00000402u}; // ds_write_b32 v2, v4
+      // This unrelated ordinary store must be covered as an opaque modification.
+      auto store = cdna4::build_flat(cdna4::kFlatStoreDwordFlat,
+                                     {.seg = 2, .addr = 2, .data = 4, .saddr = 0x7f});
+      words.insert(words.end(), store.begin(), store.end());
+      const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+      words.insert(words.end(), release.begin(), release.end());
+      words.push_back(0xBF8C0070u); // VM and LDS completion
+      const auto atomic = cdna4::build_flat(
+          opcode, {.seg = 2, .sc0 = returns_old, .addr = 2, .data = 4, .saddr = 0x7f, .vdst = 5});
+      words.insert(words.end(), atomic.begin(), atomic.end());
+      words.push_back(build_s_endpgm(arch));
+      const auto bytes = make_cdna4_lds_code_object(words, "publication_capture");
+      TestOptions options = test_options();
+      options.track_atomics = true;
+      options.max_patches = 65536;
+      options.max_patches_is_expert_limit = false;
+      AutoReportInventory capacity;
+      capacity.access_range_count = 1;
+      capacity.range_bank_count = 8;
+      capacity.sync_slot_count = 10;
+      capacity.watchpoint_count = 10;
+      capacity.atomic_event_count = 2;
+      const auto plan = plan_auto_report(capacity);
+      ASSERT_TRUE(plan.complete());
+      options.report_buffer_address = 0x123456780000ull;
+      options.report_buffer_size = plan.required_bytes;
+      options.report_layout = *plan.complete_layout();
+      const auto result = test_lower_consan(bytes, options);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+      EXPECT_EQ(
+          std::ranges::count(result.patches, PatchKind::TrampolineSyncMetadata, &PatchInfo::kind),
+          2u);
+      EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const auto &warning) {
+        return warning ==
+               "ConSan publication modification coverage required=2 covered=2 complete=true";
+      }));
+    }
+  }
+}
+
 TEST(ConSan, UniformAddressBroadcastCopiesAndClobbers) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA4}) {
@@ -1330,6 +1376,9 @@ TEST(ConSan, AtomicTrackingPublishesQualifiedTypedMetadata) {
   EXPECT_EQ(auto_plan.layout.causal_window_capacity, 9u);
   EXPECT_EQ(auto_plan.layout.sync_metadata_capacity, 9u);
   EXPECT_EQ(auto_plan.layout.pending_acquire_capacity, 9u * kPendingAcquireOwnerBankCount);
+  EXPECT_EQ(auto_plan.layout.publication_event_capacity, 9u * 64u);
+  EXPECT_EQ(revalidate_report_layout(auto_plan.layout, auto_plan.layout.required_bytes),
+            auto_plan.layout);
   EXPECT_EQ(result.observation_plan().mode, Mode::Default);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);

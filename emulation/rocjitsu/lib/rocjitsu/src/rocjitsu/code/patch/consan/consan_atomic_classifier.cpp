@@ -209,9 +209,13 @@ AtomicLoweringClassification classify_atomic_lowering(const AtomicSite &site, rj
   if (*site.raw_saddr == vector_only_saddr) {
     if (*site.address_vgpr >= 255u)
       return reject(Reason::UnsupportedInputWidth);
-    // GFX12 FLAT has a signed immediate displacement, including vector-only
-    // addresses. Earlier FLAT encodings retain their zero-offset contract.
-    if (flat && memory.instruction_word_count != 3u && *site.raw_ioffset != 0)
+    // CDNA4 FLAT uses an unsigned 12-bit displacement (bit 12 is reserved),
+    // while GFX12 uses a signed displacement. Other older targets retain the
+    // zero-offset contract until their FLAT displacement is qualified.
+    const bool cdna4_flat = flat && arch == ROCJITSU_CODE_ARCH_CDNA4;
+    if (cdna4_flat && (*site.raw_ioffset < 0 || *site.raw_ioffset > 0xfff))
+      return reject(Reason::UnsupportedOffset);
+    if (flat && !cdna4_flat && memory.instruction_word_count != 3u && *site.raw_ioffset != 0)
       return reject(Reason::UnsupportedOffset);
     if (*site.raw_ioffset < offset_min || *site.raw_ioffset > offset_max)
       return reject(Reason::UnsupportedOffset);

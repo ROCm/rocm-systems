@@ -1488,15 +1488,21 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
     if (sequence.kind != SyncKind::Atomic && sequence.operation != SyncOperation::OrdinaryStore)
       continue;
     auto communication = sequence;
-    if (sequence.operation == SyncOperation::OrdinaryStore) {
-      for (const auto id : sequence.member_event_ids) {
-        const auto *event = events.find_event(id);
-        if (event && event->operation == SyncOperation::OrdinaryStore)
-          communication.begin_text_offset = event->text_offset();
-      }
+    // Cache association can move the sequence start before the release cache
+    // instruction. LDS completion is relative to the actual communication,
+    // including a combined wait between that cache instruction and the RMW.
+    for (const auto id : sequence.member_event_ids) {
+      const auto *event = events.find_event(id);
+      if (event && (event->operation == SyncOperation::OrdinaryStore ||
+                    event->operation == SyncOperation::AtomicRmw ||
+                    event->operation == SyncOperation::AtomicCompareExchange))
+        communication.begin_text_offset = event->text_offset();
     }
     sequence.lds_release_wait_text_offset =
         exact_workgroup_release_wait_boundary(communication, blocks, arch);
+    if (!sequence.lds_release_wait_text_offset && sequence.kind == SyncKind::Atomic)
+      sequence.lds_release_wait_text_offset =
+          exact_workgroup_release_wait_boundary(sequence, blocks, arch);
     if (sequence.lds_release_wait_text_offset)
       sequence.identity +=
           "|lds-release-wait=pc=0x" + fixed_hex(*sequence.lds_release_wait_text_offset, 16);

@@ -25,7 +25,7 @@ __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
   const uint32_t one = 1u;
 #if defined(__gfx942__) || defined(__gfx950__)
   asm volatile("buffer_wbl2 sc1\n\t"
-               "s_waitcnt vmcnt(0)\n\t"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
                "flat_atomic_add %0, %1 sc1\n\t"
                "s_waitcnt vmcnt(0)\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
                :

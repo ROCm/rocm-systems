@@ -47,7 +47,7 @@ __device__ __forceinline__ uint32_t fetch_add_acq_rel(uint32_t *address) {
   const uint32_t one = 1u;
   uint32_t old = 0u;
   asm volatile("buffer_wbl2 sc1\n\t"
-               "s_waitcnt vmcnt(0)\n\t"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
                "global_atomic_add %0, %1, %2, off sc0 sc1\n\t"
                "s_waitcnt vmcnt(0)\n\t"
                "buffer_inv sc1\n\t"

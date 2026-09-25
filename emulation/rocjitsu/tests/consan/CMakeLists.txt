@@ -1455,6 +1455,10 @@ function(rj_add_consan_device_conformance_cases)
             "RJ_CONSAN_LOG=1"
             "RJ_CONSAN_REQUIRE_PATCH=1"
         )
+        set(_atomic_order_evidence_regex "visible_sync=[1-9][0-9]*")
+        if(_device_TARGET STREQUAL "gfx950")
+            set(_atomic_order_evidence_regex "ordered_publication_pairs=[1-9][0-9]*")
+        endif()
         set(_atomic_order_correct_test_name
             "${_device_PREFIX}.GlobalAtomicOrder.Correct"
         )
@@ -1465,7 +1469,7 @@ function(rj_add_consan_device_conformance_cases)
             ${_config_args}
             ${_resource_lock_args}
             TIMEOUT 60
-            PASS_REGEX "visible_sync=[1-9][0-9]*"
+            PASS_REGEX "${_atomic_order_evidence_regex}"
             ENVIRONMENT
                 ${_atomic_order_common_environment}
                 "RJ_CONSAN_FORBID_DIAGNOSTICS=1"
