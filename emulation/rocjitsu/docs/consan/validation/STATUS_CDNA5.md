@@ -18,8 +18,10 @@ emulator checks, and at least **6/8** fault detections. Fractions count detectio
 among admitted and reached fault trials. Default cells name the lowest passing
 preset at or above `default`; SuperCollider cells name the tested controls.
 Emulator results do not qualify physical hardware or measure its performance.
-Follow [VALIDATION.md](VALIDATION.md), beginning with allowlist discovery;
-record the prerequisite gap if matching native rocprofv3 profiling is unavailable.
+Follow [VALIDATION.md](VALIDATION.md), beginning with allowlist discovery.
+This campaign uses rocprofv3 inside the gfx1250 emulator; see the
+[campaign setup and evidence](CDNA5_REVALIDATION_20260925.md) for profiler ordering
+and matching runtime requirements.
 For the global-access scope limitation relevant to `pytorch-scatter-reduce`, see
 [SuperCollider for global memory](../SUPERCOLLIDER_GLOBAL_MEMORY.md).
 
@@ -44,9 +46,9 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) |  |  |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) |  |  |
-| Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) |  |  |
-| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending |  |
-| Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) |  |  |
+| Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending |  |
+| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending |  |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) |  |  |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) |  |  |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) |  |  |
@@ -57,7 +59,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) |  |  |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) |  |  |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) |  |  |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟧 default: 30 s timeout during patching; longer clean run pending |  |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟧 default: 30 s timeout during patching; longer clean run pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) |  |  |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) |  |  |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) |  |  |
