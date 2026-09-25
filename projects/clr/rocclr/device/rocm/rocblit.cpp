@@ -445,9 +445,9 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
     group_signals.push_back(gpu().Barriers().GetLastSignal());
   }
 
-  const hsa_status_t status = Hsa::memory_async_batch_copy(
-      final_ops.data(), static_cast<uint32_t>(final_ops.size()),
-      static_cast<uint32_t>(wait_events.size()), wait_events.data());
+  const hsa_status_t status =
+      Hsa::memory_async_batch_copy(final_ops.data(), static_cast<uint32_t>(final_ops.size()),
+                                   static_cast<uint32_t>(wait_events.size()), wait_events.data());
   if (status != HSA_STATUS_SUCCESS) {
     for (size_t signal_index = 0; signal_index < final_ops.size(); ++signal_index) {
       gpu().Barriers().ResetCurrentSignal();
@@ -2218,7 +2218,8 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
 }
 
 // ================================================================================================
-bool KernelBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
+bool KernelBlitManager::CopyBufferRectBatch(
+    const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
   if (!dev().info().pcie_atomics_) {
     return HostBlitManager::CopyBufferRectBatch(copy_ops);
   }
@@ -2233,10 +2234,8 @@ bool KernelBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRect
         op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
     device::Memory* dst_dev_mem =
         op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]);
-    const address src =
-        gpuMem(*src_dev_mem).getDeviceMemory() + op.src_rect.offset(0, 0, 0);
-    const address dst =
-        gpuMem(*dst_dev_mem).getDeviceMemory() + op.dst_rect.offset(0, 0, 0);
+    const address src = gpuMem(*src_dev_mem).getDeviceMemory() + op.src_rect.offset(0, 0, 0);
+    const address dst = gpuMem(*dst_dev_mem).getDeviceMemory() + op.dst_rect.offset(0, 0, 0);
     const bool dword_aligned =
         (reinterpret_cast<uintptr_t>(src) % 4) == 0 &&
         (reinterpret_cast<uintptr_t>(dst) % 4) == 0 && (op.src_rect.rowPitch_ % 4) == 0 &&

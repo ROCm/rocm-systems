@@ -3333,6 +3333,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
                                  unsigned long long flags, hipStream_t stream) {
   HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
   if (flags != 0 || opList == nullptr || numOps == 0) {
+    *failIdx = SIZE_MAX;
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (!hip::isValid(stream)) {
@@ -3346,6 +3347,11 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   std::vector<std::vector<amd::BatchCopyRectOp>> copy_ops_by_device(g_devices.size());
   std::vector<std::pair<size_t, HIP_MEMCPY3D>> per_entry_copies;
   for (size_t i = 0; i < numOps; ++i) {
+    const hipMemcpySrcAccessOrder access_order = opList[i].srcAccessOrder;
+    if (access_order < hipMemcpySrcAccessOrderStream || access_order > hipMemcpySrcAccessOrderAny) {
+      *failIdx = i;
+      HIP_RETURN(hipErrorInvalidValue);
+    }
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
     hipError_t status = ihipMemcpy3D_validate(&parms);
     if (status != hipSuccess) {
@@ -3354,7 +3360,8 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
     }
     HIP_MEMCPY3D desc = getDrvMemcpy3DDesc(parms);
     if (desc.WidthInBytes == 0 || desc.Height == 0 || desc.Depth == 0) {
-      continue;
+      *failIdx = i;
+      HIP_RETURN(hipErrorInvalidValue);
     }
 
     hipMemoryType src_memory_type;
@@ -3399,8 +3406,8 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   amd::Command::EventWaitList marker_wait_list;
   amd::Command* stream_wait_cmd = hip_stream->getLastQueuedCommand(true);
   hipError_t status = EnqueueBatchCommands<amd::BatchCopyMemoryRectCommand>(
-      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, *hip_stream, true,
-      stream_wait_cmd, marker_wait_list);
+      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, *hip_stream, true, stream_wait_cmd,
+      marker_wait_list);
   if (stream_wait_cmd != nullptr) {
     stream_wait_cmd->release();
   }

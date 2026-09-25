@@ -361,8 +361,7 @@ bool HostBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyO
   return true;
 }
 
-bool HostBlitManager::CopyBufferRectBatch(
-    const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
+bool HostBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>& copy_ops) const {
   for (const amd::BatchCopyRectOp& op : copy_ops) {
     device::Memory* src_dev_mem =
         op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
