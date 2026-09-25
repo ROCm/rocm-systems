@@ -232,8 +232,8 @@ using detail::WorkitemOwnerDerivationPlan;
     // otherwise owners separated by the bucket count alias systematically.
     const uint32_t owner_buckets = bank_count / lane_groups;
     const uint32_t owner_bucket_bits = std::countr_zero(owner_buckets);
-    for (uint32_t shift = owner_bucket_bits; shift < std::bit_width(watchpoint::max_owner);
-         shift += owner_bucket_bits) {
+    const uint32_t owner_bits = std::bit_width(watchpoint::max_owner);
+    for (uint32_t shift = owner_bucket_bits; shift < owner_bits; shift += owner_bucket_bits) {
       sequence.append(instrumentation::build_v_lshrrev_b32(
                           temporary_vgpr, scalar_positive_inline_u32(shift), owner_vgpr, arch),
                       instrumentation::build_v_xor_b32(
