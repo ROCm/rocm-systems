@@ -446,9 +446,7 @@ amdsmi_status_t WSLGPUBackend::GetBusyPercent(uint32_t* gpu_busy_percent) {
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
-  *gpu_busy_percent = (metrics.average_gfx_activity != std::numeric_limits<uint32_t>::max())
-                          ? metrics.average_gfx_activity
-                          : std::numeric_limits<uint32_t>::max();
+  *gpu_busy_percent = metrics.average_gfx_activity;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -497,17 +495,12 @@ amdsmi_status_t WSLGPUBackend::GetPcieInfo(amdsmi_pcie_info_t* info) {
   // never populates pcie_bandwidth/replay counters at all, so those stay at
   // this N/A sentinel instead of being copied through as a bogus zero.
   std::memset(info, 0xFF, sizeof(*info));
-  if (rocdxg_info.max_pcie_width != std::numeric_limits<uint16_t>::max())
-    info->pcie_static.max_pcie_width = rocdxg_info.max_pcie_width;
-  if (rocdxg_info.max_pcie_speed != std::numeric_limits<uint32_t>::max())
-    info->pcie_static.max_pcie_speed = rocdxg_info.max_pcie_speed;
-  if (rocdxg_info.pcie_interface_version != std::numeric_limits<uint32_t>::max())
-    info->pcie_static.pcie_interface_version = rocdxg_info.pcie_interface_version;
+  info->pcie_static.max_pcie_width = rocdxg_info.max_pcie_width;
+  info->pcie_static.max_pcie_speed = rocdxg_info.max_pcie_speed;
+  info->pcie_static.pcie_interface_version = rocdxg_info.pcie_interface_version;
   info->pcie_static.slot_type = static_cast<amdsmi_card_form_factor_t>(rocdxg_info.slot_type);
-  if (rocdxg_info.pcie_width != std::numeric_limits<uint16_t>::max())
-    info->pcie_metric.pcie_width = rocdxg_info.pcie_width;
-  if (rocdxg_info.pcie_speed != std::numeric_limits<uint32_t>::max())
-    info->pcie_metric.pcie_speed = rocdxg_info.pcie_speed;
+  info->pcie_metric.pcie_width = rocdxg_info.pcie_width;
+  info->pcie_metric.pcie_speed = rocdxg_info.pcie_speed;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -584,12 +577,12 @@ amdsmi_status_t WSLGPUBackend::GetFanSpeed(uint32_t /* sensor_ind */, int64_t* s
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
-  if (speed == nullptr) return AMDSMI_STATUS_INVAL;
   // amdsmi_get_gpu_fan_speed() has no N/A translation downstream (unlike e.g.
   // clock/power info), so an unavailable sensor must surface as NOT_SUPPORTED
   // rather than a raw uint32 sentinel value passed through an int64_t.
   if (metrics.current_fan_speed_percent == std::numeric_limits<uint32_t>::max())
     return AMDSMI_STATUS_NOT_SUPPORTED;
+  if (speed == nullptr) return AMDSMI_STATUS_INVAL;
   *speed = static_cast<int64_t>(metrics.current_fan_speed_percent);
   return AMDSMI_STATUS_SUCCESS;
 }
