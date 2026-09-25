@@ -423,8 +423,8 @@ NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopCta coop, T value, int root, bool ent
 }
 
 // ncclCoopAny has no typed stash. size==1 (the gin.put helper) is identity.
-// size>1: only root's value is defined; other threads get T() so they must not
-// take a divergent coop.sync() on the result (Flush keeps barriers outside).
+// size>1: only root's value is defined; other threads get T(). Anvil Flush
+// does not use this overload when size>1: rank 0 quiets the whole snapshot.
 template <typename T>
 NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopAny coop, T value, int root, bool entrySync = true) {
   if (entrySync) coop.sync();

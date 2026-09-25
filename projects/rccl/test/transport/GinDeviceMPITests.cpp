@@ -184,6 +184,22 @@ std::string sdmaBarrierFenceEnvSkipReason() {
   return "";
 }
 
+// Sub-threshold IPC SignalInc visibility: the payload must be visible as soon as
+// waitSignal returns, without a producer Flush. Skip if the put would take SDMA.
+std::string sdmaIpcSignalIncEnvSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  constexpr size_t kIpcBytes = 64;
+  size_t threshold = NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
+  if (const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD"); e && e[0] && *e != '-') {
+    char* end = nullptr;
+    unsigned long long v = std::strtoull(e, &end, 10);
+    if (end != e && *end == '\0') threshold = static_cast<size_t>(v);
+  }
+  if (threshold < kIpcBytes)
+    return "BarrierFence IPC SignalInc needs NCCL_GIN_ANVIL_SDMA_THRESHOLD >= 64";
+  return "";
+}
+
 std::string sdmaInternalA2AEnvSkipReason() {
   if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return "GIN-SDMA alltoall requires NCCL_GIN_TYPE=" +
@@ -446,7 +462,8 @@ class GinMPIDeviceTests : public MPITestBase {
   void runPutValueInline(int nContexts);
   void runWaitCounterAndSignal(int nContexts);
   void runVASignalPut(int nContexts);
-  void runBarrierFenceVisibility(BarrierFenceOperation operation, bool allContexts, bool defaultFence);
+  void runBarrierFenceVisibility(BarrierFenceOperation operation, bool allContexts, bool defaultFence,
+                                 bool coopAny = false);
 };
 
 // Context-aware producer/consumer for Put_BasicAndOffsets: one block per GIN
@@ -1561,21 +1578,33 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal_MultiContext) {
 
 template <typename GinOrAllContexts>
 __device__ void syncFenceVisibilityBarrier(GinOrAllContexts ginOrAllContexts, BarrierFenceOperation operation,
-                                           bool defaultFence) {
-  ncclGinBarrierSession<ncclCoopCta> bar{
-    ncclCoopCta(), ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-  if (defaultFence) {
-    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
+                                           bool defaultFence, bool coopAny) {
+  if (coopAny) {
+    ncclCoopAny coop{ncclCoopCta()};
+    ncclGinBarrierSession<ncclCoopAny> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+    if (defaultFence) {
+      bar.sync(coop, cuda::memory_order_acq_rel);
+    } else {
+      ncclGinFenceLevel fence =
+        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
+      bar.sync(coop, cuda::memory_order_acq_rel, fence);
+    }
   } else {
-    ncclGinFenceLevel fence =
-      operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, fence);
+    ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+    if (defaultFence) {
+      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
+    } else {
+      ncclGinFenceLevel fence =
+        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
+      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, fence);
+    }
   }
 }
 
 __global__ void barrierFenceVisibilityKernel(
     ncclWindow_t srcWin, ncclWindow_t dstWin, uint8_t* dst, size_t bytes,
-    BarrierFenceOperation operation, bool allContexts, bool defaultFence, int* error,
+    BarrierFenceOperation operation, bool allContexts, bool defaultFence, bool coopAny, int* error,
     struct ncclDevComm devComm) {
   int rank = devComm.rank;
   int peer = operation == BarrierFenceOperation::SelfPut ? rank : (rank + 1) % devComm.nRanks;
@@ -1593,9 +1622,9 @@ __global__ void barrierFenceVisibilityKernel(
   }
 
   if (allContexts) {
-    syncFenceVisibilityBarrier(ncclGinAllContexts(devComm), operation, defaultFence);
+    syncFenceVisibilityBarrier(ncclGinAllContexts(devComm), operation, defaultFence, coopAny);
   } else {
-    syncFenceVisibilityBarrier(gin, operation, defaultFence);
+    syncFenceVisibilityBarrier(gin, operation, defaultFence, coopAny);
   }
 
   int sourceRank = operation == BarrierFenceOperation::Put ? (rank + devComm.nRanks - 1) % devComm.nRanks : peer;
@@ -1605,8 +1634,32 @@ __global__ void barrierFenceVisibilityKernel(
   }
 }
 
+// Rank 0: sub-threshold put + SignalInc, no Flush. Rank 1: waitSignal then
+// read the window. Pins that signalPeer's pre-atomic system fence orders IPC
+// stores (swapping that fence with the add still passes a fence *count*).
+__global__ void barrierFenceIpcSignalIncKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, uint8_t* dst, size_t bytes, int* error,
+    struct ncclDevComm devComm) {
+  constexpr ncclGinSignal_t kSigIdx = 0;
+  int rank = devComm.rank;
+  int peer = (rank + 1) % devComm.nRanks;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (rank == 0) {
+    if (threadIdx.x == 0) {
+      gin.put(ncclTeamWorld(devComm), peer, dstWin, /*dstOffset=*/0, srcWin, /*srcOffset=*/0, bytes,
+              ncclGin_SignalInc{kSigIdx});
+    }
+    return;
+  }
+  gin.waitSignal(ncclCoopCta(), kSigIdx, /*least=*/1);
+  for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
+    uint8_t expected = static_cast<uint8_t>(0x20 + /*sourceRank=*/0 + (i & 0x3f));
+    if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));
+  }
+}
+
 void GinMPIDeviceTests::runBarrierFenceVisibility(
-    BarrierFenceOperation operation, bool allContexts, bool defaultFence) {
+    BarrierFenceOperation operation, bool allContexts, bool defaultFence, bool coopAny) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (auto reason = barrierFenceBackendSkipReason(); !reason.empty())
@@ -1679,7 +1732,8 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
 
   MPI_Barrier(MPI_COMM_WORLD);
   barrierFenceVisibilityKernel<<<1, kGinKernelThreads, 0, stream>>>(
-    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, operation, allContexts, defaultFence, dError, devComm);
+    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, operation, allContexts, defaultFence, coopAny, dError,
+    devComm);
   ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
 
   int error = 0;
@@ -1721,6 +1775,85 @@ TEST_F(GinMPIDeviceTests, BarrierFence_AllContextsPut_SingleNode) {
 
 TEST_F(GinMPIDeviceTests, BarrierFence_AllContextsGet_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Get, /*allContexts=*/true, /*defaultFence=*/false);
+}
+
+TEST_F(GinMPIDeviceTests, BarrierFence_CoopAnyFlushMakesPutVisible_SingleNode) {
+  runBarrierFenceVisibility(BarrierFenceOperation::Put, /*allContexts=*/false, /*defaultFence=*/false,
+                            /*coopAny=*/true);
+}
+
+TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = barrierFenceBackendSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = sdmaIpcSignalIncEnvSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = singleNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  constexpr size_t kBytes = 64;
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  int* dError = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
+  auto srcCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
+  auto dstCleanup = makeScopeGuard([&]() {
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
+  auto errorCleanup = makeScopeGuard([&]() {
+    if (dError) (void)hipFree(dError);
+  });
+
+  ncclWindow_t srcWin = nullptr;
+  ncclWindow_t dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto srcWinCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto dstWinCleanup = makeScopeGuard([&]() {
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  std::vector<uint8_t> hostSrc(kBytes);
+  for (size_t i = 0; i < kBytes; ++i)
+    hostSrc[i] = static_cast<uint8_t>(0x20 + /*rank0 pattern*/0 + (i & 0x3f));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.worldGinBarrierCount = 1;
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  barrierFenceIpcSignalIncKernel<<<1, kGinKernelThreads, 0, stream>>>(
+    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, dError, devComm);
+  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  int err = 0;
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, dError, sizeof(int), hipMemcpyDeviceToHost));
+  ASSERT_EQ(err, 0) << "payload byte mismatch at index " << (err - 1);
 }
 
 // Collective kernel: every rank runs the same code. The barrier composes

@@ -511,6 +511,38 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MultiDirtyBits) {
   EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
+// H12b: ncclCoopAny size>1 must quiet every snapshot bit on rank 0. A stub
+// bcast leaves non-root dirty=0, so a 32-thread stride only visits peer 0.
+__global__ void kernelFlushCoopAny(TemplateHarness* h, uint64_t* dirty) {
+  h->ctx.sdmaDirty = dirty;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopAny{ncclCoopCta()}, false,
+                                                         nullptr, cuda::memory_order_seq_cst, nullptr);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Flush_CoopAnyQuietsAllDirtyPeers) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  uint64_t mask = (1ULL << 0) | (1ULL << 1);
+  d_dirty.copyFrom(&mask, 1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  d_h.upload(host);
+  resetQuietCount();
+  kernelFlushCoopAny<<<1, 32>>>(d_h.ptr, d_dirty.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_dirty.download(), 0ULL);
+  EXPECT_EQ(readQuietCount(), 2ULL);
+}
+
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;
 
 template <typename T>

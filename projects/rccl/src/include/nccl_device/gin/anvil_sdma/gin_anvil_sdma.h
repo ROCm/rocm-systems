@@ -200,6 +200,35 @@ NCCL_DEVICE_INLINE void maybeFenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx
   }
 }
 
+// ncclCoopAny cannot stash a bcast (coop.h). size<=1 is identity; size>1 Flush
+// quiets the whole snapshot on rank 0 instead of striding a T() mask.
+NCCL_DEVICE_INLINE bool anvilFlushUsesBcast(ncclCoopAny coop) {
+  return coop.size() <= 1;
+}
+template <typename Coop>
+NCCL_DEVICE_INLINE bool anvilFlushUsesBcast(Coop) {
+  return true;
+}
+
+NCCL_DEVICE_INLINE void quietSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCtx, uint64_t dirty, int nRanks,
+                                           int threadRank, int stride) {
+  if (dirty == 0) return;
+  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
+  int numCh = loadConst(&rsCtx->numChannels);
+  if (handles == nullptr || numCh <= 0) return;
+#pragma unroll 1
+  for (int p = threadRank; p < nRanks; p += stride) {
+    uint64_t peerMask = ((1ULL << numCh) - 1) << (p * numCh);
+    if ((dirty & peerMask) == 0) continue;
+    for (int ch = 0; ch < numCh; ++ch) {
+      uint64_t bit = 1ULL << (p * numCh + ch);
+      if ((dirty & bit) == 0) continue;
+      auto* h = loadConst(handles + p * numCh + ch);
+      if (h != nullptr) ::sdma_anvil::quiet(*h);
+    }
+  }
+}
+
 }  // namespace detail
 }  // namespace anvil
 }  // namespace gin
@@ -474,27 +503,17 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
         epoch0 = __scoped_atomic_load_n(sdmaEpoch, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       }
     }
-    // Typed coops stash by id (coop.h). ncclCoopAny size>1 only root keeps the
-    // value; barriers below stay outside `if (dirty)` so they cannot diverge.
-    dirty = ncclCoopBcast(coop, dirty, /*root=*/0);
-    epoch0 = ncclCoopBcast(coop, epoch0, /*root=*/0, /*entrySync=*/false);
-    if (dirty != 0) {
-      auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
-      int nr = ctx.nRanks;
-      int numCh = loadConst(&rsCtx->numChannels);
-      if (handles != nullptr) {
-#pragma unroll 1
-        for (int p = coop.thread_rank(); p < nr; p += coop.size()) {
-          uint64_t peerMask = ((1ULL << numCh) - 1) << (p * numCh);
-          if ((dirty & peerMask) == 0) continue;
-          for (int ch = 0; ch < numCh; ++ch) {
-            uint64_t bit = 1ULL << (p * numCh + ch);
-            if ((dirty & bit) == 0) continue;
-            auto* h = loadConst(handles + p * numCh + ch);
-            if (h != nullptr) ::sdma_anvil::quiet(*h);
-          }
-        }
-      }
+    // Typed coops stash by coop.id. Do not bcast epoch0: only rank 0 reads it,
+    // and a second Cta bcast with entrySync=false aliases the dirty stash.
+    // ncclCoopAny size>1 cannot bcast; rank 0 quiets the whole snapshot.
+    const bool usesBcast = nccl::gin::anvil::detail::anvilFlushUsesBcast(coop);
+    if (usesBcast) dirty = ncclCoopBcast(coop, dirty, /*root=*/0);
+    if (usesBcast) {
+      nccl::gin::anvil::detail::quietSdmaDirtyBits(rsCtx, dirty, ctx.nRanks, coop.thread_rank(),
+                                                   coop.size());
+    } else if (coop.thread_rank() == 0) {
+      nccl::gin::anvil::detail::quietSdmaDirtyBits(rsCtx, dirty, ctx.nRanks, /*threadRank=*/0,
+                                                   /*stride=*/1);
     }
     coop.sync();
     // Clear only if no mark ran during quiet. A concurrent put can fetch_or an
