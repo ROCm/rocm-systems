@@ -336,6 +336,8 @@ enum class AccessOrigin : uint8_t {
   Flat,
   /// Global-memory operation carrying a direct-to-LDS modifier.
   DirectToLds,
+  /// Tensor-DMA transfer with descriptor-derived LDS ranges.
+  TensorLds,
   /// One past the last origin. This is an iteration bound and never a decoded
   /// access origin.
   Count,

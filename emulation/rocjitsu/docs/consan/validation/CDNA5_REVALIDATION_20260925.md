@@ -1090,3 +1090,23 @@ but their string tables differ, changing exact code-object identity. Retained
 comparison files are `hgemm-text-{0,1}.bin` and `hgemm-strtab-{0,1}.bin`.
 Artifact reproducibility must be resolved before retrying; do not loosen the
 exact identity requirement or report this attempt as a false negative.
+
+### Tensor-DMA inventory no longer silently drops LDS accesses
+
+The inventory now retains `tensor_load_to_lds` as an LDS write and
+`tensor_store_from_lds` as an LDS read, using a distinct `TensorLds` origin.
+Descriptor-derived ranges remain explicitly unavailable; no lane address or
+fixed transfer width is invented. Both mode policies classify these accesses
+as unsupported, so their absence can no longer masquerade as complete coverage.
+This fixes coverage accounting, not tensor-DMA race detection.
+
+Normal GCC compilation succeeds. The targeted decoder/inventory gate passes
+28/28 (`tensor-inventory-tests.log`); the full ConSan host filter passes 983
+with two benchmark tests skipped (`tensor-inventory-host-tests.log`). The new
+regression covers load and store direction, group address space, unavailable
+ranges, rejected lowering and two applicable unsupported decisions in each
+mode. Its SuperCollider fixture explicitly enables the LDS probe.
+
+A separate `tensor-inventory-hook/librocjitsu_dbi_hooks.so` has been linked for
+`tensor-inventory-mxf8-clean`. That external-workload check is still running;
+active campaigns continue using their retained shared or saved-address hooks.

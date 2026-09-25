@@ -1053,17 +1053,32 @@ void classify_instruction(const Instruction &inst, KernelStats &stats) {
 void record_lds_site(const Instruction &inst, ProgramContainer &kernel, ProgramSiteArena &sites,
                      uint64_t instruction_text_offset) {
   const std::string_view mnemonic = inst.mnemonic();
-  if (!mnemonic.starts_with("ds_") || is_ds_register_lane_operation(mnemonic))
+  const bool tensor_load = mnemonic == "tensor_load_to_lds";
+  const bool tensor_store = mnemonic == "tensor_store_from_lds";
+  const bool tensor = tensor_load || tensor_store;
+  if ((!mnemonic.starts_with("ds_") && !tensor) || is_ds_register_lane_operation(mnemonic))
     return;
 
   ProgramSite site;
-  site.origin = AccessOrigin::NativeLds;
-  site.kind = lds_access_kind(mnemonic);
+  site.origin = tensor ? AccessOrigin::TensorLds : AccessOrigin::NativeLds;
+  site.kind = tensor_load    ? LdsAccessKind::Write
+              : tensor_store ? LdsAccessKind::Read
+                             : lds_access_kind(mnemonic);
+  if (tensor_load)
+    ++kernel.stats.lds_write_count;
+  if (tensor_store)
+    ++kernel.stats.lds_read_count;
   site.physical_id.original_text_offset = instruction_text_offset;
   site.decoded_site().text_offset = instruction_text_offset;
   site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
   site.decoded_site().size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
+  if (tensor) {
+    site.decoded_site().mnemonic = std::string(mnemonic);
+    site.container = kernel.id;
+    sites.add_access(std::move(site));
+    return;
+  }
   if (site.kind == LdsAccessKind::Read) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.operands.destination_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);

@@ -1270,6 +1270,13 @@ private:
     result.address_space = AccessAddressSpace::Group;
     result.provenance = AccessProvenance::NativeLdsOpcode;
     result.confidence = SemanticConfidence::Exact;
+    if (site.origin == AccessOrigin::TensorLds) {
+      // Tensor descriptors define runtime tile shapes and swizzled LDS ranges.
+      // Preserve the access without inventing a per-lane address or byte width.
+      result.exclusions.push_back({.reason = InventoryExclusionReason::RangeEncodingUnavailable});
+      result.lowering = classify_access_lowering(result, storage_->arch);
+      return result;
+    }
     append_common_exclusions(result, site.origin == AccessOrigin::DirectToLds);
     if (const auto form = detail::decode_native_lds_two_range_shape(site.mnemonic_view())) {
       const auto word0 = read_little_endian_u32(bytes, site.decoded_file_offset());

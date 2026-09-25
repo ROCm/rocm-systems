@@ -267,6 +267,44 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   }
 }
 
+TEST(ConSan, InventoriesGfx1250TensorDmaAsUnmodeledLdsRanges) {
+  const auto load = cdna5::build_vimage(
+      cdna5::kTensorLoadToLdsVimage,
+      {.vaddr4 = 124, .vaddr0 = 16, .vaddr1 = 20, .vaddr2 = 124, .vaddr3 = 124});
+  const auto store = cdna5::build_vimage(
+      cdna5::kTensorStoreFromLdsVimage,
+      {.vaddr4 = 124, .vaddr0 = 16, .vaddr1 = 20, .vaddr2 = 124, .vaddr3 = 124});
+  std::vector<uint32_t> words(load.begin(), load.end());
+  words.insert(words.end(), store.begin(), store.end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+  for (const Mode mode : {Mode::Default, Mode::SuperCollider}) {
+    TestOptions options = test_options();
+    SCOPED_TRACE(static_cast<int>(mode));
+    options.mode = mode;
+    options.probe_lds_check_trap = mode == Mode::SuperCollider;
+    const auto result = test_lower_consan(make_gfx1250_code_object(words, "tensor_dma"), options);
+    ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+    EXPECT_EQ(result.program_inventory.kernels().front().stats.lds_write_count, 1u);
+    EXPECT_EQ(result.program_inventory.kernels().front().stats.lds_read_count, 1u);
+    ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
+    EXPECT_EQ(result.program_inventory.access_sites()[0].kind, LdsAccessKind::Write);
+    EXPECT_EQ(result.program_inventory.access_sites()[1].kind, LdsAccessKind::Read);
+    for (const auto &site : result.program_inventory.access_sites()) {
+      EXPECT_EQ(site.origin, AccessOrigin::TensorLds);
+      EXPECT_EQ(site.address_space, AccessAddressSpace::Group);
+      EXPECT_TRUE(site.ranges.empty());
+      EXPECT_FALSE(site.operands.address_vgpr.has_value());
+      EXPECT_EQ(site.lowering.normalization_reason,
+                AccessClassifierReason::RangeEncodingUnavailable);
+      EXPECT_FALSE(site.lowering.replay_guest_access.available());
+      EXPECT_FALSE(site.lowering.compare_observed_value.available());
+    }
+    EXPECT_TRUE(test_admitted_accesses(result).empty());
+    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported), 2u);
+    EXPECT_EQ(applicable_access_decision_count(result), 2u);
+  }
+}
+
 TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite) {
   constexpr auto async_b8 = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB8Vglobal,
                                                  {.saddr = 0, .vdst = 7, .vaddr = 8});
