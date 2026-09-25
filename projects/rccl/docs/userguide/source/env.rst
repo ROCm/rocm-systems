@@ -1719,7 +1719,7 @@ NCCL_P2P_LL128_ENABLE
 ---------------------
 (since 2.28)
 
-``NCCL_P2P_LL128_ENABLE`` controls gfx1250 LL128 send/recv. Default ``-1`` (auto) selects LL128 for ``ncclSend``/``ncclRecv`` only (not AlltoAll) on 4 GPU/node in these inclusive message-size windows: 1-node 4 GPU from 4 KiB to 16 KiB, 2-node 8 GPU from 4 KiB to 256 KiB, 4-node 16 GPU from 4 KiB to 128 KiB. Below 4 KiB stays legacy LL; above the window uses SIMPLE. Set to ``1`` to opt all P2P (including AlltoAll) into LL128 below ``NCCL_P2P_LL128_THRESHOLD``. Set to ``0`` to disable. gfx942/gfx950 do not use this flag; they select LL128 via ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``. Internodal gfx1250 LL128 still needs the net staging buffer; for the 2-node and 4-node auto windows RCCL allocates it even when ``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` is unset.
+``NCCL_P2P_LL128_ENABLE`` controls gfx1250 LL128 send/recv. Default ``-1`` (auto) selects LL128 for ``ncclSend``/``ncclRecv`` only (not AlltoAll) on 4 GPU/node in these inclusive message-size windows: 1-node 4 GPU from 4 KiB to 1 MiB, 2-node 8 GPU from 4 KiB to 512 KiB, 4-node 16 GPU from 4 KiB to 256 KiB. Below 4 KiB stays legacy LL; above the window uses SIMPLE. Set to ``1`` to opt all P2P (including AlltoAll) into LL128 below ``NCCL_P2P_LL128_THRESHOLD``. Set to ``0`` to disable. gfx942/gfx950 do not use this flag; they select LL128 via ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``. Internodal gfx1250 LL128 still needs the net staging buffer; for the 2-node and 4-node auto windows RCCL allocates it even when ``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` is unset.
 
 Values accepted
 ^^^^^^^^^^^^^^^

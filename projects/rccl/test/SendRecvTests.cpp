@@ -467,8 +467,8 @@ namespace RcclUnitTesting
   //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE unset  // gfx1250 SendRecv auto
   //                               && SendRecv 4ppn size window) );
   //
-  // gfx1250 SendRecv auto windows (ENABLE default -1): 1-node 4 GPU 4-16 KiB, 2-node 8 GPU
-  // 4-256 KiB, 4-node 16 GPU 4-128 KiB. Tests that pin the legacy-LL path set ENABLE=0.
+  // gfx1250 SendRecv auto windows (ENABLE default -1): 1-node 4 GPU 4 KiB-1 MiB, 2-node 8 GPU
+  // 4-512 KiB, 4-node 16 GPU 4-256 KiB. Tests that pin the legacy-LL path set ENABLE=0.
   //
   // ll128Enabled is required so P2P stays consistent with the comm's collective protocol choice: if
   // LL128 is not enabled for the comm, send/recv must not use it even with the opt-in flag set. For

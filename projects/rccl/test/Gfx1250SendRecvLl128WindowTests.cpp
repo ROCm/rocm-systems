@@ -24,9 +24,9 @@ TEST(Gfx1250SendRecvLl128WindowTests, NonGfx1250HasNoWindow)
 
 TEST(Gfx1250SendRecvLl128WindowTests, RankCountsMapToCaps)
 {
-  EXPECT_EQ(rcclGfx1250SendRecvLl128MaxBytes(kGfx1250, 1, 4), 16 << 10);
-  EXPECT_EQ(rcclGfx1250SendRecvLl128MaxBytes(kGfx1250, 1, 8), 256 << 10);
-  EXPECT_EQ(rcclGfx1250SendRecvLl128MaxBytes(kGfx1250, 1, 16), 128 << 10);
+  EXPECT_EQ(rcclGfx1250SendRecvLl128MaxBytes(kGfx1250, 1, 4), 1 << 20);
+  EXPECT_EQ(rcclGfx1250SendRecvLl128MaxBytes(kGfx1250, 1, 8), 512 << 10);
+  EXPECT_EQ(rcclGfx1250SendRecvLl128MaxBytes(kGfx1250, 1, 16), 256 << 10);
 }
 
 TEST(Gfx1250SendRecvLl128WindowTests, OtherRankCountsHaveNoWindow)

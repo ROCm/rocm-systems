@@ -1374,8 +1374,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //   - gfx942/gfx950: NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, which also stages the net LL128
   //     buffer for internodal P2P.
   //   - gfx1250: NCCL_P2P_LL128_ENABLE=1 for all P2P below the threshold, or ENABLE=-1 (auto)
-  //     for SendRecv-only size windows (1-node 4 GPU: 4-16 KiB, 2-node 8 GPU: 4-256 KiB,
-  //     4-node 16 GPU: 4-128 KiB). Internodal still needs the LL128 staging buffer
+  //     for SendRecv-only size windows (1-node 4 GPU: 4 KiB-1 MiB, 2-node 8 GPU: 4-512 KiB,
+  //     4-node 16 GPU: 4-256 KiB). Internodal still needs the LL128 staging buffer
   //     (NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, auto-set for those 2/4-node windows); if it is missing
   //     the op falls back to SIMPLE.
 #if defined(ENABLE_LL128)
