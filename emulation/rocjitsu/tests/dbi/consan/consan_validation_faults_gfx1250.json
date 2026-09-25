@@ -56,22 +56,47 @@
     "tp1-prefill": {
       "faults": [
         {
-          "id": "barrier-move",
-          "family": "barrier-move",
+          "id": "barrier-drop-attention-max-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Recompiled maintained TP1 flags reproduce fresh inventory ELF b8bf8d46b98911e4 exactly. Pristine tp1-pristine.asm (.text VMA 0x13b00) shows DPP wave maximum reduced into lane zero, then a cross-wave LDS maximum reduction. Store VMA 0x1c9ec writes 672+12*wave_id, restores EXEC at 0x1c9f4, and signal/wait .text+0x8efc/0x8f00 precedes peer load VMA 0x1ca04 from 672+12*(lane_id&7). Drop only this publication pair, preserving earlier entry/reuse and subsequent read-completion barriers. The maintained nonempty token invocation executes this attention reduction; its publication barrier is on the unconditional reduction path. Eight independent trials per mode, minimum six detections, are predeclared before outcomes."
+          },
           "environment": {
-            "RJ_CONSAN_FAULT_MOVE_BARRIER": "1",
-            "RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION": "later",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|kind=barrier|pc=0x0000000000008cdc|mnemonic=s_barrier_signal|occurrence=10",
-            "RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|destination=instruction|pc=0x0000000000008ce4|mnemonic=ds_load_2addr_b64|size=8"
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:b8bf8d46b98911e4|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|kind=barrier|pc=0x0000000000008efc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:b8bf8d46b98911e4|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|event=barrier|pc=0x0000000000008efc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:b8bf8d46b98911e4|kernel=prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD|event=barrier|pc=0x0000000000008f00|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }
@@ -80,22 +105,47 @@
     "tp1-decode-combined": {
       "faults": [
         {
-          "id": "barrier-move",
-          "family": "barrier-move",
+          "id": "barrier-drop-attention-max-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Recompiled maintained TP1 flags reproduce fresh inventory ELF b8bf8d46b98911e4 exactly. Pristine tp1-pristine.asm (.text VMA 0x13b00) shows DPP wave maximum reduced into lane zero, then a cross-wave LDS maximum reduction. Store VMA 0x27360 writes 672+12*wave_id, restores EXEC at 0x27368, and signal/wait .text+0x13870/0x13884 precedes peer load VMA 0x27388 from 672+12*(lane_id&7). Drop only this publication pair, preserving earlier entry/reuse and subsequent read-completion barriers. The maintained nonempty token invocation executes this attention reduction; its publication barrier is on the unconditional reduction path. Eight independent trials per mode, minimum six detections, are predeclared before outcomes."
+          },
           "environment": {
-            "RJ_CONSAN_FAULT_MOVE_BARRIER": "1",
-            "RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION": "later",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32|kind=barrier|pc=0x0000000000014c40|mnemonic=s_barrier_signal|occurrence=6",
-            "RJ_CONSAN_FAULT_BARRIER_DESTINATION_IDENTITY": "fnv1a64:72bac70efa2b56a5|kernel=decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32|destination=instruction|pc=0x0000000000014cc0|mnemonic=ds_load_2addr_b64|size=8"
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:b8bf8d46b98911e4|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x0000000000013870|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:b8bf8d46b98911e4|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x0000000000013870|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:b8bf8d46b98911e4|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x0000000000013884|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }

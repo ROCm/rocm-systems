@@ -476,3 +476,15 @@ or workgroup barriers therefore does not create an inter-wave LDS race in
 this workload. Its yellow cells now explain this instead of promising an
 unreviewed barrier fault. No synthetic barrier-drop result is counted as a
 false negative or detection qualification.
+
+### TP1 prefill and decode publication fault refresh
+
+Compiling the maintained TP1 MLIR/flags reproduces inventory ELF
+`b8bf8d46b98911e4` exactly (`tp1-review.vmfb`, `tp1-pristine.asm`). Both attention
+kernels publish a per-wave maximum at LDS address `672+12*wave_id`, then read
+peer slots using `672+12*(lane_id&7)`. The reviewed publication pairs are
+`.text+0x8efc/0x8f00` for prefill and `0x13870/0x13884` for decode. Only those
+pairs are removed; earlier barriers and subsequent read-completion barriers
+remain. The stale barrier-move specs are replaced with these source-independent
+ISA-reviewed publication faults, each with eight predeclared trials per mode
+and minimum six detections.
