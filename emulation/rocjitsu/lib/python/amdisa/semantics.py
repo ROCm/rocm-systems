@@ -2505,11 +2505,13 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'ds_permute')
     if upper == 'DS_SWIZZLE_B32':
         return InstructionSemantics(name, 'ds_swizzle')
-    # ── Explicitly classified as nop (not simulated) ────────────────────
     # GS register operations — must precede the atomic fallback because
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(
+            name, 'ds_gs_register', operation='sub' if '_SUB_' in upper else 'add'
+        )
+    # ── Explicitly classified as nop (not simulated) ────────────────────
     # GWS (Global Wave Sync) — hardware scheduling primitive, not needed
     # for compute simulation.
     if upper.startswith('DS_GWS_'):

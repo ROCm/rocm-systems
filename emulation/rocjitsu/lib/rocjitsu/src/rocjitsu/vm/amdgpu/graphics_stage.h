@@ -6,15 +6,18 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 
 namespace rocjitsu::amdgpu {
 
 class Wavefront;
+class GsRegisters;
 
 /// Inputs and export destinations shared by the waves of a graphics stage.
 class GraphicsStage {
 public:
   virtual ~GraphicsStage() = default;
+  virtual std::shared_ptr<GsRegisters> gs_registers() const { return {}; }
   virtual void initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave_index) = 0;
   /// Pixel validity accompanies exports even when no color components are enabled.
   virtual void export_mask(Wavefront &wave, uint64_t mask) = 0;

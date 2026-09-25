@@ -13,6 +13,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -40,6 +41,14 @@ inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t select
     return scalar_selector_range_is_backed(wf, selector, 2) &&
            scalar_selector_range_is_backed(wf, selector + 2, 2);
   return scalar_selector_range_is_backed(wf, selector, 4);
+}
+
+/// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.
+/// Constants supply their raw 32-bit value as an unsigned byte offset.
+inline std::optional<uint32_t> buffer_scalar_offset(Wavefront &wf, uint32_t selector) {
+  if (auto constant = resolve_src_scalar_statically(selector))
+    return static_cast<uint32_t>(*constant);
+  return try_read_scalar_selector(wf, selector);
 }
 
 constexpr uint32_t buffer_offset_part(uint32_t voffset, int64_t inst_offset) {
@@ -278,16 +287,12 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
   uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
-  // soffset field: 0-105 = SGPR index, 128 (0x80) = inline constant 0.
-  uint32_t soffset_val = 0;
-  if (inst.soffset != 0x80) {
-    auto soffset = amdgpu::try_read_scalar_selector(wf, inst.soffset);
-    if (!soffset) {
-      reject_vector_memory_access(d);
-      return;
-    }
-    soffset_val = *soffset;
+  auto soffset = buffer_scalar_offset(wf, inst.soffset);
+  if (!soffset) {
+    reject_vector_memory_access(d);
+    return;
   }
+  const uint32_t soffset_val = *soffset;
   // Buffer bounds checking: OOB loads return 0, OOB stores are dropped.
   // num_records is the buffer size in bytes, or in records when index-checked.
   uint32_t num_records = srd2;
@@ -425,15 +430,12 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
   uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
-  uint32_t soffset_val = 0;
-  if (inst.soffset != 0x80) {
-    auto soffset = amdgpu::try_read_scalar_selector(wf, inst.soffset);
-    if (!soffset) {
-      reject_vector_memory_access(d);
-      return;
-    }
-    soffset_val = *soffset;
+  auto soffset = buffer_scalar_offset(wf, inst.soffset);
+  if (!soffset) {
+    reject_vector_memory_access(d);
+    return;
   }
+  const uint32_t soffset_val = *soffset;
   uint32_t num_records = srd2;
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   const auto rdna_oob_select = static_cast<RdnaBufferOobSelect>((srd3 >> 28) & 0x3);

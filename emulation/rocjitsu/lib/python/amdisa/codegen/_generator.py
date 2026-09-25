@@ -375,6 +375,7 @@ class CodeGenerator:
         'ds_write': 'local',
         'ds_write2': 'local',
         'ds_atomic': 'local',
+        'ds_gs_register': 'local',
         'ds_stack': 'local',
         'ds_atomic2': 'local',
         'ds_mskor': 'local',
@@ -7550,6 +7551,19 @@ class CodeGenerator:
             L.append(
                 f'  amdgpu::prepare_lds_stack(wf, *d, inst_.addr, inst_.data0, inst_.data1, '
                 f'inst_.vdst, {push}, {sem.num_elems}, {size}, {flags});'
+            )
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
+
+        if cls == 'ds_gs_register':
+            L.append('  if (!inst_.gds) throw util::UnimplementedInst(mnemonic());')
+            L.append(
+                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            )
+            self._append_wait_counter_type(L, sem, cls)
+            L.append(
+                '  wf.prepare_gs_register(*d, inst_.offset0, inst_.data0, inst_.vdst, '
+                f'{str(sem.operation == "sub").lower()});'
             )
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)

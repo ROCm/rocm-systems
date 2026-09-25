@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gs_registers.h"
 #include "rocjitsu/vm/amdgpu/image_metadata.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -1160,10 +1161,22 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
 
 VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  if (d.gs_registers) {
+    const uint32_t stride = d.num_elems * d.elem_size;
+    d.response_data.resize(d.wf_size * stride);
+    uint32_t operand = 0;
+    std::memcpy(&operand, d.store_data.data(), sizeof(operand));
+    const uint64_t previous =
+        d.gs_registers->modify(d.gs_register_index, operand, d.atomic_op == AtomicOp::SUB);
+    if (d.lane_mask)
+      std::memcpy(d.response_data.data() + std::countr_zero(d.lane_mask) * stride, &previous,
+                  stride);
+    return VmAccessOutcome::Complete;
+  }
+  auto &lds = wf.lds();
   if (d.lds_stack_inputs) {
     execute_lds_stack(wf, d);
     return VmAccessOutcome::Complete;

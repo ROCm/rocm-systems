@@ -8,7 +8,12 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
+
+#include <bit>
+#include <cstring>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -86,6 +91,33 @@ bool Wavefront::fail_pm4_submission() {
     return false;
   pm4_failure_->fail();
   return true;
+}
+
+void Wavefront::prepare_gs_register(VectorMemState &state, uint32_t offset, uint32_t source,
+                                    uint32_t destination, bool subtract) {
+  state.gs_registers = graphics_stage_ ? graphics_stage_->gs_registers() : nullptr;
+  if (!state.gs_registers) {
+    report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  state.gs_register_index = (offset >> 2) & 15;
+  state.elem_size = state.gs_register_index < 8 ? 4 : 8;
+  state.num_elems = 1;
+  if (source >= num_vgprs() || destination >= num_vgprs() ||
+      state.elem_size / 4 > num_vgprs() - destination) {
+    report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  state.dst_reg_base = vgpr_alloc().base + destination;
+  state.atomic_op = subtract ? AtomicOp::SUB : AtomicOp::ADD;
+  // Only the first active lane supplies the operand and receives the return value.
+  state.exec_mask = state.lane_mask = exec() & (uint64_t{0} - exec());
+  state.store_data.resize(4);
+  if (state.lane_mask) {
+    const uint32_t operand = RegisterAccess(*this).read_vgpr(vgpr_alloc().base + source,
+                                                             std::countr_zero(state.lane_mask));
+    std::memcpy(state.store_data.data(), &operand, sizeof(operand));
+  }
 }
 
 void Wavefront::export_graphics(uint32_t target, uint32_t mask,

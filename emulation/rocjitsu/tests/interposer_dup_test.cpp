@@ -600,6 +600,7 @@ TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
 
   constexpr int kIterations = 200;
   for (int iteration = 0; iteration < kIterations; ++iteration) {
+    SCOPED_TRACE(iteration);
     int drm = open_drm_render();
     ASSERT_GE(drm, 0);
     drm_syncobj_create create{};
@@ -609,8 +610,6 @@ TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
 
     int replacement = make_sized_memfd(0x1000);
     ASSERT_GE(replacement, 0);
-    struct stat replacement_stat {};
-    ASSERT_EQ(syscall(SYS_fstat, replacement, &replacement_stat), 0);
 
     std::barrier start(3);
     std::atomic<int> duplicated{-1};
@@ -623,30 +622,35 @@ TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
     std::thread closer([&] {
       start.arrive_and_wait();
       close_result = close(drm);
-      reuse_result = dup2(replacement, drm);
+      // Let the kernel reuse a free number. Forcing dup2 onto the closed number
+      // can overwrite a temporary descriptor opened by another thread (including
+      // the sanitizer runtime) between close and duplication.
+      reuse_result = dup(replacement);
     });
     start.arrive_and_wait();
     duplicator.join();
     closer.join();
     ASSERT_EQ(close_result.load(), 0);
-    ASSERT_EQ(reuse_result.load(), drm);
+    ASSERT_GE(reuse_result.load(), 0);
 
     if (duplicated.load() >= 0) {
       struct stat duplicate_stat {};
       ASSERT_EQ(syscall(SYS_fstat, duplicated.load(), &duplicate_stat), 0);
       drm_syncobj_destroy destroy{};
       destroy.handle = create.handle;
-      if (duplicate_stat.st_ino == drm_stat.st_ino) {
+      if (duplicate_stat.st_dev == drm_stat.st_dev && duplicate_stat.st_ino == drm_stat.st_ino) {
         EXPECT_EQ(ioctl(duplicated.load(), DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
       } else {
-        EXPECT_EQ(duplicate_stat.st_ino, replacement_stat.st_ino);
+        // The old number may now name the replacement or another thread's
+        // temporary file. Neither may inherit the old DRM namespace.
         EXPECT_EQ(ioctl(duplicated.load(), DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
         EXPECT_EQ(errno, ENOTTY);
       }
+      EXPECT_NE(duplicated.load(), reuse_result.load());
       EXPECT_EQ(close(duplicated.load()), 0);
     }
 
-    EXPECT_EQ(close(drm), 0);
+    EXPECT_EQ(close(reuse_result.load()), 0);
     EXPECT_EQ(close(replacement), 0);
   }
   EXPECT_EQ(close(kfd), 0);
@@ -949,7 +953,169 @@ protected:
     wait.timeout_nsec = deadline;
     return ioctl(drm_, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
   }
+
+  int query_submission(uint64_t sequence, uint64_t timeout, uint64_t *busy,
+                       uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint32_t ring = 0) {
+    drm_amdgpu_wait_cs wait{};
+    wait.in.handle = sequence;
+    wait.in.timeout = timeout;
+    wait.in.ip_type = engine;
+    wait.in.ring = ring;
+    wait.in.ctx_id = context_;
+    const int rc = ioctl(drm_, DRM_IOCTL_AMDGPU_WAIT_CS, &wait);
+    *busy = wait.out.status;
+    return rc;
+  }
 };
+
+TEST_F(InterposerPm4Test, SubmissionFenceQueryPollsAndWaitsForCompletion) {
+  uint64_t busy = 99;
+  ASSERT_EQ(query_submission(0, 0, &busy), 0);
+  EXPECT_EQ(busy, 0u);
+  ASSERT_EQ(query_submission(UINT64_MAX, 0, &busy), 0);
+  EXPECT_EQ(busy, 0u);
+  memory_[0] = 0xffff1000;
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(1, true, &sequence), 0);
+  EXPECT_EQ(sequence, 1u);
+  ASSERT_EQ(query_submission(sequence, 0, &busy), 0);
+  EXPECT_EQ(busy, 1u);
+  ASSERT_EQ(
+      query_submission(UINT64_MAX, monotonic_deadline_after(std::chrono::milliseconds(10)), &busy),
+      0);
+  EXPECT_EQ(busy, 1u);
+  int signal_rc = -1;
+  std::thread release([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    drm_syncobj_array signal{};
+    signal.handles = reinterpret_cast<uint64_t>(&input_);
+    signal.count_handles = 1;
+    signal_rc = ioctl(drm_, DRM_IOCTL_SYNCOBJ_SIGNAL, &signal);
+  });
+  const int rc =
+      query_submission(sequence, monotonic_deadline_after(std::chrono::seconds(5)), &busy);
+  release.join();
+  EXPECT_EQ(signal_rc, 0);
+  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(busy, 0u);
+  EXPECT_EQ(query_submission(sequence, UINT64_MAX, &busy), 0);
+  EXPECT_EQ(busy, 0u);
+}
+
+TEST_F(InterposerPm4Test, SubmissionFenceSequencesAreLocalToContextAndEngine) {
+  memory_[0] = 0xffff1000;
+  uint64_t pending = 0, graphics = 0, other = 0, busy = 99;
+  ASSERT_EQ(submit(1, true, &pending), 0);
+  ASSERT_EQ(submit(1, false, &graphics, AMDGPU_HW_IP_GFX), 0);
+  EXPECT_EQ(pending, 1u);
+  EXPECT_EQ(graphics, 1u);
+  ASSERT_EQ(query_submission(graphics, monotonic_deadline_after(std::chrono::seconds(5)), &busy,
+                             AMDGPU_HW_IP_GFX),
+            0);
+  EXPECT_EQ(busy, 0u);
+  ASSERT_EQ(query_submission(pending, 0, &busy), 0);
+  EXPECT_EQ(busy, 1u);
+  const uint32_t original = context_;
+  drm_amdgpu_ctx ctx{};
+  ctx.in.op = AMDGPU_CTX_OP_ALLOC_CTX;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CTX, &ctx), 0);
+  context_ = ctx.out.alloc.ctx_id;
+  ASSERT_EQ(submit(1, false, &other), 0);
+  EXPECT_EQ(other, 1u);
+  ASSERT_EQ(query_submission(other, monotonic_deadline_after(std::chrono::seconds(5)), &busy), 0);
+  EXPECT_EQ(busy, 0u);
+  context_ = original;
+  ASSERT_EQ(query_submission(pending, 0, &busy), 0);
+  EXPECT_EQ(busy, 1u);
+  drm_syncobj_array signal{};
+  signal.handles = reinterpret_cast<uint64_t>(&input_);
+  signal.count_handles = 1;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_SIGNAL, &signal), 0);
+  EXPECT_EQ(query_submission(pending, monotonic_deadline_after(std::chrono::seconds(5)), &busy), 0);
+}
+
+TEST_F(InterposerPm4Test, SubmissionFenceQueryRejectsInvalidIdentityAndReportsFailure) {
+  uint64_t busy = 99;
+  EXPECT_EQ(query_submission(1, 0, &busy), -1);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(query_submission(0, 0, &busy, AMDGPU_HW_IP_DMA), -1);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(query_submission(0, 0, &busy, AMDGPU_HW_IP_COMPUTE, 4), -1);
+  EXPECT_EQ(errno, EINVAL);
+  const uint32_t original = context_;
+  context_ = UINT32_MAX;
+  EXPECT_EQ(query_submission(0, 0, &busy), -1);
+  EXPECT_EQ(errno, EINVAL);
+  context_ = original;
+  memory_[0] = 0xc000ff00;
+  memory_[1] = 0;
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(2, false, &sequence), 0);
+  EXPECT_EQ(query_submission(sequence, monotonic_deadline_after(std::chrono::seconds(5)), &busy),
+            -1);
+  EXPECT_EQ(errno, EIO);
+  EXPECT_EQ(query_submission(UINT64_MAX, 0, &busy), -1);
+  EXPECT_EQ(errno, EIO);
+}
+
+TEST_F(InterposerPm4Test, SubmissionFenceQueryRetiresOldHistory) {
+  memory_[0] = 0xffff1000;
+  uint64_t sequence = 0, busy = 99;
+  for (uint64_t i = 1; i <= 80; ++i) {
+    ASSERT_EQ(submit(1, false, &sequence), 0);
+    EXPECT_EQ(sequence, i);
+    ASSERT_EQ(query_submission(sequence, monotonic_deadline_after(std::chrono::seconds(5)), &busy),
+              0);
+    EXPECT_EQ(busy, 0u);
+  }
+  EXPECT_EQ(query_submission(1, 0, &busy), 0);
+  EXPECT_EQ(busy, 0u);
+  EXPECT_EQ(query_submission(sequence + 1, 0, &busy), -1);
+  EXPECT_EQ(errno, EINVAL);
+}
+
+TEST_F(InterposerPm4Test, TransferWaitsForSubmissionWithoutWaitingForCompletion) {
+  drm_syncobj_create target{};
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_CREATE, &target), 0);
+  drm_syncobj_transfer transfer{};
+  transfer.src_handle = output_;
+  transfer.dst_handle = target.handle;
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_TRANSFER, &transfer), -1);
+  EXPECT_EQ(errno, EINVAL);
+  transfer.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_TRANSFER, &transfer), -1);
+  EXPECT_EQ(errno, EINVAL);
+  transfer.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  std::atomic<bool> started{false};
+  int transfer_rc = -1;
+  std::thread worker([&] {
+    started.store(true, std::memory_order_release);
+    transfer_rc = ioctl(drm_, DRM_IOCTL_SYNCOBJ_TRANSFER, &transfer);
+  });
+  while (!started.load(std::memory_order_acquire))
+    std::this_thread::yield();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  memory_[0] = 0xffff1000;
+  uint64_t sequence = 0;
+  const int submit_rc = submit(1, true, &sequence);
+  worker.join();
+  ASSERT_EQ(submit_rc, 0);
+  ASSERT_EQ(transfer_rc, 0);
+  drm_syncobj_wait wait{};
+  wait.handles = reinterpret_cast<uint64_t>(&target.handle);
+  wait.count_handles = 1;
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+  drm_syncobj_array signal{};
+  signal.handles = reinterpret_cast<uint64_t>(&input_);
+  signal.count_handles = 1;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_SIGNAL, &signal), 0);
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(5));
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_WAIT, &wait), 0);
+  drm_syncobj_destroy destroy{};
+  destroy.handle = target.handle;
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+}
 
 TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
   std::vector<uint32_t> packets;
@@ -978,6 +1144,198 @@ TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
       0x88888888, 0x99999999, 4,          0xaaaaaaaa, 0xbbbbbbbb, 0xcccccccc};
   for (uint32_t i = 0; i < expected.size(); ++i)
     EXPECT_EQ(memory_[1536 + i], expected[i]) << "register " << std::hex << registers[i];
+}
+
+TEST_F(InterposerPm4Test, ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState) {
+  const uint32_t packet[] = {0xc0026900,
+                             0x300,
+                             0xa5a5a5a5,
+                             0x12345678,
+                             0xc0025100,
+                             0x300,
+                             0x00ff00ff,
+                             0xffff0000,
+                             0xc0025100,
+                             0x301,
+                             0,
+                             0xffffffff,
+                             0xc0035d00,
+                             0x4000000f,
+                             uint32_t(kAddress + 4096),
+                             uint32_t(kAddress >> 32),
+                             1,
+                             0xc0044000,
+                             (5u << 8) | (1u << 16),
+                             0xa300,
+                             0,
+                             uint32_t(kAddress + 6144),
+                             uint32_t(kAddress >> 32)};
+  memory_[1024] = 0xabcdef12;
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  EXPECT_EQ(memory_[1536], 0xa5ffa500);
+  EXPECT_EQ(memory_[1537], 0x12345678);
+  EXPECT_EQ(memory_[1024], 0xabcdef12);
+}
+
+TEST_F(InterposerPm4Test, DispatchInterleaveShadowIsQualifiedForGfx12) {
+  drm_amdgpu_info_device device{};
+  drm_amdgpu_info info{};
+  info.query = AMDGPU_INFO_DEV_INFO;
+  info.return_pointer = reinterpret_cast<uint64_t>(&device);
+  info.return_size = sizeof(device);
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_INFO, &info), 0);
+  const uint32_t packet[] = {0xc0019b00,
+                             0x2000022f,
+                             0x40,
+                             0xc0044000,
+                             5u << 8,
+                             0x2e2f,
+                             0,
+                             uint32_t(kAddress + 6144),
+                             uint32_t(kAddress >> 32)};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  const int rc = wait_output(monotonic_deadline_after(std::chrono::seconds(5)));
+  if (device.family == AMDGPU_FAMILY_GC_12_0_0) {
+    EXPECT_EQ(rc, 0);
+    EXPECT_EQ(memory_[1536], 0x40);
+  } else {
+    EXPECT_EQ(rc, -1);
+    EXPECT_EQ(errno, EIO);
+  }
+}
+
+TEST_F(InterposerPm4Test, ComputeTranslationPrefetchIgnoresPfpSelector) {
+  const uint32_t packet[] = {
+      0xc0035d00, 0x40000004, uint32_t(kAddress),        uint32_t(kAddress >> 32), 1,
+      0xc0033700, 5u << 8,    uint32_t(kAddress + 6144), uint32_t(kAddress >> 32), 0x12345678};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
+  EXPECT_EQ(memory_[1536], 0x12345678u);
+}
+
+TEST_F(InterposerPm4Test, StreamoutQuerySamplesAllFourMemoryCounterPairs) {
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm_, &device));
+  const uint64_t source = kAddress + 5120, destination = kAddress + 6144;
+  std::vector<uint32_t> packets;
+  for (uint32_t stream = 0; stream < 4; ++stream) {
+    // Distinct 64-bit counters, including a counter with its high bit already set.
+    memory_[1284 + 4 * stream] = 17 + stream;
+    memory_[1285 + 4 * stream] = 3 + stream;
+    memory_[1286 + 4 * stream] = 31 + stream;
+    memory_[1287 + 4 * stream] = 0x80000005 + stream;
+    const uint64_t target = destination + 16 * stream;
+    packets.insert(packets.end(), {0xc004c300, uint32_t(source), uint32_t(source >> 32), stream,
+                                   uint32_t(target), uint32_t(target >> 32)});
+  }
+  std::fill_n(memory_ + 1536, 18, 0xdeadbeef);
+  std::memcpy(memory_, packets.data(), packets.size() * 4);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  const int rc = wait_output(monotonic_deadline_after(std::chrono::seconds(5)));
+  if (device.family != AMDGPU_FAMILY_GC_12_0_0) {
+    EXPECT_EQ(rc, -1);
+    EXPECT_EQ(errno, EIO);
+    EXPECT_EQ(memory_[1536], 0xdeadbeef);
+    return;
+  }
+  ASSERT_EQ(rc, 0);
+  for (uint32_t stream = 0; stream < 4; ++stream) {
+    EXPECT_EQ(memory_[1536 + 4 * stream], 17 + stream);
+    EXPECT_EQ(memory_[1537 + 4 * stream], 0x80000003 + stream);
+    EXPECT_EQ(memory_[1538 + 4 * stream], 31 + stream);
+    EXPECT_EQ(memory_[1539 + 4 * stream], 0x80000005 + stream);
+    EXPECT_EQ(memory_[1285 + 4 * stream], 3 + stream);
+  }
+  EXPECT_EQ(memory_[1552], 0xdeadbeef);
+}
+
+TEST_F(InterposerPm4Test, StreamoutQueryEventMarksZeroCounterSamplesValid) {
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm_, &device));
+  std::vector<uint32_t> packets;
+  for (uint32_t stream = 0; stream < 4; ++stream) {
+    const uint64_t target = kAddress + 6144 + 16 * stream;
+    packets.insert(packets.end(), {0xc0024600, 15 | ((stream + 8) << 8), uint32_t(target),
+                                   uint32_t(target >> 32)});
+  }
+  std::fill_n(memory_ + 1536, 18, 0xdeadbeef);
+  std::memcpy(memory_, packets.data(), packets.size() * 4);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  const int rc = wait_output(monotonic_deadline_after(std::chrono::seconds(5)));
+  if (device.family != AMDGPU_FAMILY_GC_11_0_0 && device.family != AMDGPU_FAMILY_GC_11_5_0) {
+    EXPECT_EQ(rc, -1);
+    EXPECT_EQ(errno, EIO);
+    EXPECT_EQ(memory_[1536], 0xdeadbeef);
+    return;
+  }
+  ASSERT_EQ(rc, 0);
+  for (uint32_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(memory_[1536 + 2 * i], 0u);
+    EXPECT_EQ(memory_[1537 + 2 * i], 0x80000000);
+  }
+  EXPECT_EQ(memory_[1552], 0xdeadbeef);
+}
+
+TEST_F(InterposerPm4Test, InterleavedDispatchExecutesDirectAndIndirectShaders) {
+  drm_amdgpu_info_device device{};
+  drm_amdgpu_info info{};
+  info.query = AMDGPU_INFO_DEV_INFO;
+  info.return_pointer = reinterpret_cast<uint64_t>(&device);
+  info.return_size = sizeof(device);
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_INFO, &info), 0);
+  // GFX12: scale the local ID, store a constant, wait for the store, end.
+  const uint32_t shader[] = {0x30000082, 0x7e0202ff, 0x12345678, 0xee068000,
+                             0x00800000, 0,          0xbfc10000, 0xbfb00000};
+  std::memcpy(memory_ + 1152, shader, sizeof(shader));
+  const uint64_t code = kAddress + 4608, data = kAddress + 6144, arguments = kAddress + 5120;
+  memory_[1280] = memory_[1281] = memory_[1282] = 1;
+  for (bool indirect : {false, true}) {
+    std::fill_n(memory_ + 1536, 4, 0xabcdef01u);
+    std::vector<uint32_t> packet{0xc0037600,
+                                 0x207,
+                                 2,
+                                 1,
+                                 1,
+                                 0xc0027600,
+                                 0x20c,
+                                 uint32_t(code >> 8),
+                                 uint32_t(code >> 40),
+                                 0xc0017600,
+                                 0x213,
+                                 2u << 1,
+                                 0xc0027600,
+                                 0x240,
+                                 uint32_t(data),
+                                 uint32_t(data >> 32)};
+    if (indirect)
+      packet.insert(packet.end(), {0xc0021100, 1, uint32_t(arguments), uint32_t(arguments >> 32),
+                                   0xc001a802, 0, 0x48005});
+    else
+      packet.insert(packet.end(), {0xc003a702, 1, 1, 1, 0x48005});
+    std::memcpy(memory_, packet.data(), packet.size() * 4);
+    uint64_t sequence = 0;
+    ASSERT_EQ(submit(packet.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+    const int rc = wait_output(monotonic_deadline_after(std::chrono::seconds(5)));
+    if (device.family != AMDGPU_FAMILY_GC_12_0_0) {
+      EXPECT_EQ(rc, -1);
+      EXPECT_EQ(errno, EIO);
+      EXPECT_EQ(memory_[1536], 0xabcdef01u);
+      return;
+    }
+    ASSERT_EQ(rc, 0);
+    EXPECT_EQ(memory_[1536], 0x12345678u);
+    EXPECT_EQ(memory_[1537], 0x12345678u);
+    EXPECT_EQ(memory_[1538], 0xabcdef01u);
+  }
 }
 
 TEST_F(InterposerPm4Test, ContextRegisterLoadReadsMemoryAndPreservesAdjacentRegisters) {
@@ -1036,6 +1394,148 @@ TEST_F(InterposerPm4Test, ContextRegisterLoadRejectsRangeOverflow) {
   ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
   EXPECT_EQ(errno, EIO);
+}
+
+TEST_F(InterposerPm4Test, ShadowRegisterLoadsUseSparseMemoryOffsets) {
+  std::vector<uint32_t> packets;
+  const auto emit = [&](uint32_t opcode, std::initializer_list<uint32_t> words) {
+    packets.push_back(0xc0000000 | ((words.size() - 1) << 16) | (opcode << 8));
+    packets.insert(packets.end(), words.begin(), words.end());
+  };
+  // Different apertures share the same sparse shadow layout. Reversing the
+  // two load ranges distinguishes register offsets from a packed source.
+  const std::array<uint32_t, 3> loads{0x5e, 0x5f, 0x61};
+  const std::array<uint32_t, 3> sets{0x79, 0x76, 0x69};
+  const std::array<uint32_t, 3> bases{0xc000, 0x2c00, 0xa000};
+  std::fill(memory_ + 1152, memory_ + 1168, 0xdeadbeef);
+  memory_[1152 + 5] = 55;
+  memory_[1152 + 6] = 66;
+  memory_[1152 + 9] = 99;
+  for (size_t i = 0; i < loads.size(); ++i) {
+    emit(sets[i], {4, 11, 22, 33, 44, 88, 77});
+    emit(loads[i], {uint32_t(kAddress + 4608), uint32_t(kAddress >> 32), 9, 1, 5, 2});
+    for (uint32_t reg = 4; reg <= 9; ++reg)
+      emit(0x40, {5u << 8, bases[i] + reg, 0, uint32_t(kAddress + 6144 + (i * 6 + reg - 4) * 4),
+                  uint32_t(kAddress >> 32)});
+  }
+  std::memcpy(memory_, packets.data(), packets.size() * 4);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  const std::array<uint32_t, 6> expected{11, 55, 66, 44, 88, 99};
+  for (size_t i = 0; i < 18; ++i)
+    EXPECT_EQ(memory_[1536 + i], expected[i % 6]) << "result " << i;
+}
+
+TEST_F(InterposerPm4Test, MemoryAtomicsApplyIntegerOperationsAtBothWidths) {
+  struct Case {
+    uint32_t operation;
+    uint64_t initial, source, compare, expected;
+  };
+  const std::array cases{Case{7, 3, 7, 0, 7},
+                         Case{8, 3, 7, 3, 7},
+                         Case{8, 3, 7, 1, 3},
+                         Case{15, UINT64_MAX, 2, 0, 1},
+                         Case{16, 0, 1, 0, UINT64_MAX},
+                         Case{17, UINT64_MAX, 1, 0, UINT64_MAX},
+                         Case{18, UINT64_MAX, 1, 0, 1},
+                         Case{19, UINT64_MAX, 1, 0, 1},
+                         Case{20, UINT64_MAX, 1, 0, UINT64_MAX},
+                         Case{21, 0x5a, 0x3c, 0, 0x18},
+                         Case{22, 0x5a, 0x3c, 0, 0x7e},
+                         Case{23, 0x5a, 0x3c, 0, 0x66},
+                         Case{24, 6, 7, 0, 7},
+                         Case{24, 7, 7, 0, 0},
+                         Case{24, 9, 7, 0, 0},
+                         Case{25, 6, 7, 0, 5},
+                         Case{25, 7, 7, 0, 6},
+                         Case{25, 9, 7, 0, 7},
+                         Case{25, 0, 7, 0, 7}};
+  std::vector<uint32_t> packets;
+  std::vector<uint64_t> expected;
+  for (uint32_t flags : {0u, 0x20u, 0x40u, 0x60u}) {
+    for (const auto &test : cases) {
+      const size_t index = expected.size();
+      const uint64_t target = kAddress + 4608 + index * 16;
+      const bool wide = flags & 0x20;
+      memory_[1152 + index * 4] = uint32_t(test.initial);
+      memory_[1153 + index * 4] = wide ? uint32_t(test.initial >> 32) : 0xdeadbeef;
+      memory_[1154 + index * 4] = 0xa5a5a5a5;
+      memory_[1155 + index * 4] = 0x5a5a5a5a;
+      // Use a nonzero ignored cache policy; both return encodings mutate memory.
+      packets.insert(packets.end(),
+                     {0xc0071e00, test.operation | flags | (1u << 25), uint32_t(target),
+                      uint32_t(target >> 32), uint32_t(test.source), uint32_t(test.source >> 32),
+                      uint32_t(test.compare), uint32_t(test.compare >> 32), 0});
+      expected.push_back(wide ? test.expected : (0xdeadbeef00000000ull | uint32_t(test.expected)));
+    }
+  }
+  ASSERT_LT(packets.size(), 1024u);
+  std::memcpy(memory_, packets.data(), packets.size() * 4);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(packets.size(), false, &sequence), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    const uint64_t result =
+        uint64_t{memory_[1152 + i * 4]} | (uint64_t{memory_[1153 + i * 4]} << 32);
+    EXPECT_EQ(result, expected[i]) << "atomic case " << i;
+    EXPECT_EQ(memory_[1154 + i * 4], 0xa5a5a5a5);
+    EXPECT_EQ(memory_[1155 + i * 4], 0x5a5a5a5a);
+  }
+}
+
+TEST_F(InterposerPm4Test, InvalidMemoryPacketsFailFenceWithoutWritingMemory) {
+  const uint32_t low = uint32_t(kAddress + 6144), high = uint32_t(kAddress >> 32);
+  const std::vector<std::vector<uint32_t>> packets{
+      {0xc0071e00, 15 | (1u << 8), low, high, 1, 0, 0, 0, 0}, // Loop command.
+      {0xc0071e00, 15 | (1u << 7), low, high, 1, 0, 0, 0, 0}, // Reserved control.
+      {0xc0071e00, 15, low, high, 1, 0, 0, 0, 1u << 13},      // Reserved interval.
+      {0xc0071e00, 9, low, high, 1, 0, 0, 0, 0},              // Unimplemented TC operation.
+      {0xc0071e00, 15, low + 1, high, 1, 0, 0, 0, 0},         // Unaligned 32-bit.
+      {0xc0071e00, 47, low + 4, high, 1, 0, 0, 0, 0},         // Unaligned 64-bit.
+      {0xc0071e00, 15, low + 0x100000, high, 1, 0, 0, 0, 0},  // Unmapped.
+      {0xc0061e00, 15, low, high, 1, 0, 0, 0},                // Short atomic.
+      {0xc0025e00, low, high, 1},                             // Unpaired load range.
+      {0xc0035e00, low + 1, high, 0, 1},                      // Unaligned shadow address.
+      {0xc0035e00, low, high | 0x10000, 0, 1},                // Reserved address bits.
+      {0xc0035e00, low, high, 0, 0},                          // Empty range.
+      {0xc0035e00, low, high, 0x3fff, 2},                     // UCONFIG overflow.
+      {0xc0035f00, low, high, 0x3ff, 2},                      // SH overflow.
+      {0xc0036100, low, high, 0x1fff, 2},                     // CONTEXT overflow.
+      {0xc0025100, 0x2000, 0xffffffff, 1},                    // RMW outside context aperture.
+      {0xc0015100, 0, 0xffffffff},                            // Short RMW packet.
+      {0xc0035d00, 0x10, uint32_t(kAddress), high, 1},        // Reserved prefetch control.
+      {0xc0035d00, 7, low, high, 1},                          // Unaligned prefetch address.
+      {0xc0035d00, 7, uint32_t(kAddress), high, 0x4000},      // Reserved page count.
+      {0xc0019b00, 0x20000240, 1},                      // Interleave index on another register.
+      {0xc0029b00, 0x2000022f, 1, 2},                   // Interleave index over multiple registers.
+      {0xc0024600, 0x180f, low, high},                  // Reserved streamout query control.
+      {0xc0024600, 0x80f, low + 4, high},               // Unaligned query destination.
+      {0xc0024600, 0x80f, low + 0x100000, high},        // Unmapped query destination.
+      {0xc004c300, low, high, 4, low + 32, high},       // Reserved stream selection.
+      {0xc004c300, low + 4, high, 0, low + 32, high},   // Unaligned control buffer.
+      {0xc004c300, low, high, 0, low + 36, high},       // Unaligned query destination.
+      {0xc004c300, low + 0x100000, high, 0, low, high}, // Unmapped control buffer.
+      {0xc004c300, low, high, 0, low + 0x100000, high}, // Unmapped query destination.
+      {0xc003c300, low, high, 0, low + 32},             // Missing destination high word.
+      {0xc0035e00, low + 0x100000, high, 0, 1}};        // Unmapped load.
+  for (size_t i = 0; i < packets.size(); ++i) {
+    SCOPED_TRACE(i);
+    // A fault retires the queue. Each malformed packet gets a fresh context.
+    drm_amdgpu_ctx ctx{};
+    ctx.in.op = AMDGPU_CTX_OP_ALLOC_CTX;
+    ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CTX, &ctx), 0);
+    context_ = ctx.out.alloc.ctx_id;
+    memory_[1536] = 0xabcdef12;
+    memory_[1537] = 0x34567890;
+    std::memcpy(memory_, packets[i].data(), packets[i].size() * 4);
+    uint64_t sequence = 0;
+    ASSERT_EQ(submit(packets[i].size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+    EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
+    EXPECT_EQ(errno, EIO);
+    EXPECT_EQ(memory_[1536], 0xabcdef12);
+    EXPECT_EQ(memory_[1537], 0x34567890);
+  }
 }
 
 TEST_F(InterposerPm4Test, MalformedPackedGraphicsRegistersFailFence) {
@@ -1179,10 +1679,18 @@ TEST_F(InterposerPm4Test, InsufficientScratchFailsFence) {
 }
 
 TEST_F(InterposerPm4Test, GraphicsQueueAcceptsBufferOwnershipFlushEvents) {
-  const uint32_t packet[] = {0xc0004600, 44, 0xc0004600, 46};
+  const uint32_t packet[] = {0xc0004600, 44, 0xc0004600, 46, 0xc0004600, 38, 0xc0004600, 49};
   std::memcpy(memory_, packet, sizeof(packet));
   uint64_t sequence = 0;
   ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
+}
+
+TEST_F(InterposerPm4Test, ComputeQueueAcceptsPipelineStatisticsControls) {
+  const uint32_t packet[] = {0xc0004600, 23, 0xc0004600, 24, 0xc0004600, 25, 0xc0004600, 26};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
 }
 
@@ -1550,6 +2058,64 @@ TEST_F(InterposerPm4Test, NestedIndirectBufferReturns) {
   ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
   ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
   EXPECT_EQ(memory_[1024], 0x12345678u);
+}
+
+TEST(InterposerDrmTest, PrimaryNodePathHasCharacterDeviceMetadata) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  for (const char *symbol : {"stat", "lstat"}) {
+    SCOPED_TRACE(symbol);
+    auto function =
+        reinterpret_cast<int (*)(const char *, struct stat *)>(dlsym(RTLD_DEFAULT, symbol));
+    ASSERT_NE(function, nullptr);
+    struct stat node {};
+    ASSERT_EQ(function("/dev/dri/card0", &node), 0);
+    EXPECT_TRUE(S_ISCHR(node.st_mode));
+    EXPECT_EQ(node.st_rdev, makedev(226, 0));
+    EXPECT_EQ(function("/dev/dri/card999999", &node), -1);
+    EXPECT_EQ(errno, ENOENT);
+  }
+  for (const char *symbol : {"stat64", "lstat64"}) {
+    SCOPED_TRACE(symbol);
+    auto function =
+        reinterpret_cast<int (*)(const char *, struct stat64 *)>(dlsym(RTLD_DEFAULT, symbol));
+    ASSERT_NE(function, nullptr);
+    struct stat64 node {};
+    ASSERT_EQ(function("/dev/dri/card0", &node), 0);
+    EXPECT_TRUE(S_ISCHR(node.st_mode));
+    EXPECT_EQ(node.st_rdev, makedev(226, 0));
+  }
+  close(kfd);
+}
+
+TEST(InterposerDrmTest, CanonicalSysfsPathsRetainSimulatedDevice) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  const char *path = "/sys/dev/char/226:0/device/uevent";
+  const auto read_contents = [](const char *name) {
+    std::ifstream file(name);
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  };
+  const auto expected = read_contents(path);
+  ASSERT_FALSE(expected.empty());
+  char *allocated = realpath(path, nullptr);
+  ASSERT_NE(allocated, nullptr);
+  EXPECT_EQ(read_contents(allocated), expected);
+  free(allocated);
+
+  char resolved[PATH_MAX];
+  ASSERT_EQ(realpath(path, resolved), resolved);
+  EXPECT_EQ(read_contents(resolved), expected);
+  auto checked = reinterpret_cast<char *(*)(const char *, char *, size_t)>(
+      dlsym(RTLD_DEFAULT, "__realpath_chk"));
+  ASSERT_NE(checked, nullptr);
+  ASSERT_EQ(checked(path, resolved, sizeof(resolved)), resolved);
+  EXPECT_EQ(read_contents(resolved), expected);
+  ASSERT_EQ(checked("/", resolved, sizeof(resolved)), resolved);
+  EXPECT_STREQ(resolved, "/");
+  EXPECT_EQ(realpath("/sys/dev/char/226:999999/device/uevent", resolved), nullptr);
+  EXPECT_EQ(errno, ENOENT);
+  close(kfd);
 }
 
 TEST(InterposerDrmTest, RenderNodePathMetadataMatchesDescriptor) {

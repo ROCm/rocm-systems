@@ -50,7 +50,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   const bool query = queried_lods != nullptr;
   if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
-      unsupported_flags || (dim != 0 && dim != 1 && dim != 3 && dim != 5) || !mask ||
+      unsupported_flags || (dim != 0 && dim != 1 && dim != 3 && dim != 4 && dim != 5) || !mask ||
       (query && (d16 || (mask & ~3u))))
     return unsupported();
   std::array<uint32_t, 8> r{};
@@ -60,7 +60,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   for (uint32_t i = 0; i < r.size(); ++i)
     r[i] = read_scalar_selector(wf, resource + i);
   const uint32_t type = r[3] >> 28;
-  const bool is_array = type == 11 || type == 13;
+  const bool is_array = type == 11 || type == 12 || type == 13;
   const uint32_t swizzle = (r[3] >> 20) & 31;
   uint32_t width = ((r[1] >> 30) | ((r[2] & (gfx12 ? 0x3fff : 0xfff)) << 2)) + 1;
   uint32_t height = ((r[2] >> 14) & (gfx12 ? 0xffff : 0x3fff)) + 1;
@@ -80,8 +80,9 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t first_layer = (r[4] >> 16) & (gfx12 ? 0x3fff : 0x1fff);
   const uint32_t last_layer = is_array ? r[4] & (gfx12 ? 0x3fff : 0x1fff) : 0;
   if ((type != 8 && type != 9 && !is_array) || (dim == 0 && type != 8) ||
-      (type == 8 && (height != 1 || (!query && swizzle))) || (!is_array && (r[4] >> 16)) ||
-      (!query && !bytes) ||
+      ((type == 8 || type == 12) && (height != 1 || (!query && swizzle))) ||
+      (dim == 4 && type != 8 && type != 12) || (type == 12 && (dim != 4 || sample)) ||
+      (!is_array && (r[4] >> 16)) || (!query && !bytes) ||
       (is_array && (first_layer > last_layer || (r[4] & (gfx12 ? 0xc000c000u : 0xe000e000u)))) ||
       first_level > last_level || last_level > max_level ||
       (!query && max_level && ((!is_array && r[4]) || compressed)) ||
@@ -139,9 +140,9 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     aniso_bias = (s[0] >> 21) & 63;
     perf_mip = gfx12 ? ((s[2] >> 30) | ((s[3] & 3) << 2)) : (s[1] >> 24) & 15;
     const auto supported_wrap = [](uint32_t wrap) { return wrap <= 3 || wrap == 6; };
-    if (!supported_wrap(wrap_x) || !supported_wrap(wrap_y) ||
-        (s[0] & ((query ? 0u : (7u << 12)) | (3u << 29) | (3u << 19))) || (s[2] & (3u << 24)) ||
-        mip_filter > 2)
+    // These sample opcodes do not use DEPTH_COMPARE_FUNC.
+    if (!supported_wrap(wrap_x) || !supported_wrap(wrap_y) || (s[0] & ((3u << 29) | (3u << 19))) ||
+        (s[2] & (3u << 24)) || mip_filter > 2)
       return unsupported();
     seamless_cube = dim == 3 && !(s[0] & (1u << 28));
     if (seamless_cube)
@@ -239,7 +240,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       return a16 ? (value >> (16 * (component % 2))) & 0xffff : value;
     };
     uint32_t x = sample ? 0 : load_coordinate(0);
-    uint32_t y = sample || dim == 0 ? 0 : load_coordinate(1);
+    uint32_t y = sample || dim == 0 || dim == 4 ? 0 : load_coordinate(1);
     if (sample) {
       const auto read = [&](uint32_t index, uint32_t source_lane) {
         if (a16 && index >= coordinate_offset) {
@@ -558,7 +559,9 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       d.lane_mask |= uint64_t{1} << lane;
       continue;
     }
-    const uint32_t relative_layer = dim == 5 ? load_coordinate(2) : 0;
+    const uint32_t relative_layer = dim == 5   ? load_coordinate(2)
+                                    : dim == 4 ? load_coordinate(1)
+                                               : 0;
     if (!is_array && relative_layer)
       return unsupported();
     if (x >= width || y >= height || (is_array && relative_layer > last_layer - first_layer))

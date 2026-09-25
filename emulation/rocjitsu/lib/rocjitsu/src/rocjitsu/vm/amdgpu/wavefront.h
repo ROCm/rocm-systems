@@ -30,6 +30,7 @@ namespace amdgpu {
 
 struct Pm4FailureState;
 class GraphicsStage;
+class VectorMemState;
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
@@ -269,6 +270,8 @@ public:
   }
   void export_graphics(uint32_t target, uint32_t mask, const std::array<uint32_t, 4> &sources,
                        bool row);
+  void prepare_gs_register(VectorMemState &state, uint32_t offset, uint32_t source,
+                           uint32_t destination, bool subtract);
   /// @brief Retain a PM4 scratch slot until this wave retires.
   void set_scratch_lease(std::shared_ptr<uint32_t> lease) { scratch_lease_ = std::move(lease); }
 

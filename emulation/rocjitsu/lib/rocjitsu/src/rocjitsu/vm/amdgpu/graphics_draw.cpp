@@ -150,14 +150,17 @@ T blend_factor(uint32_t factor, uint32_t component, const std::array<T, 4> &sour
   }
 }
 
-// SX can bypass blending when the source contribution is zero and the
-// destination factor is one. RGB flags consider every exported RGB channel,
-// including channels masked off by CB_TARGET_MASK.
+enum class BlendCopy { None, Source, Destination };
+
+// SX can bypass arithmetic when the result equals the source or destination. RGB flags consider
+// every exported RGB channel, including channels masked off by CB_TARGET_MASK.
 template <typename T>
-bool blend_preserves_destination(uint32_t opt, uint32_t component, uint32_t export_mask,
-                                 const std::array<T, 4> &source) {
+bool blend_can_copy(BlendCopy from, uint32_t opt, uint32_t component, uint32_t export_mask,
+                    const std::array<T, 4> &source) {
+  const bool copy_source = from == BlendCopy::Source;
   const uint32_t operation = (opt >> 8) & 7;
-  if (operation != 1 && operation != 5) // OPT_COMB_ADD / OPT_COMB_REVSUBTRACT
+  // ADD can copy either input; SUBTRACT and REVSUBTRACT copy source/destination.
+  if (operation != 1 && operation != (copy_source ? 2u : 5u))
     return false;
   bool c0 = (export_mask & 7) != 0, c1 = c0;
   for (unsigned i = 0; i < 3; ++i) {
@@ -171,10 +174,10 @@ bool blend_preserves_destination(uint32_t opt, uint32_t component, uint32_t expo
   // SX_BLEND_OPT: preserve/ignore all, color zero/one, alpha zero/one, or none.
   const bool ignore[]{true, false, c0, c1, a0, a1, a0, false};
   const bool preserve[]{false, true, c1, c0, a1, a0, false, false};
+  if (copy_source)
+    return (preserve[opt & 7] || (component == 3 ? a0 : c0)) && ignore[(opt >> 4) & 7];
   return (ignore[opt & 7] || (component == 3 ? a0 : c0)) && preserve[(opt >> 4) & 7];
 }
-
-enum class BlendCopy { None, Source, Destination };
 
 // Constant zero/one equations can bypass arithmetic for the whole pixel.
 // Color constants are checked across RGB even for partial exports or writes.
@@ -273,11 +276,43 @@ uint8_t unorm_color_byte(double value) {
   return lower + (fraction > 0.5 || (fraction == 0.5 && (lower & 1)));
 }
 
+// Color-buffer sRGB destinations decode to FP16, independently of the texture
+// decoder. These rounded levels reproduce physical RDNA3/4 blend results.
+float srgb_color_linear(uint8_t value) {
+  static constexpr uint16_t levels[] = {
+      0x0000, 0x0cf9, 0x10f9, 0x1376, 0x14f9, 0x1637, 0x1776, 0x185a, 0x18f9, 0x1998, 0x1a37,
+      0x1adb, 0x1b88, 0x1c1f, 0x1c7f, 0x1ce4, 0x1d4e, 0x1dbd, 0x1e32, 0x1eab, 0x1f2a, 0x1fae,
+      0x201c, 0x2063, 0x20ad, 0x20fa, 0x214a, 0x219d, 0x21f2, 0x224a, 0x22a6, 0x2304, 0x2365,
+      0x23c9, 0x2418, 0x244d, 0x2484, 0x24bc, 0x24f6, 0x2532, 0x256f, 0x25ad, 0x25ed, 0x262f,
+      0x2673, 0x26b8, 0x26ff, 0x2747, 0x2791, 0x27dd, 0x2815, 0x283d, 0x2865, 0x288f, 0x28b9,
+      0x28e4, 0x2910, 0x293d, 0x296a, 0x2999, 0x29c9, 0x29f9, 0x2a2a, 0x2a5d, 0x2a90, 0x2ac4,
+      0x2af9, 0x2b2f, 0x2b66, 0x2b9e, 0x2bd7, 0x2c08, 0x2c26, 0x2c44, 0x2c62, 0x2c81, 0x2ca0,
+      0x2cc0, 0x2ce0, 0x2d01, 0x2d22, 0x2d44, 0x2d66, 0x2d89, 0x2dad, 0x2dd0, 0x2df5, 0x2e1a,
+      0x2e3f, 0x2e65, 0x2e8b, 0x2eb2, 0x2ed9, 0x2f01, 0x2f2a, 0x2f53, 0x2f7c, 0x2fa7, 0x2fd1,
+      0x2ffc, 0x3014, 0x302a, 0x3040, 0x3057, 0x306e, 0x3085, 0x309d, 0x30b4, 0x30cc, 0x30e5,
+      0x30fd, 0x3116, 0x312f, 0x3149, 0x3162, 0x317c, 0x3197, 0x31b1, 0x31cc, 0x31e7, 0x3203,
+      0x321e, 0x323a, 0x3257, 0x3273, 0x3290, 0x32ad, 0x32cb, 0x32e8, 0x3306, 0x3325, 0x3343,
+      0x3362, 0x3381, 0x33a1, 0x33c1, 0x33e1, 0x3401, 0x3411, 0x3422, 0x3432, 0x3443, 0x3454,
+      0x3465, 0x3476, 0x3488, 0x3499, 0x34ab, 0x34bd, 0x34cf, 0x34e1, 0x34f4, 0x3506, 0x3519,
+      0x352c, 0x353f, 0x3552, 0x3565, 0x3578, 0x358c, 0x35a0, 0x35b4, 0x35c8, 0x35dc, 0x35f1,
+      0x3605, 0x361a, 0x362f, 0x3644, 0x3659, 0x366f, 0x3684, 0x369a, 0x36b0, 0x36c6, 0x36dc,
+      0x36f2, 0x3709, 0x3720, 0x3736, 0x374d, 0x3765, 0x377c, 0x3794, 0x37ab, 0x37c3, 0x37db,
+      0x37f3, 0x3806, 0x3812, 0x381f, 0x382b, 0x3838, 0x3844, 0x3851, 0x385e, 0x386b, 0x3877,
+      0x3885, 0x3892, 0x389f, 0x38ac, 0x38ba, 0x38c7, 0x38d5, 0x38e2, 0x38f0, 0x38fe, 0x390c,
+      0x391a, 0x3928, 0x3936, 0x3944, 0x3953, 0x3961, 0x3970, 0x397e, 0x398d, 0x399c, 0x39ab,
+      0x39ba, 0x39c9, 0x39d8, 0x39e7, 0x39f7, 0x3a06, 0x3a16, 0x3a25, 0x3a35, 0x3a45, 0x3a55,
+      0x3a65, 0x3a75, 0x3a85, 0x3a95, 0x3aa5, 0x3ab6, 0x3ac6, 0x3ad7, 0x3ae8, 0x3af9, 0x3b09,
+      0x3b1a, 0x3b2c, 0x3b3d, 0x3b4e, 0x3b5f, 0x3b71, 0x3b82, 0x3b94, 0x3ba6, 0x3bb8, 0x3bca,
+      0x3bdc, 0x3bee, 0x3c00,
+  };
+  return util::f16_to_f32(levels[value]);
+}
+
 // Color-buffer quantization thresholds for FP16 sRGB exports. Each entry is
 // the first positive half encoding producing the next byte value. Captures of
 // all 65536 FP16 inputs agree on RDNA3 and RDNA4; applying the ideal sRGB curve
 // instead changes values near these boundaries.
-uint8_t srgb_color_byte(float value) {
+uint8_t srgb_color_byte(double value) {
   if (!(value > 0))
     return 0;
   if (value >= 1)
@@ -308,8 +343,12 @@ uint8_t srgb_color_byte(float value) {
       0x3b24, 0x3b34, 0x3b44, 0x3b58, 0x3b68, 0x3b7a, 0x3b8c, 0x3b9c, 0x3bb0, 0x3bc0, 0x3bd4,
       0x3be4, 0x3bf8,
   };
-  const uint16_t half = util::f32_to_f16(value);
-  return static_cast<uint8_t>(std::upper_bound(std::begin(boundaries), std::end(boundaries), half) -
+  // Comparing the unrounded blend result avoids a float conversion rounding up
+  // across an FP16 boundary before the color buffer truncates toward zero.
+  return static_cast<uint8_t>(std::upper_bound(std::begin(boundaries), std::end(boundaries), value,
+                                               [](double linear, uint16_t half) {
+                                                 return linear < util::f16_to_f32(half);
+                                               }) -
                               std::begin(boundaries));
 }
 } // namespace
@@ -318,7 +357,10 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                            std::vector<uint32_t> indices)
     : arch_(arch), vertex_count_(vertices), total_vertices_(vertices),
       instance_count_(state.num_instances), primitive_type_(state.uconfig_registers[0x242]),
-      indices_(std::move(indices)), sh_(state.sh_registers), context_(state.context_registers) {
+      indices_(std::move(indices)), sh_(state.sh_registers), context_(state.context_registers),
+      attribute_ring_base_(
+          addr_calc::buffer_virtual_address(uint64_t{state.uconfig_registers[0x446]} << 16)),
+      gs_registers_(state.gs_registers) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
       arch != ROCJITSU_CODE_ARCH_RDNA4)
     throw std::runtime_error("graphics draw requires RDNA3 or RDNA4");
@@ -386,6 +428,7 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
     context_[5] = (ctx[7] & 0x3fff) | (((ctx[7] >> 16) & 0x3fff) << 16);
     // MAXMIP moves from bits 16:19 to 15:19 on GFX12.
     context_[6] = (ctx[0x10] & ~0xf8000u) | ((ctx[0x10] & 0xf0000u) >> 1);
+    context_[7] = ctx[0x11]; // DB_STENCIL_INFO
     context_[8] = ctx[0x12];
     context_[9] = ctx[0x1a];
     context_[10] = ctx[0x14];
@@ -537,7 +580,9 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
   // GFX11+ merged GS repurposes PGM_LO/HI_GS as the first two user SGPRs.
   wave.debug_write_sgpr(0, sh_[gfx12 ? 0x84 : 0x88]);
   wave.debug_write_sgpr(1, sh_[gfx12 ? 0x85 : 0x89]);
-  wave.debug_write_sgpr(2, 0);
+  // Ordinary merged GS launches carry group counts as well as per-wave counts.
+  // The ordered wave ID is zero for our single-wave primitive groups.
+  wave.debug_write_sgpr(2, (vertex_count_ << 12) | (primitive_count() << 22));
   wave.debug_write_sgpr(3, vertex_count_ | (primitive_count() << 8));
   for (uint32_t i = 4; i < 8; ++i)
     wave.debug_write_sgpr(i, 0);
@@ -599,8 +644,11 @@ void GraphicsDraw::export_lane(Wavefront &wave, uint32_t lane, uint32_t target, 
       if (mask & (1u << i))
         positions_[lane][i] = values[i];
     position_masks_[lane] |= mask;
-  } else if (target == 13 && lane < vertex_count_ && mask == 4) {
-    layer_viewport_[lane] = values[2];
+  } else if (target == 13 && lane < vertex_count_ && !(context_[0x206] & 0x1813ffffu)) {
+    // Unused miscellaneous components may still be exported. Only Z carries
+    // the layer and viewport indices; the other enabled consumers need support.
+    if (mask & 4)
+      layer_viewport_[lane] = values[2];
   } else if (target == 20 && lane < primitive_count() && mask == 1) {
     primitives_[lane] = values[0];
     primitive_valid_[lane] = true;
@@ -693,16 +741,17 @@ void GraphicsDraw::prepare_colors() {
     const uint32_t view = context_[block + 1];
     color.first_layer = view & layer_mask;
     color.last_layer = (view >> layer_bits) & layer_mask;
+    // GFX11 META_LINEAR only controls enabled metadata. GFX12 reserves this bit.
     if (!color.memory_format || (color.srgb && color.export_format != kExportFp16Abgr) ||
         (swap && color.components != 4) || (attrib & ~allowed_attrib) ||
-        ((attrib3 >> 24) & 3) > 1 || (attrib3 & (1u << layer_bits)) ||
+        ((attrib3 >> 24) & 3) > 1 ||
+        ((gfx12 || color.metadata) && (attrib3 & (1u << layer_bits))) ||
         (context_[block + 2] & ~31u) || color.first_layer > color.last_layer ||
         color.last_layer > (attrib3 & layer_mask) || (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
         !supported_export_format(color.export_format, color.components))
       throw std::runtime_error("unsupported graphics color state");
     if ((color.blend & kBlendEnable) &&
-        (color.srgb ||
-         (color.memory_format != kBufRgba8Unorm && color.memory_format != kBufRgba16Float &&
+        ((color.memory_format != kBufRgba8Unorm && color.memory_format != kBufRgba16Float &&
           color.memory_format != kBufRgba32Float) ||
          !supported_blend(color.blend) ||
          ((color.blend & kBlendSeparateAlpha) && !supported_blend(color.blend >> 16))))
@@ -752,6 +801,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
   prepare_colors();
   depth_control_ = context_[0x1c];
+  // An invalid stencil surface disables stencil even when STENCIL_ENABLE is set.
+  if (!(context_[7] & 1))
+    depth_control_ &= ~1u;
   // Disabled stencil comparisons do not affect depth testing.
   if (depth_control_ & ~0x7007f6u)
     throw std::runtime_error(
@@ -814,15 +866,6 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   const uint32_t attributes = (sh_[0x31] >> 11) & 63;
   if (attributes > 32 || (sh_[0x31] >> 17))
     throw std::runtime_error("unsupported graphics parameter count");
-  std::array<uint32_t, 4> ring{};
-  if (attributes) {
-    const uint64_t table = (uint64_t{sh_[0x85]} << 32) | sh_[0x84];
-    if (memory.read(table + 0xa0, {reinterpret_cast<std::byte *>(ring.data()), sizeof(ring)}) !=
-        VmAccessOutcome::Complete)
-      throw std::runtime_error("graphics attribute descriptor read failed");
-  }
-  const uint64_t ring_base =
-      addr_calc::buffer_virtual_address((uint64_t{ring[1] & 0xffff} << 32) | ring[0]);
   const uint32_t ring_stride = ((sh_[0x31] & 31) + 1) * 16;
   const float sx = std::bit_cast<float>(context_[0x10f]);
   const float ox = std::bit_cast<float>(context_[0x110]);
@@ -1122,11 +1165,14 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
             if ((control & 32) && !passthrough) {
               values[k] = ((control >> 8) & (c == 3 ? 1u : 2u)) ? 1.0f : 0.0f;
             } else {
+              // The hardware attribute ring uses 16-byte elements interleaved
+              // across 32 vertices. Its base comes from SPI_ATTRIBUTE_RING_BASE,
+              // independently of the driver's shader descriptor table.
               const auto address = addr_calc::rdna_buffer_address(
-                  ring[1], ring[3], ring_stride, true, flat ? provoking_index : indices[k],
+                  3u << 30, 2u << 21, ring_stride, true, flat ? provoking_index : indices[k],
                   (control & 31) * 16 + c * 4, 0, 0);
               uint32_t bits = 0;
-              if (memory.read(ring_base + address.offset,
+              if (memory.read(attribute_ring_base_ + address.offset,
                               {reinterpret_cast<std::byte *>(&bits), sizeof(bits)}) !=
                   VmAccessOutcome::Complete)
                 throw std::runtime_error("graphics attribute read failed");
@@ -1247,6 +1293,35 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
 void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
   const auto image_address =
       arch_ == ROCJITSU_CODE_ARCH_RDNA4 ? gfx12_image_address : gfx11_image_address;
+  const auto decode_export = [](uint32_t format, const ColorExport &exported) {
+    auto components = exported.values;
+    uint32_t component_mask = exported.mask;
+    if (format == kExportFp16Abgr || format == kExportUnorm16Abgr || format == kExportSnorm16Abgr ||
+        format == kExportUint16Abgr || format == kExportSint16Abgr) {
+      if (exported.mask & ~3u)
+        throw std::runtime_error("unsupported packed graphics color export mask");
+      component_mask = ((exported.mask & 1) ? 3u : 0u) | ((exported.mask & 2) ? 12u : 0u);
+      for (uint32_t c = 0; c < 4; ++c) {
+        const uint16_t half = exported.values[c / 2] >> (16 * (c % 2));
+        if (format == kExportUint16Abgr)
+          components[c] = half;
+        else if (format == kExportUnorm16Abgr)
+          components[c] = std::bit_cast<uint32_t>(half / 65535.0f);
+        else if (format == kExportSnorm16Abgr)
+          components[c] =
+              std::bit_cast<uint32_t>(std::max(static_cast<int16_t>(half) / 32767.0f, -1.0f));
+        else if (format == kExportSint16Abgr)
+          components[c] = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(half)));
+        else
+          components[c] = std::bit_cast<uint32_t>(util::f16_to_f32(half));
+      }
+    } else {
+      const uint32_t export_mask = format == kExport32R ? 1u : format == kExport32Gr ? 3u : 15u;
+      if (exported.mask & ~export_mask)
+        throw std::runtime_error("unsupported graphics color export mask");
+    }
+    return ColorExport{.mask = component_mask, .values = components};
+  };
   const bool clamp_depth = !(context_[0x19] & 1);
   const float depth_min = std::bit_cast<float>(context_[0x115]);
   const float depth_max = std::bit_cast<float>(context_[0x116]);
@@ -1315,36 +1390,7 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         const auto &exported = f.exports[color.export_index];
         if (!exported.mask || batch.relative_layer > color.last_layer - color.first_layer)
           continue;
-        std::array<uint32_t, 4> components = exported.values;
-        uint32_t component_mask = exported.mask;
-        if (color.export_format == kExportFp16Abgr || color.export_format == kExportUnorm16Abgr ||
-            color.export_format == kExportSnorm16Abgr || color.export_format == kExportUint16Abgr ||
-            color.export_format == kExportSint16Abgr) {
-          if (exported.mask & ~3u)
-            throw std::runtime_error("unsupported packed graphics color export mask");
-          component_mask = ((exported.mask & 1) ? 3u : 0u) | ((exported.mask & 2) ? 12u : 0u);
-          for (uint32_t c = 0; c < 4; ++c) {
-            const uint16_t half = exported.values[c / 2] >> (16 * (c % 2));
-            if (color.export_format == kExportUint16Abgr)
-              components[c] = half;
-            else if (color.export_format == kExportUnorm16Abgr)
-              components[c] = std::bit_cast<uint32_t>(half / 65535.0f);
-            else if (color.export_format == kExportSnorm16Abgr)
-              components[c] =
-                  std::bit_cast<uint32_t>(std::max(static_cast<int16_t>(half) / 32767.0f, -1.0f));
-            else if (color.export_format == kExportSint16Abgr)
-              components[c] =
-                  static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(half)));
-            else
-              components[c] = std::bit_cast<uint32_t>(util::f16_to_f32(half));
-          }
-        } else {
-          const uint32_t export_mask = color.export_format == kExport32R    ? 1u
-                                       : color.export_format == kExport32Gr ? 3u
-                                                                            : 15u;
-          if (exported.mask & ~export_mask)
-            throw std::runtime_error("unsupported graphics color export mask");
-        }
+        auto [component_mask, components] = decode_export(color.export_format, exported);
         const uint64_t layer_base =
             image_layer_base(arch_ == ROCJITSU_CODE_ARCH_RDNA4, color.base, color.slice_size,
                              color.first_layer + batch.relative_layer, color.bytes, color.swizzle);
@@ -1378,12 +1424,14 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
             destination[c] = std::bit_cast<float>(decoded[c]);
             constant[c] = std::bit_cast<float>(context_[0x105 + c]);
             if (color.memory_format == kBufRgba8Unorm) {
-              source[c] = std::clamp(source[c], 0.0f, 1.0f);
+              source[c] = std::isnan(source[c]) ? 0 : std::clamp(source[c], 0.0f, 1.0f);
               // UNORM destinations round to twelve significant bits before blending.
               const uint32_t normalized = decoded[c];
               destination[c] =
                   std::bit_cast<float>((normalized + 0x7ffu + ((normalized >> 12) & 1)) & ~0xfffu);
-              constant[c] = std::clamp(constant[c], 0.0f, 1.0f);
+              if (color.srgb && c < 3)
+                destination[c] = srgb_color_linear(logical_previous[c]);
+              constant[c] = std::isnan(constant[c]) ? 0 : std::clamp(constant[c], 0.0f, 1.0f);
               // Color blending truncates UNORM constants to twelve significant bits.
               constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
             }
@@ -1397,13 +1445,27 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           if (color.memory_format == kBufRgba16Float)
             for (auto &value : constant)
               value = std::bit_cast<float>(std::bit_cast<uint32_t>(value) & ~0xfffu);
+          // SX classifies the raw export before arithmetic saturation. NaNs do
+          // not set zero/one flags, while negative values set the zero flag.
+          auto flag_source = source;
+          const uint32_t epsilon = (context_[0x1d6] >> (4 * target)) & 15;
+          const float threshold =
+              epsilon ? std::ldexp(epsilon & 1 ? 0.75f : 0.5f, int(epsilon / 2) - 11) : 0;
+          const auto source_flag = [&](float value) {
+            return value < threshold || value == 0       ? 0.0f
+                   : value > 1 - threshold || value == 1 ? 1.0f
+                                                         : value;
+          };
+          if (color.memory_format == kBufRgba8Unorm)
+            for (uint32_t c = 0; c < 4; ++c)
+              flag_source[c] = source_flag(std::bit_cast<float>(components[c]));
           const uint32_t opt_disable = context_[0x1d7] >> (4 * target);
           const uint32_t opt = context_[0x1d8 + target];
           const auto preserves_group = [&](bool alpha) {
             return !(write_mask & (alpha ? 8u : 7u)) ||
                    (!(opt_disable & (alpha ? 2u : 1u)) &&
-                    blend_preserves_destination(opt >> (alpha ? 16 : 0), alpha ? 3 : 0,
-                                                component_mask, source));
+                    blend_can_copy(BlendCopy::Destination, opt >> (alpha ? 16 : 0), alpha ? 3 : 0,
+                                   component_mask, flag_source));
           };
           // A destination bypass retains the whole pixel. A written group that
           // needs arithmetic also prevents the other group from bypassing.
@@ -1429,6 +1491,38 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
                 constant[c] = raster::blend_input(constant[c]);
               }
           }
+          if (color.memory_format == kBufRgba8Unorm) {
+            if (preserve_destination)
+              continue;
+            const auto copy_group = [&](bool alpha, const std::array<float, 4> &flags,
+                                        uint32_t mask, BlendCopy from = BlendCopy::Source) {
+              return !(color.write_mask & mask & (alpha ? 8u : 7u)) ||
+                     (!(opt_disable & (alpha ? 2u : 1u)) &&
+                      blend_can_copy(from, opt >> (alpha ? 16 : 0), alpha ? 3 : 0, mask, flags));
+            };
+            // Destination-preserving pixels leave the quad first. The remaining
+            // covered pixels must all permit a source copy to bypass arithmetic.
+            copy_source = true;
+            for (uint32_t neighbor = lane & ~3u; neighbor < (lane & ~3u) + 4; ++neighbor) {
+              const auto &fragment = batch.lanes[neighbor];
+              const auto &other = fragment.exports[color.export_index];
+              if (!fragment.covered || !other.mask)
+                continue;
+              const auto decoded_neighbor = decode_export(color.export_format, other);
+              const uint32_t mask = decoded_neighbor.mask;
+              std::array<float, 4> flags;
+              for (uint32_t c = 0; c < 4; ++c)
+                flags[c] = source_flag(std::bit_cast<float>(decoded_neighbor.values[c]));
+              if (copy_group(false, flags, mask, BlendCopy::Destination) &&
+                  copy_group(true, flags, mask, BlendCopy::Destination))
+                continue;
+              copy_source &= copy_group(false, flags, mask) && copy_group(true, flags, mask);
+            }
+            if (copy_source)
+              for (uint32_t c = 0; c < 4; ++c)
+                bytes[c] =
+                    color.srgb && c < 3 ? srgb_color_byte(source[c]) : unorm_color_byte(source[c]);
+          }
           if (!copy_source) {
             for (uint32_t c = 0; c < 4; ++c) {
               const uint32_t control =
@@ -1439,7 +1533,8 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
               if (color.memory_format == kBufRgba8Unorm) {
                 // Keep blend precision through byte quantization. Rounding to
                 // FP32 first can cross a UNORM midpoint, even with FP16 exports.
-                bytes[c] = unorm_color_byte(blended);
+                bytes[c] =
+                    color.srgb && c < 3 ? srgb_color_byte(blended) : unorm_color_byte(blended);
                 continue;
               }
               float result = static_cast<float>(blended);
@@ -1454,7 +1549,7 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         if (!(blend & kBlendEnable) || color.memory_format != kBufRgba8Unorm)
           pack_buffer_format(color.memory_format, 0xfac, components,
                              std::span{bytes}.first(color.bytes));
-        if (color.srgb)
+        if (color.srgb && !(blend & kBlendEnable))
           for (uint32_t c = 0; c < 3; ++c)
             bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
         std::array<uint8_t, 16> output = previous;
