@@ -283,6 +283,7 @@ public:
     cu->set_gpu_vm(gpu_vm_);
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
+    on_cu_pool_ready(cu);
   }
 
   void startup() override;
@@ -759,10 +760,9 @@ private:
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
 
-  bool has_runnable_cus() const;
   FunctionalQuantumResult run_active_cus_once(simdojo::Tick now);
-  void refresh_pooled_due_ticks(simdojo::Tick now);
-  simdojo::Tick next_pooled_due_tick(simdojo::Tick now);
+  void prune_pooled_due_ticks();
+  simdojo::Tick next_pooled_due_tick();
   void arm_dispatch_continuation(simdojo::Tick tick);
   void cancel_dispatch_continuation();
 

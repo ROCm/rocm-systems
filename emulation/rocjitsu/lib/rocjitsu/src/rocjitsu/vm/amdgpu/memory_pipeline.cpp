@@ -779,7 +779,13 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
 
-  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+  if (d.lane_mask == 0)
+    return VmAccessOutcome::Complete;
+  DeviceCacheCoherence::AtomicBoundary boundary = l2->coherence_domain()->acquire_atomic_boundary();
+  if (boundary.outcome() != VmAccessOutcome::Complete)
+    return boundary.outcome();
+
+  for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
@@ -787,7 +793,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
 
     // Perform the atomic RMW under L2's atomic lock.
     const VmAccessOutcome outcome = l2->atomic_rmw(
-        ea, esz,
+        boundary, ea, esz,
         [&](uint8_t *line_data, uint32_t offset) {
           if (esz == 4) {
             uint32_t old_val;
@@ -842,8 +848,11 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
           }
         },
         vmid);
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
+      d.translated.atomic_lane = lane;
       return outcome;
+    }
+    d.translated.atomic_lane = lane + 1;
   }
   return VmAccessOutcome::Complete;
 }

@@ -142,7 +142,8 @@ struct VmFixture {
 
   VmFixture(std::string_view arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
             uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104, uint32_t vgprs_per_wf = 256,
-            uint32_t num_shader_engines = 1, uint64_t max_ticks = 10000) {
+            uint32_t num_shader_engines = 1, uint64_t max_ticks = 10000,
+            bool create_engine = true) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string shader_engines;
     std::string links;
@@ -195,7 +196,8 @@ struct VmFixture {
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
-    engine->create();
+    if (create_engine)
+      engine->create();
   }
 
   amdgpu::Xcd *xcd(uint32_t idx = 0) { return soc_ptr->xcd(idx); }
@@ -1603,7 +1605,8 @@ TEST(GpuMemoryTest, SanitizedMtypeLookupAvoidsAllocatorMetadataReentry) {
   };
   memory.set_page_table_unlocked_hook(&query_hook);
   {
-    amdgpu::RequestMtypeResolver request(&memory.gpu_vm(), kPid);
+    amdgpu::VmMtypeCache policy_cache;
+    amdgpu::RequestMtypeResolver request(&memory.gpu_vm(), kPid, policy_cache);
     EXPECT_EQ(request.at(kBaseVa), amdgpu::Mtype::UC);
     EXPECT_EQ(hook_calls, 0u);
   }
@@ -5494,6 +5497,22 @@ TEST(AqlDispatchTest, CompletedPoolBatchRefillsIdleComputeUnits) {
   }
 
   EXPECT_EQ(completion_signal_value(f.mem(), signal), 0);
+}
+
+TEST(AqlDispatchTest, PoolFindsWavesAdmittedBeforeEngineAttachment) {
+  VmFixture f("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_shader_engines=*/1,
+              /*max_ticks=*/10000, /*create_engine=*/false);
+  f.cp()->set_dispatch_threads(2);
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  f.mem()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), 0x1000);
+  ASSERT_NE(f.cu(1)->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/104,
+                                 /*num_vgprs=*/256),
+            nullptr);
+  f.engine->create();
+  f.engine->schedule_event_now(f.cp()->doorbell_event());
+  f.engine->run();
+  EXPECT_TRUE(f.cu(1)->is_idle());
 }
 
 TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave) {

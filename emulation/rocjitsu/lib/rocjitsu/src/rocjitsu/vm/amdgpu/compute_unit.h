@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -247,6 +248,11 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
+    // Reuse instruction-fetch snapshots only within this execution quantum.
+    // Restore the outer scope on exceptions and nested quantum execution too.
+    InstructionVmSnapshot snapshot;
+    snapshot.compute_unit = this;
+    ScopedInstructionVmSnapshot scope(&snapshot);
     // A request left by direct step() execution must not shorten this quantum.
     functional_yield_requested_ = false;
     FunctionalQuantumResult result;
@@ -284,7 +290,6 @@ public:
   /// @brief Check whether this CU has no runnable wavefronts.
   /// @retval true No wavefront can currently execute.
   /// @retval false At least one wavefront can execute.
-  /// @warning NOT thread-safe (see has_runnable_wfs()): engine-thread only.
   virtual bool is_idle() const { return !has_runnable_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
@@ -648,15 +653,8 @@ public:
   /// @brief Check whether any wavefront slot is actively executing.
   /// @retval true At least one resident wavefront is not halted.
   /// @retval false All slots are unallocated or halted.
-  /// @warning NOT thread-safe: reads the non-atomic per-wave state_. Safe only on the
-  ///   shared partition engine thread (CP and its CUs share one partition, asserted in
-  ///   CommandProcessor::startup()); callers on any other thread would race a halt().
   bool has_active_wfs() const {
-    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
-    for (const auto &w : wfs_)
-      if (w && !w->is_halted())
-        return true;
-    return false;
+    return static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) != 0;
   }
 
   /// @brief Check whether any wavefront can currently make forward progress.
@@ -666,11 +664,7 @@ public:
   /// @ref has_active_wfs so the engine can quiesce while a wave is stopped at
   /// a breakpoint. @retval true At least one non-halted, non-debug-halted wave.
   bool has_runnable_wfs() const {
-    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
-    for (const auto &w : wfs_)
-      if (w && !w->is_halted() && !w->debug_paused())
-        return true;
-    return false;
+    return (wave_activity_.load(std::memory_order_acquire) >> 32) != 0;
   }
 
   template <typename F> decltype(auto) with_wave_state_locked(F &&fn) {
@@ -1207,6 +1201,10 @@ protected:
   SgprFile sgpr_file_{"sgpr"};
   /// Null slots are idle; materialized waves persist across dispatches.
   std::vector<std::unique_ptr<Wavefront>> wfs_;
+  friend class Wavefront;
+  // Low/high halves count active/runnable waves. Publish both in one update
+  // so a pause or retirement cannot expose half of an activity transition.
+  std::atomic<uint64_t> wave_activity_{0};
   /// @brief Hold the wave-state lock, then notify the CP once it is released.
   /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
   /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running
@@ -1315,6 +1313,28 @@ protected:
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
+
+  struct InstructionVmSnapshot {
+    ComputeUnitCore *compute_unit = nullptr;
+    GpuVm *owner = nullptr;
+    AddressSpaceHandle address_space;
+    uint32_t vmid = 0;
+    std::optional<GpuVmAccess> access;
+  };
+  // Only the scope pointer is thread-local; the snapshot itself lives on the
+  // quantum's stack and releases all backing references before returning.
+  static thread_local InstructionVmSnapshot *instruction_vm_snapshot_;
+  class ScopedInstructionVmSnapshot {
+  public:
+    explicit ScopedInstructionVmSnapshot(InstructionVmSnapshot *snapshot)
+        : previous_(std::exchange(instruction_vm_snapshot_, snapshot)) {}
+    ScopedInstructionVmSnapshot(const ScopedInstructionVmSnapshot &) = delete;
+    ScopedInstructionVmSnapshot &operator=(const ScopedInstructionVmSnapshot &) = delete;
+    ~ScopedInstructionVmSnapshot() { instruction_vm_snapshot_ = previous_; }
+
+  private:
+    InstructionVmSnapshot *previous_;
+  };
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 

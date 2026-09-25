@@ -587,7 +587,7 @@ public:
   void set_wait_all() {
     wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0, 0};
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
@@ -595,56 +595,56 @@ public:
     wait_target_.lgkmcnt = lgkmcnt;
     wait_target_.expcnt = expcnt;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
   void set_wait_target_vscnt(uint8_t threshold) {
     wait_target_.vscnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
   void set_wait_target_loadcnt(uint8_t threshold) {
     wait_target_.vmcnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
   void set_wait_target_storecnt(uint8_t threshold) {
     wait_target_.vscnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
   void set_wait_target_dscnt(uint8_t threshold) {
     wait_target_.dscnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
   void set_wait_target_kmcnt(uint8_t threshold) {
     wait_target_.kmcnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the TENSORCNT target (GFX12.5 S_WAIT_TENSORCNT).
   void set_wait_target_tensorcnt(uint8_t threshold) {
     wait_target_.tensorcnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the ASYNCCNT target (GFX12.5 S_WAIT_ASYNCCNT).
   void set_wait_target_asynccnt(uint8_t threshold) {
     wait_target_.asynccnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
@@ -652,7 +652,7 @@ public:
     wait_target_.vscnt = storecnt;
     wait_target_.dscnt = dscnt;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
@@ -660,7 +660,7 @@ public:
     wait_target_.vmcnt = loadcnt;
     wait_target_.dscnt = dscnt;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set a single split-wait counter threshold by name.
@@ -686,15 +686,15 @@ public:
     else if (name == "wait_expcnt") {
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
+        set_state(WfState::WAITCNT);
     } else if (name == "wait_samplecnt") {
       wait_target_.samplecnt = t;
       if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
+        set_state(WfState::WAITCNT);
     } else if (name == "wait_bvhcnt") {
       wait_target_.vmcnt = t; // map to vmcnt
       if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
+        set_state(WfState::WAITCNT);
     } else if (name == "wait_loadcnt_dscnt") {
       set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
                                     static_cast<uint8_t>(threshold & 0x3F));
@@ -746,7 +746,12 @@ public:
 
   /// @brief Set the execution state.
   /// @param s New execution state.
-  void set_state(WfState s) { state_ = s; }
+  void set_state(WfState s) {
+    const bool was_active = !is_halted();
+    state_ = s;
+    if (was_active != !is_halted())
+      update_activity_counts(was_active, was_active && !debug_paused());
+  }
 
   /// @brief Check whether this wavefront slot is halted.
   /// @retval true Slot is halted and available for dispatch.
@@ -861,19 +866,34 @@ public:
   /// @details A debug-halted wave keeps its slot and all register state; the
   /// scheduler skips it so the CU can go quiescent without retiring the wave.
   bool debug_halted() const { return debug_halted_; }
-  void set_debug_halted(bool v) { debug_halted_ = v; }
+  void set_debug_halted(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    debug_halted_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
 
   /// @brief Whether KFD has temporarily suspended this wave's queue.
   /// @details Queue suspension freezes execution for a stable CWSR snapshot,
   /// but unlike debug_halted it does not imply an architectural stop reason.
   bool debug_suspended() const { return debug_suspended_; }
-  void set_debug_suspended(bool v) { debug_suspended_ = v; }
+  void set_debug_suspended(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    debug_suspended_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
   /// @brief Runtime-suspended: the queue's queue_percentage went to zero.
   /// @details A separate reason from the debugger's, because the two overlap.
   /// Sharing one bit let a runtime resume clear a debugger pause, and a
   /// debugger or CWSR resume clear an active runtime pause.
   bool runtime_suspended() const { return runtime_suspended_; }
-  void set_runtime_suspended(bool v) { runtime_suspended_ = v; }
+  void set_runtime_suspended(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    runtime_suspended_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
 
   /// @brief Whether a *debugger* currently holds this wave stopped.
   /// @details Deliberately excludes runtime_suspended_: KFD uses this to decide
@@ -925,7 +945,7 @@ public:
   /// the saved PC points just after the trap, matching the ROCr trap handler.
   void debug_trap(uint32_t trap_id) {
     trap_id_ = trap_id;
-    debug_halted_ = true;
+    set_debug_halted(true);
     single_step_ = false;
   }
 
@@ -961,7 +981,7 @@ public:
     set_mode_raw(saved.mode_raw);
     gfx12_trap_ctrl_raw_ = saved.gfx12_trap_ctrl_raw;
     trap_id_ = saved.trap_id;
-    debug_halted_ = saved.debug_halted;
+    set_debug_halted(saved.debug_halted);
     single_step_ = saved.single_step;
     fatal_exception_pending_ = saved.fatal_exception_pending;
     fatal_exception_cwsr_valid_ = saved.fatal_exception_cwsr_valid;
@@ -992,7 +1012,7 @@ public:
     if (wait_counters_.empty())
       halt();
     else
-      state_ = WfState::ENDING;
+      set_state(WfState::ENDING);
   }
 
   /// @brief Log instruction count at end for trace/debug.
@@ -1054,7 +1074,7 @@ public:
     wait_counters_ = {};
     wait_target_ = {};
     ready_cycle_ = 0;
-    state_ = WfState::HALTED;
+    set_state(WfState::HALTED);
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
@@ -1088,6 +1108,9 @@ protected:
   /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
             uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en);
+
+  void update_activity_counts(bool was_active, bool was_runnable);
+  bool activity_tracked_ = false;
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
