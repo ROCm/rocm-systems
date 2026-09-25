@@ -16,14 +16,12 @@
 
 namespace RcclUnitTesting
 {
-  // Return true if device 0's architecture is one for which the LL128 P2P send/recv kernel is
-  // generated and activated (gfx942/gfx950/gfx1250; see reg_values_of("SendRecv") and the enqueue
-  // gate). The arch is queried in a forked child so the parent test process does not initialize
-  // HIP (mirrors EnvVars' isolated arch detection).
-  static bool DeviceSupportsLL128SendRecv()
+  // Return device 0's gcnArchName. Queried in a forked child so the parent test process
+  // does not initialize HIP (mirrors EnvVars' isolated arch detection).
+  static std::string DeviceGcnArchName()
   {
     int pipefd[2];
-    if (pipe(pipefd) != 0) return false;
+    if (pipe(pipefd) != 0) return "";
     pid_t pid = fork();
     if (pid == 0)
     {
@@ -43,9 +41,22 @@ namespace RcclUnitTesting
     (void)r;
     close(pipefd[0]);
     waitpid(pid, nullptr, 0);
-    std::string a(arch);
+    return std::string(arch);
+  }
+
+  // Return true if device 0's architecture is one for which the LL128 P2P send/recv kernel is
+  // generated and activated (gfx942/gfx950/gfx1250; see reg_values_of("SendRecv") and the enqueue
+  // gate).
+  static bool DeviceSupportsLL128SendRecv()
+  {
+    std::string a = DeviceGcnArchName();
     return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos ||
            a.find("gfx1250") != std::string::npos;
+  }
+
+  static bool DeviceIsGfx1250()
+  {
+    return DeviceGcnArchName().find("gfx1250") != std::string::npos;
   }
 
   // Scan the NCCL_DEBUG_SUBSYS=COLL log files matching globPattern for the per-op protocol line
@@ -766,6 +777,7 @@ namespace RcclUnitTesting
   TEST(SendRecv, UserBufferRegister)
   {
     setenv("RCCL_ENABLE_INTRANET", "1", 1);
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1); // keep UBR on SIMPLE; auto windows would skip it
     TestBed testBed;
 
     // Configuration
@@ -860,6 +872,74 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
     }
     testBed.Finalize();
+    unsetenv("NCCL_P2P_LL128_ENABLE");
     unsetenv("RCCL_ENABLE_INTRANET");
+  }
+
+  // gfx1250 auto windows (ENABLE unset): 4/8/16 ranks pick LL below 4 KiB, LL128 in the
+  // window, SIMPLE above it. Host table tests cannot see enqueue selection; this scrapes
+  // NCCL_DEBUG COLL on a 4ppn-shaped comm.
+  TEST(SendRecv, Gfx1250AutoWindowSelectsLL128)
+  {
+    if (!DeviceIsGfx1250()) {
+      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+    }
+    unsetenv("NCCL_P2P_LL128_ENABLE");
+    std::string const debugGlob = "/tmp/rccl_gfx1250_auto_win_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_auto_win_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus != 4 && testBed.ev.maxGpus != 8 && testBed.ev.maxGpus != 16) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        GTEST_SKIP() << "Skipping... auto windows key off nRanks 4/8/16 (detected "
+                     << testBed.ev.maxGpus << " GPUs).";
+      }
+      int numGpus = testBed.ev.maxGpus;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {1},
+                        testBed.GetNumStreamsPerGroup(1, 1), 1);
+      if (::testing::Test::HasFatalFailure()) return;
+
+      OptionalColArgs options;
+      // int8 so element count is the byte size. 2 KiB = LL, 16 KiB = LL128 (in every window),
+      // 2 MiB = SIMPLE (above the 1 MiB / 512 KiB / 256 KiB caps).
+      std::vector<int> const numElements = {2048, 16384, 1 << 21};
+      bool isCorrect = true;
+      for (int numIdx = 0; numIdx < (int)numElements.size() && isCorrect; ++numIdx) {
+        int n = numElements[numIdx];
+        options.root = 1;
+        testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, n, n, options, 0, 0, 0);
+        testBed.AllocateMem(false, false, 0, 0, 0);
+        testBed.PrepareData(0, 0, 0);
+        options.root = 0;
+        testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, n, n, options, 0, 0, 1);
+        testBed.AllocateMem(false, false, 0, 0, 1);
+        testBed.PrepareData(0, 0, 1);
+        testBed.ExecuteCollectives({0, 1}, 0);
+        testBed.ValidateResults(isCorrect, 0, 0, 1);
+        testBed.DeallocateMem(0, 0, 1);
+        testBed.DeallocateMem(0, 0, 0);
+      }
+      EXPECT_TRUE(isCorrect);
+      testBed.DestroyComms();
+      testBed.Finalize();
+    }
+    bool const sawLL     = DebugLogsContainProtocol(debugGlob, "LL");
+    bool const sawLL128  = DebugLogsContainProtocol(debugGlob, "LL128");
+    bool const sawSimple = DebugLogsContainProtocol(debugGlob, "Simple");
+    EXPECT_TRUE(sawLL) << "2 KiB should stay legacy LL below the 4 KiB floor";
+    EXPECT_TRUE(sawLL128) << "16 KiB should take the gfx1250 SendRecv auto LL128 window";
+    EXPECT_TRUE(sawSimple) << "2 MiB should be SIMPLE above the auto-window cap";
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
   }
 }

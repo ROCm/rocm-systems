@@ -1363,7 +1363,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //     function. Wire<->data chunk conversion uses comm->ll128LineElems/ll128DataElems
   //     (8/7 on gfx9, 16/15 on gfx1250) rather than the legacy-LL x2 factor.
   //   - legacy LL kernel (reg=0): every other arch/comm, or when the LL128 path is not selected.
-  // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
+  // The kernel variant is per P2P round (useLL128SendRecv is recomputed from protocol[0/1]
+  // after selection). sendProtoLL/recvProtoLL can still differ for SIMPLE vs latency.
   // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950, 1250 = gfx1250.
   // LL128 send/recv requires ALL of:
   //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
@@ -1483,18 +1484,18 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   }
 
   // One P2P kernel variant for both dirs (ncclDevWorkP2p has no per-dir LL vs LL128). If this
-  // round mixed LL and LL128, run both as the same LL-family protocol so an LL-planned dir does
-  // not execute ProtoLL128 against an LL peer.
+  // round mixed LL and LL128, demote LL128 to LL. Promoting the LL dir to LL128 would pick that
+  // connection's framing from the other dir's size, and the peer on that link never saw that
+  // size (it is a different rank except delta 0 or n/2). Demoting keeps mixed rounds on legacy
+  // LL, which every rank with the same send/recv sizes computes the same way. It also leaves
+  // AlltoAll (srLl128Hi=0) on the threshold path instead of inheriting a paired SendRecv window.
   if (bytes[0] != -1 && bytes[1] != -1) {
     bool llFam0 = protocol[0] == NCCL_PROTO_LL || protocol[0] == NCCL_PROTO_LL128;
     bool llFam1 = protocol[1] == NCCL_PROTO_LL || protocol[1] == NCCL_PROTO_LL128;
     if (llFam0 && llFam1 && protocol[0] != protocol[1]) {
-      if (hasLL128[0] && hasLL128[1]) {
-        protocol[0] = protocol[1] = NCCL_PROTO_LL128;
-      } else if (hasLL[0] && hasLL[1]) {
-        protocol[0] = protocol[1] = NCCL_PROTO_LL;
-      } else {
-        protocol[0] = protocol[1] = NCCL_PROTO_SIMPLE;
+      for (int d = 0; d < 2; d++) {
+        if (protocol[d] != NCCL_PROTO_LL128) continue;
+        protocol[d] = hasLL[d] ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
       }
     }
   }
