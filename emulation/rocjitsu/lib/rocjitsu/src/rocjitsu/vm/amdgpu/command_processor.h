@@ -147,6 +147,10 @@ public:
 
   using ScratchBackingAllocator =
       std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
+  /// Ensure the requested pool is backed before each shard admits its first wave.
+  /// Requests may repeat or overlap: preserve existing storage and mappings,
+  /// including live spills, and allocate only missing ranges. Wave admission
+  /// still validates the access permissions of each wave's slice afterward.
   void set_scratch_backing_allocator(ScratchBackingAllocator cb) {
     scratch_allocator_ = std::move(cb);
   }
