@@ -303,22 +303,27 @@ inline std::string mpiCoordinatedSkipReason(bool localSkip, const char* localRea
  *
  * GTEST_SKIP() in a helper only returns from the helper, so the calling test
  * would continue and fail ncclDevCommCreate. Expand this after
- * createTestCommunicator() in the TEST body (or the run* that is the test).
+ * createTestCommunicator() in the TEST body (or the run* that is the test),
+ * on every rank: the skip is an MPI_Allreduce, and a rank that does not reach
+ * it will hang.
  *
- * Skips only when getActiveCommunicator() is non-null AND
- * comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE. Requires comm.h at the
- * expansion site. Does not replace ginProxyTestSkipReason env gates.
+ * A rank skips locally when getActiveCommunicator() is non-null AND
+ * comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE. Every rank then skips
+ * if any rank would, so a mixed NONE/supported split cannot leave some ranks
+ * inside a GIN collective. Requires comm.h at the expansion site. Does not
+ * replace ginProxyTestSkipReason env gates.
  */
-#define SKIP_IF_GIN_UNSUPPORTED()                                                     \
-    do                                                                                \
-    {                                                                                 \
-        ncclComm_t skipGinComm = getActiveCommunicator();                             \
-        if(skipGinComm != nullptr &&                                                  \
-           skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE)                 \
-        {                                                                             \
-            GTEST_SKIP()                                                              \
-                << "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"; \
-        }                                                                             \
+#define SKIP_IF_GIN_UNSUPPORTED()                                                              \
+    do                                                                                         \
+    {                                                                                          \
+        ncclComm_t skipGinComm = getActiveCommunicator();                                      \
+        const bool skipGinLocal =                                                              \
+            skipGinComm != nullptr && skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE; \
+        const std::string skipGinReason = mpiCoordinatedSkipReason(                            \
+            skipGinLocal,                                                                      \
+            "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"); \
+        if(!skipGinReason.empty())                                                             \
+            GTEST_SKIP() << skipGinReason;                                                     \
     } while(0)
 
 // Debug Logging Macros (TEST_*)
