@@ -54,7 +54,7 @@ impl CacheInfo {
         self.level
     }
 
-    /// Returns the cache capacity value reported by native topology.
+    /// Returns the cache capacity in bytes reported by native topology.
     #[must_use]
     pub const fn size(&self) -> u32 {
         self.size

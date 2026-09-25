@@ -1174,13 +1174,19 @@ fn backing_and_create_failures_release_only_resources_that_were_acquired() {
 
     let fixture = Fixture::new(true);
     fixture.state.lock().unwrap().create_errno = Some(12);
-    assert!(fixture.create(desc).is_err());
+    assert_ne!(
+        fixture.create(desc).err().unwrap().kind(),
+        ErrorKind::ResourceOwnershipUncertain
+    );
     fixture.assert_released();
     assert_eq!(fixture.state.lock().unwrap().destroys, 0);
 
     let fixture = Fixture::new(true);
     fixture.state.lock().unwrap().create_errno = Some(14);
-    assert!(fixture.create(desc).is_err());
+    assert_eq!(
+        fixture.create(desc).err().unwrap().kind(),
+        ErrorKind::ResourceOwnershipUncertain
+    );
     let state = fixture.state.lock().unwrap();
     assert_eq!(state.creates, 1);
     assert_eq!(state.destroys, 0);
@@ -1214,10 +1220,13 @@ fn doorbell_mapping_failure_destroys_known_queue_before_releasing_backing() {
             .unwrap()
             .destroy_errno
             .extend(destroy_errno);
-        assert!(
-            fixture
-                .create(descriptor(aql(QueueProducerMode::Single)))
-                .is_err()
+        let failure = fixture
+            .create(descriptor(aql(QueueProducerMode::Single)))
+            .err()
+            .unwrap();
+        assert_eq!(
+            failure.kind() == ErrorKind::ResourceOwnershipUncertain,
+            destroy_errno.is_some()
         );
         let state = fixture.state.lock().unwrap();
         assert_eq!(state.destroys, 1);

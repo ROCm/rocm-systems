@@ -33,6 +33,8 @@ pub(super) struct DmaBufDetails {
 
 unsafe extern "C" {
     fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
+    fn pread(fd: c_int, buffer: *mut c_void, count: usize, offset: i64) -> isize;
+    fn pwrite(fd: c_int, buffer: *const c_void, count: usize, offset: i64) -> isize;
     fn mmap(
         address: *mut c_void,
         length: usize,
@@ -44,6 +46,44 @@ unsafe extern "C" {
     fn madvise(address: *mut c_void, length: usize, advice: c_int) -> c_int;
     fn munmap(address: *mut c_void, length: usize) -> c_int;
     fn syscall(number: c_long, ...) -> c_long;
+}
+
+/// Borrows a caller-owned descriptor and writable host range for one read.
+pub(super) unsafe fn read_descriptor(
+    descriptor: i32,
+    address: usize,
+    size: usize,
+    offset: i64,
+) -> io::Result<usize> {
+    if descriptor < 0 || address == 0 || size > isize::MAX as usize || offset < 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    // SAFETY: The caller promises the complete writable range for this call.
+    let result = unsafe { pread(descriptor, address as *mut c_void, size, offset) };
+    if result < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        usize::try_from(result).map_err(|_| io::Error::from(io::ErrorKind::InvalidData))
+    }
+}
+
+/// Borrows a caller-owned descriptor and readable host range for one write.
+pub(super) unsafe fn write_descriptor(
+    descriptor: i32,
+    address: usize,
+    size: usize,
+    offset: i64,
+) -> io::Result<usize> {
+    if descriptor < 0 || address == 0 || size > isize::MAX as usize || offset < 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    // SAFETY: The caller promises the complete readable range for this call.
+    let result = unsafe { pwrite(descriptor, address as *const c_void, size, offset) };
+    if result < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        usize::try_from(result).map_err(|_| io::Error::from(io::ErrorKind::InvalidData))
+    }
 }
 
 const PROT_NONE: c_int = 0;

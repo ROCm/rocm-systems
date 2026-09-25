@@ -20,6 +20,10 @@ pub(crate) use linux_kfd::{
     NativeVirtualAddress, NativeVirtualDeviceMapping, NativeVirtualHostMapping,
     NativeVirtualMemory,
 };
+#[cfg(target_os = "linux")]
+pub(crate) use linux_kfd::{
+    close_descriptor, descriptor_length, read_descriptor, read_descriptor_exact, write_descriptor,
+};
 #[cfg(not(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")

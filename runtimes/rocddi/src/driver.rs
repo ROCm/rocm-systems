@@ -24,6 +24,10 @@ pub(crate) use builtin::{
     NativePcSampling, NativeQueue, NativeVirtualAddress, NativeVirtualDeviceMapping,
     NativeVirtualHostMapping, NativeVirtualMemory, PlatformDriver,
 };
+#[cfg(target_os = "linux")]
+pub(crate) use builtin::{
+    close_descriptor, descriptor_length, read_descriptor, read_descriptor_exact, write_descriptor,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) trait ProviderDriver: Send + Sync {
@@ -159,6 +163,7 @@ pub(crate) trait KernelQueueDriver: Send + Sync {
 
 pub(crate) trait DeviceDriver: Send + Sync {
     fn check(&self, device: &DeviceState) -> Result<(), Error>;
+    fn asic_family_id(&self, device: &DeviceState) -> Result<u32, Error>;
     fn clock_counters(&self, device: &DeviceState) -> Result<ClockCounters, Error>;
     fn available_memory(&self, device: &DeviceState) -> Result<u64, Error>;
     fn set_trap_handler(

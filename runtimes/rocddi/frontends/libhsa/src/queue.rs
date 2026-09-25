@@ -169,7 +169,10 @@ pub(crate) struct Queue {
 fn stop_queue_event_worker(alive: &AtomicBool, worker: &mut Option<JoinHandle<()>>) {
     alive.store(false, Ordering::Release);
     if let Some(worker) = worker.take() {
-        let _ = worker.join();
+        if worker.thread().id() != thread::current().id() {
+            let _ = worker.join();
+        }
+        // The worker owns the signal and stop Arc values until it exits.
     }
 }
 
@@ -482,7 +485,9 @@ fn handle_queue_event(
     )
     .and_then(|(allocation, scratch)| {
         let queue = runtime.queues.get_mut(&key).ok_or(INVALID_QUEUE)?;
-        queue.native.set_scratch(scratch).map_err(map_error)?;
+        // SAFETY: The KFD insufficient-scratch event stopped firmware.
+        // The replacement allocation remains owned by the queue on success.
+        unsafe { queue.native.set_scratch(scratch) }.map_err(map_error)?;
         queue.scratch = Some(allocation);
         queue.inactive_signal.release_queue();
         Ok(())
@@ -497,6 +502,21 @@ fn handle_queue_event(
             rearm: false,
         },
     })
+}
+
+fn discard_unpublished_queue(
+    mut native: rocddi::gpu::queue::Queue,
+    inactive_signal: Arc<QueueEventSignal>,
+    scratch: Option<Allocation>,
+    status: Status,
+) -> Status {
+    if native.destroy().is_err() {
+        // Firmware may still hold the signal and scratch addresses.
+        std::mem::forget(native);
+        std::mem::forget(inactive_signal);
+        std::mem::forget(scratch);
+    }
+    status
 }
 
 fn queue_event_worker(
@@ -658,40 +678,54 @@ fn create_hardware_queue(
             }
         };
     let mut native = match runtime.gpus[index].device.gpu().and_then(|gpu| {
-        gpu.create_queue(QueueRequest {
-            ring_size_bytes,
-            parameters: QueueParameters::Aql {
-                producer_mode: if queue_type == QUEUE_TYPE_SINGLE {
-                    QueueProducerMode::Single
-                } else {
-                    QueueProducerMode::Multiple
+        // SAFETY: The queue owner retains the inactive signal and scratch
+        // backing through successful destruction and failed acquisition.
+        unsafe {
+            gpu.create_queue(QueueRequest {
+                ring_size_bytes,
+                parameters: QueueParameters::Aql {
+                    producer_mode: if queue_type == QUEUE_TYPE_SINGLE {
+                        QueueProducerMode::Single
+                    } else {
+                        QueueProducerMode::Multiple
+                    },
+                    inactive_signal: Some(inactive_signal.handle()),
+                    error_event: Some(inactive_signal.error_event()),
+                    scratch,
                 },
-                inactive_signal: Some(inactive_signal.handle()),
-                error_event: Some(inactive_signal.error_event()),
-                scratch,
-            },
-            priority,
-            device_producer: false,
-        })
+                priority,
+                device_producer: false,
+            })
+        }
     }) {
         Ok(queue) => queue,
-        Err(error) => return map_error(error),
+        Err(error) => {
+            if error.kind() == rocddi::ErrorKind::ResourceOwnershipUncertain {
+                std::mem::forget(inactive_signal);
+                std::mem::forget(scratch_allocation);
+            }
+            return map_error(error);
+        }
     };
     if let Some(cu_mask) = cu_mask {
         if let Err(error) = native.set_cu_mask(cu_mask) {
-            let _ = native.destroy();
-            return map_error(error);
+            return discard_unpublished_queue(
+                native,
+                inactive_signal,
+                scratch_allocation,
+                map_error(error),
+            );
         }
     }
     let info = native.info();
     if info.write_index_host_address < WRITE_INDEX_OFFSET
         || info.read_index_host_address < READ_INDEX_OFFSET
     {
-        return ERROR;
+        return discard_unpublished_queue(native, inactive_signal, scratch_allocation, ERROR);
     }
     let public = info.write_index_host_address - WRITE_INDEX_OFFSET;
     if info.read_index_host_address - READ_INDEX_OFFSET != public || public % 128 != 0 {
-        return ERROR;
+        return discard_unpublished_queue(native, inactive_signal, scratch_allocation, ERROR);
     }
     let mut doorbell = Box::new(AmdSignal::doorbell(info.doorbell_host_address, public));
     let doorbell_handle = (&raw mut *doorbell) as usize as u64;
@@ -1855,6 +1889,24 @@ mod tests {
 
         assert!(worker.is_none());
         assert!(finished.load(Ordering::Acquire));
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn callback_can_stop_its_own_event_worker() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let (handle_tx, handle_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_alive = alive.clone();
+        let worker = thread::spawn(move || {
+            let mut own_handle = Some(handle_rx.recv().unwrap());
+            stop_queue_event_worker(&worker_alive, &mut own_handle);
+            done_tx
+                .send(own_handle.is_none() && !worker_alive.load(Ordering::Acquire))
+                .unwrap();
+        });
+        handle_tx.send(worker).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
     }
 
     #[test]

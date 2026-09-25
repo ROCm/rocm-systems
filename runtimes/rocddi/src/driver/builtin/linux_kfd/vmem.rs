@@ -10,10 +10,12 @@
 //! mappings. A failed unmap or handle release leaves its native dependency live
 //! and attached to the owner for an explicit retry.
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo};
@@ -225,6 +227,8 @@ pub(crate) struct KfdVirtualAddress {
     reservation: Option<sys::Reservation>,
     mapping_granularity: u64,
     uncertain: AtomicBool,
+    host_ranges: Arc<Mutex<BTreeMap<usize, usize>>>,
+    device_mappings: Arc<AtomicUsize>,
 }
 
 impl KfdVirtualAddress {
@@ -270,6 +274,8 @@ impl KfdVirtualAddress {
             reservation: Some(reservation),
             mapping_granularity: limits.granularity,
             uncertain: AtomicBool::new(false),
+            host_ranges: Arc::new(Mutex::new(BTreeMap::new())),
+            device_mappings: Arc::new(AtomicUsize::new(0)),
         }))
     }
 
@@ -290,13 +296,29 @@ impl KfdVirtualAddress {
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        if self.reservation.is_none() {
+            return Ok(());
+        }
         self.check()?;
+        let ranges = self.host_ranges.lock().map_err(|_| {
+            error(
+                ErrorKind::Internal,
+                "virtual-address host-range lock poisoned",
+            )
+        })?;
+        if !ranges.is_empty() || self.device_mappings.load(Ordering::Acquire) != 0 {
+            return Err(error(
+                ErrorKind::Busy,
+                "virtual-address range still has live mappings",
+            ));
+        }
         if let Some(reservation) = &mut self.reservation {
             reservation
                 .release()
                 .map_err(|source| native_error("virtual-address release", source))?;
             self.reservation = None;
         }
+        drop(ranges);
         Ok(())
     }
 
@@ -318,6 +340,20 @@ impl KfdVirtualAddress {
 
     fn mark_uncertain(&self) {
         self.uncertain.store(true, Ordering::Release);
+    }
+
+    fn retain_device_mapping(&self) -> Result<Arc<AtomicUsize>, Error> {
+        self.device_mappings
+            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| {
+                count.checked_add(1)
+            })
+            .map_err(|_| {
+                error(
+                    ErrorKind::ResourceExhausted,
+                    "virtual-address mapping count overflow",
+                )
+            })?;
+        Ok(self.device_mappings.clone())
     }
 }
 
@@ -341,6 +377,7 @@ pub(crate) struct KfdVirtualMemory {
     freeing: bool,
     uncertain: bool,
     mapping_uncertain: AtomicBool,
+    mappings: Arc<AtomicUsize>,
 }
 
 impl KfdVirtualMemory {
@@ -406,6 +443,7 @@ impl KfdVirtualMemory {
             freeing: false,
             uncertain: false,
             mapping_uncertain: AtomicBool::new(false),
+            mappings: Arc::new(AtomicUsize::new(0)),
         });
         let gpu_id = memory
             .vm
@@ -492,6 +530,7 @@ impl KfdVirtualMemory {
                 freeing: false,
                 uncertain: false,
                 mapping_uncertain: AtomicBool::new(false),
+                mappings: Arc::new(AtomicUsize::new(0)),
             },
             allocator,
         )
@@ -542,7 +581,28 @@ impl KfdVirtualMemory {
         })
     }
 
+    fn retain_mapping(&self) -> Result<Arc<AtomicUsize>, Error> {
+        self.dma_buf()?;
+        self.mappings
+            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| {
+                count.checked_add(1)
+            })
+            .map_err(|_| {
+                error(
+                    ErrorKind::ResourceExhausted,
+                    "virtual-memory mapping count overflow",
+                )
+            })?;
+        Ok(self.mappings.clone())
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        if self.mappings.load(Ordering::Acquire) != 0 {
+            return Err(error(
+                ErrorKind::Busy,
+                "virtual-memory backing still has live mappings",
+            ));
+        }
         self.freeing = true;
         if self.mapping_uncertain.load(Ordering::Acquire) {
             return Err(error(
@@ -605,6 +665,8 @@ pub(crate) struct KfdVirtualDeviceMapping {
     pending_unmap: Option<(u32, u64)>,
     owns_gem: bool,
     uncertain: bool,
+    reservation_mappings: Option<Arc<AtomicUsize>>,
+    backing_mappings: Option<Arc<AtomicUsize>>,
 }
 
 impl KfdVirtualDeviceMapping {
@@ -638,7 +700,22 @@ impl KfdVirtualDeviceMapping {
             )
         })?;
         state.pending_maps.try_reserve(1)?;
-        let handle = state.acquire_gem(render, dma_buf, memory.info.physical_backing_id)?;
+        let backing_mappings = memory.retain_mapping()?;
+        let reservation_mappings = match reservation.retain_device_mapping() {
+            Ok(count) => count,
+            Err(error) => {
+                backing_mappings.fetch_sub(1, Ordering::AcqRel);
+                return Err(error);
+            }
+        };
+        let handle = match state.acquire_gem(render, dma_buf, memory.info.physical_backing_id) {
+            Ok(handle) => handle,
+            Err(error) => {
+                reservation_mappings.fetch_sub(1, Ordering::AcqRel);
+                backing_mappings.fetch_sub(1, Ordering::AcqRel);
+                return Err(error);
+            }
+        };
         let update = match state.submit_map(render, handle, address, offset, size, permissions) {
             Ok(update) => update,
             Err(source) => {
@@ -650,6 +727,8 @@ impl KfdVirtualDeviceMapping {
                     std::mem::forget(vm);
                 } else {
                     state.release_gem(render, memory.info.physical_backing_id)?;
+                    reservation_mappings.fetch_sub(1, Ordering::AcqRel);
+                    backing_mappings.fetch_sub(1, Ordering::AcqRel);
                 }
                 return Err(source.error);
             }
@@ -674,6 +753,8 @@ impl KfdVirtualDeviceMapping {
             pending_unmap: None,
             owns_gem: true,
             uncertain: false,
+            reservation_mappings: Some(reservation_mappings),
+            backing_mappings: Some(backing_mappings),
         }))
     }
 
@@ -721,6 +802,12 @@ impl KfdVirtualDeviceMapping {
             state.release_gem(render, self.backing_id)?;
             self.owns_gem = false;
         }
+        if let Some(count) = self.reservation_mappings.take() {
+            count.fetch_sub(1, Ordering::AcqRel);
+        }
+        if let Some(count) = self.backing_mappings.take() {
+            count.fetch_sub(1, Ordering::AcqRel);
+        }
         Ok(())
     }
 }
@@ -736,6 +823,8 @@ impl Drop for KfdVirtualDeviceMapping {
 /// Host mapping joining one address reservation to CPU-accessible backing.
 pub(crate) struct KfdVirtualHostMapping {
     reservation: Option<sys::Reservation>,
+    host_ranges: Arc<Mutex<BTreeMap<usize, usize>>>,
+    backing_mappings: Option<Arc<AtomicUsize>>,
 }
 
 impl KfdVirtualHostMapping {
@@ -769,21 +858,63 @@ impl KfdVirtualHostMapping {
             )
         })?;
         let owner = Owned::try_new_uninit(allocator)?;
+        let end = address.checked_add(size).ok_or_else(|| {
+            error(
+                ErrorKind::InvalidArgument,
+                "virtual-memory host range overflows",
+            )
+        })?;
+        let dma_buf = memory.dma_buf()?;
+        let mut ranges = address_owner.host_ranges.lock().map_err(|_| {
+            error(
+                ErrorKind::Internal,
+                "virtual-address host-range lock poisoned",
+            )
+        })?;
+        if ranges
+            .range(..end)
+            .next_back()
+            .is_some_and(|(_, existing_end)| *existing_end > address)
+        {
+            return Err(error(
+                ErrorKind::Busy,
+                "virtual-memory host mapping overlaps a live mapping",
+            ));
+        }
+        let backing_mappings = memory.retain_mapping()?;
         let mut reservation = sys::Reservation::view(address, size);
-        reservation
-            .map_dma_buf_with_permissions(memory.dma_buf()?, offset, permissions.bits())
-            .map_err(|source| native_error("virtual-memory host map", source))?;
+        if let Err(source) =
+            reservation.map_dma_buf_with_permissions(dma_buf, offset, permissions.bits())
+        {
+            backing_mappings.fetch_sub(1, Ordering::AcqRel);
+            return Err(native_error("virtual-memory host map", source));
+        }
+        ranges.insert(address, end);
+        drop(ranges);
         Ok(owner.write(Self {
             reservation: Some(reservation),
+            host_ranges: address_owner.host_ranges.clone(),
+            backing_mappings: Some(backing_mappings),
         }))
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         if let Some(reservation) = &mut self.reservation {
+            let mut ranges = self.host_ranges.lock().map_err(|_| {
+                error(
+                    ErrorKind::Internal,
+                    "virtual-address host-range lock poisoned",
+                )
+            })?;
+            let address = reservation.address();
             reservation
                 .release()
                 .map_err(|source| native_error("virtual-memory host unmap", source))?;
+            ranges.remove(&address);
             self.reservation = None;
+            if let Some(count) = self.backing_mappings.take() {
+                count.fetch_sub(1, Ordering::AcqRel);
+            }
         }
         Ok(())
     }
@@ -791,6 +922,95 @@ impl KfdVirtualHostMapping {
 
 impl Drop for KfdVirtualHostMapping {
     fn drop(&mut self) {
-        let _ = self.free();
+        if self.free().is_err() {
+            if let Some(reservation) = self.reservation.take() {
+                std::mem::forget(reservation);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_mappings_reject_overlap_and_retain_both_parents() {
+        let allocator = Allocator::default();
+        let mut address =
+            KfdVirtualAddress::reserve((0, u64::MAX), 8192, 4096, 0, allocator).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "rocddi-host-map-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        file.set_len(8192).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let mut backing = KfdVirtualMemory {
+            vm: None,
+            reservation: None,
+            handle: None,
+            dma_buf: Some(file),
+            info: VirtualMemoryInfo {
+                size: 8192,
+                mapping_granularity: 4096,
+                physical_backing_id: [0; 2],
+            },
+            freeing: false,
+            uncertain: false,
+            mapping_uncertain: AtomicBool::new(false),
+            mappings: Arc::new(AtomicUsize::new(0)),
+        };
+        let base = address.address();
+        let mut first = KfdVirtualHostMapping::create(
+            &backing,
+            &address,
+            base,
+            0,
+            4096,
+            DeviceAccess::READ | DeviceAccess::WRITE,
+            allocator,
+        )
+        .unwrap();
+        assert_eq!(
+            KfdVirtualHostMapping::create(
+                &backing,
+                &address,
+                base,
+                4096,
+                4096,
+                DeviceAccess::READ | DeviceAccess::WRITE,
+                allocator,
+            )
+            .err()
+            .unwrap()
+            .kind(),
+            ErrorKind::Busy
+        );
+        let mut adjacent = KfdVirtualHostMapping::create(
+            &backing,
+            &address,
+            base + 4096,
+            4096,
+            4096,
+            DeviceAccess::READ | DeviceAccess::WRITE,
+            allocator,
+        )
+        .unwrap();
+        assert_eq!(address.free().unwrap_err().kind(), ErrorKind::Busy);
+        assert_eq!(backing.free().unwrap_err().kind(), ErrorKind::Busy);
+        first.free().unwrap();
+        assert_eq!(address.free().unwrap_err().kind(), ErrorKind::Busy);
+        assert_eq!(backing.free().unwrap_err().kind(), ErrorKind::Busy);
+        adjacent.free().unwrap();
+        address.free().unwrap();
+        backing.free().unwrap();
     }
 }

@@ -27,6 +27,9 @@ pub enum ErrorKind {
     Driver,
     /// A driver violated its advertised interface contract.
     DriverContract,
+    /// A failed native acquisition may still reference caller-owned backing.
+    /// The caller must retain that backing until process teardown.
+    ResourceOwnershipUncertain,
     /// Topology or other implementation data is malformed or inconsistent.
     InvalidData,
     /// A concurrent state change prevented a consistent result.

@@ -39,6 +39,15 @@ impl Device {
         self.driver.check(&self.state)
     }
 
+    /// Queries the ASIC family of this activated GPU through its bound render
+    /// node. The passive topology family remains available in `endpoint()`.
+    ///
+    /// # Errors
+    /// Returns the native DRM query error, or a device or session loss error.
+    pub fn asic_family_id(&self) -> Result<u32, Error> {
+        self.driver.asic_family_id(&self.state)
+    }
+
     /// Returns whether a prior native observation latched terminal device loss.
     /// This reads cached process state and performs no system call or wait.
     #[must_use]

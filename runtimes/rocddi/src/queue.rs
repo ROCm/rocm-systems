@@ -95,7 +95,13 @@ impl Queue {
     /// # Errors
     /// Rejects non-AQL queues, invalid target geometry, unavailable queues, or
     /// scratch ranges that cannot be represented by the native control block.
-    pub fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    ///
+    /// # Safety
+    /// Firmware must have stopped this queue for an insufficient-scratch
+    /// event. The new backing must remain GPU accessible until the queue is
+    /// destroyed or a later stopped-state update replaces it.
+    #[allow(unsafe_code)]
+    pub unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         driver::PlatformDriver::set_queue_scratch(&mut self.inner, scratch)
     }
     /// Checks loss and transport availability without reading queue progress.
@@ -134,7 +140,14 @@ impl GpuDevice<'_> {
     /// sizes before acquisition. Allocation and native queue setup can fail;
     /// cleanup preserves the exact acquired state, including backing that a
     /// CREATE copy fault may have left reachable without a trustworthy ID.
-    pub fn create_queue(&self, desc: QueueRequest) -> Result<Queue, Error> {
+    /// `ResourceOwnershipUncertain` requires retention of caller backing.
+    ///
+    /// # Safety
+    /// The caller must keep AQL inactive-signal, error-event, and scratch
+    /// addresses backed and GPU accessible for as long as firmware can access
+    /// the queue, including ambiguous failure and cleanup paths.
+    #[allow(unsafe_code)]
+    pub unsafe fn create_queue(&self, desc: QueueRequest) -> Result<Queue, Error> {
         let inner = self.device.driver.create_queue(&self.device.state, desc)?;
         let info = inner.cached_info();
         Ok(Queue {

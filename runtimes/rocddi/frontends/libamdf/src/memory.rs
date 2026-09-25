@@ -11,13 +11,9 @@ use crate::support::*;
 use rocddi::host_storage::{Buffer, Owned};
 use rocddi::memory;
 use rocddi::memory::interop::linux as linux_interop;
-use std::ffi::{c_int, c_void};
+use std::ffi::c_void;
 use std::os::fd::IntoRawFd;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-
-unsafe extern "C" {
-    fn close(descriptor: c_int) -> c_int;
-}
 
 const BACKING_FLAGS: u64 =
     AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_SHAREABLE;
@@ -317,9 +313,9 @@ unsafe extern "C" fn close_dma_buf(
     }
     let descriptor = unsafe { payload.file_descriptor };
     if let Ok(descriptor) = i32::try_from(descriptor) {
-        // SAFETY: AMDF export transferred ownership of this descriptor to the
-        // external-memory value, whose release callback runs at most once.
-        let _ = unsafe { close(descriptor) };
+        // AMDF export transferred ownership to this value. The callback runs
+        // at most once, so the Linux backend consumes the descriptor here.
+        let _ = rocddi::session::linux::close_descriptor(descriptor);
     }
 }
 

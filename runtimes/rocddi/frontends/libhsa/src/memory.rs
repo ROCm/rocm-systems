@@ -36,12 +36,6 @@ use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 use crate::ffi::*;
 use crate::runtime::{Runtime, boundary, initialized_mut, lock, map_error};
 
-unsafe extern "C" {
-    fn close(descriptor: i32) -> i32;
-    fn pread(descriptor: i32, buffer: *mut c_void, count: usize, offset: i64) -> isize;
-    fn pwrite(descriptor: i32, buffer: *const c_void, count: usize, offset: i64) -> isize;
-}
-
 const GPU_POOL_COARSE: u64 = 1;
 const GPU_POOL_FINE: u64 = 2;
 const GPU_POOL_GROUP: u64 = 3;
@@ -1641,30 +1635,28 @@ unsafe fn ais_transfer(
         else {
             break Err(EOVERFLOW);
         };
-        // SAFETY: The caller validated the complete host range. pread/pwrite
-        // borrow the descriptor and do not retain the supplied address.
+        // SAFETY: The caller validated the complete host range. Linux borrows
+        // the descriptor and host bytes only for this synchronous operation.
         let transferred = unsafe {
             match operation {
-                AisOperation::Read => pread(
+                AisOperation::Read => rocddi::session::linux::read_descriptor(
                     descriptor,
-                    (host + copied) as *mut c_void,
+                    host + copied,
                     remaining,
                     offset,
                 ),
-                AisOperation::Write => pwrite(
+                AisOperation::Write => rocddi::session::linux::write_descriptor(
                     descriptor,
-                    (host + copied) as *const c_void,
+                    host + copied,
                     remaining,
                     offset,
                 ),
             }
         };
-        if transferred < 0 {
-            break Err(std::io::Error::last_os_error()
-                .raw_os_error()
-                .unwrap_or(EIO));
-        }
-        let transferred = transferred as usize;
+        let transferred = match transferred {
+            Ok(transferred) => transferred,
+            Err(error) => break Err(error.raw_os_error().unwrap_or(EIO)),
+        };
         if transferred == 0 {
             if matches!(operation, AisOperation::Read) || remaining == 0 {
                 break Ok(());
@@ -1876,8 +1868,7 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
 #[unsafe(no_mangle)]
 pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     boundary(|| {
-        // SAFETY: The ABI transfers responsibility for closing this descriptor.
-        if unsafe { close(descriptor) } == 0 {
+        if rocddi::session::linux::close_descriptor(descriptor).is_ok() {
             SUCCESS
         } else {
             RESOURCE_FREE

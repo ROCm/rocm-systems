@@ -11,6 +11,7 @@
 use std::ffi::c_int;
 use std::fs::File;
 use std::io;
+use std::mem::ManuallyDrop;
 use std::os::fd::{FromRawFd, IntoRawFd};
 use std::os::unix::fs::MetadataExt;
 
@@ -70,6 +71,15 @@ pub(super) fn close_descriptor(descriptor: i32) -> io::Result<()> {
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+pub(super) fn descriptor_length(descriptor: i32) -> io::Result<u64> {
+    if descriptor < 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    // SAFETY: The temporary File borrows the descriptor for metadata only.
+    let file = ManuallyDrop::new(unsafe { File::from_raw_fd(descriptor) });
+    file.metadata().map(|metadata| metadata.len())
 }
 
 pub(super) fn dma_buf_file_info(file: &File) -> io::Result<DmaBufFileInfo> {

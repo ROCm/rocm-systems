@@ -7,16 +7,11 @@
 //! the complete object is valid. Executable freeze and destruction retain the
 //! HSA-visible ownership and failure semantics around that native backing.
 //!
-//! The current file-reader path uses Linux descriptors. That operating-system
-//! detail is intentionally isolated here and must become a platform adapter
-//! before this frontend can be built as a Windows HSA implementation.
+//! File readers accept Linux descriptors through rocddi's Linux provider. A
+//! future platform frontend will need its own native-handle adapter.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
-use std::fs::File;
-use std::mem::ManuallyDrop;
-use std::os::fd::FromRawFd;
-use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 use std::sync::atomic::{Ordering, fence};
 
@@ -1256,13 +1251,9 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        // SAFETY: The descriptor remains owned by the application. ManuallyDrop
-        // prevents this temporary File view from closing it.
-        let file_view = ManuallyDrop::new(unsafe { File::from_raw_fd(file) });
-        let size = match file_view
-            .metadata()
+        let size = match rocddi::session::linux::descriptor_length(file)
             .ok()
-            .and_then(|metadata| usize::try_from(metadata.len()).ok())
+            .and_then(|length| usize::try_from(length).ok())
         {
             Some(0) => return INVALID_CODE_OBJECT,
             Some(size) => size,
@@ -1273,7 +1264,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             return OUT_OF_RESOURCES;
         }
         bytes.resize(size, 0);
-        if file_view.read_exact_at(&mut bytes, 0).is_err() {
+        if rocddi::session::linux::read_descriptor_exact(file, &mut bytes, 0).is_err() {
             return INVALID_FILE;
         }
         let handle = match runtime.allocate_handle() {
@@ -2555,10 +2546,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
             return OUT_OF_RESOURCES;
         }
         bytes.resize(size, 0);
-        // SAFETY: The descriptor remains owned by the application. ManuallyDrop
-        // prevents this temporary File view from closing it.
-        let file_view = ManuallyDrop::new(unsafe { File::from_raw_fd(file) });
-        if file_view.read_exact_at(&mut bytes, offset as u64).is_err() {
+        let Ok(file_offset) = i64::try_from(offset) else {
+            return INVALID_FILE;
+        };
+        if rocddi::session::linux::read_descriptor_exact(file, &mut bytes, file_offset).is_err() {
             return INVALID_FILE;
         }
         let mut guard = match lock() {

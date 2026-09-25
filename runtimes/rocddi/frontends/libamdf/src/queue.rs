@@ -358,8 +358,23 @@ fn creation_transports(
     Ok((host, device))
 }
 
-fn rollback_creation(queue: &mut queue::Queue, device: &Device, status: u64) -> u64 {
-    let status = queue.destroy().err().map_or(status, |error| native(&error));
+fn rollback_creation(
+    mut queue: queue::Queue,
+    scratch_borrow: Option<memory::QueueScratchBorrow>,
+    device: &Device,
+    status: u64,
+) -> u64 {
+    let status = match queue.destroy() {
+        Ok(()) => status,
+        Err(error) => {
+            // Native teardown may still leave firmware references.
+            let status = native(&error);
+            std::mem::forget(queue);
+            std::mem::forget(scratch_borrow);
+            unregister(&device.queues);
+            return status;
+        }
+    };
     unregister(&device.queues);
     status
 }
@@ -403,6 +418,10 @@ fn wait_consumed(
 }
 
 #[allow(unused_unsafe)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "queue backing and native acquisition share one auditable rollback path"
+)]
 pub(crate) unsafe extern "C" fn create(
     pointer: *mut amdf_device_t,
     create_info: *const amdf_gpu_user_queue_create_info_t,
@@ -434,9 +453,14 @@ pub(crate) unsafe extern "C" fn create(
             unregister(&device.queues);
             return Err(UNSUPPORTED);
         };
-        let mut native_queue = match gpu.create_queue(desc) {
+        // SAFETY: The queue retains the borrowed scratch allocation until
+        // successful native destruction, including rollback.
+        let native_queue = match unsafe { gpu.create_queue(desc) } {
             Ok(queue) => queue,
             Err(error) => {
+                if error.kind() == rocddi::ErrorKind::ResourceOwnershipUncertain {
+                    std::mem::forget(scratch_borrow);
+                }
                 unregister(&device.queues);
                 return Err(native(&error));
             }
@@ -452,11 +476,21 @@ pub(crate) unsafe extern "C" fn create(
         {
             Ok(mappings) => mappings,
             Err(status) => {
-                return Err(rollback_creation(&mut native_queue, device, status));
+                return Err(rollback_creation(
+                    native_queue,
+                    scratch_borrow,
+                    device,
+                    status,
+                ));
             }
         };
         if create_info.required_capabilities & !capabilities != 0 {
-            return Err(rollback_creation(&mut native_queue, device, UNSUPPORTED));
+            return Err(rollback_creation(
+                native_queue,
+                scratch_borrow,
+                device,
+                UNSUPPORTED,
+            ));
         }
         let epoch = device.current_reset_epoch();
         let id = amdf_queue_id_t {

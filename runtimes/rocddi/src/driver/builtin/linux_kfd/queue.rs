@@ -1377,6 +1377,37 @@ pub(crate) struct KfdQueue {
 }
 
 impl KfdQueue {
+    fn uncertain_ownership(failure: Error) -> Error {
+        match failure {
+            Error::NativeOperation {
+                operation, source, ..
+            } => Error::NativeOperation {
+                kind: ErrorKind::ResourceOwnershipUncertain,
+                operation,
+                source,
+            },
+            Error::Operation { detail, .. } => error(ErrorKind::ResourceOwnershipUncertain, detail),
+            Error::Capacity { .. } => error(
+                ErrorKind::ResourceOwnershipUncertain,
+                "KFD queue cleanup failed after acquisition",
+            ),
+        }
+    }
+
+    fn abort_creation(mut queue: Owned<Self>, original: Error) -> Error {
+        match queue.destroy() {
+            Ok(()) => original,
+            Err(cleanup) if queue.id.is_none() => cleanup,
+            Err(cleanup) => {
+                // No queue owner can be returned for a later retry. Retain
+                // native backing and tell the frontend to retain its raw
+                // signal and scratch allocations as well.
+                std::mem::forget(queue);
+                Self::uncertain_ownership(cleanup)
+            }
+        }
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "keep native queue acquisition and publication in one auditable path"
@@ -1565,16 +1596,28 @@ impl KfdQueue {
                 .err()
                 .is_some_and(|source| source.raw_os_error() == Some(14));
         }
-        result.map_err(|source| native_error("AMDKFD_IOC_CREATE_QUEUE", source))?;
-        let doorbell = queue.vm.doorbells.addresses(
+        if let Err(source) = result {
+            let failure = native_error("AMDKFD_IOC_CREATE_QUEUE", source);
+            return Err(if queue.uncertain {
+                Self::uncertain_ownership(failure)
+            } else {
+                failure
+            });
+        }
+        let doorbell = match queue.vm.doorbells.addresses(
             &queue.vm,
             args.doorbell_offset,
             request.device_producer,
-        )?;
+        ) {
+            Ok(doorbell) => doorbell,
+            Err(source) => return Err(Self::abort_creation(queue, source)),
+        };
         queue.info.doorbell_host_address = doorbell.host;
         queue.info.doorbell_device_address = doorbell.device;
         queue.doorbell_offset = args.doorbell_offset;
-        queue.vm.check()?;
+        if let Err(source) = queue.vm.check() {
+            return Err(Self::abort_creation(queue, source));
+        }
         Ok(queue)
     }
 }

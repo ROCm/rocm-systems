@@ -7,17 +7,14 @@
 //! lock. Final shutdown removes public reachability before releasing workers
 //! and native resources.
 //!
-//! Host and GPU discovery currently consume Linux procfs, sysfs, DRM, and KFD
-//! information. These probes are implementation details of the present Linux
-//! frontend and must be replaced by a platform provider for Windows support.
+//! Host discovery currently consumes Linux procfs and sysfs information. GPU
+//! discovery and native queries go through the rocddi provider.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{c_int, c_void};
 use std::fmt::Arguments;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
-use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -183,36 +180,19 @@ fn gpu_agent_name(gpu: &GpuInfo) -> String {
     format!("gfx{}{}{}", gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
 }
 
-#[link(name = "libdrm_amdgpu.so.1", kind = "dylib", modifiers = "+verbatim")]
-unsafe extern "C" {
-    fn amdgpu_device_initialize(
-        descriptor: c_int,
-        major: *mut u32,
-        minor: *mut u32,
-        device: *mut *mut c_void,
-    ) -> c_int;
-    fn amdgpu_device_deinitialize(device: *mut c_void) -> c_int;
-    fn amdgpu_get_marketing_name(device: *mut c_void) -> *const c_char;
-    fn amdgpu_query_info(device: *mut c_void, info_id: u32, size: u32, value: *mut c_void)
-    -> c_int;
-}
-
-const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
-
-#[derive(Default)]
-struct DrmGpuInfo {
-    product_name: Option<String>,
-    family_id: Option<u32>,
-}
-
-#[derive(Default)]
-#[repr(C)]
-struct DrmAmdgpuDeviceInfoPrefix {
-    device_id: u32,
-    chip_revision: u32,
-    external_revision: u32,
-    pci_revision: u32,
-    family_id: u32,
+fn gpu_product_name(endpoint: &Endpoint) -> String {
+    let end = endpoint
+        .name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(endpoint.name.len());
+    std::str::from_utf8(&endpoint.name[..end])
+        .ok()
+        .filter(|name| {
+            name.starts_with("AMD ") || name.starts_with("Radeon ") || name.starts_with("Instinct ")
+        })
+        .unwrap_or("AMD Radeon Graphics")
+        .to_owned()
 }
 
 fn select_asic_family_id(topology: u32, drm: Option<u32>) -> u32 {
@@ -228,52 +208,6 @@ fn full_profile_platform(local_memory_bytes: impl IntoIterator<Item = u64>) -> b
     local_memory_bytes
         .next()
         .is_some_and(|bytes| bytes == 0 && local_memory_bytes.all(|bytes| bytes == 0))
-}
-
-fn gpu_drm_info(render_minor: u32) -> Option<DrmGpuInfo> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(format!("/dev/dri/renderD{render_minor}"))
-        .ok()?;
-    let mut major = 0;
-    let mut minor = 0;
-    let mut device = std::ptr::null_mut();
-    // SAFETY: libdrm receives a live render descriptor and writable outputs.
-    let status = unsafe {
-        amdgpu_device_initialize(
-            file.as_raw_fd(),
-            &raw mut major,
-            &raw mut minor,
-            &raw mut device,
-        )
-    };
-    if status != 0 || device.is_null() {
-        return None;
-    }
-    // SAFETY: The initialized device owns this NUL-terminated name until it is
-    // deinitialized. Copy it before releasing the device.
-    let product_name = unsafe {
-        let name = amdgpu_get_marketing_name(device);
-        (!name.is_null()).then(|| CStr::from_ptr(name).to_string_lossy().into_owned())
-    };
-    let mut info = DrmAmdgpuDeviceInfoPrefix::default();
-    // SAFETY: The DRM query accepts a prefix of the stable device-info UAPI
-    // record and receives writable storage of the advertised size.
-    let query_status = unsafe {
-        amdgpu_query_info(
-            device,
-            AMDGPU_INFO_DEV_INFO,
-            std::mem::size_of::<DrmAmdgpuDeviceInfoPrefix>() as u32,
-            (&raw mut info).cast(),
-        )
-    };
-    // SAFETY: This device was returned by the successful initialization above.
-    let _ = unsafe { amdgpu_device_deinitialize(device) };
-    Some(DrmGpuInfo {
-        product_name,
-        family_id: (query_status == 0).then_some(info.family_id),
-    })
 }
 
 fn notify_system_shutdown(handlers: &[(SystemEventHandler, usize)]) {
@@ -382,13 +316,13 @@ fn cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
         else {
             continue;
         };
-        let bytes = cache.size.wrapping_mul(1024);
+        let bytes = cache.size;
         if index == 0 {
             if sizes[index] == 0 {
                 sizes[index] = bytes;
             }
         } else {
-            sizes[index] = sizes[index].wrapping_add(bytes);
+            sizes[index] = sizes[index].saturating_add(bytes);
         }
     }
     sizes
@@ -413,6 +347,16 @@ pub(crate) struct Gpu {
     pub(crate) fine_grain_pool: bool,
 }
 
+impl Gpu {
+    pub(crate) fn supports_images(&self) -> bool {
+        image_target_supported(self.info)
+    }
+}
+
+pub(crate) fn image_target_supported(target: GpuInfo) -> bool {
+    target.gfx_major == 12 && target.gfx_minor == 0 && target.gfx_stepping == 1
+}
+
 /// Stable HSA cache object associated with one CPU or GPU agent.
 pub(crate) struct Cache {
     pub(crate) agent: HsaAgent,
@@ -422,7 +366,7 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
-    fn new(agent: HsaAgent, agent_name: &[u8], level: u32, size: u32) -> Self {
+    fn new(agent: HsaAgent, agent_name: &[u8], level: u32, size_bytes: u32) -> Self {
         let name_length = agent_name
             .iter()
             .position(|byte| *byte == 0)
@@ -437,7 +381,7 @@ impl Cache {
             agent,
             name: name.into_boxed_slice(),
             level: level as u8,
-            size,
+            size: size_bytes,
         }
     }
 }
@@ -499,7 +443,44 @@ pub(crate) struct Runtime {
     pub(crate) session: Session,
 }
 
+pub(crate) fn defer_cleanup<T: Send + 'static>(
+    owner: T,
+    cleanup: impl FnOnce(T) + Send + 'static,
+) -> Result<(), Option<T>> {
+    let pending = Arc::new(Mutex::new(Some(owner)));
+    let worker_pending = pending.clone();
+    if thread::Builder::new()
+        .name("rocddi-shutdown".into())
+        .spawn(move || {
+            let owner = worker_pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(owner) = owner {
+                cleanup(owner);
+            }
+        })
+        .is_err()
+    {
+        return Err(pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take());
+    }
+    Ok(())
+}
+
 impl Runtime {
+    pub(crate) fn running_on_worker(&self) -> bool {
+        self.workers
+            .iter()
+            .any(|worker| worker.thread().id() == thread::current().id())
+    }
+
+    pub(crate) fn request_stop(&self) {
+        self.stop_workers.store(true, Ordering::Release);
+    }
+
     pub(crate) fn create() -> Result<Self, Status> {
         let host_memory_bytes = host_memory_bytes()?;
         let host = host_info();
@@ -543,15 +524,9 @@ impl Runtime {
                 ));
             }
             let device = session.activate(&endpoint).map_err(map_error)?;
-            let drm_info = endpoint
-                .linux_kfd_drm_info()
-                .render_minor
-                .and_then(gpu_drm_info)
-                .unwrap_or_default();
-            let product_name = drm_info
-                .product_name
-                .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
-            let asic_family_id = select_asic_family_id(info.asic_family_id, drm_info.family_id);
+            let product_name = gpu_product_name(&endpoint);
+            let asic_family_id =
+                select_asic_family_id(info.asic_family_id, device.asic_family_id().ok());
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
@@ -660,6 +635,15 @@ impl Runtime {
         let offset = agent.handle.checked_sub(GPU_AGENT_BASE)?;
         let index = usize::try_from(offset).ok()?;
         (index < self.gpus.len()).then_some(index)
+    }
+
+    pub(crate) fn image_supported(&self, agent: HsaAgent) -> bool {
+        self.gpu_index(agent)
+            .is_some_and(|index| self.gpus[index].supports_images())
+    }
+
+    pub(crate) fn has_image_gpu(&self) -> bool {
+        self.gpus.iter().any(Gpu::supports_images)
     }
 
     pub(crate) fn is_agent(&self, agent: HsaAgent) -> bool {
@@ -771,14 +755,14 @@ impl Runtime {
     }
 
     pub(crate) fn stop(mut self) -> Status {
+        self.request_stop();
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
         notify_system_shutdown(&self.system_event_handlers);
         self.pc_sampling_agents.clear();
         let pc_sampling_status =
             crate::pc_sampling::destroy_sessions(std::mem::take(&mut self.pc_sampling));
-        self.stop_workers.store(true, Ordering::Release);
-        for worker in self.workers.drain(..) {
-            let _ = worker.join();
-        }
         self.counted_queues.clear();
         self.counted_queue_pools.clear();
         self.released_counted_queues.clear();
@@ -1044,6 +1028,42 @@ mod tests {
     static NEXT_FIXTURE: AtomicU32 = AtomicU32::new(0);
 
     #[test]
+    fn deferred_cleanup_joins_the_callback_worker_after_exit() {
+        struct Owner {
+            worker: JoinHandle<()>,
+            exited: Arc<AtomicBool>,
+            completed: std::sync::mpsc::Sender<bool>,
+        }
+        let exited = Arc::new(AtomicBool::new(false));
+        let (owner_tx, owner_rx) = std::sync::mpsc::channel::<Owner>();
+        let (completed_tx, completed_rx) = std::sync::mpsc::channel();
+        let worker_exited = exited.clone();
+        let worker = thread::spawn(move || {
+            let owner = owner_rx.recv().unwrap();
+            assert_eq!(owner.worker.thread().id(), thread::current().id());
+            assert!(
+                defer_cleanup(owner, |owner| {
+                    owner.worker.join().unwrap();
+                    owner
+                        .completed
+                        .send(owner.exited.load(AtomicOrdering::Acquire))
+                        .unwrap();
+                })
+                .is_ok()
+            );
+            worker_exited.store(true, AtomicOrdering::Release);
+        });
+        owner_tx
+            .send(Owner {
+                worker,
+                exited,
+                completed: completed_tx,
+            })
+            .unwrap();
+        assert!(completed_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+    }
+
+    #[test]
     fn initialization_gate_rejects_overlapping_generations() {
         let mut registry = RuntimeRegistry::new();
         let first = registry.begin_init().unwrap().unwrap();
@@ -1134,7 +1154,7 @@ mod tests {
         assert_eq!(&*caches[0].name, b"AMD Example CPU L1\0");
         assert_eq!(caches[0].level, 1);
         assert_eq!(caches[0].size, 48 * 1024);
-        assert_eq!(cache_sizes(&caches, cpu_agent), [48 * 1024 * 1024, 0, 0, 0]);
+        assert_eq!(cache_sizes(&caches, cpu_agent), [48 * 1024, 0, 0, 0]);
     }
 
     #[test]
@@ -1151,13 +1171,25 @@ mod tests {
     }
 
     #[test]
+    fn images_are_qualified_only_for_the_gfx1201_descriptor() {
+        for target in [(10, 3, 0), (11, 0, 0), (12, 0, 0), (12, 1, 0)] {
+            assert!(!image_target_supported(GpuInfo {
+                gfx_major: target.0,
+                gfx_minor: target.1,
+                gfx_stepping: target.2,
+                ..GpuInfo::default()
+            }));
+        }
+        assert!(image_target_supported(GpuInfo {
+            gfx_major: 12,
+            gfx_minor: 0,
+            gfx_stepping: 1,
+            ..GpuInfo::default()
+        }));
+    }
+
+    #[test]
     fn drm_device_info_supplies_missing_asic_family_id() {
-        assert_eq!(std::mem::size_of::<DrmAmdgpuDeviceInfoPrefix>(), 20);
-        assert_eq!(std::mem::align_of::<DrmAmdgpuDeviceInfoPrefix>(), 4);
-        assert_eq!(
-            std::mem::offset_of!(DrmAmdgpuDeviceInfoPrefix, family_id),
-            16
-        );
         assert_eq!(select_asic_family_id(0, Some(0x98)), 0x98);
         assert_eq!(select_asic_family_id(0x91, Some(0)), 0x91);
         assert_eq!(select_asic_family_id(0x91, None), 0x91);
@@ -1381,12 +1413,12 @@ mod tests {
             handle: GPU_AGENT_BASE + 1,
         };
         let caches = [
-            Cache::new(agent, b"gfx1201", 1, 32),
-            Cache::new(agent, b"gfx1201", 1, 32),
-            Cache::new(agent, b"gfx1201", 2, 256),
-            Cache::new(agent, b"gfx1201", 2, 256),
-            Cache::new(agent, b"gfx1201", 3, 8192),
-            Cache::new(other, b"gfx1201", 3, 8192),
+            Cache::new(agent, b"gfx1201", 1, 32 * 1024),
+            Cache::new(agent, b"gfx1201", 1, 32 * 1024),
+            Cache::new(agent, b"gfx1201", 2, 256 * 1024),
+            Cache::new(agent, b"gfx1201", 2, 256 * 1024),
+            Cache::new(agent, b"gfx1201", 3, 8192 * 1024),
+            Cache::new(other, b"gfx1201", 3, 8192 * 1024),
         ];
         assert_eq!(
             cache_sizes(&caches, agent),

@@ -51,6 +51,64 @@ pub(crate) use vmem::{
     KfdVirtualHostMapping as NativeVirtualHostMapping, KfdVirtualMemory as NativeVirtualMemory,
 };
 
+#[allow(unsafe_code)]
+pub(crate) unsafe fn read_descriptor(
+    descriptor: i32,
+    address: usize,
+    size: usize,
+    offset: i64,
+) -> std::io::Result<usize> {
+    // SAFETY: The caller owns a writable host range for this synchronous call.
+    unsafe { sys::read_descriptor(descriptor, address, size, offset) }
+}
+
+#[allow(unsafe_code)]
+pub(crate) unsafe fn write_descriptor(
+    descriptor: i32,
+    address: usize,
+    size: usize,
+    offset: i64,
+) -> std::io::Result<usize> {
+    // SAFETY: The caller owns a readable host range for this synchronous call.
+    unsafe { sys::write_descriptor(descriptor, address, size, offset) }
+}
+
+pub(crate) fn close_descriptor(descriptor: i32) -> std::io::Result<()> {
+    util::close_descriptor(descriptor)
+}
+
+pub(crate) fn descriptor_length(descriptor: i32) -> std::io::Result<u64> {
+    util::descriptor_length(descriptor)
+}
+
+#[allow(unsafe_code)]
+pub(crate) fn read_descriptor_exact(
+    descriptor: i32,
+    bytes: &mut [u8],
+    offset: i64,
+) -> std::io::Result<()> {
+    let mut copied = 0;
+    while copied < bytes.len() {
+        let position = offset
+            .checked_add(i64::try_from(copied).map_err(|_| std::io::ErrorKind::InvalidInput)?)
+            .ok_or(std::io::ErrorKind::InvalidInput)?;
+        // SAFETY: The remaining slice is writable through this synchronous read.
+        let count = unsafe {
+            sys::read_descriptor(
+                descriptor,
+                bytes[copied..].as_mut_ptr() as usize,
+                bytes.len() - copied,
+                position,
+            )?
+        };
+        if count == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        copied += count;
+    }
+    Ok(())
+}
+
 /// Session-scoped Linux backend with lazy KFD activation.
 ///
 /// Construction records policy and allocator state only. The first explicit GPU
@@ -708,6 +766,12 @@ impl KernelQueueDriver for LinuxKfdDriver {
 impl DeviceDriver for LinuxKfdDriver {
     fn check(&self, device: &DeviceState) -> Result<(), Error> {
         device.vm.check()
+    }
+    fn asic_family_id(&self, device: &DeviceState) -> Result<u32, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        drm::asic_family_id(device.vm.render()?)
+            .map_err(|source| native_error("DRM ASIC family query", source))
     }
     fn clock_counters(&self, device: &DeviceState) -> Result<ClockCounters, Error> {
         self.ensure_open()?;

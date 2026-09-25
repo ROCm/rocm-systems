@@ -27,6 +27,7 @@ const fn request(direction: u32, number: u32, size: u32) -> u64 {
 const GEM_CLOSE: u64 = request(1, 0x09, 8);
 const PRIME_FD_TO_HANDLE: u64 = request(3, 0x2e, 12);
 const AMDGPU_GEM_USERPTR: u64 = request(3, 0x51, 24);
+const AMDGPU_INFO: u64 = request(1, 0x45, 32);
 const AMDGPU_GEM_OP: u64 = request(3, 0x50, 24);
 const AMDGPU_GEM_LIST_HANDLES: u64 = request(3, 0x59, 16);
 const AMDGPU_GEM_VA: u64 = request(1, 0x48, 64);
@@ -56,6 +57,8 @@ pub(super) const GEM_CREATE_DISCARDABLE: u64 = 1 << 12;
 pub(super) const GEM_CREATE_GFX12_DCC: u64 = 1 << 16;
 pub(super) const GEM_CREATE_SPARSE: u64 = 1 << 29;
 const GEM_LIST_HANDLES_IS_IMPORT: u32 = 1;
+const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
+const AMDGPU_DEVICE_INFO_PREFIX_SIZE: u32 = 20;
 const DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT: u32 = 1 << 1;
 const CLOCK_MONOTONIC: c_int = 1;
 const VM_UPDATE_WAIT_NANOSECONDS: i64 = 5_000_000_000;
@@ -97,6 +100,25 @@ struct GemUserptr {
     size: u64,
     flags: u32,
     handle: u32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AmdgpuInfo {
+    return_pointer: u64,
+    return_size: u32,
+    query: u32,
+    query_data: [u32; 4],
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AmdgpuDeviceInfoPrefix {
+    device_id: u32,
+    chip_revision: u32,
+    external_revision: u32,
+    pci_revision: u32,
+    family_id: u32,
 }
 
 #[repr(C)]
@@ -280,6 +302,22 @@ fn call<T>(file: &File, request: u64, body: &mut T) -> io::Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Reads the ASIC family from the render node already bound to this KFD VM.
+pub(super) fn asic_family_id(file: &File) -> io::Result<u32> {
+    let mut result = AmdgpuDeviceInfoPrefix::default();
+    let mut body = AmdgpuInfo {
+        return_pointer: ptr::from_mut(&mut result) as u64,
+        return_size: AMDGPU_DEVICE_INFO_PREFIX_SIZE,
+        query: AMDGPU_INFO_DEV_INFO,
+        ..AmdgpuInfo::default()
+    };
+    call(file, AMDGPU_INFO, &mut body)?;
+    if result.device_id == 0 || result.family_id == 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    Ok(result.family_id)
 }
 
 /// Allocates one private DRM context on the render file bound to the KFD VM.
@@ -694,6 +732,11 @@ pub(super) fn wait(file: &File, handle: u32, point: u64) -> io::Result<()> {
 
 const _: () = {
     assert!(std::mem::size_of::<GemClose>() == 8);
+    assert!(std::mem::size_of::<AmdgpuInfo>() == 32);
+    assert!(
+        std::mem::size_of::<AmdgpuDeviceInfoPrefix>() == AMDGPU_DEVICE_INFO_PREFIX_SIZE as usize
+    );
+    assert!(std::mem::offset_of!(AmdgpuDeviceInfoPrefix, family_id) == 16);
     assert!(std::mem::size_of::<PrimeHandle>() == 12);
     assert!(std::mem::size_of::<GemCreateInfo>() == 32);
     assert!(std::mem::size_of::<GemOp>() == 24);
@@ -712,6 +755,7 @@ const _: () = {
     assert!(std::mem::size_of::<IndirectBuffer>() == 32);
     assert!(std::mem::size_of::<TimelineSignal>() == 16);
     assert!(GEM_CLOSE == 0x4008_6409);
+    assert!(AMDGPU_INFO == 0x4020_6445);
     assert!(PRIME_FD_TO_HANDLE == 0xc00c_642e);
     assert!(AMDGPU_GEM_OP == 0xc018_6450);
     assert!(AMDGPU_GEM_LIST_HANDLES == 0xc010_6459);

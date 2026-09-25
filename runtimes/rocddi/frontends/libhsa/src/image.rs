@@ -751,6 +751,9 @@ fn create_image(
     let Some(gpu_index) = runtime.gpu_index(agent) else {
         return INVALID_AGENT;
     };
+    if !runtime.gpus[gpu_index].supports_images() {
+        return IMAGE_FORMAT_UNSUPPORTED;
+    }
     let layout = match image_layout(descriptor, access_permission, mipmap_levels, explicit_pitch) {
         Ok(layout) => layout,
         Err(status) => return status,
@@ -797,6 +800,9 @@ unsafe fn create_amd_image(
     let Some(gpu_index) = runtime.gpu_index(agent) else {
         return INVALID_AGENT;
     };
+    if !runtime.gpus[gpu_index].supports_images() {
+        return IMAGE_FORMAT_UNSUPPORTED;
+    }
     let layout = match image_layout(
         request.descriptor,
         request.access_permission,
@@ -1372,7 +1378,7 @@ fn query_capability(
     if !runtime.is_agent(agent) {
         return Err(INVALID_AGENT);
     }
-    Ok(if runtime.gpu_index(agent).is_some() {
+    Ok(if runtime.image_supported(agent) {
         image_property(format, geometry).map_or(0, |property| property.capability)
     } else {
         0
@@ -1443,7 +1449,7 @@ fn query_image_data_info(
     }
     // SAFETY: The caller supplied writable output storage.
     unsafe { image_data_info.write(HsaExtImageDataInfo::default()) };
-    if runtime.gpu_index(agent).is_none() {
+    if !runtime.image_supported(agent) {
         return IMAGE_FORMAT_UNSUPPORTED;
     }
     match image_layout(descriptor, access_permission, mipmap_levels, explicit_pitch) {
@@ -2107,7 +2113,7 @@ pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(
         if !runtime.is_agent(agent) {
             return INVALID_AGENT;
         }
-        let gpu = runtime.gpu_index(agent).is_some();
+        let gpu = runtime.image_supported(agent);
         // SAFETY: Each attribute selects its documented writable output extent.
         unsafe {
             match attribute {
@@ -2226,6 +2232,9 @@ fn create_sampler(
     let Some(index) = runtime.gpu_index(agent) else {
         return INVALID_AGENT;
     };
+    if !runtime.gpus[index].supports_images() {
+        return SAMPLER_DESCRIPTOR_UNSUPPORTED;
+    }
     if runtime.samplers.try_reserve(1).is_err() {
         return OUT_OF_RESOURCES;
     }

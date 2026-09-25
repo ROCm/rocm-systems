@@ -12,6 +12,111 @@ use crate::memory::{HostAllocation, VirtualAddress, VirtualAddressInfo};
 use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 
+/// Linux descriptor calls shared by native-handle ABI adapters.
+#[cfg(target_os = "linux")]
+pub mod linux {
+    use std::io;
+
+    /// Reads the current length of a borrowed descriptor without closing it.
+    ///
+    /// # Errors
+    /// Returns the native descriptor or metadata error.
+    pub fn descriptor_length(descriptor: i32) -> io::Result<u64> {
+        crate::driver::descriptor_length(descriptor)
+    }
+
+    /// Reads exactly `bytes.len()` bytes from a borrowed descriptor at `offset`.
+    ///
+    /// # Errors
+    /// Returns a native read error or `UnexpectedEof` for a short file.
+    pub fn read_descriptor_exact(descriptor: i32, bytes: &mut [u8], offset: i64) -> io::Result<()> {
+        crate::driver::read_descriptor_exact(descriptor, bytes, offset)
+    }
+
+    /// Closes one descriptor whose ownership was transferred by the caller.
+    ///
+    /// # Errors
+    /// Returns the native close error. Linux may still consume the descriptor.
+    pub fn close_descriptor(descriptor: i32) -> io::Result<()> {
+        crate::driver::close_descriptor(descriptor)
+    }
+
+    /// Reads one chunk at `offset` without changing the descriptor position.
+    ///
+    /// # Safety
+    /// `address..address + size` must be a live writable host range for the
+    /// duration of the call, and `descriptor` must remain open.
+    ///
+    /// # Errors
+    /// Returns an invalid argument or native read error.
+    #[allow(unsafe_code)]
+    pub unsafe fn read_descriptor(
+        descriptor: i32,
+        address: usize,
+        size: usize,
+        offset: i64,
+    ) -> io::Result<usize> {
+        // SAFETY: The caller upholds the range and descriptor contract.
+        unsafe { crate::driver::read_descriptor(descriptor, address, size, offset) }
+    }
+
+    /// Writes one chunk at `offset` without changing the descriptor position.
+    ///
+    /// # Safety
+    /// `address..address + size` must be a live readable host range for the
+    /// duration of the call, and `descriptor` must remain open.
+    ///
+    /// # Errors
+    /// Returns an invalid argument or native write error.
+    #[allow(unsafe_code)]
+    pub unsafe fn write_descriptor(
+        descriptor: i32,
+        address: usize,
+        size: usize,
+        offset: i64,
+    ) -> io::Result<usize> {
+        // SAFETY: The caller upholds the range and descriptor contract.
+        unsafe { crate::driver::write_descriptor(descriptor, address, size, offset) }
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::unwrap_used)]
+    mod tests {
+        use super::*;
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+
+        #[test]
+        fn exact_read_preserves_the_borrowed_descriptor() {
+            let path = std::env::temp_dir().join(format!(
+                "rocddi-descriptor-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let mut file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap();
+            std::fs::remove_file(path).unwrap();
+            file.write_all(b"ABCD").unwrap();
+            let descriptor = file.as_raw_fd();
+            assert_eq!(descriptor_length(descriptor).unwrap(), 4);
+            let mut bytes = [0; 2];
+            read_descriptor_exact(descriptor, &mut bytes, 1).unwrap();
+            assert_eq!(&bytes, b"BC");
+            assert_eq!(
+                read_descriptor_exact(descriptor, &mut bytes, 3)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::UnexpectedEof
+            );
+            assert_eq!(file.metadata().unwrap().len(), 4);
+        }
+    }
+}
+
 /// Upper bound on the lifetime of native state acquired by this session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionLifetime {
