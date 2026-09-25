@@ -61,13 +61,19 @@ def main() -> int:
         result = test_result(case)
         counts[result] += 1
         print(f"{result}: {case.attrib['name']}")
+        if result == "FAIL":
+            for failure in case.findall("failure") + case.findall("error"):
+                if failure.text:
+                    print(failure.text.strip())
     print(
         f"{counts['PASS']} passed, {counts['FAIL']} failed, "
         f"{counts['SKIP']} skipped"
     )
 
-    if completed.returncode:
-        print("\nCatch2 failure details:")
+    # A crash can leave syntactically valid, but incomplete, JUnit without a
+    # failed case. Preserve the raw transcript only for that exceptional path.
+    if completed.returncode and counts["FAIL"] == 0:
+        print("\nCatch2 terminated without a JUnit failure:")
         print(completed.stdout, end="")
     return completed.returncode
 
