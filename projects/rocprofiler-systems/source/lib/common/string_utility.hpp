@@ -213,9 +213,12 @@ strip_rocprofsys_prefix(std::string_view value)
 
 inline constexpr size_t k_default_hex_width = 16;
 
-/// formats an integral value as a zero-padded, "0x"-prefixed hex string
+/// @brief Format an integral value as a zero-padded, "0x"-prefixed hex string.
+/// @param value The integral value to format.
+/// @param width The minimum number of hex digits to zero-pad to.
+/// @return @p value formatted as e.g. "0x0000000000000010" (width 16, value 16).
 template <typename Tp>
-inline std::string
+[[nodiscard]] inline std::string
 hex_padded(Tp value, size_t width = k_default_hex_width)
 {
     return fmt::format("0x{:0{}x}", value, width);
