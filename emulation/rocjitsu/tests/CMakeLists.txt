@@ -872,6 +872,28 @@ target_link_libraries(
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
 
+add_executable(waitcheck_stream_test analysis/waitcheck_stream_test.cpp)
+target_link_libraries(
+    waitcheck_stream_test
+    PRIVATE
+        rocjitsu_waitcheck_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_stream_test WARNINGS)
+rj_add_gtest_tests(waitcheck_stream_test)
+if(CMAKE_NM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME WaitcheckStream.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:waitcheck_stream_test>
+            -DWAITCHECK_ARCHIVE=$<TARGET_FILE:rocjitsu_waitcheck_internal>
+            -DREQUIRED_MODEL_ARCHES=cdna3,cdna4,cdna5,rdna3,rdna3_5,rdna4 -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_waitcheck_stream_symbols.cmake
+    )
+endif()
+
 # Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Isolate allocator fault injection from the simulator test executable.

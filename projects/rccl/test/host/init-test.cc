@@ -26,6 +26,8 @@
 #endif
 #include <sys/resource.h>
 #include <utility>
+#include <atomic>
+#include <thread>
 #include <vector>
 
 #include "fakes/init_fakes.h"
@@ -326,6 +328,41 @@ class HostPattern {
   std::unique_ptr<ncclComm> comm_;
 };
 }  // namespace
+
+// ScopedHook's counter is incremented from every thread that reaches the seam:
+// commReclaim runs commDestroySync on one std::thread per rank, so a hook over
+// ncclProxyStop is entered concurrently. A plain int loses updates there, and
+// the suite test that notices (CommReclaim_LastIntraRank_...) only undercounts
+// in a small fraction of runs -- too rare to guard the header on its own.
+TEST(ScopedHookMicrotest, CallsCounterIsExactUnderConcurrentInvocation) {
+  static std::function<void()> seam = [] {};
+  constexpr int kThreads   = 8;
+  constexpr int kPerThread = 50000;
+
+  ScopedHook hook(seam, [] {});
+
+  // Release every worker at once. Without the gate the early threads can finish
+  // before the last one starts, and the increments barely overlap.
+  static std::atomic<int>  ready{0};
+  static std::atomic<bool> go{false};
+  ready.store(0);
+  go.store(false);
+
+  std::vector<std::thread> workers;
+  workers.reserve(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    workers.emplace_back([] {
+      ready.fetch_add(1, std::memory_order_acq_rel);
+      while (!go.load(std::memory_order_acquire)) { /* spin */ }
+      for (int j = 0; j < kPerThread; ++j) seam();
+    });
+  }
+  while (ready.load(std::memory_order_acquire) < kThreads) { /* spin */ }
+  go.store(true, std::memory_order_release);
+  for (auto& w : workers) w.join();
+
+  EXPECT_EQ(hook.calls, kThreads * kPerThread);
+}
 
 TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
   HostPattern p{1, 1, 2, 2};

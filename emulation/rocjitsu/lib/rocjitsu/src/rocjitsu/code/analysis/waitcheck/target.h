@@ -77,6 +77,12 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
+// Counter retirement order does not imply ordered VGPR writeback on GFX12.
+[[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
 [[nodiscard]] inline WaitCounterKind smem_wait_counter(WaitcntModel model) {
   return uses_legacy_waitcnt(model) ? WaitCounterKind::Ds : WaitCounterKind::Km;
 }
