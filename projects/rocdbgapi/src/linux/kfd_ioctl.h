@@ -49,9 +49,10 @@
  * - 1.21 - Debugger support to subscribe to LDS out-of-address exceptions
  * - 1.22 - Add queue creation with metadata ring base address
  * - 1.23 - Add profiler control ioctl to enable/disable profiler on a process
+ * - 1.24 - Add  PCI domain in kfd_dbg_device_info_entry
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 23
+#define KFD_IOCTL_MINOR_VERSION 24
 
 struct kfd_ioctl_get_version_args {
 	__u32 major_version;	/* from KFD */
@@ -151,7 +152,7 @@ struct kfd_dbg_device_info_entry {
 	__u32 capability;
 	__u32 debug_prop;
 	__u32 capability2;
-	__u32 pad;
+	__u32 pci_domain;
 };
 
 /* For kfd_ioctl_set_memory_policy_args.default_policy and alternate_policy */
