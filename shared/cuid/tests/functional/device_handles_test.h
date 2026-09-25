@@ -30,4 +30,11 @@ class TestGetHandleByFD : public TestBase {
   void Run() override;
 };
 
+// Asserts what ColdLookupEnvironment recorded before the first test enumerated.
+class TestColdHandleLookup : public TestBase {
+ public:
+  TestColdHandleLookup();
+  void Run() override;
+};
+
 #endif  // CUID_TEST_FUNCTIONAL_DEVICE_HANDLES_TEST_H_

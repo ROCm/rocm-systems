@@ -59,18 +59,18 @@ void TestDriverCuid::Run() {
   ASSERT_NE(dir, nullptr);
   const std::string root(dir);
 
-  const std::string secondary = root + "/cuid_secondary";
+  const std::string derived = root + "/cuid_derived";
   const std::string primary = root + "/cuid_primary";
   const std::string garbage = root + "/cuid_garbage";
 
   // The attribute is present and well-formed. The kernel writes the UUID with
   // a trailing newline, which the reader must trim.
   {
-    WriteAttribute(secondary, "d4abaad3-9b34-8c50-9800-028dcc084200\n");
+    WriteAttribute(derived, "d4abaad3-9b34-8c50-9800-028dcc084200\n");
     const uint8_t expected[16] = {0xd4, 0xab, 0xaa, 0xd3, 0x9b, 0x34, 0x8c, 0x50,
                                   0x98, 0x00, 0x02, 0x8d, 0xcc, 0x08, 0x42, 0x00};
     amdcuid_id_t id = {{0}};
-    EXPECT_EQ(CuidUtilities::read_driver_cuid_from_path(secondary, &id), AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(CuidUtilities::read_driver_cuid_from_path(derived, &id), AMDCUID_STATUS_SUCCESS);
     for (int i = 0; i < 16; ++i) {
       EXPECT_EQ(id.bytes[i], expected[i]) << "Mismatch at byte " << i;
     }
@@ -143,14 +143,14 @@ void TestDriverCuid::Run() {
   // BDF wrapper must not build a path out of an empty BDF, which is what a
   // GIM-only device reaches the caller with.
   {
-    EXPECT_EQ(CuidUtilities::read_driver_cuid_from_path(secondary, nullptr),
+    EXPECT_EQ(CuidUtilities::read_driver_cuid_from_path(derived, nullptr),
               AMDCUID_STATUS_INVALID_ARGUMENT);
     amdcuid_id_t id = {{0}};
     EXPECT_EQ(CuidUtilities::read_driver_cuid("", CuidUtilities::kDriverPrimaryAttribute, &id),
               AMDCUID_STATUS_INVALID_ARGUMENT);
   }
 
-  unlink(secondary.c_str());
+  unlink(derived.c_str());
   unlink(primary.c_str());
   unlink(garbage.c_str());
   rmdir(root.c_str());

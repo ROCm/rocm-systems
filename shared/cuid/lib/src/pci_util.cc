@@ -124,29 +124,29 @@ amdcuid_status_t PciUtil::get_pci_dsn_cap_offset(std::string bdf, uint16_t& offs
   return AMDCUID_STATUS_UNSUPPORTED;
 }
 
-amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf, uint16_t& offset) {
-  if (geteuid() != 0) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
-  if (bdf.empty()) return AMDCUID_STATUS_INVALID_ARGUMENT;
+amdcuid_status_t PciUtil::find_vsec_serial_offset(const uint8_t* config_space, size_t size,
+                                                  uint16_t vendor_id, uint16_t& offset) {
+  if (!config_space || size < 0x100 + 8) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
-  // Get the whole PCI config space header
-  uint8_t config_space[kPciConfigSpaceSize] = {0};
-  amdcuid_status_t status = read_pci_config_space(bdf, config_space, sizeof(config_space), 0);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
+  // A VSEC carries no vendor of its own: its layout is defined by the Vendor
+  // ID of the function it sits in. No serial-number VSEC ID is defined, so the
+  // body can only be trusted as far as the function is the device the caller
+  // identified; a function answering with another vendor is not.
+  if (load_le16(config_space) != vendor_id) return AMDCUID_STATUS_UNSUPPORTED;
 
   // Vendor-Specific Extended Capability (cap_id 0x000B) is a PCIe Extended
   // Capability.
-  const uint16_t vsec_cap_id = 0x0b;  // PCIe VSEC capability ID
+  const uint16_t vsec_cap_id = 0x0b;
+  // The capability header and the VSEC header, 4 bytes each, precede the body.
+  const uint16_t vsec_body = 8;
+  const uint16_t serial_size = 8;
 
   // Traverse the extended capability list starting at offset 0x100.
   uint16_t cap_ptr = 0x100;
   for (size_t hops = 0; hops < 1024; ++hops) {
-    // Widen to size_t before comparing against sizeof(): cap_ptr promotes to
-    // int, which would otherwise be an implicit signed/unsigned comparison.
-    if (cap_ptr < 0x100 || static_cast<size_t>(cap_ptr) + 7 >= sizeof(config_space)) {
+    // Widen to size_t before comparing: cap_ptr promotes to int, which would
+    // otherwise be an implicit signed/unsigned comparison.
+    if (cap_ptr < 0x100 || static_cast<size_t>(cap_ptr) + vsec_body > size) {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
 
@@ -159,21 +159,18 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf, uint16_t& off
     uint16_t next_ptr = static_cast<uint16_t>((cap_header >> 20) & 0x0FFF);
 
     if (cap_id_local == vsec_cap_id) {
-      // check vsec header now for correct fields
       uint32_t vsec_header = static_cast<uint32_t>(config_space[cap_ptr + 4]) |
                              (static_cast<uint32_t>(config_space[cap_ptr + 5]) << 8) |
                              (static_cast<uint32_t>(config_space[cap_ptr + 6]) << 16) |
                              (static_cast<uint32_t>(config_space[cap_ptr + 7]) << 24);
 
-      // if the VSEC has the required length for our fingerprint, return the
-      // offset. Since VSEC ID for serial number/id not typically defined,
-      // we rely on the length field to to simply get enough bytes
-      // for the fingerprint rather than checking an ID field in the VSEC
-      // header. If one is defined in the future, we will add that check here as
-      // well.
-      uint16_t vsec_length = static_cast<uint16_t>((vsec_header >> 20) & 0x0FFF);
-      if (vsec_length >= 8) {
-        offset = cap_ptr + 8;
+      // VSEC Length counts the whole structure, both headers included, so it
+      // must cover 8 body bytes past them. Anything shorter would read the
+      // next capability as a serial.
+      const uint16_t vsec_length = static_cast<uint16_t>((vsec_header >> 20) & 0x0FFF);
+      if (vsec_length >= vsec_body + serial_size &&
+          static_cast<size_t>(cap_ptr) + vsec_body + serial_size <= size) {
+        offset = cap_ptr + vsec_body;
         return AMDCUID_STATUS_SUCCESS;
       }
     }
@@ -187,4 +184,20 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf, uint16_t& off
   }
 
   return AMDCUID_STATUS_UNSUPPORTED;
+}
+
+amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf, uint16_t vendor_id,
+                                                  uint16_t& offset) {
+  if (geteuid() != 0) {
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+  if (bdf.empty()) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  // Get the whole PCI config space header
+  uint8_t config_space[kPciConfigSpaceSize] = {0};
+  amdcuid_status_t status = read_pci_config_space(bdf, config_space, sizeof(config_space), 0);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
+  }
+  return find_vsec_serial_offset(config_space, sizeof(config_space), vendor_id, offset);
 }

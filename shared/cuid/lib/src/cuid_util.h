@@ -69,10 +69,10 @@ inline amdcuid_status_t validate_fingerprint(uint64_t fingerprint) {
 
 // The CUID attributes amdgpu publishes under /sys/bus/pci/devices/<bdf>/.
 // cuid_primary is 0400 and gated on CAP_SYS_ADMIN because its payload embeds
-// the raw serial; cuid_secondary is 0444 and is what unprivileged tools
+// the raw serial; cuid_derived is 0444 and is what unprivileged tools
 // consume. cuid_seed is deliberately absent here: it is the secret.
 constexpr const char kDriverPrimaryAttribute[] = "cuid_primary";
-constexpr const char kDriverSecondaryAttribute[] = "cuid_secondary";
+constexpr const char kDriverDerivedAttribute[] = "cuid_derived";
 
 // Read a driver-published CUID attribute and parse its RFC 9562 UUID string
 // into `id`. `path` is the full attribute file, so a test can point it at a
@@ -90,7 +90,7 @@ constexpr const char kDriverSecondaryAttribute[] = "cuid_secondary";
 // errno is meaningful and nothing escapes into hosts built without exceptions.
 amdcuid_status_t read_driver_cuid_from_path(const std::string& path, amdcuid_id_t* id);
 
-// Read `attribute` (kDriverPrimaryAttribute or kDriverSecondaryAttribute) for
+// Read `attribute` (kDriverPrimaryAttribute or kDriverDerivedAttribute) for
 // the device at `bdf`, in the standard "dddd:bb:dd.f" form.
 amdcuid_status_t read_driver_cuid(const std::string& bdf, const std::string& attribute,
                                   amdcuid_id_t* id);
@@ -112,6 +112,11 @@ inline void pack_component_type_bits(uint8_t value, uint8_t raw_bits[16]) {
   raw_bits[15] = static_cast<uint8_t>((raw_bits[15] & 0xFC) | ((value & 0xC) >> 2));
 }
 
+// Whether this process holds CAP_SYS_ADMIN in its effective set. amdgpu gates
+// reading cuid_primary and cuid_seed on it, so root without it (a default
+// container) is unprivileged as far as the driver is concerned.
+bool has_cap_sys_admin();
+
 std::string read_sysfs_file(const std::string& path);
 std::string readlink_bdf(const std::string& device_path);
 std::string bdf_to_device_path(const std::string& bdf, amdcuid_device_type_t device_type);
@@ -121,6 +126,7 @@ amdcuid_status_t generate_derived_cuid(const amdcuid_primary_id* primary_id,
                                        amdcuid_derived_id* derived_id, cuid_hmac* hmac);
 // device_type is the enumeration, not an integer: it is written straight into
 // the Component Type field, so a raw value must not be passable here.
+// UnitID > 0x1FFF returns INVALID_ARGUMENT without modifying primary_id.
 amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                        uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                        amdcuid_device_type_t device_type,
@@ -151,7 +157,7 @@ constexpr uint16_t kAuxFormatCpu = 2;
 // gives Format 0-16 and Machine ID 17-143, which overlap and total 257.
 //
 //   bits   0:15   Format          1 = PCIe device, 2 = CPU
-//   bits  16:143  Machine ID      128 bits, from /etc/machine-id
+//   bits  16:143  Machine ID      zero; the machine-id keys the HMAC instead
 //   bits 144:175  PCIe Routing ID (segment<<16)|(bus<<8)|(device<<3)|function
 //   bits 176:183  RevisionID      CPU: stepping
 //   bits 184:199  DeviceID        CPU: family and model
@@ -175,41 +181,60 @@ struct AuxiliaryInput {
 // BDF, which is_valid_bdf() should have rejected already.
 uint32_t routing_id_from_bdf(const std::string& bdf);
 
-// Pack the 32-octet auxiliary input structure from `input` and a machine
-// identity, at the field positions documented on AuxiliaryInput above. Those
-// positions are wire format: the kernel implements no auxiliary path, so
-// nothing else pins them. The machine identity is an argument so the
-// conformance vectors can assert the structure octet for octet against the
-// aux-input row of cuid_vectors.txt.
-void pack_auxiliary_input(const AuxiliaryInput& input, const uint8_t machine_id[16],
-                          uint8_t out[32]);
+// Pack the 32-octet auxiliary input structure from `input`, at the field
+// positions documented on AuxiliaryInput above. Those positions are wire
+// format: the kernel implements no auxiliary path, so nothing else pins them.
+void pack_auxiliary_input(const AuxiliaryInput& input, uint8_t out[32]);
 
-// The auxiliary serial: the first 8 octets of the unkeyed SHA-256 of the
-// 32-octet input structure, little-endian. Placed in payload bits 0:63 of an
-// otherwise normal primary that has bit 117 set.
+// Label of the temporary-CUID application key, 16 ASCII octets, no NUL.
+constexpr char kTemporaryKeyLabel[] = "AMD-CUID-TEMP-v2";
+
+// K_app = HMAC-SHA256(key = machine-id as 16 octets, msg = kTemporaryKeyLabel).
+// Keys both the auxiliary serial and the derived temporary CUID, so neither
+// exposes the machine-id itself (machine-id(5)). HW_FINGERPRINT_NOT_FOUND when
+// this host has no machine-id.
+amdcuid_status_t temporary_key(uint8_t out[32]);
+void temporary_key(const uint8_t machine_id[16], uint8_t out[32]);
+
+// The auxiliary serial: the first 8 octets of HMAC-SHA256(K_app, the 32-octet
+// input structure), little-endian. Placed in payload bits 0:63 of an otherwise
+// normal primary that has bit 117 set.
 amdcuid_status_t make_fallback_fingerprint(const AuxiliaryInput& input, uint64_t& fingerprint);
 
-// The same, with the machine identity supplied rather than read from this host
-// (the overload above is this one behind read_machine_id()). For the
-// conformance vectors, which need a fixed one to reproduce on any host.
+// The same, with the machine identity supplied rather than read from this host,
+// for the conformance vectors, which need a fixed one to reproduce on any host.
 amdcuid_status_t make_fallback_fingerprint(const AuxiliaryInput& input,
                                            const uint8_t machine_id[16], uint64_t& fingerprint);
 
+// The largest value the 13-bit UnitID field holds. A larger index must be
+// refused rather than masked: masking sends 0x2000 to 0, which means "the
+// component as a whole", so a sub-unit would answer with its parent's
+// identifier.
+constexpr uint16_t kMaxUnitId = 0x1FFF;
+
 // GPU VF (SR-IOV Virtual Function) utilities
 int extract_render_minor(const std::string& path);
-uint16_t get_gpu_vf_id(const std::string& device_path);
 
-// Where the CUID records live: /var/lib/amdcuid, root-owned and 0755, with the
-// unprivileged record 0644 and the privileged one 0600. Machine state, not
-// configuration, so beside the key store's AMDCUID_CONFIG_DIR (/etc/amdcuid)
-// rather than in it, and not in /tmp: the lock and temp names this library
-// derives are predictable, so in a world-writable directory a local user can
-// pre-create one as a symlink for the next root-privileged refresh to follow.
-// Overridable at build time; an unprivileged process may also point it
-// elsewhere with $AMDCUID_RECORD_DIR, ignored outright when euid is 0.
-const std::string& record_dir();
-const std::string& cuid_file();
-const std::string& priv_cuid_file();
+// What a device turned out to be, as far as SR-IOV is concerned. The two
+// questions are separate because the answers are used differently.
+//
+// On a host a VF's physfn link is visible, and its index says which share of the
+// card this is, so the VF is a sub-unit: the card's serial plus that index names
+// it, exactly as a partition index does.
+//
+// In a guest there is no physfn link and the index is unknowable. What is
+// reachable there -- the PCIe Device Serial Number, if the VF exposes one at all
+// -- belongs to the physical card, and nothing distinguishes it from the card's
+// own identity, so every guest sharing that card would publish the same one and
+// it would be the host's. The kernel declines to publish a CUID on a VF for this
+// reason; this structure is how the library declines.
+struct VfIdentity {
+  bool is_vf = false;        // the device reports itself as a virtual function
+  bool index_known = false;  // ... and we could determine which one
+  uint16_t unit_id = 0;      // 1-based index, or 0 when not a VF / unknown
+};
+
+VfIdentity get_gpu_vf_identity(const std::string& device_path);
 }  // namespace CuidUtilities
 
 #endif

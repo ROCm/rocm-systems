@@ -40,9 +40,7 @@ endif()
 
 set(AMDCUID_TST_EXECUTABLE amdcuid_test)
 
-# Sources listed explicitly, as lib/CMakeLists.txt does. aux_source_directory()
-# is evaluated at configure time, so adding a file did not regenerate the build
-# and failed at link until cmake was re-run by hand.
+# Sources listed explicitly so adding a file re-runs configure.
 set(TEST_SOURCES_ROOT
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/test_base.cc
@@ -52,16 +50,18 @@ set(TEST_SOURCES_ROOT
 set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/acpi_parser_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/cpu_unit_id_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/device_type_table_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/driver_cuid_test.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/unit/file_lock_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/unit/key_info_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/key_store_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/lookup_policy_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/partition_cuid_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/pci_util_test.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/unit/record_generation_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/serial_precedence_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/sriov_vf_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/sha256_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/status_string_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/utilities_test.cc
@@ -72,9 +72,7 @@ set(TEST_SOURCES_UNIT
 set(TEST_SOURCES_FUNCTIONAL
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_handles_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_query_test.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_refresh_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/hmac_test.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/functional/rekey_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/reverse_lookup_test.cc
 )
 
@@ -86,7 +84,6 @@ set(TEST_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/driver_cuid_test.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/unit/file_lock_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/pci_util_test.h
@@ -97,7 +94,6 @@ set(TEST_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/version_read_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_handles_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_query_test.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_refresh_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/hmac_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/functional/reverse_lookup_test.h
 )
@@ -139,9 +135,13 @@ target_compile_definitions(
     PRIVATE AMDCUID_VECTORS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/vectors/cuid_vectors.txt"
 )
 
-# Fail the build if cuid_vectors.txt has drifted from its generator, the same
-# way check_sha256_drift.py guards the SHA-256 sources.
-find_package(Python3 COMPONENTS Interpreter QUIET)
+option(AMDCUID_BUILD_LIFECYCLE_TESTS "Build isolated Linux lifecycle fixtures" OFF)
+
+if(AMDCUID_BUILD_LIFECYCLE_TESTS)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+endif()
 if(Python3_Interpreter_FOUND)
     add_custom_target(
         amdcuid_vectors_check
@@ -153,9 +153,59 @@ if(Python3_Interpreter_FOUND)
     add_dependencies(${AMDCUID_TST_EXECUTABLE} amdcuid_vectors_check)
 endif()
 
-# Register two CTest targets split by privilege level.
+# These binaries replace discovery at link time. They are never installed and
+# no override is compiled into production objects.
+if(AMDCUID_BUILD_LIFECYCLE_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    get_target_property(_cuid_sources amdcuid_objs SOURCES)
+    add_library(cuid_lifecycle_lib STATIC ${_cuid_sources})
+    set(_fixture "${CMAKE_CURRENT_BINARY_DIR}/lifecycle-state")
+    target_include_directories(cuid_lifecycle_lib PUBLIC ../lib)
+    target_link_libraries(cuid_lifecycle_lib PUBLIC rocm::sha256 Threads::Threads)
+
+    # These tests mount a private synthetic /sys, /dev and /run before running
+    # the real GPU discovery code. The shim refuses the host namespace.
+    foreach(_path_target IN ITEMS cuid_gpu_path_probe cuid_gpu_path_baseline)
+        if(_path_target STREQUAL "cuid_gpu_path_probe")
+            set(_path_sources lifecycle/gpu_path_probe.cc)
+        else()
+            set(_path_sources ${TEST_SOURCES})
+        endif()
+        add_executable(${_path_target} ${_path_sources} lifecycle/gpu_path_shim.cc)
+        target_include_directories(${_path_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(
+            ${_path_target}
+            PRIVATE
+                CUID_TEST_ROOT="${_fixture}"
+                AMDCUID_VECTORS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/vectors/cuid_vectors.txt"
+        )
+        target_link_libraries(${_path_target} PRIVATE cuid_lifecycle_lib GTest::gtest)
+        target_link_options(
+            ${_path_target}
+            PRIVATE
+                -Wl,--wrap=stat
+                -Wl,--wrap=fstat
+                -Wl,--wrap=write
+                -Wl,--wrap=_ZN7CuidCpu8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE
+                -Wl,--wrap=_ZN7CuidNic8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE
+                -Wl,--wrap=_ZN7CuidNpu8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE
+                -Wl,--wrap=_ZN12CuidPlatform8discoverERSt6vectorISt10shared_ptrI10CuidDeviceESaIS3_EE
+        )
+    endforeach()
+    add_test(
+        NAME cuid_gpu_paths
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/lifecycle/test_gpu_paths.py ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        cuid_gpu_paths
+        PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180 RESOURCE_LOCK cuid_lifecycle_state
+    )
+endif()
+
+# Register the privilege suites and the CPU/partition/VF regression cases.
 add_test(NAME cuid_unprivileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstUnprivileged.*)
 add_test(NAME cuid_privileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstPrivileged.*)
+add_test(NAME cuid_regression_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtst.*)
 
 # Platform-specific config directory
 if(WIN32)

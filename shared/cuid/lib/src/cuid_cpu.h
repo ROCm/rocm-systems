@@ -23,6 +23,8 @@ class CuidCpu : public CuidDevice {
   amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_CPU; }
   amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
   amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
+  bool key_gated_identity() const override { return true; }
+  amdcuid_status_t get_auxiliary_primary_cuid(amdcuid_primary_id& id) const override;
   static amdcuid_status_t discover(std::vector<DevicePtr>& cpus);
   static amdcuid_status_t discover_single(amdcuid_cpu_info* cpu_info,
                                           const std::string& device_path);

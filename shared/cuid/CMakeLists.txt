@@ -16,8 +16,12 @@ set(AMDCUID_PACKAGE ${AMDCUID} CACHE STRING "")
 # ROCM_DIR should be passed in via command line
 set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
 
-# Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+# ROCm installs under lib, not lib64. Top level only: the cache is global to a
+# build tree, so seeding CMAKE_INSTALL_LIBDIR from a subdirectory would decide
+# the layout of every sibling project in a superbuild.
+if(NOT DEFINED CMAKE_INSTALL_LIBDIR AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Library install directory")
+endif()
 
 # Read version from amd_cuid.h so there is a single source of truth
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/include/amd_cuid.h" _CUID_HEADER)
@@ -36,9 +40,10 @@ set(CMAKE_INSTALL_MESSAGE LAZY)
 # This must go after some CMAKE_* variables
 project(${AMDCUID} VERSION "${VERSION_STRING}")
 
-# Usually ROCM tools are installed into /opt/rocm
-# CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project()
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+# Usually ROCM tools are installed into /opt/rocm.
+# CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project().
+# Top level only: forcing the prefix from a subdirectory relocates the parent's install.
+if(PROJECT_IS_TOP_LEVEL AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
         set(CMAKE_INSTALL_PREFIX "C:/Program Files/AMD/ROCM/AMDCUID" CACHE PATH "Default installation directory." FORCE)
     else() # Linux/Unix
@@ -54,30 +59,17 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
-option(BUILD_TESTS "Build test suite" OFF)
-# When cmake -DBUILD_EXAMPLES off by default, it will not build the CUID examples
-option(BUILD_EXAMPLES "Build examples" OFF)
-# When cmake -DBUILD_DAEMON off by default, it will not build the CUID daemon
-option(BUILD_DAEMON "Build daemon" OFF)
-
-# Version-independent directory shared by all installed versions.
-# The HMAC key and daemon config file are stored here so that multi-version
-# ROCm installs all agree on the same key and settings, keeping CUIDs stable
-# across version upgrades.  The path must NOT contain CMAKE_INSTALL_PREFIX
-# (which is version-specific, e.g. /opt/rocm-6.1/core).
-if(WIN32)
-    set(AMDCUID_SHARED_CONFIG_DIR
-        "C:/ProgramData/AMD/AMDCUID/config"
-        CACHE PATH
-        "Version-independent directory for the HMAC key and daemon config."
-    )
+# A parent project has its own BUILD_TESTS etc. (projects/amdsmi sets
+# BUILD_TESTS=ON), which option() would silently adopt. As a subdirectory, build
+# only the library unless the parent sets the AMDCUID_-prefixed names.
+if(PROJECT_IS_TOP_LEVEL)
+    # When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
+    option(BUILD_TESTS "Build test suite" OFF)
+    # When cmake -DBUILD_EXAMPLES off by default, it will not build the CUID examples
+    option(BUILD_EXAMPLES "Build examples" OFF)
 else()
-    set(AMDCUID_SHARED_CONFIG_DIR
-        "/etc/amdcuid"
-        CACHE PATH
-        "Version-independent directory for the HMAC key and daemon config."
-    )
+    set(BUILD_TESTS ${AMDCUID_BUILD_TESTS})
+    set(BUILD_EXAMPLES ${AMDCUID_BUILD_EXAMPLES})
 endif()
 
 if(WIN32)
@@ -95,49 +87,36 @@ message("-----------ROCM_DIR : " ${ROCM_DIR})
 message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
 message("--------Build Type  : " ${CMAKE_BUILD_TYPE})
 
+# A parent that absorbs AMDCUID_IN_TREE_OBJECTS must not also ship a
+# libamdcuid.a, headers or CMake package for a library nobody links.
+option(AMDCUID_INSTALL "Install the library, headers and CMake package" ${PROJECT_IS_TOP_LEVEL})
+
 # Define all the install component labels
 set(LIB_COMPONENT "library")
-set(DAEMON_COMPONENT "daemon")
-set(CLI_COMPONENT "cli")
 set(EXAMPLE_COMPONENT "example")
 set(TESTS_COMPONENT "tests")
 
 add_subdirectory(lib)
-add_subdirectory(cli)
-if(BUILD_DAEMON)
-    add_subdirectory(daemon)
-endif()
 if(BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
 if(BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
 endif()
 
-# Unified post-install wrapper: runs the library post-install always, and the
-# daemon post-install automatically when the daemon binary is present.
-if(UNIX AND NOT APPLE)
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/amdcuid_postinst_wrapper.sh.in
-        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh
-        @ONLY
-    )
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/amdcuid_prerm_wrapper.sh.in
-        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
-        @ONLY
-    )
+# efivarfs shows AmdCuidKey world-readable and immutable. systemd-tmpfiles
+# only reads fixed directories, never ones under an install prefix.
+if(AMDCUID_INSTALL AND UNIX AND NOT APPLE)
+    set(AMDCUID_TMPFILES_DIR "/usr/lib/tmpfiles.d" CACHE PATH "Directory systemd-tmpfiles reads amdcuid.conf from")
     install(
-        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
+        FILES ${CMAKE_CURRENT_SOURCE_DIR}/scripts/tmpfiles.d/amdcuid.conf
+        DESTINATION ${AMDCUID_TMPFILES_DIR}
         COMPONENT ${LIB_COMPONENT}
     )
 endif()
 
 # Uninstall target
-# NOTE: /etc/amdcuid/ (HMAC key + config) is intentionally left in place by
-#       the prerm script to preserve existing CUID values across reinstalls.
-#       Remove manually with: sudo rm -rf /etc/amdcuid
 if(NOT TARGET uninstall)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"

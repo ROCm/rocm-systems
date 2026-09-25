@@ -8,7 +8,6 @@
 #include "unit/concurrency_test.h"
 #include "unit/cuid_gpu_test.h"
 #include "unit/driver_cuid_test.h"
-#include "unit/file_lock_test.h"
 #include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
 #include "unit/pci_util_test.h"
@@ -24,7 +23,6 @@
 
 #include "functional/device_handles_test.h"
 #include "functional/device_query_test.h"
-#include "functional/device_refresh_test.h"
 #include "functional/hmac_test.h"
 #include "functional/reverse_lookup_test.h"
 #include "src/gim_util.h"
@@ -73,36 +71,6 @@ TEST(cuidtstUnprivileged, HmacSha256Kat) {
   RunGenericTest(&tst);
 }
 
-TEST(cuidtstUnprivileged, FileLockBasic) {
-  TestFileLockBasic tst;
-  RunGenericTest(&tst);
-}
-
-TEST(cuidtstUnprivileged, FileLockRAII) {
-  TestFileLockRAII tst;
-  RunGenericTest(&tst);
-}
-
-TEST(cuidtstUnprivileged, FileLockMultipleShared) {
-  TestFileLockMultipleShared tst;
-  RunGenericTest(&tst);
-}
-
-TEST(cuidtstUnprivileged, FileLockExclusiveBlocks) {
-  TestFileLockExclusiveBlocks tst;
-  RunGenericTest(&tst);
-}
-
-TEST(cuidtstUnprivileged, FileLockTimeout) {
-  TestFileLockTimeout tst;
-  RunGenericTest(&tst);
-}
-
-TEST(cuidtstUnprivileged, FileLockTimeoutSpecialCases) {
-  TestFileLockTimeoutSpecialCases tst;
-  RunGenericTest(&tst);
-}
-
 TEST(cuidtstUnprivileged, GetAllHandles) {
   TestGetAllHandles tst;
   RunGenericTest(&tst);
@@ -123,13 +91,13 @@ TEST(cuidtstUnprivileged, GetHandleByFD) {
   RunGenericTest(&tst);
 }
 
-TEST(cuidtstUnprivileged, DeviceQuery) {
-  TestDeviceQuery tst;
+TEST(cuidtstUnprivileged, ColdHandleLookup) {
+  TestColdHandleLookup tst;
   RunGenericTest(&tst);
 }
 
-TEST(cuidtstUnprivileged, DeviceRefresh) {
-  TestDeviceRefresh tst;
+TEST(cuidtstUnprivileged, DeviceQuery) {
+  TestDeviceQuery tst;
   RunGenericTest(&tst);
 }
 
@@ -244,6 +212,6 @@ TEST(cuidtstPrivileged, GimDeviceEnumeration) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   ProcessCmdline(&sCUIDGlvalues, argc, argv);
-  ::testing::AddGlobalTestEnvironment(new RecordStoreEnvironment());
+  ::testing::AddGlobalTestEnvironment(new ColdLookupEnvironment());
   return RUN_ALL_TESTS();
 }

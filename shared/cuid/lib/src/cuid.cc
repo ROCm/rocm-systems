@@ -3,18 +3,21 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <climits>
+#include <cstdlib>
 #include <cstring>
-#include <fstream>
-#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <vector>
 
 #include "include/amd_cuid.h"
+#include "rocm/sha2/sha256.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_device.h"
 #include "src/cuid_device_manager.h"
@@ -33,26 +36,30 @@ cuid_hmac global_hmac = cuid_hmac();
 CuidDeviceManager& mgr = CuidDeviceManager::instance();
 
 // Share global_hmac with mgr so build_cuid_index() derives CUIDs with the
-// same key amdcuid_set_hash_key() updates
+// key reload_key() last read.
 struct HmacWiring {
   HmacWiring() { mgr.set_hmac(&global_hmac); }
 } hmac_wiring;
 
-// The key to hand a derivation, for a caller of this privilege. Root gets it;
-// generate_derived_cuid() rejects a null key, so without this a privileged
-// lookup of a device the record names but holds no derived entry for returns
-// INVALID_ARGUMENT. An unprivileged caller does not get it, the same rule
-// AMDCUID_QUERY_DERIVED_CUID applies below: it cannot read a hardware
-// fingerprint, so deriving would build every device's CUID from an all-zero
-// primary. It must be answered from the driver or the record, or not at all.
-cuid_hmac* derivation_key() { return geteuid() == 0 ? &global_hmac : nullptr; }
+// Root with a node key gets it. Anyone else gets nullptr, which puts a
+// key-gated component (CPU, NIC, NPU, Platform) on its temporary CUID.
+cuid_hmac* derivation_key() {
+  return (geteuid() == 0 && global_hmac.is_valid()) ? &global_hmac : nullptr;
+}
 
-// Push the new seed into the driver for one PCI device.
-//
-// The kernel accepts exactly 32 raw bytes, not at most 32 (amdgpu_cuid.c:
-// `if (count != sizeof(cuid->seed)) return -EINVAL;`), so this is one write()
-// of exactly key_length, with no retry of a short write and no trailing
-// newline.
+amdcuid_status_t current_handle(const DevicePtr& device, amdcuid_id_t* handle) {
+  amdcuid_derived_id derived{};
+  const auto status = device->get_derived_cuid(derived, derivation_key());
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  const auto indexed = mgr.index_handle(device, derived.UUIDv8_representation);
+  if (indexed != AMDCUID_STATUS_SUCCESS) return indexed;
+  *handle = derived.UUIDv8_representation;
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+// The driver persists the seed to AmdCuidKey and re-keys every component.
+// cuid_seed accepts exactly 32 raw bytes in one write, with no trailing newline.
+// Retrying a short write would submit an invalid length.
 //
 // Returns SUCCESS when the seed was accepted, UNSUPPORTED when the attribute is
 // absent, so there is no kernel-published value to go stale, and
@@ -82,40 +89,120 @@ amdcuid_status_t write_driver_seed(const std::string& bdf, const uint8_t key[key
                                          : AMDCUID_STATUS_FILE_ERROR;
 }
 
-// Re-key every driver that publishes a CUID of its own.
-//
-// CuidDevice::get_derived_cuid() answers from the driver's cuid_secondary
-// first, and that value is keyed by the per-device sysfs cuid_seed, not by this
-// library's key file, so rewriting the key file alone leaves every such GPU on
-// its old derived CUID.
-//
-// A device with no cuid_seed attribute is not a failure, since nothing of the
-// caller's is left stale; a device that has the attribute and will not take the
-// write is. There is no status meaning "partially re-keyed", so the first real
-// failure is returned: PERMISSION_DENIED where the write was refused, FILE_ERROR
-// otherwise. The key file and the in-memory key are already replaced by the time
-// this runs, so a non-SUCCESS return means those devices are still on the old
-// seed.
-amdcuid_status_t publish_seed_to_drivers(const uint8_t key[key_length]) {
-  if (mgr.devices().empty()) {
-    (void)mgr.discover_devices();
+// efivarfs marks the variable immutable, which refuses both opening it for
+// writing and chmod. Sets `cleared` when the flag was set and is now clear.
+bool clear_immutable(int fd, bool& cleared) {
+  cleared = false;
+  int flags = 0;
+  if (ioctl(fd, FS_IOC_GETFLAGS, &flags) != 0) return false;
+  if (!(flags & FS_IMMUTABLE_FL)) return true;
+  flags &= ~FS_IMMUTABLE_FL;
+  if (ioctl(fd, FS_IOC_SETFLAGS, &flags) != 0) return false;
+  cleared = true;
+  return true;
+}
+
+// Put back what clear_immutable() took off, so the variable is not left
+// deletable.
+void restore_immutable(int fd) {
+  int flags = 0;
+  if (ioctl(fd, FS_IOC_GETFLAGS, &flags) == 0) {
+    flags |= FS_IMMUTABLE_FL;
+    if (ioctl(fd, FS_IOC_SETFLAGS, &flags) == 0) return;
   }
+  const int err = errno;
+  LOG(WARN, "amdcuid_set_hash_key: cannot restore the immutable flag on "
+                << kKeyVariablePath << ": " << CuidUtilities::errno_string(err));
+}
 
-  amdcuid_status_t first_failure = AMDCUID_STATUS_SUCCESS;
-  for (const auto& device : mgr.devices()) {
-    if (!device) continue;
+// Without amdgpu the key goes straight to AmdCuidKey, flagged as set by an
+// administrator. UNSUPPORTED when there is no efivarfs to write it to.
+amdcuid_status_t write_key_variable(const uint8_t key[key_length]) {
+  struct stat st{};
+  if (stat(kEfivarsDir, &st) != 0) return AMDCUID_STATUS_UNSUPPORTED;
 
-    std::string bdf;
-    if (device->get_bdf(bdf) != AMDCUID_STATUS_SUCCESS || bdf.empty()) {
-      continue;  // CPU, platform: nothing in sysfs to re-key
+  uint8_t buf[4 + kKeyVariablePayloadLen];
+  CuidUtilities::build_key_variable(key, buf);
+
+  bool cleared = false;
+  bool clear_failed = false;
+  int fd = -1;
+  const int ro_fd = open(kKeyVariablePath, O_RDONLY | O_CLOEXEC);
+  if (ro_fd >= 0) {
+    if (!clear_immutable(ro_fd, cleared)) {
+      const int err = errno;
+      clear_failed = true;
+      LOG(WARN, "amdcuid_set_hash_key: cannot clear the immutable flag on "
+                    << kKeyVariablePath << ": " << CuidUtilities::errno_string(err));
     }
+    fd = open(kKeyVariablePath, O_WRONLY | O_CLOEXEC);
+  } else if (errno == ENOENT) {
+    fd = open(kKeyVariablePath, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+  }
+  const int open_err = errno;
 
-    const amdcuid_status_t status = write_driver_seed(bdf, key);
-    if (status == AMDCUID_STATUS_SUCCESS || status == AMDCUID_STATUS_UNSUPPORTED) continue;
-    if (first_failure == AMDCUID_STATUS_SUCCESS) first_failure = status;
+  ssize_t written = -1;
+  int err = open_err;
+  if (fd >= 0) {
+    written = write(fd, buf, sizeof(buf));
+    err = errno;
+    close(fd);
+  }
+  rocm::sha2::secure_zero(buf, sizeof(buf));
+  if (ro_fd >= 0) {
+    if (cleared) restore_immutable(ro_fd);
+    close(ro_fd);
   }
 
-  return first_failure;
+  if (fd < 0) {
+    LOG(ERROR, "amdcuid_set_hash_key: cannot open " << kKeyVariablePath << ": "
+                                                    << CuidUtilities::errno_string(open_err));
+    // With the immutable flag still set, EPERM says nothing about privilege.
+    if (clear_failed) return AMDCUID_STATUS_FILE_ERROR;
+    return (open_err == EACCES || open_err == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
+                                                     : AMDCUID_STATUS_FILE_ERROR;
+  }
+  if (written == static_cast<ssize_t>(sizeof(buf))) return AMDCUID_STATUS_SUCCESS;
+  LOG(ERROR, "amdcuid_set_hash_key: cannot write " << kKeyVariablePath << ": "
+                                                   << CuidUtilities::errno_string(err));
+  return AMDCUID_STATUS_FILE_ERROR;
+}
+
+// efivarfs lists a variable only as it was at mount time, so one the driver
+// created this boot is absent until the next boot or a resume from
+// hibernation, and listed 0644 until the tmpfiles.d rule runs at boot.
+void restrict_key_variable() {
+  const int fd = open(kKeyVariablePath, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return;
+  bool cleared = false;
+  clear_immutable(fd, cleared);
+  if (fchmod(fd, 0600) != 0)
+    LOG(WARN, "amdcuid_set_hash_key: cannot make " << kKeyVariablePath << " mode 0600 ("
+                                                   << CuidUtilities::errno_string(errno)
+                                                   << "); every local user can read the key");
+  if (cleared) restore_immutable(fd);
+  close(fd);
+}
+
+bool find_cuid_seed_device(std::string& bdf) {
+  DIR* dir = opendir("/sys/bus/pci/devices");
+  if (!dir) return false;
+  bool found = false;
+  struct dirent* entry;
+  // This call site owns its DIR*, which is all POSIX requires; readdir_r is
+  // deprecated and must not be adopted.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  while (!found && (entry = readdir(dir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;
+    struct stat st{};
+    const std::string path = std::string("/sys/bus/pci/devices/") + entry->d_name + "/cuid_seed";
+    if (stat(path.c_str(), &st) == 0) {
+      bdf = entry->d_name;
+      found = true;
+    }
+  }
+  closedir(dir);
+  return found;
 }
 
 }  // namespace
@@ -187,11 +274,13 @@ const char* amdcuid_id_to_string(amdcuid_id_t cuid_value) {
 }
 
 amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count) {
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   if (!count) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 
   amdcuid_status_t status;
+  if (geteuid() == 0) global_hmac.reload_key();
   // get all the devices on the system first
   if (mgr.devices().empty()) {
     status = mgr.discover_devices();
@@ -200,6 +289,11 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
     }
   }
 
+  status = mgr.build_cuid_index();
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    *count = 0;
+    return status;
+  }
   auto handle_list = mgr.get_all_handles();
   auto handle_count = static_cast<uint32_t>(handle_list.size());
   if (handle_count == 0) {
@@ -222,6 +316,28 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
 }
 
 namespace {
+
+// Discover devices into the manager if it has none cached yet.
+amdcuid_status_t enumerate_into_manager() {
+  if (!mgr.devices().empty()) {
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  return mgr.discover_devices();
+}
+
+// The physical package of the logical CPU at `path`, or -1. A package is
+// recorded once, under its lowest logical CPU, and any of its logical CPUs
+// names it.
+int cpu_package_of(const std::string& path) {
+  char buf[PATH_MAX];
+  const std::string resolved = realpath(path.c_str(), buf) ? std::string(buf) : path;
+  const std::string text =
+      CuidUtilities::read_sysfs_file(resolved + "/topology/physical_package_id");
+  if (text.empty() || text.size() > 5 || text.find_first_not_of("0123456789") != std::string::npos)
+    return -1;
+  const long package = std::strtol(text.c_str(), nullptr, 10);
+  return package <= 0xFFFF ? static_cast<int>(package) : -1;
+}
 
 // helper function to discover device given dev_path
 DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
@@ -269,15 +385,33 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
     return std::make_shared<CuidNpu>(npu_info);
   }
 
-  int fd = open(dev_path, O_RDONLY);
-  if (fd < 0) {
-    // unable to open device path
+  // discover_single() takes a sysfs path. Resolve only character/block nodes
+  // through their device number: a directory has st_rdev == 0, which would
+  // incorrectly resolve through /sys/dev/char/0:0.
+  std::string real_dev_path;
+  struct stat path_stat = {};
+  if (stat(dev_path, &path_stat) != 0) {
     return nullptr;
   }
-
-  // find real device path in case of symlink
-  std::string real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
-  close(fd);
+  if (S_ISCHR(path_stat.st_mode) || S_ISBLK(path_stat.st_mode)) {
+    int fd = open(dev_path, O_RDONLY);
+    if (fd < 0) {
+      // unable to open device path
+      return nullptr;
+    }
+    real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
+    close(fd);
+  } else {
+    // Preserve the class path: discover_single() extracts its DRM node name.
+    // Class directories need "/device" appended to reach the PCI attributes.
+    real_dev_path = dev_path;
+    struct stat vendor_stat = {};
+    struct stat child_stat = {};
+    if (stat((real_dev_path + "/vendor").c_str(), &vendor_stat) != 0 &&
+        stat((real_dev_path + "/device/vendor").c_str(), &child_stat) == 0) {
+      real_dev_path += "/device";
+    }
+  }
   if (real_dev_path.empty()) {
     return nullptr;
   }
@@ -320,20 +454,31 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
 amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
                                                 amdcuid_device_type_t device_type,
                                                 amdcuid_id_t* handle) {
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   if (!dev_path || !handle) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
+  if (geteuid() == 0) global_hmac.reload_key();
 
-  const std::string input_dev_path(dev_path);
+  std::string input_dev_path(dev_path);
+  CuidGpuRoute gpu_route;
+  bool gpu_resolved = false;
+  if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
+    const auto resolved = CuidGpu::resolve_path(input_dev_path, gpu_route);
+    gpu_resolved = resolved == AMDCUID_STATUS_SUCCESS;
+    if (!gpu_resolved && (gpu_route.partition || resolved != AMDCUID_STATUS_FILE_NOT_FOUND))
+      return resolved;
+    if (gpu_resolved) input_dev_path = gpu_route.node;
+  }
   std::string real_dev_path;
   // For NIC paths (e.g., /sys/class/net/eth0), GPU paths
   // (e.g., /sys/class/drm/renderD128), and CPU paths
   // (e.g., /sys/devices/system/cpu/cpu0), use the path as-is since
   // get_real_path resolves symlinks and appends "/device" which does not
-  // match how device_node paths are stored in CUID files.
+  // match the device paths discovery stores.
   // CPU and Platform sysfs paths are directories without a /device
   // subdirectory, so the /device suffix would produce an invalid path.
-  std::string dev_path_str(dev_path);
+  std::string dev_path_str(input_dev_path);
   if (device_type == AMDCUID_DEVICE_TYPE_NIC || device_type == AMDCUID_DEVICE_TYPE_GPU ||
       device_type == AMDCUID_DEVICE_TYPE_CPU || device_type == AMDCUID_DEVICE_TYPE_PLATFORM ||
       device_type == AMDCUID_DEVICE_TYPE_NPU ||
@@ -347,76 +492,72 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
     real_dev_path = CuidUtilities::get_real_path(dev_path);
   }
 
-  amdcuid_status_t status;
+  const int cpu_package =
+      device_type == AMDCUID_DEVICE_TYPE_CPU ? cpu_package_of(input_dev_path) : -1;
+
+  const auto matches = [&](const DevicePtr& device) {
+    if (device->type() != device_type) return false;
+    uint16_t package = 0;
+    if (cpu_package >= 0 && device->get_physical_id(package) == AMDCUID_STATUS_SUCCESS &&
+        package == cpu_package)
+      return true;
+    std::string path;
+    if (device->get_device_path(path) != AMDCUID_STATUS_SUCCESS) return false;
+    if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
+      const auto gpu = std::dynamic_pointer_cast<CuidGpu>(device);
+      return gpu && (gpu_resolved ? gpu->matches_route(gpu_route) : path == input_dev_path);
+    }
+    const auto real = CuidUtilities::get_real_path(path);
+    return path == input_dev_path || path == real_dev_path ||
+           (!real.empty() && real == real_dev_path);
+  };
   // check mgr first to see if device is already known
   for (const auto& device : mgr.devices()) {
-    std::string device_path;
-    status = device->get_device_path(device_path);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      continue;
-    }
-    std::string device_real_path = CuidUtilities::get_real_path(device_path);
-    if ((device_path == input_dev_path || device_path == real_dev_path ||
-         (!device_real_path.empty() && device_real_path == real_dev_path)) &&
-        device->type() == device_type) {
-      amdcuid_derived_id derived;
-      status = device->get_derived_cuid(derived, derivation_key());
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        return status;
-      }
-      std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
-      return AMDCUID_STATUS_SUCCESS;
-    }
+    if (matches(device)) return current_handle(device, handle);
   }
 
-  // next check cuid files for device
-  DevicePtr device = nullptr;
-  status = mgr.get_device_from_file_by_dev_path(input_dev_path, device);
-  if (status != AMDCUID_STATUS_SUCCESS && real_dev_path != input_dev_path) {
-    status = mgr.get_device_from_file_by_dev_path(real_dev_path, device);
-  }
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    amdcuid_derived_id derived;
-    status = device->get_derived_cuid(derived, derivation_key());
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
+  const auto enumeration_status = enumerate_into_manager();
+  if (enumeration_status == AMDCUID_STATUS_SUCCESS) {
+    for (const auto& enumerated : mgr.devices()) {
+      if (matches(enumerated)) return current_handle(enumerated, handle);
     }
-    std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
-    return AMDCUID_STATUS_SUCCESS;
+  } else if (enumeration_status != AMDCUID_STATUS_DEVICE_NOT_FOUND &&
+             enumeration_status != AMDCUID_STATUS_UNSUPPORTED) {
+    return enumeration_status;
   }
 
-  // finally, attempt to discover device, this would require elevated
-  // permissions since it will require reading of protected hardware info
-  if (geteuid() == 0) {
-    device = discover_device_by_path(real_dev_path.c_str(), device_type);
+  // Verified GPU paths can be described without reading a secret.
+  amdcuid_status_t status;
+  DevicePtr device;
+  if (gpu_resolved) {
+    amdcuid_gpu_info info{};
+    status = CuidGpu::discover_single(&info, gpu_route.node);
+    if (status != AMDCUID_STATUS_SUCCESS) return status;
+    device = std::make_shared<CuidGpu>(info);
   } else {
-    mgr.request_device(real_dev_path.c_str(), device_type, device);
+    device = discover_device_by_path(real_dev_path.c_str(), device_type);
   }
 
   if (!device) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   } else {
-    // add device to mgr
-    amdcuid_derived_id derived;
-    status = device->get_derived_cuid(derived, &global_hmac);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
-    mgr.add_device(device);
-    return AMDCUID_STATUS_SUCCESS;
+    return current_handle(device, handle);
   }
 }
 
 amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_t device_type,
                                            amdcuid_id_t* handle) {
-  if (!bdf || !handle) {
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
+  // The BDF becomes a sysfs path component below; anything but DDDD:BB:SS.F
+  // could name somewhere else.
+  if (!bdf || !handle || !CuidUtilities::is_valid_bdf(bdf)) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 
   if (device_type == AMDCUID_DEVICE_TYPE_CPU || device_type == AMDCUID_DEVICE_TYPE_PLATFORM) {
     return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
   }
+  if (geteuid() == 0) global_hmac.reload_key();
 
   // check mgr first to see if device is already known
   for (const auto& device : mgr.devices()) {
@@ -426,72 +567,46 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
       continue;
     }
     if (device_bdf == bdf && device->type() == device_type) {
-      amdcuid_derived_id derived;
-      status = device->get_derived_cuid(derived, derivation_key());
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        return status;
+      return current_handle(device, handle);
+    }
+  }
+
+  const auto enumeration_status = enumerate_into_manager();
+  if (enumeration_status == AMDCUID_STATUS_SUCCESS) {
+    for (const auto& enumerated : mgr.devices()) {
+      std::string device_bdf;
+      if (enumerated->get_bdf(device_bdf) != AMDCUID_STATUS_SUCCESS) {
+        continue;
       }
-      std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
-      return AMDCUID_STATUS_SUCCESS;
+      if (device_bdf == bdf && enumerated->type() == device_type) {
+        return current_handle(enumerated, handle);
+      }
     }
+  } else if (enumeration_status != AMDCUID_STATUS_DEVICE_NOT_FOUND &&
+             enumeration_status != AMDCUID_STATUS_UNSUPPORTED) {
+    return enumeration_status;
   }
 
-  // next check cuid files for device
+  // Not already known: discover just this one device by BDF.
   DevicePtr device = nullptr;
-  amdcuid_status_t status = mgr.get_device_from_file_by_bdf(bdf, device);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    amdcuid_derived_id derived;
-    status = device->get_derived_cuid(derived, derivation_key());
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
-    return AMDCUID_STATUS_SUCCESS;
+  if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
+    CuidGpuRoute route;
+    if (CuidGpu::resolve_path(std::string("/sys/bus/pci/devices/") + bdf, route) ==
+            AMDCUID_STATUS_SUCCESS &&
+        !route.partition)
+      return amdcuid_get_handle_by_dev_path(route.node.c_str(), device_type, handle);
   }
-
-  // finally, attempt to discover device, this would require elevated
-  // permissions since it will require reading of protected hardware info
   std::string device_path = CuidUtilities::bdf_to_device_path(bdf, device_type);
   if (device_path.empty()) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   }
-  std::string real_dev_path = device_path;
-  // if device is not a nic or npu, attempt to resolve real device path in case
-  // of symlink for more reliable matching. NPU paths from bdf_to_device_path
-  // may be PCI device directories (not char/block devices), so the fd-based
-  // real path resolution would fail.
-  if ((device_type != AMDCUID_DEVICE_TYPE_NIC || device_path.find("net") == std::string::npos) &&
-      device_type != AMDCUID_DEVICE_TYPE_NPU) {
-    int fd = open(device_path.c_str(), O_RDONLY);
-    if (fd < 0) {
-      return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-    real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
-    close(fd);
-  }
-
-  if (real_dev_path.empty()) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  }
-
-  if (geteuid() == 0) {
-    device = discover_device_by_path(real_dev_path.c_str(), device_type);
-  } else {
-    mgr.request_device(real_dev_path.c_str(), device_type, device);
-  }
+  // bdf_to_device_path() already returns a sysfs path, not a device node.
+  device = discover_device_by_path(device_path.c_str(), device_type);
 
   if (!device) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   } else {
-    // add device to mgr
-    amdcuid_derived_id derived;
-    status = device->get_derived_cuid(derived, &global_hmac);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
-    mgr.add_device(device);
-    return AMDCUID_STATUS_SUCCESS;
+    return current_handle(device, handle);
   }
 }
 
@@ -514,31 +629,15 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_t
 }
 
 amdcuid_status_t amdcuid_refresh() {
-  // discover existing devices on the system and update mgr
-  amdcuid_status_t status;
-  if (geteuid() != 0) {
-    status = mgr.request_refresh();
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      status = mgr.get_devices_on_system();
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        return status;
-      }
-    }
-  } else {
-    status = mgr.get_devices_on_system();
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-  }
-  mgr.build_cuid_index();
-
-  // save updated device list to files
-  status = mgr.save_registry_to_files();
-  return status;
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
+  if (geteuid() == 0) global_hmac.reload_key();
+  mgr.shutdown();
+  return mgr.discover_devices();
 }
 
 amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_query_t query,
                                                void* data, uint32_t* length) {
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   if (!length) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
@@ -546,6 +645,12 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
   if (!device) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   }
+  amdcuid_derived_id derived{};
+  const auto identity_status = device->get_derived_cuid(derived, derivation_key());
+  if (identity_status != AMDCUID_STATUS_SUCCESS) return identity_status;
+  const amdcuid_id_t current = derived.UUIDv8_representation;
+  if (std::memcmp(current.bytes, handle.bytes, sizeof(current.bytes)) != 0)
+    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   // Must be initialized: most cases below only assign `status` inside
   // `if (data != nullptr)`, so the size-query form of this API
   // (data == nullptr, *length large enough) would otherwise return the value
@@ -570,16 +675,8 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       if (*length < sizeof(amdcuid_id_t)) {
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
       }
-      amdcuid_derived_id sec_id = {};
-      if (geteuid() == 0) {
-        // if elevated, provide hmac in case it needs to get generated
-        status = device->get_derived_cuid(sec_id, &global_hmac);
-      } else {
-        // if not elevated, only get existing derived cuid
-        status = device->get_derived_cuid(sec_id);
-      }
       if (data != nullptr) {
-        std::memcpy(data, &sec_id.UUIDv8_representation, sizeof(amdcuid_id_t));
+        std::memcpy(data, &current, sizeof(amdcuid_id_t));
       }
       *length = sizeof(amdcuid_id_t);
     } break;
@@ -612,6 +709,17 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       }
       *length = required_length;
     } break;
+    case AMDCUID_QUERY_SOURCE: {
+      if (*length < sizeof(amdcuid_source_t)) {
+        return AMDCUID_STATUS_INSUFFICIENT_SIZE;
+      }
+      if (data != nullptr) {
+        const amdcuid_source_t source = device->derived_source();
+        std::memcpy(data, &source, sizeof(source));
+      }
+      *length = sizeof(amdcuid_source_t);
+      break;
+    }
     case AMDCUID_QUERY_DEVICE_TYPE: {
       if (*length < sizeof(amdcuid_device_type_t)) {
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
@@ -750,7 +858,7 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
       }
       if (data != nullptr) {
         bool is_temporary = false;
-        status = device->is_temporary_cuid(&is_temporary);
+        status = device->is_temporary_cuid(&is_temporary, derivation_key());
         *(bool*)data = is_temporary;
       }
       *length = sizeof(bool);
@@ -764,6 +872,7 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
 }
 
 amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]) {
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   if (geteuid() != 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
@@ -771,54 +880,25 @@ amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 
-  // Persist first: if the key cannot be written, leave the in-memory key alone
-  // so the process keeps deriving the CUIDs that match what is on disk. The
-  // previous code ignored both failures and reported success regardless.
-  amdcuid_status_t status = global_hmac.store_key(key);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
+  if (CuidUtilities::is_rejected_key(key)) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
-  status = global_hmac.set_hmac_key(key);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
-
-  // Before the records are rebuilt, not after: get_derived_cuid() prefers the
-  // driver's cuid_secondary, so re-recording first would write the pre-re-key
-  // kernel values straight back into the new record.
-  const amdcuid_status_t seed_status = publish_seed_to_drivers(key);
-
-  // The values recorded under the old seed go too: get_derived_cuid() consults
-  // the record before it derives, so leaving them in place means a node with an
-  // existing record serves its pre-re-key derived CUIDs indefinitely.
-  status = mgr.invalidate_derived_cuids(key);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
-
-  // A device the driver would not re-key is still serving its old derived CUID.
-  // See publish_seed_to_drivers() for why that is reported rather than folded
-  // into SUCCESS.
-  return seed_status;
+  std::string bdf;
+  const auto status =
+      find_cuid_seed_device(bdf) ? write_driver_seed(bdf, key) : write_key_variable(key);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  restrict_key_variable();
+  return amdcuid_refresh();
 }
 
 amdcuid_status_t amdcuid_get_key_info(amdcuid_key_info_t* info) {
+  std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   if (!info) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   std::memset(info, 0, sizeof(*info));
+  if (geteuid() != 0) return AMDCUID_STATUS_PERMISSION_DENIED;
 
-  // Three outcomes, three statuses. Unprovisioned is a success: the node is
-  // keyed with the public fallback seed and info reports that. A key store
-  // present but unreadable is PERMISSION_DENIED, because the answer an
-  // unprivileged caller would otherwise get on a provisioned node ("not
-  // provisioned", with the fallback fingerprint) is wrong, not unavailable.
-  // Only a store that exists and is not a key is KEY_ERROR.
-  //
-  // Answered from a single call into global_hmac: see
-  // cuid_hmac::get_key_info() for context under concurrent
-  // amdcuid_set_hash_key().
-  return global_hmac.get_key_info(info);
+  const auto status = global_hmac.reload_key();
+  return status == AMDCUID_STATUS_SUCCESS ? global_hmac.get_key_info(info) : status;
 }
 
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]) {

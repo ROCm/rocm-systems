@@ -9,7 +9,6 @@
 #include <iostream>
 #include <sstream>
 
-#include "cuid_file.h"
 #include "cuid_util.h"
 #include "smbios_util.h"
 
@@ -80,11 +79,9 @@ namespace {
 // An adopted firmware UUID is not a framed 122-bit payload: remove_UUIDv8_bits()
 // on it drops six bits and shifts the rest, so two platforms whose UUIDs differ
 // only in the version and variant bits de-frame alike and derive the same
-// secondary CUID. It has to be the sixteen octets as firmware wrote them. A
+// derived CUID. It has to be the sixteen octets as firmware wrote them. A
 // serial-derived primary is framed as a UUIDv8, so its raw_bits are the
-// de-framed payload; copying the framed octets there gives a platform read back
-// from the record a different HMAC message from the same platform computed
-// fresh. is_constructed() discriminates on the version nibble.
+// de-framed payload. is_constructed() discriminates on the version nibble.
 void set_platform_raw_bits(amdcuid_primary_id& id) {
   if (CuidUtilities::is_constructed(&id.UUIDv8_representation)) {
     CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
@@ -96,21 +93,6 @@ void set_platform_raw_bits(amdcuid_primary_id& id) {
 }  // namespace
 
 amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id& id) const {
-  // attempt to find the primary CUID in file first
-  std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-  CuidFile primary_file(cuid_file_path, false);
-  primary_file.load();
-  std::vector<CuidFileEntry> entries = primary_file.get_entries();
-
-  // for platform, just return the first entry found
-  CuidFileEntry entry;
-  amdcuid_status_t status = primary_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    id.UUIDv8_representation = entry.primary_cuid;
-    set_platform_raw_bits(id);
-    return AMDCUID_STATUS_SUCCESS;
-  }
-
   // Where the firmware supplies a system UUID, the Platform CUID is those 16
   // octets used directly: no reframing, no component type, no vendor field, no
   // fold. Collapsing the UUID to its first 8 octets and packing it through the
@@ -125,7 +107,7 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id& id) const {
 
   // No system UUID: the system serial through the normal layout, or no CUID.
   uint64_t fingerprint = 0;
-  status = get_hardware_fingerprint(fingerprint);
+  const amdcuid_status_t status = get_hardware_fingerprint(fingerprint);
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
   }
@@ -136,6 +118,27 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id& id) const {
   // machine, and packing it makes two producers disagree on the same platform.
   return CuidUtilities::generate_primary_cuid(fingerprint, 0, 0, 0, 0, AMDCUID_DEVICE_TYPE_PLATFORM,
                                               &id, false);
+}
+
+amdcuid_status_t CuidPlatform::get_auxiliary_primary_cuid(amdcuid_primary_id& id) const {
+  // The platform has no PCIe routing id or vendor/device pair of its own; the
+  // auxiliary form still needs to differ from every other component type's,
+  // which the component_type field alone provides.
+  CuidUtilities::AuxiliaryInput aux;
+  aux.format = CuidUtilities::kAuxFormatCpu;
+  aux.routing_id = 0;
+  aux.revision_id = 0;
+  aux.device_id = 0;
+  aux.vendor_id = 0;
+  aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_PLATFORM);
+  uint64_t fingerprint = 0;
+  amdcuid_status_t status = CuidUtilities::make_fallback_fingerprint(aux, fingerprint);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  status = CuidUtilities::generate_primary_cuid(fingerprint, 0, 0, 0, 0,
+                                                AMDCUID_DEVICE_TYPE_PLATFORM, &id, true);
+  if (status != AMDCUID_STATUS_SUCCESS) std::memset(&id, 0, sizeof(id));
+  return status;
 }
 
 const amdcuid_platform_info& CuidPlatform::get_info() const { return m_info; }

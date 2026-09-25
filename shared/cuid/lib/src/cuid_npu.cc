@@ -12,7 +12,6 @@
 #include <iostream>
 #include <sstream>
 
-#include "cuid_file.h"
 #include "cuid_util.h"
 #include "pci_util.h"
 
@@ -230,7 +229,8 @@ amdcuid_status_t CuidNpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
   if (status != AMDCUID_STATUS_SUCCESS) {
     // attempt to get fingerprint through VSEC fallback if DSN capability is not
     // found
-    status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+    status =
+        PciUtil::get_pci_vsec_cap_offset(m_info.bdf, m_info.header.fields.npu.vendor_id, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
       return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
@@ -263,63 +263,43 @@ amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id& id) const {
     }
   }
 
-  bool temp = false;
-  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+  // A device with no serial gets an auxiliary identity; a serial this caller
+  // may not read is returned as that error, since the identity a device
+  // presents must not depend on the privilege of the caller asking.
   uint64_t fingerprint = 0;
-
-  if (geteuid() == 0) {
-    // Attempt to read the CUID from the file first
-    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-    CuidFile primary_file(cuid_file_path, false);
-    primary_file.load();
-
-    CuidFileEntry entry;
-    status = primary_file.find_by_device_node(m_info.accel_node, entry);
-    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
-      id.UUIDv8_representation = entry.primary_cuid;
-      CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-      return AMDCUID_STATUS_SUCCESS;
-    }
-  }
-
-  // Primary CUID not found in the file, so derive it. A device with no serial
-  // gets an auxiliary identity; a serial this caller may not read is returned
-  // as that error, since the identity a device presents must not depend on the
-  // privilege of the caller asking.
-  status = get_hardware_fingerprint(fingerprint);
-  if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
-    return status;
-  }
-  if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
-    std::string bdf;
-    status = this->get_bdf(bdf);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    CuidUtilities::AuxiliaryInput aux;
-    aux.format = CuidUtilities::kAuxFormatPcie;
-    aux.routing_id = CuidUtilities::routing_id_from_bdf(bdf);
-    aux.revision_id = m_info.header.fields.npu.revision_id;
-    aux.device_id = m_info.header.fields.npu.device_id;
-    aux.vendor_id = m_info.header.fields.npu.vendor_id;
-    aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NPU);
-    status = CuidUtilities::make_fallback_fingerprint(aux, fingerprint);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    temp = true;
-  }
+  amdcuid_status_t status = get_hardware_fingerprint(fingerprint);
+  if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) return get_auxiliary_primary_cuid(id);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
 
   status = CuidUtilities::generate_primary_cuid(
       fingerprint,
       0,  // unit_id: NPUs are not partitioned
       m_info.header.fields.npu.revision_id, m_info.header.fields.npu.device_id,
-      m_info.header.fields.npu.vendor_id, AMDCUID_DEVICE_TYPE_NPU, &id, temp);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    std::memset(&id, 0, sizeof(id));
-    return status;
-  }
+      m_info.header.fields.npu.vendor_id, AMDCUID_DEVICE_TYPE_NPU, &id, false);
+  if (status != AMDCUID_STATUS_SUCCESS) std::memset(&id, 0, sizeof(id));
+  return status;
+}
 
+amdcuid_status_t CuidNpu::get_auxiliary_primary_cuid(amdcuid_primary_id& id) const {
+  std::string bdf;
+  amdcuid_status_t status = this->get_bdf(bdf);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  CuidUtilities::AuxiliaryInput aux;
+  aux.format = CuidUtilities::kAuxFormatPcie;
+  aux.routing_id = CuidUtilities::routing_id_from_bdf(bdf);
+  aux.revision_id = m_info.header.fields.npu.revision_id;
+  aux.device_id = m_info.header.fields.npu.device_id;
+  aux.vendor_id = m_info.header.fields.npu.vendor_id;
+  aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NPU);
+  uint64_t fingerprint = 0;
+  status = CuidUtilities::make_fallback_fingerprint(aux, fingerprint);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  status = CuidUtilities::generate_primary_cuid(
+      fingerprint, 0, m_info.header.fields.npu.revision_id, m_info.header.fields.npu.device_id,
+      m_info.header.fields.npu.vendor_id, AMDCUID_DEVICE_TYPE_NPU, &id, true);
+  if (status != AMDCUID_STATUS_SUCCESS) std::memset(&id, 0, sizeof(id));
   return status;
 }
 

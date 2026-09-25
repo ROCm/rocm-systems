@@ -17,7 +17,6 @@
 #include <iostream>
 #include <sstream>
 
-#include "cuid_file.h"
 #include "cuid_util.h"
 #include "pci_util.h"
 
@@ -136,7 +135,8 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
   if (status != AMDCUID_STATUS_SUCCESS) {
     // attempt to get fingerprint through VSEC fallback if DSN capability is not
     // found
-    status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+    status =
+        PciUtil::get_pci_vsec_cap_offset(m_info.bdf, m_info.header.fields.nic.vendor_id, offset);
   }
   if (status == AMDCUID_STATUS_SUCCESS) {
     const uint8_t fingerprint_size = 8;
@@ -167,6 +167,11 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
     }
     return status;
   }
+  return fingerprint_from_mac(mac_address, fingerprint);
+}
+
+amdcuid_status_t CuidNic::fingerprint_from_mac(const std::string& mac_address,
+                                               uint64_t& fingerprint) {
   if (!mac_address.empty()) {
     // convert MAC address string to bytes
     uint8_t mac_bytes[6] = {0};
@@ -207,61 +212,41 @@ amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id& id) const {
     }
   }
 
-  bool temp = false;
-  uint64_t fingerprint = 0;
-  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
-
-  if (geteuid() == 0) {
-    // attempt to read the CUID from the file first
-    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-    CuidFile primary_file(cuid_file_path, false);
-    primary_file.load();
-    std::vector<CuidFileEntry> entries = primary_file.get_entries();
-
-    CuidFileEntry entry;
-    status = primary_file.find_by_device_node(m_info.network_interface, entry);
-    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
-      id.UUIDv8_representation = entry.primary_cuid;
-      CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-      return AMDCUID_STATUS_SUCCESS;
-    }
-  }
-
   // A device with no serial gets an auxiliary identity; a serial this caller
   // may not read is returned as that error, since the identity a device
   // presents must not depend on the privilege of the caller asking.
-  status = get_hardware_fingerprint(fingerprint);
-  if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
-    return status;
-  }
-  if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
-    std::string bdf;
-    status = this->get_bdf(bdf);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    CuidUtilities::AuxiliaryInput aux;
-    aux.format = CuidUtilities::kAuxFormatPcie;
-    aux.routing_id = CuidUtilities::routing_id_from_bdf(bdf);
-    aux.revision_id = m_info.header.fields.nic.revision_id;
-    aux.device_id = m_info.header.fields.nic.device_id;
-    aux.vendor_id = m_info.header.fields.nic.vendor_id;
-    aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC);
-    status = CuidUtilities::make_fallback_fingerprint(aux, fingerprint);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
-    }
-    temp = true;
-  }
+  uint64_t fingerprint = 0;
+  amdcuid_status_t status = get_hardware_fingerprint(fingerprint);
+  if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) return get_auxiliary_primary_cuid(id);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
 
   status = CuidUtilities::generate_primary_cuid(
       fingerprint, 0, m_info.header.fields.nic.revision_id, m_info.header.fields.nic.device_id,
-      m_info.header.fields.nic.vendor_id, AMDCUID_DEVICE_TYPE_NIC, &id, temp);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    std::memset(&id, 0, sizeof(id));
-    return status;
-  }
+      m_info.header.fields.nic.vendor_id, AMDCUID_DEVICE_TYPE_NIC, &id, false);
+  if (status != AMDCUID_STATUS_SUCCESS) std::memset(&id, 0, sizeof(id));
+  return status;
+}
 
+amdcuid_status_t CuidNic::get_auxiliary_primary_cuid(amdcuid_primary_id& id) const {
+  std::string bdf;
+  amdcuid_status_t status = this->get_bdf(bdf);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  CuidUtilities::AuxiliaryInput aux;
+  aux.format = CuidUtilities::kAuxFormatPcie;
+  aux.routing_id = CuidUtilities::routing_id_from_bdf(bdf);
+  aux.revision_id = m_info.header.fields.nic.revision_id;
+  aux.device_id = m_info.header.fields.nic.device_id;
+  aux.vendor_id = m_info.header.fields.nic.vendor_id;
+  aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC);
+  uint64_t fingerprint = 0;
+  status = CuidUtilities::make_fallback_fingerprint(aux, fingerprint);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  status = CuidUtilities::generate_primary_cuid(
+      fingerprint, 0, m_info.header.fields.nic.revision_id, m_info.header.fields.nic.device_id,
+      m_info.header.fields.nic.vendor_id, AMDCUID_DEVICE_TYPE_NIC, &id, true);
+  if (status != AMDCUID_STATUS_SUCCESS) std::memset(&id, 0, sizeof(id));
   return status;
 }
 
