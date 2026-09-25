@@ -11,6 +11,7 @@
 #
 # Options:
 #   --workers N          Number of pytest-xdist workers (default: 8)
+#   --cpu-budget N       ROCjitsu execution-thread budget per process (default: 8)
 #   --soft-timeout N     Per-test timeout for the first run (default: 30)
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
 #   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
@@ -33,6 +34,7 @@ set -euo pipefail
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
 worker_count=8
+rocjitsu_cpu_budget=8
 soft_timeout_seconds=30
 hard_timeout_seconds=60
 rerun_timeout_seconds=1200
@@ -41,7 +43,8 @@ warn_perf=false
 sanitizer_mode=none
 
 usage() {
-  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
+  echo "Usage: $0 [--workers N] [--cpu-budget N] [--soft-timeout N]" \
+    "[--hard-timeout N] [--rerun-timeout N]" \
     "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed] [--warn-perf]" >&2
 }
 
@@ -62,6 +65,15 @@ while (( $# )); do
         exit 1
       fi
       worker_count="$2"
+      shift 2
+      ;;
+    --cpu-budget)
+      if (( $# < 2 )); then
+        echo "--cpu-budget requires a value" >&2
+        usage
+        exit 1
+      fi
+      rocjitsu_cpu_budget="$2"
       shift 2
       ;;
     --soft-timeout)
@@ -124,6 +136,7 @@ done
 
 numeric_options=(
   "worker_count:--workers"
+  "rocjitsu_cpu_budget:--cpu-budget"
   "soft_timeout_seconds:--soft-timeout"
   "hard_timeout_seconds:--hard-timeout"
   "rerun_timeout_seconds:--rerun-timeout"
@@ -203,7 +216,8 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
   # does not construct the expected shared-runtime/interposer preload order.
   preflight_config="${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
   "${run_wrapper_prefix[@]}" \
-    "${rocjitsu_launcher}" --config "${preflight_config}" -- \
+    "${rocjitsu_launcher}" --config "${preflight_config}" \
+    --cpu-thread-budget "${rocjitsu_cpu_budget}" -- \
     "${child_command_prefix[@]}" true
 fi
 
@@ -227,6 +241,7 @@ run_pytest() {
     timeout --foreground --signal=TERM --kill-after=5s "${timeout_seconds}s"
     "${rocjitsu_launcher}"
     --config "${config_path}"
+    --cpu-thread-budget "${rocjitsu_cpu_budget}"
     --
     "${child_command_prefix[@]}"
   )

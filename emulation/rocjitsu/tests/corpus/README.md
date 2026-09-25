@@ -56,6 +56,20 @@ retains only its size and SHA-256. Its `finalize` command requires every pinned
 corpus input to have either a successful pair or a matching declared
 exclusion, which prevents partial runs from becoming a develop baseline.
 
+## CPU allocation
+
+Every corpus case is its own ROCjitsu process, and each of those sizes its
+thread allocation from the CPUs it can see rather than from the share of the
+runner it is entitled to — so several workers on one runner each plan as if
+they had the whole machine. The workflow matrix therefore names both numbers
+per lane: `corpus_worker_limit` for pytest-xdist fanout and
+`rocjitsu_cpu_threads_budget` for one ROCjitsu process, capped at `nproc`.
+
+The harness passes the budget as `rocjitsu --cpu-thread-budget`, which replaces
+the JSON `cpu_thread_budget` for that launch without restricting process
+affinity: ROCjitsu picks the largest configured thread allocation that fits,
+and Linux still schedules those threads on any CPU available to the CI VM.
+
 ## Near-timeout reporting
 
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
@@ -79,8 +93,8 @@ The Clang and GCC ASan+UBSan lanes run the same target-qualified corpus as the
 release lane against a sanitizer-instrumented RocJITsu build. They use longer
 per-test timeouts to accommodate the instrumented simulator.
 
-Each case runs through `env` → `setpriv` → the process supervisor → `timeout` →
-`rocjitsu` → the optional HIP preload helper → the corpus executable. The
+Each case runs through `env` → `setpriv` → the process supervisor → `timeout`
+→ `rocjitsu` → the optional HIP preload helper → the corpus executable. The
 run-wrapper `timeout` owns the per-test deadline and retains command output;
 pytest gets 15 seconds of cleanup headroom as a failsafe. Each target's
 failed-test rerun also has a 20-minute budget in CI, within the 60-minute
