@@ -36,11 +36,7 @@ endfunction()
 # Mark the hipified "oracle" translation units (real argcheck/archinfo/utils, pulled
 # in unhipified-source form) as GENERATED. They are produced by the hipify step
 # (add_dependencies wires the ordering), so they do not exist at configure time --
-# without this a fresh configure errors on the missing sources. Pass the mode's
-# hipify base directory (${PROJECT_BINARY_DIR}/hipify in-build, ${RCCL_HIPIFY_DIR}
-# standalone) and the oracle basenames under src/misc. Source-file properties are
-# DIRECTORY-scoped, but we call this at each target so every block stands alone and
-# does not rely on target ordering within this file.
+# without this a fresh configure errors on the missing sources.
 function(rccl_mark_oracle_tus_generated _hipify_dir)
   set(_tus "")
   foreach(_basename ${ARGN})

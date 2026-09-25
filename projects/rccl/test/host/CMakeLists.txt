@@ -194,9 +194,8 @@ endfunction()
 #   EXTRA_INCLUDES  include dirs appended after the mode's include-dir var
 #   EXTRA_DEFS      compile definitions appended after the mode's define baseline
 #   CATEGORIES_YAML CTest category yaml (in-build only; ignored standalone)
-#   REMOVE_DEFS     defines to drop from the mode baseline before EXTRA_DEFS are
-#                   added (init strips the three preprocessor-gated macros it sets
-#                   per variant so they are never inherited from the common set)
+#   REMOVE_DEFS     defines to drop from the in-build baseline before EXTRA_DEFS are
+#                   added; ignored standalone, whose baseline is fixed
 function(rccl_add_micro_binary _name)
   cmake_parse_arguments(_ramb "" "CATEGORIES_YAML"
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
