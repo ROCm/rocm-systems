@@ -1072,3 +1072,21 @@ manifestations. Its matching clean already passed. The cell now records the
 measured result. `topk-high-queue.py` waits for the running corrected Default
 preset queue to finish, then launches matching high clean/fault qualification
 in fresh roots. No lower-than-default preset is tested.
+
+### Bounded SGEMM smoke qualifies at high
+
+`sgemm-high-retry-clean` passes baseline and high correctness with complete
+coverage. `sgemm-high-retry-fault` detects all 8 admitted/reached publication
+faults, with high recorded in every trial, complete analysis and healthy pre/post
+checks throughout. Clean and fault hook/allowlist hashes match. Since default
+completed at 0/8 and high reaches 8/8, high is the lowest qualifying preset at
+or above default. The Default cell is now green.
+
+HGEMM's first Default fault attempt is not a detection-rate result: it passes
+numerically and has healthy checks, but requests/applies no mutation. Its selected
+kernel is allowlisted and dispatched. The inventory and trial ELF .text sections
+are byte-identical (SHA256 ee482f9917bb42a1e95e4eeea87b5704eea68dce6427dc95ceb2963b61eb2051),
+but their string tables differ, changing exact code-object identity. Retained
+comparison files are `hgemm-text-{0,1}.bin` and `hgemm-strtab-{0,1}.bin`.
+Artifact reproducibility must be resolved before retrying; do not loosen the
+exact identity requirement or report this attempt as a false negative.
