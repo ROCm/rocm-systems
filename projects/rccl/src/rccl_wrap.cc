@@ -1384,7 +1384,7 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
     return false;
   }
 
-  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
     return false;
   }
@@ -1463,13 +1463,14 @@ bool rcclCeArGraphSafe(struct ncclComm* comm) {
   return !comm->ceColl.graphModeSeen;
 }
 
-bool rcclCeStagedUnregisteredEligible(int nRanks, size_t msgBytes, ncclDataType_t datatype, ncclRedOp_t op,
+bool rcclCeStagedUnregisteredEligible(struct ncclComm* comm, size_t msgBytes, ncclDataType_t datatype, ncclRedOp_t op,
                                       bool force, bool ceArGraphAllowed, bool ceUsable) {
   // Cap is ceUsable's 2-shot window (table/env, 256 MiB default), not the 32 MiB
   // staging allocation. ncclCeAllReduce pipelines AllGather through slots.
-  (void)nRanks;
   (void)msgBytes;
-  return force && ceArGraphAllowed && ceUsable && ncclCeImplemented(ncclFuncAllReduce, (int)op, datatype);
+  return force && ceArGraphAllowed && ceUsable &&
+         ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype,
+                         ncclSymSendNonregRecvReg, nullptr, nullptr);
 }
 
 // Single source of truth for AllReduce implementation selection. See the header
@@ -1680,7 +1681,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // First FORCE-unregistered call enqueues CE so ncclCeInit runs. Cap is ceUsable
   // (2-shot max), not the 32 MiB staging buffer.
   const bool ceStagedUnregistered =
-    rcclCeStagedUnregisteredEligible(comm->nRanks, msgBytes, datatype, op, force, ceArGraphAllowed, ceUsable);
+    rcclCeStagedUnregisteredEligible(comm, msgBytes, datatype, op, force, ceArGraphAllowed, ceUsable);
   if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
