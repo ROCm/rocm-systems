@@ -38,7 +38,7 @@ template <backend_factory_contract BackendFactory>
 class provider
 {
 public:
-    using backend_t = typename BackendFactory::backend_t;
+    using backend_t = BackendFactory::backend_t;
     using device_t  = collectors::gpu_perf_counter::device<backend_t>;
 
     provider(const std::vector<std::shared_ptr<agent>>&           agent_list,
@@ -135,10 +135,8 @@ private:
 
             status = m_backend_api->configure_device_counting_service(
                 counter_context, typename backend_t::buffer_id_t{ 0 }, agent_id,
-                [](typename backend_t::context_id_t               ctx,
-                   typename backend_t::agent_id_t                 agent_cb,
-                   typename backend_t::device_counting_agent_cb_t set_config,
-                   void*                                          user_data) {
+                [](backend_t::context_id_t ctx, backend_t::agent_id_t agent_cb,
+                   backend_t::device_counting_agent_cb_t set_config, void* user_data) {
                     auto* configs = static_cast<std::unordered_map<
                         std::uint64_t, typename backend_t::counter_config_id_t>*>(
                         user_data);
@@ -161,10 +159,10 @@ private:
     }
 
     [[nodiscard]] std::vector<typename backend_t::counter_id_t> query_supported_counters(
-        typename backend_t::agent_id_t agent_id) const
+        backend_t::agent_id_t agent_id) const
     {
         const auto collect_counters =
-            [](typename backend_t::agent_id_t, typename backend_t::counter_id_t* counters,
+            [](backend_t::agent_id_t, backend_t::counter_id_t* counters,
                size_t num_counters, void* user_data) -> typename backend_t::status_t {
             auto* out =
                 static_cast<std::vector<typename backend_t::counter_id_t>*>(user_data);

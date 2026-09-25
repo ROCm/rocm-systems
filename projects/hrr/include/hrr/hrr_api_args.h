@@ -13,7 +13,7 @@
  * One packed struct per HIP API covering both HipDispatchTable (runtime) and
  * HipCompilerDispatchTable (compiler stubs).
  *
- * Archive format (v3):
+ * Archive format (v5):
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
@@ -53,13 +53,15 @@
  * structs) are no longer dropped.
  * v5: hrr_api_id_t is assigned from HipDispatchTable member order, then
  * HipCompilerDispatchTable member order, instead of typedef declaration
- * order, which renumbered 496 of the 552 IDs once. Runtime IDs occupy 0..N-1
- * so a new compiler-table member cannot shift them. Every event stores its
+ * order, which renumbered 496 of the 552 IDs once. Every event stores its
  * ID, so a pre-v5 archive names the wrong API when decoded against this
- * table and needs an ID translation to be read back. From v5 on a new API
- * takes the next free ID in its table and no existing runtime ID moves, so
- * adding APIs no longer needs a version bump. A retired dispatch-table slot
- * (nulled void*) still occupies an ID. */
+ * table and needs an ID translation to be read back.
+ * Runtime IDs come first and compiler IDs occupy the tail, so appending a
+ * HipCompilerDispatchTable member moves no existing ID, while appending a
+ * HipDispatchTable member takes the first compiler ID and shifts the whole
+ * compiler tail up by one. Compiler APIs do write events, so that second
+ * case still needs a version bump. A retired dispatch-table slot (nulled
+ * void*) still occupies an ID. */
 #define HRR_VERSION ((uint16_t)5u)
 
 /* Written once at byte 0 of events.bin. */
@@ -5393,6 +5395,15 @@ typedef struct {
     uint32_t flags;
 } hrr_args_hipInitDevice;
 
+/* hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions, hipModule_t module) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t functions;
+    uint32_t numFunctions;
+    uint64_t module;
+} hrr_args_hipModuleEnumerateFunctions;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -5939,16 +5950,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPMEMGETDEFAULTMEMPOOL = 541,
     HRR_API_HIPDEVICEGETLUID = 542,
     HRR_API_HIPINITDEVICE = 543,
-    HRR_API_HIPPOPCALLCONFIGURATION = 544,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 545,
-    HRR_API_HIPREGISTERFATBINARY = 546,
-    HRR_API_HIPREGISTERFUNCTION = 547,
-    HRR_API_HIPREGISTERMANAGEDVAR = 548,
-    HRR_API_HIPREGISTERSURFACE = 549,
-    HRR_API_HIPREGISTERTEXTURE = 550,
-    HRR_API_HIPREGISTERVAR = 551,
-    HRR_API_HIPUNREGISTERFATBINARY = 552,
-    HRR_API_COUNT = 553
+    HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
+    HRR_API_HIPPOPCALLCONFIGURATION = 545,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 546,
+    HRR_API_HIPREGISTERFATBINARY = 547,
+    HRR_API_HIPREGISTERFUNCTION = 548,
+    HRR_API_HIPREGISTERMANAGEDVAR = 549,
+    HRR_API_HIPREGISTERSURFACE = 550,
+    HRR_API_HIPREGISTERTEXTURE = 551,
+    HRR_API_HIPREGISTERVAR = 552,
+    HRR_API_HIPUNREGISTERFATBINARY = 553,
+    HRR_API_COUNT = 554
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6498,6 +6510,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemGetDefaultMemPool",
     "hipDeviceGetLuid",
     "hipInitDevice",
+    "hipModuleEnumerateFunctions",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

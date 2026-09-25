@@ -64,14 +64,20 @@ static inline void amdf_abort(void) { abort(); }
 extern "C" {
 #endif
 
-/// Version number identifying a compatible public API table layout.
+/// Version number identifying compatible public API tables and structures.
 typedef uint32_t amdf_abi_version_t;
 
-/// The first supported libamdf ABI version.
+/// The original libamdf ABI version.
 #define AMDF_ABI_VERSION_1 ((amdf_abi_version_t)1)
 
+/// Memory visibility qualification and explicit registered-page cacheability.
+#define AMDF_ABI_VERSION_2 ((amdf_abi_version_t)2)
+
+/// Exact prospective CREATE payload geometry in construction capabilities.
+#define AMDF_ABI_VERSION_3 ((amdf_abi_version_t)3)
+
 /// The most recent ABI version described by this header.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_1
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_3
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -95,6 +101,8 @@ enum amdf_status_domain_e {
   AMDF_STATUS_DOMAIN_ERRNO = 3,
   /// Windows Win32 error values returned by `GetLastError`.
   AMDF_STATUS_DOMAIN_WIN32 = 4,
+  /// Failed Windows COM/DXGI/D3D HRESULT values.
+  AMDF_STATUS_DOMAIN_HRESULT = 5,
 };
 
 /// Portable status code used with `AMDF_STATUS_DOMAIN_API`.
@@ -202,6 +210,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO = 19,
   /// An `amdf_memory_access_capabilities_t` output structure.
   AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES = 20,
+  /// An `amdf_memory_profile_pair_query_t` input structure.
+  AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY = 21,
 };
 
 /// Identifier of an optional API table compiled into the providing library.
@@ -459,6 +469,46 @@ typedef struct amdf_pci_info_t {
   uint32_t revision_id;
 } amdf_pci_info_t;
 
+/// Native namespace used to correlate an endpoint with another API provider.
+typedef uint32_t amdf_endpoint_native_identity_type_t;
+enum amdf_endpoint_native_identity_type_e {
+  /// No native correlation identity is available.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_NONE = 0,
+  /// Linux character-device major/minor numbers.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE = 1,
+  /// Windows adapter LUID and physical-adapter index.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER = 2,
+};
+
+/// Passive identity for matching contemporaneous native API providers.
+///
+/// This value conveys neither a native handle nor ownership. It is not stable
+/// across device removal or reboot. Matching identifies the native device;
+/// foreign-driver, memory-transport and access compatibility still require
+/// their own qualification. The opaque endpoint id remains the value used to
+/// open libamdf endpoints.
+typedef struct amdf_endpoint_native_identity_t {
+  /// Native namespace selecting the active member of `value`.
+  amdf_endpoint_native_identity_type_t type;
+  /// Native identity in the namespace selected by `type`.
+  union {
+    /// Linux DRM render node for GPU endpoints, accelerator node for XDNA.
+    struct {
+      /// Character-device major number, as returned by `major(st_rdev)`.
+      uint32_t major;
+      /// Character-device minor number, as returned by `minor(st_rdev)`.
+      uint32_t minor;
+    } linux_device;
+    /// Windows logical adapter and the endpoint's physical adapter within it.
+    struct {
+      /// LUID bits: `(uint64_t)(uint32_t)HighPart << 32 | LowPart`.
+      uint64_t luid;
+      /// KMT physical-adapter index within the logical adapter.
+      uint32_t physical_adapter_index;
+    } windows_adapter;
+  } value;
+} amdf_endpoint_native_identity_t;
+
 /// Fixed-stride endpoint identity returned by `endpoint_enumerate`.
 ///
 /// This structure is immutable for ABI v1. It contains no pointers, extension
@@ -494,6 +544,8 @@ typedef struct amdf_endpoint_info_t {
   char name[AMDF_ENDPOINT_NAME_CAPACITY];
   /// Number of immutable endpoint-local native queue families.
   uint32_t queue_family_count;
+  /// Cached native identity for matching other API providers before activation.
+  amdf_endpoint_native_identity_t native_identity;
 } amdf_endpoint_info_t;
 
 #ifdef __cplusplus

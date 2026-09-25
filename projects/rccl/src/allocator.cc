@@ -27,6 +27,9 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   int cudaDev;
   int flag;
   int dcnt;
+  bool handleCreated = false;
+  bool addressReserved = false;
+  bool mapped = false;
 
   if (ptr == NULL || size == 0) goto fallback;
 
@@ -72,11 +75,14 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     ALIGN_SIZE(handleSize, memGran);
 
     /* Allocate the physical memory on the device */
-    CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
+    CUCHECKGOTO(cuMemCreate(&handle, handleSize, &memprop, 0), ret, vmm_fail);
+    handleCreated = true;
     /* Reserve a virtual address range */
-    CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
+    CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0), ret, vmm_fail);
+    addressReserved = true;
     /* Map the virtual address range to the physical allocation */
-    CUCHECK(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0));
+    CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0), ret, vmm_fail);
+    mapped = true;
     /* Now allow RW access to the newly mapped memory */
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
@@ -84,10 +90,17 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
         accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         accessDesc.location.id = i;
         accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-        CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+        CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1), ret, vmm_fail);
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }
+    goto exit;
+
+vmm_fail:
+    if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, handleSize);
+    if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
+    if (handleCreated) (void)cuMemRelease(handle);
+    *ptr = NULL;
     goto exit;
   }
 

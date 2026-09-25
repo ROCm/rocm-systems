@@ -2252,7 +2252,8 @@ class TestExecutor:
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
                        "rccl-UnitTestsMicroInit-uncached",
                        "rccl-UnitTestsMicroInit-faultinj",
-                       "rccl-UnitTestsMicroEnqueue"]:
+                       "rccl-UnitTestsMicroEnqueue",
+                       "rccl-UnitTestsMicroSymKernels"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])

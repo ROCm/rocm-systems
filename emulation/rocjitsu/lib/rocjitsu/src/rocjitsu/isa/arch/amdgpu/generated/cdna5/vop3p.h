@@ -1009,6 +1009,7 @@ public:
 class VWmmaF6416x16x4F64Vop3p : public Vop3p {
 public:
   VWmmaF6416x16x4F64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;

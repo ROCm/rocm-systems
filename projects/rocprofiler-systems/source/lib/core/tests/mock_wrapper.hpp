@@ -645,8 +645,8 @@ struct name_info
 {
     using value_type   = name_info_impl<EnumT, ValueT>;
     using enum_type    = EnumT;
-    using support_type = typename value_type::support_type;
-    using return_type  = typename value_type::return_type;
+    using support_type = value_type::support_type;
+    using return_type  = value_type::return_type;
     using item_type    = const value_type*;
     using item_array_t = std::vector<item_type>;
 

@@ -34,9 +34,11 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+if(NOT WIN32)
+  if (NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 project(videodecodeperf)
@@ -50,10 +52,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
+if(NOT WIN32)
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
+  else()
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
+  endif()
 else()
-  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
+  # MSVC supplies optimization and NDEBUG per configuration; these are the
+  # defines the sample sources need.
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -65,12 +73,12 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
     set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
-    if(HAS_ROCM_CHECK_TARGET_IDS)
+    if(HAS_ROCM_CHECK_TARGET_IDS AND NOT WIN32)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
         set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
     endif()
-    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1035;gfx1100;gfx1101;gfx1102;gfx1103;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
 endif()
 
 # Set AMD GPU_TARGETS
@@ -96,11 +104,13 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(rocdecode QUIET)
 find_package(rocdecode-host 1.0.0 QUIET)
-find_package(rocprofiler-register QUIET)
+if(NOT WIN32)
+    find_package(rocprofiler-register QUIET)
+endif()
 find_package(FFmpeg QUIET)
 find_package(Threads QUIET)
 
-if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND AND rocprofiler-register_FOUND)))
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     # FFMPEG
@@ -111,10 +121,14 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
     include_directories (${rocdecode_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../utils ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode ${CMAKE_CURRENT_SOURCE_DIR}/..)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
     # threads
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+    if(Threads_FOUND)
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+    endif()
     # rocprofiler-register
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    if(rocprofiler-register_FOUND)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    endif()
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodeperf.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     if(rocdecode-host_FOUND)
@@ -138,16 +152,21 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
     # symbol scope first and wins VA symbol interposition, loading the matching
     # vendored VA driver. It must be injected as a raw path because CMake
     # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
-    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(NOT WIN32 AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
       set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
     # FFMPEG multi-version support
-    if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)
+    if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100) #FFmpeg version <= 4.4
       target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0)
-    else()
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=0)
+    elseif(_FFMPEG_AVCODEC_VERSION VERSION_GREATER 58.134.100 AND _FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 60.31.100) #FFmpeg version > 4.4 && version < 6.1
       target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=0)
+    else()
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0) #FFmpeg version >= 6.1
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=1)
     endif()
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")

@@ -6,6 +6,8 @@
 /// @file observable_shared_mutex.h
 /// @brief A shared mutex that reports how many writers are waiting on it.
 
+#include "util/distributed_shared_mutex.h"
+
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -54,7 +56,7 @@ public:
 
     explicit ExclusiveGuard(ObservableSharedMutex &owner) : owner_(owner) {
       // Scoped rather than a decrement written after the acquire. Locking can
-      // throw -- std::shared_timed_mutex::lock() reports system errors that way
+      // throw -- DistributedSharedMutex::lock() reports system errors that way
       // -- and a throw past a bare decrement would leave the count raised with
       // no waiter behind it. Nothing lowers it again, so every later reader of
       // blocked_writers() sees a writer that does not exist: a test waiting for
@@ -72,11 +74,11 @@ public:
 
   private:
     ObservableSharedMutex &owner_;
-    std::unique_lock<std::shared_timed_mutex> lock_;
+    std::unique_lock<DistributedSharedMutex> lock_;
   };
 
   /// @brief Take shared ownership. Readers are not counted.
-  [[nodiscard]] std::shared_lock<std::shared_timed_mutex> lock_shared() {
+  [[nodiscard]] std::shared_lock<DistributedSharedMutex> lock_shared() {
     return std::shared_lock(mutex_);
   }
 
@@ -89,7 +91,7 @@ public:
   }
 
 private:
-  std::shared_timed_mutex mutex_;
+  DistributedSharedMutex mutex_;
   std::atomic<uint64_t> blocked_writers_{0};
 };
 

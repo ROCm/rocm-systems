@@ -144,15 +144,19 @@ typedef struct amdf_gpu_device_info_t {
 /// The primary ring contains native type-3 PM4 packets. Transfer commands use
 /// six-dword COPY_DATA and WRITE_DATA with a four-dword prefix and payload.
 /// Cache-control encoding is described by the reported PM4 format features.
-/// Read and write indices are naturally aligned 64-bit monotonic dword counts;
-/// each index selects storage modulo `ring_byte_length / 4`.
-/// A producer never advances more than that capacity beyond the acquired read
-/// index. After storing complete commands into the ring, the producer performs
-/// a release store of the new write index followed by a release store of the
-/// same value to the 64-bit doorbell. An acquire load of a read index at least
-/// that value proves the corresponding ring dwords are no longer in use by
-/// the queue. Each user publication ends on an eight-dword boundary, padded
-/// with type-3 NOP packets when necessary; packets never straddle ring wrap.
+/// Indices occupy naturally aligned 64-bit storage. The write index is a
+/// monotonic dword count; the native read index wraps at the ring capacity
+/// `ring_byte_length / 4`. The producer always leaves at least one dword free:
+/// fewer than that capacity may remain unconsumed, including reserved storage.
+/// Given a stable published write index W and acquired native read index R,
+/// the consumed frontier is W - ((W - R) & (capacity - 1)). Status and wait
+/// operations expand the native counter to this monotonic frontier; the raw
+/// mapping continues to expose the native ring-relative read index.
+/// After storing complete commands, the producer release-stores the new write
+/// index followed by the same value to the 64-bit doorbell. Consumption proves
+/// ring storage can be reused; command completion requires a separate fence.
+/// Each publication ends on an eight-dword boundary, padded with type-3 NOP
+/// packets when necessary; packets never straddle ring wrap.
 /// Kernel publication accepts an immutable dword-aligned command stream.
 #define AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1 1u
 
@@ -203,8 +207,8 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// An all-zero value disables scratch and accepts only commands whose private
 /// segment is empty. Otherwise the selected access must belong to the queue's
 /// device and provide read/write permission and a stable GPU address. The queue
-/// borrows the memory until destruction succeeds, preventing the scratch
-/// backing from being released early.
+/// borrows the memory without lifetime tracking. The caller keeps the scratch
+/// backing live until queue destruction succeeds.
 typedef struct amdf_gpu_queue_scratch_t {
   /// Memory resource borrowed for the queue lifetime, or NULL when disabled.
   amdf_memory_t* memory;
@@ -364,21 +368,20 @@ typedef struct amdf_gpu_api_t {
   ///
   /// Every command range must belong to the queue's device and reset epoch and
   /// have execute device access and the `DEVICE_ADDRESS` memory flag. The call
-  /// registers memory borrows before native acceptance and releases them only
-  /// when queue progress later retires the returned submission. It performs no
-  /// allocation, command-byte access, native-format parsing, lowering,
-  /// transcription, native submission retry, sleep, or host wait. Native
-  /// rejection leaves `out_submission` unchanged. Because command bytes are
-  /// opaque, the caller keeps every indirectly referenced memory or native
-  /// object live until the submission retires; only the command-memory
-  /// attachments are retained by libamdf itself.
+  /// borrows command memory without retaining it or tracking its lifetime.
+  /// The caller keeps it live until the returned submission retires. It
+  /// performs no allocation, command-byte access, native-format parsing,
+  /// lowering, transcription, native submission retry, sleep, or host wait.
+  /// Native rejection leaves `out_submission` unchanged. Because command bytes
+  /// are opaque, the caller keeps every indirectly referenced memory or native
+  /// object live until the submission retires.
   ///
   /// This hot path takes no library lock and performs no lazy initialization,
   /// mapping, pinning or indirect-buffer scan. It is thread-safe with other
   /// submissions and progress operations. Queue-slot contention returns BUSY
-  /// rather than waiting; command-memory borrow counters use atomics and may
-  /// contend. This is not a wait-free guarantee. Native publication may enter
-  /// the driver; it does not initialize a host scheduler or translate commands.
+  /// rather than waiting. This is not a wait-free guarantee. Native publication
+  /// may enter the driver; it does not initialize a host scheduler or translate
+  /// commands.
   amdf_status_t(AMDF_CALL* kernel_queue_submit)(
       amdf_kernel_queue_t* queue,
       const amdf_gpu_kernel_queue_submission_info_t* submission_info,

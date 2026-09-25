@@ -12,7 +12,7 @@ __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
                                        [[maybe_unused]] int sizex,
                                        [[maybe_unused]] int sizey)
 {
-    #if defined(__gfx1250__) || defined(__gfx1251__)
+    #if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
     __shared__ int shmem[10 * 10];
     auto* pShmem = static_cast<int*>(shmem);
     gfx1250_TDM_GROUP0 group0;
@@ -40,7 +40,7 @@ __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
     __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
 
-    #endif // #if defined(__gfx1250__) || defined(__gfx1251__)
+    #endif // #if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
 }
 
 TEST_CASE("TDM_Basic_load_2d")

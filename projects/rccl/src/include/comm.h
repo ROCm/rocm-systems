@@ -254,6 +254,7 @@ struct ncclTaskColl {
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  rcclSymkExtract symkExtract;
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
@@ -818,6 +819,10 @@ struct ncclComm {
     [3]; // for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
   struct ncclTuningContext_t tuningContext;
 
+  // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
+  // NULL on architectures without a dedicated threshold table (falls back to env-var params).
+  const struct rcclArchThresholds* archThresholds;
+
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */
   ncclResult_t asyncResult;
@@ -1024,6 +1029,8 @@ struct ncclComm {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+  // [RCCL] Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD
+  int ll128ShmemElemsPerThread;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap

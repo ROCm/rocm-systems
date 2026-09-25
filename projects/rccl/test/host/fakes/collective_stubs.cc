@@ -48,8 +48,6 @@ ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
-ncclResult_t ncclLaunchRma(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
-ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
 
 // dev_runtime.h
 // ncclDevrCommCreateInternal, ncclDevrWindowRegisterInGroup and

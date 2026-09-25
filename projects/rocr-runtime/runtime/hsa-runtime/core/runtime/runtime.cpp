@@ -3241,11 +3241,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// When enabled, load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
 // Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
 // and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
+  if (!flag().hotswap_enable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {

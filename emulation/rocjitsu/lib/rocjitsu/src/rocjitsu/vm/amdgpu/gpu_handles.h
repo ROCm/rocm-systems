@@ -12,7 +12,8 @@
 namespace rocjitsu::amdgpu {
 
 /// @brief Lifetime-safe reference to one GPU address space.
-struct AddressSpaceHandle {
+class AddressSpaceHandle {
+public:
   static constexpr uint32_t kInvalidSlot = std::numeric_limits<uint32_t>::max();
 
   uint32_t slot = kInvalidSlot;
@@ -23,7 +24,8 @@ struct AddressSpaceHandle {
 };
 
 /// @brief Lifetime-safe reference to one registered hardware queue.
-struct QueueHandle {
+class QueueHandle {
+public:
   static constexpr uint32_t kInvalidSlot = std::numeric_limits<uint32_t>::max();
 
   uint32_t slot = kInvalidSlot;

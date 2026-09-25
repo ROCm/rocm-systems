@@ -392,6 +392,18 @@ class device_counting_service_test : public ::testing::Test
 protected:
     device_counting_service_test() {}
 
+    void SetUp() override
+    {
+        // WSL/no-KFD: agent exposes no counter metrics; skip until KFD profiler
+        // ioctl (or libhsakmt PM4 path) is available. When /dev/kfd is absent
+        // (WSL2/DXG) device counting cannot open /dev/kfd for the profiling
+        // queue and the service blocks forever waiting on hardware. Real-KFD CI
+        // is unaffected because /dev/kfd is present there.
+        if(!agent::kfd_device_available())
+            GTEST_SKIP() << "WSL/no-KFD: agent exposes no counter metrics; skipping "
+                            "until KFD profiler ioctl (or libhsakmt PM4 path) is available";
+    }
+
     static void test_run(const device_counting_run_options& options)
     {
         global_sync_samples().wlock([](auto& data) { data.clear(); });

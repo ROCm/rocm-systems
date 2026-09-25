@@ -9,9 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 class md5sum
@@ -82,7 +80,7 @@ md5sum::update(Tp inp)
 namespace
 {
 
-using size_type = typename md5sum::size_type;
+using size_type = md5sum::size_type;
 
 // Constants for md5sumTransform routine.
 constexpr std::uint32_t S11 = 7;
@@ -413,5 +411,4 @@ md5sum::hexdigest() const
     return std::string(buf);
 }
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

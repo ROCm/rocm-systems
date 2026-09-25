@@ -30,6 +30,7 @@ from amdisa.isa_profile import (
     Cdna5Profile,
     DppOpcodeRule,
     DppCtrlDialect,
+    FloatDotAccumulation,
     MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
@@ -474,6 +475,26 @@ def test_saddr_null_selector_rejects_unrelated_encodings():
     assert Rdna4Profile().saddr_null_selector_expr('ENC_VSCRATCH') is None
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), FloatDotAccumulation.HOST_F32),
+        (Cdna2Profile(), FloatDotAccumulation.HOST_F32),
+        (CdnaProfile(), FloatDotAccumulation.HOST_F32),
+        (Cdna4Profile(), FloatDotAccumulation.HOST_F32),
+        (Rdna1Profile(), FloatDotAccumulation.HOST_F32),
+        (Rdna2Profile(), FloatDotAccumulation.HOST_F32),
+        (Rdna3Profile(), FloatDotAccumulation.GFX11),
+        (Rdna3_5Profile(), FloatDotAccumulation.GFX11),
+        (Rdna4Profile(), FloatDotAccumulation.GFX12),
+        (Cdna5Profile(), FloatDotAccumulation.HOST_F32),
+    ],
+)
+def test_float_dot_accumulation_policy(profile, expected):
+    # CDNA5 inherits RDNA4 encoding machinery, but not its measured arithmetic.
+    assert profile.float_dot_accumulation is expected
+
+
 def test_isa_properties_codegen_uses_profile_values(tmp_path):
     specs = [
         ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
@@ -501,6 +522,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
         '        .wave_state_layout = WaveStateLayout::Legacy,\n'
         '        .compute_tmpring_wavesize_granule = 1024,\n'
         '        .compute_tmpring_wavesize_bits = 13,\n'
@@ -519,6 +541,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .float_dot_accumulation = FloatDotAccumulation::Gfx12,\n'
         '        .wave_state_layout = WaveStateLayout::Gfx12,\n'
         '        .compute_tmpring_wavesize_granule = 256,\n'
         '        .compute_tmpring_wavesize_bits = 18,\n'
@@ -537,6 +560,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
         '        .wave_state_layout = WaveStateLayout::Gfx12_5,\n'
         '        .compute_tmpring_wavesize_granule = 256,\n'
         '        .compute_tmpring_wavesize_bits = 18,\n'
@@ -629,7 +653,9 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'rocjitsu/isa/arch/amdgpu/cdna5/isa.h' in operand_h
     assert 'rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h' in operand_h
     assert 'ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_' in operand_h
-    assert 'class Operand : public IsaOperand<Isa>' in operand_h
+    assert 'class Operand final : public IsaOperand<Isa>' in operand_h
+    assert 'static constexpr bool kStaticRegisterAccess = true;' in operand_h
+    assert 'friend class amdgpu::RegisterAccess;' in operand_h
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_h
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
@@ -708,7 +734,7 @@ def test_rdna4_operand_execution_backend_is_split_from_model_source(tmp_path):
     operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
     operand_exec_cpp = (tmp_path / 'rdna4' / 'operand_exec.cpp').read_text()
 
-    assert 'class Operand : public IsaOperand<Isa>' in operand_h
+    assert 'class Operand final : public IsaOperand<Isa>' in operand_h
     assert 'uint32_t Operand::read_scalar' in operand_cpp
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/wavefront.h' not in operand_cpp

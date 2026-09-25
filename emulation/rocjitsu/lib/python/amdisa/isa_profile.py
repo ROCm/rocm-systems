@@ -219,6 +219,14 @@ def _modern_rdna_dpp_opcode_rule(
     return DppOpcodeRule.ALLOW
 
 
+class FloatDotAccumulation(Enum):
+    """Numerical accumulation policy for F32-output floating DOT2."""
+
+    HOST_F32 = 'HostF32'
+    GFX11 = 'Gfx11'
+    GFX12 = 'Gfx12'
+
+
 class WaveStateLayout(Enum):
     """Architectural layout of wave status, exception, and trap-control state."""
 
@@ -705,6 +713,11 @@ class IsaProfile(ABC):
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
         return False
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        """Additional lane source encodings qualified beyond the XML ranges."""
+        return ((192, 192),)
 
     @property
     def smem_address_uses_access_size(self) -> bool:
@@ -1406,6 +1419,11 @@ class _AmdgpuProfileBase(IsaProfile):
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         """Whether the TTMP workgroup-ID payload uses cluster coordinates."""
         return False
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        """Select the scalar/SIMD arithmetic contract for floating DOT2."""
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -2164,6 +2182,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
     """
 
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
+
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
@@ -2189,6 +2208,12 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return super().skip_inst_encoding(
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # READLANE masks the value to the wave width, not the selector encoding.
+        # RADV emits both inline 64 and literal lane indices.
+        return ((192, 192), (255, 255))
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2312,6 +2337,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX11
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2386,6 +2415,11 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # Literal lane indices are only qualified on RDNA3 and RDNA4.
+        return ((192, 192),)
 
     @property
     def renders_gfx11_image_syntax(self) -> bool:
@@ -2473,6 +2507,12 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return super().skip_inst_encoding(
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # READLANE masks the value to the wave width, not the selector encoding.
+        # RADV emits both inline 64 and literal lane indices.
+        return ((192, 192), (255, 255))
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2590,6 +2630,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX12
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -2752,6 +2796,11 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def vmem_stores_complete_in_order(self) -> bool:
         return True
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # Literal lane indices are only qualified on RDNA3 and RDNA4.
+        return ((192, 192),)
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2970,6 +3019,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:

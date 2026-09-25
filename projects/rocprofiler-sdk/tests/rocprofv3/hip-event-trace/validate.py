@@ -143,7 +143,7 @@ def test_hip_event_timestamps(json_data):
     """Verify timestamps are ordered and within the profiling window."""
     data = json_data["rocprofiler-sdk-tool"]
     init_time = data["metadata"]["init_time"]
-    fini_time = data["metadata"]["fini_time"]
+    data["metadata"]["fini_time"]
 
     for itr in data["buffer_records"]["hip_event"]:
         assert (

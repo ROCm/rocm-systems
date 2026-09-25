@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -184,12 +185,13 @@ void VMacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<true>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(
-            std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
-                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
-                     std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)))));
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)),
+            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));
   }
 }
 

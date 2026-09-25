@@ -104,7 +104,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     int index;
     struct ncclTaskColl* next = task->next;
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
-    bool symAvailable = ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    bool symAvailable = task->symkExtract != RCCL_SYMK_EXTRACT_DENY &&
+                        ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
@@ -339,7 +340,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                      ncclSymkKernelListProfile[kernelIndex] :
                      ncclSymkKernelList[kernelIndex];
   int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
-  plan->kernelDynSmem = (1 & ncclSymkDynamicSmemKernelMask() >> (int)kernelId) ? maxDynamicSmem : 0;
+  plan->kernelDynSmem = (1 & (ncclSymkDynamicSmemKernelMask() >> (int)kernelId)) ? maxDynamicSmem : 0;
   task = headTask;
   while (task != nullptr && task->devFuncId == devFuncId) {
     workCount++;

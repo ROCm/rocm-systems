@@ -527,4 +527,26 @@ IpDiscoveryValidation validate_ip_discovery_table(std::span<const std::byte> tab
   return {.valid = true, .problem = {}};
 }
 
+IpBlockIndex::IpBlockIndex(const IpDiscoverySpec &spec) {
+  blocks_.reserve(spec.blocks.size());
+  for (const IpBlock &block : spec.blocks) {
+    if (!block.register_bases.empty()) {
+      blocks_.push_back(&block);
+    }
+  }
+}
+
+const IpBlock *IpBlockIndex::find(IpHardwareId id, uint8_t instance) const {
+  // A linear scan of a handful of pointers, which is what "built once" buys:
+  // the vector is the whole index, and every record it holds is one the caller
+  // could be asking for. A map keyed on the pair would be more structure than
+  // the ten-odd blocks a table names ever justify, and would still be a lookup.
+  for (const IpBlock *block : blocks_) {
+    if (block->hardware_id == id && block->instance == instance) {
+      return block;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace rocjitsu

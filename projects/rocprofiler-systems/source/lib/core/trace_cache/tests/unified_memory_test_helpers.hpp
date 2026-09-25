@@ -12,11 +12,7 @@
 #include <string_view>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
-{
-namespace test
+namespace rocprofsys::trace_cache::test
 {
 
 namespace detail
@@ -116,6 +112,4 @@ make_kfd_page_fault_sample(std::uint32_t agent_id, bool is_read,
     return s;
 }
 
-}  // namespace test
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache::test

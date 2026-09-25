@@ -16,11 +16,26 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
+| `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
+
+### PCI/VFIO guest compatibility
+
+The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
+Compute-only guests therefore require an AMDGPU kernel containing commit
+`4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
+That change makes multimedia discovery accept a device with no VCN instance.
+Rocjitsu does not emulate a placeholder media block, and adding one would expand
+the device contract beyond the compute functionality modeled here.
+
+The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
+guest kernel and initramfs artifacts. See
+[QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract, the
+complete launch command, GEMM qualification criteria, and troubleshooting.
 
 ## DBT guest configs
 
@@ -79,7 +94,15 @@ The example above is intentionally minimal.
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
-| `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
+| `vm.arch` | string | ISA architecture family: `cdna3`, `cdna4`, `cdna5`, etc. |
+| `vm.target` | string | Optional concrete GPU target, such as `gfx1250` or `gfx1251`. |
+
+`vm.target` selects target-specific instruction legality and behavior within an
+ISA architecture family. When it is present, it must belong to `vm.arch`. If
+both the target binding and `vm.gpu.device.gfx_target_version` provide nonzero
+packed versions, they must match. CDNA5 currently defaults an omitted target to
+`gfx1250` for compatibility; new configs for an architecture with multiple
+concrete targets should specify the target explicitly.
 
 `exec_mode` is matched literally: only the exact string `"clocked"` selects
 clocked mode. If the field is omitted, set to `"functional"`, or given any
@@ -140,11 +163,11 @@ the same reason, though the hang has only been characterised on the 2-GPU
 config. Remove the pins once it is fixed.
 
 Raising `num_threads` only pays off if the work reaches more than one XCD, which
-is decided by `HwQueue::xcd_fanout` rather than by how the queue was created (see
+is decided by `AqlQueueConfig::xcd_fanout` rather than by how the queue was created (see
 *Queue ownership and XCD fan-out* in `vm-design.md`). KFD sets the flag for
-compute queues, and a test can opt in when it registers a queue directly; a queue
-without the flag keeps its whole grid on its owning XCD and leaves the other
-partitions idle no matter how `num_threads` is set.
+supported AQL compute queues, and a test can opt in when it registers a queue
+directly; a queue without the flag keeps its whole grid on its owning XCD and
+leaves the other partitions idle no matter how `num_threads` is set.
 
 Setting the flag is not a guarantee that every partition gets work. The grid is
 split in dispatch chunks, and a chunk is a whole cluster for a clustered

@@ -6,7 +6,7 @@
 
 // rccl::Recorder (src/recorder.cc) faked once for every host-only microtest
 // binary. Previously the ctor/dtor/instance() triple was copied verbatim into
-// comm_fakes.cc, init_fakes.cc and enqueue_fakes.cc, differing only in which
+// comm_fakes.cc, init_fakes.cc and enqueue_test_deps.cc, differing only in which
 // record() overloads each target happened to reference.
 
 #ifndef RCCL_TEST_HOST_RECORDER_FAKES_H_

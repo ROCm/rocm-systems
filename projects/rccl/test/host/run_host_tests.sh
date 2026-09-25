@@ -79,8 +79,9 @@ PHASE="${1:-all}"
 
 # Install everything the host-test pipeline needs that the base ROCm dev image
 # lacks: cmake + host toolchain, gtest/fmt, moreutils (ts), python3-venv (the
-# guards phase creates a venv + pip-installs pytest), and lcov/genhtml (the
-# coverage phase merges per-binary lcov tracefiles into one overall report).
+# guards phase creates a venv + pip-installs pytest), lcov/genhtml (the
+# coverage phase merges per-binary lcov tracefiles into one overall report), and
+# ccache (the configure phase picks it up automatically when present).
 # Uses sudo when not already root so it works both in the root CI container and
 # locally.
 do_deps() {
@@ -89,7 +90,7 @@ do_deps() {
   [ "$(id -u)" -eq 0 ] || sudo="sudo"
   $sudo apt-get update
   $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
-    moreutils libgtest-dev libgmock-dev libfmt-dev lcov llvm
+    moreutils libgtest-dev libgmock-dev libfmt-dev lcov llvm ccache
 }
 
 do_rccl_configure() {
@@ -148,6 +149,7 @@ do_host_tests() {
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
+    "rccl-UnitTestsMicroWarpSpeed:$SCRIPT_DIR/host_tests_micro_warpspeed.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
     # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
@@ -159,7 +161,11 @@ do_host_tests() {
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
+    "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
   )
+  # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
+  # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
+  local -a optional_binaries=("rccl-UnitTestsMicroSymKernels")
 
   : > "$LOG_FILE"   # truncate; each binary appends below
   local rc=0 entry exe name xml profdir
@@ -168,6 +174,10 @@ do_host_tests() {
     xml="${entry#*:}"
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
+      if printf '%s\n' "${optional_binaries[@]}" | grep -qx "$name"; then
+        echo "SKIP: $name not built (optional)" | tee -a "$LOG_FILE"
+        continue
+      fi
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
       rc=1
       continue

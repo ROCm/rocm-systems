@@ -401,19 +401,19 @@ typedef struct amdf_xdna_api_t {
   /// provider fills its preallocated transport packet with address and length.
   /// Submission performs no allocation, format parsing, lowering, relocation,
   /// binding resolution, native submission retry, sleep or host wait. Native
-  /// retirement releases the memory borrow after consuming the command result.
+  /// retirement consumes the command result. The caller keeps instruction
+  /// memory live until retirement; libamdf neither retains nor tracks it.
   /// Native rejection leaves `out_submission` unchanged.
-  /// The caller retains memory reachable through opaque device addresses;
-  /// native command retirement does not prove that user-mode work scheduled
-  /// by those commands has stopped accessing that memory.
+  /// The caller also keeps memory reachable through opaque device addresses
+  /// live; native command retirement does not prove that user-mode work
+  /// scheduled by those commands has stopped accessing that memory.
   ///
   /// This hot path takes no library lock and performs no lazy initialization,
   /// mapping, pinning or indirect-buffer scan. It is thread-safe with other
   /// submissions and progress operations. Queue-slot contention returns BUSY
-  /// rather than waiting; command-memory borrow counters use atomics and may
-  /// contend. This is not a wait-free guarantee. Native publication may enter
-  /// the driver and publish the queue-owned packet's cache lines, not the
-  /// caller's instruction or data bytes.
+  /// rather than waiting. This is not a wait-free guarantee. Native publication
+  /// may enter the driver and publish the queue-owned packet's cache lines, not
+  /// the caller's instruction or data bytes.
   amdf_status_t(AMDF_CALL* kernel_queue_submit)(
       amdf_kernel_queue_t* queue,
       const amdf_xdna_kernel_queue_submission_info_t* submission_info,

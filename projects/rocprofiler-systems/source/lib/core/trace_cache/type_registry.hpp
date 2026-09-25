@@ -9,9 +9,7 @@
 #include <map>
 #include <optional>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
@@ -21,7 +19,7 @@ class type_registry
                   "TypeIdentifierEnum must be an enum class");
 
 public:
-    using variant_t = typename std::variant<SupportedTypes...>;
+    using variant_t = std::variant<SupportedTypes...>;
 
     type_registry() { (register_type<SupportedTypes>(), ...); }
 
@@ -48,5 +46,4 @@ private:
     }
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

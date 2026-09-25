@@ -1699,11 +1699,11 @@ class TestDeriveVectorTernary:
         assert SemaNodeKind.MUL in all_kinds
         assert SemaNodeKind.ADD in all_kinds
 
-    def test_lowers_to_std_fma(self):
+    def test_lowers_to_mode_aware_fma(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'std::fma(' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
 
     def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [
@@ -2774,13 +2774,14 @@ class TestDeriveMfma:
     @pytest.mark.parametrize(
         'name',
         [
+            'V_WMMA_F64_16X16X4_F64',
             'V_WMMA_BF16F32_16X16X32_BF16',
             'V_WMMA_F32_16X16X128_F8F6F4',
             'V_WMMA_F32_32X16X128_F4',
             'V_SWMMAC_BF16F32_16X16X64_BF16',
         ],
     )
-    def test_gfx1250_low_precision_wmma_derives_mfma(self, name):
+    def test_cdna5_wmma_profiles_derive_mfma(self, name):
         sem = derive_semantics(name, 'ENC_VOP3P')
         assert sem is not None
         assert sem.semantic_class == 'mfma'
@@ -3183,10 +3184,11 @@ class TestDeriveBufferFormat:
         assert sem.num_elems == 1
         assert sem.d16_lo and not sem.d16_hi
 
-    def test_typed_non_d16_load_under_vbuffer_stays_nop(self):
+    def test_typed_non_d16_load_under_vbuffer_is_executable(self):
         sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_VBUFFER')
         assert sem is not None
-        assert sem.semantic_class == 'nop'
+        assert sem.semantic_class == 'tbuffer_load'
+        assert sem.num_elems == 4
 
     @pytest.mark.parametrize(
         'legacy,rdna_ordered,enc',

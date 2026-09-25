@@ -7,13 +7,7 @@
 
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
+namespace rocprofsys::pmc::collectors::nic
 {
 
 // Data types are owned by the backend layer (the producer); re-exported here so
@@ -82,7 +76,4 @@ struct metrics
     std::uint64_t req_rx_impl_nak_seq_err = 0;
 };
 
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::nic
