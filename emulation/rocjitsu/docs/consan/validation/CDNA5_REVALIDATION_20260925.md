@@ -1752,3 +1752,25 @@ all reuse barriers remain intact. The reviewed witness connects wave 2's
 tensor A write at LDS 4352 to wave 1 lane zero's DS load. Eight trials with a
 six-detection minimum are declared before results, using the existing exact
 ELF identities. Validation runner tests pass (`tensor-publication-spec-tests.log`).
+
+### First tensor-DMA publication row qualified green
+
+`tensor-mxf8-high-fault` finishes accepted: 8/8 attempted, admitted and reached,
+8/8 detections, with healthy checks. The same reviewed fault at default in
+`tensor-mxf8-default-fault` is fully admitted/reached but detects 0/8. Numeric
+oracles pass under both presets; the detector diagnoses the missing publication
+edge independently of whether emulator scheduling causes a numeric failure.
+Together with the accepted high clean and complete tensor coverage, MXF8
+explicit is green at high, the lowest passing preset tested from default upward.
+
+`tensor-private-f16-transposes-clean` passes numerics and complete coverage in
+all four objects: aggregated 736/736 accesses and 176/176 barriers. Its Default
+cell moves to yellow pending reviewed fault qualification.
+
+`tensor-private-mxf8-tdm-clean` rejects all six shards before execution.
+A direct replay with log level 2 (`tensor-private-mxf8-tdm-debug.log`) identifies
+the remaining allocation-policy failure: scalar persistent-state placement
+cannot find entry-local VGPR scratch and rejects before the full-wave private
+fallback. The row stays orange with this current blocker, replacing the older
+missing-tensor-range explanation. No source changes or hook replacement took
+place during the fault campaigns.

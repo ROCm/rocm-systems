@@ -45,12 +45,12 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟨 high: clean pass with tensor-DMA coverage (78/78 accesses); fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟨 default: clean pass with tensor-DMA coverage (50/50 accesses); fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 4 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: all 4 clean objects pass with tensor-DMA coverage; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 9 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 all 3 clean shards pass; audit confirms 54 unsupported tensor-DMA accesses | 🟧 delay-zero: 2/3 clean shards pass; third hits the 300 s client deadline |
-| Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟧 clean numerics pass; 54 tensor-DMA accesses lack modeled LDS ranges | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟧 tensor loads modeled; scalar-prologue scratch allocation blocks all 6 clean shards | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟧 all 6 clean shards pass; audit confirms 144 unsupported tensor-DMA accesses | 🟨 delay-zero: all 6 clean shards pass after address-bank fixes; fault trials pending |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
