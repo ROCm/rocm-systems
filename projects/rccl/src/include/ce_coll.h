@@ -41,9 +41,9 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
-inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
-  return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
+// Per-rank staging capacity in ceARTmpBuf.
+inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks, size_t stagingBytes) {
+  return nRanks > 0 ? stagingBytes / (size_t)nRanks : 0;
 }
 
 // Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
@@ -227,9 +227,8 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
 // is not enough: Phase 3 writes the full receive range through peer LSA mappings.
 int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes);
 
-// Bytes allocated for ceARTmpBuf: alignUp(NCCL_CE_NUM_SLOTS * nRanks * maxChunkBytes, 16).
-// The !fastPath AllGather + memcpy of totalBytes must not exceed this.
-size_t ncclCeAllReduceStagingBufBytes(int nRanks);
+// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity.
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).

@@ -45,7 +45,7 @@
 #define CE_FAULT_LAUNCH_OP 0x04U
 
 /** Omit recv window base in CE Phase 3 (legacy: rank * shardBytes, no window offset).
- * 0x08 is unused (previously CE_FAULT_SKIP_FORCE_UNREGISTERED). */
+ * 0x08 is reserved for an in-flight CE fault bit. */
 #define CE_FAULT_LEGACY_RECV_OFFSET 0x10U
 
 // ---------------------------------------------------------------------------

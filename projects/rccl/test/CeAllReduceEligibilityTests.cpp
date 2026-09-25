@@ -223,16 +223,20 @@ TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_PointerInWindowIsN
 
 TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
 {
-    for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24}) {
-        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
-        const size_t expected = alignUp(
-            static_cast<size_t>(NCCL_CE_NUM_SLOTS) * static_cast<size_t>(nRanks) *
-                ncclCeAllReduceMaxChunkBytes(nRanks),
-            static_cast<size_t>(16));
-        EXPECT_EQ(ncclCeAllReduceStagingBufBytes(nRanks), expected);
+    for (size_t stagingBytes :
+         {static_cast<size_t>(NCCL_CE_AR_STAGING_BYTES), static_cast<size_t>(33) * 1024 * 1024}) {
+        for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24}) {
+            SCOPED_TRACE("stagingBytes=" + std::to_string(stagingBytes) +
+                         " nRanks=" + std::to_string(nRanks));
+            const size_t expected = alignUp(
+                static_cast<size_t>(NCCL_CE_NUM_SLOTS) * static_cast<size_t>(nRanks) *
+                    ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+                static_cast<size_t>(16));
+            EXPECT_EQ(ncclCeAllReduceStagingBufBytes(nRanks, stagingBytes), expected);
+        }
     }
-    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(0), 0u);
-    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(-1), 0u);
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(0, NCCL_CE_AR_STAGING_BYTES), 0u);
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(-1, NCCL_CE_AR_STAGING_BYTES), 0u);
 }
 
 TEST_F(CeAllReduceEligibilityTest, MaxStagingBytesPerRank)
@@ -328,6 +332,8 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
 // (symEligible requires Sum). Empty winSorted is a safe FindWindow miss.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isolated)
 {
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
     ProcessIsolatedTestRunner::registerTest(
         ProcessIsolatedTestRunner::TestConfig(
             "ForceUnregisteredSelectsCe_Isolated",
@@ -377,6 +383,8 @@ TEST(RcclCeAllReduceEligibility, StagedUnregisteredRejectsUnsupportedDriver)
 // the 2-shot cap; AllGather is pipelined through slots.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSelectsTwoShot_Isolated)
 {
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
     ProcessIsolatedTestRunner::registerTest(
         ProcessIsolatedTestRunner::TestConfig(
             "ForceUnregisteredOverStagingSelectsTwoShot_Isolated",
@@ -389,7 +397,8 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSel
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
                 mock.comm.ceColl.ceARTmpBuf = nullptr;
 
-                const size_t staging = ncclCeAllReduceStagingBufBytes(mock.comm.nRanks);
+                const size_t staging =
+                    ncclCeAllReduceStagingBufBytes(mock.comm.nRanks, NCCL_CE_AR_STAGING_BYTES);
                 ASSERT_GT(staging, 0u);
                 size_t count = (staging / sizeof(float)) + static_cast<size_t>(mock.comm.nRanks);
                 while (count * sizeof(float) <= staging) count += static_cast<size_t>(mock.comm.nRanks);

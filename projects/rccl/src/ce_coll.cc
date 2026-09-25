@@ -2136,15 +2136,12 @@ static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   uint8_t* ceARTmpBuf = nullptr;
   ncclWindow_vidmem* arWinDev = nullptr;
   ncclWindow_vidmem* arWinDevHost = nullptr;
-  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  size_t maxChunkBytes = 0;
   size_t ceARTmpBufSize = 0;
 
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
   if (!rcclParamCeAllReduce()) return ncclSuccess;
 
-  maxChunkBytes = comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks;
-  ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
+  ceARTmpBufSize = ncclCeAllReduceStagingBufBytes(comm->nRanks, comm->ceColl.ceArStagingBytes);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                 ret, fail);
@@ -2169,9 +2166,11 @@ int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void cons
   return recvStart >= winStart && totalBytes <= win->size && recvStart - winStart <= win->size - totalBytes;
 }
 
-size_t ncclCeAllReduceStagingBufBytes(int nRanks) {
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes) {
   if (nRanks <= 0) return 0;
-  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks * ncclCeAllReduceMaxChunkBytes(nRanks), (size_t)16);
+  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks *
+                   ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+                 (size_t)16);
 }
 
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
