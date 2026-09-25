@@ -285,3 +285,19 @@ reclassify the red cells until that confirmation succeeds.
 Tree Default requalification on the relaxed-observation fix finished 1/8 with a
 matching clean pass (`tree-relaxed-default-*`), confirming high as the lowest
 passing preset at or above default for that hook.
+
+### Normal-hook confirmation of the lifetime repair
+
+The rebuilt normal GCC hook completes HipKittens and PyTorch tensor-descriptor
+add cleanly in **both** modes. All four maintained-runner results are accepted,
+including baseline numerical checks and full applicable coverage; artifacts are
+under `lifetime-clean`. Their status cells move from red to yellow pending fault
+qualification. All 67 gfx1250 atomic/publication emulator tests pass with the
+rebuilt hook (`publication-lifetime-device-tests.log`). No debugger intervention
+is used for these accepted results. This confirms the static-lifetime fix resolves
+both external heap-corruption reproducers.
+
+Tensile F8 Default completed six shards; its 511/512/513 square-size shards hit
+the 420-second client execution budget (one retained log has 10 of 12 expected
+numeric rows). The full row is orange, with no shard coverage or oracle waived.
+The bounded scheduler has resumed with the rebuilt hook.
