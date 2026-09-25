@@ -225,6 +225,7 @@ TEST(rocprofiler_lib, configure_attach_uses_configure_symbol_owner)
     ASSERT_NE(configure, nullptr);
     ASSERT_NE(attach, nullptr);
 
+    // Use libc as a stable foreign owner to model a mismatched global symbol lookup.
     auto* foreign_symbol = dlsym(RTLD_DEFAULT, "malloc");
     ASSERT_NE(foreign_symbol, nullptr);
 
