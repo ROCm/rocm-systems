@@ -901,7 +901,7 @@
           "family": "barrier-drop",
           "reach_witness": {
             "kind": "reviewed-unconditional-final-isa",
-            "evidence": "Fresh gfx1250 inventory ELF 7e9735d439957243, Ailk/Bljk MT16x32x128 two-wave kernel; f8-selected.asm from matching code object (.text VMA 0x7100, selected kernel VMA 0x12f00). First A store at VMA 0x147b0 writes v32=4*tid, so thread 0 writes LDS offset 0. First A read at 0x149cc uses v34=(lane%16)+256*(lane//16)+2048*(wave//2); thread 32 reads offset 0, crossing waves. Drop post-store signal/wait .text+0xd8c0/0xd8c4 (VMA 0x149c0/0x149c4), preserving producer retirement and remaining barriers. The maintained 128/129 square cases execute full DepthU128 iterations reaching this publication after prefetch reconvergence. Eight trials per mode with minimum six detections predeclared before outcomes."
+            "evidence": "Fresh gfx1250 inventory ELF 7e9735d439957243, Ailk/Bljk MT16x32x128 two-wave kernel; f8-selected.asm from matching code object (.text VMA 0x7100, selected kernel VMA 0x12f00). First A store at VMA 0x147b0 writes v32=4*tid, so thread 0 writes LDS offset 0. First A read at 0x149cc uses v34=(lane%16)+256*(lane//16)+2048*(wave//2); thread 32 reads offset 0, crossing waves. Drop post-store signal/wait .text+0xd8c0/0xd8c4 (VMA 0x149c0/0x149c4), preserving producer retirement and remaining barriers. The fault command selects the first maintained shard, M=N=127 and K=1024. Its reduction therefore executes full DepthU128 iterations reaching this publication after prefetch reconvergence. Eight trials per mode with minimum six detections predeclared before outcomes."
           },
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",

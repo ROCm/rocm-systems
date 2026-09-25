@@ -1224,3 +1224,25 @@ analysis and healthy before/after checks in every trial. Together with the tree
 regression this checks both barrier and atomic publication after the CDNA5
 lane-retention change. The pressure table cell keeps its already qualifying
 high preset without an unnecessary bank override.
+
+### Exact generated-client replay passes HGEMM's numerical oracle
+
+The Tensile driver now exports a hash-checked replay manifest after successful
+validation and can rerun the retained clients without regenerating code objects.
+The replay path preserves client inputs, redirects only result files, verifies
+inputs before and after execution, and retains the existing numerical, timing
+and ELF-target checks. Its unit tests cover input mutations, changed contracts,
+client failure/timeouts and a shared deadline; 253 combined replay, driver and
+validation tests pass.
+
+`hgemm-exact-replay-results.json` records successful export and replay runs.
+Both return zero and validate 146 numerical rows across two passing clients.
+`hgemm-exact-replay-manifest.json` retains eight hashed inputs and the full
+client/configuration contract. This removes the regeneration requirement; the
+new retained objects still need inventory, reviewed fault identity selection
+and matching clean/fault qualification before HGEMM can turn green.
+
+The F8 reach witness now describes the actual selected fault shard, M=N=127
+and K=1024, whose reduction reaches full DepthU128 iterations. This corrects
+the former reference to other square shards without changing the selected
+fault site or workload. All 209 validation runner tests pass after the change.
