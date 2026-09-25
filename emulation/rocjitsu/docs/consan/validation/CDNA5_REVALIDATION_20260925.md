@@ -944,3 +944,22 @@ fresh `sgemm-smoke-default-retry-fault` artifacts and retains the same reviewed
 fault and default preset. VALIDATION.md now documents the distinction between
 Tensile's internal client launcher and these independent health probes. The
 runner's 209-test gate passed with the current fault spec before this retry.
+
+### HGEMM first tile-publication fault
+
+Fresh inventory ELF `37a61d190bb3009f`, inspected in `hgemm-pristine.asm`,
+contains the MT16x32x32 two-wave kernel. Its B store at VMA 0x5708 writes
+`1152 + 16*tid + 32*((16*tid)>>9)`. Thread 2 writes offset 1184; thread 32's
+first B load at 0x57f8 reads that same offset. The reviewed split publication
+pair .text+0x156c/0x1570 (VMA 0x576c/0x5770) follows prefetch reconvergence
+and is reached by full reduction iterations of the maintained 127/128/129
+square problems. Producer retirement and subsequent barriers remain intact.
+
+Added the exact pair as `barrier-drop-tile-publication`, with eight trials per
+mode and six detections required, before outcomes. Independent address arithmetic
+confirms the cross-wave handoff; all 209 validation runner tests pass
+(`hgemm-spec-tests.log`). `hgemm-default-queue.py` waits for the active SGEMM
+campaign process to finish, then runs matching baseline/Default clean and Default
+fault qualification. It uses explicit emulator health probes, 900 s inner and
+1200 s outer deadlines, and fresh `hgemm-default-retry-{clean,fault}` roots.
+The initial corrected SGEMM trial has now completed with healthy emulator probes.
