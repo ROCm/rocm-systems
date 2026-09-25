@@ -82,7 +82,14 @@ hip-moi library (`tree-fixed/clean-{0,1,2}/`). The rebuilt producer release OR
 is `.text+0x1988c`, occurrence 208, in `fnv1a64:304fa2ce12cd1d95`; the final
 acquire/release OR stays at `.text+0x8a24`. Fresh ISA review and prospective
 qualification are retained in `tree-fixed/`; ascending preset trials are running. No hip-moi oracle, workload synchronization, or numerical check has
-been weakened. Evidence: `tree-debug/regression-{before,after}.log` and
+been weakened. The repair is committed locally in hip-moi as `346343f`; its
+full gfx950 CTest suite passes 184/184 (`tree-fixed/ctest-native-wave-r1.xml`).
+Generic two-subgroup atomic tests were changed to use native wave sizes because
+their fixed 32-lane split could deadlock inside one CDNA wave64. The initial
+CTest runtime-path rejection and the stopped old-fixture deadlock are retained;
+GPU discovery and a dispatch smoke test passed before releasing the lock.
+The D128 block, D128 pressure, MFMA attention, and Stream-K arrival executables
+remain byte-for-byte unchanged (`tree-fixed/rebuilt-fixture-hashes.json`). Evidence: `tree-debug/regression-{before,after}.log` and
 `tree-debug/{native,max-0,max-1,max-2}.log`.
 
 ## Remaining sampling searches
