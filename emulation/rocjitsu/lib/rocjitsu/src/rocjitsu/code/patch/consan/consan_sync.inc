@@ -90,11 +90,13 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   const bool scalar_persistent = plan.persistent_sgprs.complete();
   if (plan.wave_exec_archive_vgpr &&
-      (arch != ROCJITSU_CODE_ARCH_CDNA5 || !scalar_persistent || scalar_spill || private_layout ||
+      (arch != ROCJITSU_CODE_ARCH_CDNA5 || (!scalar_persistent && !private_layout) ||
+       (scalar_spill && (!scalar_spill->lane_reservoir_vgpr || spill)) ||
        *plan.wave_exec_archive_vgpr != plan.scratch_vgpr + 9u ||
        *plan.wave_exec_archive_vgpr >= 256u ||
-       !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources))) {
-    errors.emplace_back("ConSan wave-wide barrier lacks full-wave scalar identity resources");
+       !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources,
+                                                 private_layout != nullptr))) {
+    errors.emplace_back("ConSan wave-wide barrier lacks preserved full-wave identity resources");
     return std::nullopt;
   }
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
@@ -810,10 +812,11 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
     if (!probe)
       continue;
     if (candidate.wave_wide_tensor_owner) {
-      if (probe->scalar_spill || probe->private_layout ||
-          !candidate_point.persistent_sgprs.complete() || !candidate_point.exec_save_sgpr) {
+      if ((probe->scalar_spill && (!probe->scalar_spill->lane_reservoir_vgpr || probe->spill)) ||
+          (!candidate_point.persistent_sgprs.complete() && !probe->private_layout) ||
+          !candidate_point.exec_save_sgpr) {
         result.warnings.emplace_back(
-            "ConSan wave-wide barrier needs unborrowed scalar identity and scratch state");
+            "ConSan wave-wide barrier needs preserved full-wave identity and scratch state");
         continue;
       }
       if (probe->spill) {

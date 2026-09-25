@@ -935,11 +935,12 @@ build_direct_watchpoint_words(std::span<const uint8_t> bytes, const Candidate &c
   const uint16_t tensor_exec_archive = plan.scratch_vgpr + plan.base_scratch_vgpr_count + 2u;
   if (tensor) {
     if (arch != ROCJITSU_CODE_ARCH_CDNA5 || candidate.site().kind != LdsAccessKind::Write ||
-        !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources) ||
-        !plan.tensor_full_wave_resources || !plan.persistent_sgprs.complete() ||
+        !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources,
+                                                  plan.automatic_private_epoch) ||
+        !plan.tensor_full_wave_resources ||
+        (!plan.persistent_sgprs.complete() && !plan.automatic_private_epoch) ||
         !plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch ||
-        plan.automatic_private_epoch || plan.spill_backed_operand_recovery ||
-        !candidate.site().operands.tensor_descriptor_sgprs ||
+        plan.spill_backed_operand_recovery || !candidate.site().operands.tensor_descriptor_sgprs ||
         static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count > 256u ||
         *plan.owner_epoch_vgprs.owner <= tensor_exec_archive ||
         *plan.owner_epoch_vgprs.epoch <= tensor_exec_archive ||

@@ -2218,6 +2218,22 @@ resolve_scratch(std::span<const CandidateResourcePlan> plans, const ProgramInven
       domain.occupy(options.dispatch_sgpr.base(), kDispatchStateSgprCount);
       if (options.dynamic_stack_spill)
         domain.occupy_dynamic_stack_state();
+      // Tensor instructions consume scalar descriptors while the probe's
+      // scratch SGPRs are borrowed. A lane reservoir preserves the guest
+      // values, but descriptor operands must remain directly readable.
+      for (const ProgramSite &site : problem.inventory().access_sites()) {
+        if (site.origin != AccessOrigin::TensorLds || !site.operands.tensor_descriptor_sgprs)
+          continue;
+        const auto site_owners = problem.inventory().execution_owner_kernels(site);
+        if (!std::ranges::any_of(site_owners, [&](ProgramContainerId owner) {
+              return std::ranges::find(owners, owner) != owners.end();
+            }))
+          continue;
+        const auto &groups = *site.operands.tensor_descriptor_sgprs;
+        for (size_t group = 0; group < groups.size(); ++group)
+          if (groups[group] != 124u)
+            domain.occupy(groups[group], group == 1u ? 8u : 4u);
+      }
       // This path preserves every borrowed guest SGPR in address-free private
       // storage before using it. Unlike a merely liveness-dead window, it is
       // safe below a scalar-relative owner's allocation tail.
@@ -3314,7 +3330,7 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
       scalar_model != ScalarPlacementModel::Unsupported &&
       scalar_model != ScalarPlacementModel::DescriptorPartitioned &&
       !debug.test_force_private_epoch &&
-      (persistent_demand.wave_wide_scalar_state_required ||
+      (persistent_demand.wave_wide_identity_required ||
        (persistent_demand.scalar_state_required_for_private_or_overflow &&
         (persistent_end > persistent_vgpr_limit || prefer_private_epoch)));
   if (rdna_needs_scalar_epoch) {
@@ -3325,7 +3341,7 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     const std::vector<ProgramContainerId> scalar_owners = scalar_owner_kernel_ids(resource_plans);
     const auto resolved_contexts = resolve_scalar_owner_contexts(scalar_state, scalar_owners);
     if (!resolved_contexts) {
-      if (has_dynamic_stack_owner || persistent_demand.wave_wide_scalar_state_required) {
+      if (has_dynamic_stack_owner || persistent_demand.wave_wide_identity_required) {
         update.rejection = PlacementRejection::PersistentStateUnavailable;
         diagnostics.emplace_back("ConSan could not resolve every " + rdna_arch_name +
                                  " required scalar-state owner");
@@ -3337,7 +3353,7 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     }
     auto prologue_scratch = plan_scalar_prologue_scratch(scalar_state, *resolved_contexts, true);
     if (!prologue_scratch) {
-      if (has_dynamic_stack_owner || persistent_demand.wave_wide_scalar_state_required)
+      if (has_dynamic_stack_owner || persistent_demand.wave_wide_identity_required)
         update.rejection = PlacementRejection::PersistentStateUnavailable;
       diagnostics.emplace_back("ConSan could not place entry-local VGPR scratch for " +
                                rdna_arch_name + " scalar persistent state");
@@ -3357,7 +3373,7 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     std::optional<uint16_t> scalar_base =
         tail_domain.select_first(resolved_contexts->tail_floor, scalar_count);
     const uint32_t hole_limit = std::min<uint32_t>(resolved_contexts->tail_floor, scalar_limit);
-    if ((has_dynamic_stack_owner || persistent_demand.wave_wide_scalar_state_required) &&
+    if ((has_dynamic_stack_owner || persistent_demand.wave_wide_identity_required) &&
         !scalar_base && scalar_references.control_flow_closed &&
         !scalar_references.uses_indirect_sgprs) {
       ScalarPlacementDomain hole_domain(arch, static_cast<uint16_t>(hole_limit),
@@ -3380,12 +3396,6 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
           " owner without growing the VGPR allocation");
       return update;
     }
-    if (persistent_demand.wave_wide_scalar_state_required) {
-      update.rejection = PlacementRejection::PersistentStateUnavailable;
-      diagnostics.emplace_back(
-          "ConSan could not place persistent scalar identity for a wave-wide tensor owner");
-      return update;
-    }
     if (has_dynamic_stack_owner) {
       update.rejection = PlacementRejection::PersistentStateUnavailable;
       diagnostics.emplace_back(
@@ -3402,7 +3412,8 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
         std::string("ConSan could not place persistent scalar owner/epoch state for an ") +
         rdna_arch_name + " " + "default" + " owner; retaining the existing private-state fallback");
   }
-  const bool needs_private_epoch = options.automatic_private_epoch ||
+  const bool needs_private_epoch = persistent_demand.wave_wide_identity_required ||
+                                   options.automatic_private_epoch ||
                                    debug.test_force_private_epoch ||
                                    persistent_end > persistent_vgpr_limit || prefer_private_epoch;
   if (needs_private_epoch && !has_dynamic_stack_owner &&

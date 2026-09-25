@@ -1704,3 +1704,34 @@ only s95 and s98..s105 unused, before transient instrumentation reservations.
 Next work must provide wave-uniform identity under pressure while preserving
 inactive lanes and correctly advancing synchronization epochs; simply allowing
 ordinary per-lane private state would not establish those properties.
+
+### Private wave identity removes the MXF8 tensor allocation blocker
+
+Tensor-owning kernels can now fall back to private identity initialized across
+all wave lanes at entry. After the ordinary entry capture, a disjoint spill
+frame preserves scratch lanes while owner, epoch, workgroup coordinates and
+any private dispatch identity are replicated from lane zero. Tensor probes and
+barriers can consequently use this state under partial or empty EXEC. The
+entry prologue still restores borrowed guest ABI registers.
+
+The fixed-lane scalar save path is now supported when no VGPR spill is needed.
+Tensor descriptor SGPR ranges are excluded from borrowed scalar windows, so
+the relocated tensor instruction and descriptor decoder see their original
+operands. Tensor probes do not take the ordinary empty-EXEC bypass. Memory-
+backed scalar spills and dynamic frames remain unsupported on this path.
+
+Execution tests cover private replication with full, one-lane, sparse and
+empty EXEC, preserving scratch lanes and EXEC/VCC/SCC. The emitted barrier
+test checks scalar identity, private identity with VGPR spills, and private
+identity with lane-backed scalar preservation; every private epoch lane
+advances even with empty EXEC. Normal GCC build and
+`ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,035 passed, two existing skips
+(`tensor-private-final-tests.log`).
+
+`tensor-private-mxf8-clean` is accepted: numeric oracle pass, 78/78 access
+ranges including all tensor loads, 32/32 barrier sites and 4/4 atomic plus 4/4
+fence sites, with no unsupported or failed coverage. Default sampling collects
+no runtime observations for these small problems; this is not a fault result
+or evidence of race freedom. The MXF8 Default cell moves from orange to yellow
+with reviewed fault trials still pending. A matching high-preset clean and
+MXF4 explicit Default clean are running in separate artifact roots.

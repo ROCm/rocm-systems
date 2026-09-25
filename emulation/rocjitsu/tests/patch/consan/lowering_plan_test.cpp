@@ -238,8 +238,9 @@ TEST(ConSanLoweringPlan, PersistentStateFollowsConsumers) {
   EXPECT_TRUE(demand.private_workgroup_tuple_supported);
 }
 
-TEST(ConSanLoweringPlan, TensorOwnersRequireWaveUniformPersistentState) {
+TEST(ConSanLoweringPlan, TensorOwnersRequireWaveUniformPersistentStateWithPrivateFallback) {
   Request request;
+  request.owner_source = OwnerSource::WorkitemId;
   request.track_barriers = false;
   request.track_atomics = false;
   OperatingPoint point;
@@ -248,9 +249,9 @@ TEST(ConSanLoweringPlan, TensorOwnersRequireWaveUniformPersistentState) {
       request, point, {.access_count = 1u, .has_wave_wide_tensor_owner = true});
   EXPECT_TRUE(demand.needs_persistent_state);
   EXPECT_TRUE(demand.needs_entry_workgroup_tuple);
-  EXPECT_TRUE(demand.wave_wide_scalar_state_required);
-  EXPECT_FALSE(demand.private_state_supported);
-  EXPECT_FALSE(demand.private_workgroup_tuple_supported);
+  EXPECT_TRUE(demand.wave_wide_identity_required);
+  EXPECT_TRUE(demand.private_state_supported);
+  EXPECT_TRUE(demand.private_workgroup_tuple_supported);
 }
 
 } // namespace

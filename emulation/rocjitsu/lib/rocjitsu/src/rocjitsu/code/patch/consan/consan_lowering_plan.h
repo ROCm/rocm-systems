@@ -51,7 +51,7 @@ struct PersistentStateDemand {
   bool private_workgroup_tuple_supported = false;
   bool private_state_supported = false;
   bool scalar_state_required_for_private_or_overflow = false;
-  bool wave_wide_scalar_state_required = false;
+  bool wave_wide_identity_required = false;
 };
 
 /// Permission to retry placement with scratch overlapping short-lived guest

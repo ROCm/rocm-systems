@@ -35,11 +35,15 @@ bool site_has_tensor_owner(const ProgramInventory &inventory, const ProgramSite 
 }
 
 bool tensor_identity_sources_are_wave_uniform(const DispatchIdentity &dispatch,
-                                              const WorkgroupSources &workgroup) {
-  const auto uniform_source = [](const WorkgroupSource &source) {
-    return source.is_well_formed() && !source.vector_src && !source.private_offset;
+                                              const WorkgroupSources &workgroup,
+                                              bool full_wave_private_initialized) {
+  const auto uniform_source = [&](const WorkgroupSource &source) {
+    return source.is_well_formed() && !source.vector_src &&
+           (!source.private_offset || full_wave_private_initialized);
   };
-  return dispatch.is_well_formed() && !dispatch.private_offset && workgroup.x.scalar_src &&
+  return dispatch.is_well_formed() && (!dispatch.private_offset || full_wave_private_initialized) &&
+         (workgroup.x.scalar_src ||
+          (full_wave_private_initialized && workgroup.x.private_offset)) &&
          uniform_source(workgroup.x) && uniform_source(workgroup.y) &&
          uniform_source(workgroup.z) && uniform_source(workgroup.cluster_workgroup_id);
 }
@@ -66,6 +70,50 @@ std::optional<VgprSpillSequence> tensor_full_wave_spill(const VgprSpillSequence 
   wrap(result.save_words);
   wrap(result.restore_words);
   return result;
+}
+
+bool append_full_wave_private_identity(std::vector<uint32_t> &words,
+                                       const PrivateStateLayout &layout, uint16_t scratch_vgpr,
+                                       uint16_t exec_save_sgpr, const VgprSpillSequence &spill,
+                                       rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !layout.is_well_formed() || !layout.owner_offset ||
+      scratch_vgpr > 254u || exec_save_sgpr > 104u || exec_save_sgpr % 2u ||
+      spill.vgpr_base != scratch_vgpr || spill.vgpr_count != 2u || spill.uses_dynamic_stack_frame ||
+      !spill.has_complete_slot_metadata())
+    return false;
+  const uint16_t archive = scratch_vgpr + 1u;
+  InstructionSequence sequence(words);
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(exec_save_sgpr, kAmdGpuExecLo, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch),
+          spill.save_words,
+          instrumentation::build_v_writelane_b32(archive, exec_save_sgpr, 0, arch),
+          instrumentation::build_v_writelane_b32(archive, exec_save_sgpr + 1u, 1, arch)))
+    return false;
+  std::vector<uint32_t> offsets{*layout.owner_offset, layout.epoch_offset};
+  for (auto offset : layout.exact_workgroup_offsets.values())
+    if (offset)
+      offsets.push_back(*offset);
+  if (layout.dispatch_id_offset) {
+    offsets.push_back(*layout.dispatch_id_offset);
+    offsets.push_back(*layout.dispatch_id_offset + SpillManager::kSlotBytes);
+  }
+  for (uint32_t offset : offsets) {
+    if (!sequence.emit_all(
+            instrumentation::build_private_load_b32(scratch_vgpr, offset, arch),
+            instrumentation::build_s_wait_private_load0(arch),
+            instrumentation::build_v_readlane_b32(exec_save_sgpr, scratch_vgpr, 0, arch),
+            instrumentation::build_valu_to_salu_dependency_wait(arch),
+            build_v_mov_b32_e32(scratch_vgpr, exec_save_sgpr, arch),
+            instrumentation::build_private_store_b32(scratch_vgpr, offset, arch)))
+      return false;
+  }
+  return sequence.emit_all(
+      instrumentation::build_s_wait_private_store0(arch),
+      instrumentation::build_v_readlane_b32(exec_save_sgpr, archive, 0, arch),
+      instrumentation::build_v_readlane_b32(exec_save_sgpr + 1u, archive, 1, arch),
+      instrumentation::build_valu_to_salu_dependency_wait(arch), spill.restore_words,
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save_sgpr, arch));
 }
 
 bool append_select_tensor_load_element(std::vector<uint32_t> &words, const ProgramSite &site,

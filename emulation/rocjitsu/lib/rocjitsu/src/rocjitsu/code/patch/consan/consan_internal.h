@@ -305,6 +305,10 @@ struct PrivateEpochPrologueEmissionPlan {
   /// prologue.
   std::optional<SgprSpillSequence> entry_scalar_spill;
 
+  /// Additional disjoint frame for initializing every lane of private identity.
+  std::optional<VgprSpillSequence> full_wave_identity_spill = std::nullopt;
+  std::optional<uint16_t> full_wave_identity_exec_sgpr = std::nullopt;
+
   /// Resolved launch-coordinate sources needed by workgroup identity.
   std::optional<WorkgroupSources> workgroup_sources;
 
@@ -317,7 +321,7 @@ struct PrivateEpochPrologueEmissionPlan {
   /// Number of consecutive temporary VGPRs required by the selected semantic
   /// operations, independent of their target instruction encodings.
   [[nodiscard]] uint16_t required_scratch_vgpr_count() const {
-    if (private_state_layout.dispatch_id_offset)
+    if (private_state_layout.dispatch_id_offset || full_wave_identity_spill)
       return 2u;
     return 1u;
   }
@@ -331,6 +335,8 @@ struct PrivateEpochPrologueEmissionPlan {
         scratch_end > 256u) {
       return false;
     }
+    if (full_wave_identity_spill.has_value() != full_wave_identity_exec_sgpr.has_value())
+      return false;
     if (!private_state_layout.is_well_formed() ||
         (private_state_layout.dispatch_id_offset &&
          (!dispatch_plan || dispatch_capture.sgpr() ||

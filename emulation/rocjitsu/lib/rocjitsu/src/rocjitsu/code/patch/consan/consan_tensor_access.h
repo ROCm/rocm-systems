@@ -14,6 +14,7 @@ struct ProgramContainerId;
 class ProgramInventory;
 struct DispatchIdentity;
 struct WorkgroupSources;
+struct PrivateStateLayout;
 namespace detail {
 
 /// Owners which may execute wave-wide tensor accesses, including shared helpers.
@@ -21,8 +22,10 @@ namespace detail {
 tensor_execution_owner_kernels(const ProgramInventory &inventory);
 [[nodiscard]] bool site_has_tensor_owner(const ProgramInventory &inventory, const ProgramSite &site,
                                          std::span<const ProgramContainerId> tensor_owners);
-[[nodiscard]] bool tensor_identity_sources_are_wave_uniform(const DispatchIdentity &dispatch,
-                                                            const WorkgroupSources &workgroup);
+[[nodiscard]] bool
+tensor_identity_sources_are_wave_uniform(const DispatchIdentity &dispatch,
+                                         const WorkgroupSources &workgroup,
+                                         bool full_wave_private_initialized = false);
 
 /// Wrap a fixed-stack VGPR spill/fill so both preserve all wave lanes, even
 /// when the guest EXEC is empty. Each bracket restores its incoming EXEC.
@@ -31,6 +34,16 @@ tensor_execution_owner_kernels(const ProgramInventory &inventory);
 [[nodiscard]] std::optional<VgprSpillSequence>
 tensor_full_wave_spill(const VgprSpillSequence &spill, uint16_t exec_save_sgpr,
                        rj_code_arch_t arch);
+
+/// Replicate initialized lane-zero identity to every lane at kernel entry.
+/// The SGPR pair is borrowed by the entry prologue; the caller preserves any
+/// guest ABI value in it. EXEC/VCC/SCC and both scratch VGPRs are preserved.
+/// Spill slots must be disjoint from the prologue's existing live spill frame.
+[[nodiscard]] bool append_full_wave_private_identity(std::vector<uint32_t> &words,
+                                                     const PrivateStateLayout &layout,
+                                                     uint16_t scratch_vgpr, uint16_t exec_save_sgpr,
+                                                     const VgprSpillSequence &spill,
+                                                     rj_code_arch_t arch);
 
 /// Select an element of a valid, LDS-fitting CDNA5 tensor-load descriptor.
 /// Two caller-provided 32-bit hashes select a position within the tile and an

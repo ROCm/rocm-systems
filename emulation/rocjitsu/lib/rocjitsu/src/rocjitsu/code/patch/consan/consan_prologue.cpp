@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_prologue.h"
+#include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -676,6 +677,13 @@ build_private_epoch_prologue_words(const PrivateEpochPrologueEmissionPlan &plan,
   }
   (void)sequence.emit_all(build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), arch),
                           *epoch_store, *wait_store);
+  if (plan.full_wave_identity_spill &&
+      !detail::append_full_wave_private_identity(words, private_state_layout, scratch_vgpr,
+                                                 *plan.full_wave_identity_exec_sgpr,
+                                                 *plan.full_wave_identity_spill, arch)) {
+    errors.emplace_back("ConSan could not initialize wave-wide private identity");
+    return std::nullopt;
+  }
   if (entry_scalar_spill) {
     (void)sequence.emit(entry_scalar_spill->restore_words);
   }
@@ -1005,7 +1013,11 @@ void try_apply_private_epoch_prologue_patch(const Request &request,
         return;
       }
     }
-    const uint16_t prologue_temporary_vgpr_count = has_private_dispatch_id ? 2u : 1u;
+    const auto tensor_owners = detail::tensor_execution_owner_kernels(result.program_inventory);
+    const bool wave_wide_identity =
+        request.mode == Mode::Default && std::ranges::binary_search(tensor_owners, kernel.id);
+    const uint16_t prologue_temporary_vgpr_count =
+        has_private_dispatch_id || wave_wide_identity ? 2u : 1u;
     const bool fixed_lane_entry_scalar_reservoir = kernel_point.exec_save_sgpr &&
                                                    kernel_point.has_scalar_spill() &&
                                                    !kernel.uses_dynamic_stack.value_or(false);
@@ -1068,6 +1080,21 @@ void try_apply_private_epoch_prologue_patch(const Request &request,
     }
     uint32_t required_private_bytes =
         entry_scalar_spill ? entry_scalar_spill->total_private_bytes : spill->total_private_bytes;
+    std::optional<VgprSpillSequence> full_wave_identity_spill;
+    if (wave_wide_identity) {
+      if (!kernel_point.exec_save_sgpr) {
+        result.errors.emplace_back("ConSan wave-wide private identity lacks entry scratch SGPRs");
+        return;
+      }
+      full_wave_identity_spill =
+          build_vgpr_spill_sequence(manager, *access_patch->scratch_vgpr, 2u, arch);
+      if (!full_wave_identity_spill) {
+        result.errors.emplace_back("ConSan wave-wide private identity lacks its own spill frame");
+        return;
+      }
+      required_private_bytes =
+          std::max(required_private_bytes, full_wave_identity_spill->total_private_bytes);
+    }
     for_each_patch(result, [&](const PatchInfo &patch) {
       if (kernel_owns_patch(kernel, patch))
         required_private_bytes =
@@ -1079,6 +1106,9 @@ void try_apply_private_epoch_prologue_patch(const Request &request,
         .private_state_layout = layout,
         .spill = std::move(*spill),
         .entry_scalar_spill = std::move(entry_scalar_spill),
+        .full_wave_identity_spill = std::move(full_wave_identity_spill),
+        .full_wave_identity_exec_sgpr =
+            wave_wide_identity ? kernel_point.exec_save_sgpr : std::nullopt,
         .workgroup_sources = std::move(workgroup_sources),
         .dispatch_plan = dispatch_plan,
         .dispatch_capture = dispatch_capture,

@@ -176,10 +176,23 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
       continue;
     auto &spill = probe->spill;
     if (access_resource_facts.wave_wide_tensor) {
-      if (probe->scalar_spill || candidate_point.automatic_private_epoch ||
-          !candidate_point.persistent_sgprs.complete() || !candidate_point.exec_save_sgpr) {
-        result.warnings.emplace_back(
-            "ConSan tensor access needs unborrowed scalar identity and scratch state");
+      const bool safe_scalar_spill =
+          !probe->scalar_spill ||
+          (probe->scalar_spill->lane_reservoir_vgpr && !spill &&
+           candidate.site().operands.tensor_descriptor_sgprs && [&] {
+             const auto &groups = *candidate.site().operands.tensor_descriptor_sgprs;
+             for (size_t group = 0; group < groups.size(); ++group)
+               if (groups[group] != 124u &&
+                   range_overlaps(probe->scalar_spill->sgpr_base, probe->scalar_spill->sgpr_count,
+                                  groups[group], group == 1u ? 8u : 4u))
+                 return false;
+             return true;
+           }());
+      if (!safe_scalar_spill ||
+          (!candidate_point.persistent_sgprs.complete() && !probe->private_layout) ||
+          !candidate_point.exec_save_sgpr) {
+        result.warnings.emplace_back("ConSan tensor access needs preserved full-wave identity and "
+                                     "descriptor-safe scratch state");
         continue;
       }
       if (spill) {
@@ -389,7 +402,7 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
       entry_prefix_words = std::move(gate->words);
     }
     std::optional<uint32_t> empty_exec_branch;
-    if (planned_patch.scalar_spill) {
+    if (planned_patch.scalar_spill && !planned_patch.emission.tensor_full_wave_resources) {
       empty_exec_branch = static_cast<uint32_t>(entry_prefix_words.size());
       const auto guard = instrumentation::build_s_cbranch_execz(0, arch);
       if (!guard) {

@@ -213,19 +213,17 @@ PersistentStateDemand plan_persistent_state_demand(const Request &request,
   demand.needs_entry_workgroup_tuple =
       (facts.access_count || facts.atomic_count || facts.barrier_count) &&
       !detail::has_exact_entry_workgroup_capture(point);
-  demand.wave_wide_scalar_state_required = facts.has_wave_wide_tensor_owner;
-  demand.private_workgroup_tuple_supported =
-      demand.needs_entry_workgroup_tuple && !demand.wave_wide_scalar_state_required;
+  demand.wave_wide_identity_required = facts.has_wave_wide_tensor_owner;
+  demand.private_workgroup_tuple_supported = demand.needs_entry_workgroup_tuple;
   // A synchronization-aware ConSan probe must preserve one owner identity
   // from kernel entry through both access and sync sites. Access-only ConSan
   // objects retain the cheaper private-state choice.
   demand.needs_persistent_state =
-      demand.wave_wide_scalar_state_required || point.initialize_owner_epoch ||
+      demand.wave_wide_identity_required || point.initialize_owner_epoch ||
       demand.needs_entry_workgroup_tuple || request.track_atomics || request.track_barriers ||
       (request.runtime_sample_stride > 1u || request.cell_selector().stride > 1u);
   demand.synchronization_requires_persistent_owner = facts.atomic_count || facts.barrier_count;
-  demand.private_state_supported =
-      request.owner_source == OwnerSource::WorkitemId && !demand.wave_wide_scalar_state_required;
+  demand.private_state_supported = request.owner_source == OwnerSource::WorkitemId;
   demand.scalar_state_required_for_private_or_overflow = facts.has_operational_dynamic_stack_owner;
   return demand;
 }
