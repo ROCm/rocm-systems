@@ -3168,6 +3168,44 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250StoreAcrossVgprBankBoundary) {
   EXPECT_NE(std::ranges::find(body, kSelectGuestSourceBank), body.end());
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250SubwordStoresInEveryBank) {
+  for (uint8_t bank = 1; bank <= 3; ++bank) {
+    for (uint16_t op : {cdna5::kDsStoreB8Vds, cdna5::kDsStoreB16Vds, cdna5::kDsStoreB8D16HiVds,
+                        cdna5::kDsStoreB16D16HiVds}) {
+      SCOPED_TRACE(testing::Message() << "bank=" << unsigned(bank) << " opcode=" << op);
+      const auto store = cdna5::build_vds(op, {.addr = 2, .data0 = 1});
+      // The guest store uses Src1, but the XOR uses Src0. Scratch and
+      // readback stay in bank zero throughout the significant-bit check.
+      const uint32_t guest_bank = 0xBF860000u | (uint32_t{bank} << 2u);
+      std::vector<uint32_t> text_words = {guest_bank, store[0], store[1]};
+      text_words.resize(64u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+      text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+      Options options;
+      options.mode = Mode::SuperCollider;
+      options.probe_lds_check_trap = true;
+      options.scratch_vgpr = 3;
+      const auto result =
+          test_lower_consan(make_gfx1250_code_object(text_words, "banked_subword_store"), options);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+      const auto patch =
+          std::ranges::find(result.patches, PatchKind::LdsStoreCheckTrap, &PatchInfo::kind);
+      ASSERT_NE(patch, result.patches.end());
+      const auto body = emitted_patch_words(result, *patch);
+      const auto difference =
+          build_v_xor_b32_e32(3, vector_source_vgpr(1), 3, ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_TRUE(difference);
+      const auto xor_it = std::ranges::find(body, *difference);
+      ASSERT_NE(xor_it, body.end());
+      ASSERT_NE(xor_it, body.begin());
+      ASSERT_NE(xor_it + 1, body.end());
+      EXPECT_EQ(*(xor_it - 1), 0xBF860000u | bank);
+      EXPECT_EQ(*(xor_it + 1), 0xBF860000u | (uint32_t{bank} << 8u));
+      EXPECT_EQ(body.back(), guest_bank);
+    }
+  }
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4B96Store) {
   constexpr auto store = cdna4::build_ds(cdna4::kDsWriteB96Ds, {.addr = 10, .data0 = 2});
   std::vector<uint32_t> text_words = {store[0], store[1]};

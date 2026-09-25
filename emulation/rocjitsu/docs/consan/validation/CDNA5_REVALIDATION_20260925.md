@@ -555,3 +555,17 @@ Two of three Default clean shards pass in about 41 seconds, with complete
 client deadline without a final analysis verdict. The cell remains orange,
 now describing this measured timeout instead of the historical OOM. Evidence:
 `bounded-clean-tensile/tensile-sk-mxf8f4gemm-tdm/default/`.
+
+### SuperCollider subword store bank repair
+
+The sparse ML invalid transform is `could not form sub-dword store difference`.
+The new regression reproduces it for a gfx1250 byte store whose value is in
+physical VGPR bank one. The subword XOR had encoded the physical register
+number directly in a field limited to bank-local indices. It now selects the
+source bank for Src0, keeps readback/destination in bank zero, and restores
+bank zero before masking. The final zero comparison needs no guest bank.
+The test checks byte/halfword low/high forms in all three nonzero banks and
+restoration of the original guest mode. Before repair it fails with the exact
+E2E error; afterward all 127 selected SuperCollider/check-trap host tests pass
+(`subword-bank-before.log`, `subword-bank-after.log`). The table stays red
+until the E2E clean run is verified.

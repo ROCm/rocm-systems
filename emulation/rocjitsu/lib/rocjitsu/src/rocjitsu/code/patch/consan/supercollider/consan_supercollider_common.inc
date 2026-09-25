@@ -735,13 +735,34 @@ direct_to_lds_scratch_layout(const ProgramSite &site, const TargetProfile &targe
       difference.push_back(*shift);
       significant_bit_offset = 16u;
     }
+    // The guest store takes its value through Src1. Our XOR takes it through
+    // Src0, while its destination and readback operand must remain in bank zero.
+    const uint8_t source_bank =
+        target.has_selectable_vgpr_bank ? static_cast<uint8_t>(*first_compare_vgpr / 256u) : 0u;
+    if (source_bank != 0u) {
+      const auto select = instrumentation::build_s_set_vgpr_msb_transition(0u, source_bank, arch);
+      if (!select) {
+        errors.emplace_back("ConSan LDS check/trap proof could not select subword source bank");
+        return std::nullopt;
+      }
+      difference.push_back(*select);
+    }
     const auto xor_difference = instrumentation::build_v_xor_b32(
-        scratch_vgpr, vector_source_vgpr(*first_compare_vgpr), scratch_vgpr, arch);
+        scratch_vgpr, vector_source_vgpr(static_cast<uint16_t>(*first_compare_vgpr & 0xFFu)),
+        scratch_vgpr, arch);
     if (!xor_difference) {
       errors.emplace_back("ConSan LDS check/trap proof could not form sub-dword store difference");
       return std::nullopt;
     }
     difference.push_back(*xor_difference);
+    if (source_bank != 0u) {
+      const auto restore = instrumentation::build_s_set_vgpr_msb_transition(source_bank, 0u, arch);
+      if (!restore) {
+        errors.emplace_back("ConSan LDS check/trap proof could not restore subword source bank");
+        return std::nullopt;
+      }
+      difference.push_back(*restore);
+    }
     const uint32_t significant_mask = ((uint32_t{1} << form.element_width_bits) - 1u)
                                       << significant_bit_offset;
     const auto mask = instrumentation::build_v_and_b32_literal(scratch_vgpr, significant_mask,
@@ -834,9 +855,10 @@ direct_to_lds_scratch_layout(const ProgramSite &site, const TargetProfile &targe
       words.insert(words.end(), acc_read->begin(), acc_read->end());
       compare_vgpr = compare_scratch_vgpr;
     }
-    const uint16_t compare_mode = target.has_selectable_vgpr_bank && compare_vgpr
-                                      ? static_cast<uint16_t>(*compare_vgpr / 256u)
-                                      : 0u;
+    const uint16_t compare_mode =
+        !subdword_store_difference && target.has_selectable_vgpr_bank && compare_vgpr
+            ? static_cast<uint16_t>(*compare_vgpr / 256u)
+            : 0u;
     if (compare_mode != 0u) {
       auto select_compare_bank = instrumentation::build_s_set_vgpr_msb_transition(
           0u, static_cast<uint8_t>(compare_mode), arch);
