@@ -1859,8 +1859,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyMulticastCommand(
 
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
-    const hsa_amd_memory_copy_rect_t* rects, uint16_t num_rects,
-    std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
+    const hsa_amd_memory_copy_rect_ptr_t* srcs, const hsa_amd_memory_copy_rect_ptr_t* dsts,
+    const hsa_dim3_t* ranges, uint16_t num_rects, std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
   const bool isGFX12Plus =
                         (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
@@ -1881,11 +1882,11 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
   // box leaves the ring and the completion signal untouched.
   uint64_t size = 0;
   for (uint16_t i = 0; i < num_rects; ++i) {
-    const hsa_pitched_ptr_t* dst = &rects[i].dst;
-    const hsa_dim3_t* dst_offset = &rects[i].dst_offset;
-    const hsa_pitched_ptr_t* src = &rects[i].src;
-    const hsa_dim3_t* src_offset = &rects[i].src_offset;
-    const hsa_dim3_t* range = &rects[i].range;
+    const hsa_pitched_ptr_t* dst = &dsts[i].pitched_ptr;
+    const hsa_dim3_t* dst_offset = &dsts[i].offset;
+    const hsa_pitched_ptr_t* src = &srcs[i].pitched_ptr;
+    const hsa_dim3_t* src_offset = &srcs[i].offset;
+    const hsa_dim3_t* range = &ranges[i];
 
     // Hardware requires DWORD alignment for base address, pitches
     // Also confirm that we have a geometric rect (copied block does not wrap an edge).

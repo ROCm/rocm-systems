@@ -2228,7 +2228,7 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_RECT: {
       const bool from_host =
           core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
-      status = DmaCopyRect(op.rect_list, op.num_entries,
+      status = DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
                            from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals,
                            out_signal);
       break;
@@ -2244,7 +2244,9 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_t* rects, uint16_t num_rects,
+hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                                   const hsa_amd_memory_copy_rect_ptr_t* dsts,
+                                   const hsa_dim3_t* ranges, uint16_t num_rects,
                                    hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
@@ -2266,7 +2268,8 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_t* rects, uint
   }
 
   BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
-  hsa_status_t stat = sdmaBlit->SubmitCopyRectCommand(rects, num_rects, dep_signals, out_signal);
+  hsa_status_t stat =
+      sdmaBlit->SubmitCopyRectCommand(srcs, dsts, ranges, num_rects, dep_signals, out_signal);
 
   return stat;
 }

@@ -700,20 +700,23 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       }
       break;
     case HSA_AMD_MEMORY_COPY_OP_RECT:
-      if (op.num_entries == 0 || op.dst != nullptr || op.dst_agent_list == nullptr ||
-          op.size != 0 || op.unused_size != 0)
+      if (op.num_entries == 0 || op.rect_src == nullptr || op.rect_dst == nullptr ||
+          op.range_list == nullptr || op.dst_agent_list == nullptr || op.reserved0 != 0) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       for (uint32_t index = 0; index < op.num_entries; ++index) {
-        const hsa_amd_memory_copy_rect_t& rect = op.rect_list[index];
-        IS_BAD_PTR(rect.src.base);
-        IS_BAD_PTR(rect.dst.base);
+        IS_BAD_PTR(op.rect_src[index].pitched_ptr.base);
+        IS_BAD_PTR(op.rect_dst[index].pitched_ptr.base);
         core::Agent* entry_dst_agent = core::Agent::Convert(op.dst_agent_list[index]);
         IS_VALID(entry_dst_agent);
         if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice &&
-            entry_dst_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+            entry_dst_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
           return HSA_STATUS_ERROR_INVALID_AGENT;
-        if (rect.range.x == 0 || rect.range.y == 0 || rect.range.z == 0)
+        }
+        const hsa_dim3_t& range = op.range_list[index];
+        if (range.x == 0 || range.y == 0 || range.z == 0) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
       }
       break;
     default:
@@ -855,8 +858,10 @@ hsa_status_t hsa_amd_memory_async_copy_rect(
   IS_VALID(out_signal_obj);
 
   if ((range->x != 0) && (range->y != 0) && (range->z != 0)) {
-    const hsa_amd_memory_copy_rect_t rect = {*dst, *dst_offset, *src, *src_offset, *range};
-    return agent->DmaCopyRect(&rect, 1, dir, dep_signal_list, *out_signal_obj);
+    const hsa_amd_memory_copy_rect_ptr_t rect_src = {*src, *src_offset};
+    const hsa_amd_memory_copy_rect_ptr_t rect_dst = {*dst, *dst_offset};
+    return agent->DmaCopyRect(&rect_src, &rect_dst, range, 1, dir, dep_signal_list,
+                              *out_signal_obj);
   }
 
   return HSA_STATUS_SUCCESS;

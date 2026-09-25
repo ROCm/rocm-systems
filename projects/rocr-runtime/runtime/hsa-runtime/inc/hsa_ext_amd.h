@@ -2252,19 +2252,16 @@ typedef struct hsa_pitched_ptr_s {
 } hsa_pitched_ptr_t;
 
 /**
- * @brief Describes one box of a HSA_AMD_MEMORY_COPY_OP_RECT operation.
+ * @brief One end of a box in a HSA_AMD_MEMORY_COPY_OP_RECT operation.
  *
- * The fields carry the box arguments of hsa_amd_memory_async_copy_rect, in the
- * same order and with the same requirements.  Offsets and range carry x in
- * bytes, y and z in rows and layers.
+ * @c rect_src and @c rect_dst are arrays of this type.  The offset carries x in
+ * bytes, and y and z in rows and layers.  Requirements match the corresponding
+ * arguments of hsa_amd_memory_async_copy_rect.
  */
-typedef struct hsa_amd_memory_copy_rect_s {
-  hsa_pitched_ptr_t dst;
-  hsa_dim3_t dst_offset;
-  hsa_pitched_ptr_t src;
-  hsa_dim3_t src_offset;
-  hsa_dim3_t range;
-} hsa_amd_memory_copy_rect_t;
+typedef struct hsa_amd_memory_copy_rect_ptr_s {
+  hsa_pitched_ptr_t pitched_ptr;
+  hsa_dim3_t offset;
+} hsa_amd_memory_copy_rect_ptr_t;
 
 /**
  * @brief Describes a single copy operation within a batch.
@@ -2361,11 +2358,12 @@ typedef struct hsa_amd_memory_copy_rect_s {
  *   wait.scope      -- hsa_fence_scope_t for indirect address reads
  *
  * RECT (one or more boxes, one signal for all boxes):
- *   rect_list       -- caller-owned array of num_entries boxes
+ *   rect_src        -- caller-owned array of num_entries sources
+ *   rect_dst        -- caller-owned array of num_entries destinations
+ *   range_list      -- caller-owned array of num_entries ranges; x in bytes, y and z in rows and layers
  *   src_agent       -- common source agent (GPU or CPU); if CPU, all dst_agent_list entries must be GPU
  *   dst_agent_list  -- caller-owned array of num_entries destination agents
- *   dst             -- NULL
- *   size, unused_size -- 0
+ *   reserved0       -- must be 0
  *   num_entries     -- number of boxes (>= 1); every range component must be >= 1
  *
  * Future-proofing unions (reserved, must not be used):
@@ -2381,7 +2379,7 @@ typedef struct hsa_amd_memory_copy_op_s {
   union {
     void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
     void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
-    const hsa_amd_memory_copy_rect_t* rect_list; /**< RECT: caller-owned array of num_entries boxes */
+    hsa_amd_memory_copy_rect_ptr_t* rect_src; /**< RECT: caller-owned array of num_entries sources */
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
@@ -2394,6 +2392,7 @@ typedef struct hsa_amd_memory_copy_op_s {
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
     void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination pointers */
+    hsa_amd_memory_copy_rect_ptr_t* rect_dst; /**< RECT: caller-owned array of num_entries destinations */
   };
   union {
     struct {
@@ -2406,8 +2405,9 @@ typedef struct hsa_amd_memory_copy_op_s {
     };
     struct {
       size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_entries copy sizes */
-      size_t reserved0;                   /**< Must be 0 for LINEAR multi */
+      size_t reserved0;                   /**< Must be 0 for LINEAR multi and RECT */
     };
+    hsa_dim3_t* range_list;               /**< RECT: caller-owned array of num_entries ranges */
   };
   /** Wait-before-copy. Set to {0} to disable. */
   struct {
@@ -2442,9 +2442,9 @@ typedef struct hsa_amd_memory_copy_op_s {
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
  * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
- * and 32-byte aligned for gfx1250. A RECT operation copies the boxes in
- * @c rect_list, each under the requirements of hsa_amd_memory_async_copy_rect,
- * and requires SDMA.
+ * and 32-byte aligned for gfx1250. A RECT operation copies the boxes described
+ * by @c rect_src, @c rect_dst, and @c range_list, each under the requirements of
+ * hsa_amd_memory_async_copy_rect, and requires SDMA.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *
