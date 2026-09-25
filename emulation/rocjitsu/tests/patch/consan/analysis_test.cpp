@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan_packed_fields.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -361,12 +362,12 @@ TEST(ConSan, Gfx1250TensorLoadAddressExecutesRuntimePaddingAndPreservesGuestStat
       memory.write32(i * sizeof(uint32_t), words[i]);
     for (uint32_t size = 0; size < 4; ++size) {
       for (uint32_t interval = 0; interval < 8; ++interval) {
-        for (const uint32_t amount : {0u, 127u}) {
+        for (const uint32_t amount : {0u, 3u, 127u}) {
           for (const bool pad : {false, true}) {
             for (const uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
               const uint32_t descriptor =
                   0xa55au | (size << 16) | (pad << 20) | (interval << 22) | (amount << 25);
-              const uint32_t interval_elements = 1u << (interval + 1u);
+              const uint32_t interval_elements = (1u << (interval + 3u)) >> size;
               constexpr uint32_t lds_base = 4352;
               cu->write_sgpr(sgpr_base + 9, lds_base);
               cu->write_sgpr(sgpr_base + 20, descriptor);
@@ -390,11 +391,16 @@ TEST(ConSan, Gfx1250TensorLoadAddressExecutesRuntimePaddingAndPreservesGuestStat
               cu->flush_all();
               for (uint32_t lane = 0; lane < 32; ++lane) {
                 if ((exec >> lane) & 1u) {
-                  const uint64_t byte = uint64_t{indices[lane]} << size;
-                  const uint64_t padding = pad ? (byte / (uint64_t{interval_elements} << size)) *
-                                                     ((uint64_t{amount} + 1u) << size)
-                                               : 0u;
-                  EXPECT_EQ(cu->read_vgpr(vgpr_base + result, lane), lds_base + byte + padding)
+                  namespace tdm = amdgpu::tensor_dma_detail;
+                  // Compare the emitted ISA with the actual tensor-copy address
+                  // path, including its dword (not element) padding units.
+                  const auto desc = tdm::parse_descriptor(
+                      {1, lds_base, 0, 0}, {descriptor, 0, 0, 0, 0, 0, 0, 0}, {}, {});
+                  tdm::TensorDmaState reference(desc, false);
+                  tdm::append_copy(reference, *wave, 0, indices[lane], false);
+                  ASSERT_EQ(reference.elements.size(), 1u);
+                  EXPECT_EQ(cu->read_vgpr(vgpr_base + result, lane),
+                            reference.elements.front().lds_address - wave->lds_base())
                       << "size=" << size << " interval=" << interval << " amount=" << amount
                       << " pad=" << pad << " lane=" << lane;
                 } else {

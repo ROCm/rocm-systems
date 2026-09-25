@@ -168,28 +168,26 @@ bool append_materialize_tensor_load_lds_address(std::vector<uint32_t> &words,
                                                      .src1 = vector_source_vgpr(rhs)});
   };
   InstructionSequence sequence(words);
-  // Work in elements until the final scale: this is exactly
-  // byte + floor(byte / (interval * element_size)) * amount * element_size,
-  // without including the padding holes in an access range.
+  // Descriptor padding is in dwords, independent of element size. Scale the
+  // selected element to bytes first, then insert exact four-byte padding units.
   sequence.append(
       build_v_mov_b32_e32(descriptor, groups[1], arch),
+      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(16), descriptor, arch),
+      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(3), field, arch),
+      instrumentation::build_v_lshlrev_b32(result_vgpr, vector_source_vgpr(field),
+                                           element_index_vgpr, arch),
       instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(22), descriptor, arch),
       instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(7), field, arch),
-      instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(1), field, arch),
-      instrumentation::build_v_lshrrev_b32(padding, vector_source_vgpr(field), element_index_vgpr,
-                                           arch),
+      instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(3), field, arch),
+      instrumentation::build_v_lshrrev_b32(padding, vector_source_vgpr(field), result_vgpr, arch),
       instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(25), descriptor, arch),
       instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(1), field, arch),
       multiply(padding, padding, field),
+      instrumentation::build_v_lshlrev_b32(padding, scalar_positive_inline_u32(2), padding, arch),
       instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(20), descriptor, arch),
       instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(1), field, arch),
       multiply(padding, padding, field),
-      instrumentation::build_v_add_u32(result_vgpr, vector_source_vgpr(padding), element_index_vgpr,
-                                       arch),
-      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(16), descriptor, arch),
-      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(3), field, arch),
-      instrumentation::build_v_lshlrev_b32(result_vgpr, vector_source_vgpr(field), result_vgpr,
-                                           arch),
+      instrumentation::build_v_add_u32(result_vgpr, vector_source_vgpr(padding), result_vgpr, arch),
       instrumentation::build_v_add_u32(result_vgpr, groups[0] + 1u, result_vgpr, arch));
   return sequence.finish();
 }

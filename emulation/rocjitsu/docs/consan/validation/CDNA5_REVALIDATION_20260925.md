@@ -1540,3 +1540,20 @@ HGEMM's recovered exact-artifact Default campaign completes with 0/8 detections,
 all eight trials admitted/reached. It remains yellow and the queued high
 campaign proceeds. Qualification at high also requires its full-workload clean
 gate, not just the retained exact fault shard.
+
+### Tensor padding unit correction before integration
+
+Cross-checking the address primitive against the existing
+`TensorDmaByteLoadUsesDwordPaddingUnits` test exposed a unit error in the initial
+primitive and its formula-based test oracle. Both encoded padding interval and
+amount are **dwords**, independent of the transfer's element size. Corrected the
+emitted instructions to scale the element index to bytes first, then apply the
+four-byte padding units. The test now compares emitted addresses directly with
+`tensor_dma_detail::append_copy`, rather than duplicating the primitive's
+assumption, and includes the established four-dwords-per-64-dwords byte case.
+This primitive has not yet been enabled in workload instrumentation.
+
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*` pass: 1,026 passed,
+two existing live-inventory tests skipped (`tensor-address-dword-tests.log`).
+That includes all 40 selected tensor-DMA emulator tests and the full ConSan
+suite.
