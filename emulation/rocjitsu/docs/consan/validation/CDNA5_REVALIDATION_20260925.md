@@ -1319,3 +1319,12 @@ discovered accesses: 168 supported/patched and 16 unsupported tensor-DMA
 accesses. Dynamic evidence is complete, but static analysis is incomplete.
 The Default cell changes from yellow to orange for missing range support.
 This does not claim a numerical regression or a completed fault campaign.
+
+### Sparse tensor-DMA sweep coverage audit
+
+`tdm-default-coverage-audit/tensile-spmm-tdm-all` exits zero and passes
+11 numerical rows across nine clients. All nine applicable objects report
+incomplete static coverage, totaling 190 unsupported tensor-DMA accesses
+(10–40 per object). The 1,610 supported accesses are patched and dynamic
+evidence is complete. Default changes to orange for missing range support,
+consistent with the explicit MXF4 and sparse-transpose audit results.

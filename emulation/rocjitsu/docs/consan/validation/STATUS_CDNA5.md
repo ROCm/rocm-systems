@@ -48,7 +48,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟧 clean numerics pass; cross-wave tensor-DMA producers absent from LDS coverage | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟧 clean numerics pass; 8 tensor-DMA accesses lack modeled LDS ranges | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 4 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟧 clean numerics pass; tensor-DMA ranges unsupported in all 9 objects | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 default: all 3 clean shards pass at 1800 s; tensor-DMA producer coverage under review | 🟧 delay-zero: 2/3 clean shards pass; third hits the 300 s client deadline |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟨 default, 256 MiB report cap: all 6 clean shards pass; fault trials pending | 🟨 delay-zero: all 6 clean shards pass after address-bank fixes; fault trials pending |
