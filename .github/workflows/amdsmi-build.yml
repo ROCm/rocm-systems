@@ -16,11 +16,17 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 

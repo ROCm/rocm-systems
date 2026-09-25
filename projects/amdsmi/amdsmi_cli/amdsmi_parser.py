@@ -1502,9 +1502,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
         cuid_help = (
-            "Component Unified ID: the derived CUID, its component type, whether it is an\n"
-            "auxiliary (synthesised) identifier, and which layer answered. The derivation\n"
-            "seed's state is reported once for the node, outside the per-GPU blocks.\n"
+            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
+            "temporary (auxiliary) identifier, and which layer answered. The node key's\n"
+            "state is reported once for the node, outside the per-GPU blocks.\n"
             "Not part of the default `amd-smi static` output; ask for it.\n"
             "The primary CUID is not shown by default either: its payload embeds the raw\n"
             "serial number. Add --cuid-primary, as root, to include it."
@@ -2444,12 +2444,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o 1300 ppt0`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
             set_cuid_seed_help = (
-                "Provision the node-wide CUID derivation seed from FILE, which must hold\n"
-                "exactly 32 bytes. Use - to read it from standard input. The seed is never\n"
+                "Set the node key from FILE, which must hold exactly 32 bytes. Use - to\n"
+                "read it from standard input, for example\n"
+                "`head -c 32 /dev/urandom | amd-smi set --cuid-seed -`. The key is never\n"
                 "accepted as an argument value: an argument is readable in /proc by every\n"
                 "user on the machine and is written to shell history.\n"
-                "This replaces every derived CUID on this node and leaves every primary CUID\n"
-                "unchanged, so it is an administrative invalidation, not a routine action.\n"
+                "This replaces every CUID derived with the node key; primary and temporary\n"
+                "CUIDs are unchanged. It is an administrative invalidation, not a routine action.\n"
                 "Node-wide, so it cannot be combined with --gpu/-g, and it requires root."
             )
             set_clk_limit_help = "Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk | fclk) (min | max) value\n\tFor mclk and fclk ONLY, a max value is rounded down to the nearest selectable DPM level; sclk is honored exactly."
@@ -3270,7 +3271,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         node_help = "Gets power and baseboard information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 (OAM_ID 0) on the system.\
-                                \nIf no node argument is provided, all node information will be displayed."
+                                \nIf no node argument is provided, all node information except CUIDs will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
@@ -3278,6 +3279,14 @@ class AMDSMIParser(argparse.ArgumentParser):
         base_board_temps_help = "Displays baseboard temperatures"
         gtt_help = "Displays GTT (shared GPU memory) size"
         tray_help = "Displays compute tray type and accelerator count"
+        node_cuid_help = (
+            "Lists the CUID of every component on the node: the platform, CPU\n"
+            "packages, GPUs and GPU partitions, and NICs, with the node key's state.\n"
+            "Without root, CPU, NIC and platform CUIDs are temporary."
+        )
+        node_cuid_primary_help = (
+            "Include each component's primary CUID, implying --cuid. Requires root."
+        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3304,6 +3313,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         node_parser.add_argument("-G", "--gtt", action="store_true", required=False, help=gtt_help)
         node_parser.add_argument(
             "-T", "--tray", action="store_true", required=False, help=tray_help
+        )
+        node_parser.add_argument(
+            "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
+        )
+        node_parser.add_argument(
+            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
         )
 
         # Add Universal Arguments

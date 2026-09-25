@@ -2803,7 +2803,6 @@ def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
 _CUID_SOURCE_NAMES = {
     amdsmi_wrapper.AMDSMI_CUID_SOURCE_UNKNOWN: "UNKNOWN",
     amdsmi_wrapper.AMDSMI_CUID_SOURCE_DRIVER: "DRIVER",
-    amdsmi_wrapper.AMDSMI_CUID_SOURCE_STORE: "STORE",
     amdsmi_wrapper.AMDSMI_CUID_SOURCE_LIBRARY: "LIBRARY",
 }
 
@@ -2843,9 +2842,8 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     """
     Retrieves a GPU's Component Unified ID together with its provenance.
 
-    The fields are returned as one snapshot because they have to agree with each
-    other: a seed re-key or a device rescan between two calls yields a value
-    recorded with the wrong provenance.
+    Built from several queries, so not atomic under a concurrent rekey or
+    topology change. Source is lookup provenance, not effective seed state.
 
     Parameters:
         processor_handle (amdsmi_processor_handle_t): The processor handle.
@@ -2862,17 +2860,18 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
                 CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,
                 RACK, OTHER), or UNKNOWN.
             source (str): which stage of the staged lookup answered: DRIVER,
-                STORE, LIBRARY or UNKNOWN.
+                LIBRARY or UNKNOWN.
             auxiliary (bool): True when the identity was synthesised from
                 non-privileged information because no hardware serial was
                 reachable. Such a value changes when the OS is reinstalled and
-                is not unique across nodes.
+                is not unique across nodes. Auxiliary (temporary) CUIDs are
+                keyed by the machine ID, not the node key.
 
     Raises:
         AmdSmiParameterException: If the input parameters are invalid.
         AmdSmiLibraryException: If the library reports an error, including
             AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
-            the call.
+            the call, or when the auxiliary flag cannot be read.
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -2893,11 +2892,13 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
 
 def amdsmi_set_cuid_seed(seed: bytes) -> None:
     """
-    Provisions the node-wide CUID derivation seed.
+    Sets the node key.
 
-    Node-wide, not per device. Provisioning replaces every derived CUID handed
-    out on this node and leaves every primary CUID unchanged, so it is an
-    administrative invalidation rather than a routine operation.
+    Node-wide, not per device. Changing the key replaces every CUID derived
+    with the node key and leaves primary and temporary CUIDs unchanged. This is
+    an administrative identity change rather than a routine operation. The key
+    goes to an amdgpu device's cuid_seed, or without amdgpu to the AmdCuidKey
+    UEFI variable through efivarfs.
 
     Parameters:
         seed (bytes): exactly AMDSMI_CUID_SEED_SIZE bytes of secret material.
@@ -2909,9 +2910,11 @@ def amdsmi_set_cuid_seed(seed: bytes) -> None:
     Raises:
         AmdSmiParameterException: If the seed is not exactly the right length.
         AmdSmiLibraryException: If the library reports an error: a lack of
-            privilege, a failure to persist the seed, or
-            AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
-            the call.
+            privilege (AMDSMI_STATUS_NO_PERM, nothing changed), a refused seed
+            (AMDSMI_STATUS_INVAL), a key that was stored but whose derived
+            CUIDs were not refreshed (AMDSMI_STATUS_IO), a failure to store the
+            key (AMDSMI_STATUS_API_FAILED), or AMDSMI_STATUS_NOT_SUPPORTED
+            against a libamd_smi.so that predates the call.
     """
     if not isinstance(seed, (bytes, bytearray)):
         raise AmdSmiParameterException(seed, bytes)
@@ -2926,27 +2929,25 @@ def amdsmi_set_cuid_seed(seed: bytes) -> None:
 
 def amdsmi_get_cuid_seed_info() -> Dict[str, Any]:
     """
-    Reports whether the node seed is provisioned, and a fingerprint of it.
+    Reports the node key's provisioning status and fingerprint.
 
-    Never returns the seed: amd-smi output ends up in public bug reports. The
-    fingerprint answers whether two nodes carry the same seed without answering
-    what it is.
+    The key is read from an amdgpu device's cuid_seed, else from the AmdCuidKey
+    UEFI variable, and is never returned.
 
     Returns:
         Dict[str, Any]: with keys
 
-            provisioned (bool): False when the public canonical fallback seed is
-                in use, in which case every derived CUID on this node is
-                reproducible by anyone.
+            provisioned (bool): True when an administrator set the key; False
+                when amdgpu generated it.
             fingerprint (str): the first 8 octets of the unkeyed SHA-256 of the
-                seed in use, as lowercase hex.
+                key, as lowercase hex.
 
     Raises:
         AmdSmiLibraryException: If the library reports an error, including
             AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
-            the call. In particular AMDSMI_STATUS_NO_PERM when the seed store
-            exists but this caller cannot read it, which is not an
-            unprovisioned node and must not be reported as one.
+            the call. In particular AMDSMI_STATUS_NO_PERM for a non-root
+            caller and AMDSMI_STATUS_API_FAILED when there is no key; do not
+            report either as provisioned=False.
     """
     entry = _amdsmi_entry_point("amdsmi_get_cuid_seed_info")
 
@@ -2954,6 +2955,56 @@ def amdsmi_get_cuid_seed_info() -> Dict[str, Any]:
     _check_res(entry(ctypes.byref(info)))
 
     return {"provisioned": bool(info.provisioned), "fingerprint": bytes(info.fingerprint).hex()}
+
+
+def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
+    """
+    Lists every component on the node that has a CUID: the platform, each CPU
+    package, each AMD GPU or GPU partition, and each NIC, ordered by component
+    type, then BDF, then device path. Needs no processor handle.
+
+    For root, CPU, NIC and platform CUIDs are derived with the node key. For any
+    other caller, or without a node key, they are temporary and the primary
+    CUIDs are empty.
+
+    Returns:
+        List[Dict[str, Any]]: one dictionary per component, with the keys of
+        amdsmi_get_gpu_cuid_info plus
+
+            bdf (str): PCI address, or "" for the platform and CPUs.
+            device_path (str): sysfs path, or "" for the platform.
+            vendor_id (int): PCI or CPUID vendor ID, 0 for the platform.
+
+    Raises:
+        AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_NO_PERM when this caller may not read a component's
+            auxiliary flag, and AMDSMI_STATUS_NOT_SUPPORTED when built without
+            CUID or against a libamd_smi.so that predates the call.
+    """
+    entry = _amdsmi_entry_point("amdsmi_get_cuid_components")
+
+    while True:
+        count = ctypes.c_uint32(0)
+        _check_res(entry(ctypes.byref(count), None))
+        components = (amdsmi_wrapper.amdsmi_cuid_component_t * count.value)()
+        status = entry(ctypes.byref(count), components)
+        if status != amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE:
+            _check_res(status)
+            break
+
+    return [
+        {
+            "primary": c.info.primary.decode("utf-8"),
+            "derived": c.info.derived.decode("utf-8"),
+            "component_type": _CUID_COMPONENT_NAMES.get(c.info.component_type, "UNKNOWN"),
+            "source": _CUID_SOURCE_NAMES.get(c.info.source, "UNKNOWN"),
+            "auxiliary": bool(c.info.auxiliary),
+            "bdf": c.bdf.decode("utf-8"),
+            "device_path": c.device_path.decode("utf-8"),
+            "vendor_id": c.vendor_id,
+        }
+        for c in components[: count.value]
+    ]
 
 
 def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dict[str, Any]:

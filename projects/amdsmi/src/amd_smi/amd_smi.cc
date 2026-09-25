@@ -30,6 +30,9 @@
 
 #ifdef BUILD_CUID
 #include "amd_cuid.h"
+#ifdef AMDSMI_CUID_HAS_SHA256
+#include "rocm/sha2/sha256.h"
+#endif
 #endif
 
 #include "amd_smi/amdsmi.h"
@@ -1369,28 +1372,28 @@ amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
 }
 // Resolve a processor handle to its CUID handle. The CUID library's handle *is*
 // the device's derived CUID.
-amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle, std::string& bdf_out,
+amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
                                 amdcuid_id_t& handle_out) {
   amdsmi_bdf_t bdf = {};
   const amdsmi_status_t smi_status = amdsmi_get_gpu_device_bdf(processor_handle, &bdf);
   if (smi_status != AMDSMI_STATUS_SUCCESS) {
     return smi_status;
   }
-  bdf_out = stringify_bdf(bdf);
+  const std::string bdf_str = stringify_bdf(bdf);
 
   const amdcuid_status_t cuid_status =
-      amdcuid_get_handle_by_bdf(bdf_out.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out);
+      amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out);
   if (cuid_status != AMDCUID_STATUS_SUCCESS) {
     return cuid_status_to_amdsmi(cuid_status);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
 
-// The CUID handle is resolved by BDF and every partition of one device shares a
-// BDF, so the KFD partition id is the only thing that separates them;
-// amdsmi_get_gpu_device_uuid() folds in the same id for that reason. A handle
-// whose KFD info is unavailable, or whose partition id reads as unsupported
-// (0xFFFFFFFF), counts as not partitioned.
+// Whether this handle is a partition other than the first. Used only where the
+// driver publishes no per-partition identifier, so the only reachable value is
+// the whole card's, which every partition would share. A handle whose KFD info
+// is unavailable, or whose partition id reads as unsupported (0xFFFFFFFF),
+// counts as not partitioned.
 bool cuid_is_secondary_partition(amdsmi_processor_handle processor_handle) {
   amdsmi_kfd_info_t kfd_info = {};
   if (amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info) != AMDSMI_STATUS_SUCCESS) {
@@ -1418,21 +1421,37 @@ std::string cuid_sysfs_root() {
   return "/sys";
 }
 
-// Which stage of the staged lookup answered. Only the driver stage is
-// observable from out here: libamdcuid's derived lookup returns the contents of
-// cuid_secondary verbatim when that attribute exists. The store and the
-// library's own computation share one store, which the library writes computed
-// values back into, so nothing outside a library call can tell them apart.
-// Report UNKNOWN for those rather than guessing.
-amdsmi_cuid_source_t cuid_source_for(const std::string& bdf) {
-  if (bdf.empty()) {
+// The partition's own CUID node, /sys/class/drm/renderD<n>/device/xcp, where
+// device is the PCI device for the first partition and an amdgpu_xcp platform
+// device for the rest. Empty where the driver publishes nothing there.
+std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
+  amdsmi_enumeration_info_t enumeration_info = {};
+  if (amdsmi_get_gpu_enumeration_info(processor_handle, &enumeration_info) !=
+      AMDSMI_STATUS_SUCCESS) {
+    return "";
+  }
+
+  const std::string node = cuid_sysfs_root() + "/class/drm/renderD" +
+                           std::to_string(enumeration_info.drm_render) + "/device/xcp";
+  // cuid_derived is the world-readable one, so its presence is what says the
+  // kernel publishes here; cuid_primary is 0400 and invisible to most callers.
+  if (access((node + "/cuid_derived").c_str(), F_OK) != 0) {
+    return "";
+  }
+  return node;
+}
+
+// Which stage of the staged lookup produced the value just returned, as
+// recorded by the library. amdcuid_source_t and amdsmi_cuid_source_t share
+// values, so the mapping is a cast.
+amdsmi_cuid_source_t cuid_source_for(const amdcuid_id_t& handle) {
+  amdcuid_source_t source = AMDCUID_SOURCE_UNKNOWN;
+  uint32_t length = sizeof(source);
+  if (amdcuid_query_device_property(handle, AMDCUID_QUERY_SOURCE, &source, &length) !=
+      AMDCUID_STATUS_SUCCESS) {
     return AMDSMI_CUID_SOURCE_UNKNOWN;
   }
-  const std::string attr = cuid_sysfs_root() + "/bus/pci/devices/" + bdf + "/cuid_secondary";
-  if (access(attr.c_str(), F_OK) == 0) {
-    return AMDSMI_CUID_SOURCE_DRIVER;
-  }
-  return AMDSMI_CUID_SOURCE_UNKNOWN;
+  return static_cast<amdsmi_cuid_source_t>(source);
 }
 
 void copy_cuid_string(const amdcuid_id_t& id, char* out, size_t out_size) {
@@ -1444,40 +1463,15 @@ void copy_cuid_string(const amdcuid_id_t& id, char* out, size_t out_size) {
   snprintf(out, out_size, "%s", str);
 }
 
-}  // namespace
-#endif  // BUILD_CUID
-
-// The three CUID entry points below are defined unconditionally and gate only
-// their bodies on BUILD_CUID: the exported symbol set must not depend on
-// whether libamdcuid was found, or a build without it would drop symbols from
-// the ABI and turn a consumer's unconditional call into a link error.
-amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
-                                         amdsmi_cuid_info_t* info) {
-  AMDSMI_CHECK_INIT();
-
-  if (info == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
+void clear_cuid_info(amdsmi_cuid_info_t* info) {
   memset(info, 0, sizeof(*info));
   info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
   info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
+}
 
-#ifdef BUILD_CUID
-  // The kernel hardcodes the partition field of the identifier to zero, so the
-  // only value reachable here is the physical device's: reporting it would hand
-  // every partition of one GPU the same identifier, and an inventory consumer
-  // would fold them into one accelerator with no error to notice.
-  if (cuid_is_secondary_partition(processor_handle)) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  std::string bdf_str;
-  amdcuid_id_t handle = {};
-  const amdsmi_status_t status = cuid_handle_for(processor_handle, bdf_str, handle);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
-  }
+// Everything but the source. On failure info is cleared.
+amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* info) {
+  clear_cuid_info(info);
 
   // The handle is the derived CUID.
   copy_cuid_string(handle, info->derived, sizeof(info->derived));
@@ -1503,24 +1497,101 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
     info->component_type = static_cast<amdsmi_cuid_component_type_t>(device_type);
   }
 
-  // The auxiliary flag has no "unknown" encoding, and the struct was zeroed
-  // above, so keeping the zero on a failed query would present an unestablished
-  // value as canonical. An unprivileged caller against a driver that publishes
-  // cuid_primary as 0400 hits exactly that. Fail with the reason instead: an
-  // absent primary can say so with an empty string, this cannot.
+  // The auxiliary flag has no "unknown" encoding, so keeping the zero on a
+  // failed query would present an unestablished value as canonical. Fail with
+  // the reason instead: an absent primary can say so with an empty string,
+  // this cannot.
   bool temporary = false;
   length = sizeof(temporary);
   const amdcuid_status_t auxiliary_status =
       amdcuid_query_device_property(handle, AMDCUID_QUERY_TEMPORARY_CUID, &temporary, &length);
   if (auxiliary_status != AMDCUID_STATUS_SUCCESS) {
-    memset(info, 0, sizeof(*info));
-    info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
-    info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
+    clear_cuid_info(info);
     return cuid_status_to_amdsmi(auxiliary_status);
   }
   info->auxiliary = temporary ? 1 : 0;
+  return AMDSMI_STATUS_SUCCESS;
+}
 
-  info->source = cuid_source_for(bdf_str);
+void query_cuid_string(const amdcuid_id_t& handle, amdcuid_query_t query, char* out,
+                       size_t out_size) {
+  uint32_t length = static_cast<uint32_t>(out_size);
+  if (amdcuid_query_device_property(handle, query, out, &length) != AMDCUID_STATUS_SUCCESS) {
+    out[0] = '\0';
+  }
+  out[out_size - 1] = '\0';
+}
+
+amdsmi_status_t fill_cuid_component(const amdcuid_id_t& handle,
+                                    amdsmi_cuid_component_t* component) {
+  memset(component, 0, sizeof(*component));
+  const amdsmi_status_t status = fill_cuid_info(handle, &component->info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  component->info.source = cuid_source_for(handle);
+  query_cuid_string(handle, AMDCUID_QUERY_BDF, component->bdf, sizeof(component->bdf));
+  query_cuid_string(handle, AMDCUID_QUERY_DEVICE_PATH, component->device_path,
+                    sizeof(component->device_path));
+  uint16_t vendor_id = 0;
+  uint32_t length = sizeof(vendor_id);
+  if (amdcuid_query_device_property(handle, AMDCUID_QUERY_VENDOR_ID, &vendor_id, &length) ==
+      AMDCUID_STATUS_SUCCESS) {
+    component->vendor_id = vendor_id;
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+}  // namespace
+#endif  // BUILD_CUID
+
+// The CUID entry points below are defined unconditionally and gate only
+// their bodies on BUILD_CUID: the exported symbol set must not depend on
+// whether libamdcuid was found, or a build without it would drop symbols from
+// the ABI and turn a consumer's unconditional call into a link error.
+amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
+                                         amdsmi_cuid_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  memset(info, 0, sizeof(*info));
+  info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
+  info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
+
+#ifdef BUILD_CUID
+  // A handle names a partition; the BDF names the whole card, so it is only
+  // the fallback.
+  amdcuid_id_t handle = {};
+  const std::string partition_node = cuid_partition_node(processor_handle);
+  bool from_partition_node = false;
+
+  if (!partition_node.empty()) {
+    const amdcuid_status_t cuid_status =
+        amdcuid_get_handle_by_dev_path(partition_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle);
+    if (cuid_status != AMDCUID_STATUS_SUCCESS) {
+      return cuid_status_to_amdsmi(cuid_status);
+    }
+    from_partition_node = true;
+  } else {
+    if (cuid_is_secondary_partition(processor_handle)) {
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    const amdsmi_status_t status = cuid_handle_for(processor_handle, handle);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      return status;
+    }
+  }
+
+  const amdsmi_status_t status = fill_cuid_info(handle, info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  // The partition node exists only because the driver created it.
+  info->source = from_partition_node ? AMDSMI_CUID_SOURCE_DRIVER : cuid_source_for(handle);
   return AMDSMI_STATUS_SUCCESS;
 #else
   (void)processor_handle;
@@ -1536,29 +1607,47 @@ amdsmi_status_t amdsmi_set_cuid_seed(const uint8_t seed[AMDSMI_CUID_SEED_SIZE]) 
   }
 
 #ifdef BUILD_CUID
-  // No length parameter because there is no other accepted length: the
-  // specification defines a 256-bit shared secret, and any other size is
-  // corruption rather than a shorter secret.
-  amdcuid_status_t status = amdcuid_set_hash_key(seed);
-  switch (status) {
-    case AMDCUID_STATUS_SUCCESS:
-      // set_hash_key() only replaces the key in memory. The refresh is what
-      // re-derives every derived CUID under it, so without this the call
-      // reports success while every reader still sees the old values.
-      status = amdcuid_refresh();
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        return AMDSMI_STATUS_API_FAILED;
-      }
-      return AMDSMI_STATUS_SUCCESS;
-    case AMDCUID_STATUS_PERMISSION_DENIED:
-      return AMDSMI_STATUS_NO_PERM;
-    case AMDCUID_STATUS_INVALID_ARGUMENT:
-      return AMDSMI_STATUS_INVAL;
-    default:
-      // Includes the store failure, which is not reported as success: the key
-      // would be live in this process and absent from every other one.
-      return AMDSMI_STATUS_API_FAILED;
+  // amdcuid_set_hash_key() hands the key to the driver and then refreshes. It
+  // returns one status for both halves, so whether the key changed is read
+  // back.
+#ifndef AMDSMI_CUID_HAS_SHA256
+  amdcuid_key_info_t before = {};
+  const bool before_known = amdcuid_get_key_info(&before) == AMDCUID_STATUS_SUCCESS;
+#endif
+
+  const amdcuid_status_t status = amdcuid_set_hash_key(seed);
+  if (status == AMDCUID_STATUS_SUCCESS) {
+    return AMDSMI_STATUS_SUCCESS;
   }
+  if (status == AMDCUID_STATUS_INVALID_ARGUMENT) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  if (status == AMDCUID_STATUS_UNSUPPORTED) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  // The library refuses a non-root caller before touching anything. For root,
+  // PERMISSION_DENIED is the driver refusing the seed.
+  if (status == AMDCUID_STATUS_PERMISSION_DENIED && geteuid() != 0) {
+    return AMDSMI_STATUS_NO_PERM;
+  }
+
+  amdcuid_key_info_t after = {};
+  if (amdcuid_get_key_info(&after) != AMDCUID_STATUS_SUCCESS || after.provisioned == 0) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
+#ifdef AMDSMI_CUID_HAS_SHA256
+  uint8_t digest[rocm::sha2::SHA256_DIGEST_SIZE] = {};
+  rocm::sha2::sha256_digest(seed, AMDSMI_CUID_SEED_SIZE, digest);
+  static_assert(sizeof(after.fingerprint) <= sizeof(digest), "fingerprint is a SHA-256 prefix");
+  const bool committed = memcmp(after.fingerprint, digest, sizeof(after.fingerprint)) == 0;
+#else
+  // Without SHA-256 the new key is recognised only by the fingerprint having
+  // changed.
+  const bool committed =
+      !before_known || before.provisioned == 0 ||
+      memcmp(before.fingerprint, after.fingerprint, sizeof(after.fingerprint)) != 0;
+#endif
+  return committed ? AMDSMI_STATUS_IO : AMDSMI_STATUS_API_FAILED;
 #else
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
@@ -1573,21 +1662,19 @@ amdsmi_status_t amdsmi_get_cuid_seed_info(amdsmi_cuid_seed_info_t* info) {
   memset(info, 0, sizeof(*info));
 
 #ifdef BUILD_CUID
+  // The library never reads a key for a non-root caller, so its answer
+  // would look like a host without one.
+  if (geteuid() != 0) {
+    return AMDSMI_STATUS_NO_PERM;
+  }
   amdcuid_key_info_t key_info = {};
   const amdcuid_status_t status = amdcuid_get_key_info(&key_info);
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
       break;
-    case AMDCUID_STATUS_PERMISSION_DENIED:
-      // The key store exists but this caller cannot open it: the answer is
-      // unavailable, not absent. Flattening this into API_FAILED costs the
-      // caller the one distinction that makes the failure actionable.
-      return AMDSMI_STATUS_NO_PERM;
     case AMDCUID_STATUS_INVALID_ARGUMENT:
       return AMDSMI_STATUS_INVAL;
     default:
-      // A key store that exists and is not a key: corruption, and a different
-      // thing to ask an operator to do about it.
       return AMDSMI_STATUS_API_FAILED;
   }
   info->provisioned = key_info.provisioned;
@@ -1596,6 +1683,59 @@ amdsmi_status_t amdsmi_get_cuid_seed_info(amdsmi_cuid_seed_info_t* info) {
   memcpy(info->fingerprint, key_info.fingerprint, sizeof(info->fingerprint));
   return AMDSMI_STATUS_SUCCESS;
 #else
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+}
+
+amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_component_t* components) {
+  AMDSMI_CHECK_INIT();
+
+  if (count == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef BUILD_CUID
+  std::vector<amdcuid_id_t> handles;
+  amdcuid_status_t cuid_status = AMDCUID_STATUS_INSUFFICIENT_SIZE;
+  uint32_t total = 0;
+  while (cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE) {
+    handles.resize(total);
+    cuid_status = amdcuid_get_all_handles(handles.data(), &total);
+  }
+  if (cuid_status == AMDCUID_STATUS_UNSUPPORTED) {
+    total = 0;
+  } else if (cuid_status != AMDCUID_STATUS_SUCCESS) {
+    return cuid_status_to_amdsmi(cuid_status);
+  }
+  handles.resize(total);
+
+  std::vector<amdsmi_cuid_component_t> found(total);
+  for (uint32_t i = 0; i < total; ++i) {
+    const amdsmi_status_t status = fill_cuid_component(handles[i], &found[i]);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      return status;
+    }
+  }
+  std::sort(found.begin(), found.end(),
+            [](const amdsmi_cuid_component_t& a, const amdsmi_cuid_component_t& b) {
+              if (a.info.component_type != b.info.component_type) {
+                return a.info.component_type < b.info.component_type;
+              }
+              const int bdf = strcmp(a.bdf, b.bdf);
+              return bdf != 0 ? bdf < 0 : strcmp(a.device_path, b.device_path) < 0;
+            });
+
+  const uint32_t capacity = components == nullptr ? 0 : *count;
+  const uint32_t written = std::min(capacity, total);
+  if (written > 0) {
+    memcpy(components, found.data(), written * sizeof(found[0]));
+  }
+  *count = total;
+  return (components != nullptr && capacity < total) ? AMDSMI_STATUS_INSUFFICIENT_SIZE
+                                                     : AMDSMI_STATUS_SUCCESS;
+#else
+  (void)components;
+  *count = 0;
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 }

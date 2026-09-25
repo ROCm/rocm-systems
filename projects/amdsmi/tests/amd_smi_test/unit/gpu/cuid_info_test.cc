@@ -10,8 +10,11 @@
  * need a device are skipped rather than failed.
  */
 
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <linux/capability.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -21,12 +24,21 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 
 namespace {
+
+bool HasCapSysAdmin() {
+  __user_cap_header_struct header{_LINUX_CAPABILITY_VERSION_3, 0};
+  __user_cap_data_struct data[_LINUX_CAPABILITY_U32S_3] = {};
+  if (syscall(SYS_capget, &header, data) != 0) return false;
+  return (data[CAP_SYS_ADMIN / 32].effective & (1U << (CAP_SYS_ADMIN % 32))) != 0;
+}
 
 // A CUID is rendered as the standard 8-4-4-4-12 UUID string.
 bool LooksLikeUuid(const char* value) {
@@ -140,11 +152,19 @@ bool MakeDirs(const std::string& path) {
   return true;
 }
 
-// Whatever the driver published in `attribute` for this device, trimmed, or an
-// empty string when it publishes nothing. Reads the real /sys, never the
-// fabricated root.
-std::string DriverPublished(const std::string& bdf, const char* attribute) {
-  std::ifstream in("/sys/bus/pci/devices/" + bdf + "/" + attribute);
+constexpr uint32_t kNoPartition = 0xFFFFFFFF;
+
+// SPX partition zero shares the PCI device but has its own publication. Without
+// XCP publication, only the first/unpartitioned processor may use the whole GPU.
+std::string DriverPublished(const std::string& root, const std::string& bdf, uint32_t render,
+                            uint32_t partition) {
+  std::string path =
+      root + "/class/drm/renderD" + std::to_string(render) + "/device/xcp/cuid_derived";
+  if (render == kNoPartition || access(path.c_str(), F_OK) != 0) {
+    if (partition != 0 && partition != kNoPartition) return "";
+    path = root + "/bus/pci/devices/" + bdf + "/cuid_derived";
+  }
+  std::ifstream in(path);
   if (!in) return "";
   std::string value;
   std::getline(in, value);
@@ -152,6 +172,16 @@ std::string DriverPublished(const std::string& bdf, const char* attribute) {
     value.pop_back();
   }
   return value;
+}
+
+std::string DriverPublished(amdsmi_processor_handle handle, const std::string& bdf) {
+  amdsmi_enumeration_info_t enumeration = {};
+  if (amdsmi_get_gpu_enumeration_info(handle, &enumeration) != AMDSMI_STATUS_SUCCESS)
+    enumeration.drm_render = kNoPartition;
+  amdsmi_kfd_info_t kfd = {};
+  if (amdsmi_get_gpu_kfd_info(handle, &kfd) != AMDSMI_STATUS_SUCCESS)
+    kfd.current_partition_id = kNoPartition;
+  return DriverPublished("/sys", bdf, enumeration.drm_render, kfd.current_partition_id);
 }
 
 std::vector<amdsmi_processor_handle> GpuHandles() {
@@ -180,12 +210,17 @@ std::vector<amdsmi_processor_handle> GpuHandles() {
   return handles;
 }
 
-// The KFD partition index of a device, or 0xFFFFFFFF where the machine does not
-// report one. amd-smi resolves a CUID handle by BDF, and every partition of one
-// GPU shares a BDF, so this is the only thing that separates them.
-constexpr uint32_t kNoPartition = 0xFFFFFFFF;
-
+// current_partition_id is also 0 on an unpartitioned card; the profile's
+// partition count tells the two apart.
 uint32_t PartitionId(amdsmi_processor_handle handle) {
+  amdsmi_accelerator_partition_profile_t profile = {};
+  uint32_t ids[AMDSMI_MAX_ACCELERATOR_PARTITIONS] = {};
+  if (amdsmi_get_gpu_accelerator_partition_profile(handle, &profile, ids) !=
+      AMDSMI_STATUS_SUCCESS) {
+    return kNoPartition;
+  }
+  if (profile.num_partitions <= 1) return kNoPartition;
+
   amdsmi_kfd_info_t kfd_info = {};
   if (amdsmi_get_gpu_kfd_info(handle, &kfd_info) != AMDSMI_STATUS_SUCCESS) return kNoPartition;
   return kfd_info.current_partition_id;
@@ -232,99 +267,52 @@ constexpr bool kCuidBuiltIn = true;
 constexpr bool kCuidBuiltIn = false;
 #endif
 
-// First 8 octets of the unkeyed SHA-256 of the canonical fallback seed, the
-// public 24-octet string "AMD-CUID-DEFAULT-SEED-v1" that libamdcuid derives
-// with until an administrator provisions a real one. Pinned rather than
-// recomputed, so that a producer fingerprinting the wrong bytes fails instead
-// of agreeing with itself.
-constexpr uint8_t kFallbackSeedFingerprint[AMDSMI_CUID_SEED_FINGERPRINT_SIZE] = {
-    0xbe, 0x89, 0x37, 0xfb, 0xa7, 0xed, 0x4e, 0x6f};
+constexpr char kKeyVariable[] =
+    "/sys/firmware/efi/efivars/AmdCuidKey-e41c1f7f-63cb-46b9-bf27-36a55f92a06d";
 
-std::string HexOf(const uint8_t* octets, size_t count) {
-  std::string out;
-  char buf[3] = {};
-  for (size_t i = 0; i < count; ++i) {
-    snprintf(buf, sizeof(buf), "%02x", octets[i]);
-    out += buf;
+bool ReadExactly(const std::string& path, std::string& out, size_t size) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) return false;
+  out.assign(size + 1, '\0');
+  file.read(&out[0], static_cast<std::streamsize>(out.size()));
+  if (static_cast<size_t>(file.gcount()) != size) return false;
+  out.resize(size);
+  return true;
+}
+
+// Whether libamdcuid can see a node key from this process, and whether an
+// administrator set it: any amdgpu cuid_seed, else a well-formed AmdCuidKey.
+bool NodeKey(bool* provisioned) {
+  if (geteuid() != 0) return false;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator("/sys/bus/pci/devices", ec)) {
+    std::string seed;
+    if (!ReadExactly(entry.path().string() + "/cuid_seed", seed, AMDSMI_CUID_SEED_SIZE)) continue;
+    std::string state;
+    std::ifstream(entry.path().string() + "/cuid_seed_state") >> state;
+    *provisioned = state == "provisioned";
+    return true;
   }
-  return out;
+  std::string variable;
+  if (!ReadExactly(kKeyVariable, variable, 4 + 36)) return false;
+  const auto* payload = reinterpret_cast<const uint8_t*>(variable.data()) + 4;
+  if (payload[0] != 1 || (payload[1] & 0xfe) != 0 || payload[2] != 0 || payload[3] != 0)
+    return false;
+  *provisioned = (payload[1] & 1) != 0;
+  return true;
 }
 
-// What the seed API answers depends on the state of the node's key store and on
-// who is asking, so the cases below assert against the state the machine is
-// actually in rather than one of these four.
-//
-// The key store is 0600 root-owned, so kUnreadable is the ordinary state for an
-// unprivileged caller on a provisioned node. It is not kAbsent: reporting it as
-// "unprovisioned, fingerprint of the public fallback seed" tells an operator
-// that a node carrying a secret carries none.
-enum class SeedStore {
-  kAbsent,       // no key store: the node derives with the public fallback seed
-  kProvisioned,  // a key store this caller can read
-  kUnreadable,   // a key store this caller cannot open
-  kCorrupt,      // a key store that exists and is not a key
-};
-
-const char* SeedStoreName(SeedStore state) {
-  switch (state) {
-    case SeedStore::kAbsent:
-      return "absent";
-    case SeedStore::kProvisioned:
-      return "provisioned and readable";
-    case SeedStore::kUnreadable:
-      return "present but unreadable by this caller";
-    case SeedStore::kCorrupt:
-      return "present but not a key";
-  }
-  return "unknown";
-}
-
-// Where libamdcuid looked for the key store in *this* process. The library
-// resolves it once, in a namespace-scope cuid_hmac constructed before main(),
-// so the answer is fixed by the environment the process was launched with and
-// reading the variable now gives the same answer the library got. The default
-// mirrors the library's AMDCUID_CONFIG_DIR, which is private to its build.
-std::string SeedStorePath() {
-  const char* env = std::getenv("AMDCUID_HMAC_KEY_PATH");
-  return (env && env[0]) ? env : "/etc/amdcuid/hmac_key.bin";
-}
-
-SeedStore SeedStoreState() {
-  const std::string path = SeedStorePath();
-
-  struct stat st;
-  if (stat(path.c_str(), &st) != 0) return SeedStore::kAbsent;
-
-  // Whether the open succeeds, not access(R_OK): root passes an access() check
-  // on a mode-0 file it can still open, and it is the open that decides what
-  // the library reports. Asking the same question the library asks is the point.
-  std::ifstream in(path, std::ios::binary);
-  if (!in.is_open()) return SeedStore::kUnreadable;
-
-  return st.st_size == static_cast<off_t>(AMDSMI_CUID_SEED_SIZE) ? SeedStore::kProvisioned
-                                                                 : SeedStore::kCorrupt;
-}
-
-// The status amdsmi_get_cuid_seed_info() must return in each state. Absence is
-// a successful answer, an unprovisioned node being an ordinary one; the two
-// failures stay distinct because what an operator must do about them is
-// distinct: gain privilege, or repair the store.
-amdsmi_status_t ExpectedSeedInfoStatus(SeedStore state) {
-  switch (state) {
-    case SeedStore::kAbsent:
-    case SeedStore::kProvisioned:
-      return AMDSMI_STATUS_SUCCESS;
-    case SeedStore::kUnreadable:
-      return AMDSMI_STATUS_NO_PERM;
-    case SeedStore::kCorrupt:
-      return AMDSMI_STATUS_API_FAILED;
-  }
-  return AMDSMI_STATUS_API_FAILED;
+// A non-root caller is refused rather than told there is no key, and a host
+// without one fails rather than reporting a made-up state.
+amdsmi_status_t ExpectedSeedInfoStatus() {
+  if (geteuid() != 0) return AMDSMI_STATUS_NO_PERM;
+  bool provisioned = false;
+  return NodeKey(&provisioned) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_API_FAILED;
 }
 
 // On any failure the output struct must come back untouched. The dangerous
-// wrong answer is not a garbage fingerprint but a plausible one, the public
-// fallback's, next to provisioned = 0.
+// wrong answer is not a garbage fingerprint but a plausible one next to
+// provisioned = 0, which reads as a key amdgpu generated.
 void ExpectNothingReported(const amdsmi_cuid_seed_info_t& info) {
   EXPECT_EQ(info.provisioned, 0) << "a failed query must not report a provisioning state";
   for (size_t i = 0; i < sizeof(info.fingerprint); ++i) {
@@ -345,6 +333,8 @@ TEST(GpuUnit, CuidNullArgumentsRejected) {
   EXPECT_EQ(amdsmi_get_gpu_cuid_info(nullptr, nullptr), AMDSMI_STATUS_INVAL);
   EXPECT_EQ(amdsmi_set_cuid_seed(nullptr), AMDSMI_STATUS_INVAL);
   EXPECT_EQ(amdsmi_get_cuid_seed_info(nullptr), AMDSMI_STATUS_INVAL);
+  amdsmi_cuid_component_t component = {};
+  EXPECT_EQ(amdsmi_get_cuid_components(nullptr, &component), AMDSMI_STATUS_INVAL);
 }
 
 // Built without libamdcuid, every CUID entry point reports not-supported, with
@@ -364,6 +354,10 @@ TEST(GpuUnit, CuidEntryPointsNotSupportedWithoutTheLibrary) {
   const uint8_t seed[AMDSMI_CUID_SEED_SIZE] = {};
   EXPECT_EQ(amdsmi_set_cuid_seed(seed), AMDSMI_STATUS_NOT_SUPPORTED);
 
+  uint32_t count = 7;
+  EXPECT_EQ(amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(count, 0u);
+
   // A real handle where there is one. Without the library neither device entry
   // point dereferences the handle before returning, so a GPU-less machine
   // still exercises them.
@@ -382,7 +376,7 @@ TEST(GpuUnit, CuidEntryPointsNotSupportedWithoutTheLibrary) {
 
 // Built without libamdcuid the entry points still exist and report
 // not-supported. Built with it they answer, and which answer is right is
-// decided by the state of the key store, so assert against that state.
+// decided by the node key and the caller, so assert against those.
 TEST(GpuUnit, CuidSeedInfoAnsweredOrUnsupported) {
   const AmdSmiSession session;
   ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
@@ -395,85 +389,21 @@ TEST(GpuUnit, CuidSeedInfoAnsweredOrUnsupported) {
     return;
   }
 
-  const SeedStore state = SeedStoreState();
-  ASSERT_EQ(status, ExpectedSeedInfoStatus(state))
-      << "key store " << SeedStorePath() << " is " << SeedStoreName(state) << " (euid " << geteuid()
-      << ")";
-
+  ASSERT_EQ(status, ExpectedSeedInfoStatus()) << "euid " << geteuid();
   if (status != AMDSMI_STATUS_SUCCESS) {
     ExpectNothingReported(info);
     return;
   }
 
-  // On a successful answer the fingerprint is always populated: an
-  // unprovisioned node reports the canonical fallback seed's fingerprint rather
-  // than nothing, so "these two nodes match" is answerable before anyone has
-  // provisioned anything.
   bool any_set = false;
   for (uint8_t octet : info.fingerprint) {
     if (octet != 0) any_set = true;
   }
   EXPECT_TRUE(any_set) << "seed fingerprint should never be all zeroes";
 
-  // And the flag agrees with the store it came from.
-  EXPECT_EQ(info.provisioned == 0, state == SeedStore::kAbsent)
-      << "reported provisioned = " << info.provisioned << " with a key store that is "
-      << SeedStoreName(state);
-}
-
-// The unprovisioned fingerprint is a specific known value, not merely a
-// non-zero one: "not all zeroes" is satisfied by fingerprinting the wrong
-// bytes. It also pins the value across releases, without which a fingerprint
-// that drifted between versions would report two identically provisioned nodes
-// as different.
-TEST(GpuUnit, CuidSeedFingerprintMatchesTheCanonicalFallbackSeed) {
-  const AmdSmiSession session;
-  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
-
-  amdsmi_cuid_seed_info_t info = {};
-  const amdsmi_status_t status = amdsmi_get_cuid_seed_info(&info);
-  if (!kCuidBuiltIn) {
-    ASSERT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
-    return;
-  }
-
-  const SeedStore state = SeedStoreState();
-  const std::string fallback = HexOf(kFallbackSeedFingerprint, sizeof(kFallbackSeedFingerprint));
-  ASSERT_EQ(status, ExpectedSeedInfoStatus(state))
-      << "key store " << SeedStorePath() << " is " << SeedStoreName(state) << " (euid " << geteuid()
-      << ")";
-
-  switch (state) {
-    case SeedStore::kAbsent: {
-      // The one state in which the canonical constant applies: nothing is
-      // provisioned, so the node derives with the public 24-octet seed and must
-      // say so with that seed's fingerprint. Reach this state by pointing
-      // AMDCUID_HMAC_KEY_PATH at a path that does not exist before launching
-      // this binary.
-      EXPECT_EQ(info.provisioned, 0) << "no key store, so nothing is provisioned";
-      EXPECT_EQ(HexOf(info.fingerprint, sizeof(info.fingerprint)), fallback)
-          << "unprovisioned node should fingerprint the fallback seed";
-      break;
-    }
-    case SeedStore::kProvisioned: {
-      // A node reporting itself provisioned while still deriving with the
-      // public seed has every derived CUID reproducible by anyone, and a flag
-      // saying otherwise.
-      EXPECT_EQ(info.provisioned, 1) << "a readable key store holding a key is provisioned";
-      EXPECT_NE(HexOf(info.fingerprint, sizeof(info.fingerprint)), fallback)
-          << "provisioned node reports the public fallback fingerprint";
-      break;
-    }
-    case SeedStore::kUnreadable:
-    case SeedStore::kCorrupt: {
-      // Nothing may be reported unless it is known. SUCCESS with
-      // provisioned = 0 and the fallback fingerprint would tell an operator
-      // auditing a fleet that a node carrying a secret was never provisioned,
-      // which is a wrong answer rather than a missing one.
-      ExpectNothingReported(info);
-      break;
-    }
-  }
+  bool provisioned = false;
+  ASSERT_TRUE(NodeKey(&provisioned));
+  EXPECT_EQ(info.provisioned != 0, provisioned);
 }
 
 // The seed is write-only through this API. If a future change adds a way to
@@ -495,10 +425,7 @@ TEST(GpuUnit, CuidSeedInfoCarriesNoSeedMaterial) {
     return;
   }
 
-  const SeedStore state = SeedStoreState();
-  ASSERT_EQ(status, ExpectedSeedInfoStatus(state))
-      << "key store " << SeedStorePath() << " is " << SeedStoreName(state) << " (euid " << geteuid()
-      << ")";
+  ASSERT_EQ(status, ExpectedSeedInfoStatus()) << "euid " << geteuid();
 
   // A failed query discloses less, never more.
   if (status != AMDSMI_STATUS_SUCCESS) ExpectNothingReported(info);
@@ -512,6 +439,20 @@ TEST(GpuUnit, CuidSeedInfoCarriesNoSeedMaterial) {
   for (size_t i = 0; i < sizeof(info.reserved) / sizeof(info.reserved[0]); ++i) {
     EXPECT_EQ(info.reserved[i], 0u) << "reserved[" << i << "] carries something";
   }
+}
+
+// A root run would reach the node key if the refusal ever regressed, so the
+// refusals themselves are covered by the library's unit tests.
+TEST(GpuUnit, CuidSetSeedNeedsRoot) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+  if (geteuid() == 0) GTEST_SKIP() << "only an ordinary user can call it safely";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  uint8_t seed[AMDSMI_CUID_SEED_SIZE];
+  for (size_t i = 0; i < sizeof(seed); ++i) seed[i] = static_cast<uint8_t>(0x40 + i * 7);
+  EXPECT_EQ(amdsmi_set_cuid_seed(seed), AMDSMI_STATUS_NO_PERM);
 }
 
 // The decoder the auxiliary check below relies on, against the published
@@ -536,10 +477,10 @@ TEST(GpuUnit, CuidAuxiliaryBitDecoderMatchesConformanceVectors) {
       {"T-NIC", "d4abaad3-9b34-8c50-9800-028dcc084300", false},
       {"T-NPU", "d4abaad3-9b34-8c50-9800-028dcc084001", false},
       {"T-OTHER", "d4abaad3-9b34-8c50-9800-028dcc084303", false},
-      {"D-1", "61ffe99a-b3e0-8e16-a802-4b1d515d5438", false},
+      {"D-1", "10133e37-3995-80bc-a402-7074c5c1c44c", false},
       {"D-2", "73488f9e-ea52-86ce-8401-2627fa41b068", false},
-      {"A-1", "3395667e-f8fa-840e-bc00-028dcc084280", true},
-      {"A-2", "808fa59f-6949-80ef-a400-c97fe9a704f0", true},
+      {"A-1", "96f3618e-bffd-8ff3-9000-028dcc084280", true},
+      {"A-2", "5afaa441-5d39-8795-bc02-5e6010667cf0", true},
   };
 
   for (const auto& vector : kVectors) {
@@ -564,6 +505,10 @@ TEST(GpuUnit, CuidSnapshotIsSelfConsistent) {
                                     : "built without CUID support; asserted by "
                                       "CuidEntryPointsNotSupportedWithoutTheLibrary");
     }
+    // NO_PERM leaves no snapshot to check for consistency.
+    if (status == AMDSMI_STATUS_NO_PERM) {
+      GTEST_SKIP() << "this caller may not read the whole snapshot; run as root";
+    }
     ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
 
     // The derived CUID is the value an unprivileged caller is meant to get, so
@@ -583,13 +528,16 @@ TEST(GpuUnit, CuidSnapshotIsSelfConsistent) {
     ASSERT_TRUE(AuxiliaryBitFromUuidString(info.derived, &aux_from_value));
     EXPECT_EQ(static_cast<bool>(info.auxiliary), aux_from_value);
 
-    // libamdcuid gates its primary query on an effective UID of zero, so a
-    // non-root caller must get the empty string and a root caller must get a
-    // value. Asserting only "empty or well-formed" would accept both answers
-    // from both callers, including a snapshot handing an unprivileged process
-    // the serial-bearing primary. Each run asserts the branch it is in.
+    // libamdcuid gates its primary query on an effective UID of zero, and the
+    // driver's cuid_primary on CAP_SYS_ADMIN, so a non-root caller must get the
+    // empty string and a root caller holding CAP_SYS_ADMIN must get a value.
+    // Asserting only "empty or well-formed" would accept both answers from both
+    // callers, including a snapshot handing an unprivileged process the
+    // serial-bearing primary. Each run asserts the branch it is in; root
+    // without the capability (a default container) may get either.
     if (geteuid() == 0) {
-      EXPECT_NE(info.primary[0], '\0') << "root caller should receive the primary CUID";
+      if (HasCapSysAdmin())
+        EXPECT_NE(info.primary[0], '\0') << "root caller should receive the primary CUID";
       if (info.primary[0] != '\0') {
         EXPECT_TRUE(LooksLikeUuid(info.primary)) << "primary: " << info.primary;
         EXPECT_EQ(info.primary[14], '8');
@@ -601,7 +549,7 @@ TEST(GpuUnit, CuidSnapshotIsSelfConsistent) {
   }
 }
 
-// Where the driver really does publish cuid_secondary, the derived CUID that
+// Where the driver really does publish cuid_derived, the derived CUID that
 // comes back is the driver's value verbatim and the source says so: the kernel
 // and the library producing different values for one device is the failure the
 // driver stage exists to prevent. Only checkable where the attribute is real,
@@ -621,32 +569,63 @@ TEST(GpuUnit, CuidDriverPublishedValueIsUsedVerbatim) {
     ASSERT_EQ(amdsmi_get_gpu_device_bdf(handle, &bdf), AMDSMI_STATUS_SUCCESS);
     const std::string bdf_str = BdfString(bdf);
 
-    const std::string driver_value = DriverPublished(bdf_str, "cuid_secondary");
+    const std::string driver_value = DriverPublished(handle, bdf_str);
     if (driver_value.empty()) continue;
 
     amdsmi_cuid_info_t info = {};
-    ASSERT_EQ(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS);
+    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) {
+      GTEST_SKIP() << bdf_str << ": amd-smi reports no CUID (run as root)";
+    }
+    ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS) << bdf_str;
     EXPECT_EQ(info.source, AMDSMI_CUID_SOURCE_DRIVER) << bdf_str;
     EXPECT_EQ(std::string(info.derived), driver_value)
         << bdf_str << ": amd-smi and the driver disagree about the derived CUID";
     ++checked;
   }
 
-  if (checked == 0) GTEST_SKIP() << "no device publishes cuid_secondary";
+  if (checked == 0) GTEST_SKIP() << "no device publishes cuid_derived";
 }
 
-// amd-smi's own resolution of the source field, against a fabricated sysfs
-// tree: with the attribute present it must say DRIVER, and with the attribute
-// absent it must not.
-//
-// Fabricating the tree needs AMDSMI_CUID_SYSFS_ROOT, which exists only in a
-// library built with AMDSMI_CUID_TEST_SYSFS_OVERRIDE: a relocatable root would
-// let any unprivileged user forge the one field whose job is to say the value
-// came from the kernel. So this case probes whether the override is honoured
-// and skips when it is not. The probe needs a device whose real /sys publishes
-// nothing, since otherwise an honoured and an ignored override both give
-// DRIVER.
-TEST(GpuUnit, CuidSourceIsDriverWhenTheAttributeIsPublished) {
+TEST(GpuUnit, CuidDriverExpectationFollowsProcessorRenderNode) {
+  ScopedTempDir sysfs;
+  ASSERT_TRUE(sysfs.valid());
+  const std::string bdf = "0000:03:00.0";
+  const std::string pci = sysfs.path() + "/bus/pci/devices/" + bdf;
+  const std::string xcp = sysfs.path() + "/devices/platform/amdgpu_xcp.1";
+  ASSERT_TRUE(MakeDirs(pci + "/xcp"));
+  ASSERT_TRUE(MakeDirs(xcp + "/xcp"));
+  ASSERT_TRUE(MakeDirs(sysfs.path() + "/class/drm/renderD128"));
+  ASSERT_TRUE(MakeDirs(sysfs.path() + "/class/drm/renderD140"));
+  ASSERT_EQ(symlink(pci.c_str(), (sysfs.path() + "/class/drm/renderD128/device").c_str()), 0);
+  ASSERT_EQ(symlink(xcp.c_str(), (sysfs.path() + "/class/drm/renderD140/device").c_str()), 0);
+  const char* whole = "61ffe99a-b3e0-8e16-a802-4b1d515d5438";
+  const char* first = "73488f9e-ea52-86ce-8401-2627fa41b068";
+  const char* second = "3395667e-f8fa-840e-bc00-028dcc084280";
+  std::ofstream(pci + "/cuid_derived") << whole << '\n';
+  std::ofstream(pci + "/xcp/cuid_derived") << first << '\n';
+  std::ofstream(xcp + "/xcp/cuid_derived") << second << '\n';
+
+  // No profile-count gate: a single SPX partition is still its own component.
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, 128, 0), first);
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, 128, kNoPartition), first);
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, 140, 1), second);
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, kNoPartition, kNoPartition), whole);
+
+  // A present but empty publication must not silently select the parent.
+  std::ofstream(pci + "/xcp/cuid_derived", std::ios::trunc).close();
+  EXPECT_TRUE(DriverPublished(sysfs.path(), bdf, 128, 0).empty());
+  ASSERT_EQ(unlink((pci + "/xcp/cuid_derived").c_str()), 0);
+  ASSERT_EQ(unlink((xcp + "/xcp/cuid_derived").c_str()), 0);
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, 128, 0), whole);
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, 128, kNoPartition), whole);
+  EXPECT_TRUE(DriverPublished(sysfs.path(), bdf, 140, 1).empty());
+  EXPECT_TRUE(DriverPublished(sysfs.path(), bdf, kNoPartition, 1).empty());
+  ASSERT_EQ(rmdir((pci + "/xcp").c_str()), 0);
+  EXPECT_EQ(DriverPublished(sysfs.path(), bdf, 128, 0), whole);
+}
+
+TEST(GpuUnit, CuidSourceNamesTheStageThatAnswered) {
   if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
 
   const AmdSmiSession session;
@@ -655,68 +634,68 @@ TEST(GpuUnit, CuidSourceIsDriverWhenTheAttributeIsPublished) {
   const auto handles = GpuHandles();
   if (handles.empty()) GTEST_SKIP() << "no GPU present";
 
-  ScopedTempDir published;
-  ScopedTempDir bare;
-  ASSERT_TRUE(published.valid() && bare.valid()) << "could not create a temporary sysfs root";
-  ASSERT_TRUE(MakeDirs(bare.path() + "/bus/pci/devices"));
-
-  std::vector<std::string> bdfs;
-  std::vector<size_t> probeable;
-  for (size_t i = 0; i < handles.size(); ++i) {
+  size_t answered = 0;
+  for (auto handle : handles) {
     amdsmi_bdf_t bdf = {};
-    ASSERT_EQ(amdsmi_get_gpu_device_bdf(handles[i], &bdf), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(amdsmi_get_gpu_device_bdf(handle, &bdf), AMDSMI_STATUS_SUCCESS);
     const std::string bdf_str = BdfString(bdf);
-    bdfs.push_back(bdf_str);
-    if (DriverPublished(bdf_str, "cuid_secondary").empty()) probeable.push_back(i);
 
-    const std::string dir = published.path() + "/bus/pci/devices/" + bdf_str;
-    ASSERT_TRUE(MakeDirs(dir)) << dir;
-    std::ofstream attr(dir + "/cuid_secondary");
-    ASSERT_TRUE(attr.is_open()) << dir;
-    attr << "00000000-0000-8000-8000-000000000000\n";
-  }
-
-  if (probeable.empty()) {
-    GTEST_SKIP() << "every device publishes cuid_secondary; a fabricated root proves nothing here";
-  }
-
-  {
-    const size_t i = probeable.front();
-    const ScopedSysfsRoot root(published.path());
     amdsmi_cuid_info_t info = {};
-    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handles[i], &info);
-    if (status == AMDSMI_STATUS_NOT_SUPPORTED) GTEST_SKIP() << "no CUID for " << bdfs[i];
-    ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
-    if (info.source != AMDSMI_CUID_SOURCE_DRIVER) {
-      GTEST_SKIP() << "AMDSMI_CUID_SYSFS_ROOT is not honoured: build the library with "
-                      "-DAMDSMI_CUID_TEST_SYSFS_OVERRIDE=ON to exercise this case";
-    }
+    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) continue;
+    ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS) << bdf_str;
+    ++answered;
+
+    EXPECT_NE(info.source, AMDSMI_CUID_SOURCE_UNKNOWN)
+        << bdf_str << ": a snapshot that succeeded should say which stage produced it";
+
+    // A non-UNKNOWN source alone would not catch false DRIVER attribution.
+    const bool driver_published = !DriverPublished(handle, bdf_str).empty();
+    EXPECT_EQ(info.source == AMDSMI_CUID_SOURCE_DRIVER, driver_published)
+        << bdf_str << ": source=" << static_cast<int>(info.source) << " while the driver "
+        << (driver_published ? "does" : "does not") << " publish cuid_derived";
   }
 
-  for (size_t i = 0; i < handles.size(); ++i) {
-    {
-      const ScopedSysfsRoot root(published.path());
-      amdsmi_cuid_info_t info = {};
-      const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handles[i], &info);
-      if (status == AMDSMI_STATUS_NOT_SUPPORTED) continue;
-      ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
-      EXPECT_EQ(info.source, AMDSMI_CUID_SOURCE_DRIVER) << bdfs[i];
-    }
+  if (answered == 0) GTEST_SKIP() << "no device reported a CUID";
+}
 
-    {
-      // The same device with nothing published: not driver-sourced. Which of
-      // the remaining stages answered is not observable from out here (see
-      // cuid_source_for()), so the assertion is only that amd-smi does not
-      // claim the driver stood behind a value it never published. Only for a
-      // device whose real /sys is also silent, since the bare root is what the
-      // real one looks like to this code when the override is off.
-      if (!DriverPublished(bdfs[i], "cuid_secondary").empty()) continue;
-      const ScopedSysfsRoot root(bare.path());
-      amdsmi_cuid_info_t info = {};
-      ASSERT_EQ(amdsmi_get_gpu_cuid_info(handles[i], &info), AMDSMI_STATUS_SUCCESS);
-      EXPECT_NE(info.source, AMDSMI_CUID_SOURCE_DRIVER) << bdfs[i];
-    }
-  }
+// A driver-published partition node is what names a partition, so amd-smi must
+// answer from it, verbatim and as DRIVER, rather than from the whole card. No
+// GPU here need be partitionable: the node is fabricated under
+// AMDSMI_CUID_SYSFS_ROOT, which a library honours only when built with
+// AMDSMI_CUID_TEST_SYSFS_OVERRIDE, because a relocatable root would let any
+// unprivileged user forge the source field.
+TEST(GpuUnit, CuidPartitionNodeIsUsedVerbatimAsDriverSourced) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+#ifndef AMDSMI_CUID_TEST_SYSFS_OVERRIDE
+  GTEST_SKIP() << "configure with -DAMDSMI_CUID_TEST_SYSFS_OVERRIDE=ON to exercise this case";
+#endif
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  const auto handles = GpuHandles();
+  if (handles.empty()) GTEST_SKIP() << "no GPU present";
+
+  const amdsmi_processor_handle handle = handles.front();
+  amdsmi_enumeration_info_t enumeration = {};
+  ASSERT_EQ(amdsmi_get_gpu_enumeration_info(handle, &enumeration), AMDSMI_STATUS_SUCCESS);
+
+  ScopedTempDir sysfs;
+  ASSERT_TRUE(sysfs.valid());
+  const std::string node =
+      sysfs.path() + "/class/drm/renderD" + std::to_string(enumeration.drm_render) + "/device/xcp";
+  ASSERT_TRUE(MakeDirs(node));
+  // Differs from anything a real device publishes, so an answer taken from
+  // the whole card cannot match it.
+  const char* partition_cuid = "73488f9e-ea52-86ce-8401-2627fa41b068";
+  std::ofstream(node + "/cuid_derived") << partition_cuid << '\n';
+
+  const ScopedSysfsRoot root(sysfs.path());
+  amdsmi_cuid_info_t info = {};
+  ASSERT_EQ(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_STREQ(info.derived, partition_cuid);
+  EXPECT_EQ(info.source, AMDSMI_CUID_SOURCE_DRIVER);
 }
 
 // One value, one lookup path: two paths to one identifier is how the kernel and
@@ -739,13 +718,13 @@ TEST(GpuUnit, CuidSingleStringCallMatchesSnapshot) {
   }
 }
 
-// A partition has no CUID of its own yet, and must not be handed the physical
-// device's: the kernel fixes the identifier's partition field at zero, so
-// reporting it would give all eight partitions of an MI300X in CPX mode one
-// identifier.
+// A partition must never be handed the whole card's identifier, since all
+// partitions share one BDF. With per-partition driver CUIDs each partition
+// reports its own; without them it reports NOT_SUPPORTED. Two partitions of one
+// card must never report the same value.
 //
 // Needs partitioned hardware to exercise, so it skips where there is none.
-TEST(GpuUnit, CuidIsNotReportedForASecondaryPartition) {
+TEST(GpuUnit, CuidForAPartitionIsItsOwnOrIsRefused) {
   if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
 
   const AmdSmiSession session;
@@ -754,24 +733,53 @@ TEST(GpuUnit, CuidIsNotReportedForASecondaryPartition) {
   const auto handles = GpuHandles();
   if (handles.empty()) GTEST_SKIP() << "no GPU present";
 
+  std::map<std::string, std::vector<std::string>> derived_by_card;
   size_t checked = 0;
+
   for (auto handle : handles) {
     const uint32_t partition = PartitionId(handle);
-    if (partition == kNoPartition || partition == 0) continue;
+    if (partition == kNoPartition) continue;
 
     amdsmi_cuid_info_t info = {};
     const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
-    EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED)
-        << "partition " << partition << " reported a CUID that names the whole device";
-    if (status != AMDSMI_STATUS_SUCCESS) ExpectNoCuidReported(info);
 
-    // The string form goes through the same lookup, so it must refuse too
-    // rather than round the refusal back to the device value.
     char cuid[AMDSMI_GPU_CUID_SIZE] = {};
     unsigned int length = sizeof(cuid);
-    EXPECT_EQ(amdsmi_get_gpu_device_cuid(handle, &length, cuid), AMDSMI_STATUS_NOT_SUPPORTED)
-        << "partition " << partition;
+    const amdsmi_status_t string_status = amdsmi_get_gpu_device_cuid(handle, &length, cuid);
+
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      EXPECT_EQ(info.source, AMDSMI_CUID_SOURCE_DRIVER)
+          << "partition " << partition
+          << " reported a CUID that did not come from the driver; nothing else can name a "
+             "partition";
+      EXPECT_EQ(string_status, AMDSMI_STATUS_SUCCESS) << "partition " << partition;
+      EXPECT_STREQ(cuid, info.derived) << "partition " << partition;
+
+      amdsmi_bdf_t bdf = {};
+      ASSERT_EQ(amdsmi_get_gpu_device_bdf(handle, &bdf), AMDSMI_STATUS_SUCCESS);
+      char bdf_str[32] = {};
+      snprintf(bdf_str, sizeof(bdf_str), "%04x:%02x:%02x.%01x",
+               static_cast<unsigned>(bdf.domain_number), static_cast<unsigned>(bdf.bus_number),
+               static_cast<unsigned>(bdf.device_number),
+               static_cast<unsigned>(bdf.function_number));
+      derived_by_card[bdf_str].emplace_back(info.derived);
+    } else {
+      EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED)
+          << "partition " << partition << " failed for a reason other than having no identifier";
+      ExpectNoCuidReported(info);
+      EXPECT_EQ(string_status, AMDSMI_STATUS_NOT_SUPPORTED)
+          << "partition " << partition << ": the string form rounded the refusal back to a value";
+    }
     ++checked;
+  }
+
+  for (const auto& card : derived_by_card) {
+    for (size_t i = 0; i < card.second.size(); ++i) {
+      for (size_t j = i + 1; j < card.second.size(); ++j) {
+        EXPECT_NE(card.second[i], card.second[j])
+            << "two partitions of " << card.first << " report the same derived CUID";
+      }
+    }
   }
 
   if (checked == 0) {
@@ -860,4 +868,72 @@ TEST(GpuUnit, CuidLegacyUuidIsStillItsOwnValue) {
     EXPECT_TRUE(LooksLikeUuid(uuid)) << "uuid: " << uuid;
     EXPECT_STRNE(uuid, info.derived);
   }
+}
+
+namespace {
+
+std::vector<amdsmi_cuid_component_t> CuidComponents(amdsmi_status_t* status) {
+  uint32_t count = 0;
+  *status = amdsmi_get_cuid_components(&count, nullptr);
+  if (*status != AMDSMI_STATUS_SUCCESS) return {};
+  std::vector<amdsmi_cuid_component_t> components(count);
+  *status = amdsmi_get_cuid_components(&count, components.data());
+  components.resize(count);
+  return components;
+}
+
+}  // namespace
+
+// The node-wide list is a full inventory: every entry is a well-formed CUID of
+// a known type, no two share a derived CUID, entries come sorted by type, and
+// every GPU amd-smi manages appears with the same CUID it reports per device.
+TEST(GpuUnit, CuidComponentListIsConsistent) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  const auto components = CuidComponents(&status);
+  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  if (components.empty()) GTEST_SKIP() << "no component has a CUID";
+
+  std::set<std::string> derived;
+  for (size_t i = 0; i < components.size(); ++i) {
+    const auto& c = components[i];
+    EXPECT_TRUE(LooksLikeUuid(c.info.derived)) << "entry " << i << ": " << c.info.derived;
+    EXPECT_NE(c.info.component_type, AMDSMI_CUID_COMPONENT_UNKNOWN) << "entry " << i;
+    EXPECT_NE(c.info.source, AMDSMI_CUID_SOURCE_UNKNOWN) << "entry " << i;
+    EXPECT_TRUE(derived.insert(c.info.derived).second) << "duplicate " << c.info.derived;
+    bool aux_from_value = false;
+    ASSERT_TRUE(AuxiliaryBitFromUuidString(c.info.derived, &aux_from_value));
+    EXPECT_EQ(static_cast<bool>(c.info.auxiliary), aux_from_value) << c.info.derived;
+    if (geteuid() != 0) EXPECT_EQ(c.info.primary[0], '\0') << "entry " << i;
+    if (i > 0) EXPECT_LE(components[i - 1].info.component_type, c.info.component_type);
+  }
+
+  for (auto handle : GpuHandles()) {
+    amdsmi_cuid_info_t info = {};
+    if (amdsmi_get_gpu_cuid_info(handle, &info) != AMDSMI_STATUS_SUCCESS) continue;
+    EXPECT_EQ(derived.count(info.derived), 1u) << info.derived << " is missing from the list";
+  }
+}
+
+// A buffer one entry short is filled as far as it goes, and the call reports
+// the full count with INSUFFICIENT_SIZE rather than a silently truncated list.
+TEST(GpuUnit, CuidComponentListReportsAShortBuffer) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  uint32_t total = 0;
+  ASSERT_EQ(amdsmi_get_cuid_components(&total, nullptr), AMDSMI_STATUS_SUCCESS);
+  if (total < 2) GTEST_SKIP() << "fewer than two components";
+
+  std::vector<amdsmi_cuid_component_t> components(total - 1);
+  uint32_t count = total - 1;
+  EXPECT_EQ(amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_INSUFFICIENT_SIZE);
+  EXPECT_EQ(count, total);
+  EXPECT_TRUE(LooksLikeUuid(components.back().info.derived));
 }

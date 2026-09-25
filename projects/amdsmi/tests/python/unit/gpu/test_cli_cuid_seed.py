@@ -2,33 +2,17 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Mock-based unit tests for CUID seed provisioning and reporting.
+"""CUID seed length checks, output leak checks and node-level CLI reporting.
 
-Three requirements, tested at the layers that enforce them.
-
-**A seed of any length but 32 octets is refused, and nothing is provisioned.**
-``amdsmi_set_cuid_seed()`` takes ``const uint8_t[AMDSMI_CUID_SEED_SIZE]`` and so
-has no length to check. The check lives twice above it, in the CLI (so the error
-names the file the operator passed) and in the Python binding (so a binding
-caller cannot bypass the CLI), and both are exercised here.
-
-**No octet of the seed reaches any output stream.** ``amd-smi`` output is pasted
-into tickets, so the provisioning command must report the fingerprint and never
-the secret. The library call is stubbed out, so nothing here provisions
-anything; a real provisioning re-keys the whole node.
-
-**The seed's state is reported once for the invocation, under the names the
-machine-readable contract fixes.** The seed is a property of the node, so
-``amd-smi static --cuid`` reports it beside the per-GPU blocks rather than
-inside each of them, as ``seed_provisioned`` and ``seed_fingerprint``. Those
-tests drive the real ``StaticCommands`` and ``AMDSMILogger`` across two GPUs.
-
-Every class stubs the C library, so they run without GPU hardware and without a
-compiled ``amdsmi``. The binding-level class needs a real importable ``amdsmi``
-and skips when there is none.
+The C library is stubbed: these tests never provision a node. Output checks
+reject the synthetic seed and every consecutive eight-byte window in raw or
+hex form. Reporting tests use the real CLI and logger across two GPUs.
+Binding tests load this tree's py-interface and skip only when libamd_smi.so
+cannot be loaded.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import io
 import json
@@ -37,6 +21,7 @@ import sys
 import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 # ``common.common`` bootstraps the real amdsmi package at import time, which
 # fails on a stale or mismatched install. The CLI classes below fully stub
@@ -67,6 +52,10 @@ def _resolve_cli_dir():
 
 _CLI_DIR = _resolve_cli_dir()
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
+_SOURCE_PY_INTERFACE_DIR = os.path.normpath(
+    os.path.join(_THIS_DIR, "..", "..", "..", "..", "py-interface")
+)
+_PY_INTERFACE_PACKAGE = "amdsmi_py_interface_under_test"
 
 SEED_SIZE = 32
 
@@ -74,10 +63,9 @@ SEED_SIZE = 32
 # unique and none of it is 0x00 or 0xff, which turn up in unrelated output.
 SEED_32 = bytes(range(0x40, 0x40 + SEED_SIZE))
 
-# What the stubbed library reports after provisioning. Neither the fingerprint
-# of SEED_32 (nothing here computes one) nor the canonical fallback fingerprint
-# be8937fba7ed4e6f, so that "the command reported what the library told it"
-# cannot be satisfied by a command that reports a constant.
+# What the stubbed library reports after provisioning. Not the fingerprint of
+# SEED_32 (nothing here computes one), so that "the command reported what the
+# library told it" cannot be satisfied by a command that computes its own.
 PROVISIONED_FINGERPRINT = "1c2d3e4f50617283"
 
 
@@ -92,8 +80,12 @@ def _install_fake_amdsmi():
     interface.AMDSMI_MAX_PPT_LIMIT = 0
     interface.AMDSMI_MAX_UTIL = 100
     interface.AMDSMI_CUID_SEED_SIZE = SEED_SIZE
+    interface.AMDSMI_CUID_SEED_FINGERPRINT_SIZE = 8
     interface.amdsmi_wrapper = wrapper
+    wrapper.AMDSMI_STATUS_API_FAILED = 7
     wrapper.AMDSMI_STATUS_NO_PERM = 10
+    wrapper.AMDSMI_STATUS_INVAL = 1
+    wrapper.AMDSMI_STATUS_IO = 12
 
     class _StubLibraryException(Exception):
         """Carries an error code, which the CLI branches on."""
@@ -105,7 +97,7 @@ def _install_fake_amdsmi():
         def get_error_code(self):
             return self.err_code
 
-        def get_error_info(self):
+        def get_error_info(self, detailed=True):
             return str(self)
 
     exception.AmdSmiLibraryException = _StubLibraryException
@@ -180,10 +172,7 @@ class _CuidSeedTestBase(unittest.TestCase):
     def setUp(self):
         self.set_calls = []
         self.interface.amdsmi_set_cuid_seed = self.set_calls.append
-        # A node that has just been provisioned, and therefore *not*
-        # fingerprinting the public fallback seed. Not be8937fba7ed4e6f, the
-        # canonical fallback fingerprint: a stub echoing that constant would
-        # also be satisfied by a command printing it from its own source.
+        # A node whose key an administrator has just set.
         self.interface.amdsmi_get_cuid_seed_info = lambda: {
             "provisioned": True,
             "fingerprint": PROVISIONED_FINGERPRINT,
@@ -267,7 +256,7 @@ class TestCuidSeedLengthIsEnforced(_CuidSeedTestBase):
 
 
 class TestCuidSeedNeverReachesOutput(_CuidSeedTestBase):
-    """No octet of a provisioned seed appears in anything the command emits."""
+    """Reject whole-seed and eight-byte-window leaks in captured output."""
 
     def _assert_no_seed_material(self, blob, where):
         self.assertNotIn(SEED_32.hex(), blob.lower(), f"whole seed as hex in {where}")
@@ -320,7 +309,111 @@ class TestCuidSeedNeverReachesOutput(_CuidSeedTestBase):
         self.assertEqual(self.logger.output["seed_fingerprint"], PROVISIONED_FINGERPRINT)
 
 
-class TestCuidSeedLengthEnforcedInTheBinding(unittest.TestCase):
+class TestCuidSeedFailureReportsWhatTheNodeHolds(_CuidSeedTestBase):
+    """A failed provisioning says whether the seed was stored anyway.
+
+    The key can be stored before the refresh that follows fails, so an error
+    does not by itself mean nothing changed.
+    """
+
+    def _fail_with(self, code):
+        stub_exception = sys.modules["amdsmi.amdsmi_exception"].AmdSmiLibraryException
+
+        def _raise(seed):
+            self.set_calls.append(seed)
+            raise stub_exception(code)
+
+        self.interface.amdsmi_set_cuid_seed = _raise
+
+    def _node_holds(self, provisioned, fingerprint):
+        self.interface.amdsmi_get_cuid_seed_info = lambda: {
+            "provisioned": provisioned,
+            "fingerprint": fingerprint,
+        }
+
+    def test_stored_but_unpublished_seed_is_reported_and_still_fails(self):
+        self._fail_with(self.interface.amdsmi_wrapper.AMDSMI_STATUS_IO)
+        self._node_holds(True, hashlib.sha256(SEED_32).digest()[:8].hex())
+        with self.assertRaises(sys.modules["amdsmi.amdsmi_exception"].AmdSmiLibraryException):
+            self._provision(SEED_32)
+        self.assertEqual(self.set_calls, [SEED_32])
+        self.assertTrue(self.logger.printed, "the stored state must be reported before the error")
+        self.assertEqual(
+            self.logger.output["seed_fingerprint"], hashlib.sha256(SEED_32).digest()[:8].hex()
+        )
+        self.assertIs(self.logger.output["seed_provisioned"], True)
+        self.assertIn("node key was stored", self.logger.output["seed_publication"])
+        self.assertIn("FAILED", self.logger.output["seed_publication"])
+
+    def test_failure_that_left_the_old_seed_reports_nothing(self):
+        # The store still holds another key: reporting its fingerprint next to
+        # the error would read as the new seed having landed.
+        self._fail_with(self.interface.amdsmi_wrapper.AMDSMI_STATUS_API_FAILED)
+        self._node_holds(True, PROVISIONED_FINGERPRINT)
+        with self.assertRaises(sys.modules["amdsmi.amdsmi_exception"].AmdSmiLibraryException):
+            self._provision(SEED_32)
+        self.assertEqual(self.logger.output, {})
+        self.assertEqual(self.logger.printed, [])
+
+    def test_unprovisioned_store_reports_nothing(self):
+        self._fail_with(self.interface.amdsmi_wrapper.AMDSMI_STATUS_API_FAILED)
+        self._node_holds(False, hashlib.sha256(SEED_32).digest()[:8].hex())
+        with self.assertRaises(sys.modules["amdsmi.amdsmi_exception"].AmdSmiLibraryException):
+            self._provision(SEED_32)
+        self.assertEqual(self.logger.output, {})
+
+    def test_lack_of_privilege_is_named_and_reports_nothing(self):
+        self._fail_with(self.interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
+        self._node_holds(True, hashlib.sha256(SEED_32).digest()[:8].hex())
+        with self.assertRaises(PermissionError):
+            self._provision(SEED_32)
+        self.assertEqual(self.logger.output, {})
+
+    def test_refused_seed_is_named_and_reports_nothing(self):
+        self._fail_with(self.interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+        self._node_holds(True, PROVISIONED_FINGERPRINT)
+        with self.assertRaisesRegex(ValueError, "refused"):
+            self._provision(SEED_32)
+        self.assertEqual(self.logger.output, {})
+
+
+class _BindingTestBase(unittest.TestCase):
+    """This tree's Python binding, loaded against the built libamd_smi.so."""
+
+    @classmethod
+    def setUpClass(cls):
+        # This tree's binding under a private package name, so neither an
+        # installed amdsmi nor the stub the CLI classes register can stand in.
+        # Loaded without the package __init__, which needs the generated
+        # _version.py.
+        if not os.path.isfile(os.path.join(_SOURCE_PY_INTERFACE_DIR, "amdsmi_interface.py")):
+            raise unittest.SkipTest(f"no py-interface at {_SOURCE_PY_INTERFACE_DIR}")
+        package = types.ModuleType(_PY_INTERFACE_PACKAGE)
+        package.__path__ = [_SOURCE_PY_INTERFACE_DIR]
+        sys.modules[_PY_INTERFACE_PACKAGE] = package
+        try:
+            interface = importlib.import_module(_PY_INTERFACE_PACKAGE + ".amdsmi_interface")
+            exception = importlib.import_module(_PY_INTERFACE_PACKAGE + ".amdsmi_exception")
+        except Exception:
+            cls._forget_package()
+            raise
+        if interface.amdsmi_wrapper._loaded_lib_path is None:
+            cls._forget_package()
+            raise unittest.SkipTest("libamd_smi.so could not be loaded")
+        cls.interface = interface
+        cls.parameter_exception = exception.AmdSmiParameterException
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._forget_package()
+
+    @staticmethod
+    def _forget_package():
+        for name in [n for n in sys.modules if n.split(".")[0] == _PY_INTERFACE_PACKAGE]:
+            del sys.modules[name]
+
+
+class TestCuidSeedLengthEnforcedInTheBinding(_BindingTestBase):
     """The same refusal in the Python binding, below the CLI.
 
     A binding caller never runs ``_set_cuid_seed``, so with the check only in the
@@ -328,39 +421,21 @@ class TestCuidSeedLengthEnforcedInTheBinding(unittest.TestCase):
     short buffer to a C entry point that reads 32 octets from it.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        # The real package, not the stub the CLI classes install. The sibling
-        # classes restore sys.modules in tearDownClass, so whichever runs first,
-        # this import is the real one.
-        try:
-            from amdsmi import amdsmi_exception, amdsmi_interface
-        except Exception as e:  # pragma: no cover - no amdsmi installed
-            raise unittest.SkipTest(f"amdsmi package not importable: {e}")
-        if not isinstance(getattr(amdsmi_interface, "__file__", None), str):
-            raise unittest.SkipTest("a stubbed amdsmi is loaded in this interpreter")
-        if not hasattr(amdsmi_interface, "amdsmi_set_cuid_seed") or not hasattr(
-            amdsmi_interface.amdsmi_wrapper, "amdsmi_set_cuid_seed"
-        ):
-            # An amdsmi from before this change does not carry the check under
-            # test.
-            raise unittest.SkipTest(
-                f"installed amdsmi ({amdsmi_interface.__file__}) predates the CUID seed API"
-            )
-        cls.interface = amdsmi_interface
-        cls.parameter_exception = amdsmi_exception.AmdSmiParameterException
-
     def setUp(self):
         self.calls = []
-        self.saved = self.interface.amdsmi_wrapper.amdsmi_set_cuid_seed
 
         def _record(buffer):
             # Nothing is provisioned here: a real one re-keys the whole node.
             self.calls.append(bytes(buffer))
             return 0  # AMDSMI_STATUS_SUCCESS
 
-        self.interface.amdsmi_wrapper.amdsmi_set_cuid_seed = _record
-        self.addCleanup(setattr, self.interface.amdsmi_wrapper, "amdsmi_set_cuid_seed", self.saved)
+        # create=True: the loaded libamd_smi.so may predate the symbol, and the
+        # check under test runs before the binding is reached.
+        patcher = mock.patch.object(
+            self.interface.amdsmi_wrapper, "amdsmi_set_cuid_seed", _record, create=True
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_wrong_length_seeds_are_refused_before_the_library(self):
         for length in (0, 16, 31, 33, 64):
@@ -372,6 +447,54 @@ class TestCuidSeedLengthEnforcedInTheBinding(unittest.TestCase):
     def test_thirty_two_octets_reaches_the_library_unchanged(self):
         self.interface.amdsmi_set_cuid_seed(SEED_32)
         self.assertEqual(self.calls, [SEED_32])
+
+
+class TestCuidComponentsBinding(_BindingTestBase):
+    """amdsmi_get_cuid_components decodes every entry, and lists a component
+    that appears between its count call and its fill call."""
+
+    def _fake(self, totals):
+        """Stand in for the C call; totals[k] is the node's size at call k."""
+        wrapper = self.interface.amdsmi_wrapper
+        self.calls = []
+
+        def _entry(count_ref, components):
+            total = totals[min(len(self.calls), len(totals) - 1)]
+            self.calls.append(bool(components))
+            count = count_ref._obj
+            capacity = count.value if components else 0
+            for i in range(min(capacity, total)):
+                entry = components[i]
+                entry.info.derived = f"0000000{i}-0000-8000-8000-000000000000".encode()
+                entry.info.component_type = wrapper.AMDSMI_CUID_COMPONENT_GPU
+                entry.info.source = wrapper.AMDSMI_CUID_SOURCE_DRIVER
+                entry.bdf = f"0000:0{i}:00.0".encode()
+                entry.vendor_id = 0x1002
+            count.value = total
+            if components and capacity < total:
+                return wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE
+            return wrapper.AMDSMI_STATUS_SUCCESS
+
+        patcher = mock.patch.object(wrapper, "amdsmi_get_cuid_components", _entry, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_entries_are_decoded(self):
+        self._fake([2])
+        components = self.interface.amdsmi_get_cuid_components()
+        self.assertEqual([c["bdf"] for c in components], ["0000:00:00.0", "0000:01:00.0"])
+        self.assertEqual(components[1]["derived"], "00000001-0000-8000-8000-000000000000")
+        self.assertEqual(components[0]["component_type"], "GPU")
+        self.assertEqual(components[0]["source"], "DRIVER")
+        self.assertIs(components[0]["auxiliary"], False)
+        self.assertEqual(components[0]["vendor_id"], 0x1002)
+        self.assertEqual(components[0]["primary"], "")
+
+    def test_a_component_appearing_between_calls_is_listed(self):
+        self._fake([1, 2])
+        components = self.interface.amdsmi_get_cuid_components()
+        self.assertEqual(self.calls, [False, True, False, True])
+        self.assertEqual(len(components), 2)
 
 
 class _FakeHelpers:
@@ -387,6 +510,15 @@ class _FakeHelpers:
 
     def handle_gpus(self, args, logger, subcommand):
         return self._real.handle_gpus(self, args, logger, subcommand)
+
+    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+        return self._real.get_gpu_cuid_info(self, device_handle, include_primary)
+
+    def get_cuid_seed_state(self):
+        return self._real.get_cuid_seed_state()
+
+    def _get_driver_cuid_seed_state(self, device_handle, cuid):
+        return self._real._get_driver_cuid_seed_state(self, device_handle, cuid)
 
     def get_gpu_id_from_device_handle(self, device_handle):
         return device_handle
@@ -553,14 +685,25 @@ class TestStaticCuidOutputShape(unittest.TestCase):
             self.assertNotIn("seed_provisioned", gpu_block["cuid"])
             self.assertNotIn("seed_fingerprint", gpu_block["cuid"])
 
-    def test_json_gpu_blocks_carry_the_five_per_device_names(self):
+    def test_json_gpu_blocks_carry_identity_and_observation_metadata(self):
         document = json.loads(self._run("json", cuid=True))
 
         for gpu_block in document["gpu_data"]:
             self.assertEqual(
                 sorted(gpu_block["cuid"]),
-                ["auxiliary", "component_type", "derived_cuid", "primary_cuid", "source"],
+                [
+                    "auxiliary",
+                    "component_type",
+                    "cuid_metadata_status",
+                    "derived_cuid",
+                    "effective_seed",
+                    "identifier_kind",
+                    "primary_cuid",
+                    "source",
+                ],
             )
+            self.assertEqual(gpu_block["cuid"]["effective_seed"], "unknown")
+        self.assertNotIn("seed_info_scope", document)
 
     def test_the_library_is_asked_for_the_seed_once_for_the_invocation(self):
         # Nothing here is memoised, so a second read would mean a second
