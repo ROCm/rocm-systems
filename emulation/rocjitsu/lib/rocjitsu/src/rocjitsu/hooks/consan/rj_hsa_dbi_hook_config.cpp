@@ -1016,7 +1016,7 @@ void report_config_rejection() {
   } else {
     config->auto_report_buffer_size =
         config->mode == Mode::Default && !config->report_buffer_address
-            ? kOrdinaryAutoReportBufferCeilingBytes
+            ? kDefaultAutoReportBufferCeilingBytes
             : 0;
   }
   if (config->auto_report_buffer_size != 0 &&

@@ -51,12 +51,12 @@ TEST(AutoReportPlan, BoundaryIsExactAndOneWatchpointFails) {
   const uint64_t watchpoint_count =
       (kOrdinaryAutoReportBufferCeilingBytes - sizeof(ReportHeader)) / sizeof(uint64_t);
   AutoReportInventory inventory{.watchpoint_count = watchpoint_count};
-  const auto accepted = plan_auto_report(inventory);
+  const auto accepted = plan_auto_report(inventory, kOrdinaryAutoReportBufferCeilingBytes);
   ASSERT_TRUE(accepted.complete());
   EXPECT_EQ(accepted.required_bytes, kOrdinaryAutoReportBufferCeilingBytes);
 
   ++inventory.watchpoint_count;
-  const auto rejected = plan_auto_report(inventory);
+  const auto rejected = plan_auto_report(inventory, kOrdinaryAutoReportBufferCeilingBytes);
   EXPECT_EQ(rejected.outcome, AutoReportPlanOutcome::InsufficientReportCapacity);
   EXPECT_EQ(rejected.reason, AutoReportPlanReason::PerBufferCeiling);
   EXPECT_EQ(rejected.required_bytes, kOrdinaryAutoReportBufferCeilingBytes + sizeof(uint64_t));
@@ -82,6 +82,30 @@ TEST(AutoReportPlan, AdaptiveBanksFitWithoutDroppingLogicalRanges) {
   auto exact = requested;
   exact.bank_count_adaptive = false;
   EXPECT_EQ(fit_auto_report_inventory(exact).range_bank_count, 8u * kLogicalRanges);
+}
+
+TEST(AutoReportPlan, ExplicitLargerCapPreservesCompleteTensilePublicationInventory) {
+  const AutoReportInventory inventory{
+      .access_range_count = 2448,
+      .barrier_event_count = 544,
+      .atomic_event_count = 15376,
+      .range_bank_count = 2448,
+      .sync_slot_count = 17824,
+      .watchpoint_count = 17824,
+      .bank_count_adaptive = true,
+  };
+  const auto ordinary = plan_auto_report(inventory);
+  EXPECT_EQ(ordinary.outcome, AutoReportPlanOutcome::InsufficientReportCapacity);
+  EXPECT_EQ(ordinary.ceiling_bytes, kDefaultAutoReportBufferCeilingBytes);
+  EXPECT_EQ(ordinary.required_bytes, 152288376u);
+  const auto expanded = plan_auto_report(inventory, 256u * 1024u * 1024u);
+  ASSERT_TRUE(expanded.complete());
+  EXPECT_EQ(expanded.required_bytes, ordinary.required_bytes);
+  EXPECT_EQ(expanded.layout.watchpoint_capacity, inventory.watchpoint_count);
+  EXPECT_EQ(expanded.layout.sync_metadata_capacity, inventory.sync_slot_count);
+  EXPECT_EQ(expanded.layout.publication_event_capacity, 1140736u);
+  EXPECT_EQ(plan_auto_report(inventory, std::numeric_limits<uint64_t>::max()).ceiling_bytes,
+            kOrdinaryAutoReportBufferCeilingBytes);
 }
 
 TEST(AutoReportPlan, AdaptiveBanksHonorExplicitCallerCap) {
@@ -136,7 +160,8 @@ TEST(AutoReportPlan, RepresentableHugeCountsAreCapacityInsufficientNotOverflow) 
 }
 
 TEST(AutoReportPlan, FrozenSafetyCeilingsRemainDistinct) {
-  EXPECT_EQ(kOrdinaryAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
+  EXPECT_EQ(kDefaultAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
+  EXPECT_EQ(kOrdinaryAutoReportBufferCeilingBytes, 256u * 1024u * 1024u);
   EXPECT_EQ(kAutoReportProcessCeilingBytes, 4ull * 1024u * 1024u * 1024u);
   EXPECT_GT(kAutoReportProcessCeilingBytes, kOrdinaryAutoReportBufferCeilingBytes);
   EXPECT_EQ(auto_report_plan_reason_name(AutoReportPlanReason::PerBufferCeiling),

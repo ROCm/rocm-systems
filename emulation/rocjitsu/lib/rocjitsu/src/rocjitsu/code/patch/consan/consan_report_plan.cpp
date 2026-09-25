@@ -250,8 +250,8 @@ AutoReportPlan plan_auto_report(const AutoReportInventory &inventory,
                                 uint64_t caller_ceiling_bytes) {
   AutoReportPlan plan;
   const uint64_t mode_ceiling = kOrdinaryAutoReportBufferCeilingBytes;
-  plan.ceiling_bytes =
-      caller_ceiling_bytes == 0u ? mode_ceiling : std::min(caller_ceiling_bytes, mode_ceiling);
+  plan.ceiling_bytes = caller_ceiling_bytes == 0u ? kDefaultAutoReportBufferCeilingBytes
+                                                  : std::min(caller_ceiling_bytes, mode_ceiling);
   mark_report_regions_unplanned(plan.layout);
   uint64_t cursor = sizeof(ReportHeader);
 

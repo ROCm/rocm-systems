@@ -421,13 +421,14 @@ ceiling, down to one. This preserves the static ranges and reserved sync slots;
 the achieved bank count, not the requested count, describes retention capacity.
 The automatic allocator then requests the exact planned bytes. It never silently
 shrinks site coverage or disables an event kind to fit. The per-buffer ceiling
-is 128 MiB, and aggregate live automatic-report memory is bounded at 4 GiB per
+defaults to 128 MiB and can be explicitly raised up to 256 MiB. Aggregate live
+automatic-report memory is bounded at 4 GiB per
 process. Arithmetic overflow, a ceiling violation, or allocation failure is a
 typed incomplete outcome.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE=N` | 128 MiB | Expert cap for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. |
+| `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE=N` | 128 MiB | Expert cap up to 256 MiB for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. |
 | `RJ_CONSAN_REPORT_BUFFER=0xADDR` | unset | Caller-owned device-visible report buffer. |
 | `RJ_CONSAN_REPORT_BUFFER_SIZE=N` | `0` | Size of the caller-owned buffer; layout requirements depend on the enabled event families. |
 | `RJ_CONSAN_REQUIRE_RECORDS=0\|1` | `0` | At unload, require at least one visible auto-buffer ConSan watchpoint; standalone synchronization metadata does not satisfy this check. |

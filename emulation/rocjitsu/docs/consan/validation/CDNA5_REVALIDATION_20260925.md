@@ -449,3 +449,16 @@ through lane zero, then reads peer wave sums after `.text+0x23b0/0x23d4`.
 This publication pair is the reviewed fault; the earlier barrier remains.
 Artifacts: `qwen-pristine.asm` and `remaining-lifetime-inventory/qwen-prefill`.
 Eight trials per mode, minimum six detections, are declared before outcomes.
+
+### Explicit report-cap expansion
+
+The planner and hook now retain a 128 MiB default while accepting an explicit
+cap up to 256 MiB. Exact allocation and the 4 GiB per-process aggregate report
+budget remain enforced. The maintained runner forwards
+`CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE` identically to Default clean/fault
+runs and records it; 208 Python tests pass. All 67 selected report-planning,
+pipeline and evidence host tests pass (`report-cap-host-tests.log`), including
+the observed MXF4 inventory: a 256 MiB cap admits all 152,288,376 required bytes
+and all publication-event slots, while the unchanged default still rejects it.
+This host test binary contains no HsaHooksUnitTest suite; hook/E2E confirmation
+is pending the safe rebuild after the active Tensile workload completes.
