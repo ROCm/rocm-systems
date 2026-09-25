@@ -2238,9 +2238,9 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_RECT: {
       const bool from_host =
           core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
-      status = DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
-                           from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals,
-                           out_signal);
+      status =
+          DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
+                      from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals, out_signal);
       break;
     }
     default:
