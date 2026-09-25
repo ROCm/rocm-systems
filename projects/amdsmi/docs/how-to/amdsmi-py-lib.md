@@ -112,6 +112,24 @@ driver and make sure that any resources held by AMD SMI are released.
 Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
 ```
 
+(py_version_match)=
+### Use the module that ships with the library
+
+The Python module and `libamd_smi.so` are released together. Import the module
+from the same installation that provides the library, not a copy from another
+release. A module from an older release can fail as soon as it is imported
+against a newer library. For example, library major version 27 (ROCm 10.0 and
+later) removed `amdsmi_set_gpu_clk_range()` and `amdsmi_gpu_driver_reload()`,
+so the `amdsmi` 7.0.2 wheel on PyPI fails at import against it:
+
+```text
+AttributeError: .../libamd_smi.so.27: undefined symbol: amdsmi_set_gpu_clk_range
+```
+
+PyTorch imports `amdsmi` during `import torch` on ROCm, so this error can
+surface there. See [Packaging and install paths](../packaging.md) for where
+each installation method places the module and the library.
+
 (py_exceptions)=
 ## Exceptions
 
@@ -131,6 +149,18 @@ Exceptions that can be thrown by AMD SMI are:
        print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
    ```
 
+
+* `OSError`: raised by the first call into the library when `libamd_smi.so`
+  could not be loaded. `import amdsmi` still succeeds in that case, so code
+  that checks whether AMD SMI is usable should catch `OSError` as well as
+  `AmdSmiException`:
+
+   ```python
+   try:
+       amdsmi_init()
+   except (AmdSmiException, OSError) as e:
+       print("AMD SMI is not usable: {}".format(e))
+   ```
 
 * `AmdSmiParameterException`: Derives base `AmdSmiException` class and
   represents errors related to invalid parameters passed to functions. When this
