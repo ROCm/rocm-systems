@@ -547,3 +547,11 @@ exit 92 (`transform-error`). No numerical result is produced, so this is a red
 instrumentation failure, distinct from Default's 900 s timeout. The first
 rejected input image is 2,260,856 bytes. Evidence: the three clean run logs and
 `bounded-clean-tensile/tensile-spmm-f8-ml/supercollider/.../result.json`.
+
+### MXF8/F4 TDM bounded Default result
+
+Two of three Default clean shards pass in about 41 seconds, with complete
+768-access/204-barrier/12-atomic/12-fence coverage. The third hits its 300 s
+client deadline without a final analysis verdict. The cell remains orange,
+now describing this measured timeout instead of the historical OOM. Evidence:
+`bounded-clean-tensile/tensile-sk-mxf8f4gemm-tdm/default/`.
