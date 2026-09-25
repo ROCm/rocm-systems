@@ -345,3 +345,10 @@ The replacement spec predeclares eight trials per mode, minimum six detections.
 Tree SuperCollider sleep=15 completes 0/8 detections with accepted matching clean,
 eight admitted/reached trials, complete analysis and healthy pre/post checks.
 Evidence: `tree-lifetime-sleep15-{clean,fault}`.
+
+WMMA Default finishes 2/8 (`wmma-lifetime-default-{clean,fault}`), with
+matching accepted clean, complete analysis, and eight healthy admitted/reached
+trials. High calibration and SuperCollider sleep=15 are running.
+Tensile F8 SuperCollider finishes all nine clean shards successfully under the
+bounded scheduler (`bounded-clean-tensile/tensile-sk-f8gemm-quick/supercollider`);
+its fault qualification remains pending.
