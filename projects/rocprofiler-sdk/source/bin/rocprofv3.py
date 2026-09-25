@@ -2206,6 +2206,8 @@ def run(app_args, args, **kwargs):
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:
             e_file_contents = e_file.read()
+            if not e_file_contents.strip():
+                warning("Extra counter file '{}' was empty.", args.extra_counters)
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
     if args.pmc and args.pmc_groups:
