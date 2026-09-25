@@ -963,3 +963,21 @@ campaign process to finish, then runs matching baseline/Default clean and Defaul
 fault qualification. It uses explicit emulator health probes, 900 s inner and
 1200 s outer deadlines, and fresh `hgemm-default-retry-{clean,fault}` roots.
 The initial corrected SGEMM trial has now completed with healthy emulator probes.
+
+### FP8 GEMM ordinary-LDS publication fault
+
+Fresh inventory ELF `7e9735d439957243` selects the Ailk/Bljk MT16x32x128
+kernel. Its matching ELF has .text VMA 0x7100 and selected kernel VMA 0x12f00;
+`f8-selected.asm` retains the full disassembly. Thread 0's first A store at
+0x147b0 writes offset 0 (`v32=4*tid`). Thread 32's first A load at 0x149cc
+also reads offset 0: `v34=(lane%16)+256*(lane//16)+2048*(wave//2)`.
+This is a cross-wave publication dependency through ordinary LDS accesses.
+
+The reviewed fault drops only .text+0xd8c0/0xd8c4, the post-store split pair,
+while retaining producer retirement and other barriers. Maintained 128/129
+square cases contain full DepthU128 iterations reaching this edge. Eight trials
+per mode and six detections minimum were declared before outcomes. All 209 runner
+tests pass (`f8gemm-spec-tests.log`). `f8gemm-default-queue.py` waits for the
+existing longer full Default clean to finish successfully before launching faults;
+it exits without fault trials if that clean result is not accepted. The row
+remains orange until the full clean evidence is available.
