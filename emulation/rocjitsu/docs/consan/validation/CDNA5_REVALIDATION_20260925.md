@@ -1629,3 +1629,12 @@ source-review concern to test and fix, not a newly qualified validation result.
 
 Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,031 passed,
 two existing live-inventory tests skipped (`tensor-geometry-tests.log`).
+
+### Qwen high recovery qualifies
+
+`qwen-high-recovery-fault` completes all eight planned trials: eight admitted,
+eight reached and eight detections, with healthy pre/post checks. The recorded
+preset is high in each result. `qwen-high-long-clean` provides the matching
+accepted high clean run with complete coverage and the 1200 s allowance.
+Default previously detected 0/8 and 1/8 in separate campaigns. Qwen is green at
+high; the interrupted earlier campaign is not pooled into this result.

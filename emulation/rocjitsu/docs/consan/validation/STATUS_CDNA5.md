@@ -34,7 +34,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 high: clean pass at 1200 s; 7/7 completed recovery trials detected; final trial running | 🟧 sleep=15: clean run hits 360 s deadline; delay-zero clean previously passed |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 high: clean pass at 1200 s; fault 8/8 | 🟧 sleep=15: clean run hits 360 s deadline; delay-zero clean previously passed |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher: filtered clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 higher: all 3 clean runs pass; prefill fault 8/8 | 🟨 delay-zero: all 3 filtered clean runs pass; fault trials pending |
