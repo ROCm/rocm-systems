@@ -1,5 +1,10 @@
 # HipKittens BF16 startup fault on CDNA4
 
+**Disposition:** the async-completion implementation is deferred at the user's
+request to avoid introducing risk in the current repair series. No runtime
+implementation of the proposed fix has been made. The Default cell stays
+yellow; the diagnosis and manual reproducer below are retained for future work.
+
 The remaining Default miss is an asynchronous-completion blind spot, not a
 watchpoint-bank shortage. The original startup fault remains **unqualified**:
 `max` with 128, 256, and 512 banks each passes the clean control and detects
@@ -107,3 +112,22 @@ VM-operation tracking independent of instrumentation waits, pending LDS-write
 lifetimes across barriers, and completion proofs for nonzero VM counts and
 control-flow joins. The original startup mutation must remain the acceptance
 case, alongside the reduced correct/broken pair and the retirement control.
+
+## Deferred implementation considerations
+
+This requires changes to instruction analysis, probe generation, runtime
+evidence, and conflict analysis. A possible design is an ordered per-wave
+guest VM-event history, with issue and completion-wait records connected to
+retained LDS accesses. This is a design candidate, not an implemented or
+validated solution. Ordinary VM operations also consume counter slots and
+must be accounted for when interpreting nonzero waits. Instrumentation's own
+memory operations and waits must be excluded from that logical guest history.
+
+The design must handle divergent paths, loops and repeated static accesses,
+dynamic barrier rounds, and bounded evidence capacity without inventing
+completion proofs. A pending write may span a barrier even though the
+instrumented hardware has already completed it. The main risks are false
+positives in correctly pipelined kernels, incomplete evidence from trace
+capacity limits, and increased register, memory, and runtime costs. Removing
+necessary metadata waits or substituting the easier retirement fault would
+not be a valid fix.
