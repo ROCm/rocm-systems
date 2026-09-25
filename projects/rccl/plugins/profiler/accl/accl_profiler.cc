@@ -590,7 +590,8 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
 
   // Open output file (write mode — fresh file per init to avoid stale data)
   const char* outDir = getenv("ACCL_PROFILER_OUTPUT_DIR");
-  if (!outDir) outDir = "/tmp";
+  // Empty as well as unset: "" would assemble a path at the filesystem root.
+  if (!outDir || !outDir[0]) outDir = "/tmp";
 
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname) - 1);
