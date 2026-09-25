@@ -636,3 +636,11 @@ TP1 prefill Default finishes with 0/8 admitted/reached detections. This
 corroborates the sampling shortfall seen at high, whose batch was truncated
 by a timeout after five admitted trials; the cell retains the latest high
 result while that retry is pending.
+
+### CLIP Default qualified at high
+
+The high clean baseline and instrumented run pass, and the reviewed tile
+publication fault is detected in all 8/8 admitted/reached trials. Every trial
+has complete analysis, healthy pre/post checks, and the high preset; clean and
+fault provenance files match. Since Default was 3/8, high is the lowest
+qualified preset at or above default. Evidence: `clip-cap-high-{clean,fault}`.
