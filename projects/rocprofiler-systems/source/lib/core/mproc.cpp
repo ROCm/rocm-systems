@@ -14,9 +14,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace mproc
+namespace rocprofsys::mproc
 {
 std::set<int>
 get_concurrent_processes(int _ppid)
@@ -131,5 +129,4 @@ diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 
     return _ec;
 }
-}  // namespace mproc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::mproc

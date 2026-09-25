@@ -366,6 +366,12 @@ return `true`; the group samples this policy when each plugin is added, and its
 conservative default is `false`. Overriding the hook alone is silent — the
 plugin simply never sees an access.
 
+Plugins that also need execution state may override the context-preserving
+`onAmdgpuMemoryAccessRouted(access, inst, wf)` form. Its default implementation
+forwards to the observation-only form, so existing observers keep the same
+behavior. The borrowed instruction and wavefront already reflect the selected
+route and are valid only during the callback.
+
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.
 

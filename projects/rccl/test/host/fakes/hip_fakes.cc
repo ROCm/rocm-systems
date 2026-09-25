@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <set>
 
 #include <cassert>
 #include <cstdint>
@@ -43,6 +44,14 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemImportFromShareableHandle, hipMemImportFromShareableHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,          hipMemAddressReserve);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
+ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
+ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -202,6 +211,8 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 // Defined with the plain HIP stubs below, where the attribute switch lives.
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
+static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+static hipError_t DefaultHipEventRecord(hipEvent_t event, hipStream_t stream);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
 {
@@ -217,6 +228,16 @@ std::function<hipError_t(int*, int, int)> g_hipDeviceCanAccessPeer = DefaultHipD
 hipError_t g_hipDeviceGetAttributeResult = hipErrorInvalidValue;
 hipError_t g_hipDeviceGetPCIBusIdResult  = hipErrorInvalidValue;
 hipError_t g_hipEventCreateResult        = hipErrorInvalidValue;
+
+// Opt-in record->query fidelity. Off by default so the vast majority of tests
+// keep the simple "query just reports g_hipAsyncOpsResult" behaviour. A test
+// that wants to exercise the async publish-ordering contract (a slot's event
+// must be recorded after its copy before the query is allowed to report the
+// copy complete) sets g_hipEventQueryRequiresRecord = true. With it on, a query
+// on an event that was never recorded reports hipErrorNotReady, so dropping the
+// production hipEventRecord is observable as "the transfer never completes".
+bool                    g_hipEventQueryRequiresRecord = false;
+std::set<hipEvent_t>    g_recordedEvents;
 hipError_t g_hipMemPoolResult            = hipErrorInvalidValue;
 hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
@@ -477,9 +498,12 @@ void InstallHipVmmEmulator()
     };
 }
 // Cross-stream ordering seams; defaults preserve the replaced stubs' behaviour.
+// hipEventRecord routes through g_hipAsyncOpsResult so unhooked call sites (e.g.
+// the CE proxy-progress copy pump) track the shared async-ops result; tests that
+// need to drive event recording install their own g_hipEventRecord hook.
 static hipError_t DefaultHipEventRecord(hipEvent_t, hipStream_t)
 {
-    return hipErrorInvalidValue;
+    return g_hipAsyncOpsResult;
 }
 static hipError_t DefaultHipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned int)
 {
@@ -515,6 +539,7 @@ void ResetHipFakes()
     g_hipDeviceSetLimit             = DefaultHipDeviceSetLimit;
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
+    g_hipDeviceGetPCIBusId          = DefaultHipDeviceGetPCIBusId;
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
@@ -545,6 +570,8 @@ void ResetHipFakes()
     g_hipGetLastError               = DefaultHipGetLastError;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
+    g_hipEventQueryRequiresRecord   = false;
+    g_recordedEvents.clear();
 }
 
 // ===========================================================================
@@ -620,7 +647,12 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     return g_hipDeviceGetAttribute(pi, attr, device);
 }
 
-hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
+// Default preserves the historical behaviour: a fixed bus-id string gated on
+// the g_hipDeviceGetPCIBusIdResult flag. Tests that need a device-distinct
+// bus id (so busIdToCudaDev resolves distinct cudaDev indices -- the
+// p2pCanConnect device-selection branches) install a hook that encodes the
+// device index into the string.
+static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int)
 {
     if (pciBusId && len > 0) {
         if (g_hipDeviceGetPCIBusIdResult == hipSuccess)
@@ -630,17 +662,39 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
     }
     return g_hipDeviceGetPCIBusIdResult;
 }
+std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId =
+    DefaultHipDeviceGetPCIBusId;
+
+hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
+{
+    return g_hipDeviceGetPCIBusId(pciBusId, len, device);
+}
 
 hipError_t hipEventCreate(hipEvent_t* event)
 {
-    if (event) *event = nullptr;
-    return hipErrorInvalidValue;
+    if (event) {
+        *event = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
+    }
+    return g_hipEventCreateResult;
 }
 
-hipError_t hipEventDestroy(hipEvent_t)      { return hipSuccess; }  // benign teardown (commFree)
-hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
+hipError_t hipEventDestroy(hipEvent_t event)
+{
+    g_recordedEvents.erase(event);   // a destroyed event is no longer recorded
+    return hipSuccess;               // benign teardown (commFree)
+}
+hipError_t hipEventQuery(hipEvent_t event)
+{
+    if (g_hipEventQueryRequiresRecord && g_recordedEvents.find(event) == g_recordedEvents.end())
+        return hipErrorNotReady;     // no record has marked this event complete yet
+    return g_hipAsyncOpsResult;
+}
 hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream)
 {
+    // Track membership in the wrapper (like hipMemcpyAsync's call log) so the
+    // record->query dependency holds regardless of any installed g_hipEventRecord
+    // hook. Only the hook's return value is under a test's control.
+    if (g_hipEventQueryRequiresRecord && event) g_recordedEvents.insert(event);
     return g_hipEventRecord(event, stream);
 }
 

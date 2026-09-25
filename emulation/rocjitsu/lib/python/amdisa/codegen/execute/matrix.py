@@ -675,6 +675,26 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
         elif (
             uses_gfx11_wmma_layout
+            and result_type in ('F32', 'F16', 'BF16')
+            and input_type in ('F16', 'BF16')
+            and (M, N, K) == (16, 16, 16)
+        ):
+            bf16 = str(input_type == 'BF16').lower()
+            packed_arg = ', true' if result_type != 'F32' else ''
+            if packed_arg:
+                L.append(f'  if ({s2}.encoding_value_ < 256)')
+                L.append(
+                    f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>'
+                    f'(const_acc, {s2}.encoding_value_);'
+                )
+            L.append(
+                f'  amdgpu::exec_gfx11_wmma_dot2<{bf16}{packed_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+                f" inst_.neg, inst_.neg_hi{', (inst_.op_sel >> 2) & 1u, wf.fp16_ovfl()' if packed_arg else ''});"
+            )
+        elif (
+            uses_gfx11_wmma_layout
             and result_type == 'F32'
             and input_type not in ('F8_F6_F4', 'F8F6F4')
         ):
@@ -682,6 +702,26 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'  amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                 f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
+            )
+        elif (
+            uses_gfx12_wmma_layout
+            and result_type in ('F32', 'F16', 'BF16')
+            and input_type in ('F16', 'BF16')
+            and (M, N, K) == (16, 16, 16)
+        ):
+            bf16 = str(input_type == 'BF16').lower()
+            packed_arg = ', true' if result_type != 'F32' else ''
+            if packed_arg:
+                L.append(f'  if ({s2}.encoding_value_ < 256)')
+                L.append(
+                    f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>'
+                    f'(const_acc, {s2}.encoding_value_);'
+                )
+            L.append(
+                f'  amdgpu::exec_gfx12_wmma_dot4<{bf16}{packed_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+                f" inst_.neg, inst_.neg_hi{', wf.fp16_ovfl()' if packed_arg else ''});"
             )
         elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
             if result_type == 'F16':

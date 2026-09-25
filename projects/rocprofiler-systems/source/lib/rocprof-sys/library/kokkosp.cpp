@@ -189,9 +189,7 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
 }  // namespace
 //--------------------------------------------------------------------------------------//
 
-namespace rocprofsys
-{
-namespace kokkosp
+namespace rocprofsys::kokkosp
 {
 namespace
 {
@@ -217,8 +215,7 @@ resume()
     _paused.store(false, std::memory_order_relaxed);
 }
 
-}  // namespace kokkosp
-}  // namespace rocprofsys
+}  // namespace rocprofsys::kokkosp
 
 extern "C"
 {

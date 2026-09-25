@@ -44,8 +44,7 @@ void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc_mask();
   if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
@@ -53,8 +52,7 @@ void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc_mask();
   if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;

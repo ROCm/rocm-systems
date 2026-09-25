@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 
 #include <atomic>
+#include <cassert>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)

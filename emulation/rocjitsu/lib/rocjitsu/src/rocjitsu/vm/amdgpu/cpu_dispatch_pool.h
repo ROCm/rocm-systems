@@ -73,7 +73,7 @@ public:
       return {};
     if (results.size() != tasks.size())
       throw std::invalid_argument("dispatch result count must match task count");
-    std::fill(results.begin(), results.end(), FunctionalQuantumResult{});
+    std::ranges::fill(results, FunctionalQuantumResult{});
     threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
     const uint32_t worker_goal =
         std::min<uint32_t>(threads - 1, static_cast<uint32_t>(workers_.size()));

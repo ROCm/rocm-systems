@@ -150,7 +150,7 @@ public:
         return error;
     }
 
-    if (!std::all_of(seen_.begin(), seen_.end(), [](bool seen) { return seen; }))
+    if (!std::ranges::all_of(seen_, [](bool seen) { return seen; }))
       return lineError(line_number_, "RACE header is missing one or more required fields");
     return std::nullopt;
   }
@@ -319,8 +319,8 @@ inline TraceSections parseTrace(const RaceRecord &record) {
 }
 
 inline bool anyContains(const std::vector<std::string> &lines, const std::string &substring) {
-  return std::any_of(lines.begin(), lines.end(),
-                     [&](const std::string &line) { return detail::contains(line, substring); });
+  return std::ranges::any_of(
+      lines, [&](const std::string &line) { return detail::contains(line, substring); });
 }
 
 inline RaceExpectationMatchResult matchRaceRecord(const RaceRecord &record,

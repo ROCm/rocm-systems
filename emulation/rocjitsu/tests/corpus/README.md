@@ -68,6 +68,11 @@ runtime approaches the pytest timeout.
 simulator wavefront. This is a simulator modeling gap, not a change introduced
 by the corpus SDK nightly.
 
+## gfx1250 simulator exclusions
+
+`rocblas_sgemm::square_64x64` is excluded because the pinned ROCm SDK kernel
+reads a scalar-memory result after a nonzero KMCNT wait.
+
 ## Sanitizer simulator coverage
 
 The Clang and GCC ASan+UBSan lanes run the same target-qualified corpus as the

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -70,6 +71,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
   if (uses_src_neg_modifier(slot.op))
     src0 = apply_neg(src0, slot.neg, 0);
+  // MOV has no src1: its unused encoding bits may name a pending register.
   if (slot.op == kVopdMovB32)
     return src0;
   uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
@@ -134,7 +136,8 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
+    uint64_t condition = slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane)
+                                       : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxF32: {
@@ -151,6 +154,28 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return src1 << (src0 & 31u);
   case kVopdAndB32:
     return src0 & src1;
+  case kVopdDot2AccF32F16: {
+    if (slot.src0->opr_type_ == OperandType::OPR_SRC &&
+        amdgpu::dot2_src_needs_half_replication(slot.src0->encoding_value())) {
+      uint32_t half = src0 & 0xffffu;
+      if (amdgpu::is_inline_float_src(slot.src0->encoding_value()))
+        half = util::f32_to_f16(std::bit_cast<float>(src0));
+      src0 = half * 0x10001u;
+    }
+    const uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
+    return amdgpu::gfx11_dot2_f32<false>(src0, src1, src0 >> 16, src1 >> 16, acc);
+  }
+  case kVopdDot2AccF32Bf16: {
+    if (slot.src0->opr_type_ == OperandType::OPR_SRC &&
+        amdgpu::dot2_src_needs_half_replication(slot.src0->encoding_value())) {
+      uint32_t half = src0 & 0xffffu;
+      if (amdgpu::is_inline_float_src(slot.src0->encoding_value()))
+        half = src0 >> 16;
+      src0 = half * 0x10001u;
+    }
+    const uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
+    return amdgpu::gfx11_dot2_f32<true>(src0, src1, src0 >> 16, src1 >> 16, acc);
+  }
   default:
     throw util::UnimplementedInst(op_name(slot.op));
   }

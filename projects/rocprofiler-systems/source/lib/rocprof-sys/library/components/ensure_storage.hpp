@@ -10,9 +10,7 @@
 #include <timemory/operations/types.hpp>
 #include <timemory/utility/type_list.hpp>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -44,5 +42,4 @@ private:
     }
 };
 }  // namespace
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

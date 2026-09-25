@@ -105,7 +105,8 @@ public:
       return VmAccessOutcome::Unavailable;
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return VmAccessOutcome::Complete;
   }
 
@@ -114,7 +115,7 @@ public:
     std::lock_guard lock(mutex_);
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     write_addresses_.push_back(address);
     return VmAccessOutcome::Complete;
   }

@@ -17,9 +17,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -257,5 +255,4 @@ client_data::set_agents()
     fill_agents(agent_type::gpu, gpu_agents);
     fill_agents(agent_type::cpu, cpu_agents);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

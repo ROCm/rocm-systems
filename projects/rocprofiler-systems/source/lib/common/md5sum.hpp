@@ -9,9 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 
 class md5sum
@@ -413,5 +411,4 @@ md5sum::hexdigest() const
     return std::string(buf);
 }
 
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common
