@@ -1587,3 +1587,11 @@ primitives; detector admission, metadata, and completion integration remain.
 
 Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,028 passed,
 two existing live-inventory tests skipped (`tensor-selection-tests.log`).
+
+### HGEMM high qualifies on the complete workload
+
+`hgemm-full-high-clean` passes all six maintained problem-size shards with
+complete accepted coverage. `hgemm-exact-high-clean-retry` passes the matching
+retained fault artifact, including its 146 numeric rows. The eight admitted and
+reached trials in `hgemm-exact-high-fault` detect six faults, meeting the existing
+6/8 threshold. Default detected 0/8, so high is the lowest qualifying preset.
