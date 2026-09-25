@@ -260,6 +260,44 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
                     "setup failed");
   }
 }
+
+/*
+ * 8-byte AMO over the verbs host transport. bnxt RoCE atomics are 8-byte and
+ * native byte order, so the operand and returned pre-image pass through as-is
+ * (validated on Broadcom bnxt: fetch_add 0->1, compare_swap 0->42).
+ *
+ * TODO(mlx5/ionic): Mellanox and Pensando HCAs perform RDMA atomics in
+ * big-endian (mirrored by the device GDA path, which does endian::to_be on the
+ * atomic operands in provider_gda_mlx5.hpp). ibverbs abstracts the WQE binary
+ * format but NOT the atomic value byte order, so before enabling verbs AMO on
+ * those NICs the operand AND the returned result must be byteswapped
+ * (htobe64/be64toh), gated on the HCA atomic-endianness capability from
+ * ibv_query_device (IBV_ATOMIC_HCA vs IBV_ATOMIC_GLOB). Put/get are byte copies
+ * and unaffected; only atomics need this.
+ */
+__host__ bool HostInterface::verbs_amo_fetch_add(WindowInfo* window_info,
+                                                 void* dst, uint64_t value,
+                                                 int pe, uint64_t* out) {
+  auto* wiv = dynamic_cast<WindowInfoVerbs*>(window_info);
+  if (!wiv) {
+    return false;
+  }
+  *out = wiv->amo_fadd(dst, value, pe);
+  return true;
+}
+
+__host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
+                                                 void* dst, uint64_t swap,
+                                                 uint64_t compare, int pe,
+                                                 uint64_t* out) {
+  auto* wiv = dynamic_cast<WindowInfoVerbs*>(window_info);
+  if (!wiv) {
+    return false;
+  }
+  /* WindowInfoVerbs::amo_cas(dst, compare, swap, pe). */
+  *out = wiv->amo_cas(dst, compare, swap, pe);
+  return true;
+}
 #endif  // USE_VERBS
 
 __host__ HostInterface::~HostInterface() {

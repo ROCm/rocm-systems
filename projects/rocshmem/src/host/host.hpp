@@ -422,6 +422,21 @@ class HostInterface {
 
   /// Build the verbs host stack if selected; no-op otherwise. Collective.
   __host__ void maybe_setup_verbs_host(SymmetricHeap* heap);
+
+  /**
+   * @brief 8-byte AMO fast-path helpers for the verbs host transport.
+   *
+   * Non-template, verbs-header-free indirection called from the amo_fetch_*
+   * templates (host_templates.hpp): if @p window_info is a WindowInfoVerbs,
+   * perform the atomic and set @p *out (true); otherwise return false so the
+   * caller falls through to the MPI-window path. Defined in host.cpp so the
+   * verbs headers stay out of the device-compiled template header.
+   */
+  __host__ bool verbs_amo_fetch_add(WindowInfo* window_info, void* dst,
+                                    uint64_t value, int pe, uint64_t* out);
+  __host__ bool verbs_amo_fetch_cas(WindowInfo* window_info, void* dst,
+                                    uint64_t swap, uint64_t compare, int pe,
+                                    uint64_t* out);
 #endif
 
   /*
