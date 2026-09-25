@@ -23,12 +23,15 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class GsRegisters;
 
 /// gfx1250 cluster async-to-LDS uses the low M0 bits as a destination
 /// workgroup-rank mask. Dispatch validation keeps cluster size within this
@@ -144,8 +147,54 @@ private:
   size_t size_ = 0;
 };
 
+/// @brief Surface metadata needed to materialize image clears in the memory pipeline.
+struct ImageMetadataAccess {
+  uint64_t base = 0, metadata = 0, slice_size = 0;
+  uint32_t width = 0, height = 0, swizzle = 0;
+  bool pipe_aligned = true;
+  bool depth = false;
+  /// Per-lane x in bits 0-15 and y in bits 16-31.
+  std::array<uint32_t, 64> coordinates{};
+  /// Per-lane absolute array layer, including the descriptor view start.
+  std::array<uint32_t, 64> layers{};
+};
+
+/// @brief Texel requests and interpolation weights captured at sample issue time.
+struct ImageSampleAccess {
+  static constexpr size_t kMaxFilters = 16;
+  /// Two mips, four bilinear taps, and three texels at a cube corner.
+  static constexpr size_t kMaxTaps = kMaxFilters * 2 * 4 * 3;
+  struct Tap {
+    std::array<uint64_t, 64> addresses{};
+    /// Per-lane x in bits 0-15 and y in bits 16-31.
+    std::array<uint32_t, 64> coordinates{};
+    /// Per-lane absolute array layer, including the descriptor view start.
+    std::array<uint32_t, 64> layers{};
+    uint64_t lane_mask = 0;
+  };
+  struct Filter {
+    /// XY interpolation fractions indexed by lane, mip, then axis.
+    std::array<std::array<std::array<float, 2>, 2>, 64> fractions{};
+    /// Bits identify bilinear taps averaged from three cube corner texels.
+    std::array<std::array<uint8_t, 2>, 64> cube_corners{};
+  };
+  /// Reserve two mips of four bilinear taps; larger footprints grow on demand.
+  std::vector<Tap> taps{8};
+  /// Ordinary bilinear and trilinear requests retain one filter.
+  std::vector<Filter> filters{1};
+  /// Number of anisotropic footprint samples requested by each lane.
+  std::array<uint32_t, 64> filter_counts{};
+  std::array<float, 64> mip_fractions{};
+  uint32_t tap_count = 1;
+  /// Texel requests per footprint sample, including both mips and cube corners.
+  uint32_t taps_per_filter = 1;
+  /// One texel normally, or three when a bilinear tap crosses a cube corner.
+  uint32_t texels_per_tap = 1;
+  uint32_t border_color = 0;
+};
+
 /// @brief Dynamic pipeline state for vector memory instructions
-/// (FLAT, MUBUF, MTBUF, DS).
+/// (FLAT, MUBUF, MTBUF, MIMG, DS).
 class VectorMemState : public DynamicInstState {
 public:
   VectorMemState(MemPipelineTag pipeline) {
@@ -183,6 +232,12 @@ public:
   BufferFormat decoded_buffer_format;
   BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
   uint32_t buffer_selectors = 0;
+  bool image_srgb = false;
+  // Every sampler instruction uses floating-point texel rules, including
+  // nearest sampling without optional multi-tap image_sample state.
+  bool image_sampling = false;
+  std::unique_ptr<ImageMetadataAccess> image_metadata;
+  std::unique_ptr<ImageSampleAccess> image_sample;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
@@ -214,6 +269,9 @@ public:
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
+  /// NGG counters use the DS completion path, but do not address LDS or GDS memory.
+  std::shared_ptr<GsRegisters> gs_registers;
+  uint32_t gs_register_index = 0;
   // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
   // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
   // by default, including FLAT atomics routed to LDS through the shared

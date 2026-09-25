@@ -872,8 +872,16 @@ struct PerfsimPlugin::Impl {
       }
     }
 
+    for (const auto &set : access.additional_address_sets) {
+      if (access.decoded_space != amdgpu::DecodedMemorySpace::GLOBAL ||
+          set.addresses.size() != access.wavefront_size ||
+          (set.lane_mask & ~access.valid_lane_mask) != 0) {
+        reject(access.dispatch_id, "memory observation has invalid additional address sets");
+        return;
+      }
+    }
     const uint64_t requests = access.request_lane_mask;
-    if (requests == 0)
+    if (requests == 0 && access.additional_address_sets.empty())
       return;
 
     switch (access.decoded_space) {
@@ -910,7 +918,11 @@ struct PerfsimPlugin::Impl {
         reject(access.dispatch_id, "explicit global observation has inconsistent routing");
         return;
       }
-      record_memory(*wave, access, requests, FFM_RESOURCE_GLOBAL, access.addresses);
+      if (requests)
+        record_memory(*wave, access, requests, FFM_RESOURCE_GLOBAL, access.addresses);
+      for (const auto &set : access.additional_address_sets)
+        if (set.lane_mask)
+          record_memory(*wave, access, set.lane_mask, FFM_RESOURCE_GLOBAL, set.addresses);
       return;
 
     case amdgpu::DecodedMemorySpace::FLAT:

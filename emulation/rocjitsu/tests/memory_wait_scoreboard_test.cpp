@@ -633,10 +633,10 @@ TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctio
       ASSERT_NE(cu, nullptr);
       auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
-      const auto counters = {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,
-                             WaitCounterType::DSCNT,   WaitCounterType::KMCNT,
-                             WaitCounterType::EXPCNT,  WaitCounterType::TENSORCNT,
-                             WaitCounterType::ASYNCCNT};
+      const auto counters = {WaitCounterType::LOADCNT,  WaitCounterType::STORECNT,
+                             WaitCounterType::DSCNT,    WaitCounterType::KMCNT,
+                             WaitCounterType::EXPCNT,   WaitCounterType::TENSORCNT,
+                             WaitCounterType::ASYNCCNT, WaitCounterType::SAMPLECNT};
       for (auto counter : counters)
         wf->wait_counters().increment(counter);
       auto decoder = Decoder::create(arch);

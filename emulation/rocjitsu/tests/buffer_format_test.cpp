@@ -78,6 +78,17 @@ TEST(BufferFormatTest, UnpacksNormalizedSignedHalfAndPackedChannels) {
             (std::array<uint32_t, 4>{bits(1), bits(2), bits(0.5f), 0}));
 }
 
+TEST(BufferFormatTest, CountsStoredComponentsForNarrowAndPackedFormats) {
+  for (uint32_t format : {20u, 21u, 22u})
+    EXPECT_EQ(amdgpu::decode_buffer_format(format).value().component_count(), 1u);
+  for (uint32_t format : {48u, 49u, 50u})
+    EXPECT_EQ(amdgpu::decode_buffer_format(format).value().component_count(), 2u);
+  EXPECT_EQ(amdgpu::decode_buffer_format(30).value().component_count(), 3u);
+  for (uint32_t format : {42u, 43u, 44u, 45u, 46u, 47u})
+    EXPECT_EQ(amdgpu::decode_buffer_format(format).value().component_count(), 4u);
+  EXPECT_EQ(amdgpu::decode_buffer_format(0).value().component_count(), 0u);
+}
+
 TEST(BufferFormatTest, PacksConvertedComponentsAndReplicatesMissingShaderValues) {
   std::array<uint8_t, 4> bytes{};
   const std::array<uint32_t, 4> values{bits(-2), bits(0.5f), bits(1), bits(2)};

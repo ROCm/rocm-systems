@@ -20,6 +20,8 @@
 
 namespace rocjitsu::amdgpu {
 
+class GraphicsDraw;
+
 /// @brief Compute register offsets relative to the SH register aperture.
 inline constexpr uint32_t kPm4ComputeStartX = 0x204;
 inline constexpr uint32_t kPm4ComputeNumThreadX = 0x207;
@@ -41,7 +43,10 @@ enum class Pm4Opcode : uint32_t {
   ClearState = 0x12,
   SetPredication = 0x20,
   CondExec = 0x22,
+  DrawIndex2 = 0x27,
   ContextControl = 0x28,
+  DrawIndexAuto = 0x2d,
+  NumInstances = 0x2f,
   PfpSyncMe = 0x42,
   SetContextReg = 0x69,
   SetContextRegPairs = 0xb8,
@@ -146,7 +151,9 @@ struct Pm4QueueState {
   using ContextRegisters = std::array<uint32_t, 0x2000>;
 
   uint64_t indirect_base = 0;
+  uint32_t num_instances = 1;
   bool predicate_pass = true;
+  std::shared_ptr<GraphicsDraw> draw;
   std::shared_ptr<GsRegisters> gs_registers = std::make_shared<GsRegisters>();
   std::array<uint32_t, 0x400> sh_registers{};
   ContextRegisters context_registers{};

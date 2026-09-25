@@ -7,6 +7,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/graphics_draw.h"
+#include "rocjitsu/vm/amdgpu/graphics_stage.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
@@ -473,6 +475,11 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                       uint32_t global_wg_id,
                                                       uint32_t wf_index_in_wg) {
   using namespace rocr::llvm::amdhsa;
+  if (pkt.graphics_stage) {
+    wf->set_graphics_stage(pkt.graphics_stage);
+    pkt.graphics_stage->initialize(*wf, global_wg_id, wf_index_in_wg);
+    return VmAccessOutcome::Complete;
+  }
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
 
@@ -3087,6 +3094,54 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
   qs.push_entry(std::move(dp));
 }
 
+void CommandProcessor::draw_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                uint32_t vertices, std::vector<uint32_t> indices) {
+  if (!vertices || !queue.pm4->num_instances)
+    return;
+  if (cus_.empty())
+    throw std::runtime_error("graphics draw requires a compute unit");
+  auto draw = std::make_shared<GraphicsDraw>(*queue.pm4, cus_[0]->config().arch, vertices,
+                                             std::move(indices));
+  auto dp = draw->vertex_dispatch();
+  queue.pm4->draw = std::move(draw);
+  dispatch_graphics_pm4(queue, qs, std::move(dp));
+}
+
+void CommandProcessor::dispatch_graphics_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+                                             DispatchEntry dp) {
+  if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
+    throw std::runtime_error("graphics launch exceeds available VGPRs");
+  dp.kind = DispatchPacketKind::Kernel;
+  dp.dispatch_id = allocate_dispatch_id();
+  dp.process_id = queue.process_id;
+  dp.queue_id = queue.queue_id;
+  dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
+  dp.pm4_abi = true;
+  dp.pm4_failure = queue.pm4->submissions.front().failure;
+  dp.graphics_stage = queue.pm4->draw;
+  dp.address_space = queue.address_space;
+  flush_gpu_caches();
+  util::Logger::cp("graphics dispatch pc=", std::hex, dp.kernel_entry_pc, std::dec,
+                   " workgroups=", dp.total_wgs);
+  KernelDispatchInfo info{};
+  info.dispatch_id = dp.dispatch_id;
+  info.entry_pc = dp.kernel_entry_pc;
+  info.kernel_name = queue.pm4->draw->fragment_stage() ? "PM4 fragment" : "PM4 vertex";
+  info.code_target = cus_[0]->config().target;
+  info.lds_size_bytes = dp.group_segment_fixed_size;
+  info.wave_size = dp.kernel_wave_size;
+  info.grid_size_x = dp.grid_size_x;
+  info.workgroup_size_x = dp.kernel_wave_size;
+  info.grid_size_y = info.grid_size_z = info.workgroup_size_y = info.workgroup_size_z = 1;
+  info.workgroup_count = dp.total_wgs;
+  info.wfs_per_workgroup = 1;
+  info.sgprs_per_wf = dp.sgprs_per_wf;
+  info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuDispatchPacketProcessed(info);
+  ++total_dispatched_;
+  qs.push_entry(std::move(dp));
+}
+
 void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs) {
   queue.faulted = true;
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
@@ -3107,6 +3162,7 @@ void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &q
     if (submission.complete)
       submission.complete(false);
   queue.pm4->submissions.clear();
+  queue.pm4->draw.reset();
 }
 
 void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now) {
@@ -3124,6 +3180,14 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
     const auto access = snapshot_gpu_access(queue.address_space);
     if (!access)
       throw std::runtime_error("PM4 queue has no GPU address space");
+    if (state.draw) {
+      flush_gpu_caches();
+      if (auto dp = state.draw->advance(*access)) {
+        dispatch_graphics_pm4(queue, qs, std::move(*dp));
+        return;
+      }
+      state.draw.reset();
+    }
     // Bound one event's packet work, including IB chains.
     for (uint32_t budget = 0; budget < 4096 && !state.submissions.empty(); ++budget) {
       auto &submission = state.submissions.front();
@@ -3650,6 +3714,43 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         if (words[2] & (1u << 20))
           submission.buffers.pop_front();
         submission.buffers.push_front({address(0), words[2] & 0xfffff, depth});
+        break;
+      }
+      case Pm4Opcode::NumInstances:
+        require(1);
+        if (!submission.graphics_engine)
+          throw std::runtime_error("NUM_INSTANCES on compute engine");
+        state.num_instances = words[0];
+        break;
+      case Pm4Opcode::DrawIndexAuto:
+        require(2);
+        if (!submission.graphics_engine || words[1] != 2)
+          throw std::runtime_error("unsupported DRAW_INDEX_AUTO initiator");
+        draw_pm4(queue, qs, words[0]);
+        if (!qs.entries.empty())
+          return;
+        break;
+      case Pm4Opcode::DrawIndex2: {
+        require(5);
+        if (!submission.graphics_engine || words[4] || words[3] > (1u << 20))
+          throw std::runtime_error("unsupported DRAW_INDEX_2 initiator or count");
+        const uint32_t type = state.uconfig_registers[0x243] & 3;
+        if (type > 2)
+          throw std::runtime_error("unsupported graphics index type");
+        const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+        const uint32_t valid = std::min(words[0], words[3]);
+        flush_gpu_caches();
+        std::vector<uint8_t> data(valid * bytes);
+        if (!data.empty() && access->read(address(1), std::as_writable_bytes(std::span{data})) !=
+                                 VmAccessOutcome::Complete)
+          throw std::runtime_error("graphics index read failed");
+        std::vector<uint32_t> indices(words[3]);
+        for (uint32_t i = 0; i < valid; ++i)
+          for (uint32_t b = 0; b < bytes; ++b)
+            indices[i] |= uint32_t{data[i * bytes + b]} << (b * 8);
+        draw_pm4(queue, qs, words[3], std::move(indices));
+        if (!qs.entries.empty())
+          return;
         break;
       }
       case Pm4Opcode::DispatchDirectInterleaved:
