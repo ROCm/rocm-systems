@@ -4581,9 +4581,12 @@ RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
 RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
   auto &real = InterposerContext::real();
   if (!real.fstat64_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.fstat64_fn)>(RTLD_NEXT, "fstat64");
+    if (fn)
+      return fn(fd, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4603,9 +4606,12 @@ RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
 RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
   auto &real = InterposerContext::real();
   if (!real.fxstat_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.fxstat_fn)>(RTLD_NEXT, "__fxstat");
+    if (fn)
+      return fn(ver, fd, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4625,9 +4631,12 @@ RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
 RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
   auto &real = InterposerContext::real();
   if (!real.fxstat64_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.fxstat64_fn)>(RTLD_NEXT, "__fxstat64");
+    if (fn)
+      return fn(ver, fd, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4677,9 +4686,12 @@ RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
 RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
   auto &real = InterposerContext::real();
   if (!real.stat64_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.stat64_fn)>(RTLD_NEXT, "stat64");
+    if (fn)
+      return fn(path, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4700,9 +4712,12 @@ RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
 RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
   auto &real = InterposerContext::real();
   if (!real.lstat64_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.lstat64_fn)>(RTLD_NEXT, "lstat64");
+    if (fn)
+      return fn(path, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4723,9 +4738,12 @@ RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
 RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
   auto &real = InterposerContext::real();
   if (!real.xstat_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.xstat_fn)>(RTLD_NEXT, "__xstat");
+    if (fn)
+      return fn(ver, path, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4746,9 +4764,12 @@ RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
 RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf) {
   auto &real = InterposerContext::real();
   if (!real.xstat64_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.xstat64_fn)>(RTLD_NEXT, "__xstat64");
+    if (fn)
+      return fn(ver, path, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4769,9 +4790,12 @@ RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf
 RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
   auto &real = InterposerContext::real();
   if (!real.lxstat_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.lxstat_fn)>(RTLD_NEXT, "__lxstat");
+    if (fn)
+      return fn(ver, path, buf);
     errno = ENOSYS;
     return -1;
   }
@@ -4792,9 +4816,12 @@ RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
 RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *buf) {
   auto &real = InterposerContext::real();
   if (!real.lxstat64_fn) {
-    // The alias table is resolved eagerly in init(); a call that lands before
-    // that has no passthrough to use. Fail with an errno rather than -1 alone,
-    // which would leave the caller reading a stale one.
+    // A preload constructor (e.g. rocprofiler-sdk) can call this before init().
+    // Resolve without a lazy static or writes to the shared eager table: a
+    // forked child must never inherit an in-progress initialization guard.
+    auto fn = util::lookup_symbol<decltype(real.lxstat64_fn)>(RTLD_NEXT, "__lxstat64");
+    if (fn)
+      return fn(ver, path, buf);
     errno = ENOSYS;
     return -1;
   }
