@@ -1,0 +1,97 @@
+name: 'Resolve coco run parameters'
+description: >-
+  Check out the coco harness at the requested ref and resolve which coco run
+  this trigger maps to: pr/nightly/weekly/monthly mode, trigger_kind, the
+  pinned harness commit, and the coco CLI flags to pass.
+
+inputs:
+  coco_ref:
+    description: 'ROCm/tRCCL ref for the coco harness.'
+    required: false
+    default: 'main'
+  dry_run:
+    description: 'Resolve stacks and submissions without building or running anything.'
+    required: false
+    default: 'false'
+  periodic_mode:
+    description: 'Which periodic run to drive by hand (workflow_dispatch without pr_number). Ignored otherwise.'
+    required: false
+    default: 'nightly'
+  schedule:
+    description: 'The cron expression that fired, from github.event.schedule. Required on a schedule event.'
+    required: false
+    default: ''
+  pr_number:
+    description: 'Pull request number. Set to test a PR head; leave unset for a periodic run.'
+    required: false
+    default: ''
+  pr_sha:
+    description: 'Full 40-hex PR head SHA. Required when pr_number is set.'
+    required: false
+    default: ''
+  pr_repo:
+    description: 'Monorepo slug. Required when pr_number is set.'
+    required: false
+    default: ''
+  client-id:
+    description: 'GitHub App client ID used to mint the harness checkout token.'
+    required: true
+  app-private-key:
+    description: 'Private key for client-id.'
+    required: true
+
+outputs:
+  mode:
+    description: 'pr | nightly | weekly | monthly'
+    value: ${{ steps.resolve.outputs.mode }}
+  coco_ref:
+    description: 'Resolved commit SHA of the checked-out coco harness.'
+    value: ${{ steps.resolve.outputs.coco_ref }}
+  coco_args:
+    description: 'Additional coco CLI flags for this run.'
+    value: ${{ steps.resolve.outputs.coco_args }}
+  trigger_kind:
+    description: 'coco --trigger-kind for this run.'
+    value: ${{ steps.resolve.outputs.trigger_kind }}
+  pr_number:
+    description: 'Pull request number under test, empty for a periodic run.'
+    value: ${{ steps.resolve.outputs.pr_number }}
+  pr_sha:
+    description: 'PR head SHA under test, empty for a periodic run.'
+    value: ${{ steps.resolve.outputs.pr_sha }}
+  pr_repo:
+    description: 'Repository slug the PR belongs to, empty for a periodic run.'
+    value: ${{ steps.resolve.outputs.pr_repo }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout the coco harness
+      uses: ./.github/actions/rccl-checkout-coco-harness
+      with:
+        ref: ${{ inputs.coco_ref }}
+        path: _coco
+        client-id: ${{ inputs.client-id }}
+        app-private-key: ${{ inputs.app-private-key }}
+
+    - name: Resolve run parameters
+      id: resolve
+      shell: bash
+      working-directory: _coco
+      env:
+        DRY_RUN: ${{ inputs.dry_run }}
+        PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
+        PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
+        PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
+        EVENT_NAME: ${{ github.event_name }}
+        PERIODIC_MODE: ${{ inputs.periodic_mode }}
+        SCHEDULE: ${{ inputs.schedule }}
+      run: python3 "${GITHUB_WORKSPACE}/.github/scripts/rccl_resolve_coco_run.py"
+
+    # Self-hosted runners reuse the workspace between runs.
+    - name: Clean up harness checkout
+      if: always()
+      shell: bash
+      # On NFS an open file becomes .nfsXXXX rather than unlinking, so rm -rf
+      # hits ENOTEMPTY while a child exits. Scratch must not fail the job.
+      run: rm -rf _coco || echo "::warning::Could not fully remove _coco."

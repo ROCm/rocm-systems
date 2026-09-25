@@ -42,6 +42,9 @@ table WavefrontState {
   wg_coord: [uint32];
   kernel_wave_size: ubyte; // Architectural wave width.
   vgpr_lane_count: ubyte; // Per-register lane count in the VGPR payload.
+  // Transient gfx1250 instruction-adjacency state. Appended last so older
+  // checkpoints restore it as false.
+  setreg_vgpr_msb_hazard: bool;
 }
 
 /// Serialized state of a compute unit.

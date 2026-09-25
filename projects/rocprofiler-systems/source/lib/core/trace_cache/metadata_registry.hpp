@@ -29,9 +29,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace info
 {
@@ -289,5 +287,4 @@ private:
             rename_table);
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

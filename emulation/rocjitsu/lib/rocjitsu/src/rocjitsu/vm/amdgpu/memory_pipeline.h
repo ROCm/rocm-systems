@@ -12,6 +12,9 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <queue>
@@ -45,6 +48,13 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 class MemoryPipeline {
 public:
   using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome)>;
+  static constexpr std::size_t MAX_WAIT_COUNTER_TOKENS =
+      MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * MemoryCounterObligation::MAX_COUNTER_INCREMENT;
+
+  struct WaitCounterTokens {
+    std::array<WaitCounterType, MAX_WAIT_COUNTER_TOKENS> types{};
+    uint8_t size = 0;
+  };
 
   explicit MemoryPipeline(WaitCounterType type) : counter_type_(type) {}
   virtual ~MemoryPipeline();
@@ -52,7 +62,7 @@ public:
   struct PipelineEntry {
     Instruction *inst;
     Wavefront *wf;
-    WaitCounterType counter;
+    WaitCounterTokens counters;
     uint64_t wave_generation;
   };
 
@@ -60,9 +70,9 @@ public:
   ///
   /// In functional mode, memory accesses normally complete synchronously:
   /// the load or store is initiated and completed within this call, and the
-  /// wait counter is released only after complete_access() finishes all
-  /// writeback work.  A timing backend may return Deferred and release the
-  /// counter later through finish_completed_access().
+  /// wait-counter obligations are released only after complete_access()
+  /// finishes all writeback work. A timing backend may return Deferred and
+  /// release the counters later through finish_completed_access().
   VmAccessOutcome issue(Instruction *inst, Wavefront &wf);
 
   /// @brief Issue an instruction and retain it for retry on Unavailable.
@@ -93,16 +103,18 @@ protected:
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
-  [[nodiscard]] WaitCounterType issue_counter(const Instruction &inst) const;
+  [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
+  void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
+  void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void complete_entry(PipelineEntry entry);
 
-  void finish_completed_access(Instruction *inst, Wavefront &wf, WaitCounterType counter,
+  void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
                                uint64_t wave_generation) {
     if (wf.dispatch_generation() != wave_generation) {
       delete inst;
       return;
     }
-    wf.release_wait_counter(counter);
+    release_wait_counters(wf, counters);
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;

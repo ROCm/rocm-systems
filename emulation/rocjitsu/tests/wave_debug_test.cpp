@@ -1324,7 +1324,7 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   EXPECT_EQ(restored.queue_packet_id, wave.queue_packet_id);
   EXPECT_EQ(restored.trap_id, wave.trap_id);
   ASSERT_EQ(restored.lds.size(), 1024u);
-  EXPECT_TRUE(std::equal(wave.lds.begin(), wave.lds.end(), restored.lds.begin()));
+  EXPECT_TRUE(std::ranges::equal(wave.lds, std::span(restored.lds).first(wave.lds.size())));
   for (uint32_t r = 0; r < wave.num_vgprs; ++r)
     for (uint32_t lane = 0; lane < 32; ++lane)
       EXPECT_EQ(restored.vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
@@ -1421,7 +1421,7 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
         EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
     if (in.is_first_in_group) {
       ASSERT_GE(out.lds.size(), in.lds.size());
-      EXPECT_TRUE(std::equal(in.lds.begin(), in.lds.end(), out.lds.begin()));
+      EXPECT_TRUE(std::ranges::equal(in.lds, std::span(out.lds).first(in.lds.size())));
     } else {
       EXPECT_TRUE(out.lds.empty());
     }

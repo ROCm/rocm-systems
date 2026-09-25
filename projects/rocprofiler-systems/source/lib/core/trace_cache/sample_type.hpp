@@ -12,9 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 enum class type_identifier_t : std::uint32_t
@@ -729,5 +727,4 @@ get_size(const kfd_sample& item)
                              item.system_tid);
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

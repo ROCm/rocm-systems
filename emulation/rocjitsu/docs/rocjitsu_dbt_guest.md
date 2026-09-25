@@ -208,19 +208,17 @@ rocjitsu goes through the patched table and is covered.
   `hsa_executable_load_agent_code_object`), so whichever ROCR loads second wraps
   the first one's wrappers.
 
-  Note that `HSA_TOOLS_LIB` does not decide this. ROCR loads the hotswap hook
-  itself from `Runtime::LoadHotswapTool()`, before it reads `HSA_TOOLS_LIB` at
-  all, whenever a gfx1250 A0 agent is present and `HSA_HOTSWAP_DISABLE` is not
-  set. So on such a machine the hotswap hook is always first and the DBT hook
-  always wraps it, whatever `HSA_TOOLS_LIB` says — and merely leaving the hotswap
-  hook out of that variable does not keep it out of the process. To run the DBT
-  hook there, set `HSA_HOTSWAP_DISABLE`.
+  Note that `HSA_TOOLS_LIB` does not decide automatic loading. ROCR calls
+  `Runtime::LoadHotswapTool()` before it reads `HSA_TOOLS_LIB`. Current releases
+  load the hotswap hook when `HSA_HOTSWAP_ENABLE` is true and a gfx1250 A0 agent
+  is present; older releases load it unless `HSA_HOTSWAP_DISABLE` is true.
 
-  Everywhere else the hotswap hook never loads, `HSA_TOOLS_LIB` is the only
-  thing naming a tool, and the supported launch path keeps it to one: `rocjitsu`
-  *sets* `HSA_TOOLS_LIB` to the DBT hook rather than appending to it. Neither
-  library exports `HSA_AMD_TOOL_PRIORITY`, so nothing pins a slot among tools
-  that do come from that variable.
+  The supported DBT launch path enforces one hook across both runtime
+  generations: `rocjitsu` sets `HSA_HOTSWAP_ENABLE=0` and
+  `HSA_HOTSWAP_DISABLE=1`, then replaces `HSA_TOOLS_LIB` with the DBT hook rather
+  than appending to it. An inherited parent setting therefore cannot enable the
+  automatic hotswap hook. Neither library exports `HSA_AMD_TOOL_PRIORITY`, so
+  nothing pins a slot among tools that do come from `HSA_TOOLS_LIB`.
 - `HSA_TOOLS_DISABLE_REGISTER=1` is a workaround. The better design is a
   rocprofiler-register API-table interposer that applies the same shadowing
   before rocprofiler validates HSA agents.

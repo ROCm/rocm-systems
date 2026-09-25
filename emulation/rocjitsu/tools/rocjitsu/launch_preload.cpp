@@ -47,14 +47,14 @@ bool env_name_matches(std::string_view entry, const std::string &name) {
 
 std::vector<std::string>::iterator find_env_entry(std::vector<std::string> &entries,
                                                   const std::string &name) {
-  return std::find_if(entries.begin(), entries.end(),
-                      [&](const std::string &entry) { return env_name_matches(entry, name); });
+  return std::ranges::find_if(
+      entries, [&](const std::string &entry) { return env_name_matches(entry, name); });
 }
 
 std::vector<std::string>::const_iterator find_env_entry(const std::vector<std::string> &entries,
                                                         const std::string &name) {
-  return std::find_if(entries.begin(), entries.end(),
-                      [&](const std::string &entry) { return env_name_matches(entry, name); });
+  return std::ranges::find_if(
+      entries, [&](const std::string &entry) { return env_name_matches(entry, name); });
 }
 
 #if defined(RJ_BUILT_WITH_ASAN) || defined(RJ_BUILT_WITH_TSAN)
@@ -155,6 +155,17 @@ void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &
     environment.prepend_path("LD_PRELOAD", asan_runtime);
   if (std::string tsan_runtime = find_loaded_tsan_runtime(); !tsan_runtime.empty())
     environment.prepend_path("LD_PRELOAD", tsan_runtime);
+}
+
+void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,
+                                          const std::string &hooks_path) {
+  // The DBT and gfx1250 HotSwap hooks wrap the same HSA functions. Disable
+  // automatic HotSwap loading for current and older ROCr releases before
+  // selecting only the DBT hook through the explicit tools path.
+  environment.set("HSA_HOTSWAP_ENABLE", "0");
+  environment.set("HSA_HOTSWAP_DISABLE", "1");
+  environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
+  environment.set("HSA_TOOLS_LIB", hooks_path);
 }
 
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {

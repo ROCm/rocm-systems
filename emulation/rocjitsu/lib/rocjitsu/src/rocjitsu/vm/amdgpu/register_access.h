@@ -731,13 +731,13 @@ public:
       if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
         throw std::logic_error("partial-byte VgprReadRegion cannot copy raw words");
       if (!valid_ || !observed_) {
-        std::fill(destination.begin(), destination.end(), 0);
+        std::ranges::fill(destination, 0);
         return;
       }
       size_t copied = 0;
       for_each([&](std::span<const uint32_t> lanes) {
         const size_t count = std::min(lanes.size(), destination.size() - copied);
-        std::copy_n(lanes.begin(), count, destination.begin() + copied);
+        std::ranges::copy_n(lanes.begin(), count, destination.begin() + copied);
         copied += count;
       });
     }
@@ -963,10 +963,43 @@ public:
   }
   explicit RegisterAccess(const Wavefront &wf) : RegisterAccess(wf.cu()) { wf_ = &wf; }
 
+  /// Resolve a destination for dependency tracking without reading its value or
+  /// notifying observers. Use the execution resolver for dynamic VGPR indexing.
+  [[nodiscard]] std::optional<RegisterRef> destination_register(const Operand &op) const {
+    auto reg = op.to_register_ref();
+    if (!reg) {
+      if (auto special = op.to_special_reg_class())
+        return RegisterRef{*special, 0, static_cast<uint8_t>(std::max(1, op.size_bits() / 32))};
+      return std::nullopt;
+    }
+    if (reg->cls == RegClass::VGPR) {
+      auto &wf = mutable_wavefront();
+      auto base = op.simd_vgpr_base_mut(wf);
+      if (!base || !cu_->owns_vgpr_range(wf, *base, reg->width))
+        return std::nullopt;
+      reg->index = static_cast<uint16_t>(*base - wf.vgpr_alloc().base);
+    }
+    return reg;
+  }
+
+  /// Resolve a replay source using the execution bank and scalar selector.
+  [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op) const;
+
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
   // ISA-specific resolver/backend.
   [[nodiscard]] uint32_t read_scalar(const Operand &op) const {
+    const Wavefront &wf = wavefront();
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+      return 0;
+    return op.read_scalar(wf);
+  }
+
+  /// Statically typed fast path for generated final class, enabling
+  /// devirtualization of the hot 32-bit operand accessors.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  [[nodiscard]] uint32_t read_scalar(const OperandT &op) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
       return 0;
@@ -979,6 +1012,15 @@ public:
     return op.read_scalar64(wf);
   }
   [[nodiscard]] uint32_t read_lane(const Operand &op, uint32_t lane) const {
+    const Wavefront &wf = wavefront();
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+      return 0;
+    return op.read_lane(wf, lane);
+  }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  [[nodiscard]] uint32_t read_lane(const OperandT &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
       return 0;
@@ -1044,6 +1086,15 @@ public:
       return;
     op.write_scalar(wf, value);
   }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  void write_scalar(const OperandT &op, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      return;
+    op.write_scalar(wf, value);
+  }
   void write_scalar64(const Operand &op, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
@@ -1051,6 +1102,17 @@ public:
     op.write_scalar64(wf, value);
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      return;
+    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+      return;
+    op.write_lane(wf, lane, value);
+  }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  void write_lane(const OperandT &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
@@ -1113,7 +1175,7 @@ public:
   void read_chunk(const Operand &op, uint32_t lane_base, uint32_t count, uint32_t *out) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1)) {
-      std::fill_n(out, count, 0u);
+      std::ranges::fill_n(out, count, 0u);
       return;
     }
     op.read_lane_chunk(wf, lane_base, count, out);
@@ -1488,6 +1550,8 @@ private:
 
   void observe_sgpr_region(const Wavefront &owner, uint32_t physical_base,
                            uint32_t reg_count) const {
+    if (!cu_->observes_register_access())
+      return;
     assert(reg_count <= std::numeric_limits<uint8_t>::max());
     cu_->notify_scalar_register_read(
         owner,
@@ -1497,12 +1561,16 @@ private:
 
   void observe_vgpr_region(const Wavefront &owner, uint32_t physical_base, uint32_t reg_count,
                            uint64_t lane_mask, uint8_t byte_mask) const {
+    if (!cu_->observes_register_access())
+      return;
     for (uint32_t reg = 0; reg < reg_count; ++reg)
       cu_->notify_vgpr_read(&owner, physical_base + reg, lane_mask, byte_mask);
   }
 
   void observe_vgpr_write_region(const Wavefront &owner, uint32_t physical_base, uint32_t reg_count,
                                  uint64_t lane_mask, uint8_t byte_mask) const {
+    if (!cu_->observes_register_access())
+      return;
     for (uint32_t reg = 0; reg < reg_count; ++reg)
       cu_->notify_vgpr_write(&owner, physical_base + reg, lane_mask, byte_mask);
   }

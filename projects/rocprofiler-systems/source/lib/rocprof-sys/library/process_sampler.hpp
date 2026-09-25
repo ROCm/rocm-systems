@@ -18,9 +18,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace process_sampler
+namespace rocprofsys::process_sampler
 {
 struct instance
 {
@@ -90,5 +88,4 @@ resume()
     sampler::resume();
 }
 //
-}  // namespace process_sampler
-}  // namespace rocprofsys
+}  // namespace rocprofsys::process_sampler

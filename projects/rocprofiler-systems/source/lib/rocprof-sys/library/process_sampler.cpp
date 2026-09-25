@@ -15,9 +15,7 @@
 #include <thread>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace process_sampler
+namespace rocprofsys::process_sampler
 {
 namespace
 {
@@ -257,5 +255,4 @@ sampler::set_state(state_t _state)
 {
     get_sampler_state().store(_state);
 }
-}  // namespace process_sampler
-}  // namespace rocprofsys
+}  // namespace rocprofsys::process_sampler

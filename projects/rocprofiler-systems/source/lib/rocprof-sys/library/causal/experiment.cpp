@@ -39,9 +39,7 @@
 #include <thread>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 namespace
 {
@@ -712,5 +710,4 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
 
     return _data;
 }
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

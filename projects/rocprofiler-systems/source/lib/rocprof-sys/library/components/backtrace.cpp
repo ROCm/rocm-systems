@@ -49,9 +49,7 @@
 #include <pthread.h>
 #include <signal.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 std::vector<backtrace::entry_type>
 backtrace::get() const
@@ -181,7 +179,6 @@ backtrace::sample(int signo)
     // 4c. killpg            [common but not explicitly in call-stack]
     m_data = get_unw_stack<stack_depth, ignore_depth, with_signal_frame>();
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::backtrace)

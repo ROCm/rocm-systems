@@ -50,9 +50,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 namespace
 {
@@ -1083,5 +1081,4 @@ finish_experimenting()
     sampling::post_process();
     experiment::save_experiments();
 }
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal
