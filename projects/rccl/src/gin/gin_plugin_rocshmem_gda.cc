@@ -22,6 +22,10 @@
 #include "gin/gin_rocshmem_gda_factory.h"
 #include <hip/hip_runtime.h>
 
+// RCCL env-var parameters for traffic class (defined in transport/net_ib/)
+extern int64_t ncclParamGinIbTc();
+extern int64_t ncclParamIbTc();
+
 // collComm: per-connection state, returned by connect()
 struct ginRocshmemGdaCollCtx {
   int nranks;
@@ -120,9 +124,19 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   cctx->rank = rank;
   cctx->comm = ictx->comm;
 
+  // Resolve traffic class: NCCL_GIN_IB_TC > NCCL_IB_TC > comm config > default 0
+  int trafficClass = 0;
+  if (ncclParamGinIbTc() != -1) {
+    trafficClass = static_cast<int>(ncclParamGinIbTc());
+  } else if (ncclParamIbTc() != -1) {
+    trafficClass = static_cast<int>(ncclParamIbTc());
+  } else if (cctx->comm->config.trafficClass != NCCL_CONFIG_UNDEF_INT) {
+    trafficClass = cctx->comm->config.trafficClass;
+  }
+
   // Create QPs during connect (like GDAKI creates IB connections in connect)
-  int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, &cctx->qpSet,
-                                   &cctx->gpu_qp_ptrs);
+  int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, trafficClass,
+                                   &cctx->qpSet, &cctx->gpu_qp_ptrs);
   if (rc != 0) {
     WARN("GIN rocshmem-gda: failed to create QPs");
     delete cctx;
