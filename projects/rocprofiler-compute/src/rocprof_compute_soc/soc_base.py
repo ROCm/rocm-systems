@@ -743,6 +743,11 @@ class OmniSoC_Base:
         If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
         a metric-aware greedy pass runs before the final per-counter first-fit.
 
+        **Experimental single-pass-packable path** (hard single-bucket for every
+        metric whose PMC set fits one ``CounterFile``, then minimize passes):
+        set ``ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=1``. Replaces the
+        heuristic / CP-SAT / refill path when enabled.
+
         **Optional CP-SAT path** (toward fewer buckets under hard same-bin groups):
         set ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and install ``ortools`` (see
         ``[optimizer]`` extra in ``pyproject.toml``). Applies only when the PMC
@@ -755,6 +760,20 @@ class OmniSoC_Base:
         work_set = set(counters)
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
+
+        from rocprof_compute_soc.counter_grouping_single_pass import (
+            try_allocate_single_pass_packable,
+        )
+
+        single_pass = try_allocate_single_pass_packable(
+            self,
+            work_set,
+            self.__perfmon_config,
+            file_count_start=file_count,
+        )
+        if single_pass is not None:
+            output_files, file_count, _stats = single_pass
+            return output_files, file_count, accu_file_count
 
         cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
         if cp_sat_files is not None:
