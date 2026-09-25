@@ -106,6 +106,7 @@ struct trace_record
     std::string              name;
     std::string              description;
     std::vector<std::string> aliases;
+    bool                     is_default = false;
 };
 
 struct operation_record

@@ -7,10 +7,13 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys::avail
 {
+
+inline constexpr std::string_view k_not_implemented_message = "not implemented yet";
 
 struct query_request
 {
@@ -33,6 +36,7 @@ struct catalog_snapshot
     std::vector<device_record>    cpu_devices;
     std::vector<device_record>    nic_devices;
     std::vector<trace_record>     traces;
+    std::vector<std::string>      default_traces;
     std::vector<operation_record> trace_operations;
     std::vector<counter_record>   gpu_counters;
     std::vector<counter_record>   cpu_counters;
@@ -43,8 +47,10 @@ struct catalog_snapshot
     std::vector<diagnostic>       diagnostics;
     std::vector<capability_kind>  queried;
 
-    [[nodiscard]] bool was_queried(capability_kind capability) const noexcept;
-    [[nodiscard]] bool degraded() const noexcept { return !diagnostics.empty(); }
+    [[nodiscard]] bool        was_queried(capability_kind capability) const noexcept;
+    [[nodiscard]] bool        degraded() const noexcept { return !diagnostics.empty(); }
+    [[nodiscard]] std::string default_traces_csv() const;
+    [[nodiscard]] std::string available_traces_csv() const;
 };
 
 [[nodiscard]] catalog_snapshot
