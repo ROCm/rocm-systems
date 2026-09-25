@@ -90,3 +90,26 @@ D128 delay-zero SuperCollider completed all eight admitted/reached trials with
 healthy pre/post emulator probes and zero detections. The grouped publication
 fault and expectations were fixed before the trials. Delay calibration remains
 pending; no trial was replaced or omitted to improve the fraction.
+
+## Issues uncovered by filtered clean runs
+
+- `tree-atomic-or` Default completes its numerical test, but ConSan reports three
+  cross-wave partial-store/final-consumer conflicts (return 89). Coverage is
+  complete: accesses 32/32, barriers 6/6, atomics 2/2, fences 3/3. The bounded
+  atomic-publication journal is currently enabled only for RDNA4 and CDNA4 in
+  `consan_observation_policy.cpp` and `consan_sync.inc`; CDNA5 emits zero journal
+  events. The missing CDNA5 port is the leading explanation, to be checked by
+  regression and workload tests. Its native FLAT/GLOBAL format adds
+  `scale_offset` to the RDNA4 layout, so blindly reusing the RDNA4 rewrite is
+  insufficient. Earlier unfiltered clean success did not exercise a conflicting
+  sampled access pair and is superseded by this failure.
+- HipKittens naive BF16 aborts with `corrupted double-linked list` after both
+  instrumented profiles. Static/dynamic coverage passes; baseline and profiler
+  discovery succeed. The fault reproduces under GDB; retained logs are
+  `hipkittens-teardown-gdb*.log`. This is a real clean execution failure, with
+  root cause still under investigation.
+
+D128's first Default matrix detected 1/8 admitted/reached faults; delay-zero
+SuperCollider detected 0/8. Both matching filtered clean controls pass. The next
+Default calibration is `high`, with a new matching clean control and the same
+reviewed fault; artifacts are under `d128-high/`.
