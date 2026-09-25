@@ -171,8 +171,8 @@ namespace RcclUnitTesting
     RunSingleProcMemRegTest(config);
   }
 
-  TEST(Scatter, SingleProcMemRegDisabledSmoke)
+  TEST(Scatter, SingleProcMemRegDisabled)
   {
-    RunSingleProcMemRegDisabledSmoke(ncclCollScatter, ncclUint32, true);
+    RunSingleProcMemRegDisabledTest(ncclCollScatter, ncclUint32, true);
   }
 }
