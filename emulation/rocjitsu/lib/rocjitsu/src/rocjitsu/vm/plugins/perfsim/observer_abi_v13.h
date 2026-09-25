@@ -211,6 +211,17 @@ struct FfmObserverPluginApiPrefix {
 struct FfmObserverPluginApi;
 using FfmObserverPluginGetApiFn = FfmObserverPluginApi *(*)(std::uint32_t host_api_version);
 
+// Optional side-band capabilities. Hosts must assume zero when the query is
+// absent. Concurrent hot callbacks preserve callback order within one wave but
+// may run callbacks for independent waves at the same time. A backend that
+// advertises dispatch discard must also export
+// ffm_observer_plugin_discard_dispatch; after that call it must retain no trace
+// or report state for the named dispatch.
+inline constexpr std::uint64_t FFM_OBSERVER_CAP_CONCURRENT_HOT_CALLBACKS = std::uint64_t{1} << 0;
+inline constexpr std::uint64_t FFM_OBSERVER_CAP_DISCARD_DISPATCH = std::uint64_t{1} << 1;
+using FfmObserverPluginGetCapabilitiesFn = std::uint64_t (*)(std::uint32_t negotiated_api_version);
+using FfmObserverPluginDiscardDispatchFn = void (*)(EntityId dispatch_id);
+
 // Calls cross an independently declared C++ ABI mirror. The layouts are
 // checked below, but Clang's function sanitizer compares nominal source types
 // and therefore cannot validate these foreign calls.
