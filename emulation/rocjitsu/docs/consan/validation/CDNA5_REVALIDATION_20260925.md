@@ -124,3 +124,9 @@ preserves the stack for follow-up.
 profiles, with no applicable LDS code objects (0/0 accesses). These are yellow
 scope-limit cells, not detector failures. All three TP2 IDs now pass filtered
 clean controls independently in each profile.
+
+D128 Default qualifies at `high`: matching filtered clean passes and all eight
+admitted/reached faults are detected, with complete coverage and healthy probes.
+The qualification audit compares clean/fault provenance files and rehashes every
+input. `default` had 1/8, so `high` is the lowest passing preset at or above
+default. Evidence: `d128-high/`.
