@@ -19,6 +19,7 @@ source, mpirun places all ranks locally, so the correct answer is 1.
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from lib.test_executor import _distinct_host_count
 
@@ -26,11 +27,18 @@ from lib.test_executor import _distinct_host_count
 class TestDistinctHostCount(unittest.TestCase):
     def test_no_host_source_is_one_local_host(self):
         """No hostfile and no SLURM allocation means mpirun runs on this host only."""
-        self.assertEqual(_distinct_host_count({}), 1)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_distinct_host_count({}), 1)
 
     def test_no_host_source_skips_multi_node(self):
         """The returned count must be low enough for a 2-node test to be skipped."""
-        self.assertLess(_distinct_host_count({}), 2)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertLess(_distinct_host_count({}), 2)
+
+    def test_slurm_allocation_without_detected_hosts_is_unknown(self):
+        """Do not collapse an active allocation to the local host."""
+        with patch.dict(os.environ, {"SLURM_JOB_ID": "12345"}, clear=True):
+            self.assertEqual(_distinct_host_count({}), 0)
 
     def test_slurm_host_list_counts_distinct_entries(self):
         self.assertEqual(_distinct_host_count({"host_list": "node-a,node-b,node-c"}), 3)

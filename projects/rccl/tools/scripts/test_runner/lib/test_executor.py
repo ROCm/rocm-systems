@@ -359,6 +359,27 @@ def synthetic_case_detail(test_name, test_filter=None, status="FAILED"):
     }
 
 
+def merge_process_failure_details(details, test_name, test_filter=None):
+    """Add a process-level failure missing from rank 0's gtest report.
+
+    MPI gtest JSON is intentionally written by rank 0 only. If another rank
+    fails, mpirun returns non-zero while that report can contain only passing
+    or skipped leaves. Keep those leaves, but add an explicit failure so case
+    totals and the issue tree agree with the entry verdict.
+    """
+    if any(item.get("status") == "FAILED" for item in details or []):
+        return details
+    merged = list(details or [])
+    label = f"{test_name or '(test)'} (process exited non-zero)"
+    merged.append({
+        "suite": test_name or "(test)",
+        "case": label,
+        "full_name": label,
+        "status": "FAILED",
+    })
+    return merged
+
+
 def timeout_placeholder_detail(test_name, test_filter=None, timeout_s=None):
     """Synthetic leaf used when the process dies before gtest/pytest finishes."""
     label = test_filter if test_filter and test_filter not in ("*", "ALL") else (test_name or "(test)")
@@ -903,16 +924,18 @@ def _distinct_host_count(mpi_hosts: dict) -> int:
     """
     Count distinct hosts from SLURM host_list or Open MPI hostfile.
 
-    An empty dict is not an unknown topology: it means neither a hostfile nor a
-    SLURM allocation was found, so mpirun is invoked with no host argument and
-    places every rank on the local host. That is exactly one host, and reporting
-    it as such lets the insufficient-nodes check below skip a multi-node test
-    instead of launching it oversubscribed on a single node.
+    An empty dict normally means neither a hostfile nor a SLURM allocation was
+    found, so mpirun places every rank on the local host. An active SLURM job is
+    different: host detection may be disabled or scontrol may have failed. Keep
+    that topology unknown rather than incorrectly classifying it as one host.
 
-    Returns 0 only when a host source exists but cannot be read, so callers skip
-    the insufficient-nodes check when topology genuinely cannot be determined.
+    Returns 0 when an active allocation cannot be resolved or a declared host
+    source cannot be read, so callers skip the insufficient-nodes check when
+    topology genuinely cannot be determined.
     """
     if not mpi_hosts:
+        if os.environ.get("SLURM_JOB_ID"):
+            return 0
         return 1
     if "host_list" in mpi_hosts:
         seen = set()
@@ -2273,6 +2296,9 @@ class TestExecutor:
                 returncode = proc.wait(timeout=timeout if timeout > 0 else None)
             except subprocess.TimeoutExpired:
                 duration = time.time() - start_time
+                print("  Killing process group (mpirun and all ranks)...")
+                self._terminate_process_group(proc)
+                # Read only after every possible gtest JSON writer has exited.
                 parsed = collect_gtest_case_details_from_file(gtest_json_path or "") if is_gtest else None
                 case_details = merge_timeout_details(
                     parsed, test_name, test_filter, timeout
@@ -2286,8 +2312,6 @@ class TestExecutor:
                 issue_tree = format_issue_leaves(case_details)
                 if issue_tree:
                     print(issue_tree)
-                print("  Killing process group (mpirun and all ranks)...")
-                self._terminate_process_group(proc)
                 return _done({
                     "name": test_name,
                     "result": TestResult.RESULT_TIMEOUT.value,
@@ -2327,14 +2351,14 @@ class TestExecutor:
                     gtest_json_path or "", rc, details=case_details
                 )
                 # MPI abort / JSON races leave no report; still count the entry.
-                if case_details is None and test_result in (
-                    TestResult.RESULT_PASSED.value,
-                    TestResult.RESULT_FAILED.value,
-                    TestResult.RESULT_TIMEOUT.value,
-                ):
+                if case_details is None and test_result == TestResult.RESULT_PASSED.value:
                     case_details = [
                         synthetic_case_detail(test_name, test_filter, test_result)
                     ]
+                elif test_result == TestResult.RESULT_FAILED.value:
+                    case_details = merge_process_failure_details(
+                        case_details, test_name, test_filter
+                    )
                 if case_details is not None:
                     case_counts = _counts_from_details(case_details)
             else:

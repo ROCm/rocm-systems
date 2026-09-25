@@ -37,6 +37,7 @@ from lib.test_executor import (
     infer_gtest_result_from_json_file,
     infer_gtest_result_from_output,
     make_run_identity_key,
+    merge_process_failure_details,
     merge_timeout_details,
     stamp_run_identity,
     suite_disposition,
@@ -232,6 +233,35 @@ class TestInferFromJsonFile(unittest.TestCase):
             self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "SKIPPED")
         finally:
             os.unlink(path)
+
+
+class TestProcessFailureDetails(unittest.TestCase):
+    def test_nonzero_mpi_exit_adds_failure_to_passing_rank0_report(self):
+        details = [{
+            "suite": "Suite",
+            "case": "Case",
+            "full_name": "Suite.Case",
+            "status": "PASSED",
+        }]
+        merged = merge_process_failure_details(details, "MPI Config", "Suite.Case")
+        self.assertEqual([item["status"] for item in merged], ["PASSED", "FAILED"])
+        self.assertEqual(
+            merged[-1]["full_name"],
+            "MPI Config (process exited non-zero)",
+        )
+        self.assertEqual([item["status"] for item in details], ["PASSED"])
+
+    def test_existing_failed_leaf_does_not_add_duplicate(self):
+        details = [{
+            "suite": "Suite",
+            "case": "Case",
+            "full_name": "Suite.Case",
+            "status": "FAILED",
+        }]
+        self.assertIs(
+            merge_process_failure_details(details, "MPI Config", "Suite.Case"),
+            details,
+        )
 
 
 WILDCARD_SUITE_JSON = {
