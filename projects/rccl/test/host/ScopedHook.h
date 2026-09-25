@@ -7,6 +7,7 @@
 #ifndef RCCL_TEST_HOST_SCOPEDHOOK_H_
 #define RCCL_TEST_HOST_SCOPEDHOOK_H_
 
+#include <atomic>
 #include <functional>
 #include <utility>
 
@@ -54,7 +55,10 @@ public:
     ScopedHook(ScopedHook&&)                 = delete;
     ScopedHook& operator=(ScopedHook&&)      = delete;
 
-    int calls = 0;
+    // Atomic because production calls a seam from more than one thread --
+    // commReclaim, for one, spawns a std::thread per rank -- so a plain int
+    // loses increments and the count a test asserts on comes up short.
+    std::atomic<int> calls{0};
 private:
     std::function<R(Args...)>& slot_;
     std::function<R(Args...)>  saved_;

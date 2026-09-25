@@ -37,9 +37,14 @@ ncclResult_t ncclCommSetAsyncError(struct ncclComm* comm, ncclResult_t nextState
 ncclResult_t g_commEnsureReadyResult = ncclSuccess;
 ncclResult_t ncclCommEnsureReady(struct ncclComm*) { return g_commEnsureReadyResult; }
 
+// init.cc:231 latches NCCL_CTA_POLICY in a std::call_once; UNDEF is what an unset env yields.
+int g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
+int ncclGetEnvCtaPolicy() { return g_envCtaPolicy; }
+
 void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;
   g_commEnsureReadyResult = ncclSuccess;
+  g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
 }
 
 // --- Comm globals (real in init.cc) ---------------------------------------
@@ -61,7 +66,7 @@ int64_t ncclParamCGAClusterSize() { return g_loadParam("CGA_CLUSTER_SIZE", NCCL_
 
 // --- Pure instrumentation (no behaviour to assert) ------------------------
 // rccl::Recorder lives in recorder_fakes.cc: it was defined identically here, in
-// init_fakes.cc and in enqueue_fakes.cc, differing only in which record()
+// init_fakes.cc and in enqueue_test_deps.cc, differing only in which record()
 // overloads each target referenced.
 
 roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}

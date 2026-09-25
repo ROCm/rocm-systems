@@ -52,7 +52,10 @@ namespace
 void
 check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
 {
-    if(_code == AMDSMI_STATUS_SUCCESS) return;
+    if(_code == AMDSMI_STATUS_SUCCESS)
+    {
+        return;
+    }
     const char* _msg = nullptr;
     auto        _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
@@ -71,7 +74,10 @@ std::atomic<bool> amdsmi_initialized{ false };
 bool
 amdsmi_init()
 {
-    if(amdsmi_initialized.exchange(true)) return true;
+    if(amdsmi_initialized.exchange(true))
+    {
+        return true;
+    }
 
     try
     {
@@ -159,14 +165,23 @@ get_visible_gpu_bdfs()
     // Ensure the rocprofiler-sdk agents (and their runtime_visibility) are populated.
     // No GPU agents means the query found nothing to report on (or failed), so runtime
     // visibility is unknown rather than empty.
-    if(device_count() == 0) return std::nullopt;
+    if(device_count() == 0)
+    {
+        return std::nullopt;
+    }
 
     std::set<std::string> _bdfs;
     for(const auto& _agent :
         get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
     {
-        if(!_agent) continue;
-        if(!_agent->hip_visible) continue;
+        if(!_agent)
+        {
+            continue;
+        }
+        if(!_agent->hip_visible)
+        {
+            continue;
+        }
         _bdfs.insert(
             common::format_pci_bdf_from_location_id(_agent->domain, _agent->location_id));
     }
@@ -228,7 +243,10 @@ add_device_metadata(ArchiveT& ar)
 void
 add_device_metadata()
 {
-    if(device_count() == 0) return;
+    if(device_count() == 0)
+    {
+        return;
+    }
 
     ::tim::manager::add_metadata([](auto& ar) {
         try
@@ -338,10 +356,17 @@ get_processor_handles()
                 for(const auto& xcp : gpu_metrics.xcp_stats)
                 {
                     if(!v_busy_supported && has_valid_u16(xcp.vcn_busy))
+                    {
                         v_busy_supported = true;
+                    }
                     if(!j_busy_supported && has_valid_u16(xcp.jpeg_busy))
+                    {
                         j_busy_supported = true;
-                    if(v_busy_supported && j_busy_supported) break;
+                    }
+                    if(v_busy_supported && j_busy_supported)
+                    {
+                        break;
+                    }
                 }
 
                 // Check if XGMI metrics are supported (any value not at max)
@@ -371,42 +396,60 @@ get_processor_handles()
 bool
 vcn_is_device_level_only(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::vcn_device_level_only.size()) return false;
+    if(dev_id >= processors::vcn_device_level_only.size())
+    {
+        return false;
+    }
     return processors::vcn_device_level_only[dev_id];
 }
 
 bool
 jpeg_is_device_level_only(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::jpeg_device_level_only.size()) return false;
+    if(dev_id >= processors::jpeg_device_level_only.size())
+    {
+        return false;
+    }
     return processors::jpeg_device_level_only[dev_id];
 }
 
 bool
 is_vcn_busy_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::vcn_busy_supported.size()) return false;
+    if(dev_id >= processors::vcn_busy_supported.size())
+    {
+        return false;
+    }
     return processors::vcn_busy_supported[dev_id];
 }
 
 bool
 is_jpeg_busy_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::jpeg_busy_supported.size()) return false;
+    if(dev_id >= processors::jpeg_busy_supported.size())
+    {
+        return false;
+    }
     return processors::jpeg_busy_supported[dev_id];
 }
 
 bool
 is_xgmi_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::xgmi_supported.size()) return false;
+    if(dev_id >= processors::xgmi_supported.size())
+    {
+        return false;
+    }
     return processors::xgmi_supported[dev_id];
 }
 
 bool
 is_pcie_supported(std::uint32_t dev_id)
 {
-    if(dev_id >= processors::pcie_supported.size()) return false;
+    if(dev_id >= processors::pcie_supported.size())
+    {
+        return false;
+    }
     return processors::pcie_supported[dev_id];
 }
 

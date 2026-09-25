@@ -24,7 +24,9 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     auto _ranges = std::vector<address_range>{};
 
     if(dwarf_tag(_die) != DW_TAG_compile_unit && dwarf_tag(_die) != DW_TAG_subprogram)
+    {
         return _ranges;
+    }
 
     Dwarf_Addr _low_pc;
     Dwarf_Addr _high_pc;
@@ -35,10 +37,16 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     {
         Dwarf_Addr _entry_pc;
         dwarf_entrypc(_die, &_entry_pc);
-        if(_entry_pc < _low_pc) _low_pc = _entry_pc;
+        if(_entry_pc < _low_pc)
+        {
+            _low_pc = _entry_pc;
+        }
     }
 
-    if(_low_pc < _high_pc) _ranges.emplace_back(_low_pc, _high_pc);
+    if(_low_pc < _high_pc)
+    {
+        _ranges.emplace_back(_low_pc, _high_pc);
+    }
 
     Dwarf_Addr _base_addr;
     ptrdiff_t  _offset = 0;
@@ -47,7 +55,10 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
         uintptr_t _low  = 0;
         uintptr_t _high = 0;
         _offset         = dwarf_ranges(_die, _offset, &_base_addr, &_low, &_high);
-        if(_low < _high) _ranges.emplace_back(_low, _high);
+        if(_low < _high)
+        {
+            _ranges.emplace_back(_low, _high);
+        }
     } while(_offset > 0);
 
     return _ranges;
@@ -58,12 +69,18 @@ get_dwarf_breakpoints(Dwarf_Die* _die)
 {
     auto _bkpts = std::vector<uintptr_t>{};
 
-    if(dwarf_tag(_die) != DW_TAG_subprogram) return _bkpts;
+    if(dwarf_tag(_die) != DW_TAG_subprogram)
+    {
+        return _bkpts;
+    }
 
     Dwarf_Addr* _pts  = nullptr;
     auto        _npts = dwarf_entry_breakpoints(_die, &_pts);
 
-    if(_npts > 0 && _pts) _bkpts.assign(_pts, _pts + _npts);
+    if(_npts > 0 && _pts)
+    {
+        _bkpts.assign(_pts, _pts + _npts);
+    }
 
     return _bkpts;
 }
@@ -73,7 +90,10 @@ get_dwarf_entry(Dwarf_Die* _die)
 {
     auto _line_info = std::deque<dwarf_entry>{};
 
-    if(dwarf_tag(_die) != DW_TAG_compile_unit) return _line_info;
+    if(dwarf_tag(_die) != DW_TAG_compile_unit)
+    {
+        return _line_info;
+    }
 
     Dwarf_Lines* _lines     = nullptr;
     size_t       _num_lines = 0;
@@ -99,9 +119,15 @@ get_dwarf_entry(Dwarf_Die* _die)
                 dwarf_linediscriminator(_line, &itr.discriminator);
                 dwarf_lineaddr(_line, &_address);
                 itr.address = address_range{ _address };
-                if(_lineno > 0) itr.line = _lineno;
+                if(_lineno > 0)
+                {
+                    itr.line = _lineno;
+                }
                 const auto* _file = dwarf_linesrc(_line, nullptr, nullptr);
-                if(!_file) _file = dwarf_diename(_die);
+                if(!_file)
+                {
+                    _file = dwarf_diename(_die);
+                }
                 itr.file = path::realpath(_file);
             }
         }

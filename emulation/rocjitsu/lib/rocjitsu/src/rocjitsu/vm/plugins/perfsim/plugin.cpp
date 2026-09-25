@@ -970,10 +970,11 @@ struct PerfsimPlugin::Impl {
         add_record(global_requests, FFM_RESOURCE_GLOBAL);
         add_record(scratch_requests, FFM_RESOURCE_SCRATCH);
         add_record(local_requests, FFM_RESOURCE_LDS);
-        std::sort(records.begin(), records.begin() + record_count,
-                  [](const ResourceRecord &lhs, const ResourceRecord &rhs) {
-                    return std::countr_zero(lhs.lane_mask) < std::countr_zero(rhs.lane_mask);
-                  });
+        std::ranges::sort(records.begin(), records.begin() + record_count,
+                          [](const ResourceRecord &lhs, const ResourceRecord &rhs) {
+                            return std::countr_zero(lhs.lane_mask) <
+                                   std::countr_zero(rhs.lane_mask);
+                          });
         for (size_t i = 0; i < record_count; ++i)
           record_memory(*wave, access, records[i].lane_mask, records[i].resource,
                         callback_addresses);
@@ -1236,11 +1237,11 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   event.pc = pc;
   const uint32_t encoding_dwords = static_cast<uint32_t>(encoding_bytes / 4);
   std::array<uint32_t, 4> instruction_encoding{};
-  std::copy_n(inst.raw_encoding(), encoding_dwords, instruction_encoding.begin());
+  std::ranges::copy_n(inst.raw_encoding(), encoding_dwords, instruction_encoding.begin());
   if (fetch_window.empty())
     event.raw_isa = instruction_encoding;
   else
-    std::copy(fetch_window.begin(), fetch_window.end(), event.raw_isa.begin());
+    std::ranges::copy(fetch_window, event.raw_isa.begin());
   event.counters = instruction_counters(inst);
   event.wait = wait_info(inst);
 

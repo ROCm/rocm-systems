@@ -35,8 +35,16 @@ void warn_cluster_peer_writes_ignored_once() {
   });
 }
 
-uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
-                                const amdgpu::Wavefront &wave) {
+uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave,
+                                uint32_t register_offset = 0) {
+  if (state.buffer_components && state.buffer_d16) {
+    if (state.is_load && wave.cu().sram_ecc())
+      return ExecutionPlugin::kFullByteMask;
+    if (state.d16_hi)
+      return ExecutionPlugin::kHighHalfByteMask;
+    return register_offset * 2 + 1 < state.buffer_components ? ExecutionPlugin::kFullByteMask
+                                                             : ExecutionPlugin::kLowHalfByteMask;
+  }
   if (state.is_load && wave.cu().sram_ecc() && (state.d16_lo || state.d16_hi))
     return ExecutionPlugin::kFullByteMask;
   if (state.d16_lo)
@@ -57,20 +65,21 @@ MemoryOrderClass memory_order_for(const Instruction &inst) {
 std::optional<std::vector<uint32_t>>
 validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave) {
   const uint32_t vgpr_count = state.destination_vgpr_count();
+  const uint32_t ds2_vgpr_count = state.ds2_active ? state.ds2_destination_vgpr_count() : 0;
   const amdgpu::RegisterAccess registers_for(wave);
   std::vector<uint32_t> registers;
-  registers.reserve(vgpr_count * (state.ds2_active ? 2u : 1u));
-  auto append_range = [&](uint32_t physical_base) {
-    if (!registers_for.owns_vgpr_range(physical_base, vgpr_count))
+  registers.reserve(vgpr_count + ds2_vgpr_count);
+  auto append_range = [&](uint32_t physical_base, uint32_t count) {
+    if (!registers_for.owns_vgpr_range(physical_base, count))
       return false;
     const uint32_t logical_base = physical_base - wave.vgpr_alloc().base;
-    for (uint32_t i = 0; i < vgpr_count; ++i)
+    for (uint32_t i = 0; i < count; ++i)
       registers.push_back(logical_base + i);
     return true;
   };
 
-  if (!append_range(state.dst_reg_base) ||
-      (state.ds2_active && !append_range(state.ds2_dst_reg_base)))
+  if (!append_range(state.dst_reg_base, vgpr_count) ||
+      (state.ds2_active && !append_range(state.ds2_dst_reg_base, ds2_vgpr_count)))
     return std::nullopt;
   return registers;
 }
@@ -397,10 +406,12 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(
         return;
       std::vector<uint32_t> registers = std::move(*destinations);
       const uint8_t byte_mask = vector_memory_byte_mask(d, wf);
-      for (uint32_t reg : registers)
-        rs->checkVgprWrite(static_cast<int>(reg), d.exec_mask, byte_mask, memoryOrder);
+      const uint8_t last_byte_mask = vector_memory_byte_mask(d, wf, registers.size() - 1);
+      for (uint32_t i = 0; i < registers.size(); ++i)
+        rs->checkVgprWrite(static_cast<int>(registers[i]), d.exec_mask,
+                           vector_memory_byte_mask(d, wf, i), memoryOrder);
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
-                        byte_mask, issue->counter_obligations(), memoryOrder);
+                        byte_mask, issue->counter_obligations(), memoryOrder, last_byte_mask);
     } else if (!d.is_load) {
       rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
                         issue->counter_obligations(), memory_order_for(inst));

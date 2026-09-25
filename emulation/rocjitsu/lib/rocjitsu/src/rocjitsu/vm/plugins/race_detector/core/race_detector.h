@@ -55,7 +55,7 @@ public:
   EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
                           uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder);
+                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);

@@ -12,9 +12,6 @@ env:
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   AIS_MOUNT_PATH: ${{ inputs.ais_mount_path }}
-  # Pass the backing NVMe partition through to the container only for the LVM
-  # setup (/mnt/ais/lvm); the ext4 mount does not need a raw device.
-  AIS_EXTRA_DOCKER_DEVICE: ${{ case(inputs.ais_mount_path == '/mnt/ais/lvm', '--device=/dev/nvme0n1p3', '') }}
   AIS_PKG_INSTALL_CMD: >-
     ${{
       case(
@@ -74,7 +71,6 @@ permissions:
   packages: read
 
 jobs:
-
   run_system_tests:
     name: run_system_tests (${{ inputs.mount_label }})
     runs-on: [AIS]
@@ -122,7 +118,6 @@ jobs:
             --rm \
             --device=/dev/kfd \
             --device=/dev/dri \
-            ${AIS_EXTRA_DOCKER_DEVICE} \
             --security-opt seccomp=unconfined \
             --pull always \
             -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \

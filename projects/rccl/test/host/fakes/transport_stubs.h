@@ -17,6 +17,10 @@
 #include "nccl.h"
 
 struct ncclComm;
+struct ncclTopoGraph;
+
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
+    g_ncclTransportP2pSetup;
 
 // rcclUseAinic (src/transport/net.cc:343) queries whether an AINIC is present.
 // A host-only binary has no device, so `false` is the honest answer rather than

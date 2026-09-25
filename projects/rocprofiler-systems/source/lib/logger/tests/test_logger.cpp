@@ -31,7 +31,9 @@ read_fd(int fd)
     char        buf[4096];
     ssize_t     n;
     while((n = read(fd, buf, sizeof(buf))) > 0)
+    {
         result.append(buf, static_cast<size_t>(n));
+    }
     return result;
 }
 
@@ -410,7 +412,10 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
             while(keep_logging.load(std::memory_order_relaxed))
             {
                 logger.info("Thread {} iteration {}", i, iter++);
-                if(iter >= log_iterations) break;
+                if(iter >= log_iterations)
+                {
+                    break;
+                }
             }
         });
     }
@@ -439,7 +444,9 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
 
     keep_logging.store(false, std::memory_order_relaxed);
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     int         status;
     const pid_t waited = waitpid(child_pid, &status, 0);
@@ -658,7 +665,9 @@ TEST_F(logger_test, concurrent_logging_stress_with_fork)
     close(pipefd[0]);
 
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     int         status;
     const pid_t waited = waitpid(child_pid, &status, 0);
