@@ -183,9 +183,14 @@ public:
     std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
 
 private:
+    /// Hands out a value that is never reused, so a packet outliving its tracer cannot be
+    /// mistaken for one produced by a later tracer that happens to occupy the same address.
+    static uint64_t allocate_tracer_id();
+
     std::unordered_map<rocprofiler_agent_id_t, std::shared_ptr<ThreadTracerAgent>> agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
+    const uint64_t            tracer_id = allocate_tracer_id();
     mutable std::shared_mutex agents_map_mut{};
     std::atomic<int>          post_move_data{0};
     // Mutable for the same reason as agents_map_mut: start_context()/stop_context() are const
