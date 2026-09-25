@@ -63,5 +63,5 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟨 default: filtered clean pass; fault 0/8; high next | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) | 🟨 default: clean pass; same-lane LDS accesses, barrier drop does not create a race | 🟨 delay-zero: clean pass; same-lane LDS accesses, barrier drop does not create a race |

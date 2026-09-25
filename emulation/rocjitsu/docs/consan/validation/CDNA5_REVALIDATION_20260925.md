@@ -771,3 +771,9 @@ initialization, targets only FP32 and retains FP64 as supporting clean coverage.
 Eight trials per mode and six detections are predeclared; all 208 validation
 runner tests pass (`histc-spec-tests.log`). Sort and histogram clean/fault runs
 are queued sequentially after the full MXF4 clean batch to limit contention.
+
+### norm/softmax Default fault result
+
+`norm-cap-default-fault` completes eight admitted/reached trials with 0/8
+detections. All have complete analysis and healthy before/after checks; paired
+clean passes. SuperCollider sleep=15 follows in the running qualification driver.
