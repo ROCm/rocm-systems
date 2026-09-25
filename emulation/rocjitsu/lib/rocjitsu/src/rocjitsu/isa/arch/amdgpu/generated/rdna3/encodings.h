@@ -442,6 +442,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
+  uint32_t dpp_abs_ = 0;
+  uint32_t dpp_neg_ = 0;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -484,6 +486,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
+  uint32_t dpp_abs_ = 0;
+  uint32_t dpp_neg_ = 0;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -528,6 +532,8 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
+  uint32_t dpp_abs_ = 0;
+  uint32_t dpp_neg_ = 0;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -755,9 +761,12 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   bool has_nsa();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 5> raw_words_{};
+  const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
 class Exp : public IsaInstruction<Isa> {

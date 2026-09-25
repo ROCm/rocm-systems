@@ -22,6 +22,8 @@ Execution semantics are provided by ``SemanticsSpec`` from
 """
 
 import cgen
+
+from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 import textwrap
 import re
 import os
@@ -44,7 +46,12 @@ from amdisa.fieldless_policy import (
     fieldless_policy,
     operand_participates,
 )
-from amdisa.semantics import F32_TO_INTEGER_DTYPES, InstructionSemantics, SemanticsSpec
+from amdisa.semantics import (
+    F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_DTYPES,
+    InstructionSemantics,
+    SemanticsSpec,
+)
 from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation
 
 from amdisa.codegen.config import CodegenConfig
@@ -986,6 +993,12 @@ class CodeGenerator:
         )
 
     @staticmethod
+    def _sdwa_output_policy(sem: InstructionSemantics | None) -> str:
+        if sem and sem.name in FLUSH_NEAREST_F32_OPS:
+            return ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
+        return ''
+
+    @staticmethod
     def _sdwa_result_format(sem: InstructionSemantics | None) -> str:
         """Return the C++ result format for numerical SDWA output modifiers.
 
@@ -1018,11 +1031,14 @@ class CodeGenerator:
         return f'amdgpu::sdwa::ResultFormat::{suffix}'
 
     @staticmethod
-    def _apply_sdwa_f16_omod(body: str, instruction: str) -> str:
+    def _apply_sdwa_f16_omod(
+        body: str, instruction: str, *, rounded_result: bool = False
+    ) -> str:
         """Apply SDWA OMOD at the F16 producer, before result narrowing."""
+        helper = 'finish_rounded_f16' if rounded_result else 'round_f16_result'
         body = body.replace(
             'util::f32_to_f16_mode(',
-            f'amdgpu::sdwa::round_f16_result({instruction}, wf, ',
+            f'amdgpu::sdwa::{helper}({instruction}, wf, ',
         )
         body = body.replace(
             'amdgpu::fp_mode::finish_arithmetic_f16(',
@@ -1060,6 +1076,25 @@ class CodeGenerator:
             'FMT_NUM_F32': 'F32',
         }.get(opnd.data_format_name, 'NONE')
         return f'amdgpu::sdwa::SourceModifierFormat::{suffix}'
+
+    @staticmethod
+    def _dpp_source_sign_bit(
+        sem: InstructionSemantics, source_index: int, opnd: Operand
+    ) -> int:
+        if source_index == 1 and (
+            sem.semantic_class in ('vector_cmp_class', 'vector_cmpx_class')
+            or (sem.semantic_class == 'vector_binop' and sem.operation == 'ldexp')
+        ):
+            return 0
+        if sem.name == 'V_PK_FMAC_F16':
+            return 0
+        bit = {
+            'FMT_NUM_F16': 15,
+            'FMT_NUM_BF16': 15,
+            'FMT_NUM_F32': 31,
+            'FMT_NUM_F64': 63,
+        }.get(opnd.data_format_name)
+        return 0 if bit is None else 1 << bit
 
     @staticmethod
     def _literal_encoding_info(
@@ -2065,7 +2100,7 @@ class CodeGenerator:
                     {
                       float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                                              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2076,7 +2111,7 @@ class CodeGenerator:
                     {
                       float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(src2), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                                              std::bit_cast<float>(src2), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2087,7 +2122,7 @@ class CodeGenerator:
                     {
                       float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src2),
-                                              std::bit_cast<float>(src1), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                                              std::bit_cast<float>(src1), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2096,7 +2131,7 @@ class CodeGenerator:
                     ('VopdMulF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2115,7 +2150,7 @@ class CodeGenerator:
                     ('VopdAddF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2203,7 +2238,7 @@ class CodeGenerator:
                     {
                       float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(std::bit_cast<float>(src0),
                                               std::bit_cast<float>(src1),
-                                              std::bit_cast<float>(src2), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                                              std::bit_cast<float>(src2), wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -4057,44 +4092,45 @@ class CodeGenerator:
                     f'{{{size_line}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
-            if profile.renders_gfx11_image_syntax and enc_upper == 'ENC_MIMG':
+            if profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
                 public_members.append(
                     cgen.Line(
                         'void capture_nsa_words(const MachineInst *inst, '
                         'const Operand *vaddr);'
                     )
                 )
-                public_members.append(
-                    cgen.Line(
-                        'void append_src_operand(std::string &out, '
-                        'uint8_t operand_index) const override {\n'
-                        '  const Operand *operand = src_operands_[operand_index];\n'
-                        '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
-                        '    Instruction::append_src_operand(out, operand_index);\n'
-                        '    return;\n'
-                        '  }\n'
-                        '  const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;\n'
-                        '  out += "[";\n'
-                        '  uint32_t consumed_words = 0;\n'
-                        '  for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {\n'
-                        '    const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);\n'
-                        '    if (group_words == 0) break;\n'
-                        '    if (index != 0) out += ", ";\n'
-                        '    const uint32_t selector = index == 0\n'
-                        '        ? inst_.vaddr\n'
-                        '        : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;\n'
-                        '    if (group_words > 1) {\n'
-                        '      out += "v[" + std::to_string(selector) + ":";\n'
-                        '      out += std::to_string(selector + group_words - 1) + "]";\n'
-                        '    } else {\n'
-                        '      out += "v" + std::to_string(selector);\n'
-                        '    }\n'
-                        '    consumed_words += group_words;\n'
-                        '  }\n'
-                        '  out += "]";\n'
-                        '}'
+                if profile.renders_gfx11_image_syntax:
+                    public_members.append(
+                        cgen.Line(
+                            'void append_src_operand(std::string &out, '
+                            'uint8_t operand_index) const override {\n'
+                            '  const Operand *operand = src_operands_[operand_index];\n'
+                            '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
+                            '    Instruction::append_src_operand(out, operand_index);\n'
+                            '    return;\n'
+                            '  }\n'
+                            '  const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;\n'
+                            '  out += "[";\n'
+                            '  uint32_t consumed_words = 0;\n'
+                            '  for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {\n'
+                            '    const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);\n'
+                            '    if (group_words == 0) break;\n'
+                            '    if (index != 0) out += ", ";\n'
+                            '    const uint32_t selector = index == 0\n'
+                            '        ? inst_.vaddr\n'
+                            '        : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;\n'
+                            '    if (group_words > 1) {\n'
+                            '      out += "v[" + std::to_string(selector) + ":";\n'
+                            '      out += std::to_string(selector + group_words - 1) + "]";\n'
+                            '    } else {\n'
+                            '      out += "v" + std::to_string(selector);\n'
+                            '    }\n'
+                            '    consumed_words += group_words;\n'
+                            '  }\n'
+                            '  out += "]";\n'
+                            '}'
+                        )
                     )
-                )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {inst_enc.fmt_enc_name}::capture_nsa_words('
@@ -4388,7 +4424,7 @@ class CodeGenerator:
                         f'std::array<uint32_t, {raw_word_count}> raw_words_{{}}'
                     )
                 )
-            elif profile.renders_gfx11_image_syntax and enc_upper == 'ENC_MIMG':
+            elif profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
                 class_members.append(
                     cgen.Statement('std::array<uint32_t, 5> raw_words_{}')
                 )
@@ -4418,6 +4454,8 @@ class CodeGenerator:
                 if _dpp8_struct:
                     class_members.append(cgen.Statement('uint32_t dpp8_lane_sel_ = 0'))
             if _enc_upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+                class_members.append(cgen.Statement('uint32_t dpp_abs_ = 0'))
+                class_members.append(cgen.Statement('uint32_t dpp_neg_ = 0'))
                 # SDWA fields (CDNA and RDNA1/2 have hardware SDWA encoding; fields
                 # are present on all ISAs for uniform codegen even if unused).
                 class_members.append(
@@ -6303,9 +6341,17 @@ class CodeGenerator:
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
                 )
+                is_f16_input_conversion = (
+                    cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
+                )
                 if (
                     is_vop3
-                    and (is_float_op or is_integer_to_f32 or is_f32_to_integer)
+                    and (
+                        is_float_op
+                        or is_integer_to_f32
+                        or is_f32_to_integer
+                        or is_f16_input_conversion
+                    )
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
@@ -6435,27 +6481,6 @@ class CodeGenerator:
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
-                if (
-                    inst.name == 'V_CVT_F32_F16'
-                    and is_true16_vop3
-                    and src_ops
-                    and dst_ops
-                ):
-                    return (
-                        '  uint64_t exec = wf.exec();\n'
-                        '  const uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);\n'
-                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
-                        '    if (!(exec & (1ULL << lane)))\n'
-                        '      continue;\n'
-                        f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[0]}, wf, lane, opsel, 0);\n'
-                        '    float src = util::f16_to_f32(static_cast<uint16_t>(raw));\n'
-                        '    if (inst_.abs & (1u << 0))\n'
-                        '      src = std::fabs(src);\n'
-                        '    if (inst_.neg & (1u << 0))\n'
-                        '      src = -src;\n'
-                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(src));\n'
-                        '  }\n'
-                    )
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,
@@ -6538,7 +6563,7 @@ class CodeGenerator:
                         '        src0_bits, src1_bits, src2_bits, inst_.abs & 1u, inst_.abs & 2u,\n'
                         '        inst_.abs & 4u, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u,\n'
                         '        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod,\n'
-                        '        inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));\n'
+                        '        inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));\n'
                         f'{write_result}\n'
                         '  }\n'
                     )
@@ -6657,7 +6682,7 @@ class CodeGenerator:
                         f'        src0_bits, src1_bits, accumulator, {abs0}, {abs1}, false,\n'
                         f'        {neg0}, {neg1}, false, wf.fp_round_mode_f16_f64(),\n'
                         f'        wf.fp_denorm_mode_f16_f64(), omod, {clamp}, wf.fp16_ovfl(),\n'
-                        '        amdgpu::floating_clamp_nan_to_zero(wf));\n'
+                        '        amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));\n'
                         f'{write_result}\n'
                         '  }\n'
                     )
@@ -7290,7 +7315,7 @@ class CodeGenerator:
                         f'    uint16_t s2 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
                     )
                     L.append(
-                        f'    uint16_t result = amdgpu::fp_mode::fma_f16(s0, k, s2, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                        f'    uint16_t result = amdgpu::fp_mode::fma_f16(s0, k, s2, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
                     )
                     L.append(
                         f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
@@ -7330,7 +7355,7 @@ class CodeGenerator:
                     f'    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(s0, k, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(s0, k, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -7355,7 +7380,7 @@ class CodeGenerator:
                     )
                     L.append(f'    uint16_t k = static_cast<uint16_t>({k_expr});')
                     L.append(
-                        '    uint16_t result = amdgpu::fp_mode::fma_f16(s0, s1, k, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                        '    uint16_t result = amdgpu::fp_mode::fma_f16(s0, s1, k, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
                     )
                     L.append(
                         f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
@@ -7395,7 +7420,7 @@ class CodeGenerator:
                 )
                 L.append(f'    float k = std::bit_cast<float>({k_expr});')
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(s0, s1, k, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(s0, s1, k, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));'
                 )
             L.append('  }')
             return '\n'.join(L)
@@ -7442,6 +7467,7 @@ class CodeGenerator:
                 opsel=opsel,
                 dtype=dtype,
                 is_vop3=is_vop3,
+                has_abs=has_abs,
                 fp8_format_select=fp8_format_select,
                 arch_name=self.isa_spec.arch_name,
             )
@@ -11399,6 +11425,13 @@ class CodeGenerator:
                                 # storing them on the Instruction base for
                                 # apply_dpp() to use later.
                                 if _dpp_struct and _supports_dpp_encoding:
+                                    _dpp_source_modifiers = (
+                                        ' dpp_abs_ = dp->src0_abs | (dp->src1_abs << 1);'
+                                        ' dpp_neg_ = dp->src0_neg | (dp->src1_neg << 1);'
+                                        if enc.enc_name.upper()
+                                        in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC')
+                                        else ''
+                                    )
                                     _dpp_feature_mask = self._modifier_feature_mask(
                                         inst, _modifier_enc_name, 'dpp'
                                     )
@@ -11431,6 +11464,7 @@ class CodeGenerator:
                                             f' dpp_row_mask_ = dp->row_mask;'
                                             f' dpp_bank_mask_ = dp->bank_mask;'
                                             f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                            f'{_dpp_source_modifiers}'
                                             f'{_dpp_fi_ctor_stmt}'
                                             f'{_dpp_feature_stmt}'
                                             f'}}'
@@ -11507,6 +11541,7 @@ class CodeGenerator:
                                         f' dpp_row_mask_ = dp->row_mask;'
                                         f' dpp_bank_mask_ = dp->bank_mask;'
                                         f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                        f'{_dpp_source_modifiers}'
                                         f'{_dpp_fi_ctor_stmt}'
                                         f'{_dpp_feature_stmt}'
                                         f'}}'
@@ -11632,7 +11667,7 @@ class CodeGenerator:
                                 )
 
                     if (
-                        profile.renders_gfx11_image_syntax
+                        profile.has_gfx11_image_address_extension
                         and enc.enc_name.upper() == 'ENC_MIMG'
                     ):
                         ctor_body_parts.append('capture_nsa_words(inst, &vaddr);')
@@ -11919,6 +11954,20 @@ class CodeGenerator:
                                 if len(_src_input_ops) > 1
                                 else None
                             )
+                            _dpp_sign_bits = (
+                                [
+                                    self._dpp_source_sign_bit(sem, i, o)
+                                    for i, o in enumerate(_src_input_ops[:2])
+                                ]
+                                if sem is not None
+                                and _supports_dpp_encoding
+                                and enc.enc_name.upper()
+                                in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC')
+                                else []
+                            )
+                            _dpp_modifies_src1 = len(_dpp_sign_bits) > 1 and bool(
+                                _dpp_sign_bits[1]
+                            )
                             # Tripwire: the permuted sources must be field-bearing,
                             # so a future change to the selection above cannot
                             # silently reintroduce reading a fieldless literal as
@@ -11967,7 +12016,9 @@ class CodeGenerator:
                                 _dpp_preamble += (
                                     '  std::optional<StagedOperand> dpp_src0_;\n'
                                 )
-                            if _has_sdwa_encoding and _src1_name:
+                            if (
+                                _has_sdwa_encoding or _dpp_modifies_src1
+                            ) and _src1_name:
                                 _dpp_preamble += (
                                     '  std::optional<StagedOperand> dpp_src1_;\n'
                                 )
@@ -12170,6 +12221,14 @@ class CodeGenerator:
                                     + _sdwa_src1_block
                                     + '  }\n'
                                 )
+                            for index, sign in enumerate(_dpp_sign_bits):
+                                if sign:
+                                    source = _src_input_ops[index].name
+                                    _dpp_preamble += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                        f'    amdgpu::dpp::apply_source_modifiers({source}, dpp_src{index}_, wf,\n'
+                                        f'        {sign}ull, dpp_abs_ & {1 << index}u, dpp_neg_ & {1 << index}u);\n'
+                                    )
                             if not _semantic_stages_src0:
                                 _dpp_preamble += (
                                     f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name},\n'
@@ -12179,7 +12238,8 @@ class CodeGenerator:
                                 ) + (
                                     f'  ScopedOperandDelegate dpp_src1_binding_({_src1_name},\n'
                                     '      dpp_src1_ ? &*dpp_src1_ : nullptr);\n'
-                                    if _has_sdwa_encoding and _src1_name
+                                    if (_has_sdwa_encoding or _dpp_modifies_src1)
+                                    and _src1_name
                                     else ''
                                 )
                             if _supports_dpp_encoding and not _is_compare and _dst_name:
@@ -12370,15 +12430,18 @@ class CodeGenerator:
                                         '  }\n'
                                     )
                         _result_format = self._sdwa_result_format(sem)
+                        _output_policy = self._sdwa_output_policy(sem)
                         _local_body = body
                         if _result_format == 'amdgpu::sdwa::ResultFormat::F16':
                             _local_body = self._apply_sdwa_f16_omod(
-                                _local_body, '*this'
+                                _local_body,
+                                '*this',
+                                rounded_result=sem.name in ('V_LOG_F16', 'V_EXP_F16'),
                             )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                             r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                            rf'amdgpu::sdwa::write_lane<{_result_format}>'
+                            rf'amdgpu::sdwa::write_lane<{_result_format}{_output_policy}>'
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
@@ -12876,6 +12939,7 @@ class CodeGenerator:
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/cube.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -13429,6 +13493,7 @@ class CodeGenerator:
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
                 'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': 'gfx11_dot2_f32',
                 'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': 'gfx12_dot2_f32',
+                'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',
                     'div_fmas(',
@@ -13768,7 +13833,11 @@ class CodeGenerator:
                 r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body
             )
             if self._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::F16':
-                prefixed_body = self._apply_sdwa_f16_omod(prefixed_body, 'inst')
+                prefixed_body = self._apply_sdwa_f16_omod(
+                    prefixed_body,
+                    'inst',
+                    rounded_result=sem.name in ('V_LOG_F16', 'V_EXP_F16'),
+                )
             if sem.data_type == 'f16':
                 for result_format in ('F16', 'PK_F16'):
                     helper = (
@@ -13786,10 +13855,12 @@ class CodeGenerator:
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
             )
             result_format = self._sdwa_result_format(sem)
+            output_policy = self._sdwa_output_policy(sem)
             prefixed_body = _re.sub(
                 r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                 r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                rf'sdwa::write_lane<{result_format}>' r'(inst, wf, \1, lane, ',
+                rf'sdwa::write_lane<{result_format}{output_policy}>'
+                r'(inst, wf, \1, lane, ',
                 prefixed_body,
             )
             prefixed_body = _re.sub(
@@ -13894,6 +13965,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/cube.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -13938,6 +14010,11 @@ class CodeGenerator:
                 true16_vop3=is_true16_vop3,
                 result_writer='commit_result' if uses_result_writer else None,
             )
+            if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
+                # LOG/EXP ignore guest rounding. Keep output scaling and clamp
+                # under the saved environment too: OMOD can overflow or touch
+                # signaling NaNs, and SIMD clamp compares NaN results.
+                lines.append('  fp_mode::ScopedEnvironment environment(0);')
             alu_classifiers = {
                 'v_mul_f32_vop2': 'classify_mul_f32_vop2',
                 'v_mul_f32_vop3': 'classify_mul_f32_vop3',
@@ -14715,6 +14792,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             packed_16bit_field = (
                 '  bool packed_16bit_source_ = false;\n'
                 '  bool packed_16bit_dst_ = false;\n'
+            )
+
+        if uses_packed_16bit_sources and self.isa_spec.profile.split_execution_sources:
+            packed_16bit_field += (
+                '  std::optional<uint32_t> resolved_vgpr_offset_exec(\n'
+                '      const amdgpu::Wavefront &wf) const;\n'
             )
 
         # WARNING: final, kStaticRegisterAccess, and this friendship form the typed-access
@@ -15985,6 +16068,28 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       full_execution_backend()));
                 }
                 ''')
+            if uses_packed_16bit_sources:
+                # Ownership checks, raw storage, and observation hooks must all
+                # resolve a packed half to the same underlying physical VGPR.
+                execution_code = execution_code.replace(
+                    'detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)',
+                    'resolved_vgpr_offset_exec(wf)',
+                )
+                execution_code += '\n\n' + textwrap.dedent('''\
+                    std::optional<uint32_t>
+                    Operand::resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const {
+                      if (!reads_value())
+                        return std::nullopt;
+                      auto packed = packed_16bit_vgpr_source(
+                          packed_16bit_source_, size_bits_, opr_type_, encoding_value_);
+                      if (!packed)
+                        packed = packed_16bit_vgpr_dst(
+                            packed_16bit_dst_, size_bits_, opr_type_, encoding_value_);
+                      if (packed)
+                        return packed->reg + (wf.vgpr_msb_for_role(vgpr_msb_role()) << 8);
+                      return detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
+                    }
+                    ''')
             execution_code = execution_code.replace(
                 'raw_compute_unit(wf.cu())',
                 'amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu())',

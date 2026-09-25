@@ -33,6 +33,7 @@ void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -48,7 +49,14 @@ RJ_NOINLINE void VCmpLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_lt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -70,6 +78,7 @@ void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -85,7 +94,14 @@ RJ_NOINLINE void VCmpEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_eq_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -107,6 +123,7 @@ void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -122,7 +139,14 @@ RJ_NOINLINE void VCmpLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_le_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -144,6 +168,7 @@ void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -159,7 +184,14 @@ RJ_NOINLINE void VCmpGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_gt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -181,6 +213,7 @@ void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -196,7 +229,14 @@ RJ_NOINLINE void VCmpLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_lg_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -218,6 +258,7 @@ void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -233,7 +274,14 @@ RJ_NOINLINE void VCmpGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_ge_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -255,6 +303,7 @@ void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -270,7 +319,14 @@ RJ_NOINLINE void VCmpOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_o_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -292,6 +348,7 @@ void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -307,7 +364,14 @@ RJ_NOINLINE void VCmpUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_u_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -329,6 +393,7 @@ void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -344,7 +409,14 @@ RJ_NOINLINE void VCmpNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nge_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -366,6 +438,7 @@ void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -381,7 +454,14 @@ RJ_NOINLINE void VCmpNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nlg_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -403,6 +483,7 @@ void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -418,7 +499,14 @@ RJ_NOINLINE void VCmpNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_ngt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -440,6 +528,7 @@ void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -455,7 +544,14 @@ RJ_NOINLINE void VCmpNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nle_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -477,6 +573,7 @@ void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -492,7 +589,14 @@ RJ_NOINLINE void VCmpNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_neq_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -514,6 +618,7 @@ void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -529,7 +634,14 @@ RJ_NOINLINE void VCmpNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nlt_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -551,6 +663,7 @@ void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -566,7 +679,14 @@ RJ_NOINLINE void VCmpLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_lt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -588,6 +708,7 @@ void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -603,7 +724,14 @@ RJ_NOINLINE void VCmpEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_eq_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -625,6 +753,7 @@ void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -640,7 +769,14 @@ RJ_NOINLINE void VCmpLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_le_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -662,6 +798,7 @@ void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -677,7 +814,14 @@ RJ_NOINLINE void VCmpGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_gt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -699,6 +843,7 @@ void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -714,7 +859,14 @@ RJ_NOINLINE void VCmpLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_lg_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -736,6 +888,7 @@ void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -751,7 +904,14 @@ RJ_NOINLINE void VCmpGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_ge_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -773,6 +933,7 @@ void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -788,7 +949,14 @@ RJ_NOINLINE void VCmpOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_o_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -810,6 +978,7 @@ void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -825,7 +994,14 @@ RJ_NOINLINE void VCmpUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_u_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -847,6 +1023,7 @@ void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -862,7 +1039,14 @@ RJ_NOINLINE void VCmpNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nge_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -884,6 +1068,7 @@ void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -899,7 +1084,14 @@ RJ_NOINLINE void VCmpNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nlg_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -921,6 +1113,7 @@ void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -936,7 +1129,14 @@ RJ_NOINLINE void VCmpNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_ngt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -958,6 +1158,7 @@ void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -973,7 +1174,14 @@ RJ_NOINLINE void VCmpNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nle_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -995,6 +1203,7 @@ void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1010,7 +1219,14 @@ RJ_NOINLINE void VCmpNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_neq_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -1032,6 +1248,7 @@ void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -1047,7 +1264,14 @@ RJ_NOINLINE void VCmpNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::execute_v_cmp_nlt_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
@@ -2076,6 +2300,9 @@ RJ_NOINLINE void VCmpClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) 
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::execute_v_cmp_class_f16_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2113,6 +2340,9 @@ RJ_NOINLINE void VCmpClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) 
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::execute_v_cmp_class_f32_vopc(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2157,6 +2387,7 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2172,7 +2403,14 @@ RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2232,6 +2470,7 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2247,7 +2486,14 @@ RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2307,6 +2553,7 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2322,7 +2569,14 @@ RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2382,6 +2636,7 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2397,7 +2652,14 @@ RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2460,6 +2722,7 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2475,7 +2738,14 @@ RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2538,6 +2808,7 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2553,7 +2824,14 @@ RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2616,6 +2894,7 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2631,7 +2910,14 @@ RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2697,6 +2983,7 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2712,7 +2999,14 @@ RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2775,6 +3069,7 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2790,7 +3085,14 @@ RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2853,6 +3155,7 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2868,7 +3171,14 @@ RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -2931,6 +3241,7 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -2946,7 +3257,14 @@ RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -3006,6 +3324,7 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3021,7 +3340,14 @@ RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -3081,6 +3407,7 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3096,7 +3423,14 @@ RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -3156,6 +3490,7 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3171,7 +3506,14 @@ RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 32768ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<uint32_t>(
@@ -3228,6 +3570,7 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3243,7 +3586,14 @@ RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3297,6 +3647,7 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3312,7 +3663,14 @@ RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3366,6 +3724,7 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3381,7 +3740,14 @@ RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3435,6 +3801,7 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3450,7 +3817,14 @@ RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3504,6 +3878,7 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3519,7 +3894,14 @@ RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3573,6 +3955,7 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3588,7 +3971,14 @@ RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3642,6 +4032,7 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3657,7 +4048,14 @@ RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3711,6 +4109,7 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3726,7 +4125,14 @@ RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3780,6 +4186,7 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3795,7 +4202,14 @@ RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3849,6 +4263,7 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3864,7 +4279,14 @@ RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3918,6 +4340,7 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -3933,7 +4356,14 @@ RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -3987,6 +4417,7 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -4002,7 +4433,14 @@ RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -4056,6 +4494,7 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -4071,7 +4510,14 @@ RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -4125,6 +4571,7 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 
 RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
@@ -4140,7 +4587,14 @@ RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(vsrc1, dpp_src1_, wf, 2147483648ull, dpp_abs_ & 2u,
+                                        dpp_neg_ & 2u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
     if (amdgpu::try_execute_vopc_simd<float>(
@@ -6461,6 +6915,9 @@ RJ_NOINLINE void VCmpxClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   [&]() -> void {
     auto &inst = *this;
@@ -6631,6 +7088,9 @@ RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_abs_ & 1u,
+                                        dpp_neg_ & 1u);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   [&]() -> void {
     auto &inst = *this;

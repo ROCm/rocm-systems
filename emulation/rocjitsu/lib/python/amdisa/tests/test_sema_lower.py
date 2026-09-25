@@ -160,6 +160,36 @@ class TestLowerScalarAdd:
 
 
 class TestLowerVectorAdd:
+    @pytest.mark.parametrize('operation', ['cubeid', 'cubesc', 'cubetc', 'cubema'])
+    def test_cube_output_scaling_uses_instruction_policy(self, operation: str):
+        cube = SemaNode(
+            SemaNodeKind.CALL,
+            call_name=operation,
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name=operation),
+                *(
+                    SemaNode(SemaNodeKind.LIT, lit_value=value, ty=SemaType.F32)
+                    for value in ('1.0', '-2.0', '0.5')
+                ),
+            ),
+        )
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_omod',
+            ty=SemaType.F32,
+            children=(SemaNode(SemaNodeKind.ID, id_name='apply_omod'), cube),
+        )
+
+        result = _lower_apply_omod(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert 'cube::apply_omod(' in result
+        assert 'wf.fp_round_mode_f32()' in result
+        assert 'inst_.omod' in result
+        assert 'effective_omod' not in result
+        assert 'fp_denorm_mode' not in result
+        assert '*=' not in result
+
     def test_apply_clamp_uses_architecture_mode_policy(self):
         node = SemaNode(
             SemaNodeKind.CALL,
@@ -205,8 +235,11 @@ class TestLowerVectorAdd:
 
         assert f'amdgpu::fp_mode::{expected_helper}' in result
         assert expected_denorm_mode in result
-        assert 'const uint32_t effective_omod' in result
-        assert 'finalize_omod_' in result
+        if result_type == SemaType.F32:
+            assert 'amdgpu::fp_mode::apply_omod_f32(v, ' in result
+        else:
+            assert 'const uint32_t effective_omod' in result
+            assert 'finalize_omod_' in result
         assert 'if (inst_.omod ==' not in result
         if result_type == SemaType.F16:
             assert 'false, inst_.omod' in result

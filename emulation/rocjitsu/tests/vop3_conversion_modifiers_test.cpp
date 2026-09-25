@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/data_types.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -21,6 +22,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace {
 
@@ -264,6 +266,412 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
           EXPECT_EQ(cu->read_vgpr(vb + 2, lane), static_cast<uint32_t>(c.expected))
               << "arch=" << GetParam() << " input=" << c.bits << " vop3=" << vop3
               << " scalar=" << force_scalar;
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers) {
+  struct Case {
+    uint32_t input;
+    uint16_t packed;
+  };
+  // Explicit RTZ results include discarded mantissa bits, signed zero,
+  // a half subnormal, and finite overflow. The conversion ignores MODE rounding.
+  constexpr Case cases[] = {{0xbf803fff, 0xbc01}, {0x40490fdb, 0x4248}, {0x80000000, 0x8000},
+                            {0x477fffff, 0x7bff}, {0xb3ffffff, 0x8001}, {0x3fffffff, 0x3fff},
+                            {0xc0200000, 0xc100}, {0x3f000000, 0x3800}};
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_rtz_memory");
+    amdgpu::L2Cache l2("packed_rtz_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_rtz", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (uint32_t abs_mask = 0; abs_mask < 4; ++abs_mask) {
+      for (uint32_t neg_mask = 0; neg_mask < 4; ++neg_mask) {
+        // GFX9 uses opcode 662; later encodings use opcode 303.
+        const std::array<uint32_t, 2> words{(gfx9() ? 0xd0000002u : 0xd4000002u) |
+                                                ((gfx9() ? 662u : 303u) << 16) | (abs_mask << 8),
+                                            256u | (257u << 9) | (neg_mask << 29)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        for (uint32_t mode : {0u, 0xfu}) {
+          wf->set_mode_raw(mode);
+          for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+            SCOPED_TRACE(testing::Message()
+                         << "scalar=" << force_scalar << " abs_mask=" << abs_mask
+                         << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+            wf->set_exec(exec);
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              cu->write_vgpr(vb, lane, cases[lane % std::size(cases)].input);
+              cu->write_vgpr(vb + 1, lane, cases[(lane + 3) % std::size(cases)].input);
+              cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+            }
+            ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              uint32_t expected = 0;
+              for (uint32_t src = 0; src < 2; ++src) {
+                uint32_t half = cases[(lane + 3 * src) % std::size(cases)].packed;
+                if (abs_mask & (1u << src))
+                  half &= 0x7fff;
+                if (neg_mask & (1u << src))
+                  half ^= 0x8000;
+                expected |= half << (16 * src);
+              }
+              EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? expected : 0xdeadbeefu)
+                  << "lane=" << lane;
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedRtzDppPermutesBeforeSourceModifiers) {
+  if (gfx9() || GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "This DPP8 encoding is available on RDNA3/3.5/4 and CDNA5.";
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_rtz_dpp_memory");
+    amdgpu::L2Cache l2("packed_rtz_dpp_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_rtz_dpp", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    // LLVM gfx11_asm_vop3_dpp8_from_vop2.s encodes v5, |v1|, -v2
+    // with source-0 lanes reversed within each group of eight.
+    const uint32_t words[] = {0xd52f0105, 0x400204e9, 0x05397701};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+    ASSERT_NE(inst, nullptr);
+    wf->set_exec(wf->wf_size() == 64 ? ~0ull : 0xffffffffull);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>(-(1.0f + (lane % 8) / 8.0f)));
+      cu->write_vgpr(vb + 2, lane, std::bit_cast<uint32_t>(2.0f + (lane % 8) / 4.0f));
+    }
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const uint32_t lo = 0x3c00 + (7 - lane % 8) * 128;
+      const uint32_t hi = 0xc000 + (lane % 8) * 128;
+      EXPECT_EQ(cu->read_vgpr(vb + 5, lane), lo | (hi << 16))
+          << "lane=" << lane << " scalar=" << force_scalar;
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetrically) {
+  struct Case {
+    uint32_t input;
+    uint16_t unorm, snorm, unorm_negated = 0;
+  };
+  // Physical RDNA3/4 witnesses: false FP32 midpoint ties, signed saturation,
+  // exact midpoints, infinities and NaN. The normalized conversion ignores MODE.
+  constexpr Case second_source{0x3f000000, 0x8000, 0x4000};
+  constexpr Case f32_only_cases[] = {
+      {0x37c000c0, 0x0001, 0x0001},         {0x386000e0, 0x0003, 0x0002},
+      {0x38b000b0, 0x0005, 0x0003},         {0x38f000f0, 0x0007, 0x0004},
+      {0xbf800080, 0x0000, 0x8001, 0xffff}, {0xbf7fff00, 0x0000, 0x8001, 0xfffe},
+      {0xbf7ffb00, 0x0000, 0x8003, 0xfffa}, {0xbf7ff700, 0x0000, 0x8005, 0xfff6}};
+  // These witnesses are exactly representable in FP16 and exercise both widths.
+  constexpr Case exact_half_cases[] = {{0x3f002000, 0x801f, 0x400f},
+                                       {0x3f004000, 0x803f, 0x401f},
+                                       {0x3f006000, 0x805f, 0x402f},
+                                       {0x3f008000, 0x807f, 0x403f},
+                                       {0x00000000, 0x0000, 0x0000},
+                                       {0x33800000, 0x0000, 0x0000},
+                                       second_source,
+                                       {0x3f800000, 0xffff, 0x7fff},
+                                       {0x40000000, 0xffff, 0x7fff},
+                                       {0x7f800000, 0xffff, 0x7fff},
+                                       {0x7fc00000, 0x0000, 0x0000},
+                                       {0xbf800000, 0x0000, 0x8001, 0xffff},
+                                       {0xc0000000, 0x0000, 0x8001, 0xffff},
+                                       {0xff800000, 0x0000, 0x8001, 0xffff}};
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_normalized_memory");
+    amdgpu::L2Cache l2("packed_normalized_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool half : {false, true}) {
+      const bool early_rdna =
+          GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+      if (half && (gfx9() || early_rdna))
+        continue;
+      std::vector<Case> cases(std::begin(exact_half_cases), std::end(exact_half_cases));
+      if (!half)
+        cases.insert(cases.end(), std::begin(f32_only_cases), std::end(f32_only_cases));
+      for (bool signed_result : {false, true}) {
+        // F16 uses opcode 786; F32 uses 660 on GFX9, 872 on RDNA1/2,
+        // and 801 on later targets. The unsigned opcode follows the signed one.
+        const uint32_t opcode = (half         ? 786
+                                 : gfx9()     ? 660
+                                 : early_rdna ? 872
+                                              : 801) +
+                                !signed_result;
+        for (uint32_t abs_mask = 0; abs_mask < 4; ++abs_mask) {
+          for (uint32_t neg_mask = 0; neg_mask < 4; ++neg_mask) {
+            const uint32_t words[] = {(gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16) |
+                                          (abs_mask << 8),
+                                      256u | (257u << 9) | (neg_mask << 29)};
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+            ASSERT_NE(inst, nullptr);
+            for (uint32_t mode : {0u, 0xfu}) {
+              wf->set_mode_raw(mode);
+              for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+                SCOPED_TRACE(testing::Message()
+                             << "scalar=" << force_scalar << " half=" << half
+                             << " signed=" << signed_result << " abs_mask=" << abs_mask
+                             << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+                wf->set_exec(exec);
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const auto &c = cases[lane % cases.size()];
+                  const uint32_t input =
+                      half ? util::f32_to_f16(std::bit_cast<float>(c.input)) : c.input;
+                  cu->write_vgpr(vb, lane, input);
+                  cu->write_vgpr(vb + 1, lane,
+                                 half ? util::f32_to_f16(std::bit_cast<float>(second_source.input))
+                                      : second_source.input);
+                  cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+                }
+                ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const auto &c = cases[lane % cases.size()];
+                  uint32_t expected = 0;
+                  for (uint32_t source = 0; source < 2; ++source) {
+                    const auto &value = source == 0 ? c : second_source;
+                    const bool negate =
+                        static_cast<bool>((abs_mask & (1u << source)) && (value.input >> 31)) ^
+                        static_cast<bool>(neg_mask & (1u << source));
+                    const uint16_t packed =
+                        signed_result
+                            ? static_cast<uint16_t>(negate ? -static_cast<int16_t>(value.snorm)
+                                                           : value.snorm)
+                        : negate ? value.unorm_negated
+                                 : value.unorm;
+                    expected |= static_cast<uint32_t>(packed) << (16 * source);
+                  }
+                  EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
+                            exec & (1ull << lane) ? expected : 0xdeadbeefu)
+                      << "lane=" << lane << " input=" << c.input;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifiers) {
+  struct Case {
+    uint16_t input, unorm_magnitude, snorm_magnitude;
+  };
+  // Physical RDNA3/4 witnesses: exact halves, saturation, infinities and NaN.
+  // For 0x3801, FP32 scaling creates a false midpoint: 32799.49951171875 -> 32799.5.
+  constexpr Case cases[] = {
+      {0x0000, 0, 0},           {0x0001, 0, 0},           {0x3800, 0x8000, 0x4000},
+      {0x3801, 0x801f, 0x400f}, {0xb801, 0x801f, 0x400f}, {0x3c00, 0xffff, 0x7fff},
+      {0xbc00, 0xffff, 0x7fff}, {0x3c01, 0xffff, 0x7fff}, {0xbc01, 0xffff, 0x7fff},
+      {0x7c00, 0xffff, 0x7fff}, {0xfc00, 0xffff, 0x7fff}, {0x7e01, 0, 0}};
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool preserve_high = !gfx9() && !early_rdna;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("unary_normalized_memory");
+    amdgpu::L2Cache l2("unary_normalized_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("unary_normalized", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool vop3 : {false, true}) {
+      for (bool signed_result : {false, true}) {
+        // GFX9 uses VOP1 77 / VOP3 397; later encodings use VOP1 99 / VOP3 483.
+        // The unsigned opcode follows the signed one.
+        const uint32_t opcode =
+            (vop3 ? (gfx9() ? 397u : 483u) : (gfx9() ? 77u : 99u)) + !signed_result;
+        for (uint32_t modifiers = 0; modifiers < (vop3 ? 4u : 1u); ++modifiers) {
+          const uint32_t abs_mask = modifiers & 1u;
+          const uint32_t neg_mask = modifiers >> 1;
+          const uint32_t words[] = {
+              vop3 ? ((gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16) | (abs_mask << 8))
+                   : (0x7e000100u | (2u << 17) | (opcode << 9)),
+              256u | (neg_mask << 29)};
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+          ASSERT_NE(inst, nullptr);
+          for (uint32_t mode : {0u, 0x5u, 0xau, 0xfu}) {
+            wf->set_mode_raw(mode);
+            for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+              SCOPED_TRACE(testing::Message()
+                           << "scalar=" << force_scalar << " vop3=" << vop3
+                           << " signed=" << signed_result << " abs_mask=" << abs_mask
+                           << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+              wf->set_exec(exec);
+              for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                cu->write_vgpr(vb, lane, 0xdead0000u | cases[lane % std::size(cases)].input);
+                cu->write_vgpr(vb + 2, lane, 0xabcd1234);
+              }
+              ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+              for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                const auto &c = cases[lane % std::size(cases)];
+                const bool negative = ((c.input & 0x8000) != 0 && !abs_mask) ^ (neg_mask != 0);
+                const uint16_t low =
+                    signed_result
+                        ? static_cast<uint16_t>(negative ? -c.snorm_magnitude : c.snorm_magnitude)
+                        : (negative ? 0 : c.unorm_magnitude);
+                const uint32_t expected = low | (preserve_high ? 0xabcd0000u : 0);
+                EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
+                          exec & (1ull << lane) ? expected : 0xabcd1234u)
+                    << "lane=" << lane << " input=" << c.input;
+              }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, HalfInputConversionsApplyModifiersAndMode) {
+  struct Case {
+    uint16_t half;
+    uint32_t widened;
+    uint16_t unsigned_value, signed_positive, signed_negative;
+  };
+  // Raw outputs from physical gfx1100/gfx1201, including signaling NaNs.
+  constexpr Case cases[] = {
+      {0x0000, 0x00000000, 0, 0, 0},
+      {0x0001, 0x33800000, 0, 0, 0},
+      {0x03ff, 0x387fc000, 0, 0, 0},
+      {0x0400, 0x38800000, 0, 0, 0},
+      {0x3e00, 0x3fc00000, 1, 1, 0xffff},
+      {0x47c0, 0x40f80000, 7, 7, 0xfff9},
+      {0x77ff, 0x46ffe000, 32752, 32752, 0x8010},
+      {0x7800, 0x47000000, 32768, 32767, 0x8000},
+      {0x7bff, 0x477fe000, 65504, 32767, 0x8000},
+      {0x7c00, 0x7f800000, 65535, 32767, 0x8000},
+      {0x7c01, 0x7f802000, 0, 0, 0},
+      {0x7e01, 0x7fc02000, 0, 0, 0},
+  };
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool preserve_half = !early_rdna && !gfx9();
+  const bool always_quiet =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("half_input_memory");
+    amdgpu::L2Cache l2("half_input_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("half_input", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool vop3 : {false, true}) {
+      for (uint32_t kind = 0; kind < 3; ++kind) {
+        const bool floating = kind == 2;
+        // Unsigned/signed VOP1 opcodes 59/60 on GFX9, 82/83 on later targets.
+        const uint32_t vop1_op = floating ? 11u : (gfx9() ? 59u : 82u) + kind;
+        const uint32_t opcode = vop1_op + (vop3 ? (gfx9() ? 320u : 384u) : 0u);
+        for (uint32_t half = 0;
+             half < (vop3 && !early_rdna && (floating || preserve_half) ? 2u : 1u); ++half) {
+          for (uint32_t modifiers = 0; modifiers < (vop3 ? 4u : 1u); ++modifiers) {
+            const uint32_t abs_mask = modifiers & 1u;
+            const uint32_t neg_mask = modifiers >> 1;
+            const uint32_t opsel = half | (!floating ? half << 3 : 0u);
+            const uint32_t words[] = {vop3 ? ((gfx9() ? 0xd0000002u : 0xd4000002u) |
+                                              (opcode << 16) | (abs_mask << 8) | (opsel << 11))
+                                           : (0x7e000100u | (2u << 17) | (opcode << 9)),
+                                      256u | (neg_mask << 29)};
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+            ASSERT_NE(inst, nullptr);
+            for (uint32_t mode : {0u, 0x20fu, 0x40u, 0x24fu, 0x80u, 0x28fu, 0xc0u, 0x2cfu}) {
+              wf->set_mode_raw(mode);
+              for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+                SCOPED_TRACE(testing::Message()
+                             << "scalar=" << force_scalar << " vop3=" << vop3 << " kind=" << kind
+                             << " half=" << half << " abs_mask=" << abs_mask
+                             << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+                wf->set_exec(exec);
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const uint32_t input =
+                      cases[(lane / 2) % std::size(cases)].half | ((lane & 1u) << 15);
+                  cu->write_vgpr(vb, lane, half ? (input << 16) | 0xdead : input | 0xdead0000u);
+                  cu->write_vgpr(vb + 2, lane, 0xabcd1234u);
+                }
+                ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const auto &c = cases[(lane / 2) % std::size(cases)];
+                  const bool negative = ((lane & 1u) && !abs_mask) ^ (neg_mask != 0);
+                  uint32_t expected;
+                  if (floating) {
+                    expected = c.widened;
+                    if (!(mode & 0x40u) && c.half < 0x0400u)
+                      expected = 0;
+                    if ((always_quiet || (mode & 0x200u)) && c.half > 0x7c00u)
+                      expected |= 0x00400000u;
+                    expected |= negative ? 0x80000000u : 0;
+                  } else {
+                    const uint32_t value = kind == 0
+                                               ? (negative ? 0 : c.unsigned_value)
+                                               : (negative ? c.signed_negative : c.signed_positive);
+                    expected = preserve_half
+                                   ? (half ? (value << 16) | 0x1234u : value | 0xabcd0000u)
+                                   : value;
+                  }
+                  EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
+                            exec & (1ull << lane) ? expected : 0xabcd1234u)
+                      << "lane=" << lane << " input=" << c.half;
+                }
+              }
+            }
+          }
         }
       }
     }

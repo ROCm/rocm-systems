@@ -227,10 +227,10 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
             expected = fp_mode::packed_select_bf16(af, bf, Op == PackedFloatOp::MIN);
           expected = fp_mode::clamp_bf16(expected, iteration & 1, floating_clamp_nan_to_zero(wf));
         } else if constexpr (Op == PackedFloatOp::FMA) {
-          expected =
-              fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
-                               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
-                               iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          expected = fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
+                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
+                                      iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+                                      fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
         } else {
           constexpr auto operation = Op == PackedFloatOp::ADD   ? fp_mode::PackedBinaryOp::ADD
                                      : Op == PackedFloatOp::MUL ? fp_mode::PackedBinaryOp::MUL

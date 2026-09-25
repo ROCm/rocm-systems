@@ -306,10 +306,10 @@ def gen_pk_ternary(
                     f'    uint16_t {name} = static_cast<uint16_t>({selector} ? ({raw} >> 16) : {raw});'
                 )
             L.append(
-                '    uint16_t rlo = amdgpu::fp_mode::fma_f16(a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                '    uint16_t rlo = amdgpu::fp_mode::fma_f16(a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
             )
             L.append(
-                '    uint16_t rhi = amdgpu::fp_mode::fma_f16(a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u, inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));'
+                '    uint16_t rhi = amdgpu::fp_mode::fma_f16(a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u, inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
             )
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
@@ -557,8 +557,8 @@ def gen_pk_fmac_vop2(dst: list[str], src: list[str]) -> str:
             f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
             '    const uint32_t omod = amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf);',
-            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
-            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
+            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, r0 | (r1 << 16));',
             '  }',
         ]
@@ -585,8 +585,8 @@ def gen_pk_fmac_vop3(dst: list[str], src: list[str]) -> str:
             f'      raw1 = (raw1 & 0xffffu) * 0x10001u;',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
             '    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), true, inst_.omod);',
-            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
-            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
+            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));',
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, r0 | (r1 << 16));',
             '  }',
         ]
@@ -632,7 +632,7 @@ def gen_pk_binop_f32(
     L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
     for half, result in (('lo', 'rlo'), ('hi', 'rhi')):
         L.append(
-            f'    uint32_t {result} = amdgpu::fp_mode::packed_f32(a_{half}, b_{half}, 0.0f, amdgpu::fp_mode::PackedF32Op::{op.upper()}, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+            f'    uint32_t {result} = amdgpu::fp_mode::packed_f32(a_{half}, b_{half}, 0.0f, amdgpu::fp_mode::PackedF32Op::{op.upper()}, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
         )
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
@@ -688,10 +688,10 @@ def gen_pk_ternary_f32(
     L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
     L.append('    if (inst_.neg_hi & 4) c_hi = -c_hi;')
     L.append(
-        '    uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+        '    uint32_t rlo = amdgpu::fp_mode::packed_f32(a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
     )
     L.append(
-        '    uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));'
+        '    uint32_t rhi = amdgpu::fp_mode::packed_f32(a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
     )
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));'
@@ -1046,7 +1046,10 @@ def gen_mad_mix_lo_hi(
         f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
-    L.append(f'    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());')
+    L.append('    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(')
+    L.append(
+        '        result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false);'
+    )
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'

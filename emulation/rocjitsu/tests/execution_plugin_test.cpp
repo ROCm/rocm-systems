@@ -38,6 +38,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
@@ -2602,6 +2604,65 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
     delete inst;
 
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1}, kPartialExecMask);
+  }
+}
+
+TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndExceptionFlags) {
+  const std::pair<rj_code_arch_t, uint32_t> targets[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kVMulF32Vop2},
+      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kVMulF32Vop2},
+  };
+  constexpr uint64_t kExec = (1u << 1) | (1u << 7) | (1u << 21);
+  for (const auto &[arch, opcode] : targets) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    Wave32PluginFixture f(arch);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const uint32_t value =
+          std::bit_cast<uint32_t>((kExec & (uint64_t{1} << lane)) ? 1.1f : 1e38f);
+      f.cu->write_vgpr(base, lane, value);
+      f.cu->write_vgpr(base + 1, lane, value);
+    }
+    f.cu->write_sgpr(wf->sgpr_alloc().base + 4, std::bit_cast<uint32_t>(1.1f));
+    auto decoder = Decoder::create(arch);
+    for (uint64_t exec : {uint64_t{0}, kExec}) {
+      // Exercise vector, SGPR, literal, and inline-constant sources.
+      for (uint32_t source : {256u, 4u, 255u, 240u}) {
+        SCOPED_TRACE(testing::Message() << "exec " << exec << " source " << source);
+        wf->set_exec(exec);
+        wf->set_trapsts(0);
+        uint32_t words[] = {vop2_encode(opcode, 2, 1, source), std::bit_cast<uint32_t>(1.1f)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        plugin->events.clear();
+        ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
+        EXPECT_EQ(wf->trapsts() & 0x7fu, exec && source != 240 ? 1u << 5 : 0u);
+        std::map<uint32_t, uint64_t> reads;
+        for (const auto &event : vgpr_read_events(*plugin)) {
+          EXPECT_EQ(event.lane_mask & ~exec, 0u);
+          EXPECT_EQ(event.byte_mask, ExecutionPlugin::kFullByteMask);
+          reads[event.physical_reg - base] |= event.lane_mask;
+        }
+        std::map<uint32_t, uint64_t> expected;
+        if (exec) {
+          expected[1] = exec;
+          if (source == 256)
+            expected[0] = exec;
+        }
+        EXPECT_EQ(reads, expected);
+      }
+    }
   }
 }
 
