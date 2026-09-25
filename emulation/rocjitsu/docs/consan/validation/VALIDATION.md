@@ -377,7 +377,9 @@ manifest. The driver verifies the selected/source configurations, target,
 client binary, wrapper, expected oracle counts and Stream-K controls. It checks
 SHA-256 hashes of retained client configurations, library files, code objects
 and invocation scripts before execution and again after successful execution.
-Only the results-file destinations change, into the new run directory. The
+Each replay retains the exact manifest bytes and their SHA-256 in its run
+artifacts and oracle detail. Only the results-file destinations change, into
+the new run directory. The
 same numerical oracle and aggregate execution deadline apply. The environment
 override `CONSAN_VALIDATION_TENSILE_REPLAY_MANIFEST` selects this path for a
 single workload/shard campaign; incompatible shards are rejected.

@@ -1,4 +1,5 @@
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,6 +24,17 @@ class ReplayTest(unittest.TestCase):
         self.manifest = replay.freeze(self.root, self.wrapper, self.contract)
         self.output = self.root / 'fresh'
         self.output.mkdir()
+
+    def test_snapshot_retains_exact_input_bytes_after_source_changes(self):
+        path = self.root / 'manifest.json'
+        snapshot = self.output / 'snapshot.json'
+        raw = json.dumps(self.manifest, indent=2).encode() + b'\n'
+        path.write_bytes(raw)
+        loaded = replay.snapshot_manifest(path, snapshot)
+        path.write_text('{}')
+        self.assertEqual(loaded, self.manifest)
+        self.assertEqual(snapshot.read_bytes(), raw)
+        self.assertNotEqual(replay.digest(path), replay.digest(snapshot))
 
     def test_preserves_inputs_and_redirects_results(self):
         before = self.ini.read_text()

@@ -804,11 +804,12 @@ def main() -> int:
         "expected_client_passes": args.expect_client_passes,
     }
     replay_manifest = None
+    replay_snapshot = work_dir / "replay-manifest.snapshot.json"
     artifact_dir = work_dir
     started = time.monotonic()
     try:
         if args.replay_manifest:
-            replay_manifest = json.loads(args.replay_manifest.read_text())
+            replay_manifest = replay.snapshot_manifest(args.replay_manifest, replay_snapshot)
             returncode, output, timed_out = replay.run(
                 replay_manifest, contract, work_dir, environment,
                 args.timeout_seconds, _run_command)
@@ -908,6 +909,8 @@ def main() -> int:
         "transcript": str(transcript),
         "verified_code_objects": [str(path) for path in artifacts],
         "replay_manifest": str(args.replay_manifest) if args.replay_manifest else None,
+        "replay_manifest_snapshot": str(replay_snapshot) if args.replay_manifest else None,
+        "replay_manifest_sha256": replay.digest(replay_snapshot) if args.replay_manifest else None,
         "wrapper": str(paths.wrapper),
     }
     if errors:

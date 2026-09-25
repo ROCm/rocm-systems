@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import shlex
 import time
@@ -14,6 +15,14 @@ def digest(path: Path) -> str:
         for block in iter(lambda: source.read(1024 * 1024), b''):
             hasher.update(block)
         return hasher.hexdigest()
+
+
+def snapshot_manifest(path: Path, snapshot: Path) -> dict:
+    """Retain the exact bytes used by this run, independent of later edits."""
+    raw = path.read_bytes()
+    manifest = json.loads(raw)
+    snapshot.write_bytes(raw)
+    return manifest
 
 
 def freeze(work_dir: Path, wrapper: Path, contract: dict) -> dict:
