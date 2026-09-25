@@ -596,8 +596,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
     src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
-  # Rocshmem GDA shim headers: in SRC_FILES so hipify copies them to the
-  # hipify output tree (hipify is a no-op on them — no CUDA types).
+  # GIN shim headers: in SRC_FILES so hipify copies them to the build tree.
   list(APPEND SRC_FILES
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
@@ -1068,8 +1067,7 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     endif()
 
     # Compile anvil.cpp from rocshmem source tree into librccl.so (host-only).
-    # src/gin/log.hpp shim shadows rocshmem's log.hpp via include path ordering,
-    # redirecting LOG_* macros to RCCL native logging (WARN/INFO/TRACE).
+    # src/gin/log.hpp shadows rocshmem's log.hpp via include path ordering.
     if(ENABLE_ROCSHMEM_GIN)
       target_sources(rccl PRIVATE "${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp")
       set_source_files_properties("${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp" PROPERTIES

@@ -169,6 +169,8 @@ function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
       OUTPUT "${dst_file}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
+      # Qualify log.hpp include to prevent shadowing by consumer headers.
+      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${dst_file}"
       DEPENDS "${src_file}"
       COMMENT "Copying ${src_file} -> ${dst_file}"
       VERBATIM
