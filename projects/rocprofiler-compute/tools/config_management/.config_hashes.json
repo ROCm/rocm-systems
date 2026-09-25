@@ -25,7 +25,7 @@
         "0300_memory_chart.yaml": "549d08cf953eb40081c6644cbfe1961b",
         "0400_roofline.yaml": "4dd3c3c1339f30eb68ad0c6318acd45d",
         "0500_command_processor_cpc.yaml": "355953164df65808c63e2a87c172a29a",
-        "0600_workgroup_manager_spi.yaml": "fdc0b7826d511f15154059a0c4764256",
+        "0600_workgroup_manager_spi.yaml": "968c04caa014beedf46fc3155cac1319",
         "0700_workgroup_processor_wgp.yaml": "54441b4d05b50341fb7e16b1be8027ef",
         "0800_gl0_texture_addresser_txa.yaml": "bdaf95d7938b845d5adc8b8380d462e8",
         "0900_gl0_cache_and_lds.yaml": "b890d507ab783986e6190b080227126f",
