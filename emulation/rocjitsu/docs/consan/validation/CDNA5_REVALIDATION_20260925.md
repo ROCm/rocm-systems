@@ -1265,3 +1265,12 @@ from the prior retained fault artifacts and every manifest hash reverified.
 and Default before starting `hgemm-exact-default-fault`. This supplementary
 shard check complements the existing full-workload clean result; it does not
 replace the full shard sweep. Fault qualification remains pending.
+
+### F8 exact-artifact replay also passes
+
+`f8gemm-exact-replay-results.json` records successful export and replay with
+zero exits. Both numerical oracles pass all 12 rows from one client, using
+the exact retained objects. A fresh `f8gemm-exact-inventory` run is underway
+to bind the reviewed publication fault to those objects; eight-trial detection
+qualification is still pending. The table no longer describes fresh-generation
+identity drift as an unresolved prerequisite to launching this campaign.
