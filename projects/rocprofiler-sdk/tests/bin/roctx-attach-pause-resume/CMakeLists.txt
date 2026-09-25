@@ -40,7 +40,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tests-roctx-attach-pause-resume LANGUAGES CXX HIP)
+project(rocprofiler-sdk-tests-bin-attach-roctx-pause-resume LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
