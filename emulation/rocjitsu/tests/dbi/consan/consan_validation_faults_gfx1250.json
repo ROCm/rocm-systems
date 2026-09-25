@@ -153,21 +153,47 @@
     "qwen-prefill": {
       "faults": [
         {
-          "id": "barrier-drop",
+          "id": "barrier-drop-reduction-publication",
           "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh remaining-lifetime-inventory/qwen-prefill inventory ELF d6952ee5d5087587, main$async_dispatch_0_reduction_5x1024_f32. Pristine qwen-pristine.asm (.text VMA 0x7600) reduces each wave via DPP, writes the wave sum through lane zero at 0x99a0, restores EXEC at 0x99a8, and publishes with split signal/wait .text+0x23b0/0x23d4. Following ds_load_b32 at VMA 0x99e4 indexes the eight peer wave sums with lane ID masked by 7. Drop that pair and preserve the earlier barrier at 0x2338/0x2354. The maintained 1x5 Qwen prefill executes this first main reduction with nonempty inputs; the barrier lies on the unconditional reduction path. Eight independent trials per mode, minimum six detections, are predeclared before outcomes."
+          },
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:67f68fe983674919|kernel=_initializer_11_dispatch_0_transpose_1024x3072_f32|kind=barrier|pc=0x0000000000002d10|mnemonic=s_barrier_wait|occurrence=1",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:67f68fe983674919|kernel=_initializer_11_dispatch_0_transpose_1024x3072_f32|event=barrier|pc=0x0000000000002d0c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:67f68fe983674919|kernel=_initializer_11_dispatch_0_transpose_1024x3072_f32|event=barrier|pc=0x0000000000002d10|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:d6952ee5d5087587|kernel=main$async_dispatch_0_reduction_5x1024_f32|kind=barrier|pc=0x00000000000023b0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:d6952ee5d5087587|kernel=main$async_dispatch_0_reduction_5x1024_f32|event=barrier|pc=0x00000000000023b0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:d6952ee5d5087587|kernel=main$async_dispatch_0_reduction_5x1024_f32|event=barrier|pc=0x00000000000023d4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }

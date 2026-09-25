@@ -440,3 +440,12 @@ site identities do not occur in these current inventories, so they cannot be
 reused without review. TP2 decode and combined expose no sites in this barrier
 inventory; that is not by itself evidence of absent applicable memory accesses.
 The remaining rows need source/ISA dependency review and fault qualification.
+
+### Qwen reduction publication fault refresh
+
+The current Qwen ELF is `d6952ee5d5087587`. Pristine ISA for the first
+`main$async_dispatch_0_reduction_5x1024_f32` reduction stores each wave's sum
+through lane zero, then reads peer wave sums after `.text+0x23b0/0x23d4`.
+This publication pair is the reviewed fault; the earlier barrier remains.
+Artifacts: `qwen-pristine.asm` and `remaining-lifetime-inventory/qwen-prefill`.
+Eight trials per mode, minimum six detections, are declared before outcomes.
