@@ -1245,7 +1245,7 @@ void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
 bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
 
 bool PerfsimPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
-  return wf != nullptr && wf->has_plugin_state(slot_index());
+  return wf != nullptr && wavefront_state<PerfsimWavefrontState>(*wf) != nullptr;
 }
 
 void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
@@ -1311,14 +1311,13 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   // generic Wavefront::reset(). A terminal dispatch fault resets the wave
   // without a halt callback, so retire that incarnation while its state still
   // owns the raw pointer recorded in physical_waves.
-  if (wf.has_plugin_state(slot_index())) {
-    auto *previous = static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()));
+  if (auto *previous = wavefront_state<PerfsimWavefrontState>(wf)) {
     const uint32_t previous_dispatch = static_cast<uint32_t>(
         previous->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
     const auto existing = impl_->physical_waves.find(physical_key);
     if (existing != impl_->physical_waves.end() && existing->second != previous) {
       impl_->physical_waves.erase(existing);
-      wf.clear_plugin_state(slot_index());
+      clear_wavefront_state(wf);
       impl_->reject(wf.dispatch_id(), "physical wavefront slot retained mismatched state");
       return;
     }
@@ -1330,7 +1329,7 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
         --dispatch->second.live_waves;
       impl_->reject(previous_dispatch, "wavefront slot was reset without a halt callback");
     }
-    wf.clear_plugin_state(slot_index());
+    clear_wavefront_state(wf);
   } else if (const auto existing = impl_->physical_waves.find(physical_key);
              existing != impl_->physical_waves.end()) {
     // Never dereference a map entry after its owning Wavefront state has gone.
@@ -1366,7 +1365,7 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 
   ++dispatch->live_waves;
   impl_->physical_waves.emplace(physical_key, raw_state);
-  wf.set_plugin_state(slot_index(), std::move(state));
+  set_wavefront_state(wf, std::move(state));
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
@@ -1396,7 +1395,7 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
       --dispatch.live_waves;
   }
   impl_->physical_waves.erase(wave_iter);
-  wf.clear_plugin_state(slot_index());
+  clear_wavefront_state(wf);
 }
 
 void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
@@ -1412,10 +1411,7 @@ void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruct
 
 void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                        std::span<const uint32_t> fetch_window) {
-  PerfsimWavefrontState *wave =
-      wf.has_plugin_state(slot_index())
-          ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
-          : nullptr;
+  PerfsimWavefrontState *wave = wavefront_state<PerfsimWavefrontState>(wf);
   if (!wave) {
     const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
     if (dispatch_iter != impl_->dispatches.end() &&
@@ -1498,9 +1494,7 @@ void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObserva
 
 void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                                const amdgpu::Wavefront &wf) {
-  auto *state = wf.has_plugin_state(slot_index())
-                    ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
-                    : nullptr;
+  auto *state = wavefront_state<PerfsimWavefrontState>(wf);
   impl_->memory_access(access, state);
 }
 
@@ -1511,9 +1505,7 @@ void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
 
 void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
     const amdgpu::TensorDmaMemoryAccessObservation &access, const amdgpu::Wavefront &wf) {
-  auto *state = wf.has_plugin_state(slot_index())
-                    ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
-                    : nullptr;
+  auto *state = wavefront_state<PerfsimWavefrontState>(wf);
   impl_->tensor_dma_memory_access(access, state);
 }
 
