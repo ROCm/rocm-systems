@@ -51,7 +51,7 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 #
 # This file is included after every target_compile_options(rccl ...) call, so
 # the target already carries the flags that govern device codegen -- notably
-# -mllvm --amdgpu-kernarg-preload-count=N and -fvisibility=hidden.  The custom
+# -mllvm --amdgpu-kernarg-preload-count=N.  The custom
 # commands below invoke amdclang++ directly, so without forwarding these they
 # silently produce different code than the -fgpu-rdc build.  Losing kernarg
 # preloading in particular costs a memory round trip at every kernel entry,
@@ -69,12 +69,16 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 # when generating a target's own command line, so forwarding it here would pass
 # the literal string through (ENABLE_CODE_COVERAGE adds two), and --hipcc-* are
 # hipcc driver options while these commands drive amdclang++ directly.
+#
+# -fvisibility=hidden is a host-library flag. Passing it to a device compile
+# suppresses the -fapply-global-visibility-to-externs the HIP driver would
+# otherwise add, and that is what keeps ncclDevFunc_* non-preemptible.
 # ---------------------------------------------------------------------------
 set(DL_INHERITED_FLAGS "")
 get_target_property(_rccl_copts rccl COMPILE_OPTIONS)
 if(_rccl_copts)
   foreach(_opt IN LISTS _rccl_copts)
-    if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|-w|-W.*)$")
+    if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|-fvisibility=hidden|-w|-W.*)$")
       continue()
     endif()
     if(_opt MATCHES "^(SHELL:|--hipcc-)")
@@ -369,6 +373,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
+      # --link compiles the dispatcher, so it needs the same inherited options
+      # as the object library above; it was the only codegen step without them.
+      ${DL_INHERITED_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
