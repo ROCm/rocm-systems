@@ -353,6 +353,14 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   }
   wf.trace_inst_count_ = 0;
   wf.reset();
+  if (!has_active_wfs()) {
+    if (wave_state_depth_ != 0) {
+      instruction_access_cleanup_pending_ = true;
+    } else {
+      // Cancellation outside instruction issue has no in-flight snapshot user.
+      auto retired = std::exchange(instruction_vm_access_, std::nullopt);
+    }
+  }
 }
 
 void ComputeUnitCore::flush_wg_completions() {

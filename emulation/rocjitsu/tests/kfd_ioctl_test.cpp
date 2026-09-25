@@ -53,6 +53,7 @@ RJ_DIAGNOSTIC_POP
 #include <functional>
 #include <future>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <tuple>
@@ -320,6 +321,52 @@ protected:
   rocjitsu::SimulatedKfd *driver_ = nullptr;
   std::vector<int> debug_fds_;
 };
+
+TEST_F(KfdIoctlTest, CloseReleasesProcessAfterCompletedOrAbortedInstructionExecution) {
+  for (const bool abort : {false, true}) {
+    SCOPED_TRACE(abort ? "aborted dispatch" : "completed quantum");
+    if (abort)
+      ASSERT_GE(driver_->open(), 0);
+
+    constexpr uint64_t kKernelAddress = 0x600000000ULL;
+    alignas(4096) std::array<uint8_t, 4096> code{};
+    const std::array<uint32_t, 3> instructions = {0xBF800000u, 0xBF800000u,
+                                                  0xBF810000u}; // s_nop; s_nop; s_endpgm
+    std::memcpy(code.data(), instructions.data(), sizeof(instructions));
+    const uint32_t pid = driver_->local_process_id();
+    auto process = driver_->find_process(pid);
+    ASSERT_NE(process, nullptr);
+    const std::weak_ptr<rocjitsu::KfdProcess> lifetime = process;
+    process->map_pages(kKernelAddress, code.data(), code.size());
+
+    rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+    soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+      if (cu == nullptr && !cp->compute_units().empty())
+        cu = cp->compute_units().front();
+    });
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+    ASSERT_NE(wave, nullptr);
+    wave->set_process_id(pid);
+    wave->set_dispatch_id(7);
+    if (abort) {
+      cu->step();
+      ASSERT_EQ(wave->pc, kKernelAddress + sizeof(uint32_t));
+      ASSERT_FALSE(wave->is_halted());
+      cu->abort_dispatch(7);
+    } else {
+      cu->set_functional_quantum(4);
+      EXPECT_EQ(cu->run_quantum().iterations, 2u);
+    }
+    ASSERT_TRUE(wave->is_halted());
+    process.reset();
+    ASSERT_FALSE(lifetime.expired());
+
+    ASSERT_EQ(driver_->close(), 0);
+    EXPECT_TRUE(lifetime.expired())
+        << "the idle CU retained the closed KFD process while its VM stayed alive";
+  }
+}
 
 // Same driver surface, brought up on a part whose CWSR layout is not modelled.
 // Deriving does not inherit KfdIoctlTest's cases: TEST_F registers against the

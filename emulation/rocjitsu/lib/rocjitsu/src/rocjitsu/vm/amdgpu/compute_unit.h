@@ -1108,6 +1108,12 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
+      if (outermost && std::exchange(cu_.instruction_access_cleanup_pending_, false) &&
+          !cu_.has_active_wfs()) {
+        // Instruction issue has returned. Empty the cache before releasing owners
+        // whose destructors can reenter the CU.
+        auto retired = std::exchange(cu_.instruction_vm_access_, std::nullopt);
+      }
       lock_.unlock();
       if (outermost)
         cu_.flush_wg_completions();
@@ -1130,6 +1136,8 @@ protected:
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
+  // The final wave retired inside a guard; keep its snapshot until issue returns.
+  bool instruction_access_cleanup_pending_ = false;
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_wg_completions once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;

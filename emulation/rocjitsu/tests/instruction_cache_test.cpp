@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
@@ -17,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -485,6 +487,207 @@ TEST(InstructionCacheCuTest, SwitchingVmServicesDropsTheRetainedAccess) {
   fixture.cu()->set_gpu_vm(&second_vm);
   fixture.cu()->step();
   EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
+
+struct CountedReporter {
+  std::shared_ptr<rocjitsu::KfdProcess> process;
+  unsigned *copies;
+
+  CountedReporter(std::shared_ptr<rocjitsu::KfdProcess> owner, unsigned &count)
+      : process(std::move(owner)), copies(&count) {}
+  CountedReporter(const CountedReporter &other) : process(other.process), copies(other.copies) {
+    ++*copies;
+  }
+  void operator()(uint64_t, amdgpu::VmAccessKind) const {}
+};
+
+// Capture a real process as the KFD binding does. Releasing the registry binding
+// must not leave that process owned by an idle CU.
+TEST(InstructionCacheCuTest, CompletedWaveDoesNotRetainItsVmOwner) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_completed_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 2>{kSNop, kSEndpgm});
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  const auto handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) { (void)owner; });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+  fixture.cu()->step();
+  ASSERT_TRUE(wf->is_halted());
+  ASSERT_FALSE(fixture.cu()->has_active_wfs());
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "an idle CU retained the completed process binding";
+}
+
+TEST(InstructionCacheCuTest, AbortedWaveDoesNotRetainItsVmOwner) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_aborted_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, kSNop, kSEndpgm});
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  const auto handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) { (void)owner; });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+  fixture.cu()->abort_dispatch(1);
+  ASSERT_TRUE(wf->is_halted());
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "an idle CU retained the cancelled process binding";
+}
+
+TEST(InstructionCacheCuTest, ReentrantFaultCancellationKeepsAccessUntilIssueReturns) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_reentrant_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  unsigned faults = 0;
+  const auto handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner, &fixture, &lifetime, &faults](uint64_t, amdgpu::VmAccessKind) {
+        (void)owner;
+        ++faults;
+        fixture.cu()->abort_dispatch(1);
+        // The registry and the in-flight snapshot must both still own the
+        // callback. Clearing the CU snapshot inside abort would destroy an
+        // object whose read/fault callback is still on the stack.
+        EXPECT_GE(lifetime.use_count(), 2);
+      });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0, kCodeBase + InstructionCache::kLineSize * 4);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  fixture.cu()->step();
+  EXPECT_GE(faults, 1u);
+  EXPECT_TRUE(wf->is_halted());
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "fault handling left the binding retained after issue";
+}
+
+TEST(InstructionCacheCuTest, ExceptionalQuantumRetainsTheProcessUntilCancellation) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_exception_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
+  const auto handle =
+      gpu_vm.register_address_space(7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) {
+        (void)owner;
+        throw std::runtime_error("fault callback failed");
+      });
+  ASSERT_TRUE(handle);
+  owner.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *wf = fixture.launch(1, 0, kCodeBase + InstructionCache::kLineSize * 4);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  EXPECT_THROW(fixture.cu()->run_quantum(), std::runtime_error);
+  ASSERT_TRUE(fixture.cu()->has_active_wfs());
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_FALSE(lifetime.expired()) << "the active wave must keep its snapshot until cancellation";
+  fixture.cu()->abort_dispatch(1);
+  EXPECT_TRUE(lifetime.expired());
+}
+
+TEST(InstructionCacheCuTest, ActiveWaveReusesVmAccessAcrossQuantaAndDirectSteps) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_quantum_lifetime_cu");
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, kSNop, kSEndpgm});
+  auto process = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = process;
+  unsigned copies = 0;
+  const auto handle =
+      gpu_vm.register_address_space(7, backing, backing, CountedReporter(process, copies));
+  ASSERT_TRUE(handle);
+  process.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  fixture.cu()->set_functional_quantum(1);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(1);
+  wf->set_process_id(7);
+  wf->set_address_space(handle);
+  copies = 0;
+  fixture.cu()->run_quantum();
+  ASSERT_EQ(wf->pc, kCodeBase + 4);
+  EXPECT_EQ(copies, 1u);
+  fixture.cu()->run_quantum();
+  ASSERT_EQ(wf->pc, kCodeBase + 8);
+  EXPECT_EQ(copies, 1u) << "a quantum boundary must not discard an active wave's snapshot";
+  fixture.cu()->step();
+  EXPECT_TRUE(wf->is_halted());
+  EXPECT_EQ(copies, 1u) << "direct stepping must reuse the active snapshot";
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired()) << "the final wave retained its process after retiring";
+}
+
+TEST(InstructionCacheCuTest, EndingOneWaveKeepsTheOtherWavesVmAccess) {
+  GpuVm gpu_vm;
+  CuFixture fixture("vm_multiwave_lifetime_cu", /*wf_slots=*/2);
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  backing->write_program(std::array<uint32_t, 3>{kSNop, kSNop, kSEndpgm});
+  auto process = std::make_shared<rocjitsu::KfdProcess>(7);
+  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = process;
+  unsigned copies = 0;
+  const auto handle =
+      gpu_vm.register_address_space(7, backing, backing, CountedReporter(process, copies));
+  ASSERT_TRUE(handle);
+  process.reset();
+  fixture.cu()->set_gpu_vm(&gpu_vm);
+  auto *first = fixture.launch(1, 0, kCodeBase + 8);
+  auto *second = fixture.launch(1, 1);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  for (auto *wf : {first, second}) {
+    wf->set_dispatch_id(1);
+    wf->set_process_id(7);
+    wf->set_address_space(handle);
+  }
+  copies = 0;
+  fixture.cu()->step();
+  ASSERT_TRUE(first->is_halted());
+  ASSERT_FALSE(second->is_halted());
+  ASSERT_EQ(second->pc, kCodeBase + 4);
+  EXPECT_EQ(copies, 1u) << "retiring the first wave must not discard the live wave's snapshot";
+  EXPECT_GE(lifetime.use_count(), 2);
+  fixture.cu()->step();
+  ASSERT_EQ(second->pc, kCodeBase + 8);
+  EXPECT_EQ(copies, 1u);
+  fixture.cu()->step();
+  EXPECT_TRUE(second->is_halted());
+  EXPECT_FALSE(fixture.cu()->has_active_wfs());
+  EXPECT_EQ(copies, 1u);
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_TRUE(lifetime.expired());
 }
 
 // Self-modifying code: the rewritten instruction only becomes visible to the
