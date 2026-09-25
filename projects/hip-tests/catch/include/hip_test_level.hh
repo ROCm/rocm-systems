@@ -21,6 +21,14 @@
  *
  * A higher-priority source is used whenever it yields a level; the lower ones
  * are then ignored (strict precedence, no merging across sources).
+ *
+ * Wherever a level name is accepted, so is a test category name - "quick",
+ * "standard", "comprehensive", "full" - standing for the levels
+ * test_categories.yaml assigns it (see the generated hip_test_parameters.hh).
+ * "HIP_TEST_LEVEL=quick" is therefore "HIP_TEST_LEVEL=level_0", and pairs with
+ * the matching ctest label filter: "HIP_TEST_LEVEL=quick ctest -L quick"
+ * selects the category's tests *and* its parameters, where "ctest -L quick"
+ * alone selects only the tests and leaves parameters at kDefaultLevel.
  */
 namespace HipTestLevel {
 
@@ -82,9 +90,11 @@ bool isSupportedLevel(const std::string& level);
  *
  * The expression is read the way Catch2 reads a test spec: a comma separated
  * list of filters OR'd together, each filter a sequence of patterns AND'd
- * together, each pattern optionally negated with '~'. Patterns that do not read
- * exactly "level_N" (test names, other tags, and malformed tags such as
- * "[level_2x]") place no constraint on the level and are ignored.
+ * together, each pattern optionally negated with '~'. A pattern names levels
+ * either directly ("level_N") or through a test category ("[quick]"), which
+ * stands for every level that category covers. Patterns that name neither
+ * (test names, other tags, and malformed tags such as "[level_2x]") place no
+ * constraint on the level and are ignored.
  *
  * A filter naming levels contributes those levels, minus the ones it excludes;
  * a filter that only excludes levels contributes every supported level except
