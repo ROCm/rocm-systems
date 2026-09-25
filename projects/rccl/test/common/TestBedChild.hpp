@@ -33,7 +33,8 @@ namespace RcclUnitTesting
       CHILD_DESTROY_COMMS    = 9,  // DestroyComms()
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
-      NUM_CHILD_COMMANDS     = 12
+      CHILD_REGISTER_MEM     = 12, // RegisterMem()
+      NUM_CHILD_COMMANDS     = 13
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -49,7 +50,8 @@ namespace RcclUnitTesting
       "DEALLOCATE_MEM",
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
-      "STOP"
+      "STOP",
+      "REGISTER_MEM"
     };
 
     // These variables remain constant for life of TestBedChild
@@ -66,10 +68,10 @@ namespace RcclUnitTesting
     int childReadFd;
 
     // These varibles may change based on commands issued by parent
-    int totalRanks;                                                   // Total ranks
-    int rankOffset;                                                   // Global rank offset for this child
-    int numGroupCalls;                                                // Toatal # of group calls to be executed
-    bool useBlocking;                                                 // RCCL communication with blocking or non-blocking option
+    int totalRanks = 0;                                               // Total ranks
+    int rankOffset = 0;                                               // Global rank offset for this child
+    int numGroupCalls = 0;                                            // Toatal # of group calls to be executed
+    bool useBlocking = true;                                          // RCCL communication with blocking or non-blocking option
     std::vector<int> numCollectivesInGroup;                           // # of collectives to run per group call
     std::vector<int> numStreamsPerGroup;                              // # of different streams allowed per group call
     std::vector<ncclComm_t> comms;                                    // RCCL communicators for each rank
@@ -78,7 +80,8 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<CollectiveArgs>>> collArgs;   // Info for each collective for each rank per group call
     std::vector<std::vector<std::vector<hipGraph_t>>> graphs;         // Graphs for executing collectives per group call
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
-    std::vector<std::vector<std::vector<bool>>> graphEnabled; 
+    std::vector<std::vector<std::vector<bool>>> graphEnabled;
+    MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
@@ -122,5 +125,21 @@ namespace RcclUnitTesting
 
     // Destroys graphs
     ErrCode DestroyGraphs();
+
+    ErrCode RegisterMem();
+
+  private:
+    ErrCode DeregisterMemInternal_impl(int groupId, int collId, int localRank);
+
+    ErrCode DeallocateMemInternal_impl(int groupId, int collId, int localRank);
+
+    // Closes an NCCL group opened by the caller and returns bodyStatus unless
+    // ncclGroupEnd itself fails. The group must be closed on every exit path,
+    // otherwise a pooled worker carries the open group into the next config.
+    ErrCode EndGroup(ErrCode bodyStatus, char const* msg);
+
+    // Destroys any live graph / graph-exec handles for groupId after syncing
+    // the owning devices.
+    ErrCode ReleaseGraphHandles(int groupId);
   };
 }
