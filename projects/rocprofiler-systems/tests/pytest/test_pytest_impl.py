@@ -511,6 +511,7 @@ class TestCache(RocprofsysTest):
         ]
         assert not lost, f"{len(lost)} of {n_proc * n_keys} concurrent writes were lost"
 
+
 # =============================================================================
 # Test Class: Runner TMPDIR Isolation
 # =============================================================================
@@ -564,9 +565,9 @@ class TestRunnerTmpdirIsolation:
         expected = str(Path(tempfile.gettempdir()) / getpass.getuser())
         actual = runner.environment.test.get("ROCPROFSYS_TMPDIR")
         assert actual is not None, "ROCPROFSYS_TMPDIR not set in test environment"
-        assert actual == expected, (
-            f"ROCPROFSYS_TMPDIR should be user-scoped: expected {expected!r}, got {actual!r}"
-        )
+        assert (
+            actual == expected
+        ), f"ROCPROFSYS_TMPDIR should be user-scoped: expected {expected!r}, got {actual!r}"
 
     @pytest.mark.parametrize("runner_class,extra", _RUNNER_CLASSES, ids=_RUNNER_IDS)
     def test_tmpdir_directory_is_user_owned(self, runner_class, extra, tmp_path):
