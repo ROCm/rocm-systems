@@ -88,6 +88,7 @@ class TensileValidationTest(unittest.TestCase):
             "from pathlib import Path\n"
             "import time\n"
             "def Tensile(args):\n"
+            "    assert 'CpuThreads=2' in args, args\n"
             "    output = Path(args[1])\n"
             "    (output / 'kernel.hsaco').write_bytes(b'elf')\n"
             "    print('run,problem,solution,validation,time-us', flush=True)\n"

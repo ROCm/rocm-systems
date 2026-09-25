@@ -668,6 +668,10 @@ def main() -> int:
         type=_positive_int,
         default=DEFAULT_TIMEOUT_SECONDS,
     )
+    parser.add_argument(
+        "--cpu-threads", type=_positive_int, default=2,
+        help="Tensile generation workers per shard (bounded to avoid nested pool oversubscription)",
+    )
     parser.add_argument("--streamk-fixed-grid", type=_positive_int)
     parser.add_argument(
         "--require-streamk-mode",
@@ -776,6 +780,7 @@ def main() -> int:
         "--prebuilt-client",
         str(paths.wrapper),
         "--global-parameters",
+        f"CpuThreads={args.cpu_threads}",
         "NumBenchmarks=1",
         "SyncsPerBenchmark=1",
         "EnqueuesPerSync=1",

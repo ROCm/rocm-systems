@@ -163,3 +163,28 @@ The shared helper change also requires rebuilding and running the rest of the
 gfx1250 device fixtures before final qualification. Earlier external results
 retain their recorded hook provenance; final qualification must match the updated
 hook. The HipKittens/TDM teardown corruption remains a separate open issue.
+
+### Host OOM and campaign memory containment
+
+At 13:11 on September 25 the host hit global OOM and the kernel killed a
+VS Code process. The retained `cdna5-20260925/oom-kernel.log` records 581 Python
+processes totaling approximately 51 GiB RSS and 13 Tensile clients. Four outer
+workload workers, per-workload shard concurrency, and Tensile's unrestricted
+internal generation pools compounded. The discovery retry was also concurrent.
+The interrupted runs have no accepted results and must not qualify cells.
+
+All subsequent campaign commands, including discovery and builds, must use:
+
+```sh
+emulation/rocjitsu/scripts/consan-bounded-run.sh COMMAND [ARGUMENTS...]
+```
+
+This wrapper places all invocations in the **same** user systemd slice, with
+aggregate `MemoryMax=40G`, `MemoryHigh=36G`, and `MemorySwapMax=1G`.
+The limit applies to the campaign, leaving the desktop outside its group.
+Parent/child cgroup membership and the effective 42949672960-byte limit were
+verified. A limit hit is an infrastructure failure, never detector evidence.
+Tensile generation now defaults to two CPU workers per shard (`--cpu-threads`);
+outer campaign workload batches are serialized. Do not overlap discovery with
+large clean batches. The 38 Tensile validation tests pass with an assertion that
+the bounded worker setting reaches the actual Tensile driver invocation.
