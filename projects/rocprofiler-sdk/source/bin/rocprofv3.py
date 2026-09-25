@@ -219,6 +219,11 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     if custom_rank_env is not None and custom_size_env is not None:
         rank = get_mpi_env_int(custom_rank_env, "rank", 0)
         size = get_mpi_env_int(custom_size_env, "world size", 1)
+        if rank is not None and size is not None and rank >= size:
+            fatal_error(
+                f"MPI rank variable {custom_rank_env}={rank} is out of range for world "
+                f"size variable {custom_size_env}={size} (expected 0-{size - 1})"
+            )
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
