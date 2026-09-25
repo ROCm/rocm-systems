@@ -49,3 +49,34 @@ baseline, Default, and SuperCollider clean qualification. Their cells are yellow
 until prospective fault trials complete. The current D128 exact fault inventory
 is retained under `unfiltered-inventory/d128-block/inventory/`; it is accepted
 and has fresh code-object hashes and instruction addresses.
+
+## Filtered campaign
+
+All 21 non-Tensile validation IDs now have successful emulated kernel-dispatch
+traces and generated allowlists under `allowlists/gfx1250/`. The profiler agent
+CSV identifies gfx1250 (target version 120500), not the host gfx1201.
+`discovery-batch/` retains standard SDK discovery; `discovery-pytorch-matched/`
+retains PyTorch discovery. `discover.py` and `discover_pytorch.py` preserve the
+exact commands and environment construction.
+
+PyTorch must use its matching `_rocm_sdk_core/bin/rocprofv3`, `--rocm-root`
+pointing at that package, and its versioned `librocprofiler-sdk-tool.so.1` and
+`librocprofiler-sdk.so.1` in the preload pair. Put that package's `lib`,
+`lib/llvm/lib`, and `lib/rocm_sysdeps/lib` first in the profiler's library search
+path. Using the newer home-venv profiler with PyTorch's older LLVM bundle fails
+with duplicate `PointerFlowAnalysisResult` registration. All eight PyTorch
+operations successfully profile with the matched bundle.
+
+Filtered clean results are under `filtered-clean/<id>/<profile>/`; each profile
+has an independent baseline and matching coverage/oracle checks. Tensile uses
+its host driver and an inner emulated client, with discovery performed by
+`profile_tensile_client.sh` through `CONSAN_VALIDATION_TENSILE_WRAPPER`.
+`discovery-tensile/` includes every selected shard, not just a canary shard.
+Actual filtered Tensile clean results use `filtered-clean-tensile/`; the earlier
+`filtered-clean/tensile-*` attempt stopped at argument parsing before execution.
+
+D128's reviewed grouped K-publication fault is committed in the maintained
+`consan_validation_faults_gfx1250.json`. Pristine disassembly and dry-run inventory
+establish the current code hash and two physical publication barrier pairs.
+`d128-fault-default/` runs eight precommitted trials per detector using that spec,
+with gfx1250 emulator health discovery and dispatch smoke before/after each.

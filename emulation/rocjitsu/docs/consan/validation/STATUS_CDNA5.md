@@ -36,10 +36,10 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) |  |  |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) |  |  |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) |  |  |
-| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) |  |  |
+| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
-| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 default: unfiltered clean pass; fault trials pending | 🟨 delay-zero: unfiltered clean pass; fault trials pending |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) |  |  |
@@ -61,5 +61,5 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) |  |  |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) |  |  |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) |  |  |
-| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) |  |  |
-| PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) |  |  |
+| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
