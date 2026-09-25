@@ -638,17 +638,21 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
   if (HasFatalFailure()) return;
 
   const std::string log = logCtx.readNcclDebugLog();
-  const std::string marker = "Max Nqps=";
-  bool sawConnect = false;
+  const std::string marker = "qpPerDev=";
   bool sawGin = false;
+  bool sawEnv = false;
   for (size_t pos = 0; (pos = log.find(marker, pos)) != std::string::npos; pos += marker.size()) {
-    sawConnect = true;
-    const int nqps = std::atoi(log.c_str() + pos + marker.size());
-    if (nqps < qpPerConn) sawGin = true;
+    const int perDev = std::atoi(log.c_str() + pos + marker.size());
+    if (perDev == 1) sawGin = true;
+    if (perDev == qpPerConn) sawEnv = true;
   }
-  EXPECT_TRUE(sawConnect) << "GIN proxy bring-up did not log an IB connect";
-  EXPECT_TRUE(sawGin) << "every IB connect used NCCL_IB_QPS_PER_CONNECTION=" << qpPerConn
-                      << "; GIN links should stay at one QP per device";
+  // Total Max Nqps is 1 * ndevs, so a 2-device GIN link can equal the env value.
+  EXPECT_TRUE(sawGin) << "no IB connect used one QP per device while NCCL_IB_QPS_PER_CONNECTION="
+                      << qpPerConn;
+  // Two nodes also open collective links. Those must still follow the env value.
+  if (crossNodeReason().empty()) {
+    EXPECT_TRUE(sawEnv) << "no collective IB connect logged qpPerDev=" << qpPerConn;
+  }
 }
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
