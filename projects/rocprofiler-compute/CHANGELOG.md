@@ -41,7 +41,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Each edge now reports the traffic measured at the interface it represents.
   * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
 
-* `--torch-trace` now requires PyTorch 2.13 or 2.14, installed alongside ROCm.
+* The Torch trace collector now ships prebuilt for PyTorch 2.13 and 2.14, so
+  `--torch-trace` traces operators on every thread, including the autograd
+  threads that run the backward pass.
 
 * Named each per-kernel PC sampling folder `<short_name>_uuid_<kernel_uuid>` instead of `kernel_<kernel_uuid>`, and added the matching `short_name` column to `kernel.csv`. The short name is the demangled identifier captured while profiling.
 
