@@ -255,9 +255,9 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 /* Wire words per thread the step slot is sized for. Deliberately decoupled from
  * the register count above, the same way LL128's buffer is: a step holds many
  * register-slices, so one credit round-trip covers many inner iterations rather
- * than one. 256 puts the step at 512 KiB, matching Simple, which is where the
- * measured bandwidth curve flattens. */
-#define NCCL_NAN_STEP_ELEMS_PER_THREAD 256
+ * than one. 128 puts the step at 256 KiB, which measured best across the range;
+ * going deeper starts losing at the top end to cache and TLB pressure. */
+#define NCCL_NAN_STEP_ELEMS_PER_THREAD 128
 #define NCCL_NAN_MAX_NTHREADS NCCL_LL128_MAX_NTHREADS
 #define NCCL_NAN_SENTINEL64 0xFFFFFFFFFFFFFFFFull
 
