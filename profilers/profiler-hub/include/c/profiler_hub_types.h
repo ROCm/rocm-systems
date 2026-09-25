@@ -79,6 +79,10 @@ extern "C"
                                        *_AGENT_QUEUE categories, else 0. */
         uint32_t stream_id;           /**< Owning stream id. Only meaningful for
                                             PH_TRACK_CATEGORY_STREAM, else 0. */
+        uint64_t start_ts;            /**< Nanosecond timestamp of the track's
+                                            earliest event. */
+        uint64_t end_ts;              /**< Nanosecond timestamp of the track's
+                                            latest event. */
     } ph_track_t;
 
     /**

@@ -201,12 +201,17 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
     size_t next_id = 0;
 
     tracks.reserve(thread_track_counts.size());
-    for(const auto& [topo, count] : thread_track_counts)
+    for(const auto& [topo, stats] : thread_track_counts)
     {
         auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
         track_info_ptr->id          = next_id++;
         track_info_ptr->name        = fmt::format("Thread {}", topo.tid);
-        track_info_ptr->event_count = count;
+        track_info_ptr->event_count = stats.count;
+        if(stats.has_range)
+        {
+            track_info_ptr->start_ts = stats.min_start;
+            track_info_ptr->end_ts   = stats.max_end;
+        }
 
         if(const auto node_it = node_utility.find(topo.nid);
            node_it != node_utility.end())
@@ -243,6 +248,14 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
         track_ptr->agent_id    = row.agent_id;
         track_ptr->pmc_id      = row.pmc_id;
         track_ptr->event_count = row.count;
+        if(row.min_start.has_value())
+        {
+            track_ptr->start_ts = row.min_start.value();
+        }
+        if(row.max_end.has_value())
+        {
+            track_ptr->end_ts = row.max_end.value();
+        }
 
         if(const auto node_it = node_utility.find(row.nid); node_it != node_utility.end())
         {
@@ -270,7 +283,9 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
                                      size_t                     nid,
                                      size_t                     agent_id,
                                      size_t                     queue_id,
-                                     size_t                     count) {
+                                     size_t                     count,
+                                     size_t                     start_ts,
+                                     size_t                     end_ts) {
         auto track_ptr         = std::make_shared<reader_types::track_info_t>();
         track_ptr->id          = next_synthetic_id++;
         track_ptr->category    = kind;
@@ -278,6 +293,8 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         track_ptr->agent_id    = agent_id;
         track_ptr->queue_id    = queue_id;
         track_ptr->event_count = count;
+        track_ptr->start_ts    = start_ts;
+        track_ptr->end_ts      = end_ts;
 
         if(const auto node_it = node_utility.find(nid); node_it != node_utility.end())
         {
@@ -293,7 +310,9 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
                                 size_t                     nid,
                                 size_t                     pid,
                                 size_t                     stream_id,
-                                size_t                     count) {
+                                size_t                     count,
+                                size_t                     start_ts,
+                                size_t                     end_ts) {
         auto track_ptr         = std::make_shared<reader_types::track_info_t>();
         track_ptr->id          = next_synthetic_id++;
         track_ptr->category    = kind;
@@ -301,6 +320,8 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         track_ptr->stream_id   = stream_id;
         track_ptr->db_pid      = pid;
         track_ptr->event_count = count;
+        track_ptr->start_ts    = start_ts;
+        track_ptr->end_ts      = end_ts;
 
         if(const auto node_it = node_utility.find(nid); node_it != node_utility.end())
         {
@@ -326,7 +347,9 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
             row.nid,
             row.agent_id,
             row.queue_id,
-            row.count);
+            row.count,
+            row.min_start.value_or(0),
+            row.max_end.value_or(0));
     }
 
     for(const auto& row : category_statements.memory_allocate_agent_queue().to_vector())
@@ -337,7 +360,9 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
             row.nid,
             row.agent_id,
             row.queue_id,
-            row.count);
+            row.count,
+            row.min_start.value_or(0),
+            row.max_end.value_or(0));
     }
 
     for(const auto& row : category_statements.memory_copy_agent_queue().to_vector())
@@ -348,21 +373,25 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
             row.nid,
             row.agent_id,
             row.queue_id,
-            row.count);
+            row.count,
+            row.min_start.value_or(0),
+            row.max_end.value_or(0));
     }
 
-    std::map<std::tuple<size_t, size_t, size_t>, size_t> stream_counts;
+    std::map<std::tuple<size_t, size_t, size_t>, track_range_stats_t> stream_stats;
     auto accumulate_stream = [&](const auto& rows) {
         for(const auto& row : rows)
         {
-            stream_counts[{ row.nid, row.pid, row.stream_id }] += row.count;
+            auto& stats = stream_stats[{ row.nid, row.pid, row.stream_id }];
+            stats.count += row.count;
+            stats.merge(row.min_start, row.max_end);
         }
     };
     accumulate_stream(category_statements.kernel_dispatch_stream().to_vector());
     accumulate_stream(category_statements.memory_allocate_stream().to_vector());
     accumulate_stream(category_statements.memory_copy_stream().to_vector());
 
-    for(const auto& [key, count] : stream_counts)
+    for(const auto& [key, stats] : stream_stats)
     {
         const auto& [nid, pid, stream_id] = key;
         add_stream_track(reader_types::track_kind_t::stream,
@@ -370,14 +399,17 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
                          nid,
                          pid,
                          stream_id,
-                         count);
+                         stats.count,
+                         stats.has_range ? stats.min_start : 0,
+                         stats.has_range ? stats.max_end : 0);
     }
 }
 
-std::unordered_map<topology_key_t, size_t, topology_key_hash_t>
+std::unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>
 reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statements& stmts)
 {
-    std::unordered_map<topology_key_t, size_t, topology_key_hash_t> key_counts;
+    std::unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>
+        key_stats;
 
     auto accumulate = [&](const auto& statement) {
         for(const auto& row : statement().to_vector())
@@ -385,7 +417,9 @@ reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statement
             topology_key_t key{ .nid = row.nid,
                                 .pid = row.pid.value_or(0),
                                 .tid = row.tid.value_or(0) };
-            key_counts[key] += row.count;
+            auto&          stats = key_stats[key];
+            stats.count += row.count;
+            stats.merge(row.min_start, row.max_end);
         }
     };
 
@@ -395,7 +429,7 @@ reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statement
     accumulate(track_stmts.memory_allocate);
     accumulate(track_stmts.memory_copy);
 
-    return key_counts;
+    return key_stats;
 }
 
 void

@@ -262,6 +262,8 @@ ph_ctx::initialize_track_list()
             .category    = to_c_track_category(track->category),
             .queue_id    = static_cast<std::uint32_t>(track->queue_id),
             .stream_id   = static_cast<std::uint32_t>(track->stream_id),
+            .start_ts    = static_cast<std::uint64_t>(track->start_ts),
+            .end_ts      = static_cast<std::uint64_t>(track->end_ts),
         });
     }
 }

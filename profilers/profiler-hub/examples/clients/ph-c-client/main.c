@@ -140,7 +140,7 @@ static void
 print_tracks(const ph_track_list_t* tracks)
 {
     printf("\n=== Tracks (%d) ===\n", tracks->list_size);
-    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %s\n",
+    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %-20s %-20s %s\n",
            "id",
            "nid",
            "pid",
@@ -150,11 +150,13 @@ print_tracks(const ph_track_list_t* tracks)
            "category",
            "queue",
            "stream",
+           "start",
+           "end",
            "name");
     for(uint32_t i = 0; i < tracks->list_size; ++i)
     {
         const ph_track_t* track = &tracks->tracks[i];
-        printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %s\n",
+        printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %-20llu %-20llu %s\n",
                track->id,
                track->nid,
                track->pid,
@@ -164,6 +166,8 @@ print_tracks(const ph_track_list_t* tracks)
                track_category_name(track->category),
                track->queue_id,
                track->stream_id,
+               (unsigned long long) track->start_ts,
+               (unsigned long long) track->end_ts,
                track->track_name);
     }
 }

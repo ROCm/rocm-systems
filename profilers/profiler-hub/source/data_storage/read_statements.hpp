@@ -306,22 +306,28 @@ struct track_key_count_result
     std::optional<size_t> pid;
     std::optional<size_t> tid;
     size_t                count{};
+    std::optional<size_t> min_start;
+    std::optional<size_t> max_end;
 };
 
 struct track_agent_queue_count_result
 {
-    size_t nid{};
-    size_t agent_id{};
-    size_t queue_id{};
-    size_t count{};
+    size_t                nid{};
+    size_t                agent_id{};
+    size_t                queue_id{};
+    size_t                count{};
+    std::optional<size_t> min_start;
+    std::optional<size_t> max_end;
 };
 
 struct track_stream_count_result
 {
-    size_t nid{};
-    size_t pid{};
-    size_t stream_id{};
-    size_t count{};
+    size_t                nid{};
+    size_t                pid{};
+    size_t                stream_id{};
+    size_t                count{};
+    std::optional<size_t> min_start;
+    std::optional<size_t> max_end;
 };
 
 struct pmc_sample_result
@@ -332,12 +338,14 @@ struct pmc_sample_result
 
 struct pmc_track_result
 {
-    size_t      nid{};
-    size_t      pid{};
-    size_t      agent_id{};
-    size_t      pmc_id{};
-    std::string name;
-    size_t      count{};
+    size_t                nid{};
+    size_t                pid{};
+    size_t                agent_id{};
+    size_t                pmc_id{};
+    std::string           name;
+    size_t                count{};
+    std::optional<size_t> min_start;
+    std::optional<size_t> max_end;
 };
 
 struct read_statements
@@ -920,7 +928,12 @@ private:
     {
         auto make_key_count_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
-                         .select("nid", "pid", "tid", "COUNT(*) AS count")
+                         .select("nid",
+                                 "pid",
+                                 "tid",
+                                 "COUNT(*) AS count",
+                                 "MIN(start) AS min_start",
+                                 "MAX(end) AS max_end")
                          .from(fmt::format("{}_{}", table, m_uuid))
                          .group_by("nid", "pid", "tid")
                          .get_query_string();
@@ -929,7 +942,9 @@ private:
                 &track_key_count_result::nid,
                 &track_key_count_result::pid,
                 &track_key_count_result::tid,
-                &track_key_count_result::count);
+                &track_key_count_result::count,
+                &track_key_count_result::min_start,
+                &track_key_count_result::max_end);
         };
 
         m_track_event_count_statements.region = make_key_count_stmt("rocpd_region");
@@ -945,7 +960,12 @@ private:
     {
         auto make_agent_queue_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
-                         .select("nid", "agent_id", "queue_id", "COUNT(*) AS count")
+                         .select("nid",
+                                 "agent_id",
+                                 "queue_id",
+                                 "COUNT(*) AS count",
+                                 "MIN(start) AS min_start",
+                                 "MAX(end) AS max_end")
                          .from(fmt::format("{}_{}", table, m_uuid))
                          .group_by("nid", "agent_id", "queue_id")
                          .get_query_string();
@@ -955,12 +975,19 @@ private:
                     &track_agent_queue_count_result::nid,
                     &track_agent_queue_count_result::agent_id,
                     &track_agent_queue_count_result::queue_id,
-                    &track_agent_queue_count_result::count);
+                    &track_agent_queue_count_result::count,
+                    &track_agent_queue_count_result::min_start,
+                    &track_agent_queue_count_result::max_end);
         };
 
         auto make_stream_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
-                         .select("nid", "pid", "stream_id", "COUNT(*) AS count")
+                         .select("nid",
+                                 "pid",
+                                 "stream_id",
+                                 "COUNT(*) AS count",
+                                 "MIN(start) AS min_start",
+                                 "MAX(end) AS max_end")
                          .from(fmt::format("{}_{}", table, m_uuid))
                          .group_by("nid", "pid", "stream_id")
                          .get_query_string();
@@ -969,7 +996,9 @@ private:
                 &track_stream_count_result::nid,
                 &track_stream_count_result::pid,
                 &track_stream_count_result::stream_id,
-                &track_stream_count_result::count);
+                &track_stream_count_result::count,
+                &track_stream_count_result::min_start,
+                &track_stream_count_result::max_end);
         };
 
         m_track_category_statements.kernel_dispatch_agent_queue =
@@ -979,20 +1008,25 @@ private:
 
         // rocpd_memory_copy has both src_agent_id/dst_agent_id; group by
         // dst_agent_id (matches optiq: "which device received the copy").
-        auto memory_copy_query =
-            queries::select::table_select_query{}
-                .select(
-                    "nid", "dst_agent_id AS agent_id", "queue_id", "COUNT(*) AS count")
-                .from(fmt::format("rocpd_memory_copy_{}", m_uuid))
-                .group_by("nid", "dst_agent_id", "queue_id")
-                .get_query_string();
+        auto memory_copy_query = queries::select::table_select_query{}
+                                     .select("nid",
+                                             "dst_agent_id AS agent_id",
+                                             "queue_id",
+                                             "COUNT(*) AS count",
+                                             "MIN(start) AS min_start",
+                                             "MAX(end) AS max_end")
+                                     .from(fmt::format("rocpd_memory_copy_{}", m_uuid))
+                                     .group_by("nid", "dst_agent_id", "queue_id")
+                                     .get_query_string();
         m_track_category_statements.memory_copy_agent_queue =
             m_backend->create_read_statement_executor<track_agent_queue_count_result>(
                 memory_copy_query,
                 &track_agent_queue_count_result::nid,
                 &track_agent_queue_count_result::agent_id,
                 &track_agent_queue_count_result::queue_id,
-                &track_agent_queue_count_result::count);
+                &track_agent_queue_count_result::count,
+                &track_agent_queue_count_result::min_start,
+                &track_agent_queue_count_result::max_end);
 
         m_track_category_statements.kernel_dispatch_stream =
             make_stream_stmt("rocpd_kernel_dispatch");
@@ -1011,7 +1045,9 @@ private:
                         "PI.agent_id",
                         "PE.pmc_id AS counter_id",
                         "PI.name",
-                        "COUNT(*) AS count")
+                        "COUNT(*) AS count",
+                        "MIN(S.timestamp) AS min_start",
+                        "MAX(S.timestamp) AS max_end")
                 .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
                 .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
                 .inner_join("rocpd_sample", "S", "S.event_id = PE.event_id")
@@ -1026,7 +1062,9 @@ private:
                 &pmc_track_result::agent_id,
                 &pmc_track_result::pmc_id,
                 &pmc_track_result::name,
-                &pmc_track_result::count);
+                &pmc_track_result::count,
+                &pmc_track_result::min_start,
+                &pmc_track_result::max_end);
     }
 
     void initialize_pmc_sample_statements()

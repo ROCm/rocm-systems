@@ -304,6 +304,9 @@ struct track_info_t
     // tables, not a rocpd_track row); needed to filter sample queries.
     size_t pmc_id{};
 
+    size_t start_ts{};  ///< Nanosecond timestamp of the track's earliest event.
+    size_t end_ts{};    ///< Nanosecond timestamp of the track's latest event.
+
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
     std::shared_ptr<thread_info_t>  thread_info;

@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -35,6 +36,30 @@ struct topology_key_hash_t
         h ^= std::hash<size_t>{}(k.pid) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<size_t>{}(k.tid) + 0x9e3779b9 + (h << 6) + (h >> 2);
         return h;
+    }
+};
+
+/** @brief Accumulated event count plus [min start, max end] time span for
+ *         a track being derived from one or more grouped event queries. */
+struct track_range_stats_t
+{
+    size_t count{};
+    size_t min_start{ std::numeric_limits<size_t>::max() };
+    size_t max_end{};
+    bool   has_range{};
+
+    void merge(std::optional<size_t> row_min_start, std::optional<size_t> row_max_end)
+    {
+        if(row_min_start.has_value())
+        {
+            min_start = std::min(min_start, row_min_start.value());
+            has_range = true;
+        }
+        if(row_max_end.has_value())
+        {
+            max_end   = std::max(max_end, row_max_end.value());
+            has_range = true;
+        }
     }
 };
 
@@ -113,9 +138,11 @@ private:
     // (nid,pid,tid)) -- a track only exists if this returns a non-empty
     // group for it, matching optiq's own "no rocpd_track dependency"
     // discovery philosophy (see build_tracks()'s doc comment). Returns
-    // per-key summed event counts; called from build_tracks().
-    [[nodiscard]] std::unordered_map<topology_key_t, size_t, topology_key_hash_t>
-    discover_thread_tracks(data_storage::schema_v3::read_statements& stmts);
+    // per-key summed event count plus [min start, max end] time span;
+    // called from build_tracks().
+    [[nodiscard]] std::
+        unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>
+        discover_thread_tracks(data_storage::schema_v3::read_statements& stmts);
 
     // Appends optiq-parity category tracks (kernel-dispatch/memory-allocate/
     // memory-copy, per agent+queue and per host-stream) to `tracks`,

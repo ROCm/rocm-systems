@@ -45,6 +45,10 @@ downstream consumer of the library.
   (`kernel_dispatch_agent_queue`/`memory_allocate_agent_queue`/
   `memory_copy_agent_queue`/`stream`); previously always empty for these.
   Time-window filtering is supported for these categories too.
+- `ph_track_t`/`track_info_t` now carry `start_ts`/`end_ts` nanosecond
+  timestamps spanning each track's events, computed for every track
+  category (thread, pmc_agent, the 3 agent+queue categories, and stream —
+  the latter combined across kernel-dispatch/memory-allocate/memory-copy).
 
 ### Changed
 
