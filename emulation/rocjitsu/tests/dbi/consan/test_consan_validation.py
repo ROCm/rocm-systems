@@ -3340,6 +3340,23 @@ class ConSanValidationTest(unittest.TestCase):
             "/artifacts/tensile-work",
         )
 
+    def test_tensile_client_timeout_override_applies_to_every_shard(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8f4gemm-tdm"]
+        name = "CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS"
+        with mock.patch.dict(os.environ, {name: "1800"}):
+            commands = validation._workload_commands(
+                Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+            )
+        self.assertEqual(len(commands), 3)
+        for command in commands:
+            self.assertEqual(command[command.index("--timeout-seconds") + 1], "1800")
+        for invalid in ("0", "-1", "1.5", "", "abc", "١"):
+            with self.subTest(invalid=invalid), mock.patch.dict(os.environ, {name: invalid}):
+                with self.assertRaisesRegex(validation.ValidationError, name):
+                    validation._workload_commands(
+                        Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                    )
+
     def test_gfx1250_manifest_excludes_inapplicable_f16_sb_sweep(self) -> None:
         ids = {w["id"] for w in validation._manifest("gfx1250")["workloads"]}
         # The unfiltered sweep includes K=16 inputs for solutions requiring

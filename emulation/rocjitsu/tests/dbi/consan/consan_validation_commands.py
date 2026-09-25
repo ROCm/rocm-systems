@@ -1263,13 +1263,20 @@ def _workload_command(
             "--label",
             f"{workload.id}-{phase}",
         ]
-        if workload.tensile_inner_timeout_seconds is not None:
-            command.extend(
-                (
-                    "--timeout-seconds",
-                    str(workload.tensile_inner_timeout_seconds),
+        inner_timeout = workload.tensile_inner_timeout_seconds
+        timeout_override = os.environ.get("CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS")
+        if timeout_override is not None:
+            if (
+                not timeout_override.isascii()
+                or not timeout_override.isdecimal()
+                or int(timeout_override) <= 0
+            ):
+                raise ValidationError(
+                    "invalid CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS"
                 )
-            )
+            inner_timeout = int(timeout_override)
+        if inner_timeout is not None:
+            command.extend(("--timeout-seconds", str(inner_timeout)))
         expected_numeric_rows = (
             tensile_expected_numeric_rows
             if tensile_expected_numeric_rows is not None

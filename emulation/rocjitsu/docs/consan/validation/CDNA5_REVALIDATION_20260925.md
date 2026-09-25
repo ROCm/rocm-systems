@@ -829,3 +829,13 @@ not qualify omitted tensor-wait mutations or establish generic TDM race support.
 admitted/reached fault trials, all with complete analysis and healthy probes.
 Sleep=15 detects 0/8; the oracle also remains passing in all eight trials.
 The SuperCollider cell now records the measured result rather than pending work.
+
+### Explicit Tensile client deadlines
+
+Added `CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS` so timeout reruns can
+raise the inner client deadline without changing the maintained workload or its
+shards. `--timeout` continues to control the outer process. All 209 validation
+runner tests pass (`tensile-timeout-tests.log`), including all-shard propagation
+and rejection of invalid timeout values. SGEMM profiler discovery is separately
+retrying only its three unfinished shards under the shared memory cap, retaining
+new `bounded-retry-*` artifacts and a 3600 s client deadline.

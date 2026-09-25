@@ -393,8 +393,13 @@ Strict load rejection is a typed outcome with exit code 92. The runner retains
 its reason rather than converting it into a missing teardown verdict.
 
 `--timeout` is a diagnostic override. Changing it changes the execution
-contract and requires a new artifact root. A missing workload/profile pair is
-an incomplete campaign, not an omitted result.
+contract and requires a new artifact root. Tensile also has an independent
+per-client deadline. Set `CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS` to a
+positive integer to override that deadline for every shard; the resolved value
+is recorded as `--timeout-seconds` in each command. Increase the outer
+`--timeout` as needed to allow client execution plus setup and result collection.
+Neither override changes inputs, shards, numeric or coverage requirements.
+A missing workload/profile pair is an incomplete campaign, not an omitted result.
 
 ### Fault inventory and review
 
