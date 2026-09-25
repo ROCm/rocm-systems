@@ -45,6 +45,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -151,10 +152,13 @@ public:
     ~DispatchThreadTracer() = default;
 
     /// Initializes shared resources needed by dispatch-based tracing.
-    void start_context();
-    void stop_context();
+    void start_context() const;
+    void stop_context() const;
     void resource_init();
     void resource_deinit();
+
+    bool collects_on(rocprofiler_agent_id_t agent_id) const;
+    bool intersects(const DispatchThreadTracer& rhs) const;
 
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
@@ -173,13 +177,21 @@ public:
                                  const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
 
+    /// Number of injected trace packets still awaiting post_kernel_call.
+    int pending_post_moves() const { return post_move_data.load(); }
+
+    std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
+
 private:
-    std::unordered_map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
+    std::unordered_map<rocprofiler_agent_id_t, std::shared_ptr<ThreadTracerAgent>> agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::shared_mutex agents_map_mut{};
-    std::atomic<int>  post_move_data{0};
-    std::atomic<bool> enabled{false};
+    mutable std::shared_mutex agents_map_mut{};
+    std::atomic<int>          post_move_data{0};
+    // Mutable for the same reason as agents_map_mut: start_context()/stop_context() are const
+    // because they do not change what the tracer is configured to collect, but they do flip the
+    // active flag.
+    mutable std::atomic<bool> enabled{false};
 };
 
 class DeviceThreadTracer
