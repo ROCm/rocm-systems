@@ -7,9 +7,9 @@ sets, and why `stop_context` drains the GPU.
 Paths are relative to `projects/rocprofiler-sdk/source/`. Symbols are named rather than cited by
 line number, since line numbers rot faster than the code they point at.
 
-The migration is one PR per service. Counter collection (#8891) introduces the shared
-`hsa/queue_hooks/` infrastructure that the rest build on; SPM (#8887), thread trace (#8790) and PC
-sampling (#8895) follow the same shape. This document describes the mechanism as a whole, and flags
+The migration is one PR per service: counter collection (#11970), SPM (#11968), thread trace
+(#11967) and PC sampling (#11969). Each PR carries the shared `hsa/queue_hooks/` pieces it needs, so
+they can land in any order. This document describes the mechanism as a whole, and flags
 which service each part currently lives on.
 
 ## 1. Diagram
@@ -204,9 +204,11 @@ completion path becomes an application hang rather than data loss.
 
 ## 6. Known gaps
 
-1. Thread trace, PC sampling and device counter collection still use the registry, so
-   `Queue::_callbacks`, `Queue::get_notifiers()` and `QueueController::add_callback` cannot be
-   deleted yet. `client_ids.hpp` already reserves tags for thread trace and PC sampling.
+1. Until SPM (#11968), thread trace (#11967) and PC sampling (#11969) land, each still registers
+   through `QueueController::add_callback`, so `Queue::_callbacks`, `Queue::get_notifiers()` and
+   `add_callback` itself cannot be deleted yet. Device counter collection never used the registry.
+   Once all four migrations are in, nothing calls `add_callback` and the registry can be removed as
+   a follow-up.
 2. Several in-flight PRs edit the same `no_real_consumers` expression in `hsa/queue.cpp`.
    Consolidating the predicate into one `needs_interception(queue)` helper would remove the
    recurring conflict.
