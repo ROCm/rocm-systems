@@ -965,6 +965,41 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
 }
 
 /**
+ * @brief Declines open range replay ranges on every GPU agent a batch copy operation names.
+ *
+ * Unlike note_range_replay_device_write(), this does not rely on the per-copy classification that
+ * memory copy tracing uses. An indirect destination is resolved by the copy engine at execution
+ * time and the signal-after-copy is an arbitrary GPU-side write, so neither can be ruled out from
+ * the descriptor, and declining a range that would have replayed correctly costs one replay
+ * while missing a device write corrupts every replayed pass.
+ */
+void
+note_range_replay_batch_device_writes(const hsa_amd_memory_copy_op_t& _copy_op)
+{
+    if(!range_replay::any_range_open()) return;
+
+    const auto _note = [](hsa_agent_t _hsa_agent) {
+        const auto* _rocp_agent = agent::get_rocprofiler_agent(_hsa_agent);
+        if(_rocp_agent != nullptr && _rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            range_replay::note_device_write(_rocp_agent->id.handle);
+    };
+
+    _note(_copy_op.src_agent);
+
+    // BROADCAST always, and every other type in its multi-entry form, names its destinations
+    // through dst_agent_list rather than dst_agent; the two share storage.
+    const bool _multi_entry =
+        _copy_op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST || _copy_op.num_entries > 0;
+    if(!_multi_entry)
+        _note(_copy_op.dst_agent);
+    else if(_copy_op.dst_agent_list != nullptr)
+    {
+        for(uint32_t i = 0; i < _copy_op.num_entries; ++i)
+            _note(_copy_op.dst_agent_list[i]);
+    }
+}
+
+/**
  * @brief Intercepts batch copy submission and replaces traced op signals with rocprofiler signals.
  */
 template <size_t TableIdx, size_t OpIdx>
@@ -991,6 +1026,8 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
 
     for(uint32_t i = 0; i < num_copy_ops; ++i)
     {
+        note_range_replay_batch_device_writes(copy_ops[i]);
+
         auto _traced_copies = traced_copy_data_vec_t{};
         populate_batch_traced_copy_data(_traced_copies, copy_ops[i], meta_type::name);
 
