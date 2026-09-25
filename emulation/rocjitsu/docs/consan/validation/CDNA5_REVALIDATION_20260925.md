@@ -1774,3 +1774,20 @@ cannot find entry-local VGPR scratch and rejects before the full-wave private
 fallback. The row stays orange with this current blocker, replacing the older
 missing-tensor-range explanation. No source changes or hook replacement took
 place during the fault campaigns.
+
+### Scalar entry failure now reaches private fallback
+
+For a fixed-stack tensor owner without explicit persistent register overrides,
+failure to resolve scalar entry resources can now select the full-wave private
+identity path. Dynamic-stack and explicit-state constraints remain enforced.
+Normal GCC build and `ConSan*:Gfx1250ExecutionTest.TensorDma*`: 1,035 passed,
+two existing skips (`tensor-private-fallback-tests.log`).
+
+The MXF8 TDM retry now executes clients and reaches coverage reporting rather
+than rejecting at scalar-prologue planning; some sites still need memory-backed
+scalar preservation. Its full-shard qualification is still running.
+`tensor-fallback-spmm-all-clean` is accepted across all four bounded process
+shards and nine objects, with passing numeric oracles and aggregated coverage
+526/526 accesses, 136/136 barriers. The sparse TDM all row moves to yellow
+pending a reviewed fault. `tensor-fallback-mxf4-tdm-clean` rejects six shards
+before execution; its table cell records this current allocation-triage state.

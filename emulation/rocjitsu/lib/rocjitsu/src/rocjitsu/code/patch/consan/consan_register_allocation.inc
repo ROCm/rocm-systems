@@ -3333,6 +3333,17 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
       (persistent_demand.wave_wide_identity_required ||
        (persistent_demand.scalar_state_required_for_private_or_overflow &&
         (persistent_end > persistent_vgpr_limit || prefer_private_epoch)));
+  const auto use_wave_private_identity_fallback = [&] {
+    if (!persistent_demand.wave_wide_identity_required ||
+        !persistent_demand.private_state_supported || has_dynamic_stack_owner ||
+        has_explicit_owner_epoch || options.persistent_sgprs.complete())
+      return false;
+    options.initialize_owner_epoch = true;
+    options.automatic_private_epoch = true;
+    diagnostics.emplace_back("ConSan selected full-wave private identity because scalar entry "
+                             "resources are unavailable");
+    return true;
+  };
   if (rdna_needs_scalar_epoch) {
     const std::string rdna_arch_name = rj_code_arch_name(arch);
 
@@ -3341,6 +3352,8 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     const std::vector<ProgramContainerId> scalar_owners = scalar_owner_kernel_ids(resource_plans);
     const auto resolved_contexts = resolve_scalar_owner_contexts(scalar_state, scalar_owners);
     if (!resolved_contexts) {
+      if (use_wave_private_identity_fallback())
+        return update;
       if (has_dynamic_stack_owner || persistent_demand.wave_wide_identity_required) {
         update.rejection = PlacementRejection::PersistentStateUnavailable;
         diagnostics.emplace_back("ConSan could not resolve every " + rdna_arch_name +
@@ -3353,6 +3366,8 @@ configure_automatic_persistent_vgprs(const OperatingPoint &base, const ResourceP
     }
     auto prologue_scratch = plan_scalar_prologue_scratch(scalar_state, *resolved_contexts, true);
     if (!prologue_scratch) {
+      if (use_wave_private_identity_fallback())
+        return update;
       if (has_dynamic_stack_owner || persistent_demand.wave_wide_identity_required)
         update.rejection = PlacementRejection::PersistentStateUnavailable;
       diagnostics.emplace_back("ConSan could not place entry-local VGPR scratch for " +
