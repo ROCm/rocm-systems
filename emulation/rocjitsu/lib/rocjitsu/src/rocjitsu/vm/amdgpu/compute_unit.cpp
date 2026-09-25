@@ -305,6 +305,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   if (!wfs_[wf_id])
     wfs_[wf_id] = create_wavefront(wf_id);
   auto *wf = wfs_[wf_id].get();
+  wf->activity_tracked_ = true;
   const uint32_t dispatched_wave_size = wave_size == 0 ? wf->default_wf_size_ : wave_size;
   if ((dispatched_wave_size != 32 && dispatched_wave_size != 64) ||
       dispatched_wave_size > wf->max_wf_size_)
@@ -344,7 +345,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   ++wf->dispatch_generation_;
   if (wf->dispatch_generation_ == 0)
     ++wf->dispatch_generation_;
-  wf->state_ = WfState::RUNNING;
+  wf->set_state(WfState::RUNNING);
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
 
@@ -738,23 +739,7 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
 
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
                                            uint32_t scratch_wave_limit_per_se) const {
-  // Count free wavefront slots.
-  uint32_t free_slots = 0;
-  const size_t slot_limit = scratch_wave_limit_per_se == UINT32_MAX
-                                ? wfs_.size()
-                                : std::min<size_t>(wfs_.size(), scratch_slots_per_cu_);
-  for (size_t slot = 0; slot < slot_limit; ++slot) {
-    const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + slot;
-    if (scratch_scoreboard_id < scratch_wave_limit_per_se &&
-        (!wfs_[slot] || wfs_[slot]->is_halted()))
-      ++free_slots;
-  }
-  if (free_slots < num_wfs) {
-    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
-                     " < num_wfs=", num_wfs);
-    return false;
-  }
-
+  // Reject exhausted register allocations before scanning the wave slots.
   // Check SGPR register blocks.
   uint32_t free_sgpr = sgpr_file_.free_block_count();
   if (free_sgpr < num_wfs) {
@@ -767,6 +752,23 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
   uint32_t free_vgpr = free_vgpr_blocks();
   if (free_vgpr < num_wfs) {
     util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_vgpr=", free_vgpr,
+                     " < num_wfs=", num_wfs);
+    return false;
+  }
+
+  // Count free wavefront slots.
+  uint32_t free_slots = 0;
+  const size_t slot_limit = scratch_wave_limit_per_se == UINT32_MAX
+                                ? wfs_.size()
+                                : std::min<size_t>(wfs_.size(), scratch_slots_per_cu_);
+  for (size_t slot = 0; slot < slot_limit && free_slots < num_wfs; ++slot) {
+    const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + slot;
+    if (scratch_scoreboard_id < scratch_wave_limit_per_se &&
+        (!wfs_[slot] || wfs_[slot]->is_halted()))
+      ++free_slots;
+  }
+  if (free_slots < num_wfs) {
+    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
                      " < num_wfs=", num_wfs);
     return false;
   }
@@ -1391,6 +1393,9 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     async_execution::stats.flush();
 }
 
+thread_local ComputeUnitCore::InstructionVmSnapshot *ComputeUnitCore::instruction_vm_snapshot_ =
+    nullptr;
+
 template <bool EnableAsync>
 [[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
     Wavefront *active,
@@ -1404,7 +1409,12 @@ template <bool EnableAsync>
     }
   };
 
-  std::optional<GpuVmAccess> vm_access;
+  std::optional<GpuVmAccess> fresh_vm_access;
+  const GpuVmAccess *vm_access = nullptr;
+  InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
+  // A callback may recursively issue another wave. Keep its fetch from
+  // replacing the snapshot borrowed by this instruction's later debug probes.
+  ScopedInstructionVmSnapshot nested_scope(nullptr);
   if (active->address_space() || vmid != 0) {
     if (gpu_vm_ == nullptr) {
       drain_async_window();
@@ -1413,8 +1423,25 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    vm_access = active->address_space() ? gpu_vm_->snapshot(active->address_space())
-                                        : gpu_vm_->snapshot_vmid(vmid);
+    const AddressSpaceHandle address_space = active->address_space();
+    if (snapshot && snapshot->compute_unit == this) {
+      auto &cached = *snapshot;
+      if (cached.owner != gpu_vm_ || cached.address_space != address_space || cached.vmid != vmid ||
+          !cached.access || !cached.access->is_valid()) {
+        cached.access =
+            address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+        cached.owner = gpu_vm_;
+        cached.address_space = address_space;
+        cached.vmid = vmid;
+      }
+      if (cached.access)
+        vm_access = &*cached.access;
+    } else {
+      fresh_vm_access =
+          address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+      if (fresh_vm_access)
+        vm_access = &*fresh_vm_access;
+    }
     if (!vm_access) {
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -1424,7 +1451,7 @@ template <bool EnableAsync>
       return;
     }
   }
-  const bool vm_address_space = vm_access.has_value();
+  const bool vm_address_space = vm_access != nullptr;
 
   rj_code_binary_inst_t words[4];
   static_assert(sizeof(words) == InstructionCache::kFetchBytes,
@@ -1518,9 +1545,8 @@ template <bool EnableAsync>
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words, first.size(), first.begin());
-        issuer =
-            admission->inspect(*decoder_, inst_cache_, *memory_, vm_access ? &*vm_access : nullptr,
-                               active->pc, vmid, active->num_vgprs(), storage->has_accvgprs, first);
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+                                    active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }
     }

@@ -88,6 +88,11 @@ public:
     /// @brief Result of publishing dirty cache state for this boundary.
     [[nodiscard]] VmAccessOutcome outcome() const;
 
+    /// @brief Whether this boundary holds the specified coherence domain.
+    [[nodiscard]] bool belongs_to(const DeviceCacheCoherence *owner) const {
+      return owner_ != nullptr && owner_ == owner;
+    }
+
   private:
     friend class DeviceCacheCoherence;
 
