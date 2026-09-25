@@ -4654,8 +4654,7 @@ TEST(RemoteDriverPtracerGrantTest, RefusesAListenerThatIsNotTheLaunchedDaemon) {
   EXPECT_EQ(*driver.ptracer_verdict(), rocjitsu::PtracerGrantVerdict::RefusedPeerMismatch);
 }
 
-// Attach mode: no launcher named a daemon, so there is nothing to compare the
-// peer against and the grant is withheld rather than given to whoever answered.
+// Attach mode trusts the same-user socket peer without a launcher-provided PID.
 TEST(RemoteDriverPtracerGrantTest, TrustsTheSocketWhenNoLauncherNamedADaemon) {
   // Empty rather than unset: both mean "no launcher named one", and the empty
   // spelling is also what an inherited-but-cleared environment looks like.
@@ -4668,10 +4667,15 @@ TEST(RemoteDriverPtracerGrantTest, TrustsTheSocketWhenNoLauncherNamedADaemon) {
   });
 
   rocjitsu::RemoteDriver driver(sv[0]);
-  ASSERT_GE(driver.open(), 0);
+  testing::internal::CaptureStderr();
+  const int fd = driver.open();
+  const std::string stderr_output = testing::internal::GetCapturedStderr();
+  ASSERT_GE(fd, 0);
 
   ASSERT_TRUE(driver.ptracer_verdict().has_value());
   EXPECT_EQ(*driver.ptracer_verdict(), rocjitsu::PtracerGrantVerdict::GrantUnverifiedPeer);
+  EXPECT_EQ(stderr_output.find("[rj warn] daemon: authorizing pid"), std::string::npos)
+      << stderr_output;
 }
 
 // Having named a daemon outranks trusting the socket, so a peer failing the PID
