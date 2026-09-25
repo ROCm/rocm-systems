@@ -901,6 +901,7 @@ Examples:
             "FP4",
             "FP6",
             "FP8",
+            "MXFP8",
             "FP16",
             "BF16",
             "FP32",
@@ -918,6 +919,7 @@ Examples:
             "\t\t   FP4\n"
             "\t\t   FP6\n"
             "\t\t   FP8\n"
+            "\t\t   MXFP8\n"
             "\t\t   FP16\n"
             "\t\t   BF16\n"
             "\t\t   FP32\n"
