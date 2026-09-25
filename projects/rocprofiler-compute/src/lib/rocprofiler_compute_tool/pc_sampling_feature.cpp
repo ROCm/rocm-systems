@@ -3,6 +3,7 @@
 #include "pc_sampling_feature.h"
 
 #include "code_object_writer.h"
+#include "sdk_callbacks.h"
 
 using namespace rocprofiler_compute_tool;
 
@@ -59,6 +60,12 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
 void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info)
 {
     m_collector->on_code_object_load(info);
+}
+
+void pc_sampling_feature_t::write(tool_data_t& /*tool_data*/)
+{
+    if (m_enabled)
+        finalize();
 }
 
 void pc_sampling_feature_t::finalize()

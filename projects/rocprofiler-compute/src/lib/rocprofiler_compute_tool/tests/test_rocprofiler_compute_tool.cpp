@@ -50,18 +50,18 @@ TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
     m_input_parameters->set_pc_sampling_method("host_trap");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->pc_sampling.enabled());
-    EXPECT_EQ(tool_data->pc_sampling.mode(), PcSamplingMode::HostTrap);
-    EXPECT_EQ(tool_data->pc_sampling.code_object_info_path(),
+    EXPECT_TRUE(tool_data->pc_sampling->enabled());
+    EXPECT_EQ(tool_data->pc_sampling->mode(), PcSamplingMode::HostTrap);
+    EXPECT_EQ(tool_data->pc_sampling->code_object_info_path(),
               expected_output_path("out", "_code_obj_info.json"));
-    EXPECT_EQ(tool_data->pc_sampling.source_snapshot_path(), expected_output_directory("out", "src"));
+    EXPECT_EQ(tool_data->pc_sampling->source_snapshot_path(), expected_output_directory("out", "src"));
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoPcSamplingMethod_DoesNotEnablePcSampling)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_FALSE(tool_data->pc_sampling.enabled());
+    EXPECT_FALSE(tool_data->pc_sampling->enabled());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
