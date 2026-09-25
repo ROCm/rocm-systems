@@ -1,3 +1,9 @@
+> **Superseded in part by `adopt-uefi-key-store`.** The daemon and record-store
+> sources, the public placeholder key, and seed drift and repair described in
+> this change and in its `amdsmi-identity-api` and `amdsmi-seed-provisioning`
+> specs do not exist: the node key is the `AmdCuidKey` UEFI variable, and
+> amd-smi reports the sources `UNKNOWN`, `DRIVER` and `LIBRARY`.
+
 ## Why
 
 A CUID that nothing reports is a format, not an identifier. The kernel publishes

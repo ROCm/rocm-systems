@@ -2,7 +2,7 @@
 
 The Component Unified ID wire format: how a component's hardware identity is
 packed into a 122-bit payload, how that payload is rendered as an RFC 9562
-UUIDv8, and how a secondary identifier is derived from it. Every producer must
+UUIDv8, and how a derived identifier is computed from it. Every producer must
 emit byte-identical values for the same inputs, so this is a frozen ABI shared
 between the kernel driver and the userspace library.
 
@@ -128,9 +128,9 @@ is conforming.*
 - **THEN** the recovered 122-bit payload is bit-for-bit identical to the input
   payload
 
-### Requirement: Secondary identifier derivation
+### Requirement: Derived identifier computation
 
-The secondary (derived) CUID SHALL be computed as
+The derived CUID SHALL be computed as
 `HMAC-SHA256(key = seed, message = the 16 packed primary payload octets)`, where
 the primary payload is the message and the shared secret is the key.
 
@@ -155,11 +155,11 @@ Identifier in both layouts.
 - **WHEN** the kernel driver and the userspace library are given the same
   component identity and the same seed
 - **THEN** both emit byte-identical primary CUIDs
-- **AND** both emit byte-identical secondary CUIDs
+- **AND** both emit byte-identical derived CUIDs
 
-#### Scenario: The secondary discloses neither the serial nor the seed
+#### Scenario: The derived CUID discloses neither the serial nor the seed
 
-- **WHEN** a consumer holds a secondary CUID and knows the component's vendor,
+- **WHEN** a consumer holds a derived CUID and knows the component's vendor,
   device, revision and type
 - **THEN** recovering the serial number or the seed requires breaking
   HMAC-SHA256
@@ -168,7 +168,7 @@ Identifier in both layouts.
 
 - **WHEN** the same physical component is enumerated on two nodes provisioned
   with the same seed
-- **THEN** both nodes report the same secondary CUID
+- **THEN** both nodes report the same derived CUID
 
 ### Requirement: Auxiliary Value Identifier
 
@@ -201,7 +201,7 @@ use a different UUID version to distinguish auxiliary values.
 For a given component, the primary CUID SHALL be identical across reboots,
 driver reloads, and topology changes such as reslotting or renumbering, provided
 the component's serial number and identity registers are unchanged. The
-secondary CUID SHALL be identical under the same conditions provided the seed is
+derived CUID SHALL be identical under the same conditions provided the seed is
 also unchanged.
 
 The identifier SHALL NOT depend on PCI bus/device/function, DRM render node
@@ -212,4 +212,4 @@ component is rather than which component it is.
 
 - **WHEN** a component is moved to a different PCI slot and the machine is
   rebooted
-- **THEN** its primary and secondary CUIDs are unchanged
+- **THEN** its primary and derived CUIDs are unchanged

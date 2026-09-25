@@ -115,17 +115,26 @@ field positions and the same per-field meanings as the PCIe case, with Format
 - **DeviceID** (`184:199`) SHALL hold the CPU's Family and Model combined, the
   same way the primary payload defines a CPU's DeviceID;
 - **VendorID** (`200:215`) SHALL hold the CPU vendor ID;
-- the **PCIe Routing ID field** (`144:175`) SHALL be **zero**.
+- the **PCIe Routing ID field** (`144:175`) SHALL hold the socket's physical
+  package ID (Linux `topology/physical_package_id`), so zero on socket 0.
 
-*A CPU has no Bus/Device/Function of its own, and zero is the only Routing ID
-two producers can agree on. The published CPU table also renames bits `200:215`
+*A CPU has no Bus/Device/Function of its own, and its UnitID is zero on every
+socket, so without a Routing ID the sockets of one host would share a temporary
+CUID. The physical package ID is the socket index firmware enumerates, and every
+producer on the host reads the same value. The published CPU table also renames bits `200:215`
 from VendorID to FamilyID and splits Family and Model (C9), leaving a CPU
 auxiliary value with no vendor at all.*
 
-#### Scenario: A CPU carries no routing ID
+#### Scenario: A CPU's routing ID is its socket
 
 - **WHEN** a CPU's auxiliary input structure is built
-- **THEN** bits 144:175 are zero
+- **THEN** bits 144:175 hold its physical package ID
+
+#### Scenario: Two sockets of one host
+
+- **WHEN** a host with two CPU sockets and no CPU fingerprint builds their
+  temporary CUIDs
+- **THEN** the two CUIDs differ
 
 #### Scenario: A CPU auxiliary value
 

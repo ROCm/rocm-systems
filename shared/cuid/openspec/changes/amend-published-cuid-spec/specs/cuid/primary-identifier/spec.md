@@ -84,7 +84,7 @@ payloads yielded a Component Type of `0xB` (Reserved), `0x4` (NPU) and `0xF`
 (Other) for three platforms and set the Auxiliary Value Identifier on one of
 them, reporting a genuine firmware identity as synthesised. De-framing also drops
 six of the UUID's bits, so two platforms whose system UUIDs differ only in
-version and variant bits derive the same secondary CUID.*
+version and variant bits derive the same CUID.*
 
 #### Scenario: The firmware UUID is preserved exactly
 
@@ -100,7 +100,7 @@ version and variant bits derive the same secondary CUID.*
 
 #### Scenario: Derivation hashes the whole UUID
 
-- **WHEN** a secondary CUID is derived from an adopted primary
+- **WHEN** a derived CUID is derived from an adopted primary
 - **THEN** the HMAC message is the sixteen octets of the UUID
 - **AND** two platforms differing only in version or variant bits derive
-  different secondary CUIDs
+  different derived CUIDs
