@@ -52,7 +52,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) |  |  |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) |  |  |
-| Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) |  |  |
+| Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) |  |  |
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) |  |  |
