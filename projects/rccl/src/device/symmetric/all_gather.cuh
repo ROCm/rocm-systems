@@ -14,7 +14,9 @@
 #include "primitives.cuh"
 #endif
 
-template <int BytePerPack, int UnrollPacks, int UnrollPeers, bool EnableTma>
+// TileAligned: the caller's tier guarantees every tile address is ncclSymkTileLine-aligned, which
+// lets the staging wrappers drop TDM's head peel.
+template <int BytePerPack, int UnrollPacks, int UnrollPeers, bool EnableTma, bool TileAligned = false>
 static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int t, bool waitNeeded,
                                  ncclLsaBarrierSession<ncclCoopCta>& bar, ncclSymPtr<char> input,
                                  ncclSymPtr<char> output, bool inPlace, int nIters) {
@@ -63,7 +65,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
   if (0 < nIters) {
 #if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+      ncclSymkTileLoad<TileAligned>(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
       ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
     } else
 #endif
@@ -91,7 +93,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
             if (partial && dr == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileStore(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
+              ncclSymkTileStore<TileAligned>(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
@@ -115,7 +117,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
       if (nIters <= 0) break;
 #if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+        ncclSymkTileLoad<TileAligned>(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
         ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
       } else
 #endif
@@ -187,10 +189,12 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
       chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
       if (chunks != 0) {
         uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
-        bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma>(handler, tn, t, waitNeeded, bar,
-                                                                    (ncclSymPtr<char>)input + cursor,
-                                                                    (ncclSymPtr<char>)output + cursor, inPlace,
-                                                                    chunks * ncclSymkMinWarpsPerBlock);
+        // Both sides start on a 256 B boundary here (nPreBytes peels input to one, alignment % 256
+        // carries output with it, window bases are page-aligned) and every tile advances by a
+        // multiple of 256, so the tiles are ncclSymkTileLine-aligned and the peel can go.
+        bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma, /*TileAligned=*/true>(
+          handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor,
+          (ncclSymPtr<char>)output + cursor, inPlace, chunks * ncclSymkMinWarpsPerBlock);
         cursor = cursorAfter;
         waitNeeded = false;
       }
