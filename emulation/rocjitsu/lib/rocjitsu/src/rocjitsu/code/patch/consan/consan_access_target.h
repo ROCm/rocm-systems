@@ -39,6 +39,18 @@ append_materialize_direct_to_lds_address(std::vector<uint32_t> &words, const Pro
                                          uint16_t result_vgpr, uint16_t temporary_vgpr,
                                          uint16_t exec_save_sgpr, rj_code_arch_t arch);
 
+/// Materialize one CDNA5 tensor-load LDS address from a caller-selected linear
+/// element index (including any iteration's LDS element increment). Selection
+/// and descriptor activity/bounds checks belong to the caller. Loads include
+/// zero-filled elements; stores require a different bounds/padding contract.
+/// Uses three consecutive temporary VGPRs, disjoint from input and result.
+/// Input and result may alias. Preserves SGPRs, EXEC, VCC, SCC and inactive
+/// VGPR lanes. The caller must select the low VGPR banks and restore guest mode.
+[[nodiscard]] bool
+append_materialize_tensor_load_lds_address(std::vector<uint32_t> &words, const ProgramSite &site,
+                                           uint16_t element_index_vgpr, uint16_t result_vgpr,
+                                           uint16_t temporary_vgpr, rj_code_arch_t arch);
+
 [[nodiscard]] bool candidate_uses_scalar_vector_flat_address(const Candidate &candidate);
 [[nodiscard]] bool candidate_requires_flat_address_materialization(const Candidate &candidate);
 [[nodiscard]] uint16_t flat_access_address_scratch_count(const Candidate &candidate);

@@ -1505,3 +1505,24 @@ The descriptor-retention change passes a normal GCC build and the full host
 `ConSan*` suite: 984 passed, two existing live-inventory tests skipped
 (`tensor-descriptor-host-tests.log`). The shared workload hook was not relinked;
 ongoing campaigns keep their recorded hook binaries.
+
+### Executable tensor-load LDS address primitive
+
+Added `append_materialize_tensor_load_lds_address`, which emits gfx1250 vector
+instructions to map a selected linear element index to its actual LDS address.
+It reads the scalar descriptor's base, element size, padding interval, amount,
+and enable bit at runtime. Padding holes are never included in the selected
+access. The caller supplies the selected element index including any iteration
+increment and must enforce descriptor activity and element bounds.
+
+The primitive preserves descriptor SGPRs, EXEC, VCC, SCC, and inactive VGPR
+lanes. It supports input/result aliasing and rejects scratch overlap or invalid
+required descriptor register tuples without modifying the instruction stream.
+Tests execute the generated instructions in a gfx1250 CU over all four element
+sizes, all eight padding intervals, minimum/maximum padding amounts, padding
+on/off, and full/partial/empty EXEC. This does not yet admit tensor accesses into
+the detector: selection, metadata integration, and completion ordering remain.
+
+Normal GCC build passed. Full host `ConSan*`: 986 passed, two existing
+live-inventory tests skipped (`tensor-address-host-tests.log`). All cgroup memory
+event counters remained zero during the concurrent workload campaigns/build.

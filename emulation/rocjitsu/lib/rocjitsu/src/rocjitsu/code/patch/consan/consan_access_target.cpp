@@ -145,6 +145,55 @@ append_materialize_direct_to_lds_address(std::vector<uint32_t> &words, const Pro
   return true;
 }
 
+bool append_materialize_tensor_load_lds_address(std::vector<uint32_t> &words,
+                                                const ProgramSite &site,
+                                                uint16_t element_index_vgpr, uint16_t result_vgpr,
+                                                uint16_t temporary_vgpr, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
+      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs ||
+      element_index_vgpr >= 256u || result_vgpr >= 256u || temporary_vgpr > 253u ||
+      (element_index_vgpr >= temporary_vgpr && element_index_vgpr < temporary_vgpr + 3u) ||
+      (result_vgpr >= temporary_vgpr && result_vgpr < temporary_vgpr + 3u))
+    return false;
+  const auto &groups = *site.operands.tensor_descriptor_sgprs;
+  if (groups[0] > 102u || groups[1] > 98u)
+    return false;
+
+  const uint16_t descriptor = temporary_vgpr;
+  const uint16_t field = temporary_vgpr + 1u;
+  const uint16_t padding = temporary_vgpr + 2u;
+  const auto multiply = [&](uint16_t dst, uint16_t lhs, uint16_t rhs) {
+    return cdna5::build_vop3(cdna5::kVMulLoU32Vop3, {.vdst = static_cast<uint8_t>(dst),
+                                                     .src0 = vector_source_vgpr(lhs),
+                                                     .src1 = vector_source_vgpr(rhs)});
+  };
+  InstructionSequence sequence(words);
+  // Work in elements until the final scale: this is exactly
+  // byte + floor(byte / (interval * element_size)) * amount * element_size,
+  // without including the padding holes in an access range.
+  sequence.append(
+      build_v_mov_b32_e32(descriptor, groups[1], arch),
+      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(22), descriptor, arch),
+      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(7), field, arch),
+      instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(1), field, arch),
+      instrumentation::build_v_lshrrev_b32(padding, vector_source_vgpr(field), element_index_vgpr,
+                                           arch),
+      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(25), descriptor, arch),
+      instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(1), field, arch),
+      multiply(padding, padding, field),
+      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(20), descriptor, arch),
+      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(1), field, arch),
+      multiply(padding, padding, field),
+      instrumentation::build_v_add_u32(result_vgpr, vector_source_vgpr(padding), element_index_vgpr,
+                                       arch),
+      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(16), descriptor, arch),
+      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(3), field, arch),
+      instrumentation::build_v_lshlrev_b32(result_vgpr, vector_source_vgpr(field), result_vgpr,
+                                           arch),
+      instrumentation::build_v_add_u32(result_vgpr, groups[0] + 1u, result_vgpr, arch));
+  return sequence.finish();
+}
+
 [[nodiscard]] bool candidate_uses_scalar_vector_flat_address(const Candidate &candidate) {
   return candidate.site().lowering.form &&
          candidate.site().lowering.form->kind == AccessLoweringFormKind::FlatScalarVectorAddress;
