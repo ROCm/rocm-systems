@@ -20,10 +20,12 @@
 // restores every default and clears every record.
 //
 // Add a symbol here when a unit under test reaches it -- with a working
-// default and a reset, never as a hardcoded always-succeed. Symbols not yet
-// needed by any unit (bind, listen, accept, send, recv, poll) are deliberately
-// absent: a seam written without its caller gets the recording surface wrong.
+// default and a reset, never as a hardcoded always-succeed. bind, listen,
+// accept, fcntl, recv and send were added for ras/client_support.cc, the
+// first unit whose raw (non-ncclSocket) I/O path is under test; poll remains
+// deliberately absent: no unit needs it through this seam yet.
 
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -74,6 +76,14 @@ struct MicroReadStep {
 // else asserts the promised byte count and clamps the copy to whichever of promised/count is smaller.
 ssize_t DeliverReadStep(const MicroReadStep& step, void* buf, size_t count);
 
+// One fcntl() the unit made. `arg` is meaningless for a command like F_GETFL that takes none, but
+// recording it unconditionally is simpler than a variant per command and no test reads it in that case.
+struct MicroFcntlCall {
+  int fd;
+  int cmd;
+  int arg;
+};
+
 // ---------------------------------------------------------------------------
 // Seams. Each defaults to the success behaviour described in the .cc.
 // ---------------------------------------------------------------------------
@@ -91,6 +101,12 @@ extern std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite;
 extern std::function<int(FILE*)> g_fflush;
 extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
+extern std::function<int(int, const struct sockaddr*, socklen_t)> g_bind;
+extern std::function<int(int, int)> g_listen;
+extern std::function<int(int, struct sockaddr*, socklen_t*)> g_accept;
+extern std::function<int(int, int, int)> g_fcntl;  // (fd, cmd, arg); arg is ignored for a no-argument cmd
+extern std::function<ssize_t(int, void*, size_t, int)> g_recv;
+extern std::function<ssize_t(int, const void*, size_t, int)> g_send;
 
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own
@@ -123,6 +139,22 @@ extern int g_addrinfoBasePort;          // UNDRIVEN: entry i gets port g_addrinf
 extern int g_freeaddrinfoCalls;
 extern int g_connectResult;             // 0 succeeds; non-zero fails and sets errno to g_connectErrno
 extern int g_connectErrno;
+extern std::vector<int> g_boundFds;             // fds passed to bind(), in order
+extern int g_bindResult;                        // 0 succeeds; non-zero fails and sets errno to g_bindErrno
+extern int g_bindErrno;
+extern std::vector<int> g_listenedFds;          // fds passed to listen(), in order
+extern int g_listenResult;                      // 0 succeeds; non-zero fails and sets errno to g_listenErrno
+extern int g_listenErrno;
+extern int g_nextAcceptFd;                      // what the default accept() hands back (-1 to fail it)
+extern int g_acceptErrno;                       // errno the default accept() sets when g_nextAcceptFd is -1
+extern std::vector<int> g_acceptedFds;          // listening fds passed to accept(), in order
+extern std::vector<MicroFcntlCall> g_fcntlCalls;  // every fcntl() the unit made, in order
+extern int g_fcntlResult;                       // 0 succeeds (matches F_SETFL); non-zero fails every call
+extern std::string g_sentData;                  // every byte the unit sent via send()
+extern std::vector<int> g_sentFds;              // fds passed to send(), in order
+extern std::vector<int> g_recvFds;              // fds passed to recv(), in order
+extern std::vector<MicroReadStep> g_recvScript;  // consumed front-to-back by the default recv, same shape as g_readScript
+extern size_t g_recvScriptPos;
 
 // Queues one scripted read result. Reads past the end of the script return 0 (EOF),
 // as does a zero-length read, which is answered without spending a step.
@@ -130,6 +162,10 @@ void ScriptRead(ssize_t ret, int err, std::string data);
 
 // Convenience: script one successful read that delivers `data`.
 void ScriptReadData(std::string data);
+
+// Same as ScriptRead/ScriptReadData above, but for the recv() seam's own script queue.
+void ScriptRecv(ssize_t ret, int err, std::string data);
+void ScriptRecvData(std::string data);
 
 // Restores every seam to its default and clears every record above.
 void ResetLibcFakes();
