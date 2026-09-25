@@ -359,3 +359,8 @@ coverage pass on matching provenance; all fault trials are admitted/reached
 and healthy (`wmma-lifetime-sleep15-{clean,fault}`). This is a demonstrated
 miss on a manifested publication fault, not merely an unmanifested injected
 race. It stays yellow under the shared detection-rate scale.
+
+WMMA Default qualifies at high: 8/8 detections, matching accepted clean,
+complete analysis and healthy admitted/reached trials
+(`wmma-lifetime-high-{clean,fault}`). Default was 2/8, so high is the lowest
+passing tested preset at or above default.
