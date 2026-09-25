@@ -3279,6 +3279,27 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
     }
     hipModule_t mod_file = nullptr;
     HRR_HIP_CHECK(hipModuleLoad(&mod_file, tmp_co.string().c_str()));
+    {
+      hipFunction_t fn_file = nullptr;
+      HRR_HIP_CHECK(hipModuleGetFunction(&fn_file, mod_file, "rtc_fill"));
+      int* d_file = nullptr;
+      HRR_HIP_CHECK(hipMalloc(&d_file, SZ));
+      // Replay compares D2H buffers under a float tolerance, so a small
+      // integer would also pass against a buffer the kernel never wrote.
+      int  val   = 0x3F800000;
+      int  n     = N;
+      void* args[] = { &d_file, &val, &n };
+      int blocks = (N + 255) / 256;
+      HRR_HIP_CHECK(hipModuleLaunchKernel(fn_file,
+        blocks, 1, 1,   // grid
+        256,    1, 1,   // block
+        0, s, args, nullptr));
+      std::vector<int> h_file(N);
+      HRR_HIP_CHECK(hipMemcpyAsync(h_file.data(), d_file, SZ, hipMemcpyDeviceToHost, s));
+      HRR_HIP_CHECK(hipStreamSynchronize(s));
+      for (int i = 0; i < N; ++i) REQUIRE(h_file[i] == val);
+      HRR_HIP_CHECK(hipFree(d_file));
+    }
     HRR_HIP_CHECK(hipModuleUnload(mod_file));
     // Ignore remove errors: on Windows the ROCm driver may keep the file
     // open after hipModuleUnload, making fs::remove throw.  The temp
