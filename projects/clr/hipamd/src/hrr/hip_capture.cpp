@@ -11,6 +11,7 @@
  *   - Memcpy H2D variants with blob snapshotting (hipMemcpy, hipMemcpyAsync,
  *     hipMemcpyHtoD, hipMemcpyHtoDAsync, hipMemcpyWithStream)
  *   - Module load with code object snapshotting (hipModuleLoad*)
+ *   - Module unload (hipModuleUnload) to drop the program hash cache entry
  *   - Kernel launch with arg introspection via kernel->signature()
  *   - Fat binary registration (__hipRegisterFatBinary)
  *   - Host memory registration (hipHostRegister / hipHostUnregister)
@@ -668,7 +669,8 @@ static bool image_looks_loadable(const void* data, size_t size) {
   if (!data || size < 8) return false;
   const auto* p = static_cast<const char*>(data);
   if (std::memcmp(p, "\x7f" "ELF", 4) == 0) return true;
-  if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
+  if (size >= hip::symbols::kOffloadBundleCompressedMagicStrSize - 1 &&
+      std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
                   hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0)
     return true;
   if (size >= hip::symbols::kOffloadBundleUncompressedMagicStrSize - 1 &&
@@ -697,8 +699,9 @@ static bool image_looks_loadable(const void* data, size_t size) {
 // on the same address — inductor churns through modules, so this happens. A
 // hash keyed on the address alone then hands the later program the earlier
 // one's code object, and its launches resolve to nothing at replay ("not found
-// in any loaded module"). Comparing the image pointer and length settles it
-// without dereferencing either.
+// in any loaded module"). Comparing the image pointer and length is a second
+// check, but both are recyclable; capture_hipModuleUnload erases the entry so
+// a recycled (program, buffer, length) triple cannot hit a stale hash.
 struct ProgramCodeObject {
   const void*      image;
   size_t           size;
@@ -714,33 +717,51 @@ struct ProgramCodeObject {
 // concurrently. Serializing HRR's reads here keeps us off that path.
 static std::mutex g_prog_hash_mu;
 static std::unordered_map<const amd::Program*, ProgramCodeObject> g_prog_hash;
+static std::atomic<bool> g_span_no_device_warned{false};
 
 // Fetch a program's device binary as (pointer, length) without dereferencing
 // the bytes (the call itself still goes through binary_'s inserting
 // operator[] — see above).
 // Caller must hold g_prog_hash_mu.
-static void program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
+// Returns false when there is no current device (or the index is out of
+// range): that is not "the program has no binary", so callers must not seed
+// g_prog_hash with a {0,0} / (nullptr,0) entry.
+static bool program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
   data = nullptr;
   size = 0;
-  if (!prog) return;
+  if (!prog) return false;
   const int dev = hip::ihipGetDevice();
-  if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) return;
+  if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) {
+    if (!g_span_no_device_warned.exchange(true)) {
+      LogPrintfWarning("[HRR capture] program %p: no current HIP device "
+                       "(ihipGetDevice()=%d, g_devices=%zu); not hashing a code object",
+                       (const void*)prog, dev, hip::g_devices.size());
+    }
+    return false;
+  }
   const amd::Device* device = hip::g_devices[dev]->devices()[0];
   const auto& bin = prog->binary(*device);
   data = std::get<0>(bin);
   size = std::get<1>(bin).first;
+  return true;
 }
 
-static void program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
+static bool program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
   std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-  program_binary_span_locked(prog, data, size);
+  return program_binary_span_locked(prog, data, size);
 }
 
 static void remember_program_hash(const amd::Program* prog, const void* image, size_t size,
                                   hrr_cap::Hash128 h) {
-  if (!prog) return;
+  if (!prog || !image || size == 0) return;
   std::lock_guard<std::mutex> lk(g_prog_hash_mu);
   g_prog_hash[prog] = ProgramCodeObject{image, size, h};
+}
+
+static void forget_program_hash(const amd::Program* prog) {
+  if (!prog) return;
+  std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+  g_prog_hash.erase(prog);
 }
 
 // Hash an already-read device binary span, refusing anything that does not
@@ -773,7 +794,7 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
-  program_binary_span(prog, image, size);
+  if (!program_binary_span(prog, image, size)) return {0, 0};
   hrr_cap::Hash128 h = hash_program_image(prog, image, size);
   remember_program_hash(prog, image, size, h);
   return h;
@@ -785,16 +806,20 @@ static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
+  bool got_span = false;
   // One critical section for the span read and the lookup: the span read is
   // the part that must not race (see g_prog_hash_mu above), and folding the
   // lookup in costs nothing since we hold the lock anyway.
   {
     std::lock_guard<std::mutex> lk(g_prog_hash_mu);
-    program_binary_span_locked(prog, image, size);
-    auto it = g_prog_hash.find(prog);
-    if (it != g_prog_hash.end() && it->second.image == image && it->second.size == size)
-      return it->second.hash;
+    got_span = program_binary_span_locked(prog, image, size);
+    if (got_span) {
+      auto it = g_prog_hash.find(prog);
+      if (it != g_prog_hash.end() && it->second.image == image && it->second.size == size)
+        return it->second.hash;
+    }
   }
+  if (!got_span) return {0, 0};
   // Miss. Hash outside the lock — write_code_object takes the writer's own
   // locks, and hashing the same image twice is harmless (content-addressed).
   hrr_cap::Hash128 h = hash_program_image(prog, image, size);
@@ -867,22 +892,24 @@ hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
     if (amd::Program* prog = as_amd(reinterpret_cast<cl_program>(*module))) {
       const uint8_t* image = nullptr;
       size_t size = 0;
-      program_binary_span(prog, image, size);
-      // The file snapshot is the preferred hash, but it is not always
-      // available: fname can be null, unreadable, or truncated. Replay refuses
-      // a module event with no hash, so fall back to the extracted device
-      // image, which is what the LoadData/LoadDataEx shims record. If that is
-      // not loadable either, the {0,0} seed below is deliberate: the launch
-      // path would read the same span and reach the same answer, so caching it
-      // only avoids re-warning on every launch.
-      if (!h.lo && !h.hi) {
-        h = hash_program_image(prog, image, size);
-        if (h.lo || h.hi)
-          LogPrintfWarning("[HRR capture] hipModuleLoad(\"%s\"): could not snapshot the file;"
-                           " recorded the module's extracted device image instead",
-                           fname ? fname : "(null)");
+      if (program_binary_span(prog, image, size)) {
+        // The file snapshot is the preferred hash, but it is not always
+        // available: fname can be null, unreadable, or truncated. Replay refuses
+        // a module event with no hash, so fall back to the extracted device
+        // image, which is what the LoadData/LoadDataEx shims record. A failed
+        // span read is not cached: remember_program_hash refuses (nullptr,0),
+        // so a later successful read can still populate the entry. A non-loadable
+        // image still seeds {0,0} against a real span so the launch path does
+        // not re-warn on every kernel.
+        if (!h.lo && !h.hi) {
+          h = hash_program_image(prog, image, size);
+          if (h.lo || h.hi)
+            LogPrintfWarning("[HRR capture] hipModuleLoad(\"%s\"): could not snapshot the file;"
+                             " recorded the module's extracted device image instead",
+                             fname ? fname : "(null)");
+        }
+        remember_program_hash(prog, image, size, h);
       }
-      remember_program_hash(prog, image, size, h);
     }
     hrr_args_hipModuleLoad a{};
     a.ret        = static_cast<int32_t>(r);
@@ -892,6 +919,20 @@ hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
     a.co_hash_hi = h.hi;
     a.module_id  = 0;
     hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELOAD, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+hipError_t capture_hipModuleUnload(hipModule_t module) {
+  // Take the program pointer before the real unload frees it.
+  amd::Program* prog = module ? as_amd(reinterpret_cast<cl_program>(module)) : nullptr;
+  hipError_t r = g_real_table.hipModuleUnload_fn(module);
+  if (r == hipSuccess) {
+    forget_program_hash(prog);
+    hrr_args_hipModuleUnload a{};
+    a.ret    = static_cast<int32_t>(r);
+    a.module = reinterpret_cast<uint64_t>(module);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMODULEUNLOAD, &a.hdr, sizeof(a));
   }
   return r;
 }
