@@ -777,3 +777,12 @@ are queued sequentially after the full MXF4 clean batch to limit contention.
 `norm-cap-default-fault` completes eight admitted/reached trials with 0/8
 detections. All have complete analysis and healthy before/after checks; paired
 clean passes. SuperCollider sleep=15 follows in the running qualification driver.
+
+### MXF4 SuperCollider full clean recovery
+
+`mxf4-saved-address-clean` now passes all six baseline and all six SuperCollider
+shards (all return codes zero, accepted numerical results and complete analysis
+in each instrumented shard). The two address-bank repairs resolve the original
+clean false positives across the maintained workload, not only solution 6.
+The SuperCollider cell moves from red to yellow; injected-fault qualification
+remains pending. The full sparse-ML rerun uses this same isolated hook next.

@@ -51,7 +51,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 default: 2/3 clean shards pass; third hits the 300 s client deadline | 🟧 delay-zero: 2/3 clean shards pass; third hits the 300 s client deadline |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟨 default, 256 MiB report cap: all 6 clean shards pass; fault trials pending | 🟥 delay-zero: replay address-bank fix tested; clean mismatch persists, investigation continues |
+| Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟨 default, 256 MiB report cap: all 6 clean shards pass; fault trials pending | 🟨 delay-zero: all 6 clean shards pass after address-bank fixes; fault trials pending |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟧 default: 3/9 shards exceeded the 420 s client deadline; longer run pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
