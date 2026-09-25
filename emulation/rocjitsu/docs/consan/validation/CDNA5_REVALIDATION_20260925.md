@@ -312,3 +312,10 @@ by `ds_load_b128`; the later reuse barrier remains intact. The 64x64x32 launch
 executes one workgroup and one reduction iteration. Both modes now predeclare
 eight trials with minimum six detections and independent numerical outcomes.
 The existing matching clean results are under `lifetime-clean`.
+
+HipKittens Default now qualifies at **high, 8/8**, after default detected 3/8.
+`hipkittens-high-clean` and `hipkittens-high-fault` have matching file provenance,
+accepted clean correctness, complete analysis on all eight admitted/reached
+faults, and healthy pre/post checks. Every trial records `RJ_CONSAN_PRESET=high`.
+SuperCollider delay zero detects 0/8 (`hipkittens-sc-fault`); sleep=15 calibration
+is running with its own matching clean pass.

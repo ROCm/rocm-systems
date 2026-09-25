@@ -44,7 +44,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: clean pass; fault 8/8 with complete publication evidence | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault 0/8 |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
