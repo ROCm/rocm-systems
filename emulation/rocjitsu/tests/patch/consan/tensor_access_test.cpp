@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_tensor_access.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -28,6 +29,68 @@ TensorCase tile(std::array<uint32_t, 5> dimensions) {
   result.d2[3] = dimensions[3] << 16;
   result.d3[2] = dimensions[4] << 16;
   return result;
+}
+
+TEST(ConSanTensor, FullWaveScratchSpillPreservesInactiveAndEmptyExecLanes) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  SpillManager manager(0, 256);
+  const auto ordinary = build_vgpr_spill_sequence(manager, 20, 4, arch);
+  ASSERT_TRUE(ordinary);
+  const auto full_wave = detail::tensor_full_wave_spill(*ordinary, 96, arch);
+  ASSERT_TRUE(full_wave);
+  EXPECT_EQ(full_wave->slot_offsets, ordinary->slot_offsets);
+  EXPECT_EQ(full_wave->total_private_bytes, ordinary->total_private_bytes);
+  amdgpu::GpuMemory memory("tensor_full_wave_spill_mem");
+  amdgpu::L2Cache l2("tensor_full_wave_spill_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("tensor_full_wave_spill", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_scratch_base(0x100000);
+  wave->set_scratch_lane_size(256);
+  const auto vb = wave->vgpr_alloc().base;
+  const auto execute = [&](const std::vector<uint32_t> &words, uint64_t pc) {
+    for (size_t i = 0; i < words.size(); ++i)
+      memory.write32(pc + i * 4, words[i]);
+    wave->pc = pc;
+    size_t steps = 0;
+    while (wave->pc < pc + words.size() * 4 && steps++ < words.size() * 100)
+      cu->step();
+    cu->flush_all();
+    EXPECT_EQ(wave->pc, pc + words.size() * 4);
+  };
+  for (const uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+    for (uint32_t reg = 20; reg < 24; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0xa5a50000u + 64u * reg + lane);
+    wave->set_exec(exec);
+    wave->set_vcc(0x12345678u);
+    wave->write_scc(true);
+    execute(full_wave->save_words, 0);
+    EXPECT_EQ(wave->exec(), exec);
+    // Model a wave-wide tensor probe clobbering its entire scratch allocation.
+    for (uint32_t reg = 20; reg < 24; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0xdeadbeefu);
+    execute(full_wave->restore_words, 4096);
+    for (uint32_t reg = 20; reg < 24; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5a50000u + 64u * reg + lane);
+    EXPECT_EQ(wave->exec(), exec);
+    EXPECT_EQ(wave->vcc(), 0x12345678u);
+    EXPECT_TRUE(wave->read_scc());
+  }
+  EXPECT_FALSE(detail::tensor_full_wave_spill(*ordinary, 105, arch));
+  auto dynamic = *ordinary;
+  dynamic.uses_dynamic_stack_frame = true;
+  EXPECT_FALSE(detail::tensor_full_wave_spill(dynamic, 96, arch));
+  wave->halt();
 }
 
 TEST(ConSanTensor, SelectedAddressesMatchEnumeratedDenseGatherAndRepeatedTransfers) {

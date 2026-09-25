@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/rj_code.h"
 #include <cstdint>
 #include <vector>
@@ -9,6 +10,14 @@
 namespace rocjitsu::consan {
 struct ProgramSite;
 namespace detail {
+
+/// Wrap a fixed-stack VGPR spill/fill so both preserve all wave lanes, even
+/// when the guest EXEC is empty. Each bracket restores its incoming EXEC.
+/// The caller owns a dead ordinary SGPR pair, disjoint from descriptor operands
+/// and scalar spill state; this is not a bootstrap for borrowed scalar scratch.
+[[nodiscard]] std::optional<VgprSpillSequence>
+tensor_full_wave_spill(const VgprSpillSequence &spill, uint16_t exec_save_sgpr,
+                       rj_code_arch_t arch);
 
 /// Select an element of a valid, LDS-fitting CDNA5 tensor-load descriptor.
 /// Two caller-provided 32-bit hashes select a position within the tile and an

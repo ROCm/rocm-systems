@@ -553,6 +553,37 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
   EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaLoadIsWaveWideEvenWithEmptyExec) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  constexpr uint64_t global = 0x100000;
+  write_tensor_dma_d0(*cu, *wf, 0, global);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);
+  write_wave_sgpr(*cu, *wf, 13, 16u << 16);
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 16u << 16);
+  for (uint32_t reg = 16; reg < 20; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+  for (uint32_t i = 0; i < 16; ++i)
+    sim.memory->write32(global + 4u * i, 0x12340000u + i);
+  for (const uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+    SCOPED_TRACE(exec);
+    wf->set_exec(exec);
+    for (uint32_t i = 0; i < 16; ++i)
+      cu->lds().write32(wf->lds_base() + 4u * i, 0xdeadbeefu);
+    const std::array<uint32_t, 3> words{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+    auto load = decode_gfx1250(words, "tensor_load_to_lds");
+    ASSERT_NE(load, nullptr);
+    load->execute(*load, wf);
+    for (uint32_t i = 0; i < 16; ++i)
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4u * i), 0x12340000u + i);
+    EXPECT_EQ(wf->exec(), exec);
+  }
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

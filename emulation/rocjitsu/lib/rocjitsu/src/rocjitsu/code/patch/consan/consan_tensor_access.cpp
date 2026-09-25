@@ -4,10 +4,35 @@
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_internal.h"
+#include "rocjitsu/code/patch/consan/consan_native_abi.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu::consan::detail {
+
+std::optional<VgprSpillSequence> tensor_full_wave_spill(const VgprSpillSequence &spill,
+                                                        uint16_t exec_save_sgpr,
+                                                        rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || exec_save_sgpr > 104u || exec_save_sgpr % 2u != 0u ||
+      spill.uses_dynamic_stack_frame || spill.vgpr_count == 0 ||
+      !spill.has_complete_slot_metadata() || spill.save_words.empty() ||
+      spill.restore_words.empty())
+    return std::nullopt;
+  const auto save_exec = instrumentation::build_s_mov_b64(exec_save_sgpr, kAmdGpuExecLo, arch);
+  const auto full_exec =
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save_sgpr, arch);
+  if (!save_exec || !full_exec || !restore_exec)
+    return std::nullopt;
+  auto result = spill;
+  const auto wrap = [&](std::vector<uint32_t> &words) {
+    words.insert(words.begin(), {*save_exec, *full_exec});
+    words.push_back(*restore_exec);
+  };
+  wrap(result.save_words);
+  wrap(result.restore_words);
+  return result;
+}
 
 bool append_select_tensor_load_element(std::vector<uint32_t> &words, const ProgramSite &site,
                                        uint16_t element_hash_vgpr, uint16_t iteration_hash_vgpr,
