@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 R = TypeVar("R")
 
@@ -183,9 +183,7 @@ def setup_file_handler(loglevel: int, workload_dir: str) -> None:
 
 
 # Setup logger priority - called after argument parsing
-def setup_logging_priority(
-    verbosity: int, quietmode: bool, appmode: str, guimode: Optional[bool] = None
-) -> int:
+def setup_logging_priority(verbosity: int, quietmode: bool, appmode: str) -> int:
     # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, TRACE_LEVEL]
 
@@ -193,11 +191,6 @@ def setup_logging_priority(
         loglevel = logging.ERROR
     else:
         loglevel = levels[min(verbosity, len(levels) - 1)]  # cap to last level index
-
-    # optional: suppress Werkzeug's messages in analyze GUIs.
-    if quietmode and "analyze" in appmode and guimode:
-        werkzeug_logger = logging.getLogger("werkzeug")
-        werkzeug_logger.setLevel(logging.ERROR)
 
     # optional: override of default loglevel via env variable which takes precedence
     if "ROCPROFCOMPUTE_LOGLEVEL" in os.environ.keys():

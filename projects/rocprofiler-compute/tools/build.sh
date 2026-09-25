@@ -49,12 +49,6 @@ else
     echo "ERROR: Couldn't find directory for submodules"
 fi
 
-echo "(build.sh) Loading dash_svg"
-# Take care of dash-svg module that isn't detected by PyInstaller
-dash_info=$(pip3 show dash_svg)
-dash_loc=$(sed -n '8p' <<<"$dash_info")
-cp -r ${dash_loc:10}/dash_svg "$distpath"/rocprofiler-compute/
-
 echo "(build.sh) Fixing flattened directories"
 #TODO: Copy orig file structure from over to flattened packaged version
 rm -rf "$distpath"/rocprofiler-compute/rocprof_compute_analyze/

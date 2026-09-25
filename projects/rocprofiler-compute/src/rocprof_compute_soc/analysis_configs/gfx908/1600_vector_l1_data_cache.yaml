@@ -25,7 +25,6 @@ Panel Config:
           unit: Percent
       comparable: false
       cli_style: simple_bar
-      tui_style: simple_bar
   - metric_table:
       id: 1602
       title: vL1D cache stall metrics
@@ -44,7 +43,6 @@ Panel Config:
         Tag RAM Stall (Atomic):
           expr: 100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1603
       title: vL1D cache access metrics

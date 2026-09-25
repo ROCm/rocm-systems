@@ -196,7 +196,7 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 
     # The mock records instead of exiting, so sanitize runs on to a later error.
     with pytest.raises(SystemExit):
-        OmniAnalyze_Base(argparse.Namespace(tui=False, path=paths), {}).sanitize()
+        OmniAnalyze_Base(argparse.Namespace(path=paths), {}).sanitize()
 
     assert "last two components" in mock_error.call_args.args[1]
 

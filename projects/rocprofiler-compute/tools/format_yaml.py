@@ -23,7 +23,6 @@ import yaml
 # Path patterns that contain metric equations to check (substrings matched against path)
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
-    "rocprof_compute_tui/utils/gfx",
 ]
 
 # Path suffixes to exclude from equation checking

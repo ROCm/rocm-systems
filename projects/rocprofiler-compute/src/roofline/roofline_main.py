@@ -11,7 +11,6 @@ import numpy as np
 import plotext as plt
 import plotly.colors as pcolors
 import plotly.graph_objects as go
-from dash import dcc, html
 
 from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
@@ -713,36 +712,6 @@ class Roofline:
             )
             roof["kneeAi"] = roof_trace.x[-1]
             roof["kneePerf"] = roof_trace.y[-1]
-
-    @staticmethod
-    def generate_html_section(
-        ops_figure: Optional[go.Figure],
-        flops_figure: Optional[go.Figure],
-    ) -> Optional[html.Section]:
-        """Wrap Plotly figures in Dash HTML components for WebUI embedding."""
-        graphs = [
-            html.Div(
-                className="float-child",
-                children=[
-                    html.H3(
-                        children=(
-                            f"Empirical Roofline Analysis "
-                            f"({'Ops' if ops_flops == 'OP' else 'Flops'})"
-                        )
-                    ),
-                    dcc.Graph(figure=figure),
-                ],
-            )
-            for ops_flops, figure in (("OP", ops_figure), ("FLOP", flops_figure))
-            if figure is not None
-        ]
-        if not graphs:
-            return None
-
-        return html.Section(
-            id="roofline",
-            children=[html.Div(className="float-container", children=graphs)],
-        )
 
     @demarcate
     def generate_plot(

@@ -282,7 +282,7 @@ def _build_metric_table_df(
 
 @demarcate
 def apply_filters(
-    workload: schema.Workload, dir_path: str, is_gui: bool, debug: bool
+    workload: schema.Workload, dir_path: str, debug: bool
 ) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
@@ -637,8 +637,8 @@ def nullify_unevaluated_metric_values(
     table cells still contain raw formula strings produced by
     ``build_metric_value_string``.  This helper walks every
     ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
-    column to ``"N/A"`` so that downstream display code (``tty``,
-    ``webui``, ``tui``) can safely format the values.
+    column to ``"N/A"`` so that downstream display code can safely
+    format the values.
     """
     for df_id, df_type in workload.dfs_type.items():
         if df_type != "metric_table":
@@ -714,7 +714,6 @@ def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
 def load_table_data(
     workload: schema.Workload,
     dir_path: str,
-    is_gui: bool,
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
@@ -734,7 +733,7 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, dir_path, is_gui, args.debug),
+        apply_filters(workload, dir_path, args.debug),
         args.debug,
     )
 
