@@ -985,6 +985,7 @@ def gen_mad_mix_lo_hi(
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
     use_cdna5_helpers: bool = False,
+    fused_result: bool = False,
 ) -> str:
     """Generate V_MAD_MIXLO_F16 / V_MAD_MIXHI_F16."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -1042,14 +1043,26 @@ def gen_mad_mix_lo_hi(
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append(
-        f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
-    )
-    L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
-    L.append('    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(')
-    L.append(
-        '        result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false);'
-    )
+    if fused_result:
+        L.extend(
+            [
+                '    amdgpu::fp_mode::ScopedEnvironment environment(0);',
+                '    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(',
+                '        a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, wf.fp16_ovfl(),',
+                '        amdgpu::floating_clamp_nan_to_zero(wf));',
+            ]
+        )
+    else:
+        L.append(
+            f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
+        )
+        L.append(
+            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+        )
+        L.append('    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(')
+        L.append(
+            '        result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false);'
+        )
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'

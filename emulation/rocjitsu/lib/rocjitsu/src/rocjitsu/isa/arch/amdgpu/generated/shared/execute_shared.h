@@ -11821,7 +11821,7 @@ inline void execute_v_fma_mix_f32_vop3p([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI();
+  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_HI);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11853,11 +11853,10 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
       b = -b;
     if (inst.inst_.neg & 4)
       c = -c;
-    float result = a * b + c;
-    if (inst.inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
-                                                         false, wf.fp16_ovfl(), false);
+    amdgpu::fp_mode::ScopedEnvironment environment(0);
+    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
+        a, b, c, wf.fp_round_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
@@ -11865,7 +11864,7 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();
+  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_LO);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11897,11 +11896,10 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
       b = -b;
     if (inst.inst_.neg & 4)
       c = -c;
-    float result = a * b + c;
-    if (inst.inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
-                                                         false, wf.fp16_ovfl(), false);
+    amdgpu::fp_mode::ScopedEnvironment environment(0);
+    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
+        a, b, c, wf.fp_round_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }

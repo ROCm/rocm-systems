@@ -2948,6 +2948,10 @@ def _simd_probe_line(
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
         return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();'
+    if template_name == 'v_fma_mixlo_f16_vop3p':
+        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_LO);'
+    if template_name == 'v_fma_mixhi_f16_vop3p':
+        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_HI);'
     if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
         return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();'
     if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:

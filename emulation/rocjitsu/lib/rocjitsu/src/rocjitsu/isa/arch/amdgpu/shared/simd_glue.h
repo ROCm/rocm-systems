@@ -3831,7 +3831,26 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
       const uint64_t chunk = (exec >> base) & chunk_full;
       if (chunk == 0)
         continue;
-      U h = util::f32_to_f16_mode_simd(compute_result(base), wf.fp16_ovfl());
+      U h;
+      if constexpr (Fused) {
+        // Retain product and addend precision through the F16 rounding step.
+        // A rounded F32 intermediate can turn a near midpoint into an exact tie.
+        fp_mode::ScopedEnvironment environment(0);
+        const F a =
+            load_src(src0, base, inst.inst_.src0, op_sel_hi & 1u, op_sel & 1u, abs & 1u, neg & 1u);
+        const F b =
+            load_src(src1, base, inst.inst_.src1, op_sel_hi & 2u, op_sel & 2u, abs & 2u, neg & 2u);
+        const F c =
+            load_src(src2, base, inst.inst_.src2, op_sel_hi_2, op_sel & 4u, abs & 4u, neg & 4u);
+        h = U(0);
+        for (std::size_t i = 0; i < W; ++i)
+          if (chunk & (uint64_t{1} << i))
+            h[i] = fp_mode::detail::fma_f32_to_f16_nearest_environment(
+                a[i], b[i], c[i], wf.fp_round_mode_f16_f64(), clamp, wf.fp16_ovfl(),
+                floating_clamp_nan_to_zero(wf));
+      } else {
+        h = util::f32_to_f16_mode_simd(compute_result(base), wf.fp16_ovfl());
+      }
       U prev = dst.template load_native<uint32_t>(base);
       U packed;
       if constexpr (DstMode == FmaMixDst::F16_LO) {

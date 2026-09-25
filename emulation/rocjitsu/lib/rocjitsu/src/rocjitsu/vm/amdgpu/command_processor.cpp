@@ -2959,8 +2959,9 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
   const uint32_t initiator = dimensions[3];
   if (!(initiator & 1))
     return;
-  if (cus_.empty() || (initiator & (1u << 5)))
-    throw std::runtime_error("unsupported PM4 dispatch dimensions");
+  if (cus_.empty())
+    throw std::runtime_error("PM4 dispatch requires a compute unit");
+  const bool thread_dimensions = initiator & (1u << 5);
   const auto arch = cus_[0]->config().arch;
   const uint32_t rsrc1 = regs[kPm4ComputePgmRsrc1], rsrc2 = regs[kPm4ComputePgmRsrc2];
   DispatchEntry dp;
@@ -3012,10 +3013,26 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
   dp.enable_vgpr_workitem_id = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID);
   dp.wgp_mode = AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE);
   dp.group_segment_fixed_size = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE) * 512;
+  for (uint32_t i = 0; i < 3; ++i)
+    if (!(regs[kPm4ComputeNumThreadX + i] & 0xffff) ||
+        (regs[kPm4ComputeNumThreadX + i] & 0xffff) > 1024)
+      throw std::runtime_error("invalid PM4 workgroup dimension");
+  dp.workgroup_size_x = regs[kPm4ComputeNumThreadX] & 0xffff;
+  dp.workgroup_size_y = regs[kPm4ComputeNumThreadY] & 0xffff;
+  dp.workgroup_size_z = regs[kPm4ComputeNumThreadZ] & 0xffff;
+  uint64_t threads = uint64_t{dp.workgroup_size_x} * dp.workgroup_size_y * dp.workgroup_size_z;
+  if (threads > 1024)
+    throw std::runtime_error("PM4 workgroup exceeds 1024 threads");
+  dp.wfs_per_workgroup = (threads + dp.kernel_wave_size - 1) / dp.kernel_wave_size;
   std::array<uint32_t, 3> counts{};
   for (uint32_t i = 0; i < 3; ++i) {
     dp.workgroup_origin[i] = (initiator & (1u << 2)) ? 0 : regs[kPm4ComputeStartX + i];
-    counts[i] = dimensions[i] > dp.workgroup_origin[i] ? dimensions[i] - dp.workgroup_origin[i] : 0;
+    if (thread_dimensions && dp.workgroup_origin[i])
+      throw std::runtime_error("thread-dimension PM4 dispatch requires a zero origin");
+    const uint32_t full = regs[kPm4ComputeNumThreadX + i] & 0xffff;
+    const uint32_t end =
+        thread_dimensions ? dimensions[i] / full + (dimensions[i] % full != 0) : dimensions[i];
+    counts[i] = end > dp.workgroup_origin[i] ? end - dp.workgroup_origin[i] : 0;
   }
   dp.grid_wgs_x = counts[0];
   dp.grid_wgs_y = counts[1];
@@ -3028,17 +3045,6 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
     total *= counts[i];
   }
   dp.total_wgs = total;
-  for (uint32_t i = 0; i < 3; ++i)
-    if (!(regs[kPm4ComputeNumThreadX + i] & 0xffff) ||
-        (regs[kPm4ComputeNumThreadX + i] & 0xffff) > 1024)
-      throw std::runtime_error("invalid PM4 workgroup dimension");
-  dp.workgroup_size_x = regs[kPm4ComputeNumThreadX] & 0xffff;
-  dp.workgroup_size_y = regs[kPm4ComputeNumThreadY] & 0xffff;
-  dp.workgroup_size_z = regs[kPm4ComputeNumThreadZ] & 0xffff;
-  uint64_t threads = uint64_t{dp.workgroup_size_x} * dp.workgroup_size_y * dp.workgroup_size_z;
-  if (threads > 1024)
-    throw std::runtime_error("PM4 workgroup exceeds 1024 threads");
-  dp.wfs_per_workgroup = (threads + dp.kernel_wave_size - 1) / dp.kernel_wave_size;
   if (dp.pm4_scratch_pool && dp.total_wgs) {
     if (!dp.pm4_scratch_pool->available(dp.wfs_per_workgroup))
       throw std::runtime_error("PM4 scratch cannot accommodate one workgroup");
@@ -3050,14 +3056,14 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
                        VmAccessOutcome::Complete)
       throw std::runtime_error("PM4 scratch descriptor exceeds its mapped buffer");
   }
-  if ((dp.grid_wgs_x && dp.workgroup_size_x > UINT32_MAX / dp.grid_wgs_x) ||
-      (dp.grid_wgs_y && dp.workgroup_size_y > UINT32_MAX / dp.grid_wgs_y) ||
-      (dp.grid_wgs_z && dp.workgroup_size_z > UINT32_MAX / dp.grid_wgs_z))
+  if (!thread_dimensions && ((dp.grid_wgs_x && dp.workgroup_size_x > UINT32_MAX / dp.grid_wgs_x) ||
+                             (dp.grid_wgs_y && dp.workgroup_size_y > UINT32_MAX / dp.grid_wgs_y) ||
+                             (dp.grid_wgs_z && dp.workgroup_size_z > UINT32_MAX / dp.grid_wgs_z)))
     throw std::runtime_error("PM4 grid exceeds supported invocation count");
-  dp.grid_size_x = dp.grid_wgs_x * dp.workgroup_size_x;
-  dp.grid_size_y = dp.grid_wgs_y * dp.workgroup_size_y;
-  dp.grid_size_z = dp.grid_wgs_z * dp.workgroup_size_z;
-  if (initiator & 2) {
+  dp.grid_size_x = thread_dimensions ? dimensions[0] : dp.grid_wgs_x * dp.workgroup_size_x;
+  dp.grid_size_y = thread_dimensions ? dimensions[1] : dp.grid_wgs_y * dp.workgroup_size_y;
+  dp.grid_size_z = thread_dimensions ? dimensions[2] : dp.grid_wgs_z * dp.workgroup_size_z;
+  if (!thread_dimensions && (initiator & 2)) {
     uint32_t *sizes[] = {&dp.grid_size_x, &dp.grid_size_y, &dp.grid_size_z};
     for (uint32_t i = 0; i < 3; ++i) {
       uint32_t partial = regs[kPm4ComputeNumThreadX + i] >> 16;
@@ -3163,6 +3169,7 @@ void CommandProcessor::fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &q
       submission.complete(false);
   queue.pm4->submissions.clear();
   queue.pm4->draw.reset();
+  queue.pm4->indirect_draw.reset();
 }
 
 void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now) {
@@ -3180,6 +3187,25 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
     const auto access = snapshot_gpu_access(queue.address_space);
     if (!access)
       throw std::runtime_error("PM4 queue has no GPU address space");
+    const auto read_indices = [&](uint64_t base, uint32_t available, uint32_t count) {
+      if (count > (1u << 20))
+        throw std::runtime_error("unsupported graphics index count");
+      const uint32_t type = state.uconfig_registers[0x243] & 3;
+      if (type > 2)
+        throw std::runtime_error("unsupported graphics index type");
+      const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+      const uint32_t valid = std::min(available, count);
+      flush_gpu_caches();
+      std::vector<uint8_t> data(valid * bytes);
+      if (!data.empty() &&
+          access->read(base, std::as_writable_bytes(std::span{data})) != VmAccessOutcome::Complete)
+        throw std::runtime_error("graphics index read failed");
+      std::vector<uint32_t> indices(count);
+      for (uint32_t i = 0; i < valid; ++i)
+        for (uint32_t b = 0; b < bytes; ++b)
+          indices[i] |= uint32_t{data[i * bytes + b]} << (b * 8);
+      return indices;
+    };
     if (state.draw) {
       flush_gpu_caches();
       if (auto dp = state.draw->advance(*access)) {
@@ -3194,6 +3220,44 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
       if (submission.ready && !submission.ready()) {
         arm_stall_recheck(now);
         return;
+      }
+      if (state.indirect_draw) {
+        auto &draw = *state.indirect_draw;
+        if (draw.next == draw.count) {
+          state.indirect_draw.reset();
+          continue;
+        }
+        // Read each record after its predecessor retires, so shader writes to
+        // subsequent indirect arguments observe the same command ordering.
+        std::array<uint32_t, 5> arguments{};
+        flush_gpu_caches();
+        const uint64_t offset = uint64_t{draw.next} * draw.stride;
+        if (draw.arguments > UINT64_MAX - offset ||
+            access->read(draw.arguments + offset, std::as_writable_bytes(std::span{arguments})) !=
+                VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 indexed indirect arguments read failed");
+        state.num_instances = arguments[1];
+        state.sh_registers[draw.vertex_register] = arguments[3];
+        state.sh_registers[draw.instance_register] = arguments[4];
+        if (draw.first_index_register)
+          state.sh_registers[*draw.first_index_register] = arguments[2];
+        if (draw.draw_index_register)
+          state.sh_registers[*draw.draw_index_register] = draw.next;
+        ++draw.next;
+        if (!arguments[0] || !arguments[1])
+          continue;
+        const uint32_t type = state.uconfig_registers[0x243] & 3;
+        const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+        const uint64_t first = uint64_t{arguments[2]} * bytes;
+        if (state.index_base > UINT64_MAX - first)
+          throw std::runtime_error("PM4 indexed indirect index address overflow");
+        const uint32_t available =
+            arguments[2] < state.index_buffer_size ? state.index_buffer_size - arguments[2] : 0;
+        auto indices = read_indices(state.index_base + first, available, arguments[0]);
+        draw_pm4(queue, qs, arguments[0], std::move(indices));
+        if (!qs.entries.empty())
+          return;
+        continue;
       }
       if (submission.buffers.empty()) {
         flush_gpu_caches();
@@ -3730,24 +3794,65 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         if (!qs.entries.empty())
           return;
         break;
+      case Pm4Opcode::IndexBase:
+        require(2);
+        if (!submission.graphics_engine || (words[0] & 1))
+          throw std::runtime_error("unsupported INDEX_BASE packet");
+        state.index_base = address(0);
+        break;
+      case Pm4Opcode::IndexBufferSize:
+        require(1);
+        if (!submission.graphics_engine)
+          throw std::runtime_error("INDEX_BUFFER_SIZE on compute engine");
+        state.index_buffer_size = words[0];
+        break;
+      case Pm4Opcode::DrawIndexIndirect:
+      case Pm4Opcode::DrawIndexIndirectMulti: {
+        const bool multi = opcode == uint32_t(Pm4Opcode::DrawIndexIndirectMulti);
+        require(multi ? 9 : 4);
+        if (!submission.graphics_engine || words.back() || (words[0] & 3) ||
+            (words[2] & (multi ? 0xffff0000u : 0xefff0000u)) ||
+            (multi && ((words[3] & ~0xf000ffffu) || (words[7] & 3))))
+          throw std::runtime_error("unsupported indexed indirect draw packet");
+        Pm4QueueState::IndirectDraw draw;
+        if (state.indirect_base > UINT64_MAX - words[0])
+          throw std::runtime_error("PM4 indexed indirect argument address overflow");
+        draw.arguments = state.indirect_base + words[0];
+        draw.vertex_register = words[1] & 0xffff;
+        draw.instance_register = words[2] & 0xffff;
+        draw.count = multi ? words[4] : 1;
+        draw.stride = multi ? words[7] : 20;
+        if ((multi ? words[3] : words[2]) & (1u << 28))
+          draw.first_index_register = words[1] >> 16;
+        else if (words[1] >> 16)
+          throw std::runtime_error("unsupported indexed indirect first-index register");
+        if (multi && (words[3] & (1u << 31)))
+          draw.draw_index_register = words[3] & 0xffff;
+        if (draw.vertex_register >= state.sh_registers.size() ||
+            draw.instance_register >= state.sh_registers.size() ||
+            (draw.first_index_register &&
+             *draw.first_index_register >= state.sh_registers.size()) ||
+            (draw.draw_index_register && *draw.draw_index_register >= state.sh_registers.size()))
+          throw std::runtime_error("indexed indirect draw register outside SH aperture");
+        if (multi && (words[3] & (1u << 30))) {
+          uint32_t count = 0;
+          flush_gpu_caches();
+          if ((words[5] & 3) ||
+              access->read(address(5), std::as_writable_bytes(std::span{&count, 1})) !=
+                  VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 indexed indirect count read failed");
+          draw.count = std::min(draw.count, count);
+        }
+        if (draw.count > (1u << 20))
+          throw std::runtime_error("indexed indirect draw count exceeds simulator limit");
+        state.indirect_draw = draw;
+        break;
+      }
       case Pm4Opcode::DrawIndex2: {
         require(5);
-        if (!submission.graphics_engine || words[4] || words[3] > (1u << 20))
-          throw std::runtime_error("unsupported DRAW_INDEX_2 initiator or count");
-        const uint32_t type = state.uconfig_registers[0x243] & 3;
-        if (type > 2)
-          throw std::runtime_error("unsupported graphics index type");
-        const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
-        const uint32_t valid = std::min(words[0], words[3]);
-        flush_gpu_caches();
-        std::vector<uint8_t> data(valid * bytes);
-        if (!data.empty() && access->read(address(1), std::as_writable_bytes(std::span{data})) !=
-                                 VmAccessOutcome::Complete)
-          throw std::runtime_error("graphics index read failed");
-        std::vector<uint32_t> indices(words[3]);
-        for (uint32_t i = 0; i < valid; ++i)
-          for (uint32_t b = 0; b < bytes; ++b)
-            indices[i] |= uint32_t{data[i * bytes + b]} << (b * 8);
+        if (!submission.graphics_engine || words[4])
+          throw std::runtime_error("unsupported DRAW_INDEX_2 initiator");
+        auto indices = read_indices(address(1), words[0], words[3]);
         draw_pm4(queue, qs, words[3], std::move(indices));
         if (!qs.entries.empty())
           return;

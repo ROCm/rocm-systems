@@ -67,6 +67,7 @@ private:
     std::array<Fragment, 64> lanes{};
     std::vector<uint32_t> parameters;
     uint32_t relative_layer = 0;
+    bool front = true;
   };
   std::vector<FragmentWave> fragments_;
   bool fragment_stage_ = false;
@@ -80,6 +81,7 @@ private:
     uint32_t pitch = 0, tail_x = 0, tail_y = 0;
     uint32_t write_mask = 0, blend = 0;
     std::array<uint32_t, 4> component_indices{0, 1, 2, 3};
+    std::array<uint32_t, 4> component_widths{};
     bool srgb = false, pipe_aligned = false;
     std::optional<uint64_t> metadata;
   };
@@ -95,6 +97,11 @@ private:
   uint32_t depth_pitch_ = 0, depth_tail_x_ = 0, depth_tail_y_ = 0;
   std::optional<uint64_t> depth_metadata_;
   uint32_t depth_clear_ = 0;
+  bool depth_metadata_has_stencil_ = false;
+  uint8_t stencil_clear_ = 0;
+  uint64_t stencil_base_ = 0, stencil_slice_size_ = 0;
+  uint32_t stencil_swizzle_ = 0, stencil_pitch_ = 0;
+  uint32_t stencil_tail_x_ = 0, stencil_tail_y_ = 0;
   bool attachments_prepared_ = false;
   void finish_vertices();
   DispatchEntry fragment_dispatch() const;

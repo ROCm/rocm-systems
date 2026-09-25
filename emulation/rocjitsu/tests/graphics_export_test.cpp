@@ -1205,14 +1205,8 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
        .outcome = Outcome::Reject,
        .polygon_mode = 16 | (2 << 5) | (2 << 8)},
       {.name = "filled dual mode", .polygon_mode = 8 | (2 << 5) | (2 << 8)},
-      {.name = "front depth bias",
-       .outcome = Outcome::Reject,
-       .polygon_mode = 1u << 11,
-       .depth_bias = {1, 0, 0, 0}},
-      {.name = "back depth bias",
-       .outcome = Outcome::Reject,
-       .polygon_mode = 1u << 12,
-       .depth_bias = {0, 0, 1, 0}},
+      {.name = "front depth bias", .polygon_mode = 1u << 11, .depth_bias = {1, 0, 0, 0}},
+      {.name = "back depth bias", .polygon_mode = 1u << 12, .depth_bias = {0, 0, 1, 0}},
       {.name = "parallel depth bias",
        .outcome = Outcome::Reject,
        .polygon_mode = 1u << 13,
@@ -2171,6 +2165,36 @@ constexpr uint32_t kMipLastTexelOffsets[2][8] = {
     {365692, 124188, 47492, 20104, 9012, 4292, 2072, 1536},
 };
 
+TEST_P(GraphicsExportTest, ImageStoreMasksFillOmittedChannelsAtBothDataWidths) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (bool d16 : {false, true})
+    for (uint32_t mask = 1; mask < 16; ++mask) {
+      SCOPED_TRACE(testing::Message() << "d16=" << d16 << " mask=" << mask);
+      const std::array<uint32_t, 8> descriptor{
+          0x1000, 46u << (gfx12 ? 17 : 20), 0, 0x90000fac, 0, 0, 0, 0};
+      for (uint32_t i = 0; i < descriptor.size(); ++i)
+        wave_->debug_write_sgpr(8 + i, descriptor[i]);
+      wave_->set_exec(1);
+      wave_->debug_write_vgpr(0, 0, 0);
+      wave_->debug_write_vgpr(1, 0, 0);
+      for (uint32_t i = 0; i < 4; ++i)
+        wave_->debug_write_vgpr(
+            4 + i, 0, d16 ? 0x11u * (2 * i + 1) | (0x11u * (2 * i + 2) << 16) : 0x11u * (i + 1));
+      amdgpu::VectorMemState data(amdgpu::GLOBAL_MEM);
+      data.is_load = false;
+      ASSERT_TRUE(amdgpu::prepare_image_transfer(*wave_, data, 8, 4, {0, 1}, 1, mask, d16, false));
+      ASSERT_EQ(data.store_data.size(), wave_->wf_size() * 4);
+      const uint32_t channel_mask = mask;
+      uint8_t next = 0x11;
+      for (uint32_t i = 0; i < 4; ++i) {
+        const uint8_t expected = channel_mask & (1u << i) ? std::exchange(next, next + 0x11)
+                                 : gfx12                  ? 0x11
+                                                          : 0;
+        EXPECT_EQ(data.store_data[i], expected);
+      }
+    }
+}
+
 TEST_P(GraphicsExportTest, TiledMipTransfersUseViewBoundsAndIndependentBackingOffsets) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t base = 0x400000;
@@ -2689,6 +2713,21 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
     std::array<uint32_t, 4> constant_bits{0xbf400000, 0x3e99999a, 0x3fa00000, 0x3f266666};
   };
   const Case cases[] = {
+      {.data_format = 9,
+       .number_format = 0,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x38003400, 0x3c003a00},
+       .expected = {0xeff80100}},
+      {.data_format = 1,
+       .number_format = 4,
+       .export_format = 7,
+       .bytes = 1,
+       .components = 1,
+       .mask = 3,
+       .exported = {0x432100ab, 0x87651234},
+       .expected = {0xab}},
       // A zero export bypasses arithmetic and preserves signaling NaN payloads.
       {.data_format = 14,
        .number_format = 7,
@@ -3393,7 +3432,7 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
       context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
           std::bit_cast<uint32_t>(2.0f);
       context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
-      for (uint32_t offset = 0; offset <= test.bytes; offset += 4)
+      for (uint32_t offset = 0; offset <= ((test.bytes + 3) & ~3u); offset += 4)
         memory_.write32(0x100000 + offset,
                         offset < test.bytes ? test.initial[offset / 4] : 0xcccccccc);
 
@@ -3406,15 +3445,21 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
       EXPECT_FALSE(draw->advance(*access_));
       for (uint32_t byte = 0; byte < test.bytes; ++byte) {
         const uint32_t component = byte / (test.bytes / test.components);
-        const uint8_t expected =
+        uint8_t expected =
             ((write_mask & (1u << component)) ? test.expected[byte / 4] : test.initial[byte / 4]) >>
             (8 * (byte % 4));
+        if (test.data_format == 9) {
+          const uint32_t bits =
+              ((write_mask & 1) ? 0x3ffu : 0) | ((write_mask & 2) ? 0xffc00u : 0) |
+              ((write_mask & 4) ? 0x3ff00000u : 0) | ((write_mask & 8) ? 0xc0000000u : 0);
+          expected = ((test.expected[0] & bits) | (test.initial[0] & ~bits)) >> (8 * byte);
+        }
         uint8_t actual = 0;
         ASSERT_EQ(access_->read(0x100000 + byte, {reinterpret_cast<std::byte *>(&actual), 1}),
                   amdgpu::VmAccessOutcome::Complete);
         EXPECT_EQ(actual, expected) << byte;
       }
-      EXPECT_EQ(memory_.read32(0x100000 + test.bytes), 0xcccccccc);
+      EXPECT_EQ(memory_.read32(0x100000 + ((test.bytes + 3) & ~3u)), 0xcccccccc);
     }
   }
 }
@@ -3627,7 +3672,7 @@ TEST_P(GraphicsExportTest, HardwareSampleClampsCoordinatesAndConvertsSrgb) {
   }
 }
 
-TEST_P(GraphicsExportTest, HardwareSampleFiltersAndAddressesRgba8) {
+TEST_P(GraphicsExportTest, HardwareSampleFiltersAndAddressesUnorm8) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   const std::array<uint32_t, 8> descriptor{
       0x1000, (42u << (gfx12 ? 17 : 20)) | (1u << 30), 1u << 14, (9u << 28) | 0xfac, 0, 0, 0, 0};
@@ -3756,46 +3801,117 @@ TEST_P(GraphicsExportTest, HardwareSampleFiltersAndAddressesRgba8) {
        {0x3dc3b982, 0x3f33ee5e, 0x3b54a080, 0x3f7f4141},
        true},
   };
-  for (const auto &test : cases) {
-    SCOPED_TRACE(test.name);
-    wave_->debug_write_sgpr(9, ((test.srgb ? 66u : 42u) << (gfx12 ? 17 : 20)) | (1u << 30));
-    wave_->debug_write_sgpr(4, test.wrap | (test.wrap << 3) | (2 << 6) |
-                                   (uint32_t(test.unnormalized) << 15));
-    wave_->debug_write_sgpr(5, 0);
-    wave_->debug_write_sgpr(6, test.linear ? (1 << 20) | (1 << 22) : 0);
-    wave_->debug_write_sgpr(7, test.border << 30);
-    wave_->set_exec(5);
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
-      wave_->debug_write_vgpr(8, lane, std::bit_cast<uint32_t>(test.u));
-      wave_->debug_write_vgpr(9, lane, std::bit_cast<uint32_t>(test.v));
-      wave_->debug_write_vgpr(10, lane, 0xdeadbeef);
-      wave_->debug_write_vgpr(11, lane, 0xdeadbeef);
+  for (uint32_t channels : {1u, 2u, 4u}) {
+    SCOPED_TRACE(channels);
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    const uint32_t format = channels == 1 ? 1 : channels == 2 ? 14 : 42;
+    const std::array<uint32_t, 4> texels{0x40fa0b00, 0x80c94dff, 0xc0618eaa, 0xff02db55};
+    for (uint32_t i = 0; i < 4; ++i) {
+      const uint64_t address = 0x100000 + (i / 2) * (gfx12 ? 128 : 256) + (i % 2) * channels;
+      ASSERT_EQ(access_->write(address, std::as_bytes(std::span{&texels[i], 1}).first(channels)),
+                amdgpu::VmAccessOutcome::Complete);
     }
-    std::array<uint32_t, 4> words{0xe7c6c001, 0x02001008, 0x00000908, 0};
-    if (!gfx12) {
-      const auto mimg = rdna3::build_mimg(
-          31, {.nsa = 1, .dim = 1, .dmask = 15, .vaddr = 8, .vdata = 8, .srsrc = 2, .ssamp = 1});
-      std::copy(mimg.begin(), mimg.end(), words.begin());
-      words[2] = 9;
+    for (const auto &test : cases) {
+      if (test.srgb && channels != 4)
+        continue;
+      SCOPED_TRACE(test.name);
+      wave_->debug_write_sgpr(9, ((test.srgb ? 66u : format) << (gfx12 ? 17 : 20)) | (1u << 30));
+      wave_->debug_write_sgpr(4, test.wrap | (test.wrap << 3) | (2 << 6) |
+                                     (uint32_t(test.unnormalized) << 15));
+      wave_->debug_write_sgpr(5, 0);
+      wave_->debug_write_sgpr(6, test.linear ? (1 << 20) | (1 << 22) : 0);
+      wave_->debug_write_sgpr(7, test.border << 30);
+      wave_->set_exec(5);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+        wave_->debug_write_vgpr(8, lane, std::bit_cast<uint32_t>(test.u));
+        wave_->debug_write_vgpr(9, lane, std::bit_cast<uint32_t>(test.v));
+        wave_->debug_write_vgpr(10, lane, 0xdeadbeef);
+        wave_->debug_write_vgpr(11, lane, 0xdeadbeef);
+      }
+      std::array<uint32_t, 4> words{0xe7c6c001, 0x02001008, 0x00000908, 0};
+      if (!gfx12) {
+        const auto mimg = rdna3::build_mimg(
+            31, {.nsa = 1, .dim = 1, .dmask = 15, .vaddr = 8, .vdata = 8, .srsrc = 2, .ssamp = 1});
+        std::copy(mimg.begin(), mimg.end(), words.begin());
+        words[2] = 9;
+      }
+      auto decoded = decoder_->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      auto instruction = std::move(decoded).value();
+      ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+      ASSERT_FALSE(wave_->instruction_execution_failed());
+      ASSERT_NE(instruction->data(), nullptr);
+      EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+                gfx12 ? amdgpu::WaitCounterType::SAMPLECNT : amdgpu::WaitCounterType::LOADCNT);
+      amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+      pipeline.issue(instruction.release(), *wave_);
+      for (uint32_t c = 0; c < channels; ++c) {
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), test.expected[c]) << c;
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 2), test.expected[c]) << c;
+      }
+      EXPECT_EQ(wave_->debug_read_vgpr(8, 1), std::bit_cast<uint32_t>(test.u));
+      EXPECT_EQ(wave_->debug_read_vgpr(9, 1), std::bit_cast<uint32_t>(test.v));
+      EXPECT_EQ(wave_->debug_read_vgpr(10, 1), 0xdeadbeefu);
+      EXPECT_EQ(wave_->debug_read_vgpr(11, 1), 0xdeadbeefu);
+    }
+  }
+}
+
+TEST_P(GraphicsExportTest, PackedTenBitFilteringAndAlphaExpansionMatchHardware) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const std::array<uint32_t, 8> descriptor{
+      0x1000, (36u << (gfx12 ? 17 : 20)) | (3u << 30), 1 | (7u << 14), (9u << 28) | 0xfac, 0, 0, 0,
+      0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  for (uint32_t y = 0; y < 8; ++y)
+    for (uint32_t x = 0; x < 8; ++x) {
+      const uint32_t packed = ((x * 177 + y * 39) & 1023) | (((x * 39 + y * 91) & 1023) << 10) |
+                              (((x * 50 + y * 150) & 1023) << 20) | (((x + y) & 3) << 30);
+      memory_.write32(0x100000 + y * (gfx12 ? 128 : 256) + x * 4, packed);
+    }
+  wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22));
+  wave_->debug_write_sgpr(7, 0);
+  // Raw FP32 readbacks from physical GFX11 and GFX12, including normalization
+  // boundaries and fractional two-bit alpha that must expand before filtering.
+  struct Sample {
+    uint32_t index;
+    std::array<uint32_t, 4> expected;
+  };
+  const Sample samples[] = {
+      {16, {0x3a312c4b, 0x391c2708, 0x3948320c, 0x3aaaaaab}},
+      {4176, {0x3eb24992, 0x3d9dc772, 0x3dca8aa3, 0x3f2bfbff}},
+      {32000, {0x3e059565, 0x3e9bd8f6, 0x3f00721d, 0x3f140000}},
+      {56083, {0x3e850241, 0x3f120982, 0x3f114752, 0x3f464bff}},
+      {65535, {0x3ef43d0f, 0x3f63b8ee, 0x3ebc2f0c, 0x3f2aaaab}},
+  };
+  wave_->set_exec(1);
+  for (const auto &test : samples) {
+    SCOPED_TRACE(test.index);
+    wave_->debug_write_vgpr(0, 0, std::bit_cast<uint32_t>(float(test.index % 256) / 255));
+    wave_->debug_write_vgpr(1, 0, std::bit_cast<uint32_t>(float(test.index / 256) / 255));
+    std::array<uint32_t, 4> words{};
+    if (gfx12) {
+      const auto encoded = rdna4::build_vsample(
+          31, {.dim = 1, .dmask = 15, .vdata = 8, .rsrc = 8, .samp = 4, .vaddr0 = 0, .vaddr1 = 1});
+      std::copy(encoded.begin(), encoded.end(), words.begin());
+    } else {
+      const auto encoded = rdna3::build_mimg(
+          31, {.dim = 1, .dmask = 15, .vaddr = 0, .vdata = 8, .srsrc = 2, .ssamp = 1});
+      std::copy(encoded.begin(), encoded.end(), words.begin());
     }
     auto decoded = decoder_->decode(words.data());
     ASSERT_FALSE(decoded.failed());
     auto instruction = std::move(decoded).value();
     ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
     ASSERT_FALSE(wave_->instruction_execution_failed());
-    ASSERT_NE(instruction->data(), nullptr);
-    EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
-              gfx12 ? amdgpu::WaitCounterType::SAMPLECNT : amdgpu::WaitCounterType::LOADCNT);
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
     pipeline.issue(instruction.release(), *wave_);
-    for (uint32_t c = 0; c < 4; ++c) {
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), test.expected[c]) << c;
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 2), test.expected[c]) << c;
-    }
-    EXPECT_EQ(wave_->debug_read_vgpr(8, 1), std::bit_cast<uint32_t>(test.u));
-    EXPECT_EQ(wave_->debug_read_vgpr(9, 1), std::bit_cast<uint32_t>(test.v));
-    EXPECT_EQ(wave_->debug_read_vgpr(10, 1), 0xdeadbeefu);
-    EXPECT_EQ(wave_->debug_read_vgpr(11, 1), 0xdeadbeefu);
+    for (uint32_t channel = 0; channel < 4; ++channel)
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + channel, 0), test.expected[channel]) << channel;
   }
 }
 
@@ -5003,6 +5119,70 @@ TEST_P(GraphicsExportTest, TrilinearUsesDistinctWeightsForNonuniformMipLevels) {
   }
 }
 
+TEST_P(GraphicsExportTest, StencilComparisonsOperationsAndMasksRespectDepthAndFacing) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr bool comparisons[]{false, true, false, true, false, true, false, true};
+  constexpr uint8_t results[]{0x5a, 0,    255,  0x36, 0xc3, 0x5b, 0x59, 0xa5,
+                              0x5b, 0x59, 0x42, 0xdb, 0x99, 0xbd, 0x24, 0x66};
+  for (bool back : {false, true})
+    for (uint32_t comparison = 0; comparison < 8; ++comparison)
+      for (bool depth_pass : {false, true})
+        for (uint32_t operation = 0; operation < 16; ++operation) {
+          SCOPED_TRACE(testing::Message()
+                       << back << "," << comparison << "," << depth_pass << "," << operation);
+          auto state = rectangle_state();
+          auto &ctx = state.context_registers;
+          ctx[gfx12 ? 5 : 7] = (3 << 16) | 3;
+          const uint32_t swizzle = gfx12 ? 3 : 24;
+          ctx[gfx12 ? 6 : 0x10] = 3 | (swizzle << 4);
+          ctx[gfx12 ? 7 : 0x11] = 1 | (swizzle << 4);
+          const auto address = [&](uint32_t base, uint32_t x, uint32_t y, uint32_t bytes) {
+            return *(gfx12 ? amdgpu::gfx12_image_address(base, x, y, 4, bytes, swizzle)
+                           : amdgpu::gfx11_image_address(base, x, y, 4, bytes, swizzle));
+          };
+          ctx[gfx12 ? 8 : 0x12] = ctx[gfx12 ? 10 : 0x14] = 0x2000;
+          ctx[gfx12 ? 0xc : 0x13] = ctx[gfx12 ? 0xe : 0x15] = 0x3000;
+          ctx[gfx12 ? 0x1c : 0x200] =
+              0x87 | (depth_pass ? 0x70 : 0) | (comparison << (back ? 20 : 8));
+          // Deliberately poison the unused face and unused outcome operations.
+          const uint32_t slot = (back ? 12 : 0) + (!comparisons[comparison] ? 0
+                                                   : depth_pass             ? 4
+                                                                            : 8);
+          ctx[gfx12 ? 0x1d : 0x10b] = (0xffffffu & ~(15u << slot)) | (operation << slot);
+          if (gfx12) {
+            const uint32_t shift = back ? 8 : 0;
+            ctx[0x22] = 0x36u << shift;
+            ctx[0x23] = 0xc3u << shift;
+            ctx[0x24] = 0x0fu << shift;
+            ctx[0x25] = 0xf0u << shift;
+          } else {
+            ctx[back ? 0x10d : 0x10c] = 0xc3f00f36;
+          }
+          ctx[gfx12 ? 0x207 : 0x205] = back ? 4 : 0;
+          ctx[0x10f] = ctx[0x110] = ctx[0x111] = ctx[0x112] = std::bit_cast<uint32_t>(2.0f);
+          ctx[0x113] = std::bit_cast<uint32_t>(1.0f);
+          ctx[gfx12 ? 0x116 : 0xb5] = std::bit_cast<uint32_t>(1.0f);
+          ctx[0x90] = 1 | (1 << 16);
+          ctx[0x91] = (3 - gfx12) | ((3 - gfx12) << 16);
+          for (uint32_t i = 0; i < 16; ++i) {
+            memory_.write32(address(0x200000, i % 4, i / 4, 4), std::bit_cast<uint32_t>(1.0f));
+            memory_.write_block(address(0x300000, i % 4, i / 4, 1), std::array<uint8_t, 1>{0x5a});
+          }
+          auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+          export_rectangle_vertices(*draw);
+          ASSERT_TRUE(draw->advance(*access_));
+          EXPECT_FALSE(draw->advance(*access_));
+          for (uint32_t y = 0; y < 4; ++y)
+            for (uint32_t x = 0; x < 4; ++x) {
+              const bool covered = x >= 1 && x < 3 && y >= 1 && y < 3;
+              const auto stencil = memory_.read32(address(0x300000, x, y, 1)) & 255;
+              EXPECT_EQ(stencil, covered ? (results[operation] & 0xf0) | 0xau : 0x5au);
+              EXPECT_EQ(memory_.read32(address(0x200000, x, y, 4)),
+                        covered && comparisons[comparison] && depth_pass ? 0u : 0x3f800000u);
+            }
+        }
+}
+
 TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   struct Case {
@@ -5020,7 +5200,6 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
   constexpr Case cases[] = {
       {"zero depth", 0, 1, 0, 0, 1, false, 0, 0},
       {.name = "inactive stencil surface", .enable_stencil = true, .stencil_info = 0x20100180},
-      {.name = "active stencil rejected", .enable_stencil = true, .stencil_info = 1},
       {"far depth clamped", 2, 0.5f, 0.25f, 0.25f, 0.75f, false, 0.75f, 49151},
       {"far depth unclamped", 2, 0.5f, 0.25f, 0.25f, 0.75f, true, 1.25f, 65535},
       {"near depth clamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, false, 0.25f, 16384},
@@ -5088,14 +5267,8 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
                              std::bit_cast<uint32_t>(1.0f)});
         draw->export_lane(*wave_, 0, 20, 1,
                           {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-        const bool unsupported_stencil = test.enable_stencil && (test.stencil_info & 1);
-        decltype(draw->advance(*access_)) dispatch;
-        if (unsupported_stencil) {
-          EXPECT_THROW(draw->advance(*access_), std::runtime_error);
-        } else {
-          dispatch = draw->advance(*access_);
-          ASSERT_EQ(bool(dispatch), !test.disable_samples);
-        }
+        auto dispatch = draw->advance(*access_);
+        ASSERT_EQ(bool(dispatch), !test.disable_samples);
         // A zero-component export still carries pixel validity for late depth.
         if (dispatch) {
           if (test.fragment_export) {
@@ -5108,7 +5281,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
         const float expected = bytes == 2 ? test.expected_d16 / 65535.0f : test.expected;
         const bool comparisons[] = {false,        expected < 1,  expected == 1, expected <= 1,
                                     expected > 1, expected != 1, expected >= 1, true};
-        const bool pass = !test.disable_samples && !unsupported_stencil && comparisons[comparison];
+        const bool pass = !test.disable_samples && comparisons[comparison];
         const uint32_t expected_bits =
             bytes == 2 ? test.expected_d16 : std::bit_cast<uint32_t>(expected);
         for (uint32_t y = 0; y < 4; ++y)
@@ -5652,6 +5825,41 @@ TEST(GraphicsImageMetadataTest, HtileEndpointClearsAndExplicitClearRegister) {
     memory.write32(tag, 0xfffc0001);
     EXPECT_THROW(amdgpu::materialize_gfx11_htile(*access, base, metadata, 9, 9, 17, 13, bytes, 24),
                  std::runtime_error);
+  }
+}
+
+TEST(GraphicsImageMetadataTest, SharedDepthStencilClearPreservesTheOtherAspect) {
+  amdgpu::GpuMemory memory{"depth_stencil_clear_memory"};
+  amdgpu::GpuVm vm;
+  const auto id =
+      vm.register_address_space(0, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
+                                std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(memory));
+  const auto access = vm.snapshot(id);
+  ASSERT_TRUE(access);
+  constexpr uint64_t depth = 0x200000, stencil = 0x300000, metadata = 0x100000;
+  const auto tag = *amdgpu::gfx11_metadata_address(metadata, 9, 9, 17, 13, 4, 24, true);
+  for (bool stencil_first : {false, true}) {
+    memory.write32(tag, 0x80020000);
+    const auto expand_stencil = [&] {
+      amdgpu::materialize_gfx11_stencil_htile(*access, stencil, metadata, 9, 9, 17, 13, 4, 24, 24,
+                                              0x5a);
+    };
+    if (stencil_first) {
+      expand_stencil();
+      EXPECT_EQ(memory.read32(tag), 0x800203f0u);
+    }
+    amdgpu::materialize_gfx11_htile(*access, depth, metadata, 9, 9, 17, 13, 4, 24, 0x3f000000,
+                                    true);
+    EXPECT_EQ(memory.read32(tag), stencil_first ? 0xfffff3ffu : 0xfffff00fu);
+    expand_stencil();
+    EXPECT_EQ(memory.read32(tag), 0xfffff3ffu);
+    for (uint32_t y = 8; y < 13; ++y)
+      for (uint32_t x = 8; x < 16; ++x) {
+        EXPECT_EQ(memory.read32(*amdgpu::gfx11_image_address(depth, x, y, 17, 4, 24)), 0x3f000000u);
+        EXPECT_EQ(memory.read8(*amdgpu::gfx11_image_address(stencil, x, y, 17, 1, 24)), 0x5au);
+      }
+    // A later image access must retain stencil data already expanded by DB.
+    amdgpu::materialize_gfx11_htile(*access, stencil, metadata, 9, 9, 17, 13, 1, 24);
   }
 }
 

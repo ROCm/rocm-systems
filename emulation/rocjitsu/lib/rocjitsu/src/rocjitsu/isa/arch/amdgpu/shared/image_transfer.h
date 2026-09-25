@@ -51,7 +51,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const bool query = queried_lods != nullptr;
   if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
       unsupported_flags || (dim != 0 && dim != 1 && dim != 3 && dim != 4 && dim != 5) || !mask ||
-      (query && (d16 || (mask & ~3u))))
+      (mask & ~15u) || (query && (d16 || (mask & ~3u))))
     return unsupported();
   std::array<uint32_t, 8> r{};
   for (uint32_t i = 0; i < r.size(); ++i)
@@ -89,9 +89,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       (!is_array && (r[4] >> 16)) || (!query && !bytes) ||
       (is_array && (first_layer > last_layer || (r[4] & (gfx12 ? 0xc000c000u : 0xe000e000u)))) ||
       first_level > last_level || last_level > max_level ||
-      (!query && max_level && ((!is_array && r[4]) || compressed)) ||
-      (!d.is_load &&
-       (d.image_srgb || (mask != 15 && !(mask == 1 && format >= 20 && format <= 22)))))
+      (!query && max_level && ((!is_array && r[4]) || compressed)) || (!d.is_load && d.image_srgb))
     return unsupported();
   if (dim == 3 && (type != 11 || width != height || first_layer % 6 || last_layer < first_layer ||
                    last_layer - first_layer < 5))
@@ -163,9 +161,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     const int32_t secondary_bias = int32_t(((s[2] >> 14) & 0x3f) ^ 0x20) - 0x20;
     lod_bias = primary_bias / 256.0 +
                ((secondary_bias * int32_t(image_perf_scales[perf_mod])) >> 4) / 16.0;
-    // RGBA8 UNORM/sRGB and one-, two- or four-component floating-point filtering.
-    const bool filterable = format == 42 || format == 13 || format == 29 || format == 57 ||
-                            format == 22 || format == 50 || format == 63;
+    // Eight-/ten-bit UNORM, eight-bit sRGB and one-/two-/four-component float filtering.
+    const bool filterable = format == 1 || format == 14 || format == 36 || format == 42 ||
+                            format == 13 || format == 29 || format == 57 || format == 22 ||
+                            format == 50 || format == 63;
     if (min_lod > max_lod ||
         (!query && (min_filter || mag_filter || mip_filter == 2) && !filterable))
       return unsupported();
@@ -191,10 +190,17 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   d.buffer_d16 = d16;
   d.buffer_format = format;
   d.buffer_format_encoding = BufferFormatEncoding::Gfx11;
+  // Physical GFX11/12 stores select logical channels even with D16. GFX11
+  // zero-fills omitted channels; GFX12 replicates the first supplied component.
+  const uint32_t channel_mask = mask;
   uint32_t component = 0;
   for (uint32_t i = 0; i < 4; ++i)
-    if (mask & (1u << i))
+    if (channel_mask & (1u << i))
       d.buffer_selectors |= ((r[3] >> (3 * i)) & 7) << (3 * component++);
+  if (!d.is_load && gfx12)
+    for (uint32_t i = 0; i < 4; ++i)
+      if (!(channel_mask & (1u << i)))
+        d.buffer_selectors |= ((r[3] >> (3 * i)) & 7) << (3 * component++);
   d.wf_size = wf.wf_size();
   d.exec_mask = wf.exec();
   d.elem_size = bytes;
@@ -220,7 +226,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   if (compressed && !query) {
     const bool depth = swizzle == 24 || swizzle == 28;
     if ((type != 9 && type != 13) || (depth && type == 13) || max_level ||
-        (depth ? (bytes != 2 && bytes != 4) : (swizzle != 27 && swizzle != 31)))
+        (depth ? (bytes != 1 && bytes != 2 && bytes != 4) : (swizzle != 27 && swizzle != 31)))
       return unsupported();
     d.image_metadata = std::make_unique<ImageMetadataAccess>();
     auto &image = *d.image_metadata;

@@ -43,8 +43,9 @@ constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30, kDis
 constexpr uint32_t kRopCopy = 12;
 constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSrgb = 6,
                    kNumberFloat = 7;
-constexpr uint32_t kBufR32Uint = 20, kBufRgba8Unorm = 42, kBufRg32Uint = 48, kBufRgba16Unorm = 51,
-                   kBufRgba16Float = 57, kBufRgba32Uint = 61, kBufRgba32Float = 63;
+constexpr uint32_t kBufR8Unorm = 1, kBufR32Uint = 20, kBufRgb10A2Unorm = 36, kBufRgba8Unorm = 42,
+                   kBufRg32Uint = 48, kBufRgba16Unorm = 51, kBufRgba16Float = 57,
+                   kBufRgba32Uint = 61, kBufRgba32Float = 63;
 
 constexpr uint32_t kExport32R = 1, kExport32Gr = 2, kExportFp16Abgr = 4, kExportUnorm16Abgr = 5,
                    kExportSnorm16Abgr = 6, kExportUint16Abgr = 7, kExportSint16Abgr = 8,
@@ -54,6 +55,14 @@ constexpr uint32_t kExport32R = 1, kExport32Gr = 2, kExportFp16Abgr = 4, kExport
 // the combined GFX11 buffer format table.
 uint32_t color_buffer_format(uint32_t data_format, uint32_t number_format) {
   switch (data_format) {
+  case 1: // COLOR_8
+    if (number_format <= kNumberSint)
+      return 1 + number_format;
+    break;
+  case 9: // COLOR_2_10_10_10
+    if (number_format <= kNumberSint)
+      return 36 + number_format;
+    break;
   case 10: // COLOR_8_8_8_8
     if (number_format == kNumberSrgb)
       return kBufRgba8Unorm; // Encode RGB separately; alpha remains linear UNORM.
@@ -269,8 +278,68 @@ T blend_component(uint32_t control, uint32_t component, const std::array<T, 4> &
   throw std::runtime_error("unsupported graphics blend operation");
 }
 
-uint8_t unorm_color_byte(double value) {
-  const double scaled = (std::isnan(value) ? 0 : std::clamp(value, 0.0, 1.0)) * 255;
+template <typename T> bool depth_stencil_compare(uint32_t function, T source, T destination) {
+  switch (function) {
+  case 0:
+    return false;
+  case 1:
+    return source < destination;
+  case 2:
+    return source == destination;
+  case 3:
+    return source <= destination;
+  case 4:
+    return source > destination;
+  case 5:
+    return source != destination;
+  case 6:
+    return source >= destination;
+  case 7:
+    return true;
+  }
+  return false;
+}
+
+uint8_t stencil_operation(uint32_t operation, uint8_t value, uint8_t reference, uint8_t operand) {
+  switch (operation) {
+  case 0:
+    return value;
+  case 1:
+    return 0;
+  case 2:
+    return 255;
+  case 3:
+    return reference;
+  case 4:
+    return operand;
+  case 5:
+    return value == 255 ? 255 : value + 1;
+  case 6:
+    return value == 0 ? 0 : value - 1;
+  case 7:
+    return ~value;
+  case 8:
+    return value + 1;
+  case 9:
+    return value - 1;
+  case 10:
+    return value & operand;
+  case 11:
+    return value | operand;
+  case 12:
+    return value ^ operand;
+  case 13:
+    return ~(value & operand);
+  case 14:
+    return ~(value | operand);
+  case 15:
+    return ~(value ^ operand);
+  }
+  return value;
+}
+
+uint32_t unorm_color_bits(double value, uint32_t width = 8) {
+  const double scaled = (std::isnan(value) ? 0 : std::clamp(value, 0.0, 1.0)) * ((1u << width) - 1);
   const auto lower = static_cast<uint32_t>(scaled);
   const double fraction = scaled - lower;
   return lower + (fraction > 0.5 || (fraction == 0.5 && (lower & 1)));
@@ -397,12 +466,14 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
   if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
     // Normalize relocated registers into the GFX12 slots used below. Read the
     // original snapshot because several source and destination slots overlap.
-    if ((ctx[0x200] & 2) && (ctx[0x10] & (1u << 29))) {
-      if ((ctx[0x11] & 1) || !(ctx[0x2af] & (1u << 18)))
-        throw std::runtime_error("unsupported GFX11 stencil or unaligned HTILE surface");
+    if ((ctx[0x200] & 3) && (ctx[0x10] & (1u << 29))) {
+      if (!(ctx[0x2af] & (1u << 18)))
+        throw std::runtime_error("unsupported GFX11 unaligned HTILE surface");
       depth_metadata_ =
           addr_calc::buffer_virtual_address(((uint64_t{ctx[0x1e] & 255} << 32) | ctx[5]) << 8);
       depth_clear_ = ctx[0xb];
+      depth_metadata_has_stencil_ = (ctx[0x11] & 1) && !(ctx[0x11] & (1u << 29));
+      stencil_clear_ = ctx[0xa];
     }
     for (const auto &[dst, src] : {std::pair{0x1b, 0x203},
                                    {0x1c, 0x200},
@@ -429,6 +500,13 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
     // MAXMIP moves from bits 16:19 to 15:19 on GFX12.
     context_[6] = (ctx[0x10] & ~0xf8000u) | ((ctx[0x10] & 0xf0000u) >> 1);
     context_[7] = ctx[0x11]; // DB_STENCIL_INFO
+    context_[0xc] = ctx[0x13];
+    context_[0xd] = ctx[0x1b];
+    context_[0xe] = ctx[0x15];
+    context_[0xf] = ctx[0x1d];
+    context_[0x1d] = ctx[0x10b];
+    for (const auto &[dst, shift] : {std::pair{0x22, 0}, {0x23, 24}, {0x24, 8}, {0x25, 16}})
+      context_[dst] = ((ctx[0x10c] >> shift) & 255) | (((ctx[0x10d] >> shift) & 255) << 8);
     context_[8] = ctx[0x12];
     context_[9] = ctx[0x1a];
     context_[10] = ctx[0x14];
@@ -730,15 +808,19 @@ void GraphicsDraw::prepare_colors() {
       throw std::runtime_error("unsupported graphics color format");
     color.bytes = format.value().byte_size();
     color.components = format.value().component_count();
+    color.component_widths = format.value().widths;
     const uint32_t swap = (info >> 11) & 3;
     // Map logical RGBA channels to equally sized components in memory.
     constexpr std::array<std::array<uint32_t, 4>, 4> swaps{
         {{0, 1, 2, 3}, {2, 1, 0, 3}, {3, 2, 1, 0}, {1, 2, 3, 0}}};
     color.component_indices = swaps[swap];
+    for (uint32_t c = 0; c < color.components; ++c)
+      if (color.component_widths[c] != color.component_widths[color.component_indices[c]])
+        throw std::runtime_error("unsupported graphics color component swap");
     color.blend = context_[0x1e0 + target];
     uint32_t allowed_attrib = gfx12 ? 0u : 0x30u;
-    // FORCE_DST_ALPHA_1 has no effect on these non-blended targets without alpha.
-    if (color.components < 4 && !(color.blend & kBlendEnable))
+    // Attachments without alpha decode their destination alpha as one.
+    if (color.components < 4)
       allowed_attrib |= 1u << 2;
     const uint32_t layer_bits = gfx12 ? 14 : 13, layer_mask = (1u << layer_bits) - 1;
     const uint32_t view = context_[block + 1];
@@ -752,9 +834,13 @@ void GraphicsDraw::prepare_colors() {
         (context_[block + 2] & ~31u) || color.first_layer > color.last_layer ||
         color.last_layer > (attrib3 & layer_mask) || (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
         !supported_export_format(color.export_format, color.components))
-      throw std::runtime_error("unsupported graphics color state");
+      throw std::runtime_error(std::format("unsupported graphics color state target={} info={:#x} "
+                                           "attrib={:#x},{:#x},{:#x} export={}",
+                                           target, info, attrib, attrib2, attrib3,
+                                           color.export_format));
     if ((color.blend & kBlendEnable) &&
-        ((color.memory_format != kBufRgba8Unorm && color.memory_format != kBufRgba16Float &&
+        ((color.memory_format != kBufR8Unorm && color.memory_format != kBufRgba8Unorm &&
+          color.memory_format != kBufRgb10A2Unorm && color.memory_format != kBufRgba16Float &&
           color.memory_format != kBufRgba32Float) ||
          !supported_blend(color.blend) ||
          ((color.blend & kBlendSeparateAlpha) && !supported_blend(color.blend >> 16))))
@@ -795,9 +881,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   const uint32_t polygon_mode = (context_[0x207] >> 3) & 3;
   if (polygon_mode && (polygon_mode != 1 || ((context_[0x207] >> 5) & 63) != (2 | (2 << 3))))
     throw std::runtime_error("graphics point or line polygon modes are not implemented");
-  if ((context_[0x207] & (7u << 11)) &&
+  if ((context_[0x207] & (7u << 11)) == (1u << 13) &&
       ((context_[0x2e0] | context_[0x2e1] | context_[0x2e2] | context_[0x2e3]) & 0x7fffffffu))
-    throw std::runtime_error("graphics polygon depth bias is not implemented");
+    throw std::runtime_error("independent parallel graphics depth bias is not implemented");
   if (context_[0x2f8] & 7)
     throw std::runtime_error("graphics multisample rasterization is not implemented");
   if (context_[0x2f9] != 0x2d)
@@ -808,15 +894,15 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   if (!(context_[7] & 1))
     depth_control_ &= ~1u;
   // Disabled stencil comparisons do not affect depth testing.
-  if (depth_control_ & ~0x7007f6u)
+  if (depth_control_ & ~0x7007f7u)
     throw std::runtime_error(
-        std::format("unsupported graphics stencil or depth bounds test {:#x}", depth_control_));
+        std::format("unsupported graphics depth bounds or control {:#x}", depth_control_));
   if ((context_[0x198] & ~0xaf7fu) || (context_[0x197] & ~context_[0x198]))
     throw std::runtime_error(
         std::format("unsupported graphics fragment inputs addr={:#x} ena={:#x}", context_[0x198],
                     context_[0x197]));
 
-  if (depth_control_ & 2) {
+  if (depth_control_ & 3) {
     const uint32_t zinfo = context_[6];
     const uint32_t base_width = (context_[5] & 0xffff) + 1;
     const uint32_t base_height = (context_[5] >> 16) + 1;
@@ -830,8 +916,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
         ((uint64_t{context_[11] & 255} << 32) | context_[10]) << 8);
     util::Logger::cp("graphics depth info=", std::hex, zinfo, " view=", context_[1], ",",
                      context_[2], " base=", depth_base_, " write=", write_base, std::dec);
-    if (((zinfo & 15) != 3 && (zinfo & 15) != 1) || depth_first_layer_ > depth_last_layer_ ||
-        (context_[1] & 0xc000c000u) ||
+    if (((depth_control_ & 2) && (zinfo & 15) != 3 && (zinfo & 15) != 1) ||
+        depth_first_layer_ > depth_last_layer_ || (context_[1] & 0xc000c000u) ||
         ((depth_control_ & 4) && ((context_[2] & (1u << 24)) || depth_base_ != write_base)))
       throw std::runtime_error(
           std::format("unsupported graphics depth surface info={:#x} view={:#x},{:#x} size={}x{} "
@@ -850,6 +936,24 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     depth_tail_y_ = mip->tail_y;
     depth_slice_size_ = mip->slice_size;
     depth_base_ += mip->offset;
+    if (depth_control_ & 1) {
+      stencil_swizzle_ = (context_[7] >> 4) & 31;
+      stencil_base_ = addr_calc::buffer_virtual_address(
+          ((uint64_t{context_[0xd] & 255} << 32) | context_[0xc]) << 8);
+      const uint64_t stencil_write = addr_calc::buffer_virtual_address(
+          ((uint64_t{context_[0xf] & 255} << 32) | context_[0xe]) << 8);
+      if (stencil_base_ != stencil_write || (context_[2] & (1u << 25)))
+        throw std::runtime_error("unsupported graphics stencil write surface");
+      const auto stencil_mip =
+          image_mip_layout(gfx12, stencil_swizzle_, 1, base_width, base_height, max_mip + 1, level);
+      if (!stencil_mip)
+        throw std::runtime_error("unsupported graphics stencil mip layout");
+      stencil_base_ += stencil_mip->offset;
+      stencil_pitch_ = stencil_mip->pitch;
+      stencil_tail_x_ = stencil_mip->tail_x;
+      stencil_tail_y_ = stencil_mip->tail_y;
+      stencil_slice_size_ = stencil_mip->slice_size;
+    }
     if (!color_enabled_) {
       width_ = depth_width_;
       height_ = depth_height_;
@@ -959,7 +1063,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           return color.write_mask && relative_layer <= color.last_layer - color.first_layer;
         }))
       continue;
-    if ((depth_control_ & 2) && relative_layer > depth_last_layer_ - depth_first_layer_)
+    if ((depth_control_ & 3) && relative_layer > depth_last_layer_ - depth_first_layer_)
       continue;
     if (nonpositive_w == 3 || outside_near == 3 || outside_far == 3)
       continue;
@@ -1132,7 +1236,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
                                             : plane(0, 0, 1);
       const float depth_b = raster::vertex_difference(screen[1].z, screen[0].z);
       const float depth_c = raster::vertex_difference(screen[2].z, screen[0].z);
-      const raster::DepthPlane plane_z{
+      raster::DepthPlane plane_z{
           raster::depth_gradient(raster::plane_numerator(screen[2].y - screen[0].y,
                                                          screen[0].y - screen[1].y, depth_b,
                                                          depth_c),
@@ -1142,6 +1246,29 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
                                                          depth_c),
                                  depth_inverse_area),
           screen[0].z, screen[0].x, screen[0].y};
+      if (context_[0x207] & (1u << (front ? 11 : 12))) {
+        const uint32_t scale_reg = front ? 0x2e0 : 0x2e2;
+        const float scale = std::bit_cast<float>(context_[scale_reg]) / 16.0f;
+        const float offset = std::bit_cast<float>(context_[scale_reg + 1]);
+        const float clamp = std::bit_cast<float>(context_[0x2df]);
+        const uint32_t format = context_[0x2de];
+        if ((format & ~0x1ffu) || !std::isfinite(scale) || !std::isfinite(offset) ||
+            !std::isfinite(clamp))
+          throw std::runtime_error("unsupported graphics depth bias state");
+        int exponent = static_cast<int8_t>(format);
+        if (format & 0x100) {
+          const double maximum =
+              std::max({std::abs(screen[0].z), std::abs(screen[1].z), std::abs(screen[2].z)});
+          exponent += maximum == 0 ? -126 : std::max(-126, std::ilogb(maximum));
+        }
+        double bias = std::max(std::abs(plane_z.dx), std::abs(plane_z.dy)) * scale +
+                      std::ldexp(double(offset), exponent);
+        if (clamp > 0)
+          bias = std::min(bias, double(clamp));
+        else if (clamp < 0)
+          bias = std::max(bias, double(clamp));
+        plane_z.base += bias;
+      }
       const bool rectangle = primitive_type_ == kRectangleList;
       const auto [xmin, xmax] = std::minmax_element(coverage.begin(), coverage.end(),
                                                     [](Point a, Point b) { return a.x < b.x; });
@@ -1197,6 +1324,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       }
       FragmentWave batch;
       batch.relative_layer = relative_layer;
+      batch.front = front;
       batch.parameters = parameters;
       uint32_t used = 0;
       for (int y = min_y & ~1; y < max_y; y += 2) {
@@ -1249,6 +1377,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
             fragments_.push_back(std::move(batch));
             batch = FragmentWave{};
             batch.relative_layer = relative_layer;
+            batch.front = front;
             batch.parameters = parameters;
             used = 0;
           }
@@ -1288,8 +1417,15 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       for (uint32_t y = 0; y < depth_height_; y += 8)
         for (uint32_t x = 0; x < depth_width_; x += 8)
           materialize_gfx11_htile(memory, depth_base_, *depth_metadata_, x, y, depth_width_,
-                                  depth_height_, depth_bytes_, depth_swizzle_, bits);
+                                  depth_height_, depth_bytes_, depth_swizzle_, bits,
+                                  depth_metadata_has_stencil_);
     }
+    if ((depth_control_ & 1) && depth_metadata_ && depth_metadata_has_stencil_)
+      for (uint32_t y = 0; y < depth_height_; y += 8)
+        for (uint32_t x = 0; x < depth_width_; x += 8)
+          materialize_gfx11_stencil_htile(memory, stencil_base_, *depth_metadata_, x, y,
+                                          depth_width_, depth_height_, depth_bytes_, depth_swizzle_,
+                                          stencil_swizzle_, stencil_clear_);
     attachments_prepared_ = true;
   }
 }
@@ -1334,6 +1470,26 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
       const auto &f = batch.lanes[lane];
       if (!f.covered)
         continue;
+      const bool back = !batch.front && (depth_control_ & (1u << 7));
+      const uint32_t face_shift = back ? 8 : 0;
+      const uint8_t reference = context_[0x22] >> face_shift;
+      uint8_t previous_stencil = 0;
+      std::optional<uint64_t> stencil_address;
+      bool stencil_pass = true, depth_pass = true;
+      if (depth_control_ & 1) {
+        const uint64_t base =
+            image_layer_base(arch_ == ROCJITSU_CODE_ARCH_RDNA4, stencil_base_, stencil_slice_size_,
+                             depth_first_layer_ + batch.relative_layer, 1, stencil_swizzle_);
+        stencil_address = image_address(base, f.x + stencil_tail_x_, f.y + stencil_tail_y_,
+                                        stencil_pitch_, 1, stencil_swizzle_);
+        if (!stencil_address ||
+            memory.read(*stencil_address, std::as_writable_bytes(std::span{
+                                              &previous_stencil, 1})) != VmAccessOutcome::Complete)
+          throw std::runtime_error("graphics stencil read failed");
+        const uint8_t mask = context_[0x24] >> face_shift;
+        stencil_pass = depth_stencil_compare((depth_control_ >> (back ? 20 : 8)) & 7,
+                                             reference & mask, previous_stencil & mask);
+      }
       if (depth_control_ & 2) {
         const uint64_t layer_base = image_layer_base(
             arch_ == ROCJITSU_CODE_ARCH_RDNA4, depth_base_, depth_slice_size_,
@@ -1356,39 +1512,28 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         const float previous =
             depth_bytes_ == 2 ? previous_bits / 65535.0f : std::bit_cast<float>(previous_bits);
         const float depth = depth_bytes_ == 2 ? next_bits / 65535.0f : clamped_depth;
-        bool pass = false;
-        switch ((depth_control_ >> 4) & 7) {
-        case 0:
-          break;
-        case 1:
-          pass = depth < previous;
-          break;
-        case 2:
-          pass = depth == previous;
-          break;
-        case 3:
-          pass = depth <= previous;
-          break;
-        case 4:
-          pass = depth > previous;
-          break;
-        case 5:
-          pass = depth != previous;
-          break;
-        case 6:
-          pass = depth >= previous;
-          break;
-        case 7:
-          pass = true;
-          break;
-        }
-        if (!pass)
-          continue;
-        if ((depth_control_ & 4) &&
+        depth_pass = depth_stencil_compare((depth_control_ >> 4) & 7, depth, previous);
+        if (stencil_pass && depth_pass && (depth_control_ & 4) &&
             memory.write(*address, {reinterpret_cast<const std::byte *>(&next_bits),
                                     depth_bytes_}) != VmAccessOutcome::Complete)
           throw std::runtime_error("graphics depth write failed");
       }
+      if (stencil_address) {
+        const uint32_t operation = (context_[0x1d] >> ((back ? 12 : 0) + (!stencil_pass ? 0
+                                                                          : depth_pass  ? 4
+                                                                                        : 8))) &
+                                   15;
+        const uint8_t mask = context_[0x25] >> face_shift;
+        const uint8_t next =
+            stencil_operation(operation, previous_stencil, reference, context_[0x23] >> face_shift);
+        const uint8_t result = (previous_stencil & ~mask) | (next & mask);
+        if (mask && operation &&
+            memory.write(*stencil_address, std::as_bytes(std::span{&result, 1})) !=
+                VmAccessOutcome::Complete)
+          throw std::runtime_error("graphics stencil write failed");
+      }
+      if (!stencil_pass || !depth_pass)
+        continue;
       for (uint32_t target = 0; target < colors_.size(); ++target) {
         const auto &color = colors_[target];
         if (!color.write_mask)
@@ -1410,6 +1555,19 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         const uint32_t rop =
             (blend & (kDisableRop3 | kBlendEnable)) ? kRopCopy : (context_[0x216] >> 16) & 15;
         const uint32_t component_bytes = color.bytes / color.components;
+        const bool unorm_blend = color.memory_format == kBufR8Unorm ||
+                                 color.memory_format == kBufRgba8Unorm ||
+                                 color.memory_format == kBufRgb10A2Unorm;
+        const auto store_unorm = [&](uint32_t c, double value) {
+          if (color.memory_format != kBufRgb10A2Unorm) {
+            bytes[c] = color.srgb && c < 3 ? srgb_color_byte(value) : unorm_color_bits(value);
+          } else {
+            uint32_t packed = 0;
+            std::memcpy(&packed, bytes.data(), 4);
+            packed |= unorm_color_bits(value, color.component_widths[c]) << (c * 10);
+            std::memcpy(bytes.data(), &packed, 4);
+          }
+        };
         if (!write_mask)
           continue;
         const uint32_t full_mask = (1u << color.components) - 1;
@@ -1419,26 +1577,22 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           throw std::runtime_error("graphics color read failed");
         if (blend & kBlendEnable) {
           std::array<float, 4> source{}, destination{}, constant{};
-          std::array<uint8_t, 16> logical_previous{};
-          for (uint32_t c = 0; c < color.components; ++c)
-            std::copy_n(previous.begin() + color.component_indices[c] * component_bytes,
-                        component_bytes, logical_previous.begin() + c * component_bytes);
           const auto decoded = unpack_buffer_format(color.memory_format, 0xfac,
-                                                    std::span{logical_previous}.first(color.bytes));
+                                                    std::span{previous}.first(color.bytes));
           if (decoded.failed())
             throw std::runtime_error("unsupported graphics blend format");
           for (uint32_t c = 0; c < 4; ++c) {
             source[c] = std::bit_cast<float>(components[c]);
-            destination[c] = std::bit_cast<float>(decoded.value()[c]);
+            destination[c] = std::bit_cast<float>(decoded.value()[color.component_indices[c]]);
             constant[c] = std::bit_cast<float>(context_[0x105 + c]);
-            if (color.memory_format == kBufRgba8Unorm) {
+            if (unorm_blend) {
               source[c] = std::isnan(source[c]) ? 0 : std::clamp(source[c], 0.0f, 1.0f);
               // UNORM destinations round to twelve significant bits before blending.
-              const uint32_t normalized = decoded.value()[c];
+              const uint32_t normalized = decoded.value()[color.component_indices[c]];
               destination[c] =
                   std::bit_cast<float>((normalized + 0x7ffu + ((normalized >> 12) & 1)) & ~0xfffu);
               if (color.srgb && c < 3)
-                destination[c] = srgb_color_linear(logical_previous[c]);
+                destination[c] = srgb_color_linear(previous[color.component_indices[c]]);
               constant[c] = std::isnan(constant[c]) ? 0 : std::clamp(constant[c], 0.0f, 1.0f);
               // Color blending truncates UNORM constants to twelve significant bits.
               constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
@@ -1464,7 +1618,7 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
                    : value > 1 - threshold || value == 1 ? 1.0f
                                                          : value;
           };
-          if (color.memory_format == kBufRgba8Unorm)
+          if (unorm_blend)
             for (uint32_t c = 0; c < 4; ++c)
               flag_source[c] = source_flag(std::bit_cast<float>(components[c]));
           const uint32_t opt_disable = context_[0x1d7] >> (4 * target);
@@ -1499,7 +1653,7 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
                 constant[c] = raster::blend_input(constant[c]);
               }
           }
-          if (color.memory_format == kBufRgba8Unorm) {
+          if (unorm_blend) {
             if (preserve_destination)
               continue;
             const auto copy_group = [&](bool alpha, const std::array<float, 4> &flags,
@@ -1528,21 +1682,19 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
             }
             if (copy_source)
               for (uint32_t c = 0; c < 4; ++c)
-                bytes[c] =
-                    color.srgb && c < 3 ? srgb_color_byte(source[c]) : unorm_color_byte(source[c]);
+                store_unorm(c, source[c]);
           }
           if (!copy_source) {
             for (uint32_t c = 0; c < 4; ++c) {
               const uint32_t control =
                   c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
-              const double blended = blend_component(
-                  control, c, widen(source), widen(destination), widen(constant),
-                  color.memory_format == kBufRgba32Float, color.memory_format == kBufRgba8Unorm);
-              if (color.memory_format == kBufRgba8Unorm) {
-                // Keep blend precision through byte quantization. Rounding to
-                // FP32 first can cross a UNORM midpoint, even with FP16 exports.
-                bytes[c] =
-                    color.srgb && c < 3 ? srgb_color_byte(blended) : unorm_color_byte(blended);
+              const double blended =
+                  blend_component(control, c, widen(source), widen(destination), widen(constant),
+                                  color.memory_format == kBufRgba32Float, unorm_blend);
+              if (unorm_blend) {
+                // Keep blend precision through quantization. Rounding to FP32
+                // first can cross a UNORM midpoint, even with FP16 exports.
+                store_unorm(c, blended);
                 continue;
               }
               float result = static_cast<float>(blended);
@@ -1554,7 +1706,7 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
             }
           }
         }
-        if ((!(blend & kBlendEnable) || color.memory_format != kBufRgba8Unorm) &&
+        if ((!(blend & kBlendEnable) || !unorm_blend) &&
             pack_buffer_format(color.memory_format, 0xfac, components,
                                std::span{bytes}.first(color.bytes))
                 .failed())
@@ -1566,6 +1718,25 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         for (uint32_t c = 0; c < color.components; ++c) {
           if (!(write_mask & (1u << c)))
             continue;
+          if (color.component_widths[c] % 8) {
+            uint32_t source = 0, destination = 0, result = 0;
+            std::memcpy(&source, bytes.data(), 4);
+            std::memcpy(&destination, previous.data(), 4);
+            std::memcpy(&result, output.data(), 4);
+            uint32_t source_shift = 0, destination_shift = 0;
+            for (uint32_t i = 0; i < c; ++i)
+              source_shift += color.component_widths[i];
+            for (uint32_t i = 0; i < color.component_indices[c]; ++i)
+              destination_shift += color.component_widths[i];
+            source = (source >> source_shift) << destination_shift;
+            const uint32_t mask = ((1u << color.component_widths[c]) - 1) << destination_shift;
+            const uint32_t value =
+                ((rop & 1) ? ~source & ~destination : 0) | ((rop & 2) ? ~source & destination : 0) |
+                ((rop & 4) ? source & ~destination : 0) | ((rop & 8) ? source & destination : 0);
+            result = (result & ~mask) | (value & mask);
+            std::memcpy(output.data(), &result, 4);
+            continue;
+          }
           for (uint32_t b = 0; b < component_bytes; ++b) {
             const uint32_t index = color.component_indices[c] * component_bytes + b;
             const uint8_t source = bytes[c * component_bytes + b], destination = previous[index];

@@ -25,7 +25,7 @@ inline std::optional<uint64_t> gfx11_metadata_address(uint64_t base, uint32_t x,
                                                       bool pipe_aligned = true,
                                                       uint32_t layer = 0) {
   if (!width || !height || x >= width || y >= height || !std::has_single_bit(bytes) || bytes > 16 ||
-      (depth && bytes != 2 && bytes != 4) ||
+      (depth && bytes != 1 && bytes != 2 && bytes != 4) ||
       (depth ? (swizzle != 24 && swizzle != 28) : (swizzle != 27 && swizzle != 31)))
     return std::nullopt;
   const uint32_t element_log2 = std::countr_zero(bytes);
@@ -153,12 +153,18 @@ inline void materialize_gfx11_dcc(const GpuVmAccess &memory, uint64_t base, uint
 inline void materialize_gfx11_htile(const GpuVmAccess &memory, uint64_t base, uint64_t metadata,
                                     uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                                     uint32_t bytes, uint32_t swizzle,
-                                    std::optional<uint32_t> clear_bits = std::nullopt) {
+                                    std::optional<uint32_t> clear_bits = std::nullopt,
+                                    bool has_stencil = false) {
   const auto address = gfx11_metadata_address(metadata, x, y, width, height, bytes, swizzle, true);
   if (!address)
     throw std::runtime_error("unsupported GFX11 HTILE surface layout");
   uint32_t key;
   read_image_bytes(memory, *address, {reinterpret_cast<uint8_t *>(&key), 4});
+  if (bytes == 1) {
+    if ((key & 0x300u) != 0x300u)
+      throw std::runtime_error("GFX11 stencil HTILE clear requires a stencil clear register");
+    return;
+  }
   if ((key & 15) == 15)
     return;
   if (key & 15)
@@ -179,7 +185,34 @@ inline void materialize_gfx11_htile(const GpuVmAccess &memory, uint64_t base, ui
     for (uint32_t px = x; px < std::min(x + 8, width); ++px)
       write_image_bytes(memory, *gfx11_image_address(base, px, py, width, bytes, swizzle),
                         {reinterpret_cast<const uint8_t *>(&*clear_bits), bytes});
-  key = 0xfffc000f;
+  key = has_stencil ? (key & 0x3f0u) | 0xfffff00fu : 0xfffc000fu;
+  write_image_bytes(memory, *address, {reinterpret_cast<const uint8_t *>(&key), 4});
+}
+
+/// Expand a fast stencil clear while preserving the shared depth metadata.
+inline void materialize_gfx11_stencil_htile(const GpuVmAccess &memory, uint64_t base,
+                                            uint64_t metadata, uint32_t x, uint32_t y,
+                                            uint32_t width, uint32_t height, uint32_t depth_bytes,
+                                            uint32_t depth_swizzle, uint32_t stencil_swizzle,
+                                            uint8_t clear) {
+  const auto address =
+      gfx11_metadata_address(metadata, x, y, width, height, depth_bytes, depth_swizzle, true);
+  if (!address)
+    throw std::runtime_error("unsupported GFX11 stencil HTILE surface layout");
+  uint32_t key;
+  read_image_bytes(memory, *address, {reinterpret_cast<uint8_t *>(&key), 4});
+  const uint32_t smem = (key >> 8) & 3;
+  if (smem == 3)
+    return;
+  if (smem)
+    throw std::runtime_error("unsupported GFX11 stencil HTILE compressed block");
+  x &= ~7u;
+  y &= ~7u;
+  for (uint32_t py = y; py < std::min(y + 8, height); ++py)
+    for (uint32_t px = x; px < std::min(x + 8, width); ++px)
+      write_image_bytes(memory, *gfx11_image_address(base, px, py, width, 1, stencil_swizzle),
+                        {&clear, 1});
+  key |= 0x3f0u;
   write_image_bytes(memory, *address, {reinterpret_cast<const uint8_t *>(&key), 4});
 }
 

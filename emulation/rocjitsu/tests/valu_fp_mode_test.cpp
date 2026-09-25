@@ -1772,6 +1772,32 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
   return cases;
 }
 
+std::vector<ArithmeticCase> fma_mix_half_cases() {
+  std::vector<ArithmeticCase> cases;
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (uint32_t mode = 0; mode < 4; ++mode) {
+      for (bool high : {false, true}) {
+        // Physical RDNA3/4 shader exports: the exact product is just below
+        // 0x340c, but rounding it to F32 first produces that exact F16 value.
+        const uint32_t result = mode < 2 ? 0x340cu : 0x340bu;
+        cases.push_back({"Arch" + std::to_string(arch) + "MixHalf" + std::to_string(high) +
+                             "Round" + std::to_string(mode),
+                         arch,
+                         {high ? 0xcc224006u : 0xcc214006u, 0x820204ffu, 0x3b333333u},
+                         {{2, 0x42b90000u}},
+                         {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
+                         240u | (mode << 2),
+                         FE_UPWARD,
+                         0x9fc0u,
+                         0x9f60u});
+      }
+    }
+  }
+  return cases;
+}
+
 class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
@@ -1847,6 +1873,11 @@ TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
   }
   wave->halt();
 }
+
+INSTANTIATE_TEST_SUITE_P(FmaMixHalf, ValuFpModeTest, testing::ValuesIn(fma_mix_half_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(AllTargets, ValuFpModeTest, testing::ValuesIn(kCases),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {

@@ -1252,6 +1252,40 @@ TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
     EXPECT_EQ(memory_[1536 + i], expected[i]) << "register " << std::hex << registers[i];
 }
 
+TEST_F(InterposerPm4Test, IndexedIndirectDrawsReadStridedArgumentsAndClampCount) {
+  // Empty draws still load the shader arguments. Leave a sentinel record after
+  // the count buffer's limit to detect an ignored limit or a packed stride.
+  const std::array<std::array<uint32_t, 6>, 3> arguments{
+      {{0, 1, 17, uint32_t(-3), 11, 0xbad}, {0, 2, 23, 7, 13, 0xbad}, {0, 3, 29, 99, 101, 0xbad}}};
+  std::memcpy(memory_ + 1152, arguments.data(), sizeof(arguments));
+  memory_[1200] = 2;
+  std::vector<uint32_t> packets;
+  const auto emit = [&](uint32_t opcode, std::initializer_list<uint32_t> words) {
+    packets.push_back(0xc0000000 | ((words.size() - 1) << 16) | (opcode << 8));
+    packets.insert(packets.end(), words.begin(), words.end());
+  };
+  emit(0x11, {1, uint32_t(kAddress + 4608), uint32_t(kAddress >> 32)});
+  emit(0x26, {uint32_t(kAddress + 5120), uint32_t(kAddress >> 32)});
+  emit(0x13, {32});
+  emit(0x38, {0, 0x01020100, 0x101, 0xd0000103, 3, uint32_t(kAddress + 4800),
+              uint32_t(kAddress >> 32), 24, 0});
+  for (uint32_t i = 0; i < 4; ++i)
+    emit(0x40,
+         {5u << 8, 0x2d00 + i, 0, uint32_t(kAddress + 6144 + i * 4), uint32_t(kAddress >> 32)});
+  // The single-draw packet uses a different first-index enable location.
+  emit(0x25, {0, 0x01020100, 0x10000101, 0});
+  for (uint32_t i = 0; i < 3; ++i)
+    emit(0x40,
+         {5u << 8, 0x2d00 + i, 0, uint32_t(kAddress + 6160 + i * 4), uint32_t(kAddress >> 32)});
+  std::memcpy(memory_, packets.data(), packets.size() * 4);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(packets.size(), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  const std::array<uint32_t, 7> expected{7, 13, 23, 1, uint32_t(-3), 11, 17};
+  for (uint32_t i = 0; i < expected.size(); ++i)
+    EXPECT_EQ(memory_[1536 + i], expected[i]);
+}
+
 TEST_F(InterposerPm4Test, ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState) {
   const uint32_t packet[] = {0xc0026900,
                              0x300,
@@ -2161,6 +2195,56 @@ TEST_F(InterposerPm4Test, RepeatedTimelineTransfersVisitSharedDependenciesOnce) 
     destroy.handle = handle;
     EXPECT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
   }
+}
+
+TEST_F(InterposerPm4Test, ThreadDimensionsMaskPartialGroupsForDirectAndIndirectDispatch) {
+  drm_amdgpu_info_device device{};
+  drm_amdgpu_info info{};
+  info.query = AMDGPU_INFO_DEV_INFO;
+  info.return_pointer = reinterpret_cast<uint64_t>(&device);
+  info.return_size = sizeof(device);
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_INFO, &info), 0);
+  // Every active invocation atomically increments one shared counter.
+  const uint32_t gfx11[] = {0x7e000280, 0x7e020281, 0xdcd60000, 0x00000100,
+                            0xbf8903f7, 0xbc7c0000, 0xbfb00000};
+  const uint32_t gfx12[] = {0x7e000280, 0x7e020281, 0xee0d4000, 0x00800000,
+                            0,          0xbfc10000, 0xbfb00000};
+  const bool is_gfx12 = device.family == AMDGPU_FAMILY_GC_12_0_0;
+  std::memcpy(memory_ + 1152, is_gfx12 ? gfx12 : gfx11, sizeof(gfx11));
+  const uint64_t code = kAddress + 4608, data = kAddress + 6144, arguments = kAddress + 5120;
+  for (bool indirect : {false, true})
+    for (uint32_t x : {0u, 1u, 64u, 70u}) {
+      SCOPED_TRACE(testing::Message() << "indirect=" << indirect << " x=" << x);
+      memory_[1536] = 10;
+      memory_[1280] = x;
+      memory_[1281] = memory_[1282] = 3;
+      std::vector<uint32_t> packet{0xc0037600,
+                                   0x207,
+                                   64,
+                                   2,
+                                   2,
+                                   0xc0027600,
+                                   0x20c,
+                                   uint32_t(code >> 8),
+                                   uint32_t(code >> 40),
+                                   0xc0017600,
+                                   0x213,
+                                   2u << 1,
+                                   0xc0027600,
+                                   0x240,
+                                   uint32_t(data),
+                                   uint32_t(data >> 32)};
+      if (indirect)
+        packet.insert(packet.end(),
+                      {0xc0021600, uint32_t(arguments), uint32_t(arguments >> 32), 0x8025});
+      else
+        packet.insert(packet.end(), {0xc0031500, x, 3, 3, 0x8025});
+      std::memcpy(memory_, packet.data(), packet.size() * 4);
+      uint64_t sequence = 0;
+      ASSERT_EQ(submit(packet.size(), false, &sequence), 0);
+      ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+      EXPECT_EQ(memory_[1536], 10 + x * 9);
+    }
 }
 
 TEST_F(InterposerPm4Test, GridProductOverflowFailsFence) {

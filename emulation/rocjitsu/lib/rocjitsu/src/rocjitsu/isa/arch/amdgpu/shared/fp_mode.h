@@ -303,6 +303,25 @@ inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
 
 namespace detail {
 
+/// Round an F32-source FMA directly to F16 in a clean nearest environment.
+inline uint16_t fma_f32_to_f16_nearest_environment(float a, float b, float c, uint32_t round_mode,
+                                                   bool clamp, bool fp16_ovfl,
+                                                   bool clamp_nan_to_zero) {
+  double value;
+  if (std::isfinite(a) && std::isfinite(b) && std::isfinite(c)) {
+    const auto exact = add_exact(double(a) * double(b), double(c));
+    value = round_to_odd(exact);
+    if (exact.value == 0 && exact.error == 0) {
+      // Exact cancellation and signed zeros use the destination rounding mode.
+      ScopedFenv result_environment(round_mode);
+      value = std::fma(double(a), double(b), double(c));
+    }
+  } else {
+    value = std::fma(double(a), double(b), double(c));
+  }
+  return pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
+}
+
 /// @brief Execute F32-source fused multiply-add in an established clean nearest environment.
 inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float multiplier,
                                                     float addend, uint32_t round_mode, bool clamp,

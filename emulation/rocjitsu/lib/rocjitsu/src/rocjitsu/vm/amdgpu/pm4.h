@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -41,9 +42,13 @@ enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
   SetBase = 0x11,
   ClearState = 0x12,
+  IndexBufferSize = 0x13,
   SetPredication = 0x20,
   CondExec = 0x22,
+  DrawIndexIndirect = 0x25,
+  IndexBase = 0x26,
   DrawIndex2 = 0x27,
+  DrawIndexIndirectMulti = 0x38,
   ContextControl = 0x28,
   DrawIndexAuto = 0x2d,
   NumInstances = 0x2f,
@@ -151,6 +156,15 @@ struct Pm4QueueState {
   using ContextRegisters = std::array<uint32_t, 0x2000>;
 
   uint64_t indirect_base = 0;
+  uint64_t index_base = 0;
+  uint32_t index_buffer_size = 0;
+  struct IndirectDraw {
+    uint64_t arguments = 0;
+    uint32_t count = 0, next = 0, stride = 0;
+    uint32_t vertex_register = 0, instance_register = 0;
+    std::optional<uint32_t> first_index_register, draw_index_register;
+  };
+  std::optional<IndirectDraw> indirect_draw;
   uint32_t num_instances = 1;
   bool predicate_pass = true;
   std::shared_ptr<GraphicsDraw> draw;

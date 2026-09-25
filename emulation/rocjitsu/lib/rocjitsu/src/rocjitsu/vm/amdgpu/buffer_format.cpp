@@ -477,8 +477,11 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         texels[tap] = texel(tap);
       for (uint32_t c = 0; c < d.buffer_components; ++c) {
         const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
-        const bool unorm8 = format.number == Number::Unorm && format.widths[0] == 8 &&
-                            (!d.image_srgb || selector == 7);
+        const bool fixed_unorm = format.number == Number::Unorm &&
+                                 (format.widths[0] == 8 || format.widths[0] == 10) &&
+                                 (!d.image_srgb || selector == 7);
+        const uint32_t unorm_width = format.widths[0] == 10 ? 10 : 8;
+        const uint32_t unorm_max = (1u << unorm_width) - 1;
         const auto filter_sample = [&](uint32_t filter_index) {
           const auto filter_level = [&](uint32_t level) {
             const double x = d.image_sample->filters[filter_index].fractions[lane][level][0];
@@ -491,7 +494,7 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
                   filter_index * access.taps_per_filter + (level * 4 + tap) * access.texels_per_tap;
               const auto channel = [&](uint32_t source) {
                 const double value = std::bit_cast<float>(texels[first + source][c]);
-                return unorm8 ? round_even(value * 255) : value;
+                return fixed_unorm ? round_even(value * unorm_max) : value;
               };
               channels[tap] = channel(0);
               if (corners & (1u << tap))
@@ -499,7 +502,7 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
                     (channels[tap] * 21846 + channel(1) * 21845 + channel(2) * 21845) / 65536;
             }
             const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
-            if (!unorm8)
+            if (!fixed_unorm)
               return filter_float_texels(
                   channels, weights, corners,
                   format.number == Number::Float && format.widths[0] == 32 ? 25 : 12);
@@ -509,7 +512,7 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
           double filtered = filter_level(0);
           if (d.image_sample->taps_per_filter == 8 * d.image_sample->texels_per_tap) {
             const double fraction = d.image_sample->mip_fractions[lane];
-            if (unorm8) {
+            if (fixed_unorm) {
               // Each weighted mip retains nineteen fractional texel-value bits
               // before the two contributions are added.
               filtered = (round_even(std::ldexp(filtered * (1 - fraction), 19)) +
@@ -537,12 +540,12 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
                 filter_sample(index) * image_anisotropic_filter_weight(filter_count, index);
             // The UNORM accumulator normalizes after summation. Each weighted
             // contribution retains nineteen fractional texel-value bits.
-            return unorm8 ? round_even(std::ldexp(value * std::bit_floor(filter_count), 19)) /
-                                std::ldexp(1.0, 19)
-                          : value;
+            return fixed_unorm ? round_even(std::ldexp(value * std::bit_floor(filter_count), 19)) /
+                                     std::ldexp(1.0, 19)
+                               : value;
           };
           filtered = weighted_filter(0);
-          if (unorm8) {
+          if (fixed_unorm) {
             for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
               filtered += weighted_filter(filter_index);
           } else {
@@ -555,18 +558,20 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         } else {
           filtered = filter_sample(0);
         }
-        if (unorm8) {
+        if (fixed_unorm) {
           // Anisotropic accumulation rounds half up before normalization, then
           // discards the normalization remainder. A single filter rounds even.
           const uint64_t rounded_unorm =
               filter_count > 1 ? static_cast<uint64_t>(std::floor(std::ldexp(filtered, 13) + 0.5)) /
                                      std::bit_floor(filter_count)
                                : static_cast<uint64_t>(round_even(std::ldexp(filtered, 13)));
-          // Normalize by byte replication, converting its 34 fractional bits
-          // to FP32 with midpoints rounded up.
-          const uint64_t numerator = rounded_unorm << 13;
-          uint64_t normalized = numerator + (numerator >> 8) + (numerator >> 16) +
-                                (numerator >> 24) + (numerator >> 32);
+          // Normalize by repeating eight- or ten-bit fields, then convert
+          // the 34 fractional bits to FP32 with midpoints rounded up. Packed
+          // two-bit alpha is expanded to ten bits before filtering as well.
+          const uint64_t numerator = rounded_unorm << (34 - 13 - unorm_width);
+          uint64_t normalized = 0;
+          for (uint32_t offset = 0; offset < 34; offset += unorm_width)
+            normalized += numerator >> offset;
           const uint32_t bits = std::bit_width(normalized);
           const uint32_t shift = bits > 24 ? bits - 24 : 0;
           if (shift)
