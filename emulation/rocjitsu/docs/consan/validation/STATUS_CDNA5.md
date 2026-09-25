@@ -56,7 +56,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟨 default: all 9 clean shards pass; exact-artifact fault 0/8; high running | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟨 default: filtered clean pass; exact-artifact replay verified; reviewed fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟧 default: all 3 shards hit the 900 s client deadline; clean qualification incomplete | 🟥 delay-zero: subword transform fixed; clean mismatches persist and all 3 shards time out |
+| Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟨 default: all 3 clean shards pass at 1800 s; fault review pending | 🟥 delay-zero: subword transform fixed; clean mismatches persist and all 3 shards time out |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: clean pass; wave-private LDS, barrier drop does not create a cross-wave race | 🟨 delay-zero: clean pass; wave-private LDS, barrier drop does not create a cross-wave race |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |

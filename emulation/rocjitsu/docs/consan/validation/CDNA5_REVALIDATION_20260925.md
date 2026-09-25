@@ -1378,3 +1378,18 @@ selection in emitted instrumentation. The existing emulator implementation is
 a useful reference for tests; implementing only an emulator observer would
 not add ConSan device instrumentation. This explains why the measured orange
 cells need memory-model work rather than a higher sampling preset.
+
+### Sparse F8 ML clears its Default clean deadline
+
+`long-tensile-clean/tensile-spmm-f8-ml/default` completes all three baseline
+and Default shards with zero exits. Each instrumented shard has complete
+applicable coverage; aggregate reported supported/patched counts are 183,108
+accesses and 6,552 barriers. Instrumented shard elapsed times are approximately
+1,400, 1,591 and 1,659 seconds, explaining the earlier 900 s failures.
+The 1800 s inner / 2100 s outer budget resolves those timeouts. The Default
+cell moves from orange to yellow pending reviewed fault qualification.
+
+`spmmml-exact-replay-check.py` is preparing retained inputs for the existing
+first fault shard (16x16x64, eight expected clients), with an 1800 s inner
+deadline. Fault review and exact identity binding remain required; full clean
+sweep correctness is not being replaced by this smaller fault shard.
