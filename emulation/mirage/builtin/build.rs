@@ -119,11 +119,12 @@ fn main() {
         serde_json::from_value::<mirage_core::agent::AgentDef>(agent.clone())
             .unwrap_or_else(|error| panic!("invalid agent in {stem}.json: {error}"));
         let json = serde_json::to_string(&agent).expect("agent JSON is serializable");
+        let config_json = serde_json::to_string(&config).expect("config JSON is serializable");
         let device = &config["vm"]["gpu"]["device"];
         writeln!(
             output,
             "    Preset {{ name: {name:?}, stem: {stem:?}, marketing_name: {:?}, \
-             arch: {:?}, agent: {json:?} }},",
+             arch: {:?}, agent: {json:?}, config: {config_json:?} }},",
             device["marketing_name"].as_str().unwrap_or_default(),
             config["vm"]["arch"].as_str().unwrap_or_default(),
         )

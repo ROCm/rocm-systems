@@ -841,9 +841,18 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         MaybeRef::Owned(t) => t.clone(),
         MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
     };
-    let agent: AgentDef = match &topology.agent {
-        MaybeRef::Owned(a) => a.clone(),
-        MaybeRef::Ref(name) => mirage_core::agent::store::get(name)?,
+    let (agent, expected_config): (AgentDef, Option<serde_json::Value>) = match &topology.agent {
+        MaybeRef::Owned(a) => {
+            let agent = a.clone();
+            let expected = mirage_builtin::agents::source_config_for_agent(&agent);
+            (agent, expected)
+        }
+        MaybeRef::Ref(name) => {
+            let agent = mirage_core::agent::store::get(name)?;
+            let expected = mirage_builtin::agents::source_config(name)
+                .or_else(|| mirage_builtin::agents::source_config_for_agent(&agent));
+            (agent, expected)
+        }
     };
     let exec_mode = match def.exec_mode {
         ExecMode::Functional => "functional",
@@ -969,7 +978,7 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
             ))
         },
     )?;
-    for path in missing_config_fields(&sim)? {
+    for path in missing_config_fields(&sim, expected_config.as_ref()) {
         tracing::warn!(
             "profile's RocJITsu configuration is missing field {path}; RocJITsu schema defaults apply"
         );
@@ -1087,23 +1096,13 @@ fn merge_config(base: &mut serde_json::Value, overrides: serde_json::Value) {
     }
 }
 
-fn missing_config_fields(config: &serde_json::Value) -> Result<Vec<String>> {
-    let source = match config["vm"]["arch"].as_str() {
-        Some("cdna3") => Some(include_str!("../../../rocjitsu/configs/gfx942_cdna3.json")),
-        Some("cdna4") => Some(include_str!("../../../rocjitsu/configs/gfx950_mi355x.json")),
-        Some("cdna5") => Some(include_str!(
-            "../../../rocjitsu/configs/gfx1250_mi455x.json"
-        )),
-        _ => None,
-    };
-    let expected = match source {
-        Some(source) => serde_json::from_str(source).map_err(|error| {
-            MirageError::Other(format!("invalid embedded RocJITsu preset: {error}"))
-        })?,
-        None => {
-            serde_json::json!({"vm": {"arch": "", "gpu": {"device": {}}}, "topology": {"root": {}}})
-        }
-    };
+fn missing_config_fields(
+    config: &serde_json::Value,
+    expected_config: Option<&serde_json::Value>,
+) -> Vec<String> {
+    let skeleton =
+        serde_json::json!({"vm": {"arch": "", "gpu": {"device": {}}}, "topology": {"root": {}}});
+    let expected = expected_config.unwrap_or(&skeleton);
     let mut missing = Vec::new();
     for key in ["vm", "topology"] {
         collect_missing_fields(
@@ -1113,7 +1112,7 @@ fn missing_config_fields(config: &serde_json::Value) -> Result<Vec<String>> {
             &mut missing,
         );
     }
-    Ok(missing)
+    missing
 }
 
 fn collect_missing_fields(
@@ -1435,18 +1434,19 @@ mod tests {
 
     #[test]
     fn missing_config_fields_name_omissions_not_zeroes() {
-        let mut config: serde_json::Value =
+        let original: serde_json::Value =
             serde_json::from_str(include_str!("../../../rocjitsu/configs/gfx950_mi355x.json"))
                 .unwrap();
-        assert!(missing_config_fields(&config).unwrap().is_empty());
+        let mut config = original.clone();
+        assert!(missing_config_fields(&config, Some(&original)).is_empty());
         config["vm"]["gpu"]["device"]["num_sdma_engines"] = 0.into();
-        assert!(missing_config_fields(&config).unwrap().is_empty());
+        assert!(missing_config_fields(&config, Some(&original)).is_empty());
         config["vm"]["gpu"]["device"]
             .as_object_mut()
             .unwrap()
             .remove("num_sdma_queues_per_engine");
         assert_eq!(
-            missing_config_fields(&config).unwrap(),
+            missing_config_fields(&config, Some(&original)),
             vec!["/vm/gpu/device/num_sdma_queues_per_engine"]
         );
         let mut missing = Vec::new();
@@ -1473,6 +1473,32 @@ mod tests {
                 "/topology/root/children/iod"
             ]
         );
+    }
+
+    #[test]
+    fn missing_config_fields_uses_the_selected_builtin_preset() {
+        let agent = mirage_builtin::agents::agent("gfx1251_synthetic")
+            .expect("builtin gfx1251_synthetic agent");
+        let expected = mirage_builtin::agents::source_config_for_agent(&agent)
+            .expect("builtin agent has source config");
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&EmulatorDef {
+            extra: Default::default(),
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Owned(agent),
+            }),
+        })
+        .unwrap() else {
+            panic!("expected generated config");
+        };
+        let config: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert!(missing_config_fields(&config, Some(&expected)).is_empty());
     }
 
     #[test]

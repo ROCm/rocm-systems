@@ -21,6 +21,8 @@ pub(crate) struct Preset {
     /// constructed, which is what keeps a field the config omits
     /// omitted; see [`mirage_core::agent::AgentDef`].
     pub agent: &'static str,
+    /// The full RocJITsu source config, as JSON.
+    pub config: &'static str,
 }
 
 include!(concat!(env!("OUT_DIR"), "/presets.rs"));

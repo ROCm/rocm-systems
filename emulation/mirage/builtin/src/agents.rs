@@ -31,6 +31,27 @@ pub fn agent(name: &str) -> Option<AgentDef> {
         .map(|preset| from_preset(preset.agent))
 }
 
+#[must_use]
+pub fn source_config(name: &str) -> Option<serde_json::Value> {
+    PRESETS
+        .iter()
+        .find(|preset| preset.name.eq_ignore_ascii_case(name))
+        .and_then(|preset| serde_json::from_str(preset.config).ok())
+}
+
+#[must_use]
+pub fn source_config_for_agent(agent: &AgentDef) -> Option<serde_json::Value> {
+    let target = agent.vm.gpu.device.gfx_target_version;
+    PRESETS
+        .iter()
+        .find(|preset| {
+            serde_json::from_str::<AgentDef>(preset.agent).is_ok_and(|preset_agent| {
+                preset_agent.vm.gpu.device.gfx_target_version == target
+            })
+        })
+        .and_then(|preset| serde_json::from_str(preset.config).ok())
+}
+
 /// One builtin, parsed from the config `build.rs` embedded.
 ///
 /// The `expect` is the workspace's one production opt-out of
@@ -127,5 +148,34 @@ mod tests {
         assert_eq!(agent("MI350X"), agent("mi350x"));
         assert!(agent("mi350x").is_some());
         assert!(agent("no-such-gpu").is_none());
+    }
+
+    #[test]
+    fn source_configs_follow_agent_lookup() {
+        let agent = agent("GFX1251_SYNTHETIC").unwrap();
+        let by_name = source_config("gfx1251_synthetic").unwrap();
+        let by_agent = source_config_for_agent(&agent).unwrap();
+
+        assert_eq!(by_name, by_agent);
+        assert_eq!(by_name["vm"]["target"], "gfx1251");
+        assert!(source_config("no-such-gpu").is_none());
+        assert!(source_config_for_agent(&AgentDef::default()).is_none());
+    }
+
+    #[test]
+    fn source_configs_match_agents_with_omitted_fields() {
+        let mut config = source_config("mi350x").unwrap();
+        config["vm"]["gpu"]["device"]
+            .as_object_mut()
+            .unwrap()
+            .remove("mem_clk_max");
+        let agent: AgentDef = serde_json::from_value(serde_json::json!({
+            "vm": config["vm"],
+            "topology": config["topology"]
+        }))
+        .unwrap();
+
+        let source = source_config_for_agent(&agent).unwrap();
+        assert!(source["vm"]["gpu"]["device"].get("mem_clk_max").is_some());
     }
 }
