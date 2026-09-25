@@ -1393,3 +1393,22 @@ cell moves from orange to yellow pending reviewed fault qualification.
 first fault shard (16x16x64, eight expected clients), with an 1800 s inner
 deadline. Fault review and exact identity binding remain required; full clean
 sweep correctness is not being replaced by this smaller fault shard.
+
+### Norm qualifies at high after deadline correction
+
+`norm-cap-high-long-clean` passes baseline and instrumented correctness with
+complete coverage. All eight `norm-cap-high-long-fault` trials are admitted
+and reached, detect the fault at recorded high, and have complete analysis
+and healthy pre/post checks. Hook hashes match the clean run throughout.
+The 240 s deadline resolves the earlier interrupted batch; high is the lowest
+passing preset after default's 0/8. The Default cell is green at high.
+
+### Remaining tensor-DMA coverage audits complete
+
+The bounded `tdm-default-coverage-audit` runs for MXF4 TDM and mixed MXF8/F4
+TDM exit zero, passing 16 and six numerical rows respectively (one client
+each). Updated inventory reports 144 and 54 unsupported tensor-DMA accesses.
+Both have complete dynamic evidence but incomplete static analysis. Their
+Default cells now state the confirmed range-support limitation. The earlier
+full clean sweeps—six and three shards respectively—remain numerical evidence,
+not proof of complete detector coverage.
