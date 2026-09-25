@@ -13,11 +13,18 @@ six of eight admitted and reached trials must detect the injected fault. Green
 also requires a passing clean correctness run with matching controls, complete
 coverage evidence, and healthy GPU checks. “Lowest passing” means all smaller
 presets from `default` failed; “lowest verified” means smaller presets remain
-untested or unqualified. Yellow is pending, below the qualification bar, or outside the detector’s
-scope; red records an observed correctness or instrumentation failure. See [VALIDATION.md](VALIDATION.md)
+untested or unqualified. Existing cell ratings retain their recorded
+qualification evidence. See [VALIDATION.md](VALIDATION.md)
 for the procedure and qualification rules. The September 24
 [SuperCollider investigation](SUPERCOLLIDER_RDNA4_ANALYSIS.md) explains the
 historical color changes and audits the current clean controls.
+
+Shared [color scale](VALIDATION.md#status-colors): 🟩 qualified; 🟨 clean run
+established, but fault qualification is pending/below bar or the workload is
+outside detector scope; 🟧 clean qualification blocked by prerequisites,
+unsupported applicable operations, incomplete coverage/evidence, or a timeout;
+🟥 observed correctness or instrumentation failure. Empty/🩶 means unassessed
+for this execution target; simulator prerequisites alone do not qualify hardware.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |

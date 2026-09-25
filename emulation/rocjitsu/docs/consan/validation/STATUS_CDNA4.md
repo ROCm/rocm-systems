@@ -1,10 +1,17 @@
 # ConSan validation on CDNA4 (gfx950)
 
-Colors match [STATUS_RDNA4.md](STATUS_RDNA4.md): 🟩 qualified (matching clean
-pass, complete coverage, healthy GPU, fault detections ≥6/8); 🟨 pending, below
-bar, or out of scope; 🟥 correctness or instrumentation failure. Fault counts
-are detections. “Lowest passing” requires all lower presets to have failed.
+Fault counts are detections. Green requires a matching clean pass, complete
+applicable coverage, healthy GPU checks, and at least 6/8 admitted/reached fault
+detections. “Lowest passing” requires all lower presets from `default` to have
+failed. Existing cell ratings retain their recorded qualification evidence.
 [Procedure](VALIDATION.md) · [Evidence and repairs](CDNA4_DEFAULT_REPAIRS_20260924.md)
+
+Shared [color scale](VALIDATION.md#status-colors): 🟩 qualified; 🟨 clean run
+established, but fault qualification is pending/below bar or the workload is
+outside detector scope; 🟧 clean qualification blocked by prerequisites,
+unsupported applicable operations, incomplete coverage/evidence, or a timeout;
+🟥 observed correctness or instrumentation failure. Empty/🩶 means unassessed
+for this execution target; simulator prerequisites alone do not qualify hardware.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |

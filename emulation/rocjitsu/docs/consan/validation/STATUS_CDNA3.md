@@ -15,7 +15,12 @@ RocJITsu `configs/gfx942_cdna3_kmd.json`; simulator evidence does not promote a
 physical E2E cell. Refresh this ledger after relevant source, toolchain,
 workload, emulator, or runtime changes.
 
-Legend: 🩶 unseen or simulator-prerequisite-only · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
+Shared [color scale](VALIDATION.md#status-colors): 🟩 qualified; 🟨 clean run
+established, but fault qualification is pending/below bar or the workload is
+outside detector scope; 🟧 clean qualification blocked by prerequisites,
+unsupported applicable operations, incomplete coverage/evidence, or a timeout;
+🟥 observed correctness or instrumentation failure. Empty/🩶 means unassessed
+for this execution target; simulator prerequisites alone do not qualify hardware.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |

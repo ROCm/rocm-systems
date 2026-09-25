@@ -13,9 +13,8 @@ hip-moi ports can be added when implemented; corpus and Torch selections use
 existing target support.
 
 Qualification follows [RDNA4](STATUS_RDNA4.md) and [CDNA4](STATUS_CDNA4.md):
-🟩 matching clean correctness, complete applicable coverage, healthy emulator
-checks, and at least **6/8** fault detections; 🟨 pending, below bar, or outside
-scope; 🟥 correctness or instrumentation failure. Fractions count detections
+green requires matching clean correctness, complete applicable coverage, healthy
+emulator checks, and at least **6/8** fault detections. Fractions count detections
 among admitted and reached fault trials. Default cells name the lowest passing
 preset at or above `default`; SuperCollider cells name the tested controls.
 Emulator results do not qualify physical hardware or measure its performance.
@@ -23,6 +22,13 @@ Follow [VALIDATION.md](VALIDATION.md), beginning with allowlist discovery;
 record the prerequisite gap if matching native rocprofv3 profiling is unavailable.
 For the global-access scope limitation relevant to `pytorch-scatter-reduce`, see
 [SuperCollider for global memory](../SUPERCOLLIDER_GLOBAL_MEMORY.md).
+
+Shared [color scale](VALIDATION.md#status-colors): 🟩 qualified; 🟨 clean run
+established, but fault qualification is pending/below bar or the workload is
+outside detector scope; 🟧 clean qualification blocked by prerequisites,
+unsupported applicable operations, incomplete coverage/evidence, or a timeout;
+🟥 observed correctness or instrumentation failure. Empty/🩶 means unassessed
+for this execution target; simulator prerequisites alone do not qualify hardware.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |

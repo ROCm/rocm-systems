@@ -13,6 +13,39 @@ The target ledgers record qualification state for
 [CDNA5 / gfx1250](STATUS_CDNA5.md). A ledger is not a substitute for rerunning
 the gates after a relevant source, toolchain, workload, or runtime change.
 
+## Status colors
+
+Use the same four qualification colors for every architecture and execution
+target. A cell describes the named workload, engine, configuration, and scope;
+color changes require new evidence, not a change of legend.
+
+| Color | Meaning | Examples / next step |
+| --- | --- | --- |
+| 🟥 Red | Observed correctness or instrumentation failure. | Wrong clean output, unexpected race reports on a verified clean workload, a crash, invalid instrumentation, or failed device health. Diagnose and repair the failure. |
+| 🟧 Orange | Clean qualification is blocked, without an established correctness failure. | Missing execution prerequisites, explicit rejection of unsupported applicable instructions, incomplete coverage/report evidence, or timeout before clean qualification completes. Resolve the blocker and establish a complete clean run. |
+| 🟨 Yellow | Clean execution is established, but detector qualification remains pending, below the fault-detection bar, or outside the detector's scope. | Matching clean run passes but fault trials are still needed, fault admission/reach is not yet established, or detections are below 6/8—even 0/8. A numerically correct global-only workload outside LDS coverage also stays yellow. |
+| 🟩 Green | The named configuration satisfies the complete workload/profile contract. | Matching clean correctness, complete applicable coverage and report evidence, healthy execution, and at least 6 detections in 8 admitted/reached fault trials under the current campaign contract. |
+
+Empty cells or 🩶 are an **unassessed marker**, not a fifth qualification grade.
+Baseline-only evidence does not establish a clean instrumented run. Likewise,
+simulator-only prerequisites leave a physical qualification cell unassessed.
+Once an attempted qualification exposes a prerequisite or coverage blocker,
+record orange and name the blocker. A timeout confined to fault trials after a
+complete clean run is yellow; a timeout preventing that clean run is orange.
+Explicit unsupported-operation rejection is orange; a broken transform or a
+false report is red. Missing applicable coverage is orange; a demonstrated
+scope mismatch with passing numerical execution is yellow and must name the
+unchecked scope.
+
+This gives CDNA5 an incremental path from an identified blocker (orange), to a
+complete clean run (yellow), to detector qualification (green). Red takes
+precedence when a correctness failure is observed, even if other gates are
+blocked. Never promote a cell solely because one blocker disappeared.
+Existing RDNA4/CDNA4 clean passes with below-bar detections or scope limitations
+remain yellow; their greens keep their existing qualification. The old static
+80% site-support distinction is retired. Historical ledgers retain their dates
+and evidence limitations; this legend update does not revalidate them.
+
 ## First step for revalidation: generate and apply kernel allowlists
 
 Start every new external-workload revalidation with the rocprofv3-based

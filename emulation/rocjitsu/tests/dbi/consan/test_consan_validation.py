@@ -574,20 +574,16 @@ class ConSanValidationTest(unittest.TestCase):
             "gfx1250": "STATUS_CDNA5.md",
         }
         status_colors = ("🩶", "🟥", "🟧", "🟨", "🟩")
-        yellow_rule = (
-            "🟨 timeout-only blocker or at least 80% aggregate applicable-site "
-            "support"
-        )
 
         for target, filename in status_files.items():
             with self.subTest(target=target):
                 status = (status_root / filename).read_text()
                 self.assertEqual(status.count("| Set | Priority |"), 1)
                 self.assertEqual(status.count("| --- | ---: | --- | --- | --- |"), 1)
-                # Revalidated ledgers use the fault-detection qualification bar;
-                # other ledgers retain the historical support-based legend.
-                if target not in {"gfx1201", "gfx950", "gfx1250"}:
-                    self.assertIn(yellow_rule, status)
+                introduction = status.split("| Set |", 1)[0]
+                self.assertIn("VALIDATION.md#status-colors", introduction)
+                for color in ("🟥", "🟧", "🟨", "🟩"):
+                    self.assertIn(color, introduction)
                 rows = [
                     line
                     for line in status.splitlines()
