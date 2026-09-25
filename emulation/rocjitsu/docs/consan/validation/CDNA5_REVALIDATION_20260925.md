@@ -839,3 +839,10 @@ runner tests pass (`tensile-timeout-tests.log`), including all-shard propagation
 and rejection of invalid timeout values. SGEMM profiler discovery is separately
 retrying only its three unfinished shards under the shared memory cap, retaining
 new `bounded-retry-*` artifacts and a 3600 s client deadline.
+
+### torch.mode SuperCollider result
+
+`mode-cap-sleep15-{clean,fault}` completes clean correctness and eight
+admitted/reached fault trials with complete analysis and healthy probes.
+Sleep=15 detects 0/8 and all eight workload oracles pass. The next Default
+preset remains high; SuperCollider now has a completed measured cell.
