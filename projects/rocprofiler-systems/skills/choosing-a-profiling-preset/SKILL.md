@@ -1,0 +1,95 @@
+---
+name: choosing-a-profiling-preset
+description: Recommends which rocprofiler-systems runtime profiling preset (balanced, trace-gpu, trace-hpc, sys-trace, workload-trace, etc.) to pass to `rocprof-sys-run --preset=<name>` or `rocprof-sys-sample --preset=<name>` based on the user's workload and profiling goal, and returns the ready-to-run command. Use when the user asks "which preset should I use", describes a workload (GPU kernel, MPI, OpenMP, AI/ML training, production overview) and wants profiling guidance, or invokes `rocprof-sys-run`/`rocprof-sys-sample` without picking a preset. Do NOT use for CMake build presets (`cmake --preset debug|release|ci`) used to configure/compile rocprofiler-systems itself — that is a build-configuration concern, not a profiling-run concern.
+---
+
+# Choosing a Profiling Preset
+
+Recommends one of rocprofiler-systems' built-in runtime profiling presets for a
+described workload, and returns the exact command to run it.
+
+## Prerequisites
+
+None to make the recommendation — this skill only reasons over static preset
+metadata. Running the recommended command requires an installed or built
+`rocprof-sys-run` / `rocprof-sys-sample` binary.
+
+## Preset reference
+
+| Preset | Category | Use case |
+| --- | --- | --- |
+| `balanced` | general | Recommended default: moderate overhead, profiling+sampling(50Hz)+GPU metrics on, tracing off |
+| `profile-only` | general | Lowest overhead flat profile (production, minimal impact) |
+| `detailed` | general | Full trace+profile+system metrics, deep bottleneck analysis |
+| `trace-gpu` | gpu | GPU device activity + kernel dispatch tracing |
+| `trace-hw-counters` | gpu | GPU hardware counters (Occupancy, VALUUtilization) |
+| `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads (MPI+RCCL+rocPD, 2GB trace buffer) |
+| `trace-hpc` | hpc | MPI/OpenMP/Kokkos/RCCL + PAPI counters, compute-intensive HPC apps |
+| `trace-openmp` | hpc | OpenMP GPU target-offload apps (kernel/memcpy trace, HSA API excluded) |
+| `profile-mpi` | hpc | MPI communication latency only, no GPU metrics or tracing |
+| `sys-trace` | tracing | Full system API trace (HIP + HSA + ROCTx + RCCL) for debugging runtime-layer interactions |
+| `runtime-trace` | tracing | Runtime API trace only (excludes HSA/compiler-API noise) |
+
+## How to choose
+
+Resolve these in order; the first question that narrows to a single preset wins.
+
+1. **Is this a debugging/troubleshooting question about API interactions**
+   (e.g. "why is my HIP call behaving oddly", "what's HSA doing under the
+   hood")? → `sys-trace` (full API visibility) or `runtime-trace` (if HSA/
+   compiler-level noise should be excluded).
+
+2. **Does the workload have a dominant parallel runtime?**
+   - MPI communication latency is the *only* concern, no GPU/tracing needed →
+     `profile-mpi`.
+   - OpenMP GPU target-offload kernels → `trace-openmp`.
+   - Mixed MPI/OpenMP/Kokkos/RCCL, compute-intensive, and hardware counters are
+     wanted → `trace-hpc`.
+   - AI/ML training or a long-running GPU-accelerated HPC job needing MPI+RCCL
+     and durable trace capacity → `workload-trace`.
+
+3. **Is the focus purely the GPU device itself** (not a parallel runtime)?
+   - Kernel dispatch / device activity tracing → `trace-gpu`.
+   - Specific hardware counters (occupancy, VALU utilization) → `trace-hw-counters`.
+
+4. **Otherwise, general-purpose application profiling** — pick by overhead
+   tolerance and depth:
+   - Lowest overhead, quick flat profile (e.g. production) → `profile-only`.
+   - Balanced tracing+sampling+GPU metrics, good default → `balanced`.
+   - Maximum depth, willing to accept high overhead → `detailed`.
+
+If the user's need doesn't fit neatly, default to `balanced` and mention that
+domain flags can extend it (see below).
+
+## Output
+
+Return the exact invocation, e.g.:
+
+```bash
+rocprof-sys-run --preset=<name> -- ./myapp
+# or, for sampling-based profiling:
+rocprof-sys-sample --preset=<name> -- ./myapp
+```
+
+Mention, if relevant:
+
+- Domain flags (`--gpu`, `--rocm`, `--cpu`, `--parallel`) can layer on top of
+  any preset to add/override specific metrics, e.g.
+  `rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp`.
+- `--explain=<name>` and `--list-presets` let the user self-serve verify the
+  choice before running.
+- `--export-config=<file>.json` freezes the resolved preset+overrides into a
+  reusable JSON config — this is the supported way to customize a preset, not
+  hand-editing the shipped JSON files.
+- Full field-level detail lives in
+  `docs/how-to/using-preset-profiles.rst` and
+  `source/bin/common/presets/schema.json` — point the user there for anything
+  beyond preset selection.
+
+## Common Mistakes
+
+| Mistake | Fix |
+| --- | --- |
+| Confusing this with the CMake `--preset debug\|release\|ci` used to *build* rocprofiler-systems | Build presets configure compilation; profiling presets configure a profiling *run*. This skill only covers the latter. |
+| Assuming a preset must be customized by editing its JSON file in `source/bin/common/presets/` | Use `--export-config` to produce a customizable copy instead. |
+| Picking `detailed` by default for "just get me some data" | Default to `balanced` unless the user explicitly wants maximum depth and can tolerate higher overhead. |
