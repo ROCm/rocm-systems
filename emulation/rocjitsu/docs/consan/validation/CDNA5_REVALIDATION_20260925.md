@@ -909,3 +909,23 @@ Next review must establish the descriptor regions and consumer-wave relationship
 then determine whether a meaningful grouped publication fault can be observed
 through the supported access paths. This is not yet a scope exclusion or a
 qualified fault result. The table retains clean-pass/fault-pending status.
+
+### Bounded SGEMM smoke publication fault
+
+Reviewed fresh ELF `10d93e6ef804f677` against `sgemm-smoke-pristine.asm`.
+The MT16x32x64 kernel has 64 threads. Its first B store at VMA 0x40e4
+writes `4096 + 16*tid + 64*((16*tid)>>8)`; thread 4 writes offset 4160.
+The first B read at 0x41f0 by thread 32 also addresses 4160, establishing a
+cross-wave handoff. The selected split publication pair is .text+0x17d4/0x17d8
+(VMA 0x41d4/0x41d8), after prefetch reconvergence. Producer retirement and all
+other barriers remain intact. The maintained 33x33x65 problem with DepthU64
+and fixed StreamK grid4 includes full reduction iterations reaching this edge.
+
+Added `barrier-drop-tile-publication` with eight trials and a six-detection
+minimum for both modes before observing outcomes. The existing catalog admission
+test covers the new spec; all 209 validation runner tests pass in
+`sgemm-smoke-spec-tests.log`. Independent address arithmetic confirms 4160 for
+both the selected producer and consumer. A matching baseline/Default clean plus
+Default fault campaign runs in `sgemm-smoke-default-{clean,fault}`, using an
+explicit 180 s inner client deadline and 240 s outer deadline. SuperCollider
+qualification remains deferred under Default-first steering.
