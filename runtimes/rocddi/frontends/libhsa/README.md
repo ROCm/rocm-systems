@@ -34,11 +34,13 @@ retaining their public symbols. The product name comes from qualified KFD
 topology text, with a generic AMD name when that text is not a product name.
 ASIC family comes from the bound DRM render node via rocddi's raw ioctl path,
 with the topology value as a fallback. The HSA library does not require libdrm
-at load time.
+at load time. CPU identity, memory capacity, and cache records come from
+rocddi's Linux host facts; this frontend maps them to HSA agents and caches.
 
-The logging ABI accepts a caller-owned C `FILE*`. Logging to that stream uses
-the small `fwrite`/`fflush` interop in the HSA frontend; Linux descriptor calls
-for memory and loader operations go through the rocddi provider.
+The logging ABI accepts a caller-owned C `FILE*`, but this frontend supports
+only a null stream, which writes to stderr through Rust's standard library.
+A non-null stream returns `HSA_STATUS_ERROR_NOT_SUPPORTED`. Linux descriptor
+calls for memory and loader operations go through the rocddi provider.
 
 ## Build and test
 

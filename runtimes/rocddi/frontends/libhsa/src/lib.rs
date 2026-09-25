@@ -1384,12 +1384,14 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if !file.is_null() {
+            return NOT_SUPPORTED;
+        }
         // SAFETY: The public ABI requires flags to address an eight-byte array
         // that remains readable for the duration of this call.
         runtime
             .log_flags
             .copy_from_slice(unsafe { std::slice::from_raw_parts(flags, 8) });
-        runtime.log_file = file as usize;
         SUCCESS
     })
 }

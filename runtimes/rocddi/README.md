@@ -39,8 +39,8 @@ The core source is organized by ownership domain:
 - `session.rs` owns the root session lifetime and cross-device coordination;
 - `topology/` owns passive endpoint metadata. `EndpointKind` separates CPU,
   GPU, NPU, and future endpoint kinds; PCI attachment is optional, while
-  `topology::platform::linux` carries KFD and DRM identities needed by Linux
-  compatibility frontends;
+  `topology::platform::linux` carries KFD and DRM identities and procfs/sysfs
+  host facts needed by Linux compatibility frontends;
 - `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
   and kind-neutral introspection. `gpu/` is the checked GPU capability view and
   exposes GPU queues and profiling, with KFD events below `gpu::event::linux`;

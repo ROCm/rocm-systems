@@ -7,15 +7,13 @@
 //! lock. Final shutdown removes public reachability before releasing workers
 //! and native resources.
 //!
-//! Host discovery currently consumes Linux procfs and sysfs information. GPU
-//! discovery and native queries go through the rocddi provider.
+//! Host and GPU discovery go through the rocddi provider.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::{c_int, c_void};
+use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -25,6 +23,7 @@ use rocddi::device::Device;
 use rocddi::gpu::event::linux::{GpuMemoryFault, SignalEvent, poll_memory_fault};
 use rocddi::memory::Allocation;
 use rocddi::session::{Session, SessionLifetime};
+use rocddi::topology::platform::linux::host::{self as linux_host, CpuCacheKind, CpuInfo};
 use rocddi::topology::{Endpoint, GpuInfo};
 
 use crate::ffi::*;
@@ -33,147 +32,6 @@ use crate::memory::{LockedMemory, Memory, VmemHandle, VmemMapping, VmemReservati
 use crate::pc_sampling::PcSamplingSession;
 use crate::queue::{CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SoftQueue};
 use crate::signal::{AsyncDispatcher, ImportedIpcSignal, OwnedIpcSignal, SignalSlab};
-
-fn parse_host_memory_bytes(contents: &str) -> Option<usize> {
-    let kilobytes = contents.lines().find_map(|line| {
-        let mut fields = line.split_ascii_whitespace();
-        (fields.next()? == "MemTotal:")
-            .then(|| fields.next()?.parse::<u64>().ok())
-            .flatten()
-    })?;
-    usize::try_from(kilobytes.checked_mul(1024)?).ok()
-}
-
-fn host_memory_bytes() -> Result<usize, Status> {
-    std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|contents| parse_host_memory_bytes(&contents))
-        .filter(|bytes| *bytes != 0)
-        .ok_or(ERROR)
-}
-
-/// Host identity used to materialize the HSA CPU agent.
-#[derive(Debug, Eq, PartialEq)]
-struct HostInfo {
-    name: String,
-    compute_units: u32,
-}
-
-fn parse_host_info(contents: &str) -> Option<HostInfo> {
-    let mut name = None;
-    let mut compute_units = 0_usize;
-    for line in contents.lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        match key.trim() {
-            "processor" if value.trim().parse::<u32>().is_ok() => {
-                compute_units = compute_units.checked_add(1)?;
-            }
-            "model name" if name.is_none() && !value.trim().is_empty() => {
-                name = Some(value.trim().to_owned());
-            }
-            _ => (),
-        }
-    }
-    Some(HostInfo {
-        name: name?,
-        compute_units: u32::try_from(compute_units)
-            .ok()
-            .filter(|count| *count != 0)?,
-    })
-}
-
-fn host_info() -> HostInfo {
-    std::fs::read_to_string("/proc/cpuinfo")
-        .ok()
-        .and_then(|contents| parse_host_info(&contents))
-        .unwrap_or_else(|| HostInfo {
-            name: "CPU".to_owned(),
-            compute_units: 0,
-        })
-}
-
-fn numeric_directories(root: &Path, prefix: &str) -> Vec<(u32, std::path::PathBuf)> {
-    let mut entries = std::fs::read_dir(root)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name();
-            let name = name.to_str()?;
-            let ordinal = name.strip_prefix(prefix)?.parse().ok()?;
-            Some((ordinal, entry.path()))
-        })
-        .collect::<Vec<_>>();
-    entries.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-    entries
-}
-
-fn first_cpu(contents: &str) -> Option<u32> {
-    let contents = contents.trim_start();
-    let length = contents.bytes().take_while(u8::is_ascii_digit).count();
-    contents.get(..length)?.parse().ok()
-}
-
-fn parse_cache_size(contents: &str) -> Option<u32> {
-    let contents = contents.trim();
-    let length = contents.bytes().take_while(u8::is_ascii_digit).count();
-    let value = contents.get(..length)?.parse::<u32>().ok()?;
-    let multiplier = match contents.get(length..)?.trim() {
-        "" => 1,
-        "K" => 1024,
-        "M" => 1024 * 1024,
-        "G" => 1024 * 1024 * 1024,
-        _ => return None,
-    };
-    value.checked_mul(multiplier)
-}
-
-fn discover_host_caches(root: &Path, agent: HsaAgent, name: &[u8]) -> Vec<Cache> {
-    let mut caches = Vec::new();
-    for (cpu, cpu_path) in numeric_directories(root, "cpu") {
-        for (_, cache_path) in numeric_directories(&cpu_path.join("cache"), "index") {
-            let shared = std::fs::read_to_string(cache_path.join("shared_cpu_list"))
-                .ok()
-                .and_then(|contents| first_cpu(&contents));
-            if shared != Some(cpu) {
-                continue;
-            }
-            if std::fs::read_to_string(cache_path.join("type"))
-                .ok()
-                .is_none_or(|kind| kind.trim() != "Data")
-            {
-                continue;
-            }
-            let Some(level) = std::fs::read_to_string(cache_path.join("level"))
-                .ok()
-                .and_then(|value| value.trim().parse::<u32>().ok())
-            else {
-                continue;
-            };
-            let Some(size) = std::fs::read_to_string(cache_path.join("size"))
-                .ok()
-                .and_then(|value| parse_cache_size(&value))
-            else {
-                continue;
-            };
-            caches.push(Cache::new(agent, name, level, size));
-        }
-    }
-    caches
-}
-
-fn host_caches(agent: HsaAgent, name: &[u8]) -> Vec<Cache> {
-    let numa = Path::new("/sys/devices/system/node/node0");
-    let root = if numa.is_dir() {
-        numa
-    } else {
-        Path::new("/sys/devices/system/cpu")
-    };
-    discover_host_caches(root, agent, name)
-}
 
 fn gpu_agent_name(gpu: &GpuInfo) -> String {
     format!("gfx{}{}{}", gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
@@ -327,11 +185,6 @@ fn cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
     sizes
 }
 
-unsafe extern "C" {
-    fn fwrite(buffer: *const c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
-    fn fflush(stream: *mut c_void) -> c_int;
-}
-
 /// Activated GPU and the immutable compatibility facts derived at startup.
 pub(crate) struct Gpu {
     pub(crate) endpoint: Endpoint,
@@ -384,7 +237,6 @@ impl Cache {
 pub(crate) struct Runtime {
     pub(crate) references: u32,
     pub(crate) log_flags: [u8; 8],
-    pub(crate) log_file: usize,
     pub(crate) next_handle: u64,
     pub(crate) next_queue_id: u64,
     pub(crate) code_objects: HashMap<u64, CodeObject>,
@@ -469,8 +321,11 @@ impl Runtime {
     }
 
     pub(crate) fn create() -> Result<Self, Status> {
-        let host_memory_bytes = host_memory_bytes()?;
-        let host = host_info();
+        let host_memory_bytes = linux_host::memory_bytes().ok_or(ERROR)?;
+        let host = linux_host::cpu_info().unwrap_or_else(|| CpuInfo {
+            name: "CPU".to_owned(),
+            compute_units: 0,
+        });
         let force_fine_grain_pcie =
             std::env::var("HSA_FORCE_FINE_GRAIN_PCIE").is_ok_and(|value| value == "1");
         let session = Session::new(SessionLifetime::Process).map_err(map_error)?;
@@ -488,7 +343,22 @@ impl Runtime {
         }
         let full_profile =
             full_profile_platform(endpoints.iter().map(|endpoint| endpoint.local_memory_bytes));
-        let mut caches = host_caches(HsaAgent { handle: CPU_AGENT }, host.name.as_bytes());
+        let cpu_agent = HsaAgent { handle: CPU_AGENT };
+        let mut caches = linux_host::caches_for_numa_node(0)
+            .unwrap_or_else(linux_host::caches)
+            .into_iter()
+            .filter(|cache| {
+                cache.kind == CpuCacheKind::Data && cache.first_shared_cpu == Some(cache.cpu)
+            })
+            .map(|cache| {
+                Cache::new(
+                    cpu_agent,
+                    host.name.as_bytes(),
+                    cache.level,
+                    cache.size_bytes,
+                )
+            })
+            .collect::<Vec<_>>();
         let mut gpus = Vec::with_capacity(endpoints.len());
         for endpoint in endpoints {
             let Some(info) = endpoint.gpu().copied() else {
@@ -537,7 +407,6 @@ impl Runtime {
         Ok(Self {
             references: 1,
             log_flags: [0; 8],
-            log_file: 0,
             next_handle: 0x4853_4101_0000_0000,
             next_queue_id: 0,
             code_objects: HashMap::new(),
@@ -711,23 +580,9 @@ impl Runtime {
             return;
         }
         line.push('\n');
-        if self.log_file == 0 {
-            let mut stream = std::io::stderr().lock();
-            let _ = stream.write_all(line.as_bytes());
-            let _ = stream.flush();
-        } else {
-            // SAFETY: hsa_amd_enable_logging requires a live C FILE pointer.
-            // libc serializes writes to a shared stream.
-            unsafe {
-                fwrite(
-                    line.as_ptr().cast(),
-                    1,
-                    line.len(),
-                    self.log_file as *mut c_void,
-                );
-                fflush(self.log_file as *mut c_void);
-            }
-        }
+        let mut stream = std::io::stderr().lock();
+        let _ = stream.write_all(line.as_bytes());
+        let _ = stream.flush();
     }
 
     pub(crate) fn stop(mut self) -> Status {
@@ -999,8 +854,6 @@ mod tests {
     use rocddi::gpu::profiling::ClockCounters;
     use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 
-    static NEXT_FIXTURE: AtomicU32 = AtomicU32::new(0);
-
     #[test]
     fn deferred_cleanup_joins_the_callback_worker_after_exit() {
         struct Owner {
@@ -1067,68 +920,6 @@ mod tests {
             .event_type
             .store(event.event_type, AtomicOrdering::Relaxed);
         ERROR
-    }
-
-    struct Fixture(std::path::PathBuf);
-
-    impl Fixture {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "libhsa-host-cache-{}-{}",
-                std::process::id(),
-                NEXT_FIXTURE.fetch_add(1, AtomicOrdering::Relaxed)
-            ));
-            std::fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-
-        fn cache(&self, cpu: u32, index: u32, shared: &str, kind: &str, level: u32, size: &str) {
-            let path = self.0.join(format!("cpu{cpu}/cache/index{index}"));
-            std::fs::create_dir_all(&path).unwrap();
-            std::fs::write(path.join("shared_cpu_list"), shared).unwrap();
-            std::fs::write(path.join("type"), kind).unwrap();
-            std::fs::write(path.join("level"), level.to_string()).unwrap();
-            std::fs::write(path.join("size"), size).unwrap();
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn host_cpuinfo_matches_rocr_agent_identity() {
-        assert_eq!(
-            parse_host_info(
-                "processor : 0\nmodel name : AMD Example CPU\n\
-                 processor : 1\nmodel name : AMD Example CPU\n"
-            ),
-            Some(HostInfo {
-                name: "AMD Example CPU".to_owned(),
-                compute_units: 2,
-            })
-        );
-        assert_eq!(parse_host_info("processor : 0\n"), None);
-        assert_eq!(parse_host_info("model name : AMD Example CPU\n"), None);
-    }
-
-    #[test]
-    fn host_cache_discovery_keeps_one_copy_of_each_data_cache() {
-        let fixture = Fixture::new();
-        fixture.cache(0, 0, "0-1\n", "Data\n", 1, "48K\n");
-        fixture.cache(0, 1, "0-1\n", "Instruction\n", 1, "32K\n");
-        fixture.cache(0, 2, "0-3\n", "Unified\n", 2, "1M\n");
-        fixture.cache(1, 0, "0-1\n", "Data\n", 1, "48K\n");
-        let cpu_agent = HsaAgent { handle: CPU_AGENT };
-        let caches = discover_host_caches(&fixture.0, cpu_agent, b"AMD Example CPU");
-        assert_eq!(caches.len(), 1);
-        assert_eq!(caches[0].agent.handle, CPU_AGENT);
-        assert_eq!(&*caches[0].name, b"AMD Example CPU L1\0");
-        assert_eq!(caches[0].level, 1);
-        assert_eq!(caches[0].size, 48 * 1024);
-        assert_eq!(cache_sizes(&caches, cpu_agent), [48 * 1024, 0, 0, 0]);
     }
 
     #[test]
@@ -1303,18 +1094,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    #[test]
-    fn linux_meminfo_yields_the_rocr_system_pool_capacity() {
-        assert_eq!(
-            parse_host_memory_bytes(
-                "MemFree:          1024 kB\nMemTotal:       263219812 kB\nMemAvailable:   2048 kB\n"
-            ),
-            Some(263_219_812 * 1024)
-        );
-        assert_eq!(parse_host_memory_bytes("MemFree: 1024 kB\n"), None);
-        assert_eq!(parse_host_memory_bytes("MemTotal: invalid kB\n"), None);
     }
 
     #[test]

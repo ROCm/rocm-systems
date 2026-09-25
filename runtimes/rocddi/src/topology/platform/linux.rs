@@ -2,6 +2,9 @@
 
 use crate::topology::Endpoint;
 
+/// Linux host facts obtained from procfs and sysfs.
+pub mod host;
+
 /// Linux-native identities retained for KFD and DRM interoperability.
 ///
 /// These values are not stable rocddi endpoint identities. KFD identifiers are
