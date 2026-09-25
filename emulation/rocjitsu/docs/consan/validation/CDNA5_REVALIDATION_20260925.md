@@ -889,3 +889,23 @@ overwrite and uses fresh artifact roots, queued after the existing run ends.
 The TP1 longer-deadline retry was rejected because its artifact directory already
 existed; `tp1-cap-high-long-retry.py` now uses fresh roots. These errors do not
 establish a detector result at the intended preset or deadline.
+
+### Tensile MXFP8 explicit: producer-side review in progress
+
+The fresh inventory is accepted for `tensile-sk-mxf8gemm-explicit` and reports
+32 synchronization sites in ELF `377995ce40b4b1ea`. Disassembly saved as
+`mxf8-explicit-pristine.asm` shows tensor-DMA producers, ordinary DS loads,
+and no ordinary DS stores or atomic updates. The first tensor transfers at
+VMA 0x4398/0x43a4 precede `s_wait_tensorcnt 0`, then two split barrier pairs
+at 0x4424/0x4428 and 0x443c/0x4440 before the loads at 0x4444 onward.
+Dropping only the first pair would leave a second publication barrier, so it
+is not an adequate fault for this edge.
+
+Do not infer tensor-DMA producer coverage from the successful ordinary-access
+coverage counters. The ConSan patch implementation currently has no explicit
+tensor-load handling; its direct-to-LDS lowering describes lane-addressed M0
+and explicit VGPR-address forms, distinct from these scalar tensor descriptors.
+Next review must establish the descriptor regions and consumer-wave relationship,
+then determine whether a meaningful grouped publication fault can be observed
+through the supported access paths. This is not yet a scope exclusion or a
+qualified fault result. The table retains clean-pass/fault-pending status.
