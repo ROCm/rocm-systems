@@ -5,6 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
+
 using namespace rocprofsys::utility::string;
 
 TEST(to_lower, basic_check) { EXPECT_EQ(to_lower("ABCD"), "abcd"); }
@@ -127,4 +130,29 @@ TEST(strip_rocprofsys_prefix, strips_prefix_case_insensitively)
 TEST(strip_rocprofsys_prefix, no_prefix_is_only_lowercased)
 {
     EXPECT_EQ(strip_rocprofsys_prefix("SAMPLING_FREQ"), "sampling_freq");
+}
+
+TEST(to_integral, parses_whole_string) { EXPECT_EQ(to_integral<int>("1234"), 1234); }
+
+TEST(to_integral, negative_value_for_signed_type)
+{
+    EXPECT_EQ(to_integral<int>("-7"), -7);
+}
+
+TEST(to_integral, rejects_empty_and_partial_input)
+{
+    for(const auto* text : { "", "12abc", "abc", " 12", "12 ", "1.5" })
+    {
+        EXPECT_FALSE(to_integral<int>(text).has_value()) << "text: '" << text << "'";
+    }
+}
+
+TEST(to_integral, rejects_negative_value_for_unsigned_type)
+{
+    EXPECT_FALSE(to_integral<std::size_t>("-1").has_value());
+}
+
+TEST(to_integral, rejects_out_of_range_value)
+{
+    EXPECT_FALSE(to_integral<std::int8_t>("128").has_value());
 }

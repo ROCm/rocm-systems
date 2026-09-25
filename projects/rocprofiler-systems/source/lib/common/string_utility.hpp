@@ -8,6 +8,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -98,6 +99,24 @@ equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept
     return std::ranges::equal(lhs, rhs, [](char left, char right) {
         return std::tolower(left) == std::tolower(right);
     });
+}
+
+/// @brief Parse a string into an integral value. The whole of @p value must be a
+///        number representable by @p IntegralT; no whitespace is skipped.
+/// @param value The string to parse.
+/// @return The parsed value, or std::nullopt on empty, partial, or out-of-range input.
+template <typename IntegralT>
+[[nodiscard]] std::optional<IntegralT>
+to_integral(std::string_view value)
+{
+    IntegralT   parsed{};
+    const auto* last     = value.data() + value.size();
+    const auto [ptr, ec] = std::from_chars(value.data(), last, parsed);
+    if(ec != std::errc{} || ptr != last)
+    {
+        return std::nullopt;
+    }
+    return parsed;
 }
 
 /// @brief Parse a string into a boolean.
