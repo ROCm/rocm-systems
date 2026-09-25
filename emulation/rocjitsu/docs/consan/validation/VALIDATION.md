@@ -116,6 +116,14 @@ Run a matching clean comparator and precommit fault expectations for a changed
 preset. Label the preset explicitly in the ledger; a denser configuration's
 success cannot qualify the standard profile or erase its detection misses.
 
+For a Default report-capacity investigation, set
+`CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE` to a positive byte cap, up to
+268435456 (256 MiB). The runner forwards it as `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE`
+to both clean and fault children, and records it in their environments. The hook
+still validates the requested cap and allocates only the complete report's
+required bytes. Require matching clean/fault settings and label any raised cap
+in the status cell. Baselines and SuperCollider are unaffected.
+
 For a Default watchpoint-capacity investigation, set
 `CONSAN_VALIDATION_WATCHPOINT_BANKS` to the hook bank-count override (unsigned
 32-bit integer; zero retains automatic sizing). The runner applies it to both

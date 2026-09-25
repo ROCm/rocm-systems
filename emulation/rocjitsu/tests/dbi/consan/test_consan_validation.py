@@ -6696,6 +6696,29 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
                 validation_commands._clean_environment(
                     "default", workload, root / "hook.so", "gfx1201", root)
 
+    def test_report_cap_applies_to_default_clean_and_fault_only(self):
+        with temporary_root() as root, mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE": "268435456",
+            "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE": "1",
+        }, clear=True):
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            clean = validation_commands._clean_environment(
+                "default", workload, root / "hook.so", "gfx1250", root)
+            fault = validation_faults._fault_trial_environment(
+                "default", workload, root / "hook.so", "gfx1250",
+                {"environment": {}}, {}, {}, root)
+            for environment in (clean, fault):
+                self.assertEqual(environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"], "268435456")
+            for profile in (None, "supercollider"):
+                environment = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1250", root)
+                self.assertNotIn("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", environment)
+            for value in ("0", "-1", "268435457", "typo", ""):
+                os.environ["CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE"] = value
+                with self.assertRaises(validation.ValidationError):
+                    validation_commands._clean_environment(
+                        "default", workload, root / "hook.so", "gfx1250", root)
+
 
 class SuperColliderDelayEnvironmentTest(unittest.TestCase):
     def test_ignored_delay_name_cannot_silently_create_a_matrix(self):
