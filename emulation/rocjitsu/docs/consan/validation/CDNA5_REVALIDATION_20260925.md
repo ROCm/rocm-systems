@@ -425,3 +425,8 @@ Default was 1/8, making high the lowest passing preset at or above default.
 Stream-K finishes 0/8 at Default and SuperCollider sleep=15, with matching
 accepted clean, complete analysis and healthy admitted/reached trials
 (`streamk-lifetime-{default,sleep15}-*`). High Default calibration follows.
+
+Stream-K Default qualifies at high with 8/8 detections, matching accepted
+clean, complete analysis and healthy admitted/reached trials
+(`streamk-lifetime-high-*`). Default was 0/8. The release-weakening fault remains
+observable with the acquire edge retained.
