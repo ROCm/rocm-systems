@@ -121,6 +121,28 @@ it would for a non-replayed one, without necessarily knowing why. Whether the de
 instead collapse to one row per dispatch under some defined rule, and leave the per-pass detail to a
 separate view, is a question about what the schema promises its consumers.
 
+**Summaries count passes, not application calls.** `top_kernels`, `top`, and `rocpd summary`
+aggregate every `rocpd_kernel_dispatch` row, so for a replayed run a kernel's call count and total
+duration include every pass. That matches rocprofv3's own `--stats` and kernel trace, which already
+emit one record per pass, and it is what the GPU executed, which is why `busy` still reports an
+honest utilization. It is not what the application called. A tool that ranks kernels from a replayed
+run should count application dispatches instead. kerncap's profile step, for example, ranks kernels
+by total duration to pick one to capture. The distortion is uneven when a kernel filter limits replay
+to some kernels, since those count once per pass and the rest count once:
+
+```sql
+SELECT S.display_name, COUNT(*) AS calls, SUM(K.end - K.start) AS total_ns
+FROM rocpd_kernel_dispatch K
+JOIN rocpd_info_kernel_symbol S ON S.id = K.kernel_id AND S.guid = K.guid
+WHERE K.replay_pass IS NULL OR K.replay_pass = 0
+GROUP BY S.display_name
+ORDER BY total_ns DESC;
+```
+
+Before 3.0.5 the later passes were dropped, so rocpd summaries counted application dispatches by
+accident. Whether the summaries should do so by default, and whether rocprofv3's `--stats` should
+follow, belongs to the same product decision as the view above.
+
 **Coverage still runs against the schema rather than against hardware.** The tests here build the
 shipped SQL in SQLite and drive it with constructed rows, which is enough to prove the grouping
 behavior and the backward compatibility claim without a GPU. What they do not prove is that a real
