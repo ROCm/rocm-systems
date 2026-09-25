@@ -137,8 +137,8 @@ namespace RcclUnitTesting
     RunSingleProcMemRegTest(config);
   }
 
-  TEST(Broadcast, SingleProcMemRegDisabledSmoke)
+  TEST(Broadcast, SingleProcMemRegDisabled)
   {
-    RunSingleProcMemRegDisabledSmoke(ncclCollBroadcast, ncclUint32, true);
+    RunSingleProcMemRegDisabledTest(ncclCollBroadcast, ncclUint32, true);
   }
 }

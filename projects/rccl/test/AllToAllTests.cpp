@@ -144,8 +144,8 @@ namespace RcclUnitTesting
     RunSingleProcMemRegTest(config);
   }
 
-  TEST(AlltoAll, SingleProcMemRegDisabledSmoke)
+  TEST(AlltoAll, SingleProcMemRegDisabled)
   {
-    RunSingleProcMemRegDisabledSmoke(ncclCollAlltoAll, ncclUint32, false);
+    RunSingleProcMemRegDisabledTest(ncclCollAlltoAll, ncclUint32, false);
   }
 }

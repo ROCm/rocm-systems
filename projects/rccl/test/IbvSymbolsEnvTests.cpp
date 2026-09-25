@@ -17,6 +17,7 @@
 #include <fstream>
 #include <string>
 
+#include "ScopedEnvVar.hpp"
 #include "ibvsymbols.h"
 
 // buildIbvSymbols() is compiled straight into this test target for non-Debug
@@ -43,29 +44,6 @@ namespace RcclUnitTesting
   {
     constexpr const char* kEnvVar      = "NCCL_IBVERBS_LIB";
     constexpr const char* kAliasEnvVar = "NCCL_LIBIBVERBS_SO";
-
-    // Restores `name`'s pre-test value on scope exit so cases do not
-    // contaminate one another (tests share a process).
-    class ScopedEnv
-    {
-    public:
-      explicit ScopedEnv(const char* name) : name_(name), had_(false)
-      {
-        const char* v = std::getenv(name_);
-        if (v) { had_ = true; saved_ = v; }
-      }
-      void set(const char* value) { setenv(name_, value, 1); }
-      void unset() { unsetenv(name_); }
-      ~ScopedEnv()
-      {
-        if (had_) setenv(name_, saved_.c_str(), 1);
-        else      unsetenv(name_);
-      }
-    private:
-      const char* name_;
-      bool        had_;
-      std::string saved_;
-    };
 
     // Resolves the absolute path of the loadable libibverbs on this host, or
     // an empty string if neither soname can be opened.
@@ -139,8 +117,7 @@ namespace RcclUnitTesting
     if (!LibibverbsAvailable())
       GTEST_SKIP() << "libibverbs not installed on this host";
 
-    ScopedEnv env(kEnvVar);
-    env.unset();
+    ScopedEnvVar env(kEnvVar, nullptr);
 
     ncclIbvSymbols symbols = {};
     ASSERT_EQ(buildIbvSymbols(&symbols), ncclSuccess);
@@ -161,8 +138,7 @@ namespace RcclUnitTesting
     if (copyPath.empty())
       GTEST_SKIP() << "could not create a temp copy of libibverbs";
 
-    ScopedEnv env(kEnvVar);
-    env.set(copyPath.c_str());
+    ScopedEnvVar env(kEnvVar, copyPath.c_str());
 
     ncclIbvSymbols symbols = {};
     ncclResult_t result = buildIbvSymbols(&symbols);
@@ -181,8 +157,7 @@ namespace RcclUnitTesting
     if (!LibibverbsAvailable())
       GTEST_SKIP() << "libibverbs not installed on this host";
 
-    ScopedEnv env(kEnvVar);
-    env.set("/nonexistent/path/libibverbs.so");
+    ScopedEnvVar env(kEnvVar, "/nonexistent/path/libibverbs.so");
 
     ncclIbvSymbols symbols = {};
     ASSERT_EQ(buildIbvSymbols(&symbols), ncclSuccess);
@@ -201,10 +176,8 @@ namespace RcclUnitTesting
     if (copyPath.empty())
       GTEST_SKIP() << "could not create a temp copy of libibverbs";
 
-    ScopedEnv primary(kEnvVar);
-    primary.unset();
-    ScopedEnv alias(kAliasEnvVar);
-    alias.set(copyPath.c_str());
+    ScopedEnvVar primary(kEnvVar, nullptr);
+    ScopedEnvVar alias(kAliasEnvVar, copyPath.c_str());
 
     ncclIbvSymbols symbols = {};
     ncclResult_t result = buildIbvSymbols(&symbols);
@@ -233,10 +206,8 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "could not create temp copies of libibverbs";
     }
 
-    ScopedEnv primary(kEnvVar);
-    primary.set(primaryCopy.c_str());
-    ScopedEnv alias(kAliasEnvVar);
-    alias.set(aliasCopy.c_str());
+    ScopedEnvVar primary(kEnvVar, primaryCopy.c_str());
+    ScopedEnvVar alias(kAliasEnvVar, aliasCopy.c_str());
 
     ncclIbvSymbols symbols = {};
     ncclResult_t result = buildIbvSymbols(&symbols);

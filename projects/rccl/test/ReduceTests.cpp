@@ -138,8 +138,8 @@ namespace RcclUnitTesting
     RunSingleProcMemRegTest(config);
   }
 
-  TEST(Reduce, SingleProcMemRegDisabledSmoke)
+  TEST(Reduce, SingleProcMemRegDisabled)
   {
-    RunSingleProcMemRegDisabledSmoke(ncclCollReduce, ncclFloat32, true);
+    RunSingleProcMemRegDisabledTest(ncclCollReduce, ncclFloat32, true, {1});
   }
 }

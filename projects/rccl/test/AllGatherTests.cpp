@@ -138,9 +138,9 @@ namespace RcclUnitTesting
     RunSingleProcMemRegTest(config);
   }
 
-  TEST(AllGather, SingleProcMemRegDisabledSmoke)
+  TEST(AllGather, SingleProcMemRegDisabled)
   {
-    RunSingleProcMemRegDisabledSmoke(ncclCollAllGather, ncclUint32, true);
+    RunSingleProcMemRegDisabledTest(ncclCollAllGather, ncclUint32, true);
   }
 
   TEST(AllGather, UserBufferRegistration)
