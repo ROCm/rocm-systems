@@ -228,3 +228,27 @@ exit 92 inside the client (driver return 1). This is an orange transform blocker
 not an OOM or a completed clean run. Evidence is under `bounded-clean-tensile`.
 HipKittens also corrupts the heap with SuperCollider trap reporting, ruling out
 the automatic four-byte report allocation as a necessary trigger for that repro.
+
+### Relaxed publication fix verified; tree high qualifies
+
+Commit `d08b6bb984e` observes a supported relaxed RMW transition without claiming
+release/acquire roles. Verification: 806 host tests, 67 gfx1250 atomic/publication
+device tests, and 144 gfx950/gfx1201 emulator atomic/publication tests pass
+(`relaxed-observation-*-tests.log`). The rebuilt hook's tree clean passes and
+faults detect 8/8 at high, now with `analysis_complete=true` in every trial.
+Clean/fault provenance file sets match; all eight trials are admitted/reached,
+select high, and pass before/after health checks. Artifacts: `tree-relaxed-clean`
+and `tree-relaxed-fault`. The Default cell is green. Default's earlier 2/8 result
+predates this fix; repeat default on the new hook before calling high the lowest
+passing preset for the final campaign.
+
+Tensile MXF4 SuperCollider finishes all six shards numerically, but each reports
+a SuperCollider mismatch. The cell is red pending diagnosis. Its Default
+unsupported-transform blocker is distinct. D128 SuperCollider sleep=15 clean
+passes, and its eight-trial calibration is running.
+
+HipKittens still corrupts the heap with a copy-helper-only allowlist, zero patched
+workload accesses and no applicable ConSan code object. This rules out inserted
+workload probes as a necessary trigger. The hook/runtime lifecycle now deserves
+priority; the failure is not evidence that the numerical kernel itself is wrong.
+The diagnostic is `hipkittens-copy-only-diagnostic.log`.
