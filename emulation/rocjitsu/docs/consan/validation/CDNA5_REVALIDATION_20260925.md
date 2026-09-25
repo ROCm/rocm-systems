@@ -644,3 +644,18 @@ publication fault is detected in all 8/8 admitted/reached trials. Every trial
 has complete analysis, healthy pre/post checks, and the high preset; clean and
 fault provenance files match. Since Default was 3/8, high is the lowest
 qualified preset at or above default. Evidence: `clip-cap-high-{clean,fault}`.
+
+### Single-address LDS replay bank repair
+
+The new regression reproduces incorrect replay bank handling for both loads
+and stores in each nonzero address bank. The ordinary single-address replay
+now selects the guest address bank through Src0, retains its destination in
+the low scratch bank, and restores bank zero before comparison. Saved-address
+and split-two-address paths are separate and still need their own high-bank
+audit; this change does not claim to qualify those paths.
+
+The regression fails before the repair. Afterward all 128 selected
+SuperCollider/check-trap host tests pass (`address-bank-verified-tests.log`).
+The isolated E2E hook will be linked under `address-hook/`, leaving both
+shared and subword-fix hooks used by running jobs unchanged. MXF4 remains red
+until its clean rerun completes without a mismatch.

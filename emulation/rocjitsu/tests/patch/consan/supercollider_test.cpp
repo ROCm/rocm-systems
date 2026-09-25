@@ -2775,6 +2775,39 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad)
   EXPECT_EQ(body.back(), kSelectGuestVgprBank);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeKeepsGfx1250ReplayAddressBank) {
+  for (uint8_t bank = 1; bank <= 3; ++bank) {
+    for (bool store : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "bank=" << unsigned(bank) << " store=" << store);
+      const uint8_t guest_mode = static_cast<uint8_t>(bank | (bank << (store ? 2 : 6)));
+      const auto access = store
+                              ? cdna5::build_vds(cdna5::kDsStoreB128Vds, {.addr = 36, .data0 = 38})
+                              : cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 36, .vdst = 38});
+      std::vector<uint32_t> text_words = {0xBF860000u | guest_mode, access[0], access[1]};
+      text_words.resize(64u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5));
+      text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+      Options options;
+      options.mode = Mode::SuperCollider;
+      options.probe_lds_check_trap = true;
+      options.scratch_vgpr = 4;
+      const auto result =
+          test_lower_consan(make_gfx1250_code_object(text_words, "banked_lds_address"), options);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified());
+      ASSERT_EQ(result.patches.size(), 1u);
+      const auto body = emitted_patch_words(result, result.patches.front());
+      const auto replay = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 36, .vdst = 4});
+      const auto it = std::search(body.begin(), body.end(), replay.begin(), replay.end());
+      ASSERT_NE(it, body.end());
+      ASSERT_NE(it, body.begin());
+      ASSERT_LT(it + 2, body.end());
+      EXPECT_EQ(*(it - 1), 0xBF860000u | bank);
+      EXPECT_EQ(*(it + 2), 0xBF860000u | (uint32_t{bank} << 8u));
+      EXPECT_EQ(body.back(), 0xBF860000u | guest_mode);
+    }
+  }
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
   constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 2, .vdst = 254});
   std::vector<uint32_t> text_words = {load[0], load[1]};

@@ -836,8 +836,33 @@ direct_to_lds_scratch_layout(const ProgramSite &site, const TargetProfile &targe
     }
     words.insert(words.end(), split->begin(), split->end());
   } else {
+    // Instrumentation runs in bank zero, but the guest LDS address can live
+    // in another bank. Select only Src0 for the replay; its destination is
+    // still the low-bank scratch tuple. A saved address is already low-bank.
+    const uint8_t address_bank =
+        preserve_address || !target.has_selectable_vgpr_bank
+            ? 0u
+            : amdgpu::vgpr_msb_bank_for_role(static_cast<uint8_t>(selectable_vgpr_bank_mode),
+                                             amdgpu::VgprMsbRole::Src0)
+                  .value_or(0u);
+    if (address_bank != 0u) {
+      const auto select = instrumentation::build_s_set_vgpr_msb_transition(0u, address_bank, arch);
+      if (!select) {
+        errors.emplace_back("ConSan LDS check/trap proof could not select replay address bank");
+        return std::nullopt;
+      }
+      words.push_back(*select);
+    }
     words.push_back(duplicate_load[0]);
     words.push_back(duplicate_load[1]);
+    if (address_bank != 0u) {
+      const auto restore = instrumentation::build_s_set_vgpr_msb_transition(address_bank, 0u, arch);
+      if (!restore) {
+        errors.emplace_back("ConSan LDS check/trap proof could not restore replay address bank");
+        return std::nullopt;
+      }
+      words.push_back(*restore);
+    }
   }
   words.push_back(*wait_dscnt);
   if (subdword_store_difference)
