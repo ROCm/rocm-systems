@@ -448,17 +448,27 @@ jobs:
           # failure, not 67 unsupported capabilities. Still run the four
           # CPU-only integration checks and publish their JUnit, then fail the
           # job so the table cannot make a broken runner look green.
-          if ! python3 - <<'PY'
-          import ctypes
+          # Exit 1 is "confirmed no device". Any other probe failure (broken
+          # ctypes, missing libpython) is not a device count and must not
+          # skip the GPU suite.
+          set +e
+          python3 - <<'PY'
           import sys
 
-          hip = ctypes.CDLL("libamdhip64.so.7")
-          count = ctypes.c_int()
-          status = hip.hipGetDeviceCount(ctypes.byref(count))
+          try:
+              import ctypes
+              hip = ctypes.CDLL("libamdhip64.so.7")
+              count = ctypes.c_int()
+              status = hip.hipGetDeviceCount(ctypes.byref(count))
+          except Exception as exc:
+              print(f"GPU probe unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+              sys.exit(2)
           print(f"hipGetDeviceCount: status={status}, devices={count.value}")
           sys.exit(0 if status == 0 and count.value > 0 else 1)
           PY
-          then
+          probe_rc=$?
+          set -e
+          if [ "$probe_rc" -eq 1 ]; then
             echo "::error::GPU runner has no visible ROCm-capable device"
             python3 projects/hrr/tests/run_catch2.py \
               --xml integration-${{ matrix.family }}.xml \
