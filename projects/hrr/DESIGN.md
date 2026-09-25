@@ -278,10 +278,7 @@ projects/clr/hipamd/src/hrr/      — in-tree capture layer (compiled into amdhi
 
 ## Core Mechanism
 
-At init time the capture layer snapshots `g_real_table` from `GetHipDispatchTable()`,
-builds `g_cap_table` as a copy with the manual shims (`MANUAL_CAPTURE_APIS`) overridden,
-then installs it atomically. All shims call through `g_real_table` — never back into the dispatch table —
-preventing re-entrancy. Uninstall restores the snapshot.
+At init time the capture layer snapshots `g_real_table` from `GetHipDispatchTable()`, builds `g_cap_table` as a copy with the manual shims (`MANUAL_CAPTURE_APIS`) overridden, then writes each shim into the live table with its own atomic store so the table is never copied as a whole. HIP entry points still load those slots with ordinary function-pointer reads in `hip_table_interface.cpp` (shared with rocprofiler); matching atomic loads there are outside this change. All shims call through `g_real_table`, never back into the dispatch table, which prevents re-entrancy. Uninstall puts the snapshot back only into the slots that still hold a capture shim, so a slot that another component changed after install keeps its new value. The compiler dispatch table receives its shims the same way.
 
 ### `<<<>>>` Launch Path — Compiler Dispatch Table
 

@@ -8062,6 +8062,5 @@ void hip_capture_build_compiler_table() {
   cap.__hipRegisterTexture_fn = capture___hipRegisterTexture;
   cap.__hipRegisterVar_fn = capture___hipRegisterVar;
   cap.__hipUnregisterFatBinary_fn = capture___hipUnregisterFatBinary;
-  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
-              &cap, sizeof(HipCompilerDispatchTable));
+  hip_capture_install_compiler_table(cap);
 }

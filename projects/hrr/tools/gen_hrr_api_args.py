@@ -1919,8 +1919,7 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
         if e.reserved:
             continue
         lines.append(f"  cap.{e.name}_fn = capture_{e.name};")
-    lines.append("  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),")
-    lines.append("              &cap, sizeof(HipCompilerDispatchTable));")
+    lines.append("  hip_capture_install_compiler_table(cap);")
     lines.append("}")
     lines.append("")
 
