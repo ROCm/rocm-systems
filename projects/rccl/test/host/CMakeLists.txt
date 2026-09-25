@@ -230,8 +230,13 @@ function(rccl_add_micro_binary _name)
       ${CMAKE_CURRENT_SOURCE_DIR} ${RCCL_INCLUDE_DIRS} ${_ramb_EXTRA_INCLUDES})
     target_compile_definitions(${_name} PRIVATE
       __HIP_PLATFORM_AMD__ NCCL_OS_LINUX ROCM_VERSION=70000 ${_ramb_EXTRA_DEFS})
-    # -no-pie in case the non-PIC RCCL-vendored libgtest.a is linked.
-    target_link_options(${_name} PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
+    # -no-pie only when the non-PIC RCCL-vendored libgtest.a is linked; forcing
+    # it against PIC (system/FetchContent) GTest breaks PIE-only toolchains.
+    set(_ramb_link_opts -no-hip-rt -Wl,--gc-sections)
+    if(_MICRO_LINK_NO_PIE)
+      list(APPEND _ramb_link_opts -no-pie)
+    endif()
+    target_link_options(${_name} PRIVATE ${_ramb_link_opts})
     target_link_libraries(${_name} PRIVATE
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
@@ -245,12 +250,17 @@ function(rccl_standalone_setup)
   include(FetchContent)
 
   # --- Resolve GTest: system -> RCCL-vendored -> FetchContent fallback ---
+  # Track whether we linked the RCCL-vendored non-PIC libgtest.a: only that path
+  # needs -no-pie on the micro binaries. System/FetchContent GTest is PIC, and
+  # forcing -no-pie there is unnecessary and breaks PIE-only toolchains.
+  set(_micro_link_no_pie FALSE)
   find_package(GTest QUIET)
   if(NOT GTest_FOUND)
     set(_rccl_gtest_root "${CMAKE_CURRENT_SOURCE_DIR}/../../build/gtest")
     if(EXISTS "${_rccl_gtest_root}/lib/libgtest.a" OR EXISTS "${_rccl_gtest_root}/lib64/libgtest.a")
       message(STATUS "Using RCCL-vendored GTest: ${_rccl_gtest_root}")
       find_package(GTest REQUIRED PATHS "${_rccl_gtest_root}" NO_DEFAULT_PATH)
+      set(_micro_link_no_pie TRUE)
     else()
       message(STATUS "Downloading GTest via FetchContent")
       FetchContent_Declare(googletest
@@ -472,7 +482,12 @@ function(rccl_standalone_setup)
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
   )
 
-  target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
+  # -no-pie only for the non-PIC RCCL-vendored libgtest.a (see _micro_link_no_pie).
+  set(_host_link_opts -no-hip-rt)
+  if(_micro_link_no_pie)
+    list(APPEND _host_link_opts -no-pie)
+  endif()
+  target_link_options(rccl-HostUnitTests PRIVATE ${_host_link_opts})
 
   target_link_libraries(rccl-HostUnitTests PRIVATE
     GTest::GTest
@@ -497,6 +512,7 @@ function(rccl_standalone_setup)
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     PARENT_SCOPE)
   set(_MICRO_AMDSMI_DEF USE_AMDSMI PARENT_SCOPE)
+  set(_MICRO_LINK_NO_PIE "${_micro_link_no_pie}" PARENT_SCOPE)
   # ENABLE_DEVICE_LINKER defaults ON, so the enqueue arm that SHIPS is the
   # -devlinker one. The in-RCCL-build path builds only the single inherited-arm
   # binary; run_host_tests.sh (the only in-repo workflow that runs these) uses
