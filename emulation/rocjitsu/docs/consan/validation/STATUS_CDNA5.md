@@ -51,12 +51,12 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟧 default: 2/3 clean shards pass; third hits the 300 s client deadline | 🟧 delay-zero: 2/3 clean shards pass; third hits the 300 s client deadline |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟧 default: report exceeds default 128 MiB cap; explicit 256 MiB rerun queued | 🟥 delay-zero: false positive traced to replay using v36 instead of address v548 |
+| Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟨 default, 256 MiB report cap: all 6 clean shards pass; fault trials pending | 🟥 delay-zero: replay address-bank fix tested; clean mismatch persists, investigation continues |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending | 🟧 full-shard profiler discovery interrupted; longer-deadline retry pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟧 default: 3/9 shards exceeded the 420 s client deadline; longer run pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
-| Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟧 default: all 3 shards hit the 900 s client deadline; clean qualification incomplete | 🟥 delay-zero: subword transform fixed; retained clean client now reports a mismatch |
+| Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟧 default: all 3 shards hit the 900 s client deadline; clean qualification incomplete | 🟥 delay-zero: subword transform fixed; clean mismatches persist and all 3 shards time out |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 default: filtered clean pass; fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 default: filtered clean pass (180 s deadline); fault trials pending | 🟨 delay-zero: filtered clean pass; fault trials pending |

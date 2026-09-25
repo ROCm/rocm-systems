@@ -667,3 +667,16 @@ publication fault produces 0/8 detections. All eight trials are admitted and
 reached, analysis is complete, pre/post health checks pass, and clean/fault
 provenance files match. The cell stays yellow with the measured result.
 Evidence: `clip-cap-sleep15-{clean,fault}`.
+
+### MXF4 capacity rerun and remaining SuperCollider failures
+
+`cdna5-20260925/mxf4-cap256-clean` completes all six baseline and Default
+shards with return code zero, accepted numerical results, complete analysis,
+and full applicable access/barrier/atomic/fence coverage. The explicit 256 MiB
+report cap resolves the earlier capacity failure; fault qualification remains.
+The isolated address-bank hook still reports a mismatch on MXF4 solution 6
+(`mxf4-address-fix6-client.log`) despite numerical PASSED and complete coverage.
+The first replay-address fix therefore does not yet qualify the clean workload.
+`spmm-subword-clean` completes with failures: all three maintained shards reach
+the 900 s client deadline and report clean SuperCollider mismatches. The
+subword encoding fix removed the transform error but does not resolve this row.
