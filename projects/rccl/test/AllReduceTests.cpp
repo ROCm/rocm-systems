@@ -172,9 +172,9 @@ namespace RcclUnitTesting
     RunSingleProcMemRegTest(config);
   }
 
-  TEST(AllReduce, SingleProcMemRegDisabledSmoke)
+  TEST(AllReduce, SingleProcMemRegDisabled)
   {
-    RunSingleProcMemRegDisabledSmoke(ncclCollAllReduce, ncclFloat32, true);
+    RunSingleProcMemRegDisabledTest(ncclCollAllReduce, ncclFloat32, true);
   }
 
   // This tests using custom pre-mult scalars reductions
