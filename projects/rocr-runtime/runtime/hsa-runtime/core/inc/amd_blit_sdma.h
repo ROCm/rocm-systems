@@ -62,6 +62,19 @@ class BlitSdmaBase : public core::Blit {
   static const size_t kCopyPacketSize;
   static const size_t kMaxSingleCopySize;
   static const size_t kMaxSingleFillSize;
+
+  /// @brief Validate one rect copy without submitting work.
+  ///
+  /// This applies the same geometry, alignment, wide-pitch normalization, and
+  /// packet-field checks used while lowering the copy to SDMA packets.
+  static hsa_status_t ValidateCopyRect(const hsa_pitched_ptr_t* dst,
+                                       const hsa_dim3_t* dst_offset,
+                                       const hsa_pitched_ptr_t* src,
+                                       const hsa_dim3_t* src_offset,
+                                       const hsa_dim3_t* range,
+                                       bool is_gfx12_plus,
+                                       const char** error_message = nullptr) noexcept;
+
   virtual bool isSDMA() const override { return true; }
   virtual hsa_status_t Initialize(const core::Agent& agent, bool use_xgmi,
                                   size_t linear_copy_size_override, int rec_engine) = 0;
@@ -421,6 +434,7 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   void BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                             void* addr_a, void* addr_b, size_t size);
 
+  // Inputs must have passed BlitSdmaBase::ValidateCopyRect.
   void BuildCopyRectCommand(const std::function<void*(size_t)>& append,
                             const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                             const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
