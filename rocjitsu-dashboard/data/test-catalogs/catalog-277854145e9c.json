@@ -1,0 +1,401 @@
+{
+  "id": "catalog-277854145e9c",
+  "targets": {
+    "gfx1250": [
+      "triton.atomic_add_fp32_contended.threads1",
+      "triton.copy_fp32_32m.threads1",
+      "triton.gather_fp32_irregular.threads1",
+      "triton.gemm_bf16_1024x1024x1024.threads1",
+      "triton.gemm_bf16_1024x128x512.threads1",
+      "triton.gemm_bf16_128x1024x512.threads1",
+      "triton.gemm_bf16_128x128x128.threads1",
+      "triton.gemm_bf16_128x128x2048.threads1",
+      "triton.gemm_bf16_512x512x512.threads1",
+      "triton.gemm_bf16_aligned.threads1",
+      "triton.gemm_bf16_ragged.threads1",
+      "triton.gemm_fp16_1024x1024x1024.threads1",
+      "triton.gemm_fp16_1024x128x512.threads1",
+      "triton.gemm_fp16_128x1024x512.threads1",
+      "triton.gemm_fp16_128x128x128.threads1",
+      "triton.gemm_fp16_128x128x2048.threads1",
+      "triton.gemm_fp16_250x250x510.threads1",
+      "triton.gemm_fp16_256x256x512.threads1",
+      "triton.gemm_fp16_512x512x512.threads1",
+      "triton.gpt_oss_attention_bf16.threads1",
+      "triton.gpt_oss_attention_bf16_seq256.threads1",
+      "triton.rmsnorm_bf16.threads1",
+      "triton.rmsnorm_fp16_128x4096.threads1",
+      "triton.softmax_fp16_aligned.threads1",
+      "triton.softmax_fp16_boundary.threads1",
+      "triton.softmax_fp32_64x4096.threads1",
+      "triton.transpose_fp16_2048.threads1",
+      "triton.vector_add_fp32_boundary.threads1"
+    ],
+    "gfx950": [
+      "triton.atomic_add_fp32_contended.threads1",
+      "triton.copy_fp32_32m.threads1",
+      "triton.gather_fp32_irregular.threads1",
+      "triton.gemm_bf16_1024x1024x1024.threads1",
+      "triton.gemm_bf16_1024x128x512.threads1",
+      "triton.gemm_bf16_128x1024x512.threads1",
+      "triton.gemm_bf16_128x128x128.threads1",
+      "triton.gemm_bf16_128x128x2048.threads1",
+      "triton.gemm_bf16_512x512x512.threads1",
+      "triton.gemm_bf16_aligned.threads1",
+      "triton.gemm_bf16_ragged.threads1",
+      "triton.gemm_fp16_1024x1024x1024.threads1",
+      "triton.gemm_fp16_1024x128x512.threads1",
+      "triton.gemm_fp16_128x1024x512.threads1",
+      "triton.gemm_fp16_128x128x128.threads1",
+      "triton.gemm_fp16_128x128x2048.threads1",
+      "triton.gemm_fp16_250x250x510.threads1",
+      "triton.gemm_fp16_256x256x512.threads1",
+      "triton.gemm_fp16_512x512x512.threads1",
+      "triton.gpt_oss_attention_bf16.threads1",
+      "triton.gpt_oss_attention_bf16_seq256.threads1",
+      "triton.rmsnorm_bf16.threads1",
+      "triton.rmsnorm_fp16_128x4096.threads1",
+      "triton.softmax_fp16_aligned.threads1",
+      "triton.softmax_fp16_boundary.threads1",
+      "triton.softmax_fp32_64x4096.threads1",
+      "triton.transpose_fp16_2048.threads1",
+      "triton.vector_add_fp32_boundary.threads1"
+    ]
+  },
+  "tests": [
+    {
+      "id": "triton.atomic_add_fp32_contended.threads1",
+      "name": "Contended FP32 atomic add",
+      "problem": {
+        "buckets": 256,
+        "dataType": "fp32",
+        "elements": 131072,
+        "operation": "Atomic add"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.copy_fp32_32m.threads1",
+      "name": "32 MiB contiguous FP32 copy",
+      "problem": {
+        "dataType": "fp32",
+        "elements": 8388608,
+        "operation": "Copy"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gather_fp32_irregular.threads1",
+      "name": "Irregular FP32 gather",
+      "problem": {
+        "dataType": "fp32",
+        "indexOffset": 17,
+        "indexStride": 104729,
+        "operation": "Gather",
+        "outputElements": 4194307,
+        "sourceElements": 8388608
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_1024x1024x1024.threads1",
+      "name": "BF16 GEMM 1024x1024x1024",
+      "problem": {
+        "dataType": "bf16",
+        "k": 1024,
+        "m": 1024,
+        "n": 1024,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_1024x128x512.threads1",
+      "name": "BF16 GEMM 1024x128x512",
+      "problem": {
+        "dataType": "bf16",
+        "k": 512,
+        "m": 1024,
+        "n": 128,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_128x1024x512.threads1",
+      "name": "BF16 GEMM 128x1024x512",
+      "problem": {
+        "dataType": "bf16",
+        "k": 512,
+        "m": 128,
+        "n": 1024,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_128x128x128.threads1",
+      "name": "BF16 GEMM 128x128x128",
+      "problem": {
+        "dataType": "bf16",
+        "k": 128,
+        "m": 128,
+        "n": 128,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_128x128x2048.threads1",
+      "name": "BF16 GEMM 128x128x2048",
+      "problem": {
+        "dataType": "bf16",
+        "k": 2048,
+        "m": 128,
+        "n": 128,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_512x512x512.threads1",
+      "name": "BF16 GEMM 512x512x512",
+      "problem": {
+        "dataType": "bf16",
+        "k": 512,
+        "m": 512,
+        "n": 512,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_aligned.threads1",
+      "name": "Aligned BF16 GEMM",
+      "problem": {
+        "dataType": "bf16",
+        "k": 512,
+        "m": 256,
+        "n": 256,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_bf16_ragged.threads1",
+      "name": "Ragged BF16 GEMM",
+      "problem": {
+        "dataType": "bf16",
+        "k": 510,
+        "m": 250,
+        "n": 250,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_1024x1024x1024.threads1",
+      "name": "FP16 GEMM 1024x1024x1024",
+      "problem": {
+        "dataType": "fp16",
+        "k": 1024,
+        "m": 1024,
+        "n": 1024,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_1024x128x512.threads1",
+      "name": "FP16 GEMM 1024x128x512",
+      "problem": {
+        "dataType": "fp16",
+        "k": 512,
+        "m": 1024,
+        "n": 128,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_128x1024x512.threads1",
+      "name": "FP16 GEMM 128x1024x512",
+      "problem": {
+        "dataType": "fp16",
+        "k": 512,
+        "m": 128,
+        "n": 1024,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_128x128x128.threads1",
+      "name": "FP16 GEMM 128x128x128",
+      "problem": {
+        "dataType": "fp16",
+        "k": 128,
+        "m": 128,
+        "n": 128,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_128x128x2048.threads1",
+      "name": "FP16 GEMM 128x128x2048",
+      "problem": {
+        "dataType": "fp16",
+        "k": 2048,
+        "m": 128,
+        "n": 128,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_250x250x510.threads1",
+      "name": "FP16 GEMM 250x250x510",
+      "problem": {
+        "dataType": "fp16",
+        "k": 510,
+        "m": 250,
+        "n": 250,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_256x256x512.threads1",
+      "name": "FP16 GEMM 256x256x512",
+      "problem": {
+        "dataType": "fp16",
+        "k": 512,
+        "m": 256,
+        "n": 256,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gemm_fp16_512x512x512.threads1",
+      "name": "FP16 GEMM 512x512x512",
+      "problem": {
+        "dataType": "fp16",
+        "k": 512,
+        "m": 512,
+        "n": 512,
+        "operation": "GEMM"
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.gpt_oss_attention_bf16.threads1",
+      "name": "GPT-OSS BF16 attention",
+      "problem": {
+        "batch": 1,
+        "dataType": "bf16",
+        "headDimension": 64,
+        "keyValueHeads": 8,
+        "operation": "Attention",
+        "queryHeads": 64,
+        "sequence": 128,
+        "window": 128
+      },
+      "suite": "GPT-OSS"
+    },
+    {
+      "id": "triton.gpt_oss_attention_bf16_seq256.threads1",
+      "name": "GPT-OSS BF16 attention sequence 256",
+      "problem": {
+        "batch": 1,
+        "dataType": "bf16",
+        "headDimension": 64,
+        "keyValueHeads": 8,
+        "operation": "Attention",
+        "queryHeads": 64,
+        "sequence": 256,
+        "window": 128
+      },
+      "suite": "GPT-OSS"
+    },
+    {
+      "id": "triton.rmsnorm_bf16.threads1",
+      "name": "BF16 RMSNorm",
+      "problem": {
+        "columns": 4096,
+        "dataType": "bf16",
+        "epsilon": 1e-05,
+        "operation": "RMSNorm",
+        "rows": 128
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.rmsnorm_fp16_128x4096.threads1",
+      "name": "FP16 RMSNorm 128x4096",
+      "problem": {
+        "columns": 4096,
+        "dataType": "fp16",
+        "epsilon": 1e-05,
+        "operation": "RMSNorm",
+        "rows": 128
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.softmax_fp16_aligned.threads1",
+      "name": "Aligned FP16 softmax",
+      "problem": {
+        "columns": 4096,
+        "dataType": "fp16",
+        "operation": "Softmax",
+        "rows": 64
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.softmax_fp16_boundary.threads1",
+      "name": "Boundary FP16 softmax",
+      "problem": {
+        "columns": 4097,
+        "dataType": "fp16",
+        "operation": "Softmax",
+        "rows": 64
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.softmax_fp32_64x4096.threads1",
+      "name": "FP32 softmax 64x4096",
+      "problem": {
+        "columns": 4096,
+        "dataType": "fp32",
+        "operation": "Softmax",
+        "rows": 64
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.transpose_fp16_2048.threads1",
+      "name": "2048x2048 FP16 transpose",
+      "problem": {
+        "columns": 2048,
+        "dataType": "fp16",
+        "operation": "Transpose",
+        "rows": 2048
+      },
+      "suite": "Triton"
+    },
+    {
+      "id": "triton.vector_add_fp32_boundary.threads1",
+      "name": "Boundary FP32 vector add",
+      "problem": {
+        "dataType": "fp32",
+        "elements": 8388611,
+        "operation": "Vector add"
+      },
+      "suite": "Triton"
+    }
+  ]
+}
