@@ -1167,6 +1167,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     cudaIpcMemHandle_t handle;
     uint64_t hostHash;
     uint64_t pidHash;
+    uintptr_t allocBase;
     size_t userOffset; // userPtr - allocBase
     size_t userSize;
   };
@@ -1223,6 +1224,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
 
     mine->hostHash = comm->peerInfo[comm->rank].hostHash;
     mine->pidHash = comm->peerInfo[comm->rank].pidHash;
+    mine->allocBase = reinterpret_cast<uintptr_t>(allocBase);
     mine->userOffset = userOffset;
     mine->userSize = userSize;
 
@@ -1242,14 +1244,15 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     for (int r = 0; r < teamSize; r++) {
       bool sameProc = (peers[r].hostHash == peers[teamSelf].hostHash) && (peers[r].pidHash == peers[teamSelf].pidHash);
       if (r == teamSelf || sameProc) {
-        // Same address space: self reuses userPtr; same-PID cross-thread
-        // peers stay nullptr (MVP: no cross-thread peer mapping).
+        // Same address space: use the exchanged pointer directly and avoid an
+        // unnecessary IPC import/close pair. Keep AllocBase null for peer
+        // entries so windowCloseIpcPeers does not close a direct pointer.
         if (r == teamSelf) {
           win->ipcPeerPtrsAllocBase[r] = reinterpret_cast<void*>(allocBase);
           win->ipcPeerPtrs[r] = userPtr;
         } else {
           win->ipcPeerPtrsAllocBase[r] = nullptr;
-          win->ipcPeerPtrs[r] = nullptr;
+          win->ipcPeerPtrs[r] = reinterpret_cast<void*>(peers[r].allocBase + peers[r].userOffset);
         }
       } else {
         void* peerBase = nullptr;

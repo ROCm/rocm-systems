@@ -332,6 +332,14 @@ private:
     hipMemAllocationHandleType saved_;
 };
 
+TEST_F(P2pMicrotest, AlternateConnectorUsesOppositeTransferMode) {
+    EXPECT_EQ(1, p2pReadModeForConnIndex(/*defaultRead=*/0, RCCL_CONN_IDX_P2P_ALT, /*p2pNet=*/false));
+    EXPECT_EQ(0, p2pReadModeForConnIndex(/*defaultRead=*/1, RCCL_CONN_IDX_P2P_ALT, /*p2pNet=*/false));
+    EXPECT_EQ(0, p2pReadModeForConnIndex(/*defaultRead=*/0, RCCL_CONN_IDX_P2P_ALT, /*p2pNet=*/true));
+    EXPECT_EQ(0, p2pReadModeForConnIndex(/*defaultRead=*/0, /*default P2P connIndex=*/1, /*p2pNet=*/false));
+    EXPECT_EQ(1, p2pReadModeForConnIndex(/*defaultRead=*/1, /*default P2P connIndex=*/1, /*p2pNet=*/false));
+}
+
 // ===========================================================================
 // Helpers: lightweight builders for the recurring input/output shapes.
 //
@@ -2251,13 +2259,10 @@ inline auto ExpectReleaseSentinelHandle()
 
 }  // namespace
 
-// cuMem* arm, sameProcess=true: Retain -> memcpy handle into ipcInfo ->
-// proxy register -> Release. Lights up the same-process sub-arm without
-// touching hipMemExportToShareableHandle or the POSIX_FD/fabric branches.
+// cuMem* arm, sameProcess=true: retain/release the allocation metadata but
+// reuse the shared UVA directly, without proxy import/mapping.
 TEST_F(FreshRegistrationMicrotest, CuMemSameProcessSucceeds)
 {
-    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
-
     // Skip the (covered-elsewhere) proxyConnect call; pre-mark the slot.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     // Drive the `if (proxyConn->sameProcess)` True arm.
@@ -2283,24 +2288,10 @@ TEST_F(FreshRegistrationMicrotest, CuMemSameProcessSucceeds)
     ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
 
     ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int type,
-            void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
-            EXPECT_EQ(type, ncclProxyMsgRegister);
-            if (req == nullptr ||
-                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
-                ADD_FAILURE() << "malformed register-msg request";
-                return ncclInternalError;
-            }
-            auto* info = static_cast<p2pIpcExpInfo*>(req);
-            // cuMem* arm clears legacyIpcCap (in contrast to the legacy arm).
-            EXPECT_FALSE(info->legacyIpcCap);
-            EXPECT_EQ(info->size,   kBaseSize);
-            EXPECT_EQ(info->offset, kBegOffset);
-            // Same-process arm memcpy'd the Retain handle into memHandle.
-            EXPECT_TRUE(HandleHasSentinel(info->ipcDesc.memHandle));
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "same-process direct registration must not call the proxy";
+            return ncclInternalError;
         });
 
     int peerRanks[] = {kPeerRank};
@@ -2317,7 +2308,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemSameProcessSucceeds)
     EXPECT_EQ(retain.calls,      1);
     EXPECT_EQ(xport.calls,       0);  // sameProcess arm skipped it
     EXPECT_EQ(release.calls,     1);
-    EXPECT_EQ(proxy.calls,       1);
+    EXPECT_EQ(proxy.calls,       0);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(out.regBufFlag, 1);
@@ -2325,7 +2316,26 @@ TEST_F(FreshRegistrationMicrotest, CuMemSameProcessSucceeds)
     EXPECT_FALSE(isLegacyIpc);  // cuMem arm cleared it
 
     ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->direct);
+    EXPECT_EQ(reinterpret_cast<void*>(regRecord.begAddr),
+              regRecord.ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr);
     EXPECT_FALSE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+}
+
+TEST_F(P2pMicrotest, SameProcessDirectDeregisterSkipsProxy)
+{
+    ncclComm comm{};
+    ncclIpcRegInfo info{};
+    info.direct = true;
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "direct UVA has no proxy mapping to deregister";
+            return ncclInternalError;
+        });
+
+    EXPECT_EQ(ncclSuccess, ncclIpcDeregBuffer(&comm, &info));
+    EXPECT_EQ(proxy.calls, 0);
 }
 
 // cuMem* arm, sameProcess=false, POSIX_FD handle type:

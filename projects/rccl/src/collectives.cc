@@ -639,6 +639,7 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
                             nullptr};
 #ifdef ENABLE_ROCSHMEM
     info.sizes = sizes.data();
+    info.sizesCount = sizes.size();
 #endif
 
     ncclResult_t ret = ncclEnqueueCheck(&info);
@@ -685,20 +686,17 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
       ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr
     };
     info.sizes = gatheredSizes.data();
+    info.sizesCount = gatheredSizes.size();
 
     return ncclEnqueueCheck(&info);
   } else {
-    Recorder::instance().skip(true);
-    NCCLCHECK(ncclGroupStart());
-    for (int r = 0; r < nRanks; r++) {
-      NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
-                         stream));
-      NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
-                         stream));
-    }
-    NCCLCHECK(ncclGroupEnd());
-    Recorder::instance().skip(false);
-    return ncclSuccess;
+    struct ncclInfo info = {
+      ncclFuncAlltoAllv,   "AlltoAllv",         sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream,
+      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr
+    };
+    info.sizes = sizes.data();
+    info.sizesCount = sizes.size();
+    return ncclEnqueueCheck(&info);
   }
 }
 

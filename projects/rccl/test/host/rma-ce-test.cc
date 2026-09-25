@@ -170,6 +170,7 @@ protected:
     hipIpcMemHandle_t handle;
     uint64_t hostHash;
     uint64_t pidHash;
+    uintptr_t allocBase;
     size_t userOffset;
     size_t userSize;
   };

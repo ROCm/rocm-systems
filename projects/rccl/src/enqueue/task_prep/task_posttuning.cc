@@ -10,6 +10,7 @@
 #include "ce_coll.h"
 #include "channel.h"
 #include "checks.h"
+#include "policy_adapter.h"
 #include "collectives.h"
 #include "comm.h"
 #include "config/collconfig.h"
@@ -149,42 +150,75 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv,
-                                                bool* needPreconnect) {
+static void postTuneP2pMarkPreconnectChannels(struct ncclComm* comm, int peer, bool isSendNotRecv, uint8_t base,
+                                              int nP2pChannels, int nP2pChannelsPerPeer, int connIndex,
+                                              bool* needPreconnect) {
+  base %= nP2pChannels;
+  for (int c = 0; c < nP2pChannelsPerPeer; c++) {
+    int channelId = ncclP2pChannelForPart(nP2pChannels, base, c, nP2pChannelsPerPeer, comm->nNodes,
+                                          comm->p2pChannelShiftSize);
+    struct ncclConnector* conn =
+      isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex]
+                    : &comm->channels[channelId].peers[peer]->recv[connIndex];
+    if (conn->hasSeen != 0) continue;
+    if (connIndex == RCCL_CONN_IDX_P2P_SHM && conn->connected) {
+      conn->hasSeen = 1;
+      continue;
+    }
+    conn->hasSeen = 1;
+    if (connIndex != NCCL_CONN_IDX_P2P_NET) conn->p2pOnly = 1;
+    int maskPeer = peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex);
+    struct channelMasks* connect = isSendNotRecv ? &comm->connectSend[maskPeer] : &comm->connectRecv[maskPeer];
+    connect->masks[channelId / 64] |= (1ULL << (channelId % 64));
+    *needPreconnect = true;
+  }
+}
+
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, struct ncclRawTaskSendRecv* raw,
+                                                bool* needDefaultPreconnect, bool* needSecondaryPreconnect,
+                                                bool* needShmPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
+  int peer = raw->peer;
+  bool isSendNotRecv = raw->func == ncclFuncSend;
   uint8_t base;
 
   if (peer < 0 || peer >= comm->nRanks) return ncclInvalidArgument;
+
+  struct ncclTaskP2p task{};
+  task.collAPI = raw->collAPI;
+  task.bytes = raw->bytes;
+  task.inPlace = raw->inPlace;
+  rcclPolicyResolveP2pTask(comm, &task);
+  raw->executionPolicyMatched = task.executionPolicyMatched;
+  raw->executionPolicy = task.executionPolicy;
   if (comm->rank == peer) return ncclSuccess;
-  if (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) return ncclSuccess;
+
+  bool firstPeerUse = !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen);
+  struct rcclP2pPolicyPreconnect policyPreconnect;
+  bool hasPolicy = rcclPolicyP2pPreconnect(comm, &task, &policyPreconnect);
+  if (!firstPeerUse && !hasPolicy) return ncclSuccess;
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
-  // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
-  // private to each comm, so we need to set it anyway.
-  (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
-  for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
-
-    // P2P uses only 1 connector. The send/recv connector is shared among split
-    // shared comms, so set hasSeen to avoid duplicate connection setup if user
-    // groups sendrecv ops with split shared comms together.
-    if (isSendNotRecv) {
-      if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
-        comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
-        comm->channels[channelId].peers[peer]->send[1].p2pOnly = 1;
-        comm->connectSend[peer].masks[channelId / 64] |= (1ULL << (channelId % 64));
-        *needPreconnect = true;
-      }
-    } else {
-      if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
-        comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
-        comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
-        comm->connectRecv[peer].masks[channelId / 64] |= (1ULL << (channelId % 64));
-        *needPreconnect = true;
-      }
+  if (firstPeerUse) {
+    (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+    postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, comm->p2pnChannels,
+                                      comm->p2pnChannelsPerPeer, /*default P2P connIndex=*/1,
+                                      needDefaultPreconnect);
+    if (comm->p2pNet) {
+      postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, comm->p2pnChannels,
+                                        comm->p2pnChannelsPerPeer, NCCL_CONN_IDX_P2P_NET,
+                                        needSecondaryPreconnect);
     }
+  }
+
+  for (int i = 0; i < policyPreconnect.nConnIndices; i++) {
+    int connIndex = policyPreconnect.connIndices[i];
+    bool* needPreconnect = connIndex == RCCL_CONN_IDX_P2P_SHM ? needShmPreconnect
+                           : connIndex == 1                   ? needDefaultPreconnect
+                                                              : needSecondaryPreconnect;
+    postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyPreconnect.nChannels,
+                                      policyPreconnect.nChannelsPerPeer, connIndex, needPreconnect);
   }
   return ncclSuccess;
 }
@@ -203,7 +237,11 @@ static ncclResult_t fillP2pTaskFromRaw(struct ncclComm* comm, struct ncclTaskTun
   task->datatype = raw->datatype;
   task->root = raw->peer;
   task->bytes = raw->bytes;
-  if (task->collAPI == ncclFuncAlltoAll || task->collAPI == ncclFuncScatter || task->collAPI == ncclFuncGather) {
+  task->inPlace = raw->inPlace;
+  task->executionPolicyMatched = raw->executionPolicyMatched;
+  task->executionPolicy = raw->executionPolicy;
+  if (task->collAPI == ncclFuncAlltoAll || task->collAPI == ncclFuncAlltoAllv ||
+      task->collAPI == ncclFuncScatter || task->collAPI == ncclFuncGather) {
     task->allowUB = false;
   } else {
     task->allowUB = true;
@@ -223,6 +261,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   bool network;
   bool proxySameProcess;
 
+  if (!rcclPolicyP2pTaskAllowsRegistration(task)) return ncclSuccess;
   if (protocol != NCCL_PROTO_SIMPLE) return ncclSuccess;
   if (!task->allowUB || task->bytes == 0 || task->buff == nullptr || peer == comm->rank) return ncclSuccess;
 
@@ -892,18 +931,27 @@ static ncclResult_t postTuneAllGatherVTasks(
 
 static ncclResult_t postTuneP2pTasks(
   struct ncclComm* comm, struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>* p2pTaskQueue) {
-  bool needPreconnect = false;
+  bool needDefaultPreconnect = false;
+  bool needSecondaryPreconnect = false;
+  bool needShmPreconnect = false;
   struct ncclKernelPlanner* planner = &comm->planner;
 
   for (struct ncclTaskTuningInfo* tInfo = ncclIntruQueueHead(p2pTaskQueue); tInfo != nullptr; tInfo = tInfo->next) {
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
-    bool isSendNotRecv = raw->func == ncclFuncSend;
-
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(
+      comm, raw, &needDefaultPreconnect, &needSecondaryPreconnect,
+      &needShmPreconnect));
   }
 
-  if (needPreconnect) {
+  if (needDefaultPreconnect) {
     NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
+  }
+  if (needSecondaryPreconnect) {
+    NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  }
+  if (needShmPreconnect) {
+    NCCLCHECK(ncclTransportP2pSetupSpecific(
+      comm, NULL, RCCL_CONN_IDX_P2P_SHM, nullptr, TRANSPORT_SHM));
   }
 
   for (struct ncclTaskTuningInfo* tInfo = ncclIntruQueueHead(p2pTaskQueue); tInfo != nullptr; tInfo = tInfo->next) {
@@ -912,6 +960,7 @@ static ncclResult_t postTuneP2pTasks(
     NCCLCHECK(fillP2pTaskFromRaw(comm, tInfo, task));
 
     bool isSendNotRecv = task->func == ncclFuncSend;
+    rcclPolicyValidateP2pTask(comm, task, isSendNotRecv);
 
     NCCLCHECK(postTuneP2pRegisterBuffer(comm, task, isSendNotRecv, tInfo->tuningOut.proto));
 

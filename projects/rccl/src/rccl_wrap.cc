@@ -24,10 +24,12 @@ THE SOFTWARE.
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
+#include "policy_adapter.h"
 #include <algorithm>
 #include <cstdint>
 #include "debug.h"
 #include "net.h"
+#include "param.h"
 #include "amdsmi_wrap.h"
 #include "include/graph.h"
 #include "register.h"
@@ -125,7 +127,7 @@ int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
                                /*ncclFuncReduce*/ 8192,
                                /*ncclFuncAllGather*/ 98304,
                                /*ncclFuncReduceScatter*/ 98304,
-                               /*ncclFuncAllReduce*/ 16384,
+                               /*ncclFuncAllReduce*/ 32768,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};
@@ -1865,6 +1867,17 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t rankOffset = count * typeSize;           // bytes per peer
   const size_t totalBytes = comm->nRanks * rankOffset;  // total message bytes
+
+  // (0) Execution policy: a Send/Recv rule forces the Direct p2p path ahead of
+  // every addon backend, so the transport it selects is the one that runs.
+  const size_t aggregateBytes =
+    rankOffset > SIZE_MAX / comm->nRanks ? SIZE_MAX : rankOffset * static_cast<size_t>(comm->nRanks);
+  const bool inPlace = rcclBuffersOverlap(sendbuff, aggregateBytes, recvbuff, aggregateBytes);
+  if (rcclPolicyAllToAllUsesSendRecvPath(comm, aggregateBytes, inPlace)) {
+    decision->algo = RCCL_DIRECT_ALLTOALL;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
 
   // (1) Pivot: large, cache-line-aligned messages on pivot-enabled comms.
   const size_t rankAlign = rankOffset & ((~rankOffset) + 1);
