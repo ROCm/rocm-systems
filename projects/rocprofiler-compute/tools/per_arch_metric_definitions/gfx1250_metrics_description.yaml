@@ -70,7 +70,7 @@ System Speed-of-Light:
   Active WGPs:
     plain: Average number of WGPs that had at least one active wavefront in a cycle.
     rst: Average number of WGPs that had at least one active wavefront in a cycle.
-    unit: Count
+    unit: WGPs per Cycle
   IPC:
     plain: Average number of instructions per active WGP cycle.
     rst: Average number of instructions per active WGP cycle.
@@ -230,6 +230,14 @@ Memory chart - GL0 Cache (Vector L0):
     plain: GL0 cache hit rate.
     rst: GL0 cache hit rate.
     unit: Percent
+  GL0 Total Requests:
+    plain: Total GL0 cache requests.
+    rst: Total GL0 cache requests.
+    unit: Requests per Normalization Unit
+  GL0 Request Latency:
+    plain: Average GL0 cache request latency.
+    rst: Average GL0 cache request latency.
+    unit: Cycles
 Memory chart - LDS (Local Data Share):
   LDS Load Requests:
     plain: Number of LDS load requests.
@@ -348,6 +356,10 @@ Memory chart - GL0-GL1 Interface:
     plain: Average GL0-GL1 write latency.
     rst: Average GL0-GL1 write latency.
     unit: Cycles
+  GL0-GL1 Request Stall Rate:
+    plain: Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
+    rst: Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
+    unit: Percent
 Memory chart - GLARB (GL1-GL2 Arbiter):
   GLARBA Utilization:
     plain: Percentage of cycles the Graphic Level Arbiter is processing requests.
@@ -381,6 +393,14 @@ Memory chart - GLARB (GL1-GL2 Arbiter):
     plain: Total Graphic Level Arbiter to GL2 atomic bandwidth.
     rst: Total Graphic Level Arbiter to GL2 atomic bandwidth.
     unit: Bytes/s
+  GLARBA Request Path Utilization:
+    plain: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
+    rst: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
+    unit: Percent
+  GLARBA Return Path Utilization:
+    plain: Percentage of cycles the GL2 to GL1 return path is busy.
+    rst: Percentage of cycles the GL2 to GL1 return path is busy.
+    unit: Percent
   GLARBA Request Latency:
     plain: Average latency of requests sent to the Graphics Level Arbiter.
     rst: Average latency of requests sent to the Graphics Level Arbiter.
@@ -820,11 +840,11 @@ WGP VMEM Instruction Mix:
     plain: Number of global/scratch atomic instructions issued.
     rst: Number of global/scratch atomic instructions issued.
     unit: Count per Normalization Unit
-  Instructions - VMEM Atomic RTN:
+  Instructions - VMEM Atomic Return:
     plain: Number of returning VMEM atomic instructions issued.
     rst: Number of returning VMEM atomic instructions issued.
     unit: Count per Normalization Unit
-  Instructions - VMEM Atomic NORTN:
+  Instructions - VMEM Atomic Non-Return:
     plain: Number of non-returning VMEM atomic instructions issued.
     rst: Number of non-returning VMEM atomic instructions issued.
     unit: Count per Normalization Unit
@@ -857,11 +877,11 @@ WGP LDS Instruction Mix:
     plain: Number of LDS store instructions issued.
     rst: Number of LDS store instructions issued.
     unit: Count per Normalization Unit
-  Instructions - LDS Atomic RTN:
+  Instructions - LDS Atomic Return:
     plain: Number of returning LDS atomic instructions issued.
     rst: Number of returning LDS atomic instructions issued.
     unit: Count per Normalization Unit
-  Instructions - LDS Atomic NORTN:
+  Instructions - LDS Atomic Non-Return:
     plain: Number of non-returning LDS atomic instructions issued.
     rst: Number of non-returning LDS atomic instructions issued.
     unit: Count per Normalization Unit
@@ -1279,15 +1299,15 @@ Cache Requests:
     plain: Average GL0 cache request latency.
     rst: Average GL0 cache request latency.
     unit: Cycles
-  Total Requests - Sectors:
+  Total GL0 Sectors:
     plain: Total cache sectors involved in GL0 requests.
     rst: Total cache sectors involved in GL0 requests.
     unit: Count per Normalization Unit
-  Total Requests - Sector Reads:
+  GL0 Read Sectors:
     plain: Number of GL0 cache sectors read.
     rst: Number of GL0 cache sectors read.
     unit: Count per Normalization Unit
-  Total Requests - Sector Writes:
+  GL0 Write Sectors:
     plain: Number of GL0 cache sectors written.
     rst: Number of GL0 cache sectors written.
     unit: Count per Normalization Unit
