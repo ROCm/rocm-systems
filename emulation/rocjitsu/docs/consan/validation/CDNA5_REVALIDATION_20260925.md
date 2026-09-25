@@ -805,3 +805,20 @@ all later selection barriers and the FP64 supporting workload. Eight trials per
 mode and six detections are declared before outcomes. All 208 runner tests pass
 (`topk-spec-tests.log`). Qualification uses a 240 s timeout to accommodate the
 already established need for a longer Default clean deadline.
+
+### Tensor-descriptor add dependency review completed
+
+Both `lifetime-clean/pytorch-tdm-descriptor-add` profiles pass clean with complete
+applicable analysis. The cached Triton gfx1250 final ISA variants
+`BFCHSYCJXV4BNRVLOCQQIYWYAQLNKRW5WZH5ANXQETKSJ5S7K3SA` (one CTA) and
+`HCGUITWJ6VAOERFA6Z7NZVPTYTDMT4SGXFHDAHUYCNRNGQEQAN5A` (two CTAs) retain
+`s_wait_tensorcnt 0` after each tensor transfer and `s_wait_dscnt 0` before
+reuse. Per-wave transfer bases are 320*w and 160*w respectively. Enumerating
+all 32 lanes of all four waves confirms ordinary LDS byte ranges 0..303,
+320..623, 640..943, 960..1263 for one CTA; 0..143, 160..303, 320..463,
+480..623 within each CTA for the two-CTA variant. No wave accesses another
+wave's region. The load and store tensor transfers use the same wave regions;
+there is no cross-wave handoff to invalidate by dropping workgroup barriers.
+The cells remain yellow for this demonstrated qualification limit, rather than
+claiming an untested fault or leaving the dependency review pending. This does
+not qualify omitted tensor-wait mutations or establish generic TDM race support.
