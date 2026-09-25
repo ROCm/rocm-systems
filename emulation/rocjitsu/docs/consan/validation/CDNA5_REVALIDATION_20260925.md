@@ -130,3 +130,12 @@ admitted/reached faults are detected, with complete coverage and healthy probes.
 The qualification audit compares clean/fault provenance files and rehashes every
 input. `default` had 1/8, so `high` is the lowest passing preset at or above
 default. Evidence: `d128-high/`.
+
+### Full-shard Tensile discovery completed
+
+The discovery batch completed ten of twelve families across every shard.
+`mxf8f4gemm-tdm` shard 2 and `sgemm-quick` shards 3–5 returned nonzero;
+the mixed-format log records profiler finalization on SIGTERM at the client
+deadline. Their allowlists are not admitted as complete. These two rows remain
+orange while the interrupted shards are retried with longer deadlines.
+Evidence: `cdna5-20260925/discovery-tensile/*/result.json` and command logs.
