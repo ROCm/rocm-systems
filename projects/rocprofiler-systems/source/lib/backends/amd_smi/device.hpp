@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/amd_smi/gpu_types.hpp"
+#include "backends/amd_smi/metric_tokens.hpp"
 #include "backends/amd_smi/nic_types.hpp"
 #include "backends/amd_smi/sdma_feature.hpp"
 
@@ -11,7 +12,9 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -80,13 +83,14 @@ concept nic_session_types = requires {
 
 template <typename T>
 concept nic_session_queries =
-    requires(T sess, T::processor_handle ph, T::nic_asic_info_t* nap,
-             T::nic_port_info_t* npp, T::nic_rdma_devices_info_t* ndp,
-             std::uint8_t port_idx, std::uint32_t* cp, T::nic_stat_t* nsp) {
-        { sess.get_nic_asic_info(ph, nap) };
-        { sess.get_nic_port_info(ph, npp) };
-        { sess.get_nic_rdma_dev_info(ph, ndp) };
-        { sess.get_nic_rdma_port_statistics(ph, port_idx, cp, nsp) };
+    requires(T session, T::processor_handle handle, T::nic_asic_info_t* asic_info,
+             T::nic_port_info_t* port_info, T::nic_rdma_devices_info_t* rdma_info,
+             std::uint8_t port_idx, std::uint32_t* count, T::nic_stat_t* stats) {
+        { session.get_nic_asic_info(handle, asic_info) };
+        { session.get_nic_device_bdf(handle) } -> std::convertible_to<std::string>;
+        { session.get_nic_port_info(handle, port_info) };
+        { session.get_nic_rdma_dev_info(handle, rdma_info) };
+        { session.get_nic_rdma_port_statistics(handle, port_idx, count, stats) };
     };
 
 template <typename T>
@@ -158,6 +162,24 @@ public:
         return out;
     }
 
+    [[nodiscard]] gpu::metric_support get_metric_support() const
+    {
+        auto result = gpu::detect_metric_support(m_session->get_metrics_info(m_handle));
+
+        try
+        {
+            const auto usage = get_memory_usage();
+            result.set(gpu::metric_group::memory_usage, gpu::has_metric_value(usage));
+        } catch(const std::runtime_error&)
+        {
+            result.set(gpu::metric_group::memory_usage, false);
+        }
+
+        result.set(gpu::metric_group::temperature, probe_temperature_support());
+        result.set(gpu::metric_group::sdma_usage, probe_sdma_gpu_support());
+        return result;
+    }
+
     [[nodiscard]] std::int64_t get_hotspot_temperature() const
     {
         return m_session->get_temp_metric(m_handle, Backend::TEMPERATURE_TYPE_HOTSPOT,
@@ -209,20 +231,66 @@ public:
         return { raw.product_name, raw.vendor_name };
     }
 
-    [[nodiscard]] nic::port_info get_nic_port_info() const
+    [[nodiscard]] std::string get_nic_bdf() const
+    {
+        return m_session->get_nic_device_bdf(m_handle);
+    }
+
+    [[nodiscard]] nic::ports get_nic_ports() const
     {
         typename Backend::nic_port_info_t raw{};
         m_session->get_nic_port_info(m_handle, &raw);
-        if(raw.num_ports == 0) return {};
-        return { raw.ports[0].netdev };
+
+        nic::ports result;
+        const auto count = std::min<std::size_t>(raw.num_ports, std::size(raw.ports));
+        result.reserve(count);
+        for(std::size_t idx = 0; idx < count; ++idx)
+        {
+            result.emplace_back(nic::port{
+                .number      = raw.ports[idx].port_num,
+                .device_name = raw.ports[idx].netdev,
+            });
+        }
+        return result;
+    }
+
+    [[nodiscard]] nic::port_info get_nic_port_info() const
+    {
+        const auto ports = get_nic_ports();
+        return ports.empty() ? nic::port_info{}
+                             : nic::port_info{ ports.front().device_name };
+    }
+
+    [[nodiscard]] nic::rdma_ports get_nic_rdma_ports() const
+    {
+        typename Backend::nic_rdma_devices_info_t raw{};
+        m_session->get_nic_rdma_dev_info(m_handle, &raw);
+
+        nic::rdma_ports result;
+        const auto      device_count =
+            std::min<std::size_t>(raw.num_rdma_dev, std::size(raw.rdma_dev_info));
+        std::uint8_t query_index = 0;
+        for(std::size_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
+        {
+            const auto& device     = raw.rdma_dev_info[dev_idx];
+            const auto  port_count = std::min<std::size_t>(
+                device.num_rdma_ports, std::size(device.rdma_port_info));
+            result.reserve(result.size() + port_count);
+            for(std::size_t port_idx = 0; port_idx < port_count; ++port_idx)
+            {
+                result.emplace_back(nic::rdma_port{
+                    .query_index = query_index++,
+                    .number      = device.rdma_port_info[port_idx].rdma_port,
+                    .device_name = device.rdma_port_info[port_idx].netdev,
+                });
+            }
+        }
+        return result;
     }
 
     [[nodiscard]] nic::rdma_info get_nic_rdma_info() const
     {
-        auto raw = std::make_unique<typename Backend::nic_rdma_devices_info_t>();
-        m_session->get_nic_rdma_dev_info(m_handle, raw.get());
-        if(raw->num_rdma_dev == 0) return { 0 };
-        return { raw->rdma_dev_info[0].num_rdma_ports };
+        return { static_cast<std::uint8_t>(get_nic_rdma_ports().size()) };
     }
 
     [[nodiscard]] std::vector<nic::stat_entry> get_nic_rdma_port_statistics(
@@ -247,6 +315,23 @@ public:
 
 private:
     using gpu_metrics_t = Backend::gpu_metrics_t;
+
+    [[nodiscard]] bool probe_temperature_support() const noexcept
+    {
+        const auto probe = [this](auto sensor_type) noexcept {
+            try
+            {
+                static_cast<void>(m_session->get_temp_metric(m_handle, sensor_type,
+                                                             Backend::TEMP_CURRENT));
+                return true;
+            } catch(const std::runtime_error&)
+            {
+                return false;
+            }
+        };
+        return probe(Backend::TEMPERATURE_TYPE_HOTSPOT) ||
+               probe(Backend::TEMPERATURE_TYPE_EDGE);
+    }
 
     // ── Metric conversion ─────────────────────────────────────────────────────
 

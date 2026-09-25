@@ -5,6 +5,10 @@
 #include "avail/records.hpp"
 #include "avail/traces.hpp"
 
+#if !defined(ROCPROFSYS_BUILD_AINIC) || ROCPROFSYS_BUILD_AINIC == 0
+#    include "avail/nic.hpp"
+#endif
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -71,26 +75,17 @@ TEST(avail_catalog, remaining_stub_queries_keep_not_implemented_message)
 {
     query_request request   = {};
     request.cpu_devices     = true;
-    request.nic_devices     = true;
     request.cpu_counters    = true;
     request.cpu_metrics     = true;
-    request.gpu_metrics     = true;
-    request.nic_metrics     = true;
     request.storage_metrics = true;
 
     constexpr auto k_expected = std::array{
         expected_diagnostic{ .capability = capability_kind::cpu_devices,
                              .source     = source_id::procfs },
-        expected_diagnostic{ .capability = capability_kind::nic_devices,
-                             .source     = source_id::amd_smi },
         expected_diagnostic{ .capability = capability_kind::cpu_counters,
                              .source     = source_id::papi },
         expected_diagnostic{ .capability = capability_kind::cpu_metrics,
                              .source     = source_id::procfs },
-        expected_diagnostic{ .capability = capability_kind::gpu_metrics,
-                             .source     = source_id::amd_smi },
-        expected_diagnostic{ .capability = capability_kind::nic_metrics,
-                             .source     = source_id::amd_smi },
         expected_diagnostic{ .capability = capability_kind::storage_metrics,
                              .source     = source_id::storage },
     };
@@ -144,6 +139,48 @@ TEST(avail_catalog, gpu_counters_query_is_not_a_stub)
     ASSERT_NE(diagnostic_entry, nullptr);
     EXPECT_EQ(diagnostic_entry->message, k_sdk_unavailable_message);
     EXPECT_TRUE(snapshot.gpu_counters.empty());
+#endif
+}
+
+TEST(avail_catalog, gpu_metrics_query_is_not_a_stub)
+{
+    query_request request = {};
+    request.gpu_metrics   = true;
+
+    const auto snapshot = query(request);
+
+    EXPECT_TRUE(snapshot.was_queried(capability_kind::gpu_metrics));
+    const auto* diagnostic_entry =
+        find_diagnostic(snapshot, capability_kind::gpu_metrics);
+    if(diagnostic_entry != nullptr)
+    {
+        EXPECT_NE(diagnostic_entry->message, k_not_implemented_message);
+    }
+}
+
+TEST(avail_catalog, nic_queries_are_not_stubs)
+{
+    query_request request = {};
+    request.nic_devices   = true;
+    request.nic_metrics   = true;
+
+    const auto snapshot = query(request);
+
+    EXPECT_TRUE(snapshot.was_queried(capability_kind::nic_devices));
+    EXPECT_TRUE(snapshot.was_queried(capability_kind::nic_metrics));
+    for(const auto& entry : snapshot.diagnostics)
+    {
+        if(entry.capability == capability_kind::nic_devices ||
+           entry.capability == capability_kind::nic_metrics)
+        {
+            EXPECT_NE(entry.message, k_not_implemented_message);
+        }
+    }
+#if !defined(ROCPROFSYS_BUILD_AINIC) || ROCPROFSYS_BUILD_AINIC == 0
+    const auto* diagnostic_entry =
+        find_diagnostic(snapshot, capability_kind::nic_devices);
+    ASSERT_NE(diagnostic_entry, nullptr);
+    EXPECT_EQ(diagnostic_entry->message, k_ainic_unavailable_message);
 #endif
 }
 

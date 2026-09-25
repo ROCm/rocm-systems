@@ -91,6 +91,7 @@ template <typename T>
 concept nic_wrapper_types = requires {
     typename T::processor_type;
     typename T::nic_asic_info_t;
+    typename T::nic_bus_info_t;
     typename T::nic_port_info_t;
     typename T::nic_rdma_devices_info_t;
     typename T::nic_stat_t;
@@ -100,14 +101,24 @@ concept nic_wrapper_types = requires {
 
 template <typename T>
 concept nic_wrapper_queries =
-    requires(T t, T::processor_handle ph, T::nic_asic_info_t* nap,
-             T::nic_port_info_t* npp, T::nic_rdma_devices_info_t* ndp,
-             std::uint8_t port_idx, std::uint32_t* cp, T::nic_stat_t* nsp) {
-        { t.get_nic_asic_info(ph, nap) } -> std::convertible_to<typename T::status_t>;
-        { t.get_nic_port_info(ph, npp) } -> std::convertible_to<typename T::status_t>;
-        { t.get_nic_rdma_dev_info(ph, ndp) } -> std::convertible_to<typename T::status_t>;
+    requires(T backend, T::processor_handle handle, T::nic_asic_info_t* asic_info,
+             T::nic_bus_info_t* bus_info, T::nic_port_info_t* port_info,
+             T::nic_rdma_devices_info_t* rdma_info, std::uint8_t port_idx,
+             std::uint32_t* count, T::nic_stat_t* stats) {
         {
-            t.get_nic_rdma_port_statistics(ph, port_idx, cp, nsp)
+            backend.get_nic_asic_info(handle, asic_info)
+        } -> std::convertible_to<typename T::status_t>;
+        {
+            backend.get_nic_bus_info(handle, bus_info)
+        } -> std::convertible_to<typename T::status_t>;
+        {
+            backend.get_nic_port_info(handle, port_info)
+        } -> std::convertible_to<typename T::status_t>;
+        {
+            backend.get_nic_rdma_dev_info(handle, rdma_info)
+        } -> std::convertible_to<typename T::status_t>;
+        {
+            backend.get_nic_rdma_port_statistics(handle, port_idx, count, stats)
         } -> std::convertible_to<typename T::status_t>;
     };
 
@@ -165,6 +176,7 @@ public:
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     using nic_asic_info_t         = Wrapper::nic_asic_info_t;
+    using nic_bus_info_t          = Wrapper::nic_bus_info_t;
     using nic_port_info_t         = Wrapper::nic_port_info_t;
     using nic_rdma_devices_info_t = Wrapper::nic_rdma_devices_info_t;
     using nic_stat_t              = Wrapper::nic_stat_t;
@@ -298,27 +310,37 @@ public:
 #endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    void get_nic_asic_info(processor_handle h, nic_asic_info_t* out) const
+    void get_nic_asic_info(processor_handle handle, nic_asic_info_t* out) const
     {
-        check_status(m_amdsmi.get_nic_asic_info(h, out), "amdsmi_get_nic_asic_info");
+        check_status(m_amdsmi.get_nic_asic_info(handle, out), "amdsmi_get_nic_asic_info");
     }
 
-    void get_nic_port_info(processor_handle h, nic_port_info_t* out) const
+    [[nodiscard]] std::string get_nic_device_bdf(processor_handle handle) const
     {
-        check_status(m_amdsmi.get_nic_port_info(h, out), "amdsmi_get_nic_port_info");
+        nic_bus_info_t raw{};
+        check_status(m_amdsmi.get_nic_bus_info(handle, &raw), "amdsmi_get_nic_bus_info");
+        return common::format_pci_bdf(raw.bdf.domain_number, raw.bdf.bus_number,
+                                      raw.bdf.device_number, raw.bdf.function_number);
     }
 
-    void get_nic_rdma_dev_info(processor_handle h, nic_rdma_devices_info_t* out) const
+    void get_nic_port_info(processor_handle handle, nic_port_info_t* out) const
     {
-        check_status(m_amdsmi.get_nic_rdma_dev_info(h, out),
+        check_status(m_amdsmi.get_nic_port_info(handle, out), "amdsmi_get_nic_port_info");
+    }
+
+    void get_nic_rdma_dev_info(processor_handle         handle,
+                               nic_rdma_devices_info_t* out) const
+    {
+        check_status(m_amdsmi.get_nic_rdma_dev_info(handle, out),
                      "amdsmi_get_nic_rdma_dev_info");
     }
 
-    void get_nic_rdma_port_statistics(processor_handle h, std::uint8_t port_idx,
+    void get_nic_rdma_port_statistics(processor_handle handle, std::uint8_t port_idx,
                                       std::uint32_t* count, nic_stat_t* stats) const
     {
-        check_status(m_amdsmi.get_nic_rdma_port_statistics(h, port_idx, count, stats),
-                     "amdsmi_get_nic_rdma_port_statistics");
+        check_status(
+            m_amdsmi.get_nic_rdma_port_statistics(handle, port_idx, count, stats),
+            "amdsmi_get_nic_rdma_port_statistics");
     }
 #endif
 

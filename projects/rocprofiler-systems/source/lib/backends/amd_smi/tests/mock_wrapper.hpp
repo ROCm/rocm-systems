@@ -110,27 +110,42 @@ struct mock_nic_asic_info_t
     const char* vendor_name  = "";
 };
 
+struct mock_nic_bus_info_t
+{
+    mock_bdf_t bdf{};
+};
+
 struct mock_nic_port_t
 {
-    const char* netdev = "";
+    std::uint32_t port_num = 0;
+    const char*   netdev   = "";
 };
 
 struct mock_nic_port_info_t
 {
     std::uint32_t   num_ports = 0;
-    mock_nic_port_t ports[1]  = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+    mock_nic_port_t ports
+        [4] = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+};
+
+struct mock_rdma_port_info_t
+{
+    const char*  netdev    = "";
+    std::uint8_t rdma_port = 0;
 };
 
 struct mock_rdma_dev_info_t
 {
     std::uint8_t num_rdma_ports = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    mock_rdma_port_info_t rdma_port_info[4] = {};
 };
 
 struct mock_nic_rdma_devices_info_t
 {
     std::uint32_t num_rdma_dev = 0;
-    mock_rdma_dev_info_t
-        rdma_dev_info[1] = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    mock_rdma_dev_info_t rdma_dev_info[1] = {};
 };
 
 struct mock_nic_stat_t
@@ -182,6 +197,8 @@ struct gmock_backend_api
                 (std::uint64_t handle, std::uint32_t* count, mock_proc_info_t* list));
     MOCK_METHOD(mock_status_t, get_nic_asic_info,
                 (std::uint64_t handle, mock_nic_asic_info_t* out));
+    MOCK_METHOD(mock_status_t, get_nic_bus_info,
+                (std::uint64_t handle, mock_nic_bus_info_t* out));
     MOCK_METHOD(mock_status_t, get_nic_port_info,
                 (std::uint64_t handle, mock_nic_port_info_t* out));
     MOCK_METHOD(mock_status_t, get_nic_rdma_dev_info,
@@ -211,6 +228,7 @@ struct mock_backend
     using proc_info_t             = mock_proc_info_t;
     using processor_type          = std::uint32_t;
     using nic_asic_info_t         = mock_nic_asic_info_t;
+    using nic_bus_info_t          = mock_nic_bus_info_t;
     using nic_port_info_t         = mock_nic_port_info_t;
     using nic_rdma_devices_info_t = mock_nic_rdma_devices_info_t;
     using nic_stat_t              = mock_nic_stat_t;
@@ -299,6 +317,11 @@ struct mock_backend
     status_t get_nic_asic_info(processor_handle handle, nic_asic_info_t* out) const
     {
         return g_mock_backend->get_nic_asic_info(handle, out);
+    }
+
+    status_t get_nic_bus_info(processor_handle handle, nic_bus_info_t* out) const
+    {
+        return g_mock_backend->get_nic_bus_info(handle, out);
     }
 
     status_t get_nic_port_info(processor_handle handle, nic_port_info_t* out) const

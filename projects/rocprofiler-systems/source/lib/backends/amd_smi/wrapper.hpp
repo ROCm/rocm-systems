@@ -55,6 +55,7 @@ public:
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     using nic_asic_info_t         = amdsmi_nic_asic_info_t;
+    using nic_bus_info_t          = amdsmi_nic_bus_info_t;
     using nic_port_info_t         = amdsmi_nic_port_info_t;
     using nic_rdma_devices_info_t = amdsmi_nic_rdma_devices_info_t;
     using nic_stat_t              = amdsmi_nic_stat_t;
@@ -173,6 +174,11 @@ public:
     static status_t get_nic_asic_info(processor_handle handle, nic_asic_info_t* out)
     {
         return amdsmi_get_nic_asic_info(handle, out);
+    }
+
+    static status_t get_nic_bus_info(processor_handle handle, nic_bus_info_t* out)
+    {
+        return amdsmi_get_nic_bus_info(handle, out);
     }
 
     static status_t get_nic_port_info(processor_handle handle, nic_port_info_t* out)

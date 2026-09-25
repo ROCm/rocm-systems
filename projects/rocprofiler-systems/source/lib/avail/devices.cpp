@@ -3,6 +3,7 @@
 
 #include "avail/devices.hpp"
 #include "avail/records.hpp"
+#include "avail/smi_session.hpp"
 
 #include <exception>
 #include <string>
@@ -11,9 +12,7 @@
 #include <vector>
 
 #if defined(ROCPROFSYS_AVAIL_HAS_SDK)
-#    include "backends/amd_smi/backend.hpp"
 #    include "backends/amd_smi/gpu_types.hpp"
-#    include "backends/amd_smi/wrapper.hpp"
 #    include "backends/rocprofiler_sdk/wrapper.hpp"
 #endif
 
@@ -33,36 +32,17 @@ make_diagnostic(capability_kind capability, source_id source, std::string messag
 }
 
 #if defined(ROCPROFSYS_AVAIL_HAS_SDK)
-struct smi_session
-{
-    using backend_t = backends::amd_smi::backend<backends::amd_smi::wrapper>;
-
-    smi_session() { m_backend.initialize(); }
-    ~smi_session() { m_backend.shutdown(); }
-
-    smi_session(const smi_session&)            = delete;
-    smi_session& operator=(const smi_session&) = delete;
-    smi_session(smi_session&&)                 = delete;
-    smi_session& operator=(smi_session&&)      = delete;
-
-    [[nodiscard]] backend_t&       backend() { return m_backend; }
-    [[nodiscard]] const backend_t& backend() const { return m_backend; }
-
-private:
-    backend_t m_backend;
-};
-
 using asic_by_bdf = std::unordered_map<std::string, backends::amd_smi::gpu::asic_info>;
 
 [[nodiscard]] asic_by_bdf
 smi_asic_by_bdf(smi_session& session)
 {
     asic_by_bdf by_bdf;
-    for(const auto handle : session.backend().enumerate_gpu_handles())
+    for(const auto handle : session.backend()->enumerate_gpu_handles())
     {
         smi_session::backend_t::asic_info_t raw{};
-        session.backend().get_gpu_asic_info(handle, &raw);
-        by_bdf.emplace(session.backend().get_device_bdf(handle),
+        session.backend()->get_gpu_asic_info(handle, &raw);
+        by_bdf.emplace(session.backend()->get_device_bdf(handle),
                        backends::amd_smi::gpu::asic_info{
                            .product_name = c_string_or_empty(raw.market_name),
                            .vendor_name  = c_string_or_empty(raw.vendor_name),
@@ -109,10 +89,10 @@ enrich_agents_from_smi(std::vector<gpu_agent_info>& agents)
 }
 
 [[nodiscard]] gpu_agents_listing_result
-query_gpu_agents_from_sdk()
+query_gpu_agents_from_sdk(bool enrich_with_smi)
 {
     auto listed = inventory::gpu_agents<rocprofiler_sdk::wrapper>();
-    if(listed.issue.has_value() || listed.agents.empty())
+    if(listed.issue.has_value() || listed.agents.empty() || !enrich_with_smi)
     {
         return listed;
     }
@@ -131,12 +111,12 @@ query_gpu_agents_from_sdk()
 }  // namespace
 
 gpu_agents_listing_result
-query_gpu_agent_infos()
+query_gpu_agent_infos(bool enrich_with_smi)
 {
 #if defined(ROCPROFSYS_AVAIL_HAS_SDK)
     try
     {
-        return query_gpu_agents_from_sdk();
+        return query_gpu_agents_from_sdk(enrich_with_smi);
     } catch(const std::exception& err)
     {
         return gpu_agents_listing_result{
@@ -146,6 +126,7 @@ query_gpu_agent_infos()
         };
     }
 #else
+    static_cast<void>(enrich_with_smi);
     return gpu_agents_listing_result{
         .agents = {},
         .issue = make_diagnostic(capability_kind::gpu_devices, source_id::rocprofiler_sdk,

@@ -145,6 +145,6 @@ gpu_agents()
 query_gpu_devices();
 
 [[nodiscard]] gpu_agents_listing_result
-query_gpu_agent_infos();
+query_gpu_agent_infos(bool enrich_with_smi = true);
 
 }  // namespace rocprofsys::avail

@@ -16,9 +16,14 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/devices.hpp
         ${CMAKE_CURRENT_LIST_DIR}/gpu_counters.cpp
         ${CMAKE_CURRENT_LIST_DIR}/gpu_counters.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.hpp
         ${CMAKE_CURRENT_LIST_DIR}/listing_externals.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/nic.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/nic.hpp
         ${CMAKE_CURRENT_LIST_DIR}/records.cpp
         ${CMAKE_CURRENT_LIST_DIR}/records.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/smi_session.hpp
         ${CMAKE_CURRENT_LIST_DIR}/traces.cpp
         ${CMAKE_CURRENT_LIST_DIR}/traces.hpp
 )
@@ -30,6 +35,7 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-avail-library
+    PUBLIC rocprofiler-systems::rocprofiler-systems-amd-smi-backend
     PRIVATE
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-compile-options
@@ -44,7 +50,6 @@ if(TARGET rocprofiler-systems-rocprofiler-sdk-backend)
         rocprofiler-systems-avail-library
         PRIVATE
             rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
-            rocprofiler-systems::rocprofiler-systems-amd-smi-backend
             rocprofiler-systems::rocprofiler-systems-common-library
             rocprofiler-systems-logger
     )

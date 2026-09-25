@@ -4,6 +4,8 @@
 #include "avail/catalog.hpp"
 #include "avail/devices.hpp"
 #include "avail/gpu_counters.hpp"
+#include "avail/gpu_metrics.hpp"
+#include "avail/nic.hpp"
 #include "avail/records.hpp"
 #include "avail/traces.hpp"
 
@@ -31,21 +33,12 @@ constexpr auto k_boolean_stubs = std::array{
     stub_spec{ .flag       = &query_request::cpu_devices,
                .capability = capability_kind::cpu_devices,
                .source     = source_id::procfs },
-    stub_spec{ .flag       = &query_request::nic_devices,
-               .capability = capability_kind::nic_devices,
-               .source     = source_id::amd_smi },
     stub_spec{ .flag       = &query_request::cpu_counters,
                .capability = capability_kind::cpu_counters,
                .source     = source_id::papi },
     stub_spec{ .flag       = &query_request::cpu_metrics,
                .capability = capability_kind::cpu_metrics,
                .source     = source_id::procfs },
-    stub_spec{ .flag       = &query_request::gpu_metrics,
-               .capability = capability_kind::gpu_metrics,
-               .source     = source_id::amd_smi },
-    stub_spec{ .flag       = &query_request::nic_metrics,
-               .capability = capability_kind::nic_metrics,
-               .source     = source_id::amd_smi },
     stub_spec{ .flag       = &query_request::storage_metrics,
                .capability = capability_kind::storage_metrics,
                .source     = source_id::storage },
@@ -138,6 +131,30 @@ query(const query_request& request)
         result.queried.emplace_back(capability_kind::gpu_counters);
         auto listed         = query_gpu_counters();
         result.gpu_counters = std::move(listed.records);
+        append_listing_diagnostic(result, std::move(listed.issue));
+    }
+
+    if(request.gpu_metrics)
+    {
+        result.queried.emplace_back(capability_kind::gpu_metrics);
+        auto listed        = query_gpu_metrics();
+        result.gpu_metrics = std::move(listed.records);
+        append_listing_diagnostic(result, std::move(listed.issue));
+    }
+
+    if(request.nic_devices || request.nic_metrics)
+    {
+        if(request.nic_devices)
+        {
+            result.queried.emplace_back(capability_kind::nic_devices);
+        }
+        if(request.nic_metrics)
+        {
+            result.queried.emplace_back(capability_kind::nic_metrics);
+        }
+        auto listed = query_nic_inventory(request.nic_devices, request.nic_metrics);
+        result.nic_devices = std::move(listed.devices);
+        result.nic_metrics = std::move(listed.metrics);
         append_listing_diagnostic(result, std::move(listed.issue));
     }
 
