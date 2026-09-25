@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocjitsu::plugins::instruction_mix {
 
@@ -66,6 +67,7 @@ using MnemonicMap = std::unordered_map<std::string, MnemonicStats, MnemonicHash,
 /// hook touches no memory shared with another simulation partition and the
 /// plugin never needs the group's callback lock on the instruction path.
 struct InstructionMixWavefrontState final : WavefrontState {
+  uint32_t dispatch_id = 0;
   MnemonicMap counts;
 };
 
@@ -91,6 +93,7 @@ public:
   /// their dispatch (and the physical-register owner lookup behind it) as soon
   /// as any member asks for them. Opt out.
   bool observes_sgpr_reads() const override { return false; }
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
   /// The mix is counted entirely at before-execute and async-issue, so every
   /// other observation hook is dead weight here. The group ORs these, so a
@@ -115,9 +118,12 @@ public:
 
   void onShutdown() override;
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override;
   void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override;
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
+  void onAmdgpuPluginGroupDetached() override;
+  void onAmdgpuWavefrontStateInvalidated(amdgpu::Wavefront &wf) override;
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override;
 
@@ -128,6 +134,8 @@ private:
   struct DispatchState {
     KernelDispatchInfo info;
     MnemonicMap counts;
+    bool begun = false;
+    bool observation_complete = true;
   };
 
   /// Record one execution of @p inst. Shared by the synchronous before-execute
@@ -141,9 +149,10 @@ private:
   void emit_record(std::string_view record, const KernelDispatchInfo *info,
                    const MnemonicMap &counts);
 
-  /// In-flight dispatches, erased as each one ends. A dispatch that never
-  /// reaches onAmdgpuDispatchExecutionEnd stays here until shutdown, which
-  /// folds whatever it collected into the summary and counts it in
+  /// In-flight dispatches are erased when a fully observed execution ends. A
+  /// dispatch that never reaches execution-end, or whose observation is
+  /// interrupted by plugin-group replacement, stays here until shutdown. The
+  /// summary folds in whatever it collected and counts it in
   /// `incomplete_dispatches_` -- the report's contract is that absence means
   /// non-execution, so an abandoned dispatch's mnemonics must not vanish. It
   /// still gets no `"record":"dispatch"` line, since its per-dispatch totals
@@ -151,6 +160,10 @@ private:
   /// fixed array, so a run that abandons many dispatches holds more memory
   /// than the throughput plugin would.
   std::unordered_map<uint32_t, DispatchState> dispatches_;
+  // Dispatches first encountered after this plugin was attached to an already
+  // resident execution have no packet/begin state. Halt and execution-end can
+  // both reveal the same lifetime, so retain IDs to count each gap once.
+  std::unordered_set<uint32_t> unobserved_dispatches_;
   MnemonicMap aggregate_;
   uint64_t completed_dispatches_ = 0;
   uint64_t incomplete_dispatches_ = 0;

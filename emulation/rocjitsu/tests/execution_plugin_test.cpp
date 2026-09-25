@@ -2607,6 +2607,10 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
     StringSink &sink = sink_config.emplace<StringSink>();
     ExecutionPluginGroup group(std::move(sink_config));
     EXPECT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+    KernelDispatchInfo info{};
+    info.dispatch_id = 1;
+    group.onAmdgpuDispatchPacketProcessed(info);
+    group.onAmdgpuDispatchExecutionBegin(1);
 
     // Two waves in the same dispatch reach the same mnemonic through different
     // encodings. Feeding them in either order must produce one answer.
@@ -2656,6 +2660,10 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
     StringSink &sink = sink_config.emplace<StringSink>();
     ExecutionPluginGroup group(std::move(sink_config));
     EXPECT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+    KernelDispatchInfo info{};
+    info.dispatch_id = 1;
+    group.onAmdgpuDispatchPacketProcessed(info);
+    group.onAmdgpuDispatchExecutionBegin(1);
 
     // Same mnemonic, same encoding id, same opcode, same dispatch: the size is
     // the only field that separates the two sightings.
@@ -2704,6 +2712,10 @@ TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
 
   // Dispatch 1 completes; dispatch 2 halts its wave but never ends.
   for (const uint32_t dispatch_id : {1u, 2u}) {
+    KernelDispatchInfo info{};
+    info.dispatch_id = dispatch_id;
+    group.onAmdgpuDispatchPacketProcessed(info);
+    group.onAmdgpuDispatchExecutionBegin(dispatch_id);
     amdgpu::Wavefront &wf = *slot;
     wf.set_dispatch_id(dispatch_id);
     group.onAmdgpuWavefrontDispatched(wf);
@@ -2740,6 +2752,196 @@ TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
   EXPECT_EQ(summary.family_executions.at("control"), 1u);
 }
 
+TEST(InstructionMixPluginTest, ResidentAttachmentMarksUnobservedDispatchIncomplete) {
+  Wave32PluginFixture fixture;
+  constexpr uint32_t ResidentDispatch = 3;
+  auto *resident = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                           /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(resident, nullptr);
+  resident->set_dispatch_id(ResidentDispatch);
+
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  // The newly attached stateful plugin receives neither the resident wave's
+  // dispatch initialization nor its hot hooks, but halt and end still identify
+  // the lifetime whose coverage is unknowable.
+  resident->halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(ResidentDispatch);
+
+  constexpr uint32_t ObservedDispatch = 4;
+  KernelDispatchInfo info{};
+  info.dispatch_id = ObservedDispatch;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  group->onAmdgpuDispatchExecutionBegin(ObservedDispatch);
+  auto *observed = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x2000, /*num_sgprs=*/64,
+                                           /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(observed, nullptr);
+  observed->set_dispatch_id(ObservedDispatch);
+  group->onAmdgpuWavefrontDispatched(*observed);
+  InstructionMixTestInstruction nop("s_nop");
+  group->onAmdgpuBeforeExecuteInstruction(0x2000, nop, *observed);
+  observed->halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(ObservedDispatch);
+  group->onShutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_EQ(records[0].record, "dispatch");
+  EXPECT_EQ(records[0].dispatch_id, ObservedDispatch);
+  EXPECT_EQ(records[0].mnemonic_executions.at("s_nop"), 1u);
+
+  const auto &summary = records[1];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 1u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+}
+
+TEST(InstructionMixPluginTest, ReplacementBeforeHaltMarksResidentAttachmentIncomplete) {
+  Wave32PluginFixture fixture;
+  constexpr uint32_t ResidentDispatch = 5;
+  auto *resident = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                           /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(resident, nullptr);
+  resident->set_dispatch_id(ResidentDispatch);
+
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  // This instance missed packet, begin, and wave dispatch. If it is replaced
+  // again before halt or execution-end, the invalidation notification is its
+  // only opportunity to account for the resident lifetime.
+  InstructionMixTestInstruction nop("s_nop");
+  group->onAmdgpuBeforeExecuteInstruction(0x1000, nop, *resident);
+  fixture.cu->set_plugin_group(nullptr);
+  group->onShutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  const auto &summary = records[0];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 0u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 0u);
+  EXPECT_EQ(summary.unique_mnemonics, 0u);
+  EXPECT_TRUE(summary.mnemonic_executions.empty());
+
+  resident->halt(Wavefront::CpCompletionNotice::Suppress);
+}
+
+TEST(InstructionMixPluginTest, IdleReplacementDoesNotInventAnUnobservedDispatch) {
+  Wave32PluginFixture fixture;
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 6;
+  KernelDispatchInfo info{};
+  info.dispatch_id = Dispatch;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+  auto *wave = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                       /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_dispatch_id(Dispatch);
+  group->onAmdgpuWavefrontDispatched(*wave);
+  InstructionMixTestInstruction nop("s_nop");
+  group->onAmdgpuBeforeExecuteInstruction(0x1000, nop, *wave);
+  wave->halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  ASSERT_EQ(fixture.cu->num_wfs(), 0u);
+
+  // The physical slot remains allocated after halt, but it has no live wave
+  // or InstructionMix state. Replacing the idle CU must not turn dispatch 0
+  // into a synthetic observation gap.
+  fixture.cu->set_plugin_group(nullptr);
+  group->onShutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_EQ(records[0].record, "dispatch");
+  EXPECT_EQ(records[0].dispatch_id, Dispatch);
+  EXPECT_EQ(records[0].wave_instructions, 1u);
+  const auto &summary = records[1];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 1u);
+  EXPECT_EQ(summary.incomplete_dispatches, 0u);
+  EXPECT_TRUE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+}
+
+TEST(InstructionMixPluginTest, ReplacementKeepsCountsBeforeAndAfterObservationGap) {
+  Wave32PluginFixture fixture;
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 5;
+  KernelDispatchInfo info{};
+  info.dispatch_id = Dispatch;
+  info.workgroup_count = 2;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+
+  auto *before_gap = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                             /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(before_gap, nullptr);
+  before_gap->set_dispatch_id(Dispatch);
+  group->onAmdgpuWavefrontDispatched(*before_gap);
+  InstructionMixTestInstruction nop("s_nop");
+  group->onAmdgpuBeforeExecuteInstruction(0x1000, nop, *before_gap);
+
+  // Detach invalidates the dispatch before discarding its resident wave state;
+  // the invalidation hook must merge the count already accumulated there.
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.cu->set_plugin_group(group);
+  before_gap->halt(Wavefront::CpCompletionNotice::Suppress);
+
+  // A later ordinary wave-dispatch callback may contribute useful partial
+  // coverage even though the dispatch can no longer produce a complete line.
+  auto *after_gap = fixture.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x2000, /*num_sgprs=*/64,
+                                            /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(after_gap, nullptr);
+  after_gap->set_dispatch_id(Dispatch);
+  group->onAmdgpuWavefrontDispatched(*after_gap);
+  InstructionMixTestInstruction add("v_add_f32");
+  group->onAmdgpuBeforeExecuteInstruction(0x2000, add, *after_gap);
+  after_gap->halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  const auto &summary = records[0];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 0u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 2u);
+  EXPECT_EQ(summary.unique_mnemonics, 2u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("v_add_f32"), 1u);
+}
+
 // The mnemonic a plugin observes does not always point to static storage:
 // the generated FLAT encoding on every architecture and VOPD on gfx11/gfx12
 // and CDNA5 synthesise it into a per-instruction std::string member
@@ -2760,6 +2962,10 @@ TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
 
   amdgpu::Wavefront &wf = *slot;
   wf.set_dispatch_id(1);
+  KernelDispatchInfo info{};
+  info.dispatch_id = 1;
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(1);
   group.onAmdgpuWavefrontDispatched(wf);
   {
     std::string transient_mnemonic = "global_load_dwordx4_transient_storage";
@@ -2779,6 +2985,174 @@ TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
   ASSERT_EQ(dispatch.mnemonic_executions.size(), 1u);
   EXPECT_EQ(dispatch.mnemonic_executions.begin()->first, "global_load_dwordx4_transient_storage");
   EXPECT_EQ(dispatch.mnemonic_executions.begin()->second, 1u);
+}
+
+TEST(ThroughputPluginTest, DetachAndRestoreSameGroupDiscardsInterruptedDispatch) {
+  Wave32PluginFixture fixture;
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto throughput = std::make_unique<plugins::throughput::ThroughputPlugin>();
+  auto *throughput_ptr = throughput.get();
+  ASSERT_TRUE(group->add(std::move(throughput)));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 17;
+  KernelDispatchInfo info{};
+  info.dispatch_id = Dispatch;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+  auto *wave = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                       /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_dispatch_id(Dispatch);
+  group->onAmdgpuWavefrontDispatched(*wave);
+  ASSERT_TRUE(throughput_ptr->observes_hot_hooks_for_wavefront(wave));
+
+  ThroughputTestInstruction nop("s_nop");
+  group->onAmdgpuBeforeExecuteInstruction(0x1000, nop, *wave);
+  group->onAmdgpuAfterExecuteInstruction(0x1000, nop, *wave);
+
+  fixture.cu->set_plugin_group(nullptr);
+  EXPECT_FALSE(throughput_ptr->observes_hot_hooks_for_wavefront(wave));
+  fixture.cu->set_plugin_group(group);
+  EXPECT_NO_THROW(group->onAmdgpuWavefrontHalted(*wave));
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  EXPECT_EQ(records[0].record, "summary");
+  EXPECT_EQ(records[0].dispatches, 0u);
+  EXPECT_EQ(records[0].wave_instructions, 0u);
+}
+
+TEST(ThroughputPluginTest, DetachAndRestoreSameGroupBetweenWorkgroupsDiscardsDispatch) {
+  Wave32PluginFixture fixture;
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 18;
+  KernelDispatchInfo info{};
+  info.dispatch_id = Dispatch;
+  info.workgroup_count = 3;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+
+  ThroughputTestInstruction nop("s_nop");
+  const auto run_workgroup = [&](uint32_t wg_id) {
+    auto *wave = fixture.cu->dispatch_wf(wg_id, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                         /*num_vgprs=*/64, /*wave_size=*/32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_dispatch_id(Dispatch);
+    auto &observers = fixture.cu->plugin_group();
+    observers.onAmdgpuWavefrontDispatched(*wave);
+    for (uint32_t instruction = 0; instruction != 2; ++instruction) {
+      const uint64_t pc = 0x1000 + instruction * sizeof(uint32_t);
+      observers.onAmdgpuBeforeExecuteInstruction(pc, nop, *wave);
+      observers.onAmdgpuAfterExecuteInstruction(pc, nop, *wave);
+    }
+    wave->halt(Wavefront::CpCompletionNotice::Suppress);
+  };
+
+  run_workgroup(/*wg_id=*/0);
+  ASSERT_EQ(fixture.cu->num_wfs(), 0u);
+  fixture.cu->set_plugin_group(nullptr);
+  run_workgroup(/*wg_id=*/1);
+  ASSERT_EQ(fixture.cu->num_wfs(), 0u);
+  fixture.cu->set_plugin_group(group);
+  run_workgroup(/*wg_id=*/2);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  EXPECT_EQ(records[0].record, "summary");
+  EXPECT_EQ(records[0].dispatches, 0u);
+  EXPECT_EQ(records[0].wave_instructions, 0u);
+}
+
+TEST(ThroughputPluginTest, DetachAcrossExecutionBeginRejectsPacketOnlyObservation) {
+  Wave32PluginFixture fixture;
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 19;
+  KernelDispatchInfo info{};
+  info.dispatch_id = Dispatch;
+  group->onAmdgpuDispatchPacketProcessed(info);
+
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.cu->plugin_group().onAmdgpuDispatchExecutionBegin(Dispatch);
+  auto *wave = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                       /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_dispatch_id(Dispatch);
+  fixture.cu->plugin_group().onAmdgpuWavefrontDispatched(*wave);
+  ThroughputTestInstruction nop("s_nop");
+  fixture.cu->plugin_group().onAmdgpuBeforeExecuteInstruction(0x1000, nop, *wave);
+  fixture.cu->plugin_group().onAmdgpuAfterExecuteInstruction(0x1000, nop, *wave);
+
+  fixture.cu->set_plugin_group(group);
+  wave->halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  EXPECT_EQ(records[0].record, "summary");
+  EXPECT_EQ(records[0].dispatches, 0u);
+  EXPECT_EQ(records[0].wave_instructions, 0u);
+}
+
+TEST(ThroughputPluginTest, DetachAndRestoreBeforeExecutionBeginKeepsCompleteObservation) {
+  Wave32PluginFixture fixture;
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 20;
+  KernelDispatchInfo info{};
+  info.dispatch_id = Dispatch;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.cu->set_plugin_group(group);
+
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+  auto *wave = fixture.cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/64,
+                                       /*num_vgprs=*/64, /*wave_size=*/32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_dispatch_id(Dispatch);
+  group->onAmdgpuWavefrontDispatched(*wave);
+  ThroughputTestInstruction nop("s_nop");
+  for (uint32_t instruction = 0; instruction != 2; ++instruction) {
+    const uint64_t pc = 0x1000 + instruction * sizeof(uint32_t);
+    group->onAmdgpuBeforeExecuteInstruction(pc, nop, *wave);
+    group->onAmdgpuAfterExecuteInstruction(pc, nop, *wave);
+  }
+  wave->halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_EQ(records[0].record, "dispatch");
+  EXPECT_EQ(records[0].wave_instructions, 2u);
+  EXPECT_EQ(records[1].record, "summary");
+  EXPECT_EQ(records[1].dispatches, 1u);
+  EXPECT_EQ(records[1].wave_instructions, 2u);
 }
 
 class AsyncEventPlugin final : public ExecutionPlugin {
@@ -5425,7 +5799,7 @@ protected:
     wave->set_exec(1);
     std::array<Wavefront *, 1> waves{wave};
     fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
-    plugin_state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+    plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wave);
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_NE(decoder, nullptr);
   }
@@ -5840,8 +6214,7 @@ TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
   ASSERT_EQ(state->exec_mask, 0xFFFF'FFFFu);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
 
-  auto *plugin_state =
-      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
   ASSERT_NE(plugin_state, nullptr);
   auto &events = plugin_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 1);
@@ -5883,8 +6256,7 @@ TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
                               {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-  auto *plugin_state =
-      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
   ASSERT_NE(plugin_state, nullptr);
   auto &events = plugin_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 1);
@@ -6067,8 +6439,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
   }
 
-  auto *plugin_state =
-      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
   ASSERT_NE(plugin_state, nullptr);
   ASSERT_NE(plugin_state->race_state, nullptr);
   const auto &events = plugin_state->race_state->getDetector()->events();
@@ -6136,8 +6507,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
     EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *store, *wf);
 
-    auto *plugin_state =
-        static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+    auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
     ASSERT_NE(plugin_state, nullptr);
     ASSERT_NE(plugin_state->race_state, nullptr);
     auto &events = plugin_state->race_state->getDetector()->events();
@@ -6596,8 +6966,7 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
                 EXPECT_EQ(cu->read_vgpr_storage(vb + 8 + part, lane),
                           exec & (uint64_t{1} << lane) ? 1000 + lane * 4 + part : kCanary);
 
-            auto *plugin_state =
-                static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+            auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
             ASSERT_NE(plugin_state, nullptr);
             auto &race = *plugin_state->race_state;
             auto &core = wf->ensure_memory_wait_scoreboard();
@@ -6665,8 +7034,7 @@ TEST(RaceDetectorPluginTest, Gfx950FlatEmptyPortionDoesNotOrderAnOlderResult) {
       wf->set_exec(1);
       std::array<amdgpu::Wavefront *, 1> waves{wf};
       f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-      auto *plugin_state =
-          static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+      auto *plugin_state = plugin_ptr->wavefront_state<RaceWavefrontState>(*wf);
       ASSERT_NE(plugin_state, nullptr);
       auto &race = *plugin_state->race_state;
       const auto empty_counter = lds ? WaitCounterType::VMCNT : WaitCounterType::LGKMCNT;
@@ -6743,9 +7111,7 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
           wf->set_exec(1);
           std::array<amdgpu::Wavefront *, 1> waves{wf};
           f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-          auto &race =
-              *static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()))
-                   ->race_state;
+          auto &race = *plugin_ptr->wavefront_state<RaceWavefrontState>(*wf)->race_state;
           auto &core = wf->ensure_memory_wait_scoreboard();
           unsigned core_reports = 0;
           core.bind(0x200, &core_reports,

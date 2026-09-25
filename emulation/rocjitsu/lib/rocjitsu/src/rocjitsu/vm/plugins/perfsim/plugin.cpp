@@ -455,6 +455,10 @@ struct DispatchState {
   bool begun = false;
   bool ended = false;
   bool selected = true;
+  // A replacement after packet metadata but before execution-begin may or may
+  // not have hidden the begin callback. A later observed begin proves that it
+  // did not; a wave or end callback arriving first proves that it did.
+  bool replacement_gap_before_begin = false;
   std::atomic<bool> supported{true};
   std::mutex rejection_mutex;
   bool diagnostic_emitted = false;
@@ -720,7 +724,9 @@ struct PerfsimPlugin::Impl {
 
   PerfsimWavefrontState *find_wave(uint32_t compute_unit_id, uint32_t wavefront_id) {
     const auto iter = physical_waves.find(physical_wave_key(compute_unit_id, wavefront_id));
-    return iter == physical_waves.end() ? nullptr : iter->second;
+    if (iter == physical_waves.end() || !iter->second)
+      return nullptr;
+    return owner.wavefront_state<PerfsimWavefrontState>(*iter->second);
   }
 
   void replay(const OrderedEvent &event) const {
@@ -1240,7 +1246,10 @@ struct PerfsimPlugin::Impl {
   // dispatch state remains until its real end callback, but it retains no
   // events and cannot indefinitely hold completed supported work.
   std::unordered_set<uint32_t> replay_blockers;
-  std::unordered_map<uint64_t, PerfsimWavefrontState *> physical_waves;
+  // Wavefront objects persist across physical-slot reuse. Retain that stable
+  // identity rather than a pointer to replaceable wave-local plugin state, and
+  // resolve the current owner-tagged state before every use.
+  std::unordered_map<uint64_t, amdgpu::Wavefront *> physical_waves;
   std::deque<EventChunk> event_chunks;
   size_t staged_bytes = 0;
 };
@@ -1257,7 +1266,7 @@ void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
 bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
 
 bool PerfsimPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
-  return wf != nullptr && wf->has_plugin_state(slot_index());
+  return wf != nullptr && wavefront_state<PerfsimWavefrontState>(*wf) != nullptr;
 }
 
 void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
@@ -1288,6 +1297,9 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
     impl_->reject(dispatch_id, "dispatch began more than once");
     return;
   }
+  // The group was restored before this observation boundary, so no dispatch
+  // callback was missed during the packet-to-begin replacement interval.
+  state.replacement_gap_before_begin = false;
   state.begun = true;
   state.ended = false;
   if (!state.selected || !Impl::supported(state))
@@ -1298,8 +1310,17 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
 
 void PerfsimPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   auto iter = impl_->dispatches.find(dispatch_id);
-  if (iter == impl_->dispatches.end() || !iter->second.begun) {
-    impl_->reject(dispatch_id, "dispatch ended without a matching begin");
+  // A group installed while this dispatch is already resident receives its
+  // eventual end callback without the earlier metadata/begin callbacks. This
+  // Perfsim instance did not observe any part of that dispatch, so there is
+  // nothing to validate or replay.
+  if (iter == impl_->dispatches.end())
+    return;
+  if (!iter->second.begun) {
+    impl_->reject(dispatch_id,
+                  iter->second.replacement_gap_before_begin
+                      ? "dispatch observation was interrupted by plugin-group replacement"
+                      : "dispatch ended without a matching begin");
     iter = impl_->dispatches.find(dispatch_id);
   }
   DispatchState &state = iter->second;
@@ -1323,15 +1344,14 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   // Wavefront slots are reused and plugin state deliberately survives the
   // generic Wavefront::reset(). A terminal dispatch fault resets the wave
   // without a halt callback, so retire that incarnation while its state still
-  // owns the raw pointer recorded in physical_waves.
-  if (wf.has_plugin_state(slot_index())) {
-    auto *previous = static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()));
+  // identifies the dispatch recorded in physical_waves.
+  if (auto *previous = wavefront_state<PerfsimWavefrontState>(wf)) {
     const uint32_t previous_dispatch = static_cast<uint32_t>(
         previous->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
     const auto existing = impl_->physical_waves.find(physical_key);
-    if (existing != impl_->physical_waves.end() && existing->second != previous) {
+    if (existing != impl_->physical_waves.end() && existing->second != &wf) {
       impl_->physical_waves.erase(existing);
-      wf.clear_plugin_state(slot_index());
+      clear_wavefront_state(wf);
       impl_->reject(wf.dispatch_id(), "physical wavefront slot retained mismatched state");
       return;
     }
@@ -1343,7 +1363,7 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
         --dispatch->second.live_waves;
       impl_->reject(previous_dispatch, "wavefront slot was reset without a halt callback");
     }
-    wf.clear_plugin_state(slot_index());
+    clear_wavefront_state(wf);
   } else if (const auto existing = impl_->physical_waves.find(physical_key);
              existing != impl_->physical_waves.end()) {
     // Never dereference a map entry after its owning Wavefront state has gone.
@@ -1354,6 +1374,18 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 
   if (impl_->intentionally_unselected(wf.dispatch_id()))
     return;
+  const auto observed_dispatch = impl_->dispatches.find(wf.dispatch_id());
+  // A replacement instance can receive later workgroups for a dispatch whose
+  // packet and begin callbacks both preceded attachment. It owns no part of
+  // that dispatch, so ignore the lifetime instead of manufacturing a rejected
+  // entry that would make its eventual halt/end look malformed.
+  if (observed_dispatch == impl_->dispatches.end())
+    return;
+  if (observed_dispatch->second.replacement_gap_before_begin && !observed_dispatch->second.begun) {
+    impl_->reject(wf.dispatch_id(),
+                  "dispatch observation was interrupted by plugin-group replacement");
+    return;
+  }
   DispatchState *dispatch = impl_->active_dispatch(wf.dispatch_id());
   if (!dispatch) {
     impl_->reject(wf.dispatch_id(), "wavefront dispatched outside an active dispatch");
@@ -1375,11 +1407,9 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   state->queue_id = wf.queue_id();
   state->process_id = wf.process_id();
   state->lds_base = wf.lds_base();
-  auto *raw_state = state.get();
-
   ++dispatch->live_waves;
-  impl_->physical_waves.emplace(physical_key, raw_state);
-  wf.set_plugin_state(slot_index(), std::move(state));
+  impl_->physical_waves.emplace(physical_key, &wf);
+  set_wavefront_state(wf, std::move(state));
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
@@ -1387,15 +1417,40 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
     return;
   if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
     return;
+  if (const auto state = impl_->dispatches.find(wf.dispatch_id());
+      state != impl_->dispatches.end() && state->second.replacement_gap_before_begin &&
+      !state->second.begun) {
+    impl_->reject(wf.dispatch_id(),
+                  "dispatch observation was interrupted by plugin-group replacement");
+  }
   const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
   const auto wave_iter = impl_->physical_waves.find(physical_key);
   if (wave_iter == impl_->physical_waves.end()) {
+    // Live group replacement does not replay dispatch or wave-dispatch
+    // callbacks for already-resident waves. If this instance has never seen
+    // the dispatch, the halt completes an intentionally unobserved lifetime.
+    // A missing identity remains a protocol error for a dispatch we did see.
+    if (!impl_->dispatches.contains(wf.dispatch_id()))
+      return;
     impl_->reject(wf.dispatch_id(), "halted wavefront has no Perfsim identity");
     return;
   }
 
-  PerfsimWavefrontState &wave = *wave_iter->second;
+  auto *current_state =
+      wave_iter->second == &wf ? wavefront_state<PerfsimWavefrontState>(wf) : nullptr;
+  if (!current_state) {
+    // Never dereference retained identity unless the live wavefront slot still
+    // owns this Perfsim instance's state. Replacement normally removes the map
+    // entry through onAmdgpuWavefrontStateInvalidated(); keep this guard for
+    // malformed callback sequences and future state-clearing paths.
+    impl_->physical_waves.erase(wave_iter);
+    if (impl_->dispatches.contains(wf.dispatch_id()))
+      impl_->reject(wf.dispatch_id(), "halted wavefront retained stale Perfsim identity");
+    return;
+  }
+
+  PerfsimWavefrontState &wave = *current_state;
   const uint32_t dispatch_id =
       static_cast<uint32_t>(wave.wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
   bool retired_ended_dispatch = false;
@@ -1411,9 +1466,40 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
     retired_ended_dispatch = dispatch.ended && dispatch.live_waves == 0;
   }
   impl_->physical_waves.erase(wave_iter);
-  wf.clear_plugin_state(slot_index());
+  clear_wavefront_state(wf);
   if (retired_ended_dispatch)
     impl_->drain_epoch(/*shutdown=*/false);
+}
+
+void PerfsimPlugin::onAmdgpuPluginGroupDetached() {
+  std::vector<uint32_t> active_dispatches;
+  for (auto &[dispatch_id, state] : impl_->dispatches) {
+    if (!state.selected || state.ended || !Impl::supported(state))
+      continue;
+    if (state.begun)
+      active_dispatches.push_back(dispatch_id);
+    else if (state.metadata_seen)
+      state.replacement_gap_before_begin = true;
+  }
+  for (uint32_t dispatch_id : active_dispatches)
+    impl_->reject(dispatch_id, "dispatch observation was interrupted by plugin-group replacement");
+}
+
+void PerfsimPlugin::onAmdgpuWavefrontStateInvalidated(amdgpu::Wavefront &wf) {
+  auto *wave = wavefront_state<PerfsimWavefrontState>(wf);
+  if (!wave)
+    return;
+
+  const uint32_t dispatch_id =
+      static_cast<uint32_t>(wave->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
+  const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
+  impl_->physical_waves.erase(physical_wave_key(compute_unit_id, wf.wf_id()));
+
+  const auto dispatch = impl_->dispatches.find(dispatch_id);
+  if (dispatch == impl_->dispatches.end())
+    return;
+  if (dispatch->second.live_waves != 0)
+    --dispatch->second.live_waves;
 }
 
 void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
@@ -1429,10 +1515,7 @@ void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruct
 
 void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                        std::span<const uint32_t> fetch_window) {
-  PerfsimWavefrontState *wave =
-      wf.has_plugin_state(slot_index())
-          ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
-          : nullptr;
+  PerfsimWavefrontState *wave = wavefront_state<PerfsimWavefrontState>(wf);
   if (!wave) {
     const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
     if (dispatch_iter != impl_->dispatches.end() &&
@@ -1515,9 +1598,7 @@ void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObserva
 
 void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                                const amdgpu::Wavefront &wf) {
-  auto *state = wf.has_plugin_state(slot_index())
-                    ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
-                    : nullptr;
+  auto *state = wavefront_state<PerfsimWavefrontState>(wf);
   impl_->memory_access(access, state);
 }
 
@@ -1528,9 +1609,7 @@ void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
 
 void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
     const amdgpu::TensorDmaMemoryAccessObservation &access, const amdgpu::Wavefront &wf) {
-  auto *state = wf.has_plugin_state(slot_index())
-                    ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
-                    : nullptr;
+  auto *state = wavefront_state<PerfsimWavefrontState>(wf);
   impl_->tensor_dma_memory_access(access, state);
 }
 

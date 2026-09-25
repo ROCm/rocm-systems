@@ -17,10 +17,13 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace rocjitsu {
+class SoC;
+
 namespace amdgpu {
 
 /// @brief Accelerator Complex Die containing shader engines and a command processor.
@@ -62,11 +65,13 @@ public:
       se->spi().set_apertures(shared_base, shared_limit, private_base, private_limit);
   }
 
-  /// @brief Set the execution plugin group on CP and all CUs (shared ownership).
+  /// @brief Set the execution plugin group on a standalone XCD.
+  /// @details An SoC-owned XCD must be replaced through SoC::set_plugin_group()
+  /// so every XCD and the SoC's lifecycle owner stay synchronized.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    cp_->set_plugin_group(pg);
-    for (auto *se : shader_engines_)
-      se->set_plugin_group(pg);
+    if (parent() != nullptr)
+      throw std::logic_error("SoC-owned XCD plugins must be replaced through the SoC");
+    replace_plugin_group(std::move(pg));
   }
 
   /// @brief Wire topology links between CP→CU and CU→L2.
@@ -109,11 +114,23 @@ public:
   const L2Cache *l2_cache() const { return l2_cache_; }
 
 private:
+  void set_plugin_group_from_soc(std::shared_ptr<ExecutionPluginGroup> pg) {
+    replace_plugin_group(std::move(pg));
+  }
+
+  void replace_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    cp_->set_plugin_group_from_xcd(pg);
+    for (auto *se : shader_engines_)
+      se->set_plugin_group_from_xcd(pg);
+  }
+
   simdojo::ExecMode exec_mode_;
   std::shared_ptr<DeviceCacheCoherence> coherence_ = std::make_shared<DeviceCacheCoherence>();
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
   std::vector<ShaderEngine *> shader_engines_;
+
+  friend class ::rocjitsu::SoC;
 };
 
 } // namespace amdgpu

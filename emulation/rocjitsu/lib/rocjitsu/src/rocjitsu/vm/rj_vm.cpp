@@ -284,9 +284,14 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
   try {
     auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "");
     // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
-    // the group cannot overlap simulation callbacks.
-    shutdown_plugin_group(vm);
+    // the group cannot overlap simulation callbacks. Retain the outgoing group
+    // so set_plugin_group() can deliver detach and wave-state invalidation while
+    // its plugins are still initialized, then shut it down after replacement.
+    auto outgoing = vm->soc->plugin_group_shared();
+    const bool outgoing_active = vm->plugin_group_active.exchange(false, std::memory_order_acq_rel);
     vm->soc->set_plugin_group(group);
+    if (outgoing_active)
+      outgoing->onShutdown();
     group->onInit();
     vm->plugin_group_active.store(true, std::memory_order_release);
     return ROCJITSU_STATUS_SUCCESS;
