@@ -252,3 +252,5 @@ When ``--mpi-world-rank-variable`` and ``--mpi-world-size-variable`` are specifi
 - Working in mixed MPI environments where multiple MPI-related variables might be present.
 
 The ``--mpi-world-size-variable`` option is particularly useful when using ``--profile-mpi-ranks`` to ensure that the specified rank ranges are validated against the actual MPI world size, preventing out-of-range errors.
+
+The two options must be specified together. The named variables must hold integers, with a world size of 1 or greater and a rank from 0 to one less than the world size; otherwise ``rocprofv3`` exits with an error before launching the application.
