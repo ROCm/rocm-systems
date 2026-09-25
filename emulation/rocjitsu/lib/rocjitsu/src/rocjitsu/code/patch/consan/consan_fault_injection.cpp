@@ -179,8 +179,10 @@ static bool apply_resolved_fault_mutations(const AmdGpuCodeObject &code_object, 
                                                            SemanticConfidence::Conservative)) {
     return {};
   }
-  if (edge != AtomicOrderEdge::Acquire && encoding != AtomicFaultEncoding::CdnaFlat)
-    result.release_wait_text_offset = result.sequence->release_wait_text_offset;
+  if (edge != AtomicOrderEdge::Acquire)
+    result.release_wait_text_offset = encoding == AtomicFaultEncoding::CdnaFlat
+                                          ? result.sequence->lds_release_wait_text_offset
+                                          : result.sequence->release_wait_text_offset;
   for (SyncEventId identity : result.sequence->member_event_ids) {
     const SyncEvent *event = sync.find_event(identity);
     if (event != nullptr && event->kind == SyncKind::Fence &&
@@ -1508,9 +1510,9 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
       removed_boundary = fence_source->mnemonic;
     }
-    // RDNA4 release lowering commonly pairs a cache operation with an exact
-    // store wait. Once either is selected, remove the complete independently
-    // sufficient ordering boundary so staged reinventory cannot re-admit it.
+    // Release lowering can pair a cache operation with an exact store wait
+    // or, on CDNA, a combined VM/LDS wait. Once either is selected, remove the complete
+    // independently sufficient ordering boundary so staged reinventory cannot re-admit it.
     if (release_wait_text_offset) {
       const uint64_t wait_text_offset = *release_wait_text_offset;
       if (wait_text_offset >= source->text_offset() ||
@@ -1530,7 +1532,8 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       uint32_t wait_word = 0;
       std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
       const WaitInstructionEncoding wait = classify_wait_instruction({}, wait_word, arch);
-      if (!wait.release_boundary) {
+      if (!wait.release_boundary &&
+          !(encoding == AtomicFaultEncoding::CdnaFlat && wait.drains_lds)) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order release wait no longer has its admitted encoding");
         return;
@@ -1546,7 +1549,9 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
       if (fence != nullptr)
         removed_boundary += "/";
-      removed_boundary += wait.drains_lds ? "s_wait_storecnt_dscnt" : "s_wait_storecnt";
+      removed_boundary += encoding == AtomicFaultEncoding::CdnaFlat
+                              ? "s_waitcnt"
+                              : (wait.drains_lds ? "s_wait_storecnt_dscnt" : "s_wait_storecnt");
     }
     result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
                                  " while preserving " + std::string(source->mnemonic_view()));
