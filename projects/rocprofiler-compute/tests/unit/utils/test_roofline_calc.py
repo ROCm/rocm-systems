@@ -3,6 +3,9 @@
 
 
 import json
+import math
+from pathlib import Path
+from typing import Dict, List, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -11,12 +14,29 @@ import pytest
 from utils import schema
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
+    XMAX_DEFAULT,
     GraphPoints,
     calc_ai_analyze,
     calc_ceilings,
+    construct_roof,
+    machine_ceilings,
     sanitize_ai_value,
     sanitize_mem_level,
 )
+
+
+def assert_graph_points_positive_finite(
+    graph_points: Dict[str, List[Union[List[float], float, None]]],
+) -> None:
+    """Assert every populated graph point coordinate and scalar is positive finite."""
+    for values in graph_points.values():
+        for value in values:
+            if isinstance(value, list):
+                assert all(
+                    coordinate > 0 and math.isfinite(coordinate) for coordinate in value
+                )
+            elif value is not None:
+                assert value > 0 and math.isfinite(value)
 
 
 def run_calc_ai_analyze_with_values(
@@ -413,6 +433,7 @@ def test_calc_ceilings_roofline_datatype(
         dtype,
         full_benchmark_data(),
         MockMspec(gpu_model, gpu_arch),
+        0,
     )
 
     if valu_col is None:
@@ -448,6 +469,7 @@ def test_fp8_special_mfma_only() -> None:
         "FP8",
         full_benchmark_data(),
         MockMspec(),
+        0,
     )
 
     assert result["valu"] == [], "FP8 is not a PEAK_OPS datatype; no VALU roof"
@@ -460,7 +482,11 @@ def test_missing_peak_ops_column_returns_empty() -> None:
     del benchmark_data["FP64Flops"]
 
     result = calc_ceilings(
-        roofline_parameters(gpu_arch=MFMA_GPU_ARCH), "FP64", benchmark_data, MockMspec()
+        roofline_parameters(gpu_arch=MFMA_GPU_ARCH),
+        "FP64",
+        benchmark_data,
+        MockMspec(),
+        0,
     )
 
     assert result == GraphPoints.empty().__dict__
@@ -486,9 +512,464 @@ def test_missing_matrix_column_skips_matrix_roof(
         "BF16",
         benchmark_data,
         MockMspec(gpu_model, gpu_arch),
+        0,
     )
 
     assert result["valu"] == [], "BF16 has no VALU roof regardless of matrix data"
     assert result["matrix_ops"] == [], (
         f"missing {matrix_ops_type} column should skip the roof"
     )
+
+
+##############################################################################
+# machine_ceilings Tests
+##############################################################################
+
+
+def write_roofline_csv(path: Path, header: str, rows: List[str]) -> None:
+    """Write a roofline.csv with device-id column and data rows."""
+    path.write_text(header + "\n" + "\n".join(rows) + "\n", encoding="utf-8")
+
+
+def capture_roofline_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> List[Tuple[object, ...]]:
+    """Patch console_warning and return captured messages."""
+    warnings: List[Tuple[object, ...]] = []
+
+    def record_warning(*args: object) -> None:
+        warnings.append(args)
+
+    monkeypatch.setattr("utils.roofline_calc.console_warning", record_warning)
+    return warnings
+
+
+def test_machine_ceilings_reads_base_values_for_device(tmp_path: Path) -> None:
+    """Device 0 selects base Bw/Flops/Ops columns, not Low/High variants."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,HBMBwLow,L2Bw,FP32Flops,FP32FlopsHigh,I8Ops",
+        [
+            "0,5300,5290,10000,81000,81100,40000",
+            "1,6300,6290,20000,91000,91100,50000",
+        ],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == (
+        [5300.0, 10000.0],
+        [81000.0, 40000.0],
+    )
+
+    parameters["device_id"] = 1
+    assert machine_ceilings(parameters, MockMspec()) == (
+        [6300.0, 20000.0],
+        [91000.0, 50000.0],
+    )
+
+
+def test_machine_ceilings_drops_invalid_cells(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """N/A, nan, inf, and negative cells are dropped, yielding empty lists."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,FP32Flops,I8Ops",
+        ["0,N/A,nan,inf,-1"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert len(warnings) == 1
+    assert "no usable" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_missing_file_returns_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing roofline.csv returns empty lists and logs a warning."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert len(warnings) == 1
+    assert "roofline.csv" in str(warnings[0])
+
+
+def test_machine_ceilings_warns_when_workload_path_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Absent workload path returns empty lists and logs a warning."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = None
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert len(warnings) == 1
+    assert "workload path is absent" in str(warnings[0])
+
+
+def test_machine_ceilings_negative_device_id(tmp_path: Path) -> None:
+    """Negative device IDs return empty lists."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300,81000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = -1
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+
+
+def test_machine_ceilings_out_of_range_device_id(tmp_path: Path) -> None:
+    """Device IDs missing from the CSV return empty lists."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300,81000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = 5
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+
+
+def test_machine_ceilings_matches_sparse_device_id(tmp_path: Path) -> None:
+    """Device id matches the CSV first-column value, not the row offset."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["2,5300,81000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = 2
+
+    assert machine_ceilings(parameters, MockMspec()) == ([5300.0], [81000.0])
+
+
+def test_construct_roof_matches_sparse_semantic_device_id(tmp_path: Path) -> None:
+    """A sparse device id selects its sole CSV row for every drawn ceiling."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF32Flops",
+        ["2,500,600,700,800,2000,3000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = 2
+
+    graph_points = construct_roof(parameters, "FP32", MockMspec())
+
+    assert machine_ceilings(parameters, MockMspec()) == (
+        [500.0, 600.0, 700.0, 800.0],
+        [2000.0, 3000.0],
+    )
+    assert graph_points["hbm"][2] == 500.0
+    assert graph_points["valu"][2] == 2000.0
+    assert graph_points["matrix_ops"][2] == 3000.0
+
+
+def test_construct_roof_matches_reordered_semantic_device_id(tmp_path: Path) -> None:
+    """Requested device 0 selects its semantic row when CSV rows are reordered."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF32Flops",
+        [
+            "2,2500,2600,2700,2800,12000,13000",
+            "0,500,600,700,800,2000,3000",
+        ],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = 0
+
+    graph_points = construct_roof(parameters, "FP32", MockMspec())
+
+    assert machine_ceilings(parameters, MockMspec()) == (
+        [500.0, 600.0, 700.0, 800.0],
+        [2000.0, 3000.0],
+    )
+    assert graph_points["hbm"][2] == 500.0
+    assert graph_points["valu"][2] == 2000.0
+    assert graph_points["matrix_ops"][2] == 3000.0
+
+
+def test_construct_roof_invalid_device_id_returns_empty_graph(tmp_path: Path) -> None:
+    """A requested semantic ID absent from the CSV fails without row indexing."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF32Flops",
+        ["2,500,600,700,800,2000,3000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = 0
+
+    assert construct_roof(parameters, "FP32", MockMspec()) == (
+        GraphPoints.empty().__dict__
+    )
+
+
+@pytest.mark.parametrize("invalid_value", ["N/A", "nan", "inf"])
+def test_construct_roof_invalid_valu_returns_empty_graph(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_value: str,
+) -> None:
+    """An unusable VALU peak returns an empty graph without nonfinite values."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF32Flops",
+        [f"0,500,600,700,800,{invalid_value},3000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    graph_points = construct_roof(parameters, "FP32", MockMspec())
+
+    assert graph_points == GraphPoints.empty().__dict__
+    assert len(warnings) == 1
+    assert "invalid peak operations" in str(warnings[0]).lower()
+    assert_graph_points_positive_finite(graph_points)
+
+
+@pytest.mark.parametrize("invalid_value", ["N/A", "nan", "inf"])
+def test_construct_roof_invalid_bandwidth_skips_level(
+    tmp_path: Path,
+    invalid_value: str,
+) -> None:
+    """An unusable bandwidth skips its level and preserves finite valid roofs."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF32Flops",
+        [f"0,{invalid_value},600,700,800,2000,3000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    graph_points = construct_roof(parameters, "FP32", MockMspec())
+
+    assert graph_points["hbm"] == []
+    assert graph_points["l2"][2] == 600.0
+    assert graph_points["valu"][2] == 2000.0
+    assert graph_points["matrix_ops"][2] == 3000.0
+    assert_graph_points_positive_finite(graph_points)
+
+
+@pytest.mark.parametrize("invalid_value", ["N/A", "nan", "inf"])
+def test_construct_roof_invalid_matrix_skips_matrix_geometry(
+    tmp_path: Path,
+    invalid_value: str,
+) -> None:
+    """An unusable matrix peak is skipped while valid geometry remains finite."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF32Flops",
+        [f"0,500,600,700,800,2000,{invalid_value}"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    graph_points = construct_roof(parameters, "FP32", MockMspec())
+
+    assert graph_points["matrix_ops"] == []
+    assert graph_points["hbm"][2] == 500.0
+    assert graph_points["valu"][2] == 2000.0
+    assert_graph_points_positive_finite(graph_points)
+
+
+@pytest.mark.parametrize("invalid_value", ["N/A", "nan", "inf"])
+def test_construct_roof_invalid_matrix_only_peak_returns_empty_geometry(
+    tmp_path: Path,
+    invalid_value: str,
+) -> None:
+    """Matrix-only BF16 emits no geometry without a valid matrix peak."""
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,L2Bw,L1Bw,LDSBw,MFMAF16Flops",
+        [f"0,500,600,700,800,{invalid_value}"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    graph_points = construct_roof(parameters, "BF16", MockMspec())
+
+    assert graph_points == {
+        "hbm": [],
+        "l2": [],
+        "l1": [],
+        "l0": [],
+        "lds": [],
+        "valu": [],
+        "matrix_ops": [],
+    }
+    assert_graph_points_positive_finite(graph_points)
+
+
+@pytest.mark.parametrize("device_id", [True, False], ids=["true", "false"])
+def test_machine_ceilings_rejects_bool_device_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, device_id: bool
+) -> None:
+    """Boolean device_id values are rejected."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300,81000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = device_id
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "boolean" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_rejects_fractional_device_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fractional device_id values are rejected."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300,81000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+    parameters["device_id"] = 2.5
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "integral" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_rejects_duplicate_benchmark_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate benchmark headers fail closed instead of corrupting row mapping."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,HBMBw,FP32Flops",
+        ["0,5300,10000,81000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "duplicate benchmark header" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_rejects_duplicate_device_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate device ids in roofline.csv are rejected."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300,81000", "0,6300,91000"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "duplicate device id" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_rejects_short_csv_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows with too few columns are rejected."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "expected 3" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_rejects_over_wide_csv_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows with too many columns are rejected."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(
+        tmp_path / "roofline.csv",
+        "device,HBMBw,FP32Flops",
+        ["0,5300,81000,extra"],
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "expected 3" in str(warnings[0]).lower()
+
+
+def test_machine_ceilings_rejects_empty_csv_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty data rows are rejected."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    (tmp_path / "roofline.csv").write_text(
+        "device,HBMBw,FP32Flops\n0,5300,81000\n\n",
+        encoding="utf-8",
+    )
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert "empty" in str(warnings[0]).lower()
+
+
+@pytest.mark.parametrize(
+    ("header", "row", "message"),
+    [
+        ("device,HBMBw,FP32Flops", "0,N/A,81000", "bandwidth"),
+        ("device,HBMBw,FP32Flops", "0,5300,N/A", "compute"),
+    ],
+    ids=["no-bandwidth", "no-peaks"],
+)
+def test_machine_ceilings_warns_when_ceiling_group_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    header: str,
+    row: str,
+    message: str,
+) -> None:
+    """Valid CSV rows with no usable bandwidth or peaks warn and return empty."""
+    warnings = capture_roofline_warnings(monkeypatch)
+    write_roofline_csv(tmp_path / "roofline.csv", header, [row])
+    parameters = roofline_parameters()
+    parameters["workload_dir"] = str(tmp_path)
+
+    assert machine_ceilings(parameters, MockMspec()) == ([], [])
+    assert message in str(warnings[0]).lower()
+
+
+def test_calc_ceilings_uses_xmax_default_for_compute_roofs() -> None:
+    """Compute roof x-axis endpoints use XMAX_DEFAULT, not kernel AI extent."""
+    result = calc_ceilings(
+        roofline_parameters("MFMA", MFMA_GPU_ARCH),
+        "FP32",
+        full_benchmark_data(),
+        MockMspec(),
+        0,
+    )
+
+    assert result["valu"][0][1] == XMAX_DEFAULT
+    assert result["matrix_ops"][0][1] == XMAX_DEFAULT

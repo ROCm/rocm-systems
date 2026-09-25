@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/containers/aligned_static_vector.hpp"
 #include "core/containers/stable_vector.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -79,7 +80,7 @@ struct thread_data : base_thread_data<thread_data<Tp, Tag, MaxThreads>>
     using this_type  = thread_data<Tp, Tag, MaxThreads>;
     using value_type = unique_ptr_t<Tp>;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
     using functor_type = std::function<value_type()>;
 
     template <typename... Args>
@@ -163,8 +164,10 @@ thread_data<Tp, Tag, MaxThreads>::construct(construct_on_thread&& _t, Args&&... 
     // construct outside of lambda to prevent data-race
     static auto& _instances = instances();
     if(!_instances.at(_t.index))
+    {
         _instances.at(_t.index) =
             utility::generate<value_type>{}(std::forward<Args>(_args)...);
+    }
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
@@ -175,7 +178,7 @@ thread_data<Tp, Tag, MaxThreads>::instance()
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-typename thread_data<Tp, Tag, MaxThreads>::array_type&
+thread_data<Tp, Tag, MaxThreads>::array_type&
 thread_data<Tp, Tag, MaxThreads>::instances()
 {
     return private_instance()->m_data;
@@ -192,14 +195,16 @@ thread_data<Tp, Tag, MaxThreads>::instance(construct_on_thread&& _t, Args&&... _
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
-typename thread_data<Tp, Tag, MaxThreads>::array_type&
+thread_data<Tp, Tag, MaxThreads>::array_type&
 thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
 {
     static auto& _v = [&]() -> array_type& {
         auto& _internal = instances();
         for(size_t i = 0; i < MaxThreads; ++i)
+        {
             _internal.at(i) =
                 utility::generate<value_type>{}(std::forward<Args>(_args)...);
+        }
         private_instance()->m_init = [_args...]() {
             return utility::generate<value_type>{}(_args...);
         };
@@ -222,7 +227,7 @@ struct thread_data<std::optional<Tp>, Tag, MaxThreads>
     using value_type   = std::optional<Tp>;
     using functor_type = std::function<value_type()>;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
 
     thread_data()  = default;
     ~thread_data() = default;
@@ -306,9 +311,14 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::instance(construct_on_init,
     static auto& _v = [&]() -> unique_ptr_t<this_type>& {
         auto& _ref = instance();
         if(!_ref)
+        {
             _ref = utility::generate<unique_ptr_t<this_type>>{}(
                 std::forward<Args>(_args)...);
-        if(_ref->size() < MaxThreads) _ref->resize(MaxThreads);
+        }
+        if(_ref->size() < MaxThreads)
+        {
+            _ref->resize(MaxThreads);
+        }
         return _ref;
     }();
     return _v;
@@ -326,7 +336,9 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_init,
         if(_ref)
         {
             for(auto& itr : *_ref)
+            {
                 itr = utility::generate<value_type>{}(std::forward<Args>(_args)...);
+            }
         }
         return (_ref != nullptr);
     }();
@@ -343,7 +355,7 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
     // construct outside of lambda to prevent data-race
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
-        container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
+        container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
@@ -358,10 +370,12 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
     }();
 
     if(!_constructed.at(_t.index))
+    {
         _constructed.at(_t.index) =
             (_instance->at(_t.index) =
                  utility::generate<value_type>{}(std::forward<Args>(_args)...),
              true);
+    }
 
     return _instance->at(_t.index);
 
@@ -391,7 +405,7 @@ struct thread_data<identity<Tp>, Tag, MaxThreads>
     using this_type  = thread_data<identity<Tp>, Tag, MaxThreads>;
     using value_type = Tp;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
     using functor_type = std::function<value_type()>;
 
     thread_data()  = default;
@@ -448,7 +462,9 @@ struct thread_data<identity<Tp>, Tag, MaxThreads>
     void fill(value_type _v)
     {
         for(auto& itr : m_data)
+        {
             itr = _v;
+        }
     }
 
 private:
@@ -475,9 +491,14 @@ thread_data<identity<Tp>, Tag, MaxThreads>::instance(construct_on_init, Args&&..
     static auto& _v = [&]() -> unique_ptr_t<this_type>& {
         auto& _ref = instance();
         if(!_ref)
+        {
             _ref = utility::generate<unique_ptr_t<this_type>>{}(
                 std::forward<Args>(_args)...);
-        if(_ref->size() < MaxThreads) _ref->resize(MaxThreads);
+        }
+        if(_ref->size() < MaxThreads)
+        {
+            _ref->resize(MaxThreads);
+        }
         return _ref;
     }();
     return _v;
@@ -494,7 +515,9 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_init, Args&&.
         if(_ref)
         {
             for(auto& itr : *_ref)
+            {
                 itr = utility::generate<value_type>{}(std::forward<Args>(_args)...);
+            }
         }
         return (_ref != nullptr);
     }();
@@ -511,7 +534,7 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
     // construct outside of lambda to prevent data-race
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
-        container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
+        container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
@@ -526,10 +549,12 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
     }();
 
     if(!_constructed.at(_t.index))
+    {
         _constructed.at(_t.index) =
             (_instance->at(_t.index) =
                  utility::generate<value_type>{}(std::forward<Args>(_args)...),
              true);
+    }
 
     return _instance->at(_t.index);
     (void) _grow;
@@ -559,9 +584,9 @@ struct component_bundle_cache_impl
     using allocator_type = tim::data::ring_buffer_allocator<bundle_type>;
     using array_type     = std::vector<bundle_type*>;
 
-    using iterator         = typename array_type::iterator;
-    using const_iterator   = typename array_type::const_iterator;
-    using reverse_iterator = typename array_type::reverse_iterator;
+    using iterator         = array_type::iterator;
+    using const_iterator   = array_type::const_iterator;
+    using reverse_iterator = array_type::reverse_iterator;
 
     component_bundle_cache_impl()  = default;
     ~component_bundle_cache_impl() = default;
@@ -624,12 +649,18 @@ struct component_bundle_cache_impl
         iterator itr = begin();
         if constexpr(std::is_same<IterT, reverse_iterator>::value)
         {
-            if(_v == rend()) return;
+            if(_v == rend())
+            {
+                return;
+            }
             std::advance(itr, std::distance(rbegin(), _v));
         }
         else
         {
-            if(_v == end()) return;
+            if(_v == end())
+            {
+                return;
+            }
             itr = _v;
         }
         m_allocator.destroy(*itr);

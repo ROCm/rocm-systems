@@ -32,6 +32,38 @@
  * This header intentionally excludes nccl_device/impl/xxx__funcs.h so user IR
  * bitcode can resolve NCCL Device API implementations from libnccl_device.bc.
  */
+
+/*
+ * Production's __forceinline__ (__inline__ __attribute__((always_inline))) is
+ * linkonce_odr and emits no symbol. Drop __inline__ so the device API has
+ * external linkage: the bitcode lib emits symbols that consumers resolve from
+ * libnccl_device.bc. Must precede the API includes below.
+ */
+#include "nccl_device/utility.h"
+#undef NCCL_DEVICE_INLINE
+#undef NCCL_HOST_DEVICE_INLINE
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__NCCL_DEVICE_LTOIR_LIB__)
+#define NCCL_DEVICE_INLINE __device__ __inline_hint__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __inline_hint__
+#elif defined(__clang_llvm_bitcode_lib__)
+#define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
+#else
+// Consumer hipcc compile (IR_test.exe): hip_compat sets NCCL_DEVICE_COMPILE
+// for both host and device passes, so coop.h bodies are parsed on the host
+// pass. They must stay __device__ or HIP rejects __popcll/__syncthreads.
+// NVIDIA's empty define is fine on CUDA; HIP device builtins are host-invisble.
+#if defined(__HIPCC__)
+#define NCCL_DEVICE_INLINE __device__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ inline __attribute__((always_inline))
+#else
+#define NCCL_DEVICE_INLINE
+#define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+#endif
+#endif
+#endif
+
 #include "nccl_device/coop.h"
 #include "nccl_device/core.h"
 #include "nccl_device/ll_a2a.h"
@@ -122,9 +154,7 @@ NCCL_IR_EXTERN_C __device__ size_t ncclBarrierSession_C_size();
 
 /* ncclDevComm field accessors
  *
- * ncclDevComm is a public C struct, but its full layout (~200 bytes with
- * embedded arrays and structs) is not mirrored in Python. The Python device
- * layer reads its public fields through these accessor functions.
+ * ncclDevComm is a public C struct, the following accessors are deprecated and will be removed.
  */
 NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_Rank(ncclDevComm const* comm);
 NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_NRanks(ncclDevComm const* comm);
@@ -224,7 +254,7 @@ struct ncclBarrierSession_C {
 NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
-    ncclGin_C net,
+    ncclGin_C const* net,
     ncclTeam team,
     ncclGinBarrierHandle handle,
     uint32_t index);
@@ -241,7 +271,7 @@ NCCL_IR_EXPORT void ncclBarrierSessionInit(
     ncclCoopAny coop,
     ncclTeam innerTeam,
     ncclTeam outerTeam,
-    ncclGin_C net,
+    ncclGin_C const* net,
     ncclLsaBarrierHandle const innerBarHandle,
     ncclGinBarrierHandle const outerBarHandle,
     uint32_t index,

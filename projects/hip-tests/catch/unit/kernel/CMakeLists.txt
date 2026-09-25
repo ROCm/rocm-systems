@@ -20,6 +20,7 @@ set(TEST_SRC
     hipAutoThreadIdx.cc
     hipLaunchKernelEx.cc
     hipTestUserSgprIncrease.cc
+    hipBlockDim3DValidation.cc
 )
 
 # KernelStackSize only on gfx1250 and gfx1251

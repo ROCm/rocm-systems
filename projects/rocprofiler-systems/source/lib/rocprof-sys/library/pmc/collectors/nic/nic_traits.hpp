@@ -131,7 +131,9 @@ struct nic_traits
 
         std::set<std::string> available_names;
         for(const auto& device : devices)
+        {
             available_names.insert(device->get_name());
+        }
 
         for(auto& device : devices)
         {
@@ -219,8 +221,8 @@ struct nic_traits
                              static_cast<std::uint32_t>(nic_index),
                              static_cast<std::int32_t>(nic_index),
                              static_cast<std::int32_t>(nic_index),
-                             entry.device->get_product_name().c_str(),
-                             entry.device->get_vendor_name().c_str(),
+                             entry.device->get_product_name(),
+                             entry.device->get_vendor_name(),
                              "AI NIC",
                              "AI NIC",
                              0,

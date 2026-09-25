@@ -96,7 +96,7 @@ include(utils)
 set(PKG_VERSION_GIT_TAG_PREFIX "rdc_pkg_ver")
 # Provide git to utilities
 find_program(GIT NAMES git)
-get_version_from_tag("1.3.1" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.4.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${VERSION_STRING}")
 
@@ -292,7 +292,9 @@ if(BUILD_STANDALONE)
     message("LD_LIBRARY_PATH = $ENV{LD_LIBRARY_PATH}")
     foreach(file ${PROTOB_DEF_SRC_FILES})
         execute_process(
-            COMMAND ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
+            COMMAND
+                ${THEROCK_SANITIZER_LAUNCHER} ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR
@@ -308,8 +310,8 @@ if(BUILD_STANDALONE)
 
         execute_process(
             COMMAND
-                ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
-                --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
+                ${THEROCK_SANITIZER_LAUNCHER} ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                --grpc_out=${PROTOB_OUT_DIR} --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR

@@ -5,9 +5,7 @@
 #include "core/common.hpp"
 #include "core/timemory.hpp"
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 template <typename ArchiveT>
 void
@@ -29,5 +27,4 @@ selected_entry::serialize<cereal::MinimalJSONOutputArchive>(
 template void
 selected_entry::serialize<cereal::PrettyJSONOutputArchive>(
     cereal::PrettyJSONOutputArchive&, const unsigned int);
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

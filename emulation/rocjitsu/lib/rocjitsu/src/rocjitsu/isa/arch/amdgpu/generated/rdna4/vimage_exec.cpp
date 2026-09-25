@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -120,7 +121,9 @@ void ImageAtomicDecUintVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGetResinfoVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  amdgpu::execute_image_resource_info(wf, inst_.rsrc, inst_.vaddr0,
+                                      wf.vgpr_alloc().base + 0u + inst_.vdata, inst_.dmask,
+                                      inst_.r128, inst_.a16);
 }
 
 void ImageBvhIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {

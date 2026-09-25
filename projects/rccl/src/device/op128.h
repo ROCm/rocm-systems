@@ -370,8 +370,12 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 #elif defined(__gfx950__)
   *(v4u_gptr)addr = value.v4u;
 #else
-  __builtin_nontemporal_store(value.u64[0], (u64_gptr)addr);
-  __builtin_nontemporal_store(value.u64[1], (u64_gptr)addr + 1);
+  // Keep the fallback pointer generic. Converting a flat hipMalloc pointer to
+  // address_space(1) can select the global aperture on gfx942 and fault even
+  // though the allocation is valid.
+  uint64_t* ptr = reinterpret_cast<uint64_t*>(addr);
+  __builtin_nontemporal_store(value.u64[0], ptr);
+  __builtin_nontemporal_store(value.u64[1], ptr + 1);
 #endif
 }
 
@@ -381,8 +385,9 @@ __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr) {
   // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950/gfx1250.
   ans.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)addr, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  *(u64_gptr)ans.u64 = __builtin_nontemporal_load((u64_gptr)addr);
-  *((u64_gptr)ans.u64 + 1) = __builtin_nontemporal_load((u64_gptr)addr + 1);
+  const uint64_t* ptr = reinterpret_cast<const uint64_t*>(addr);
+  ans.u64[0] = __builtin_nontemporal_load(ptr);
+  ans.u64[1] = __builtin_nontemporal_load(ptr + 1);
 #endif
   return ans;
 }

@@ -26,13 +26,32 @@
 #include <thread>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
 using mpip_bundle_t = tim::component_tuple<category_region<category::mpi>, comm_data>;
+// NOLINTNEXTLINE(misc-include-cleaner)
+using mpip_gotcha_t = mpip_handle<mpip_bundle_t, project::rocprofsys>::mpip_gotcha_t;
+
+// set_ready() only writes wrappers that are already installed, and the MPI wrappers are
+// installed from the MPI_Init audit, which runs after the initial pause. Remember the
+// requested state so activation can adopt it.
+std::mutex g_mpip_mutex;
+bool       g_mpip_paused = false;  // guarded by g_mpip_mutex
+
+// MPI_Init/Comm_rank/Comm_size push their hidden host-category trace in one audit
+// function and pop it in another, so whether the push happened must survive the gap;
+// thread_local is safe since one call's incoming/outgoing audit pair runs synchronously
+// on a single thread.
+thread_local bool g_mpi_hidden_trace_pushed = false;
+
+bool
+mpip_paused()
+{
+    const std::scoped_lock<std::mutex> lock{ g_mpip_mutex };
+    return g_mpip_paused;
+}
 
 struct comm_rank_data
 {
@@ -65,11 +84,23 @@ struct comm_rank_data
             throw std::runtime_error("Error! Comparing rank data that is not updated");
         }
 
-        if(_lhs.updated() && !_rhs.updated()) return true;
-        if(!_lhs.updated() && _rhs.updated()) return false;
+        if(_lhs.updated() && !_rhs.updated())
+        {
+            return true;
+        }
+        if(!_lhs.updated() && _rhs.updated())
+        {
+            return false;
+        }
 
-        if(_lhs.size != _rhs.size) return _lhs.size > _rhs.size;
-        if(_lhs.rank != _rhs.rank) return _lhs.rank > _rhs.rank;
+        if(_lhs.size != _rhs.size)
+        {
+            return _lhs.size > _rhs.size;
+        }
+        if(_lhs.rank != _rhs.rank)
+        {
+            return _lhs.rank > _rhs.rank;
+        }
 
         // lesser comm is greater
         return _lhs.comm < _rhs.comm;
@@ -146,7 +177,10 @@ mpi_gotcha::configure()
         for(size_t i = 0; i < mpi_gotcha_t::capacity(); ++i)
         {
             auto* itr = mpi_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
+            if(itr)
+            {
+                itr->verbose = -1;
+            }
         }
     }
 
@@ -195,39 +229,49 @@ mpi_gotcha::shutdown()
     update();
 }
 
-std::mutex mpi_gotcha::s_mutex = {};
-
 void
-mpi_gotcha::pause()
+pause_mpip()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    mpi_gotcha_t::set_ready(false);
+    const std::scoped_lock<std::mutex> pause_lock{ g_mpip_mutex };
+    g_mpip_paused = true;
+    mpip_gotcha_t::set_ready(false);
 }
 
 void
-mpi_gotcha::resume()
+resume_mpip()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    mpi_gotcha_t::set_ready(true);
+    const std::scoped_lock<std::mutex> resume_lock{ g_mpip_mutex };
+    g_mpip_paused = false;
+    mpip_gotcha_t::set_ready(true);
 }
 
 bool
 mpi_gotcha::update()
 {
     auto_lock_t _lk{ type_mutex<mpi_gotcha>(), std::defer_lock };
-    if(!_lk.owns_lock()) _lk.lock();
+    if(!_lk.owns_lock())
+    {
+        _lk.lock();
+    }
 
     comm_rank_data _rank_data = mproc_comm_record;
     for(const auto& itr : mpi_comm_records)
     {
         // skip null comms
-        if(itr.first == null_comm()) continue;
-        // if currently have null comm, replace
+        if(itr.first == null_comm())
+        {
+            continue;
+        }
         else if(_rank_data.comm == null_comm())
+        {
+            // if currently have null comm, replace
             _rank_data = itr.second;
-        // if
+        }
         else if(itr.second > _rank_data)
+        {
+            // if new comm is greater, replace
             _rank_data = itr.second;
+        }
     }
 
     if(_rank_data.updated() && _rank_data != last_comm_record)
@@ -262,7 +306,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
     LOG_DEBUG("{}(int*, char***)", _data.tool_id);
 
-    rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    g_mpi_hidden_trace_pushed = !mpip_paused();
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return true; };
     rocprofsys::mpi::is_finalized()            = false;
@@ -274,7 +323,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 {
     LOG_DEBUG("{}(int*, char***, int, int*)", _data.tool_id);
 
-    rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    g_mpi_hidden_trace_pushed = !mpip_paused();
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return true; };
     rocprofsys::mpi::is_finalized()            = false;
@@ -288,10 +342,14 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
+    {
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
+    }
 
     if(mpip_index != std::numeric_limits<std::uint64_t>::max())
+    {
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
+    }
 
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return false; };
@@ -308,7 +366,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
 {
     LOG_DEBUG("{}(comm_t _comm, int* _val)", _data.tool_id);
 
-    rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    g_mpi_hidden_trace_pushed = !mpip_paused();
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
     if(_data.tool_id.starts_with("MPI_Comm_rank") ||
        _data.tool_id.starts_with("PMPI_Comm_rank"))
     {
@@ -333,7 +396,10 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
     LOG_DEBUG("{}() returned {}", _data.tool_id, (int) _retval);
 
-    if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
+    if(!settings::use_output_suffix())
+    {
+        settings::use_output_suffix() = true;
+    }
 
     if(_retval == rocprofsys::mpi::success_v &&
        (_data.tool_id.starts_with("MPI_Init") || _data.tool_id.starts_with("PMPI_Init")))
@@ -353,6 +419,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             configure_mpip<mpip_bundle_t, project::rocprofsys>(permit_bindings,
                                                                reject_bindings);
             mpip_index = activate_mpip<mpip_bundle_t, project::rocprofsys>();
+
+            const std::scoped_lock<std::mutex> mpip_lock{ g_mpip_mutex };
+            mpip_gotcha_t::set_ready(!g_mpip_paused);
         }
 
         const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
@@ -399,11 +468,18 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 static thread_local int _num_updates = 0;
                 static const int        _disable_after =
                     rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
-                if(_num_updates++ < _disable_after) update();
+                if(_num_updates++ < _disable_after)
+                {
+                    update();
+                }
             }
         }
     }
-    rocprofsys_pop_trace_hidden(_data.tool_id.c_str());
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_pop_trace_hidden(_data.tool_id.c_str());
+        g_mpi_hidden_trace_pushed = false;
+    }
 }
 
 void
@@ -441,7 +517,10 @@ mpi_gotcha::populate_rank_and_size()
         mproc_comm_record.comm = _ppid;
         mproc_comm_record.size = m_size = _comm_size;
         _comm_rank                      = mproc::get_process_index(_pid, _ppid);
-        if(_comm_rank >= 0) mproc_comm_record.rank = m_rank = _comm_rank;
+        if(_comm_rank >= 0)
+        {
+            mproc_comm_record.rank = m_rank = _comm_rank;
+        }
     }
 #endif
 }
@@ -458,7 +537,6 @@ mpi_gotcha::publish_rank_and_size(int rank, int size)
     }
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::mpi_gotcha)

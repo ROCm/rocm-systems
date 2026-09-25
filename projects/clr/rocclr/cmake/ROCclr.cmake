@@ -64,7 +64,6 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/platform/kernel.cpp
   ${ROCCLR_SRC_DIR}/platform/vmheap.cpp
   ${ROCCLR_SRC_DIR}/platform/memory.cpp
-  ${ROCCLR_SRC_DIR}/platform/ndrange.cpp
   ${ROCCLR_SRC_DIR}/platform/program.cpp
   ${ROCCLR_SRC_DIR}/platform/runtime.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_gl.cpp

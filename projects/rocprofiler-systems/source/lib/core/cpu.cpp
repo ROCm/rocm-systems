@@ -16,9 +16,7 @@
 #include <unistd.h>
 #include <unordered_map>
 
-namespace rocprofsys
-{
-namespace cpu
+namespace rocprofsys::cpu
 {
 std::vector<cpu_info>
 process_cpu_info_data()
@@ -144,7 +142,10 @@ void
 query_cpu_agents()
 {
     auto cpu_data = get_cpu_info();
-    if(cpu_data.empty()) return;
+    if(cpu_data.empty())
+    {
+        return;
+    }
 
     // Group CPUs by socket (physical_id), collect model_name per socket
     std::map<size_t, std::string> socket_model_names;
@@ -185,5 +186,4 @@ query_cpu_agents()
         mgr.insert_agent(cur_agent);
     }
 }
-}  // namespace cpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::cpu

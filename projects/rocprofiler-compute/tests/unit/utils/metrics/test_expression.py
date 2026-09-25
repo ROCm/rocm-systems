@@ -46,7 +46,7 @@ class TestExpression:
         transformer = CodeTransformer()
         supported_call = ast.Call(
             func=ast.Name(id="MIN", ctx=ast.Load()),
-            args=[ast.Constant(value=5) if hasattr(ast, "Constant") else ast.Num(n=5)],
+            args=[ast.Constant(value=5)],
             keywords=[],
         )
         result = transformer.visit_Call(supported_call)

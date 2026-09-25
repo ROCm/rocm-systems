@@ -31,6 +31,7 @@ namespace cdna4 {
 /// StatusReg uses the shared `amdgpu::CdnaStatusReg` layout including
 /// COND_DBG_USER and COND_DBG_SYS (both active on CDNA3/4 hardware).
 struct Isa : amdgpu::CdnaIsaBase {
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZE = 64; ///< Async MMA adapter wave size.
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
       256;                               ///< Unified AccVGPR file (src encoding alias at 768).
   static constexpr bool SRAM_ECC = true; ///< gfx950 has SRAM ECC.

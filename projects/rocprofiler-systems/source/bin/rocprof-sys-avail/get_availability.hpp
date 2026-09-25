@@ -34,11 +34,11 @@ struct component_value_type
 template <has_value_type Type>
 struct component_value_type<Type>
 {
-    using type = typename Type::value_type;
+    using type = Type::value_type;
 };
 
 template <typename Type>
-using component_value_type_t = typename component_value_type<Type>::type;
+using component_value_type_t = component_value_type<Type>::type;
 
 //--------------------------------------------------------------------------------------//
 
@@ -92,19 +92,23 @@ get_availability<Type>::get_info()
 {
     using namespace tim;
     using value_type     = component_value_type_t<Type>;
-    using category_types = typename trait::component_apis<Type>::type;
+    using category_types = trait::component_apis<Type>::type;
 
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.erase(_pos, _pattern.length());
+        }
         return _type;
     };
     auto _replace = [](std::string _type, const std::string& _pattern,
                        const std::string& _with) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.replace(_pos, _pattern.length(), _with);
+        }
         return _type;
     };
 

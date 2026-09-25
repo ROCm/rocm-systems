@@ -22,6 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <cassert>
 #include <dlfcn.h>
 
 #include "rocshmem/rocshmem.hpp"

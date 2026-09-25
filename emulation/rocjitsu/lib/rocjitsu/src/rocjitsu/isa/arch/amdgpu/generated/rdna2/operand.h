@@ -16,9 +16,10 @@
 namespace rocjitsu {
 namespace rdna2 {
 
-class Operand : public IsaOperand<Isa> {
+class Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
+  static constexpr bool kStaticRegisterAccess = true;
   Operand(int size_bits, OperandType opr_type, int encoding_value);
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
@@ -36,6 +37,7 @@ public:
   bool simd_capable() const override;
 
 private:
+  friend class amdgpu::RegisterAccess;
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
   void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,

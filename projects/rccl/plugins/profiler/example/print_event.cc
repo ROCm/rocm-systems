@@ -74,8 +74,8 @@ __hidden void printGroupEventTrailer(FILE* fh, struct group* event) {
 
 static __thread int collId;
 __hidden void printCollEventHeader(FILE* fh, struct collective* event) {
-  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"COLL\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"SeqNum\": %lu, \"CommHash\": %lu, \"Rank\": %d, \"Count\": %lu, \"Datatype\": \"%s\", \"Algorithm\": \"%s\", \"Protocol\": \"%s\", \"nChannels\": %d}},\n",
-          event->base.func, collId, getpid(), 1, event->base.startTs, event->seqNumber, ((struct collApi*)event->base.parent)->ctx->commHash, event->base.rank, event->count, event->datatype, event->algo, event->proto, event->nChannels);
+  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"COLL\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"SeqNum\": %lu, \"CommHash\": %lu, \"Rank\": %d, \"Count\": %lu, \"Datatype\": \"%s\", \"Algorithm\": \"%s\", \"Protocol\": \"%s\", \"nChannels\": %d, \"KernelVariant\": \"%s\", \"IsSymColl\": %d}},\n",
+          event->base.func, collId, getpid(), 1, event->base.startTs, event->seqNumber, ((struct collApi*)event->base.parent)->ctx->commHash, event->base.rank, event->count, event->datatype, event->algo, event->proto, event->nChannels, event->kernelVariant ? event->kernelVariant : "", event->isSymColl ? 1 : 0);
 }
 
 __hidden void printCollEventTrailer(FILE* fh, struct collective* event) {
@@ -168,6 +168,18 @@ __hidden void printKernelChEventTrailer(FILE* fh, struct kernelCh* event) {
           "KernelCh", kernelId, getpid(), 1, event->stopTs);
 }
 
+// v7: emit each kernel phase as a complete event; duration is from the GPU globaltimer (ns->us)
+__hidden void printKernelPhaseEvents(FILE* fh, struct kernelCh* event) {
+  if (event->type != ncclProfileKernelCh) return;
+  for (int i = 0; i < MAX_KERNEL_PHASES; i++) {
+    struct kernelPhase* p = &event->phases[i];
+    if (p->type != ncclProfileKernelPhase) continue;
+    double durUs = (p->stopGpuClk > p->startGpuClk) ? (double)(p->stopGpuClk - p->startGpuClk) / 1000.0 : 0.0;
+    fprintf(fh, "{\"name\": \"%s\", \"cat\": \"GPU\", \"ph\": \"X\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"dur\": %f, \"args\": {\"Channel\": %d, \"PhaseId\": %d, \"StartGpuClk\": %lu, \"StopGpuClk\": %lu}},\n",
+            p->phaseName ? p->phaseName : "phase", kernelId, getpid(), 1, p->startTs, durUs, p->channelId, p->phaseId, p->startGpuClk, p->stopGpuClk);
+  }
+}
+
 static __thread int proxyCtrlId;
 __hidden void printProxyCtrlEvent(FILE* fh, struct proxyCtrl* event) {
   const char* str;
@@ -226,7 +238,7 @@ static void debugCeCollEvent(FILE* fh, struct ceColl* event, const char* tag) {
   fprintf(fh, "  stopCompleted     = %d\n", event->stopCompleted);
   fprintf(fh, "  startTs           = %f\n", event->base.startTs);
   fprintf(fh, "  stopTs            = %f\n", event->base.stopTs);
-  fprintf(fh, "  cpuDuration       = %lu us\n", event->cpuDuration);
+  fprintf(fh, "  cpuDuration       = %f us\n", event->cpuDuration);
   fprintf(fh, "  elapsedTime       = %lu us\n", event->elapsedTime);
   fprintf(fh, "}\n");
 }
@@ -240,7 +252,7 @@ static void debugCeSyncEvent(FILE* fh, struct ceSync* event, const char* tag) {
   fprintf(fh, "  stopCompleted     = %d\n", event->stopCompleted);
   fprintf(fh, "  startTs           = %f\n", event->base.startTs);
   fprintf(fh, "  stopTs            = %f\n", event->base.stopTs);
-  fprintf(fh, "  cpuDuration       = %lu us\n", event->cpuDuration);
+  fprintf(fh, "  cpuDuration       = %f us\n", event->cpuDuration);
   fprintf(fh, "}\n");
 }
 
@@ -254,7 +266,7 @@ static void debugCeBatchEvent(FILE* fh, struct ceBatch* event, const char* tag) 
   fprintf(fh, "  stopCompleted     = %d\n", event->stopCompleted);
   fprintf(fh, "  startTs           = %f\n", event->base.startTs);
   fprintf(fh, "  stopTs            = %f\n", event->base.stopTs);
-  fprintf(fh, "  cpuDuration       = %lu us\n", event->cpuDuration);
+  fprintf(fh, "  cpuDuration       = %f us\n", event->cpuDuration);
   fprintf(fh, "}\n");
 }
 #endif
@@ -337,8 +349,9 @@ void debugEvent(void* eHandle, const char* tag) {
 }
 
 // CE event print functions
-static int ceCollId = 0;
+static __thread int ceCollId;
 static void printCeCollEvent(FILE* fh, struct ceColl* event) {
+  if (!event->stopCompleted) return;
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"%s\", \"cat\": \"CE_COLL\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"count\": %lu, \"datatype\": \"%s\", \"strategy\": \"%s\", \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
             event->base.func, ceCollId, getpid(), 1, event->base.startTs, event->eventId, event->count, event->datatype, event->syncStrategy, event->cpuStartTime, event->cpuStopTime, event->cpuDuration, event->elapsedTime);
@@ -359,8 +372,9 @@ static void printCeCollEvent(FILE* fh, struct ceColl* event) {
           event->base.func, ceCollId++, getpid(), 1, event->base.stopTs);
 }
 
-static int ceSyncId = 0;
+static __thread int ceSyncId;
 static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
+  if (!event->stopCompleted) return;
   const char* syncTypeStr = event->isComplete ? "Complete" : "Ready";
   const char* strategy = (event->parent && event->parent->syncStrategy) ? event->parent->syncStrategy : "unknown";
   if (event->timingMode == CE_TIMING_GPU) {
@@ -374,8 +388,9 @@ static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
           ceSyncId++, getpid(), 1, event->base.stopTs);
 }
 
-static int ceBatchId = 0;
+static __thread int ceBatchId;
 static void printCeBatchEvent(FILE* fh, struct ceBatch* event) {
+  if (!event->stopCompleted) return;
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"CeBatch\", \"cat\": \"CE_BATCH\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"numOps\": %d, \"totalBytes\": %lu, \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
             ceBatchId, getpid(), 1, event->base.startTs, event->eventId, event->numOps, event->totalBytes, event->cpuStartTime, event->cpuStopTime, event->cpuDuration, event->elapsedTime);
@@ -387,25 +402,39 @@ static void printCeBatchEvent(FILE* fh, struct ceBatch* event) {
           ceBatchId++, getpid(), 1, event->base.stopTs);
 }
 
+// Emits the GROUP span alone. The task events held by a group are also reachable
+// through its GroupApi -> CollApi chain.
+void printGroupEventSpan(FILE* fh, void* handle) {
+  if (handle == NULL || fh == NULL) return;
+  if (*(uint64_t *)handle != ncclProfileGroup) return;
+  struct group* g = (struct group *)handle;
+  // Pool slots are recycled without clearing stopTs, so a group still in flight
+  // can carry a stale timestamp from the slot's previous occupant.
+  if (g->startTs == 0 || g->stopTs < g->startTs) return;
+  printGroupEventHeader(fh, g);
+  printGroupEventTrailer(fh, g);
+}
+
 void printEvent(FILE* fh, void* handle) {
   if (handle == NULL || fh == NULL) return;
   uint64_t type = *(uint64_t *)handle;
   if (type == ncclProfileGroupApi) {
     struct groupApi* g = (struct groupApi*) handle;
     printGroupApiEventHeader(fh, g);
+    // Other comms' children are dumped by their own context.
     struct kernelLaunch* kernelLaunchHead = profilerQueueHead(&g->kernelLaunchEvents);
     while (kernelLaunchHead != NULL) {
-      printEvent(fh, kernelLaunchHead);
+      if (kernelLaunchHead->ctx == g->ctx) printEvent(fh, kernelLaunchHead);
       kernelLaunchHead = kernelLaunchHead->next;
     }
     struct collApi* collApiHead = profilerQueueHead(&g->collApiEvents);
     while (collApiHead != NULL) {
-      printEvent(fh, collApiHead);
+      if (collApiHead->ctx == g->ctx) printEvent(fh, collApiHead);
       collApiHead = collApiHead->next;
     }
     struct p2pApi* p2pApiHead = profilerQueueHead(&g->p2pApiEvents);
     while (p2pApiHead != NULL) {
-      printEvent(fh, p2pApiHead);
+      if (p2pApiHead->ctx == g->ctx) printEvent(fh, p2pApiHead);
       p2pApiHead = p2pApiHead->next;
     }
     printGroupApiEventTrailer(fh, g);
@@ -448,6 +477,7 @@ void printEvent(FILE* fh, void* handle) {
     printCollEventHeader(fh, c);
     for (int i = 0; i < MAX_CHANNELS; i++) {
       printKernelChEventHeader(fh, &c->kernel[i]);
+      printKernelPhaseEvents(fh, &c->kernel[i]);
       for (int j = 0; j < c->nProxyOps[i]; j++) {
         printEvent(fh, &c->op[i][j]);
       }
@@ -459,6 +489,7 @@ void printEvent(FILE* fh, void* handle) {
     printP2pEventHeader(fh, p);
     for (int i = 0; i < MAX_CHANNELS; i++) {
       printKernelChEventHeader(fh, &p->kernel[i]);
+      printKernelPhaseEvents(fh, &p->kernel[i]);
       printEvent(fh, &p->op[i]);
       printKernelChEventTrailer(fh, &p->kernel[i]);
     }
@@ -466,7 +497,10 @@ void printEvent(FILE* fh, void* handle) {
   } else if (type == ncclProfileProxyOp) {
     struct proxyOp* p = (struct proxyOp *)handle;
     printProxyOpEventHeader(fh, p);
-    for (int i = 0; i < MAX_STEPS; i++) {
+    // Collective reuse clears nProxyOps but not op[][], so slots past
+    // stepCount can still hold the previous collective's steps.
+    int nSteps = p->stepCount < MAX_STEPS ? p->stepCount : MAX_STEPS;
+    for (int i = 0; i < nSteps; i++) {
       printEvent(fh, &p->step[i]);
     }
     printProxyOpEventTrailer(fh, p);

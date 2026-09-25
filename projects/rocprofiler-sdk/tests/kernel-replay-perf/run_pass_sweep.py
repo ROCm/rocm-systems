@@ -19,8 +19,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
 
-from perf_cost_model import max_pass_scaling_ratio, model_max_ms
-from perf_stats import check_ceiling, parse_marker, repeat_measure, write_results
+from perf_cost_model import max_pass_scaling_ratio, model_max_ms  # noqa: E402
+from perf_stats import (  # noqa: E402
+    check_ceiling,
+    parse_marker,
+    repeat_measure,
+    write_results,
+)
 
 
 def run_case(

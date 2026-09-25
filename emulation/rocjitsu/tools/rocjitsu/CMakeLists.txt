@@ -42,6 +42,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_ip_discovery
         util
         flatbuffers
         Threads::Threads

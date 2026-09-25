@@ -513,7 +513,12 @@ def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert (
-        'uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());' in body
+        'uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
+        in body
+    )
+    assert (
+        'result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
+        in body
     )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'std::bit_cast<float>(src0.read_lane' not in body

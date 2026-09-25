@@ -16,9 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace argparse
+namespace rocprofsys::argparse
 {
 struct parser_data;
 
@@ -56,7 +54,8 @@ struct output_format_selection
  * Unlisted formats resolve to false so the returned selection fully defines the
  * active outputs, which is required because ROCPROFSYS_TRACE and ROCPROFSYS_PROFILE
  * otherwise derive their defaults from each other.
- * @param tokens proto | rocpd | json | text | txt (txt aliases text)
+ * @param tokens pftrace | rocpd | json | text | txt (proto aliases pftrace, txt aliases
+ * text)
  */
 [[nodiscard]] output_format_selection
 resolve_output_format(const strset_t& tokens);
@@ -131,5 +130,4 @@ add_group_arguments(parser_t&, const std::string&, parser_data&, bool _add_group
 
 parser_data&
 add_extended_arguments(parser_t&, parser_data&);
-}  // namespace argparse
-}  // namespace rocprofsys
+}  // namespace rocprofsys::argparse

@@ -42,6 +42,23 @@
 #define AMDSMI_FABRIC_DIRECT 0
 #endif
 
+// CMake's AMDSMI_FABRIC_API probe can be cached from a machine whose amd_smi.h
+// had UALoE types, then reused against a ROCm tree that only has the pre-UALoE
+// header (host unit tests and hipify TUs still get -DAMDSMI_FABRIC_DIRECT).
+// Classic UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS. ROCm 7.14 can
+// already declare fabric telemetry enumerators without that macro. If CMake
+// detected those enumerators (AMDSMI_HEADER_HAS_FABRIC_TELEMETRY), keep the
+// system types. If CMake already set AMDSMI_FABRIC_DIRECT, do not force it
+// off just because MAX_LOCAL_GPUS is missing. Only emit wrap compat types when
+// fabric is not enabled.
+#if AMDSMI_DIRECT && defined(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+#undef AMDSMI_FABRIC_DIRECT
+#define AMDSMI_FABRIC_DIRECT 1
+#elif AMDSMI_DIRECT && !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS) && !AMDSMI_FABRIC_DIRECT
+#undef AMDSMI_FABRIC_DIRECT
+#define AMDSMI_FABRIC_DIRECT 0
+#endif
+
 #if !AMDSMI_DIRECT
 /*************************************************************************
  * Pre-UALoE AMDSMI Definitions
@@ -473,8 +490,10 @@ amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char**
  * struct using the shipped library's layout, not ours. If our declaration is
  * smaller the library writes past the end of the caller's object, and any
  * shift moves the fields we read. Neither shows up as a compiler diagnostic,
- * so recognize the shipped layouts here: a mismatch must be a deliberate
- * update, not a silent memory bug.
+ * so recognize the two shipped layouts here: a mismatch must be a deliberate
+ * update, not a silent memory bug. Some pre-release ROCm 7.14 snapshots used
+ * AMDSMI_FABRIC_MAX_LOCAL_GPUS=8, while final ROCm 7.14 and ROCm 7.15 use 16
+ * without changing the amd_smi major.
  ************************************************************************/
 constexpr size_t kAmdSmiFabricInfo8GpuSize = 288;
 constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
@@ -483,19 +502,22 @@ constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
 constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
 constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
-// End of reserved in each layout. The bytes after it are trailing padding a compiler need not copy.
 constexpr size_t kAmdSmiFabricReserved8GpuEnd = 284;
 constexpr size_t kAmdSmiFabricReserved16GpuEnd = 316;
-
 constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
 
+// Compat types (AMDSMI_FABRIC_DIRECT=0) declare amdsmi_fabric_info_v1_t here and
+// can assert the full v1 field layout. Installed amd_smi.h can expose
+// amdsmi_fabric_info_t without v1 (ROCm 7.14 telemetry headers); naming v1_t
+// there is a compile error. amdsmi_wrap.cc still needs amdSmiFabricLayoutIs8Gpu
+// on the DIRECT=1 path, so classify from the outer struct size instead.
+#if !AMDSMI_FABRIC_DIRECT
 constexpr bool amdSmiFabricLayoutIs8Gpu =
   sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState8GpuOffset - sizeof(uint32_t) &&
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState8GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 224;
 
-// 27.x enlarged the union without moving this window, so the two layouts below share it.
 constexpr bool amdSmiFabricV1WindowIsAt16GpuOffsets =
   sizeof(amdsmi_fabric_info_v1_t) == 244 &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
@@ -505,13 +527,19 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
   amdSmiFabricV1WindowIsAt16GpuOffsets && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
   offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
 
-// No exact size, so a later v2 growth does not break the build.
 constexpr bool amdSmiFabricLayoutIsExtendedUnion =
   amdSmiFabricV1WindowIsAt16GpuOffsets && kAmdSmiFabricHeaderIsExtended &&
   offsetof(amdsmi_fabric_info_t, reserved) >= kAmdSmiFabricV1PayloadEnd;
 
 static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
               "unsupported amdsmi fabric layout");
+#else
+constexpr bool amdSmiFabricLayoutIs8Gpu = sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize;
+constexpr bool amdSmiFabricLayoutIs16Gpu = sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize;
+constexpr bool amdSmiFabricLayoutIsExtendedUnion = kAmdSmiFabricHeaderIsExtended;
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
+              "unsupported amdsmi fabric layout");
+#endif
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -579,7 +607,7 @@ inline uint32_t amdSmiFabricInfoVersion(const FabricInfoT& info) {
 }
 
 template <typename FabricInfoT>
-inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info) {
+inline auto amdSmiFabricInfoV1(const FabricInfoT& info) {
   if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
     return &info.fabric_info.v1;
   } else {
@@ -587,6 +615,11 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
   }
 }
 
+// amd_smi 26.x used both supported payload sizes under the same SONAME. Use a
+// maximum-sized canary buffer so either runtime can write safely, then identify
+// how much it wrote. Both implementations value-initialize a local struct and
+// assign the complete object, making the final 32 bytes zero only for the
+// 16-GPU runtime.
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
 // Must cover the declared struct: amdSmiFabricInfoBufferAsInfo casts the array to amdsmi_fabric_info_t*.

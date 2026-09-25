@@ -58,10 +58,8 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
     * :doc:`rocDecode logging levels <./reference/rocDecode-logging-control>`
     * :doc:`rocDecode environment variables <./reference/rocDecode-env-vars>`
     * :doc:`rocDecode codec support and hardware capabilities <./reference/rocDecode-formats-and-architectures>`
-    * :doc:`API library <../doxygen/html/files>`
-    * :doc:`Functions <../doxygen/html/globals>`
-    * :doc:`Data structures <../doxygen/html/annotated>`
-  
+    * :doc:`rocDecode API reference <./reference/rocDecode-api-reference>`
+
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

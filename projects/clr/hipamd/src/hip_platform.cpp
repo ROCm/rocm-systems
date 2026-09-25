@@ -747,9 +747,13 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
       return {hipSuccess, f};
     }
 
-    // Only take fallback for hipErrorInvalidSymbol (not in registered table)
+    // Not in the registered table: only a hipFunction_t from a dynamically loaded
+    // module can be cast, any other pointer would fault on dereference.
     if (err == hipErrorInvalidSymbol) {
-      return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+      if (PlatformState::Instance().IsValidFuncHandle(hostFunction)) {
+        return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+      }
+      return {hipErrorInvalidDeviceFunction, nullptr};
     }
 
     // Propagate all other errors
@@ -1149,10 +1153,18 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
 }
 
 // ================================================================================================
-bool PlatformState::IsValidDynFunc(const void* hfunc) {
-  std::scoped_lock lock(lock_);
-  return std::any_of(dynCO_map_.begin(), dynCO_map_.end(),
-                     [hfunc](const auto& entry) { return entry.second->isValidDynFunc(hfunc); });
+hipError_t PlatformState::EnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                             hipModule_t hmod) {
+  std::unordered_map<hipModule_t, hip::DynCO*>::iterator it;
+  {
+    std::scoped_lock lock(lock_);
+    it = dynCO_map_.find(hmod);
+    if (it == dynCO_map_.end()) {
+      LogPrintfError("Cannot find the module: %p", hmod);
+      return hipErrorNotFound;
+    }
+  }
+  return it->second->enumerateFunctions(functions, numFunctions);
 }
 
 // ================================================================================================

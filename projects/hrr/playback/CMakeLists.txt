@@ -48,6 +48,7 @@ if(HRR_BUILD_PLAYBACK)
     hrr_playback.cpp
     hip_playback.cpp
     hip_playback_generated.cpp
+    hrr_region_map.cpp
   )
   set_target_properties(hrr-playback PROPERTIES
     CXX_STANDARD ${HRR_CXX_STANDARD}

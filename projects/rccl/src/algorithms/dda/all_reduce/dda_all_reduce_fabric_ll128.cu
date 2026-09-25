@@ -16,6 +16,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 
@@ -126,10 +127,13 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
 
 } // namespace
 
-bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+bool ncclAllReduceDdaFabricLL128Eligible_old(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
+  if (!rcclParamDdaLL()) {
+    return false;
+  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -154,9 +158,10 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if (bytes % 8 != 0) {
     return false;
   }
-  // Use the runtime LL128 threshold (RCCL_DDA_LL128_THRESHOLD) as the cap.
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  if (ll128Thresh <= 0 || bytes > (size_t)ll128Thresh) {
+  // Cap by the resolved LL128 threshold (RCCL_DDA_LL128_THRESHOLD, else this
+  // arch's table, else the built-in default).
+  const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  if (ll128Thresh == 0 || bytes > ll128Thresh) {
     return false;
   }
   // Scratch is sized from the actual message (compact per-call slot stride), so
@@ -170,12 +175,12 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   return true;
 }
 
-uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+uint32_t ncclAllReduceDdaFabricLL128Blocks_old(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   const auto grid = ddaAllReduceFabricLL128Geom(comm, count, ncclTypeSize(datatype)).first;
   return grid.x * grid.y;
 }
 
-ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+ncclResult_t ncclAllReduceDdaFabricLL128_old(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
   switch (datatype) {

@@ -24,9 +24,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -47,14 +45,19 @@ child_exit(int _ec, void*)
 void
 prefork_setup()
 {
-    if(prefork_lock) return;
+    if(prefork_lock)
+    {
+        return;
+    }
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     if(state::process::get() < state::process::Active &&
        !config::settings_are_configured())
+    {
         rocprofsys_init_library_hidden();
+    }
 
     rocprofsys::set_env(env_vars::PRELOAD, "0", 1);
     rocprofsys::set_env(env_vars::ROOT_PROCESS, process::get_id(), 0);
@@ -82,7 +85,10 @@ prefork_setup()
 void
 postfork_parent()
 {
-    if(postfork_parent_lock) return;
+    if(postfork_parent_lock)
+    {
+        return;
+    }
 
     // Reinitialize AMD SMI in parent process to get fresh device handles before
     // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
@@ -95,7 +101,10 @@ postfork_parent()
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
-    if(config::get_use_sampling()) sampling::unblock_samples();
+    if(config::get_use_sampling())
+    {
+        sampling::unblock_samples();
+    }
 
     // prevent re-entry until prefork has been called
     postfork_parent_lock = true;
@@ -105,7 +114,10 @@ postfork_parent()
 void
 postfork_child()
 {
-    if(postfork_child_lock) return;
+    if(postfork_child_lock)
+    {
+        return;
+    }
 
     // Reset the fork-safe logger lock FIRST, before any logging path in the
     // child.  The console/sink spinlock may have been inherited held by a
@@ -191,5 +203,4 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     return _pid;
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

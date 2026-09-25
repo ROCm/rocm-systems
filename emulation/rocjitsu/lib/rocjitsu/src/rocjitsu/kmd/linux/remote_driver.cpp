@@ -52,6 +52,7 @@ namespace {
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_WAIT_EVENTS:
+  case AMDKFD_IOC_SET_CU_MASK:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
@@ -576,32 +577,32 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
   if (fd_min < 256)
     fd_min = 256;
-  // NOTE: the name here is deliberately NOT "/dev/kfd". Naming it that makes
-  // /proc/<pid>/maps carry a second "/memfd:/dev/kfd (deleted)" line, which
-  // breaks gdb.rocm/core-no-read-special-files.exp -- that test parses
-  // `info proc mappings` for the one real /dev/kfd mapping and finds none once
-  // this decoy is present. InterposerDupTest.ProcMapsNamesRemoteKfdMarker
-  // asserts the opposite (that maps names /dev/kfd and never this marker); the
-  // two expectations are in direct conflict and the upstream ROCgdb test wins,
-  // so that unit test currently only passes on a daemon-backed run and needs a
-  // design decision about what the marker is actually for.
-  auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
-  if (raw_fd < 0)
-    return -1;
+  // Keep the proc-maps marker separate from the KFD descriptor. The marker is
+  // a mapped memfd because the interposer rewrites its path to /dev/kfd for
+  // debugger compatibility; the descriptor itself must be an eventfd so its
+  // readiness follows debug notifications rather than regular-file semantics.
   if (kfd_marker_ == nullptr) {
+    auto marker_fd =
+        static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
+    if (marker_fd < 0)
+      return -1;
     constexpr size_t kMarkerSize = 4096;
-    if (syscall(SYS_ftruncate, raw_fd, kMarkerSize) == 0) {
+    if (syscall(SYS_ftruncate, marker_fd, kMarkerSize) == 0) {
       void *marker = reinterpret_cast<void *>(
-          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, raw_fd, 0));
+          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, marker_fd, 0));
       if (marker != MAP_FAILED) {
         kfd_marker_ = marker;
         kfd_marker_size_ = kMarkerSize;
       }
     }
+    syscall(SYS_close, marker_fd);
   }
+  auto raw_fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
+  if (raw_fd < 0)
+    return -1;
   // Use the raw syscall, not fcntl(): this shared object exports an interposed
   // fcntl with default visibility, so an unqualified call would re-enter the
-  // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
+  // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain eventfd dup.
   int fd = static_cast<int>(syscall(SYS_fcntl, raw_fd, F_DUPFD_CLOEXEC, fd_min));
   syscall(SYS_close, raw_fd);
   return fd;
@@ -741,6 +742,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // these to point at its own buffer; we must restore the client-side originals
   // before copying inline response data back.
   uint64_t saved_events_ptr = 0;
+  uint64_t saved_cu_mask_ptr = 0;
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
   uint64_t saved_dbg_rinfo_ptr = 0;
@@ -763,6 +765,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint32_t saved_dbg_queue_count = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
+    case AMDKFD_IOC_SET_CU_MASK: {
+      const auto *mask = static_cast<const kfd_ioctl_set_cu_mask_args *>(arg);
+      if (mask->num_cu_mask == 0 || mask->num_cu_mask % 32 != 0)
+        return -EINVAL;
+      if (mask->cu_mask_ptr == 0)
+        return -EFAULT;
+      saved_cu_mask_ptr = mask->cu_mask_ptr;
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS:
       saved_events_ptr = static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr;
       break;
@@ -841,6 +852,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   if (has_embedded_pointers(request)) {
     auto *args_base = buf.data() + prefix;
     switch (request) {
+    case AMDKFD_IOC_SET_CU_MASK: {
+      const auto *mask = reinterpret_cast<const kfd_ioctl_set_cu_mask_args *>(args_base);
+      const size_t bytes = (std::min(mask->num_cu_mask, 1024u) / 32) * sizeof(uint32_t);
+      const size_t offset = buf.size();
+      buf.resize(offset + bytes);
+      if (copy_ioctl_user_buffer(buf.data() + offset, saved_cu_mask_ptr, bytes) != 0)
+        return -EFAULT;
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS: {
       auto *wait_args = reinterpret_cast<kfd_ioctl_wait_events_args *>(args_base);
       const auto *events = reinterpret_cast<const void *>(wait_args->events_ptr);
@@ -1077,6 +1097,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     // daemon's response (daemon rewrites them to point at its own buffer).
     if (has_embedded_pointers(request)) {
       switch (request) {
+      case AMDKFD_IOC_SET_CU_MASK:
+        static_cast<kfd_ioctl_set_cu_mask_args *>(arg)->cu_mask_ptr = saved_cu_mask_ptr;
+        break;
       case AMDKFD_IOC_WAIT_EVENTS:
         static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr = saved_events_ptr;
         break;

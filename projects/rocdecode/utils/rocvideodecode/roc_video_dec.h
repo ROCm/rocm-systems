@@ -39,17 +39,44 @@ THE SOFTWARE.
 #include <thread>
 #include <ctime>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/syscall.h>
+#else
+#include <process.h>
+#include <windows.h>
+#endif
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
+
+// Select the output surface format for a chroma format + bit depth. Monochrome
+// selects the same format as 4:2:0 (NV12/P016). Unrecognized chroma formats
+// return rocDecVideoSurfaceFormat_Native (the "decoder chooses" sentinel), which
+// callers must not use as a bit position (see rocdecode.h).
+inline rocDecVideoSurfaceFormat SelectSurfaceFormat(rocDecVideoChromaFormat chroma_format, uint8_t bitdepth_minus_8) {
+    switch (chroma_format) {
+    case rocDecVideoChromaFormat_420:
+    case rocDecVideoChromaFormat_Monochrome:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_P016
+                                : rocDecVideoSurfaceFormat_NV12;
+    case rocDecVideoChromaFormat_444:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV444_16Bit
+                                : rocDecVideoSurfaceFormat_YUV444;
+    case rocDecVideoChromaFormat_422:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV422_16Bit
+                                : rocDecVideoSurfaceFormat_YUV422;
+    default:
+        return rocDecVideoSurfaceFormat_Native;  // unrecognized chroma format
+    }
+}
 
 #define ROCVIDEODEC_TOSTR(X) std::to_string(X)
 #define ROCVIDEODEC_STR(X) std::string(X)
 
 // Simple logging macros - format matches src/commons.h:
 //   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
+#ifndef _WIN32
 #define RocVideoDecCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
@@ -65,6 +92,28 @@ THE SOFTWARE.
                   << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
+#else
+#define RocVideoDecCriticalLog(msg) \
+    do { \
+        /* function-local static: the runtime initializes it exactly once, even when \
+           several decode threads reach their first log at the same time */ \
+        static const LARGE_INTEGER _freq_ = [] { LARGE_INTEGER _f_ = {}; QueryPerformanceFrequency(&_f_); return _f_; }(); \
+        LARGE_INTEGER _cnt_; QueryPerformanceCounter(&_cnt_); \
+        /* split the division to keep the counter from overflowing when scaled to us */ \
+        uint64_t _us_ = static_cast<uint64_t>(_cnt_.QuadPart / _freq_.QuadPart) * 1000000ULL \
+                      + static_cast<uint64_t>(_cnt_.QuadPart % _freq_.QuadPart) * 1000000ULL / _freq_.QuadPart; \
+        const char *_f_ = strrchr(__FILE__, '\\'); \
+        if (!_f_) _f_ = strrchr(__FILE__, '/'); \
+        uint32_t _tid_ = GetCurrentThreadId(); \
+        std::ostringstream _htid_oss_; \
+        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
+        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
+                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
+                  << _getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
+                  << __func__ << "(): " << (msg) << std::endl; \
+    } while (0)
+#endif
 
 /*!
  * \file
@@ -221,6 +270,11 @@ typedef struct ReconfigParams_t {
     uint32_t reconfig_flush_mode;
 } ReconfigParams;
 
+/**
+ * \ingroup group_amd_roc_video_dec
+ * \brief High-level video decoder utility class that wraps the rocDecode core APIs to
+ * create, control, and destroy the hardware decoder, and to decode and retrieve frames on the GPU.
+ */
 class RocVideoDecoder {
     public:
         /**
@@ -486,13 +540,13 @@ class RocVideoDecoder {
          * @brief Function to get start time
          * 
          */
-        std::chrono::_V2::system_clock::time_point StartTimer();
+        std::chrono::system_clock::time_point StartTimer();
 
         /**
          * @brief Function to get elapsed time
          * 
          */
-        double StopTimer(const std::chrono::_V2::system_clock::time_point &start_time);
+        double StopTimer(const std::chrono::system_clock::time_point &start_time);
 
         int num_devices_;
         int device_id_;

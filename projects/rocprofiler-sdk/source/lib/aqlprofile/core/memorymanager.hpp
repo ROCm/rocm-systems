@@ -325,9 +325,9 @@ public:
         return reinterpret_cast<Type*>(trace_control_buf.get());
     }
 
-    void CopyMemory(void* dst, const void* src, size_t size)
+    hsa_status_t CopyMemory(void* dst, const void* src, size_t size)
     {
-        this->copy_fn(dst, src, size, this->userdata);
+        return size == 0 ? HSA_STATUS_SUCCESS : this->copy_fn(dst, src, size, this->userdata);
     }
 
     int  GetSimdMask() const { return simd_mask; }
@@ -390,5 +390,23 @@ public:
         outputbuf_size    = size;
     }
 
+    // DEBUG_TRACE-only buffer for copying out RLC_SPM_SAMPLE_CNT.
+    // This is used during SPM integration-test debugging to compare the hardware
+    // sample-pulse count against the number of received segments. For a successful
+    // run, those two numbers should match.
+    void CreateSampleCountBuf()
+    {
+        aqlprofile_buffer_desc_flags_t flags{};
+        flags.host_access   = true;
+        flags.device_access = true;
+        flags.memory_hint   = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+        sample_count_buf_   = AllocMemory(sizeof(uint32_t), flags);
+    }
+
+    void* GetSampleCountBuf() const { return sample_count_buf_.get(); }
+
     pm4_builder::TraceConfig config{};
+
+private:
+    std::unique_ptr<void, MemoryDeleter> sample_count_buf_ = nullptr;
 };

@@ -178,7 +178,9 @@ hipError_t ihipFree(void* ptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
-        amd::SvmBuffer::free(memory_object->getContext(), ptr);
+        if (!amd::SvmBuffer::free(memory_object->getContext(), ptr)) {
+          return hipErrorInvalidValue;
+        }
       }
     }
     return hipSuccess;

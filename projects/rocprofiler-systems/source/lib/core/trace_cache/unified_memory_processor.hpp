@@ -15,12 +15,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 class output_file_sink_view
@@ -66,8 +65,14 @@ struct migration_stats
         count++;
         total_size_bytes += size_bytes;
         total_time_ns += duration_ns;
-        if(size_bytes < min_size_bytes) min_size_bytes = size_bytes;
-        if(size_bytes > max_size_bytes) max_size_bytes = size_bytes;
+        if(size_bytes < min_size_bytes)
+        {
+            min_size_bytes = size_bytes;
+        }
+        if(size_bytes > max_size_bytes)
+        {
+            max_size_bytes = size_bytes;
+        }
     }
 
     [[nodiscard]] double avg_size_bytes() const noexcept
@@ -187,7 +192,7 @@ private:
     [[nodiscard]] migration_direction classify_direction(
         const std::string& src_label, const std::string& dst_label) const;
     [[nodiscard]] std::optional<std::pair<std::string, std::string>>
-    parse_agent_ids_from_args(const std::string& args_str) const;
+    parse_agent_ids_from_args(std::string_view args_str) const;
 
     [[nodiscard]] std::string resolve_device_label(const kfd_sample&  sample,
                                                    const std::string& src_label,
@@ -216,5 +221,4 @@ private:
     std::unordered_map<std::uint32_t, std::string> m_gpu_name_cache;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

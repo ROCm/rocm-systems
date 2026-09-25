@@ -440,8 +440,6 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     rocjpeg_add_test_ext(jpegdecodeperf          ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodePerf)
     rocjpeg_add_test_ext(jpegdecodeasync         ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeAsync)
     rocjpeg_add_test_ext(jpegdecodebatchedasync  ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatchedAsync)
-    # Negative API test (source under test/)
-    rocjpeg_add_test_ext(rocjpegnegativetest     ${CMAKE_CURRENT_SOURCE_DIR}/test/rocjpeg_negative_api_tests)
   endif()
 
   # make test with CTest

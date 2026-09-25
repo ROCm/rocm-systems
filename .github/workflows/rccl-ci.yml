@@ -4,8 +4,18 @@ name: RCCL cluster CI
 # on ruby, gin on tw). Each leg is self-contained: it provisions the ROCm floor from
 # TheRock CI artifacts, builds rocSHMEM/RCCL/rccl-tests from the PR sources, and runs.
 # ROCm tracks TheRock automatically (latest main run); pass artifact_run_id to pin one.
+#
+# Nightly and on demand, not PR-triggered. rccl-coco-pr.yml covers RCCL and
+# rccl-tests PRs; these suites rejoin it once the device-api tests are restored
+# there. Until then, changes under projects/rocshmem are covered only by this
+# nightly, not by any PR check.
 
 on:
+  schedule:
+    # Weekday nightly, offset from rccl-coco-scheduled.yml's 03:47 nightly and from
+    # rccl-ainic-tw-gfx950-runner.yml's 02:00 so the three do not contend for
+    # the ruby and tw runners. The longest leg here is 5h.
+    - cron: '47 12 * * 1-5'
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -22,20 +32,12 @@ on:
         description: 'ROCm/TheRock git ref for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: '648a501e56a1e0919976d6f540b7853e63d44998'
+        default: 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
         required: false
         default: 'gfx950'
-  pull_request:
-    paths:
-      - 'projects/rocshmem/**'
-      - 'projects/rccl/**'
-      - 'projects/rccl-tests/**'
-      - 'projects/rccl/tools/ci/**'
-      - '.github/workflows/rccl-ci.yml'
-      - '.github/workflows/rccl-suite.yml'
 
 permissions:
   contents: read
@@ -60,8 +62,8 @@ jobs:
       timeout_minutes: 240
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      # TheRock pinned ref committed 2026-09-02; bump when refreshing artifacts.
-      therock_ref: ${{ inputs.therock_ref || '648a501e56a1e0919976d6f540b7853e63d44998' }}
+      # TheRock pinned ref committed 2026-09-19; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # ext-plugins suite on ruby: builds RCCL, a UCX-enabled OpenMPI, rccl-tests and
@@ -82,8 +84,8 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      # TheRock pinned ref committed 2026-09-02; bump when refreshing artifacts.
-      therock_ref: ${{ inputs.therock_ref || '648a501e56a1e0919976d6f540b7853e63d44998' }}
+      # TheRock pinned ref committed 2026-09-19; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
@@ -105,8 +107,8 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      # TheRock pinned ref committed 2026-09-02; bump when refreshing artifacts.
-      therock_ref: ${{ inputs.therock_ref || '648a501e56a1e0919976d6f540b7853e63d44998' }}
+      # TheRock pinned ref committed 2026-09-19; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || 'a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # Gates GIN on build/infra failures only; test failures stay non-gating (red
@@ -117,7 +119,7 @@ jobs:
     name: GIN build gate
     needs: gin
     if: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: |
           echo "GIN build/infra failed; see the GIN job logs." >&2

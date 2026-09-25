@@ -10,6 +10,8 @@
 #include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
@@ -33,13 +35,20 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <optional>
+#include <set>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -47,12 +56,18 @@ namespace {
 using namespace rocjitsu;
 
 const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CDNA5_CONFIG_PATH = test::config_path("gfx1250_mi455x.json");
 
 constexpr uint32_t kTotalXcds = 8;
 constexpr uint32_t kCusPerXcd = 36; // 4 SEs x 9 CUs
 constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint64_t kKdAddr = 0x10000;
+constexpr uint64_t kScratchKdAddr = 0x20000;
+constexpr uint64_t kCdna5ScratchKdAddr = 0x30000;
+constexpr uint64_t kCdna5PlainKdAddr = 0x40000;
+constexpr uint64_t kDefaultScratchPool = 0x1'0000'0000ULL;
 constexpr uint32_t kWavefrontSize = 64;
+constexpr uint32_t kCdna5WavefrontSize = 32;
 
 /// How many worker threads the fixture's engine runs on.
 enum class Threading {
@@ -65,17 +80,20 @@ enum class Threading {
   ThreadPerXcd,
 };
 
-/// A loaded gfx950 SoC plus a trivial s_endpgm kernel resident in GPU memory.
+/// A SoC loaded from the requested config (gfx950 by default), with a trivial kernel.
 struct XcdDistributionFixture {
   config::LoadedConfig loaded;
   std::unique_ptr<simdojo::SimulationEngine> engine;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
 
-  explicit XcdDistributionFixture(Threading threading = Threading::Single)
-      : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+  explicit XcdDistributionFixture(Threading threading = Threading::Single,
+                                  uint32_t dispatch_threads = 1,
+                                  const std::string &config_path = CONFIG_PATH)
+      : loaded(config::load_config(config_path, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
+    soc->set_dispatch_threads(dispatch_threads);
     // load_config() resolves an unset num_threads to one partition per XCD, so
     // Single has to pin one worker rather than just leave the config alone.
     loaded.engine_config.num_threads =
@@ -105,6 +123,55 @@ struct XcdDistributionFixture {
   }
 };
 
+/// A loaded gfx1250 SoC with a private-segment kernel used to verify that the
+/// physical XCD topology also defines the device-wide scratch layout.
+struct Cdna5ScratchTopologyFixture {
+  config::LoadedConfig loaded;
+  std::unique_ptr<simdojo::SimulationEngine> engine;
+  SoC *soc = nullptr;
+  amdgpu::GpuMemory *memory = nullptr;
+
+  Cdna5ScratchTopologyFixture()
+      : loaded(config::load_config(CDNA5_CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+    soc = loaded.soc();
+    memory = loaded.memory();
+    loaded.engine_config.num_threads = 1;
+    engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
+    engine->topology().set_root(loaded.take_root());
+    loaded.wire_links(engine->topology());
+    engine->create();
+
+    using namespace rocr::llvm::amdhsa;
+    kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+    kd.private_segment_fixed_size = 64;
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5ScratchKdAddr);
+    memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t),
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    kd.private_segment_fixed_size = 0;
+    memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5PlainKdAddr);
+    memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t),
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+  }
+};
+
+void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
+                            rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  const uint32_t vgpr_granule = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 16 : 8;
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / vgpr_granule) - 1));
+  // CDNA4 uses this count; CDNA5 ignores it and allocates its fixed scalar file.
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  kd.private_segment_fixed_size = private_bytes;
+  memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
+  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
+}
+
 /// Index of the XCD whose command processor is @p cp.
 uint32_t assigned_xcd_index(const SoC &soc, const amdgpu::CommandProcessor *cp) {
   for (uint32_t xi = 0; xi < soc.num_xcds(); ++xi)
@@ -117,7 +184,13 @@ uint32_t assigned_xcd_index(const SoC &soc, const amdgpu::CommandProcessor *cp) 
 // Records the interleaving of workgroup dispatch and completion across all XCDs.
 class WorkgroupOrderPlugin : public ExecutionPlugin {
 public:
-  WorkgroupOrderPlugin() : ExecutionPlugin("xcd-wg-order") {}
+  explicit WorkgroupOrderPlugin(std::function<void()> on_first_dispatch = {})
+      : ExecutionPlugin("xcd-wg-order"), on_first_dispatch_(std::move(on_first_dispatch)) {}
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t) override {
+    if (auto callback = std::exchange(on_first_dispatch_, {}))
+      callback();
+  }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
@@ -147,12 +220,13 @@ public:
     std::vector<uint32_t> ids;
     for (const auto &[id, step] : first_dispatched_)
       ids.push_back(id);
-    std::sort(ids.begin(), ids.end(),
-              [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
+    std::ranges::sort(
+        ids, [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
     return ids;
   }
 
 private:
+  std::function<void()> on_first_dispatch_;
   uint64_t step_ = 0;
   std::map<uint32_t, uint64_t> first_dispatched_;
   std::map<uint32_t, uint64_t> last_completed_;
@@ -216,6 +290,233 @@ private:
   std::vector<Event> ends_;
 };
 
+/// Records whether each dispatched wave retained the queue's address-space identity.
+class AddressSpaceIdentityPlugin : public ExecutionPlugin {
+public:
+  explicit AddressSpaceIdentityPlugin(amdgpu::AddressSpaceHandle expected)
+      : ExecutionPlugin("xcd-address-space-identity"), expected_(expected) {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++workgroups_;
+    for (const auto *wave : waves)
+      retained_ = retained_ && wave->address_space() == expected_;
+  }
+
+  bool retained() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return retained_;
+  }
+
+  uint32_t workgroups() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return workgroups_;
+  }
+
+private:
+  amdgpu::AddressSpaceHandle expected_;
+  mutable std::mutex mutex_;
+  bool retained_ = true;
+  uint32_t workgroups_ = 0;
+};
+
+/// Records the scratch base assigned to the first wave of each workgroup.
+class ScratchAddressPlugin : public ExecutionPlugin {
+public:
+  ScratchAddressPlugin() : ExecutionPlugin("xcd-scratch-address") {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    ASSERT_EQ(waves.size(), 1u);
+    if (!waves.empty())
+      scratch_bases_[wg_id] = waves.front()->scratch_base();
+  }
+
+  const std::map<uint32_t, uint64_t> &scratch_bases() const { return scratch_bases_; }
+
+private:
+  std::map<uint32_t, uint64_t> scratch_bases_;
+};
+
+/// Count queue-dispatched workgroups and record the largest physical wave slot.
+class WaveSlotPlugin : public ExecutionPlugin {
+public:
+  struct Stats {
+    uint32_t dispatched = 0;
+    uint32_t completed = 0;
+    uint32_t max_slot = 0;
+  };
+
+  WaveSlotPlugin() : ExecutionPlugin("xcd-wave-slot") {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    ASSERT_EQ(waves.size(), 1u);
+    if (waves.empty())
+      return;
+    auto &stats = stats_[dispatch_id];
+    ++stats.dispatched;
+    stats.max_slot = std::max(stats.max_slot, waves.front()->wf_id());
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t) override {
+    ++stats_[dispatch_id].completed;
+  }
+
+  const std::map<uint32_t, Stats> &stats() const { return stats_; }
+
+private:
+  std::map<uint32_t, Stats> stats_;
+};
+
+/// Identity translator and transport adapter used only to put the ordinary
+/// simulator backing behind a real generation-checked GpuVm handle.
+class SparseGpuVmAccess final : public amdgpu::AddressSpaceTranslator,
+                                public amdgpu::PhysicalMemoryAccess {
+public:
+  struct HostWindow {
+    uint64_t base = 0;
+    size_t size = 0;
+    size_t extent = amdgpu::GpuMemory::PAGE_SIZE;
+  };
+
+  explicit SparseGpuVmAccess(amdgpu::GpuMemory &memory,
+                             std::optional<HostWindow> host_window = std::nullopt)
+      : memory_(&memory), host_window_(host_window),
+        host_bytes_(host_window ? host_window->size : 0) {}
+
+  bool provision_host_window(size_t size) {
+    if (!host_window_ || size > host_window_->extent)
+      return false;
+    host_window_->size = size;
+    host_bytes_.resize(size);
+    return true;
+  }
+
+  size_t scratch_probe_bytes() const {
+    return scratch_probe_bytes_.load(std::memory_order_relaxed);
+  }
+
+  amdgpu::VmTranslationResult probe_translation(uint64_t address, std::size_t size,
+                                                amdgpu::VmAccessKind access) const override {
+    if (host_window_ && address >= host_window_->base &&
+        address - host_window_->base < host_window_->extent) {
+      const size_t page_bytes =
+          amdgpu::GpuMemory::PAGE_SIZE - (address & amdgpu::GpuMemory::PAGE_MASK);
+      scratch_probe_bytes_.fetch_add(std::min(size, page_bytes), std::memory_order_relaxed);
+    }
+    return translate(address, size, access);
+  }
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind) const override {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed, .translation = {}};
+    if (host_window_ && address >= host_window_->base &&
+        address - host_window_->base < host_window_->extent) {
+      const uint64_t offset = address - host_window_->base;
+      if (offset > host_window_->size || size > host_window_->size - static_cast<size_t>(offset))
+        return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::Local,
+                        .address = address,
+                        .contiguous_bytes =
+                            amdgpu::GpuMemory::PAGE_SIZE - (address & amdgpu::GpuMemory::PAGE_MASK),
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return amdgpu::VmAccessOutcome::Malformed;
+    memory_->read_block(
+        address, std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()));
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                std::span<const std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return amdgpu::VmAccessOutcome::Malformed;
+    memory_->write_block(
+        address,
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::AtomicLoadResult atomic_load(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                       uint32_t width) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    if (!valid_atomic(address, width))
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    uint64_t observed = 0;
+    const bool complete = memory_->atomic_modify(
+        address, width, [&](const uint8_t *bytes) { std::memcpy(&observed, bytes, width); });
+    return {.outcome =
+                complete ? amdgpu::VmAccessOutcome::Complete : amdgpu::VmAccessOutcome::Faulted,
+            .value = observed};
+  }
+
+  amdgpu::VmAccessOutcome atomic_store(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                       uint32_t width, uint64_t value) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return amdgpu::VmAccessOutcome::Malformed;
+    if (!valid_atomic(address, width))
+      return amdgpu::VmAccessOutcome::Malformed;
+    const bool complete = memory_->atomic_modify(
+        address, width, [&](uint8_t *bytes) { std::memcpy(bytes, &value, width); });
+    return complete ? amdgpu::VmAccessOutcome::Complete : amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  amdgpu::AtomicCompareExchangeResult compare_exchange(amdgpu::VmMemoryDomain domain,
+                                                       uint64_t address, uint32_t width,
+                                                       uint64_t expected,
+                                                       uint64_t desired) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    if (!valid_atomic(address, width))
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    uint64_t observed = 0;
+    bool exchanged = false;
+    const bool complete = memory_->atomic_modify(address, width, [&](uint8_t *bytes) {
+      std::memcpy(&observed, bytes, width);
+      exchanged = observed == expected;
+      if (exchanged)
+        std::memcpy(bytes, &desired, width);
+    });
+    return {.outcome =
+                complete ? amdgpu::VmAccessOutcome::Complete : amdgpu::VmAccessOutcome::Faulted,
+            .observed = observed,
+            .exchanged = exchanged};
+  }
+
+  std::byte *resolve_host_pointer(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                  std::size_t size) const override {
+    if (domain != amdgpu::VmMemoryDomain::Local || !host_window_ || address < host_window_->base)
+      return nullptr;
+    const uint64_t offset = address - host_window_->base;
+    if (offset > host_window_->size || size > host_window_->size - static_cast<size_t>(offset))
+      return nullptr;
+    return const_cast<std::byte *>(host_bytes_.data()) + offset;
+  }
+
+private:
+  static bool valid_atomic(uint64_t address, uint32_t width) {
+    return (width == sizeof(uint16_t) || width == sizeof(uint32_t) || width == sizeof(uint64_t)) &&
+           (address & (width - 1)) == 0;
+  }
+
+  amdgpu::GpuMemory *memory_;
+  std::optional<HostWindow> host_window_;
+  std::vector<std::byte> host_bytes_;
+  mutable std::atomic<size_t> scratch_probe_bytes_{0};
+};
+
 } // namespace
 
 // Fan-out is a property of the queue, not of the device. A queue registered
@@ -268,6 +569,151 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
     EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+}
+
+TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
+  for (Threading threading : {Threading::Single, Threading::ThreadPerXcd}) {
+    XcdDistributionFixture fx(threading);
+    auto *owner = fx.soc->xcd(3)->command_processor();
+    auto queue = test::make_fanout_queue(fx.memory, owner);
+    amdgpu::QueueCuSelection selected(std::in_place);
+    selected->push_back(fx.soc->xcd(0)->command_processor()->compute_units().front());
+    selected->push_back(fx.soc->xcd(7)->command_processor()->compute_units().front());
+    owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
+    selected->clear(); // The queue owns its selection independently of the caller.
+    queue->dispatch(kKdAddr, 10 * kWavefrontSize, kWavefrontSize);
+    queue->dispatch_with_barrier(kKdAddr, 6 * kWavefrontSize, kWavefrontSize);
+    fx.engine->run();
+    const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+    for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+      EXPECT_EQ(counts[xi], xi == 0 || xi == 7 ? 8u : 0u) << "xcd" << xi;
+  }
+}
+
+static void run_cu_mask_transition(Threading threading, bool explicit_barrier) {
+  XcdDistributionFixture fx(threading);
+  if (threading == Threading::ThreadPerXcd) {
+    ASSERT_GT(fx.loaded.engine_config.num_threads, 1u);
+  }
+
+  auto *owner = fx.soc->xcd(0)->command_processor();
+  auto queue = test::make_fanout_queue(fx.memory, owner);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                std::vector{owner->compute_units().front()});
+
+  // Change the mask and submit B when A begins on its owner's thread. A has
+  // more workgroups than its one enabled CU can hold, so it remains in flight.
+  // The plugin group serializes callbacks in both engine threading modes.
+  constexpr uint32_t kFirstWgs = 256;
+  constexpr uint32_t kSecondWgs = 6;
+  auto plugin = std::make_unique<WorkgroupOrderPlugin>([&] {
+    auto *target = fx.soc->xcd(7)->command_processor();
+    owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                  std::vector{target->compute_units().front()});
+    if (explicit_barrier) {
+      hsa_kernel_dispatch_packet_t barrier{};
+      barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+      queue->submit(barrier);
+      queue->dispatch(kKdAddr, kSecondWgs * kWavefrontSize, kWavefrontSize);
+    } else {
+      queue->dispatch_with_barrier(kKdAddr, kSecondWgs * kWavefrontSize, kWavefrontSize);
+    }
+  });
+  auto *order = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  queue->dispatch(kKdAddr, kFirstWgs * kWavefrontSize, kWavefrontSize);
+  fx.engine->run();
+
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    EXPECT_EQ(counts[xi], xi == 0 ? kFirstWgs : xi == 7 ? kSecondWgs : 0u) << "xcd" << xi;
+    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->accepted_entry_count_for_test(
+                  /*queue_id=*/1, /*process_id=*/0),
+              explicit_barrier ? 3u : 2u)
+        << "xcd" << xi << " must retain the queue history even when excluded by the CU mask";
+  }
+  const auto ids = order->dispatch_ids();
+  ASSERT_EQ(ids.size(), 2u);
+  ASSERT_NE(order->last_completed(ids[0]), UINT64_MAX);
+  ASSERT_NE(order->last_completed(ids[1]), UINT64_MAX);
+  EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
+      << "the newly enabled XCD started B while A was still running on the previously enabled XCD";
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierBitOrdering) {
+  run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/false);
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierBitOrderingThreaded) {
+  run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/false);
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierPacketOrdering) {
+  run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/true);
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierPacketOrderingThreaded) {
+  run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/true);
+}
+
+TEST(XcdDistributionTest, EmptyCuMaskDefersFetchUntilQueueIsEnabled) {
+  XcdDistributionFixture fx;
+  auto *owner = fx.soc->xcd(0)->command_processor();
+  auto queue = test::make_fanout_queue(fx.memory, owner);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                amdgpu::QueueCuSelection(std::in_place));
+  queue->dispatch(kKdAddr, kWavefrontSize, kWavefrontSize);
+  (void)fx.engine->step();
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 0u);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, std::nullopt);
+  fx.engine->run();
+  counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 1u);
+}
+
+TEST(XcdDistributionTest, FanoutPreservesAddressSpaceIdentityThroughEveryWave) {
+  XcdDistributionFixture fx;
+  auto vm_access = std::make_shared<SparseGpuVmAccess>(*fx.memory);
+  const amdgpu::AddressSpaceHandle address_space =
+      fx.soc->gpu_vm().register_translated(/*vmid=*/0, vm_access, vm_access);
+  ASSERT_TRUE(address_space);
+
+  auto plugin = std::make_unique<AddressSpaceIdentityPlugin>(address_space);
+  auto *identity = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+  ASSERT_NE(cp, nullptr);
+  auto queue = test::make_fanout_queue(fx.memory, cp, /*queue_id=*/1,
+                                       test::AqlQueue::DEFAULT_RING_ADDR, address_space);
+
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->queue_address_space_for_test(
+                  /*queue_id=*/1, /*process_id=*/0),
+              address_space)
+        << "xcd" << xi << " lost the queue address-space identity";
+  }
+
+  queue->dispatch(kKdAddr, kTotalXcds * kWavefrontSize, kWavefrontSize);
+  fx.engine->run();
+
+  EXPECT_EQ(identity->workgroups(), kTotalXcds);
+  EXPECT_TRUE(identity->retained());
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), kTotalXcds);
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    EXPECT_EQ(counts[xi], 1u) << "xcd" << xi << " did not execute its address-space shard";
+    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->first_accepted_address_space_for_test(
+                  /*queue_id=*/1, /*process_id=*/0),
+              address_space)
+        << "xcd" << xi << " lost the dispatch address-space identity";
+  }
 }
 
 // The split must not depend on which XCD the queue landed on: rank is the XCD's
@@ -338,6 +784,59 @@ TEST(XcdDistributionTest, BarrierAfterSmallDispatchStillOrders) {
   ASSERT_EQ(ids.size(), 2u);
   EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
       << "an XCD with no share of the first dispatch started the barrier'd one early";
+}
+
+// A one-workgroup grid is assigned to xcd0 even when another XCD owns the
+// queue.  The owner therefore has an empty kernel shard, but it still has to
+// publish that share, advance past the packet, and wait for grid-wide retirement
+// before it exposes the completion signal or admits a barrier'd follower.
+TEST(XcdDistributionTest, EmptyOwnerShardCompletesAndOrdersBarrieredFollower) {
+  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+
+  auto plugin = std::make_unique<WorkgroupOrderPlugin>();
+  auto *order = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  constexpr uint64_t kSignalAddr = 0x68000;
+  constexpr uint32_t kSignalValueOffset = 8;
+  fx.memory->write64(kSignalAddr + kSignalValueOffset, 1);
+
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/3);
+  ASSERT_NE(cp, nullptr);
+  ASSERT_EQ(assigned_xcd_index(*fx.soc, cp), 3u);
+  auto queue = test::make_fanout_queue(fx.memory, cp);
+
+  hsa_kernel_dispatch_packet_t first{};
+  first.header = HSA_PACKET_TYPE_KERNEL_DISPATCH | (1u << HSA_PACKET_HEADER_BARRIER);
+  first.setup = 1;
+  first.workgroup_size_x = kWavefrontSize;
+  first.workgroup_size_y = 1;
+  first.workgroup_size_z = 1;
+  first.grid_size_x = kWavefrontSize;
+  first.grid_size_y = 1;
+  first.grid_size_z = 1;
+  first.kernel_object = kKdAddr;
+  first.completion_signal.handle = kSignalAddr;
+  queue->submit(first);
+  queue->dispatch_with_barrier(kKdAddr, kWavefrontSize, kWavefrontSize);
+
+  fx.engine->run();
+
+  EXPECT_EQ(fx.memory->read64(kSignalAddr + kSignalValueOffset), 0u)
+      << "the empty owner shard prevented grid-wide completion publication";
+
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), kTotalXcds);
+  EXPECT_EQ(counts[0], 2u);
+  for (uint32_t xi = 1; xi < kTotalXcds; ++xi)
+    EXPECT_EQ(counts[xi], 0u) << "xcd" << xi << " unexpectedly received a workgroup";
+
+  const auto ids = order->dispatch_ids();
+  ASSERT_EQ(ids.size(), 2u);
+  EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
+      << "the barrier'd follower started before the one-workgroup grid retired";
 }
 
 // A barrier packet whose dependency is still unsatisfied stops the owner from
@@ -670,8 +1169,8 @@ TEST(XcdDistributionTest, DispatchIdClassesStayDisjointAcrossTheWrap) {
 // peer's completion_signal, and drain_completions() fires only for the shard
 // that is not a peer. Defeating either alone still yields one decrement, so this
 // pins the property rather than either implementation of it.
-void run_fanout_completion_signal(Threading threading) {
-  XcdDistributionFixture fx(threading);
+void run_fanout_completion_signal(Threading threading, uint32_t dispatch_threads = 1) {
+  XcdDistributionFixture fx(threading, dispatch_threads);
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   // amd_signal_t::value lives 8 bytes into the signal object.
@@ -724,6 +1223,11 @@ TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnceThreaded) {
   run_fanout_completion_signal(Threading::ThreadPerXcd);
 }
 
+TEST(XcdDistributionTest, SharedPoolFiresTheCompletionSignalExactlyOnceThreaded) {
+  // Eight XCD engines share three pool workers and join their batches independently.
+  run_fanout_completion_signal(Threading::ThreadPerXcd, /*dispatch_threads=*/4);
+}
+
 // The two ordering regressions above run on a single engine thread, where every
 // XCD is driven by one drain loop and two command processors never actually run
 // at the same time. That leaves the properties they check resting on an
@@ -764,8 +1268,8 @@ TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcdsThreaded) {
             uint64_t{kTotalXcds} * kTotalXcds);
 }
 
-TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+void run_threaded_fanout_barrier(uint32_t dispatch_threads) {
+  XcdDistributionFixture fx(Threading::ThreadPerXcd, dispatch_threads);
   ASSERT_GT(fx.loaded.engine_config.num_threads, 1u) << "fixture did not actually go concurrent";
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
@@ -793,6 +1297,15 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
   ASSERT_EQ(ids.size(), 2u) << "expected exactly two distinct dispatch ids";
   EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
       << "an XCD began the barrier'd dispatch while a peer still ran the previous one";
+}
+
+TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
+  run_threaded_fanout_barrier(/*dispatch_threads=*/1);
+}
+
+TEST(XcdDistributionTest, SharedPoolBarrierBitWaitsForEveryXcdsShareThreaded) {
+  // Exercise barrier ordering when peer XCDs execute and join shared-pool work concurrently.
+  run_threaded_fanout_barrier(/*dispatch_threads=*/4);
 }
 
 // One matched begin/end pair is owed per packet, not per share, and the pair
@@ -846,9 +1359,6 @@ TEST(XcdDistributionTest, FanoutReportsOneExecutionPairWhenTheOwnerShareIsEmpty)
 TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   XcdDistributionFixture fx;
   KfdProcess process(7);
-  fx.memory->set_passthrough(true);
-  fx.memory->register_process(process.process_id(), &process.page_table_,
-                              &process.page_table_mutex_, process.page_table_generation());
   class Reporter : public amdgpu::MemoryFaultReporter {
   public:
     std::atomic_uint faults{0};
@@ -856,7 +1366,12 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
       faults.fetch_add(1, std::memory_order_relaxed);
     }
   } reporter;
-  fx.memory->set_memory_fault_reporter(&reporter);
+  amdgpu::LegacyGpuVmAdapter legacy_vm(fx.soc->gpu_vm(), fx.memory);
+  const amdgpu::AddressSpaceHandle address_space =
+      legacy_vm.register_address_space(process.process_id(), &process.page_table_,
+                                       &process.page_table_mutex_, process.page_table_generation());
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(legacy_vm.set_fault_reporter(address_space, &reporter));
 
   constexpr uint32_t kPrivateBytes = 16;
   constexpr size_t kScratchSize = kPrivateBytes * kWavefrontSize * kTotalCus;
@@ -871,12 +1386,14 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
     amdgpu::CommandProcessor *cp = fx.soc->xcd(xi)->command_processor();
     cp->set_scratch_backing_resolver([&](uint32_t) { return scratch_va; });
     cp->set_scratch_backing_allocator([&](uint32_t pid, uint64_t va, size_t size) {
-      allocations.fetch_add(1, std::memory_order_relaxed);
       EXPECT_EQ(pid, process.process_id());
       EXPECT_EQ(va, scratch_va);
       EXPECT_EQ(size, backing.size());
       EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
-      process.map_pages(va, backing.data(), backing.size());
+      if (allocations.load(std::memory_order_relaxed) == 0) {
+        process.map_pages(va, backing.data(), backing.size());
+        allocations.fetch_add(1, std::memory_order_relaxed);
+      }
       return true;
     });
   }
@@ -886,6 +1403,9 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
     kernel_descriptor_t kd{};
     uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   } kernel;
+  constexpr uint64_t kKernelVa = 0x20000;
+  constexpr uint64_t kRingVa = 0x30000;
+  constexpr uint64_t kQueueVa = 0x40000;
   kernel.kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   kernel.kd.private_segment_fixed_size = kPrivateBytes;
   AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 3);
@@ -899,19 +1419,24 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   pkt.workgroup_size_y = pkt.workgroup_size_z = 1;
   pkt.grid_size_x = kTotalCus * kWavefrontSize;
   pkt.grid_size_y = pkt.grid_size_z = 1;
-  pkt.kernel_object = reinterpret_cast<uint64_t>(&kernel);
+  pkt.kernel_object = kKernelVa;
   amd_queue_t queue_desc{};
   queue_desc.write_dispatch_id = 1;
+  process.map_pages(kKernelVa, &kernel, sizeof(kernel));
+  process.map_pages(kRingVa, ring.data(), sizeof(ring));
+  process.map_pages(kQueueVa, &queue_desc, sizeof(queue_desc));
   uint64_t doorbell = 1;
-  amdgpu::HwQueue hw{};
+  amdgpu::AqlQueueConfig hw{};
+  hw.address_space = address_space;
   hw.process_id = process.process_id();
   hw.queue_id = 1;
-  hw.ring_base_va = reinterpret_cast<uint64_t>(ring.data());
+  hw.ring_base_va = kRingVa;
   hw.ring_size = sizeof(ring);
-  hw.read_ptr_va = reinterpret_cast<uint64_t>(&queue_desc.read_dispatch_id);
-  hw.write_ptr_va = reinterpret_cast<uint64_t>(&queue_desc.write_dispatch_id);
+  hw.read_ptr_va = kQueueVa + offsetof(amd_queue_t, read_dispatch_id);
+  hw.write_ptr_va = kQueueVa + offsetof(amd_queue_t, write_dispatch_id);
   hw.doorbell_base = &doorbell;
-  hw.host_accessible = true;
+  hw.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+  hw.uses_kfd_queue_abi = true;
   hw.xcd_fanout = true;
   amdgpu::CommandProcessor *cp = fx.soc->assign_queue_owner_cp(0);
   cp->register_queue(std::move(hw));
@@ -924,8 +1449,8 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   for (uint64_t count : fx.soc->dispatched_workgroups_per_xcd())
     EXPECT_EQ(count, kTotalCus / kTotalXcds);
   cp->unregister_queue(1, process.process_id());
-  fx.memory->set_memory_fault_reporter(nullptr);
-  fx.memory->unregister_process(process.process_id());
+  EXPECT_TRUE(legacy_vm.set_fault_reporter(address_space, nullptr));
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
 
 // Scratch is the one resource a shard cannot size from its own share. A wave's
@@ -942,23 +1467,18 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   constexpr uint32_t kPrivateBytes = 64;
-  constexpr uint64_t kScratchKdAddr = 0x20000;
+  constexpr uint64_t kPerWave = uint64_t{kPrivateBytes} * kWavefrontSize;
+  constexpr uint64_t kWavesPerWg = 1;
+  constexpr uint64_t kGridWide = kPerWave * kTotalCus * kWavesPerWg;
+  install_scratch_kernel(*fx.memory, kPrivateBytes);
 
-  // A second kernel descriptor, identical to the fixture's but demanding scratch.
-  {
-    using namespace rocr::llvm::amdhsa;
-    kernel_descriptor_t kd{};
-    kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((256 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((104 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
-    kd.private_segment_fixed_size = kPrivateBytes;
-    fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
-    fx.memory->write32(kScratchKdAddr + sizeof(kernel_descriptor_t),
-                       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
-  }
+  auto vm_access = std::make_shared<SparseGpuVmAccess>(
+      *fx.memory,
+      SparseGpuVmAccess::HostWindow{.base = kDefaultScratchPool, .size = 0, .extent = kGridWide});
+  constexpr uint32_t kProcessId = 17;
+  const amdgpu::AddressSpaceHandle address_space =
+      fx.soc->gpu_vm().register_translated(kProcessId, vm_access, vm_access);
+  ASSERT_TRUE(address_space);
 
   struct ScratchRequest {
     uint64_t gpu_va;
@@ -968,22 +1488,21 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   std::mutex requests_mutex;
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     fx.soc->xcd(xi)->command_processor()->set_scratch_backing_allocator(
-        [&](uint32_t, uint64_t gpu_va, size_t size) -> bool {
+        [&, vm_access](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
           {
             std::lock_guard<std::mutex> lock(requests_mutex);
             requests.push_back({gpu_va, size});
           }
-          // Actually back it, or every wave would find the pool unmapped and
-          // re-enter the allocator, hiding the very duplication under test.
-          std::vector<uint8_t> zeros(size, 0);
-          fx.memory->load_image(zeros.data(), size, gpu_va);
-          return true;
+          EXPECT_EQ(process_id, kProcessId);
+          EXPECT_EQ(gpu_va, kDefaultScratchPool);
+          return vm_access->provision_host_window(size);
         });
   }
 
   auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
   ASSERT_NE(cp, nullptr);
-  auto queue = test::make_fanout_queue(fx.memory, cp);
+  auto queue = test::make_fanout_queue(
+      fx.memory, cp, /*queue_id=*/1, test::AqlQueue::DEFAULT_RING_ADDR, address_space, kProcessId);
   queue->dispatch(kScratchKdAddr, kTotalCus * kWavefrontSize, kWavefrontSize);
 
   fx.engine->run();
@@ -999,24 +1518,284 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   // share. This is the claim that matters: a wave's slot is indexed by its
   // grid-wide workgroup id, so a share-sized pool would be an eighth as large
   // and the workgroups above it would spill past the end of it.
-  const uint64_t per_wave = uint64_t{kPrivateBytes} * kWavefrontSize;
-  const uint64_t waves_per_wg = 1; // one wavefront-sized workgroup
-  const uint64_t grid_wide = per_wave * kTotalCus * waves_per_wg;
-  const uint64_t share_wide = per_wave * (kTotalCus / kTotalXcds) * waves_per_wg;
+  const uint64_t share_wide = kPerWave * (kTotalCus / kTotalXcds) * kWavesPerWg;
   for (const auto &request : requests) {
-    EXPECT_EQ(request.size, grid_wide)
+    EXPECT_EQ(request.size, kGridWide)
         << "scratch was sized from a shard's share rather than from the whole grid";
     EXPECT_NE(request.size, share_wide) << "sized from this XCD's own share";
   }
 
-  // Requests come from more than one XCD, so the sizing above is being checked
-  // on peer shards and not only on the owner's.
-  EXPECT_GT(requests.size(), 1u);
+  EXPECT_EQ(requests.size(), kTotalXcds)
+      << "each shard should ensure backing once before admitting waves";
+}
 
-  // NOTE: the companion claim -- that the pool is *mapped* once rather than once
-  // per XCD -- is deliberately not asserted here. The allocator is skipped only
-  // when has_host_backing() already answers for the pool, which needs a KFD
-  // process page table; this fixture dispatches on vmid 0, where nothing
-  // resolves, so the allocator is re-entered per wave and the idempotent path is
-  // unreachable. Pinning it needs a KFD-backed dispatch.
+// Every CP learns its fan-out rank from SoC::initialize(). Scratch addressing
+// must consume that same immutable topology: keeping a separate frontend-owned
+// XCC identity lets PCI/MES queues leave every CP at the default XCC zero and
+// aliases corresponding wave slots across all eight XCDs.
+TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
+  Cdna5ScratchTopologyFixture fx;
+  ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
+
+  auto plugin = std::make_unique<ScratchAddressPlugin>();
+  auto *addresses = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+  ASSERT_NE(cp, nullptr);
+  auto queue = test::make_fanout_queue(fx.memory, cp);
+  queue->dispatch(kCdna5ScratchKdAddr, kTotalXcds * kCdna5WavefrontSize, kCdna5WavefrontSize);
+
+  fx.engine->run();
+
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), kTotalXcds);
+  for (uint32_t xcc = 0; xcc < kTotalXcds; ++xcc)
+    EXPECT_EQ(counts[xcc], 1u) << "xcd" << xcc;
+
+  ASSERT_EQ(addresses->scratch_bases().size(), kTotalXcds);
+  const auto *xcd = fx.soc->xcd(0);
+  ASSERT_EQ(xcd->num_shader_engines(), 2u);
+  const auto *se = xcd->shader_engine(0);
+  ASSERT_EQ(se->num_compute_units(), 16u);
+  constexpr uint64_t kPerWave = 64 * kCdna5WavefrontSize;
+  const uint64_t waves_per_se =
+      static_cast<uint64_t>(se->num_compute_units()) * se->compute_unit(0)->scratch_slots_per_cu();
+  const uint64_t xcc_stride = xcd->num_shader_engines() * waves_per_se * kPerWave;
+  std::set<uint64_t> unique_bases;
+  for (const auto &[workgroup, scratch_base] : addresses->scratch_bases()) {
+    EXPECT_EQ(scratch_base, kDefaultScratchPool + workgroup * xcc_stride)
+        << "workgroup " << workgroup << " must use its physical XCC scratch offset";
+    unique_bases.insert(scratch_base);
+  }
+  EXPECT_EQ(unique_bases.size(), kTotalXcds)
+      << "corresponding wave slots on different XCDs shared private memory";
+}
+
+TEST(XcdDistributionTest, Cdna5ScratchCapacityKeepsEveryCuAddressable) {
+  Cdna5ScratchTopologyFixture fx;
+  auto *cp = fx.soc->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_EQ(cp->compute_units().size(), 32u);
+
+  constexpr uint32_t kScratchSlotsPerCu = 32;
+  constexpr uint32_t kCusPerShaderEngine = 16;
+  constexpr uint32_t kScratchSlotsPerShaderEngine = kScratchSlotsPerCu * kCusPerShaderEngine;
+  for (const auto *cu : cp->compute_units()) {
+    EXPECT_EQ(cu->num_wf_slots(), 64u);
+    EXPECT_EQ(cu->scratch_slots_per_cu(), kScratchSlotsPerCu);
+    EXPECT_LT(cu->scratch_scoreboard_base(), kScratchSlotsPerShaderEngine);
+    EXPECT_TRUE(
+        cu->can_accept_workgroup(/*num_wfs=*/1, /*lds_bytes=*/0, kScratchSlotsPerShaderEngine));
+  }
+
+  auto *cu = cp->compute_units().front();
+  std::vector<amdgpu::Wavefront *> scratch_waves;
+  for (uint32_t slot = 0; slot < kScratchSlotsPerCu; ++slot) {
+    auto *wave = cu->dispatch_wf(slot, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1,
+                                 kCdna5WavefrontSize, kScratchSlotsPerShaderEngine);
+    ASSERT_NE(wave, nullptr) << "scratch slot " << slot;
+    scratch_waves.push_back(wave);
+  }
+  EXPECT_EQ(cu->dispatch_wf(kScratchSlotsPerCu, /*pc=*/0, /*num_sgprs=*/1, /*num_vgprs=*/1,
+                            kCdna5WavefrontSize, kScratchSlotsPerShaderEngine),
+            nullptr)
+      << "scratch-backed residency exceeded the advertised per-CU capacity";
+
+  auto *general_wave = cu->dispatch_wf(kScratchSlotsPerCu, /*pc=*/0, /*num_sgprs=*/1,
+                                       /*num_vgprs=*/1, kCdna5WavefrontSize);
+  ASSERT_NE(general_wave, nullptr)
+      << "the scratch limit incorrectly removed a general execution slot";
+  for (auto *wave : scratch_waves)
+    cu->free_wavefront_resources(*wave);
+  cu->free_wavefront_resources(*general_wave);
+}
+
+TEST(XcdDistributionTest, Cdna5QueueAdmissionCapsScratchButKeepsGeneralWaveSlots) {
+  Cdna5ScratchTopologyFixture fx;
+  auto *cp = fx.soc->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+
+  auto plugin = std::make_unique<WaveSlotPlugin>();
+  auto *slots = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  test::AqlQueue queue(fx.memory, cp);
+  constexpr uint32_t kScratchWorkgroups = 1056; // More than 32 slots on each of 32 CUs.
+  queue.dispatch(kCdna5ScratchKdAddr, kScratchWorkgroups * kCdna5WavefrontSize,
+                 kCdna5WavefrontSize);
+  constexpr uint32_t kGeneralWorkgroups = 2048; // Fill all 64 execution slots on each CU.
+  queue.dispatch_with_barrier(kCdna5PlainKdAddr, kGeneralWorkgroups * kCdna5WavefrontSize,
+                              kCdna5WavefrontSize);
+  fx.engine->run();
+
+  ASSERT_EQ(slots->stats().size(), 2u);
+  const auto &scratch = slots->stats().begin()->second;
+  EXPECT_EQ(scratch.dispatched, kScratchWorkgroups);
+  EXPECT_EQ(scratch.completed, kScratchWorkgroups);
+  EXPECT_LT(scratch.max_slot, 32u)
+      << "scratch-backed waves escaped the 32-slot per-CU admission limit";
+
+  const auto &general = std::next(slots->stats().begin())->second;
+  EXPECT_EQ(general.dispatched, kGeneralWorkgroups);
+  EXPECT_EQ(general.completed, kGeneralWorkgroups);
+  EXPECT_GE(general.max_slot, 32u)
+      << "the scratch limit reduced residency for a kernel without private memory";
+}
+
+// Model a spill as soon as each wave is admitted, without relying on host
+// scheduling to place the spill before another XCD grows the shared pool.
+TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
+  for (const bool cdna5 : {false, true}) {
+    SCOPED_TRACE(cdna5 ? "gfx1250 physical scratch slots" : "gfx950 logical scratch slots");
+    XcdDistributionFixture fx(Threading::Single, 1,
+                              cdna5 ? test::config_path("gfx1250_mi455x.json") : CONFIG_PATH);
+    const auto &cus = fx.soc->all_cus();
+    ASSERT_FALSE(cus.empty());
+    const uint32_t wave_size = cus.front()->wf_size();
+    const uint32_t total_cus = static_cast<uint32_t>(cus.size());
+    constexpr uint32_t kPrivateBytes = 64;
+    const size_t per_wave = kPrivateBytes * wave_size;
+    size_t scratch_slots = total_cus;
+    if (cdna5) {
+      scratch_slots = 0;
+      for (const auto *cu : cus)
+        scratch_slots += cu->scratch_slots_per_cu();
+    }
+    const size_t pool_bytes = per_wave * scratch_slots;
+    install_scratch_kernel(*fx.memory, kPrivateBytes,
+                           cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4);
+
+    // A preceding dispatch left enough backing for the first wave, but not the
+    // new grid. Provision the missing tail before admitting any new waves.
+    auto vm_access = std::make_shared<SparseGpuVmAccess>(
+        *fx.memory, SparseGpuVmAccess::HostWindow{
+                        .base = kDefaultScratchPool, .size = per_wave, .extent = pool_bytes});
+    constexpr uint32_t kProcessId = 17;
+    const auto address_space =
+        fx.soc->gpu_vm().register_translated(kProcessId, vm_access, vm_access);
+    ASSERT_TRUE(address_space);
+    uint32_t allocations = 0;
+    for (uint32_t xi = 0; xi < fx.soc->num_xcds(); ++xi) {
+      auto *cp = fx.soc->xcd(xi)->command_processor();
+      cp->set_scratch_backing_allocator([&](uint32_t, uint64_t gpu_va, size_t size) {
+        EXPECT_EQ(gpu_va, kDefaultScratchPool);
+        EXPECT_EQ(size, pool_bytes);
+        if (allocations != 0)
+          return true;
+        ++allocations;
+        std::vector<uint8_t> tail(size - per_wave);
+        fx.memory->write_block(gpu_va + per_wave, tail);
+        return vm_access->provision_host_window(size);
+      });
+    }
+
+    class SpillPlugin final : public ExecutionPlugin {
+    public:
+      SpillPlugin(amdgpu::GpuMemory &memory, const uint32_t &allocations)
+          : ExecutionPlugin("scratch-spills"), memory_(memory), allocations_(allocations) {}
+      void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+        EXPECT_EQ(allocations_, 1u) << "wave admitted before the whole pool was provisioned";
+        memory_.write32(wf.scratch_base(), kSentinel + wf.wg_id());
+        ++admitted;
+      }
+      void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+        EXPECT_EQ(memory_.read32(wf.scratch_base()), kSentinel + wf.wg_id())
+            << "scratch backing changed after wave admission";
+        ++halted;
+      }
+      uint32_t admitted = 0;
+      uint32_t halted = 0;
+
+    private:
+      enum : uint32_t { kSentinel = 0x12345678 };
+      amdgpu::GpuMemory &memory_;
+      const uint32_t &allocations_;
+    };
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<SpillPlugin>(*fx.memory, allocations);
+    auto *spills = plugin.get();
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    fx.soc->set_plugin_group(group);
+    auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+    ASSERT_NE(cp, nullptr);
+    auto queue =
+        test::make_fanout_queue(fx.memory, cp, /*queue_id=*/1, test::AqlQueue::DEFAULT_RING_ADDR,
+                                address_space, kProcessId);
+    queue->dispatch(kScratchKdAddr, total_cus * wave_size, wave_size);
+    fx.engine->run();
+
+    EXPECT_EQ(allocations, 1u);
+    EXPECT_EQ(spills->admitted, total_cus);
+    EXPECT_EQ(spills->halted, total_cus);
+    // Provisioning must not probe every unused physical scratch slot on each
+    // shard. Bound the work by the wave slices that can actually execute.
+    EXPECT_LE(vm_access->scratch_probe_bytes(), 2 * per_wave * total_cus);
+  }
+}
+
+TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {
+  XcdDistributionFixture fx;
+  constexpr uint32_t kPrivateBytes = 64;
+  install_scratch_kernel(*fx.memory, kPrivateBytes);
+
+  auto vm_access = std::make_shared<SparseGpuVmAccess>(
+      *fx.memory, SparseGpuVmAccess::HostWindow{.base = kDefaultScratchPool, .size = 0});
+  const amdgpu::AddressSpaceHandle address_space =
+      fx.soc->gpu_vm().register_translated(/*vmid=*/17, vm_access, vm_access);
+  ASSERT_TRUE(address_space);
+
+  uint32_t allocator_calls = 0;
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+  ASSERT_NE(cp, nullptr);
+  cp->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+    ++allocator_calls;
+    return false;
+  });
+  test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, /*process_id=*/17);
+  queue.dispatch(kScratchKdAddr, kWavefrontSize, kWavefrontSize);
+
+  fx.engine->run();
+
+  EXPECT_EQ(allocator_calls, 1u);
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 0u)
+      << "a failed scratch allocation admitted a wavefront";
+}
+
+TEST(XcdDistributionTest, ScratchRequiresTheCompleteWaveSlice) {
+  XcdDistributionFixture fx;
+  constexpr uint32_t kPrivateBytes = 64;
+  install_scratch_kernel(*fx.memory, kPrivateBytes);
+
+  // The first byte resolves, which is enough for the old point probe, while the
+  // rest of this wave's 4 KiB scratch slice is deliberately absent.
+  auto vm_access = std::make_shared<SparseGpuVmAccess>(
+      *fx.memory, SparseGpuVmAccess::HostWindow{.base = kDefaultScratchPool, .size = 1});
+  const amdgpu::AddressSpaceHandle address_space =
+      fx.soc->gpu_vm().register_translated(/*vmid=*/17, vm_access, vm_access);
+  ASSERT_TRUE(address_space);
+
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+  ASSERT_NE(cp, nullptr);
+  test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/false,
+                       /*queue_id=*/1, address_space, /*process_id=*/17);
+  queue.dispatch(kScratchKdAddr, kWavefrontSize, kWavefrontSize);
+
+  fx.engine->run();
+
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 0u)
+      << "a one-byte scratch mapping was accepted for a complete wave";
 }

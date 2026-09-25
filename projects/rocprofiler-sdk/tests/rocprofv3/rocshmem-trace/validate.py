@@ -24,9 +24,6 @@
 
 import sys
 import pytest
-import json
-
-from collections import defaultdict
 
 
 # helper function

@@ -98,7 +98,10 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   signal_.queue_ptr = &amd_queue_;
 
   auto& driver = static_cast<XdnaDriver&>(agent->driver());
-  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, &kmq_metadata_);
+  // The driver derives a column count from this by dividing by the number of core rows, so
+  // anything smaller than one row's worth of tiles asks for zero columns and is rejected.
+  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, agent->properties().NumNeuralCores,
+                                                  agent->properties().DeviceId, &kmq_metadata_);
   if (err != HSA_STATUS_SUCCESS) {
     throw hsa_exception(err, "Failed to create KMQ metadata for the AIE queue.");
   }
@@ -226,19 +229,26 @@ void AieAqlQueue::SubmitPackets() {
   }
 
   const auto num_pkts = last_pkt_idx - first_pkt_idx;
+  uint64_t num_completed = 0;
   hsa_status_t err = driver.SubmitCmdChain(amd_queue_.hsa_queue, kmq_metadata_, first_pkt_idx,
-                                           num_pkts, agent.properties().NumNeuralCores, agent);
+                                           num_pkts, agent, &num_completed);
+
+  // Consume exactly the packets that executed. On success that is the whole batch. On a partial
+  // failure it is the prefix the device got through, whose completion signals have already been
+  // released -- leaving them in the ring would say they are still pending when they are not. The
+  // failing packet and everything behind it stay, so the ring still shows what did not run.
+  // Stored before the callback, so a handler that inspects the queue sees a settled read index.
+  atomic::Store(&amd_queue_.read_dispatch_id, first_pkt_idx + num_completed,
+                std::memory_order_release);
+
   if (err != HSA_STATUS_SUCCESS) {
     // Stop processing further packets on this queue and report the failure through the per-queue
-    // error callback (mirrors the GPU AqlQueue error path). The read index is left unadvanced
-    // because these packets did not complete successfully.
+    // error callback (mirrors the GPU AqlQueue error path).
     debug_print("AIE queue: command submission failed (0x%x)\n", err);
     suspended_ = true;
     InvokeErrorCallback(err);
     return;
   }
-
-  atomic::Store(&amd_queue_.read_dispatch_id, last_pkt_idx, std::memory_order_release);
 }
 
 void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {

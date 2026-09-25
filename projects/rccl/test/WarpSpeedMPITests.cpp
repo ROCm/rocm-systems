@@ -211,8 +211,7 @@ TEST_F(WarpSpeedMPITest, MixedThresholdRace)
     int  max_processes = 8;
     int  min_nodes     = 1;
     int  max_nodes     = 1;
-    ASSERT_TRUE(validateTestPrerequisites(min_processes, max_processes, kNoPowerOfTwoRequired, min_nodes, max_nodes))
-        << "Requires exactly 8 ranks on a single node";
+    SKIP_UNLESS_MPI_PREREQS(min_processes, max_processes, kNoPowerOfTwoRequired, min_nodes, max_nodes);
 
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
     skipUnlessWarpSpeedAutoEnabled();
@@ -233,12 +232,11 @@ TEST_F(WarpSpeedMPITest, MixedThresholdRace)
 TEST_F(WarpSpeedMPITest, HighRankCommInitAndAllGather)
 {
     // Single node, all available ranks (repro uses 64 on CPX+NPS2).
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           kRequireSingleNode,
-                                          kRequireSingleNode))
-        << "Requires a single-node run";
+                                          kRequireSingleNode);
 
     // Init exercises the bootstrap topology AllGather and WarpSpeed channel setup.
     ASSERT_EQ(ncclSuccess, createTestCommunicator());

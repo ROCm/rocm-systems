@@ -43,7 +43,10 @@ objects for the virtual machine and the topology.
 |-------|------|-------------|
 | `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
-| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width. `1` is serial and the default when omitted; `0` explicitly selects an automatic host-wide budget capped at 32 and split across SoCs; other values apply per SoC. Each effective SoC width is capped at its largest per-CP CU count. |
+| `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
+| `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity capped at 32, positive values override it. |
+| `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
 
@@ -51,12 +54,13 @@ objects for the virtual machine and the topology.
 `num_threads` partitions whole XCD subtrees across Simdojo engine threads. A
 single XCD is never split between engine partitions. In functional mode,
 `cpu_dispatch_threads` controls the host parallelism used to execute accepted
-CU work. Its omitted-field default is serial; set it explicitly to `0` to use
-automatic sizing. Its budget is shared by all command processors in a SoC and
-does not change queue ownership or XCD fan-out. After either automatic or explicit
-selection, the effective width is capped at the largest number of CUs owned by
-any one command processor in that SoC. In clocked mode its effective value is
-always 1.
+CU work. Its pool is shared by all command processors in a SoC, and each width
+is clamped to per-CP CU capacity. The selection counts engines, all retained
+dispatch workers and shared helpers: E + sum(D - 1) + H. Explicit knobs
+override the selected allocation; configs without a table use serial defaults.
+Clocked mode always uses serial dispatch. See the source
+[configuration guide](../../configuration.md)
+for table examples and `rocjitsu --thread-budget-table`.
 
 `exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
 mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any
@@ -161,7 +165,7 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone simulation. |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
@@ -173,6 +177,12 @@ Standalone configs (without `_kmd` in the name) are used with
 `rj_vm_step` or `rj_vm_run`. KMD configs initialize the topology and
 simulated driver so that an unmodified ROCm runtime stack can issue
 ioctls through the interposer.
+
+The gfx1250 standalone profile can also back the Linux VFIO-user server. That
+compute-only PCI profile requires an AMDGPU guest containing commit
+`4e07da515d1c` or an equivalent backport so discovery accepts the intentional
+absence of VCN, UVD, and JPEG hardware. See
+[Run a QEMU VFIO-user compute guest](/how-to/qemu-vfio.md).
 
 ## Multi-GPU configurations
 

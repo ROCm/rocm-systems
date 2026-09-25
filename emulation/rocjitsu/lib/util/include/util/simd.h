@@ -7,6 +7,7 @@
 #include "util/bit.h"
 
 #include <bit>
+#include <bitset>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,10 @@
 
 #if __has_include(<experimental/simd>)
 #include <experimental/simd>
+#endif
+
+#if defined(__AVX512F__)
+#include <immintrin.h>
 #endif
 
 // clang + libstdc++ <experimental/simd> on AVX-512 has produced incorrect
@@ -35,6 +40,37 @@
 #endif
 
 namespace util {
+
+/// Round an IEEE F32/F64 value to an integral value with ties to even.
+/// Integer operations preserve signed zero and quiet NaN payloads without
+/// depending on or changing host rounding, denormal modes or exception flags.
+template <typename Float> inline Float rndne_scalar(Float value) {
+  static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
+  using U = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
+  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
+  constexpr U kSign = U(1) << (sizeof(U) * 8 - 1);
+  constexpr U kInfinity = U(2 * kBias + 1) << kFraction;
+  const U bits = std::bit_cast<U>(value);
+  const U magnitude = bits & ~kSign;
+  const U sign = bits & kSign;
+  if (magnitude >= kInfinity)
+    return std::bit_cast<Float>(bits | (magnitude > kInfinity ? U(1) << (kFraction - 1) : 0));
+  const unsigned exponent = static_cast<unsigned>(magnitude >> kFraction);
+  if (exponent >= kBias + kFraction)
+    return value;
+  if (exponent < kBias) {
+    const U rounded = magnitude > (U(kBias - 1) << kFraction) ? U(kBias) << kFraction : 0;
+    return std::bit_cast<Float>(sign | rounded);
+  }
+  const unsigned shift = kBias + kFraction - exponent;
+  const U unit = U(1) << shift;
+  const U fraction = magnitude & (unit - 1);
+  U rounded = magnitude & ~(unit - 1);
+  if (fraction > unit / 2 || (fraction == unit / 2 && (rounded & unit) != 0))
+    rounded += unit;
+  return std::bit_cast<Float>(sign | rounded);
+}
 
 /// Compile-time switch for `<experimental/simd>` availability. Callers
 /// gate SIMD fast paths via `if constexpr (util::has_stdx_simd)` so the
@@ -103,6 +139,63 @@ template <class T> using native = stdx::native_simd<T>;
 
 /// Native-SIMD width measured in 32-bit lanes. Convenience constant.
 template <class T> constexpr std::size_t native_width_v = native<T>::size();
+
+/// Pack a SIMD predicate into the low mask.size() bits. Bit i corresponds to
+/// SIMD lane i. libstdc++ exposes a bitset bridge that maps native masks to
+/// movemask-style instructions; retain a lane fallback for other TS
+/// implementations.
+template <class Mask> [[gnu::always_inline]] inline uint64_t simd_mask_to_bits(const Mask &mask) {
+  constexpr std::size_t W = Mask::size();
+  static_assert(W <= 64);
+  constexpr bool broken_native64_width =
+      UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
+  if constexpr (!broken_native64_width && requires { mask.__to_bitset().to_ullong(); }) {
+    return static_cast<uint64_t>(mask.__to_bitset().to_ullong());
+  } else {
+    uint64_t bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (mask[i])
+        bits |= uint64_t{1} << i;
+    return bits;
+  }
+}
+
+/// Expand the low Simd::size() bits into a SIMD predicate. High input bits are
+/// ignored. The libstdc++ bitset bridge lowers to a broadcast, lane-bit test,
+/// and vector compare instead of constructing the predicate lane by lane.
+template <class Simd>
+[[gnu::always_inline]] inline typename Simd::mask_type simd_mask_from_bits(uint64_t bits) {
+  using Mask = typename Simd::mask_type;
+  constexpr std::size_t W = Simd::size();
+  static_assert(W <= 64);
+  constexpr bool broken_native64_width =
+      UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
+  if constexpr (!broken_native64_width && requires { Mask::__from_bitset(std::bitset<W>(bits)); }) {
+    return Mask::__from_bitset(std::bitset<W>(bits));
+  } else {
+    Mask mask(false);
+    for (std::size_t i = 0; i < W; ++i)
+      mask[i] = ((bits >> i) & 1u) != 0;
+    return mask;
+  }
+}
+
+/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
+/// is the numeric form needed by carry-in arithmetic; selection paths should
+/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
+/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
+[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
+  using U = native<uint32_t>;
+  static_assert(U::size() <= 32);
+#if defined(__AVX512F__)
+  static_assert(U::size() == 16);
+  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
+#else
+  const U lane_bits([](auto i) { return uint32_t{1} << i; });
+  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
+  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
+#endif
+}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -116,6 +209,9 @@ template <class T> struct native {
 template <class T> constexpr std::size_t native_width_v = native<T>::size();
 template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
+template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
+template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
+inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
 template <class T> native<T> load64(const uint32_t *, const uint32_t *) { return {}; }
@@ -514,6 +610,22 @@ inline native<float> bf16_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>((v & 0xFFFFu) << 16);
 }
 
+/// BF16 conversion is integer rounding; host floating-point controls do not
+/// participate. Preserve NaN payloads and optionally saturate finite overflow.
+inline native<uint32_t> pack_bf16_simd(native<uint32_t> bits, bool overflow) {
+  using U = native<uint32_t>;
+  U out = (bits + U(0x7fffu) + ((bits >> 16) & U(1))) >> 16;
+  const auto special = (bits & U(0x7f800000u)) == U(0x7f800000u);
+  stdx::where(special, out) = bits >> 16;
+  stdx::where(special && ((bits & U(0xffffu)) != U(0)), out) = (bits >> 16) | U(1);
+  if (overflow) {
+    const auto finite = (bits & U(0x7fffffffu)) < U(0x7f800000u);
+    stdx::where(finite && ((out & U(0x7fffu)) == U(0x7f80u)), out) =
+        (out & U(0x8000u)) | U(0x7f7fu);
+  }
+  return out;
+}
+
 /// Vectorized, bit-exact port of `f32_to_f16` (util/data_types.h). Returns the
 /// f16 bits in the low 16 bits of each lane (high bits zero). All conditions
 /// are expressed as unsigned comparisons on the biased f32 exponent `fe`, so
@@ -689,9 +801,34 @@ inline native<float> ceil_simd(native<float> a) {
 inline native<float> floor_simd(native<float> a) {
   return round_fixup_simd<float, false>(a, [](native<float> x) { return stdx::floor(x); });
 }
-inline native<float> rndne_simd(native<float> a) {
-  return round_fixup_simd<float, true>(a, [](native<float> x) { return stdx::nearbyint(x); });
+/// Vector counterpart of rndne_scalar, using only unsigned integer lanes.
+template <typename Float> inline native<Float> rndne_bits_simd(native<Float> value) {
+  using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  using U = native<Bits>;
+  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
+  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
+  constexpr Bits kSign = Bits(1) << (sizeof(Bits) * 8 - 1);
+  constexpr Bits kInfinity = Bits(2 * kBias + 1) << kFraction;
+  const U bits = std::bit_cast<U>(value);
+  const U magnitude = bits & U(~kSign);
+  const U exponent = magnitude >> kFraction;
+  // All lanes need a valid shift, including values handled by the blends below.
+  const U shift = stdx::min(stdx::max(U(kBias + kFraction) - exponent, U(1)), U(kFraction));
+  const U unit = U(1) << shift;
+  const U fraction = magnitude & (unit - U(1));
+  U rounded = magnitude & ~(unit - U(1));
+  const auto increment =
+      (fraction > (unit >> 1)) || ((fraction == (unit >> 1)) && ((rounded & unit) != U(0)));
+  stdx::where(increment, rounded) += unit;
+  const U half(Bits(kBias - 1) << kFraction), one(Bits(kBias) << kFraction);
+  stdx::where(magnitude <= half, rounded) = U(0);
+  stdx::where((magnitude > half) && (magnitude < one), rounded) = one;
+  stdx::where(exponent >= U(kBias + kFraction), rounded) = magnitude;
+  stdx::where(magnitude > U(kInfinity), rounded) = magnitude | U(Bits(1) << (kFraction - 1));
+  return std::bit_cast<native<Float>>(rounded | (bits & U(kSign)));
 }
+
+inline native<float> rndne_simd(native<float> a) { return rndne_bits_simd(a); }
 
 inline native<double> trunc_simd(native<double> a) {
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
@@ -716,9 +853,9 @@ inline native<double> floor_simd(native<double> a) {
 }
 inline native<double> rndne_simd(native<double> a) {
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<double>(a, [](double x) { return std::nearbyint(x); });
+  return map_native64_scalar<double>(a, [](double x) { return rndne_scalar(x); });
 #else
-  return round_fixup_simd<double, true>(a, [](native<double> x) { return stdx::nearbyint(x); });
+  return rndne_bits_simd(a);
 #endif
 }
 
@@ -729,8 +866,8 @@ inline native<double> rndne_simd(native<double> a) {
 /// produce. gcc's glibc floorf/floor/ceil/trunc instead pass an sNaN through
 /// verbatim, so the generated scalar body would disagree with its own SIMD
 /// fast path (and with hardware) under gcc. Quiet explicitly there; on clang
-/// this is an idempotent no-op left to the compiler. (std::nearbyint already
-/// quiets under glibc, so rndne needs no fixup.)
+/// this is an idempotent no-op left to the compiler. rndne_scalar handles
+/// NaNs directly with integer bits.
 #if defined(__GNUC__) && !defined(__clang__)
 template <class F> inline F quiet_snan_scalar(F a, F r) {
   using U = std::conditional_t<sizeof(F) == 4, uint32_t, uint64_t>;
@@ -847,6 +984,18 @@ inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
   using U = native<uint32_t>;
   U lowbit = x & (~x + U(1u));
   return popcount_u32_simd(lowbit - U(1u));
+}
+
+/// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
+inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
+  using U = native<uint32_t>;
+  using F = native<float>;
+  U byte = value & U(0xffu), exponent = byte >> 3, mantissa = byte & U(7);
+  U result = ((exponent + U(112)) << 23) | (mantissa << 20);
+  U subnormal = std::bit_cast<U>(stdx::static_simd_cast<F>(mantissa) * F(0x1p-17f));
+  stdx::where(exponent == U(0), result) = subnormal;
+  stdx::where(byte == U(0xffu), result) = U(0x7fc00000u);
+  return std::bit_cast<F>(result);
 }
 
 /// Vector port of `util::fp8_e4m3_to_f32` over the low byte of each lane (E4M3:

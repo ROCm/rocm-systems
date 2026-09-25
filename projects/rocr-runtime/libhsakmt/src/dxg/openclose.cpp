@@ -321,10 +321,22 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
             log_va_exhaustion("system", system_heap_mgr_.get(), system_heap_space_size_, size,
                               align, hit_base_addr);
             code = ErrorCode::OutOfMemory;
-        }
-        else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
+        } else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
             system_heap_mgr_->Free(gpu_addr);
             code = ErrorCode::SyscallFail;
+        }
+    } else if (domain == Wkmi::kUserMemory) {
+        // Userptr: system-heap GPU VA only. Do not Commit; pages are at user_ptr.
+        if (!system_heap_mgr_) {
+            *out_gpu_virt_addr = 0;
+            return ErrorCode::OutOfMemory;
+        }
+
+        gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
+        if (gpu_addr == 0) {
+            log_va_exhaustion("userptr", system_heap_mgr_.get(), system_heap_space_size_, size,
+                              align, hit_base_addr);
+            code = ErrorCode::OutOfMemory;
         }
     } else {
         if (!local_heap_mgr_) {
@@ -350,6 +362,10 @@ ErrorCode hsakmtRuntime::FreeGpuVirtualAddress(const Wkmi::AllocDomain domain,
 
     if (domain == Wkmi::kSystem) {
         DecommitSystemHeapSpace((void *)gpu_addr, size);
+        if (system_heap_mgr_) {
+            system_heap_mgr_->Free(gpu_addr);
+        }
+    } else if (domain == Wkmi::kUserMemory) {
         if (system_heap_mgr_) {
             system_heap_mgr_->Free(gpu_addr);
         }
