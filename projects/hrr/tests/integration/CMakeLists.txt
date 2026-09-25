@@ -21,6 +21,9 @@
 # a captured no-op is exactly what the matrix needs to observe — and asserts
 # every API's replay class still matches what HRR's generator declares.
 #
+# hrr_capture_access_test.cc covers what capture does with the file system: a
+# private archive, and no writes through planted symbolic links.
+#
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
 # api_matrix.yaml.  Regenerate after an upstream classification change with:
 #   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
@@ -53,6 +56,7 @@ add_executable(hrr-integration-tests
   ${HRR_GPU_WORKLOAD_SOURCES}
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_capture_access_test.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17
