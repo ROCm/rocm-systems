@@ -360,4 +360,62 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     registration::finalize();
     context::pop_client(1);
 }
+
+// stop_context() clears enabled before it drops the serialization reference. A dispatch that
+// reaches pre_kernel_call() in between must keep the SERIALIZE_ALL request, like any untraced
+// dispatch, or it skips the serializer barriers and overlaps a traced dispatch still in flight.
+TEST(ThreadTraceQueueHooks, StoppingContextKeepsSerializeAllRequest)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto&                  agents    = hsa::get_queue_controller()->get_supported_agents();
+    const hsa::AgentCache* att_agent = nullptr;
+    for(const auto& [_, agent] : agents)
+    {
+        if(!agent.get_rocp_agent()) continue;
+        if(!agent.get_rocp_agent()->runtime_visibility.hsa) continue;
+        att_agent = &agent;
+        break;
+    }
+    if(!att_agent) GTEST_SKIP() << "no ATT-capable GPU agent available";
+
+    auto serialize_all  = rocprofiler_thread_trace_parameter_t{};
+    serialize_all.type  = ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL;
+    serialize_all.value = 1;
+
+    auto ctx = rocprofiler_context_id_t{0};
+    ASSERT_EQ(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
+                  ctx,
+                  att_agent->get_rocp_agent()->id,
+                  &serialize_all,
+                  1,
+                  start_stop_dispatch_cb,
+                  [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
+                  nullptr),
+              ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    auto* ctx_p = context::get_mutable_registered_context(ctx);
+    ASSERT_TRUE(ctx_p && ctx_p->dispatch_thread_trace);
+    auto& tracer = *ctx_p->dispatch_thread_trace;
+    tracer.resource_init();
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    hsa::HookTestFakeQueue  fq(*att_agent, {.handle = 903});
+    context::correlation_id corr_id{};
+    corr_id.internal = 44;
+    auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
+
+    auto [packet, serialize] = tracer.pre_kernel_call(fq, 1, 1, &user_data, &corr_id);
+    EXPECT_FALSE(packet) << "a stopped tracer must not inject ATT packets";
+    EXPECT_TRUE(serialize) << "a stopping SERIALIZE_ALL tracer must keep requesting serialization";
+    EXPECT_EQ(tracer.pending_post_moves(), 0);
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
 }  // namespace
