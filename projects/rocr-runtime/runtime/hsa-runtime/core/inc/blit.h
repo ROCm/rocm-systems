@@ -119,6 +119,53 @@ class Blit {
 
   virtual void GangLeader(bool gang_leader) = 0;
   virtual bool GangLeader() const { return false; };
+
+  /// @brief Whether this blit implements SubmitSwapCopyCommand below. Lets the
+  /// copy router pick between a capable engine and a per-entry fallback without
+  /// switching on the concrete type.
+  ///
+  /// @note Deliberately not named SwapSupported(): BlitSdmaBase already uses
+  /// that name for "this SDMA engine has the swap packet", which is a different
+  /// question - the SDMA engine reaches its swap packet through SubmitBodies,
+  /// not through SubmitSwapCopyCommand.
+  virtual bool SupportsSwapCopyCommand() const { return false; }
+
+  /// @brief Submit a batch of swap copy commands, exchanging the contents of
+  /// each address pair. After execution entry i's buffer A holds the original
+  /// contents of its buffer B and vice versa. All entries share @p out_signal,
+  /// which is released once every entry has completed.
+  ///
+  /// @note N-entry rather than single-pair because that is the shape the HSA
+  /// batch-copy API and its HIP caller use; a swap batch must not have to be
+  /// unrolled into N ops by the caller just to reach a blit.
+  ///
+  /// @param num_entries Number of address pairs, >= 1.
+  /// @param addr_a_list Array of @p num_entries first-buffer addresses.
+  /// @param addr_b_list Array of @p num_entries second-buffer addresses.
+  /// @param size_list Array of @p num_entries swap sizes in bytes.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  virtual hsa_status_t SubmitSwapCopyCommand(
+      uint32_t num_entries, void* const* addr_a_list, void* const* addr_b_list,
+      const size_t* size_list, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  /// @brief Single-pair form of the above.
+  ///
+  /// @note Deliberately non-virtual: the N-entry overload is the only
+  /// overridable entry point, so an implementation cannot accidentally support
+  /// one shape and silently reject the other.
+  hsa_status_t SubmitSwapCopyCommand(void* addr_a, void* addr_b, size_t size,
+                                     std::vector<core::Signal*>& dep_signals,
+                                     core::Signal& out_signal) {
+    void* const addr_a_list[1] = {addr_a};
+    void* const addr_b_list[1] = {addr_b};
+    const size_t size_list[1] = {size};
+    return SubmitSwapCopyCommand(1, addr_a_list, addr_b_list, size_list,
+                                 dep_signals, out_signal);
+  }
 };
 }  // namespace core
 }  // namespace rocr

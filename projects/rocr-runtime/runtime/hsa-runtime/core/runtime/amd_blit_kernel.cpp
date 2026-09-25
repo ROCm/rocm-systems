@@ -50,6 +50,7 @@
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
+#include "core/inc/runtime.h"
 #include "core/util/utils.h"
 
 namespace rocr {
@@ -568,16 +569,27 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
   // Obtain the number of compute units in the underlying agent.
   num_cus_ = gpuAgent->properties().NumFComputeCores / 4;
 
-  // Assemble shaders to AQL code objects.
-  std::map<KernelType, const char*> kernel_names = {
-      {KernelType::CopyAligned, "CopyAligned"},
-      {KernelType::CopyMisaligned, "CopyMisaligned"},
-      {KernelType::Fill, "Fill"}};
+  // Assemble shaders to AQL code objects. Optional shaders are not built for
+  // every generation; when one is missing it is left unregistered and the
+  // matching capability query reports it unsupported, rather than failing
+  // initialization of the whole blit engine.
+  struct KernelShader {
+    KernelType type;
+    const char* name;
+    bool optional;
+  };
+  static const KernelShader kernel_shaders[] = {
+      {KernelType::CopyAligned, "CopyAligned", false},
+      {KernelType::CopyMisaligned, "CopyMisaligned", false},
+      {KernelType::Fill, "Fill", false},
+      {KernelType::SwapCopy, "SwapCopy", true}};
 
-  for (auto kernel_name : kernel_names) {
-    KernelCode& kernel = kernels_[kernel_name.first];
-    gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
-                            kernel.code_buf_size_);
+  for (const KernelShader& kernel_shader : kernel_shaders) {
+    if (kernel_shader.optional && !gpuAgent->IsShaderAvailable(kernel_shader.name)) continue;
+
+    KernelCode& kernel = kernels_[kernel_shader.type];
+    gpuAgent->AssembleShader(kernel_shader.name, AMD::GpuAgent::AssembleTarget::AQL,
+                             kernel.code_buf_, kernel.code_buf_size_);
     // Publish the code object the same way RegionMemory::Freeze() does.
     gpuAgent->PcieWcFlush(kernel.code_buf_, kernel.code_buf_size_);
     const_cast<AMD::GpuAgent*>(gpuAgent)->InvalidateCodeCaches(kernel.code_buf_,
@@ -652,6 +664,70 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   return HSA_STATUS_SUCCESS;
 }
 
+void BlitKernel::SubmitDependentSignalBarriers(uint64_t barrier_start_index,
+                                               std::vector<core::Signal*>& dep_signals,
+                                               hsa_signal_t completion_signal) {
+  if (dep_signals.empty()) return;
+
+  // Insert barrier packets to handle dependent signals.
+  // Barrier bit keeps signal checking traffic from competing with a copy.
+  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+  hsa_barrier_and_packet_t barrier_packet = {0};
+  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+
+  hsa_barrier_and_packet_t* queue_buffer =
+      reinterpret_cast<hsa_barrier_and_packet_t*>(
+          queue_->public_handle()->base_address);
+
+  uint64_t barrier_index = barrier_start_index;
+  const size_t dep_signal_count = dep_signals.size();
+  for (size_t i = 0; i < dep_signal_count; ++i) {
+    const size_t idx = i % 5;
+    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
+    if (i == (dep_signal_count - 1) || idx == 4) {
+      // Only the last barrier signals completion, and only when the caller has
+      // no dispatch of its own to carry the signal.
+      if (i == (dep_signal_count - 1)) barrier_packet.completion_signal = completion_signal;
+
+      std::atomic_thread_fence(std::memory_order_acquire);
+      queue_buffer[(barrier_index)&queue_bitmask_] = barrier_packet;
+      std::atomic_thread_fence(std::memory_order_release);
+      queue_buffer[(barrier_index)&queue_bitmask_].header = kBarrierPacketHeader;
+
+      LogPrint(HSA_AMD_LOG_FLAG_AQL,
+      "HWq=%p, id=%lu, Barrier Header = "
+      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+      "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
+      "rptr=%lu, wptr=%lu",
+      queue_->public_handle()->base_address, queue_->public_handle()->id,
+      kBarrierPacketHeader,
+      extractAqlBits(kBarrierPacketHeader,
+                    HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
+      extractAqlBits(kBarrierPacketHeader,
+                    HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
+      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+      barrier_packet.dep_signal[0].handle,
+      barrier_packet.dep_signal[1].handle,
+      barrier_packet.dep_signal[2].handle,
+      barrier_packet.dep_signal[3].handle,
+      barrier_packet.dep_signal[4].handle,
+      barrier_packet.completion_signal.handle,
+      queue_->LoadReadIndexRelaxed(), barrier_index);
+
+      ++barrier_index;
+
+      memset(&barrier_packet, 0, sizeof(hsa_barrier_and_packet_t));
+      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+    }
+  }
+}
+
 hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     void* dst, const void* src, size_t size,
     std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
@@ -683,58 +759,8 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
 
   uint64_t write_index_temp = write_index;
 
-  // Insert barrier packets to handle dependent signals.
-  // Barrier bit keeps signal checking traffic from competing with a copy.
-  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
-      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-
-  hsa_barrier_and_packet_t barrier_packet = {0};
-  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
-
-  hsa_barrier_and_packet_t* queue_buffer =
-      reinterpret_cast<hsa_barrier_and_packet_t*>(
-          queue_->public_handle()->base_address);
-
-  const size_t dep_signal_count = dep_signals.size();
-  for (size_t i = 0; i < dep_signal_count; ++i) {
-    const size_t idx = i % 5;
-    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
-    if (i == (dep_signal_count - 1) || idx == 4) {
-      std::atomic_thread_fence(std::memory_order_acquire);
-      queue_buffer[(write_index)&queue_bitmask_] = barrier_packet;
-      std::atomic_thread_fence(std::memory_order_release);
-      queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
-
-      LogPrint(HSA_AMD_LOG_FLAG_AQL,
-      "HWq=%p, id=%lu, Barrier Header = "
-      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-      "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
-      "rptr=%lu, wptr=%lu",
-      queue_->public_handle()->base_address, queue_->public_handle()->id,
-      kBarrierPacketHeader,
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0].handle,
-      barrier_packet.dep_signal[1].handle,
-      barrier_packet.dep_signal[2].handle,
-      barrier_packet.dep_signal[3].handle,
-      barrier_packet.dep_signal[4].handle,
-      barrier_packet.completion_signal.handle,
-      queue_->LoadReadIndexRelaxed(), write_index);
-
-      ++write_index;
-
-      memset(&barrier_packet, 0, sizeof(hsa_barrier_and_packet_t));
-      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
-    }
-  }
+  SubmitDependentSignalBarriers(write_index, dep_signals);
+  write_index += num_barrier_packet;
 
   // Insert dispatch packet for copy kernel.
   KernelArgs* args = ObtainAsyncKernelCopyArg();
@@ -999,6 +1025,228 @@ uint64_t BlitKernel::PendingBytes() {
   // Zero is a valid return in this case since the command which was last when the search started is
   // now complete.
   return 0;
+}
+
+hsa_status_t BlitKernel::SubmitEmptyCopyCommand(std::vector<core::Signal*>& dep_signals,
+                                                core::Signal& out_signal) {
+  // Nothing to move, but the completion signal must still not fire ahead of the
+  // dependencies. With no dependencies it is just a local decrement; otherwise
+  // the barrier packets carry the completion signal in place of a dispatch.
+  if (dep_signals.empty()) {
+    out_signal.SubRelease(1);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(num_barrier_packet);
+    RecordBlitHistory(0, write_index + num_barrier_packet - 1);
+  }
+
+  SubmitDependentSignalBarriers(write_index, dep_signals, core::Signal::Convert(&out_signal));
+
+  ReleaseWriteIndex(write_index, num_barrier_packet);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+uint32_t BlitKernel::MaxDispatchesPerReservation(uint32_t num_barrier_packet) const {
+  const uint32_t queue_size = queue_bitmask_ + 1;
+  // The barriers only ride along in the first reservation; a queue too small to
+  // hold them plus one dispatch would make no forward progress, but
+  // AcquireWriteIndex already asserts that case away, so clamp to at least one.
+  if (queue_size <= num_barrier_packet) return 1;
+  return queue_size - num_barrier_packet;
+}
+
+hsa_status_t BlitKernel::DeferUntilDepsResolved(const std::vector<core::Signal*>& pending_deps,
+                                                std::function<void()> submit) {
+  assert(!pending_deps.empty() && "deferral with nothing to wait on never fires");
+
+  struct DeferredSubmit {
+    std::function<void()> submit;
+    std::atomic<uint32_t> remaining;
+  };
+
+  DeferredSubmit* op = new DeferredSubmit{std::move(submit), {}};
+  op->remaining.store(uint32_t(pending_deps.size()), std::memory_order_release);
+
+  // Each dependency calls this when it reaches zero; the last one in runs the
+  // submission. Returning false unregisters the handler.
+  static hsa_amd_signal_handler handler = [](hsa_signal_value_t value, void* arg) {
+    DeferredSubmit* op = reinterpret_cast<DeferredSubmit*>(arg);
+    if (op->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      op->submit();
+      delete op;
+    }
+    return false;
+  };
+
+  // SetAsyncSignalHandler currently always succeeds. If that ever changes,
+  // failing part way would leave some handlers registered against op and the
+  // rest never firing, so op could be neither run nor safely deleted here.
+  for (size_t i = 0; i < pending_deps.size(); ++i) {
+    core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+        core::Signal::Convert(pending_deps[i]), HSA_SIGNAL_CONDITION_EQ, 0, handler, op);
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitSwapCopyCommand(uint32_t num_entries, void* const* addr_a_list,
+                                               void* const* addr_b_list, const size_t* size_list,
+                                               std::vector<core::Signal*>& dep_signals,
+                                               core::Signal& out_signal) {
+  if (!SupportsSwapCopyCommand()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (num_entries == 0 || addr_a_list == nullptr || addr_b_list == nullptr ||
+      size_list == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  for (uint32_t e = 0; e < num_entries; ++e) {
+    if (addr_a_list[e] == nullptr || addr_b_list[e] == nullptr) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
+  // Count the dispatches up front so out_signal can be raised in one step and
+  // so a batch whose entries exceed one dispatch's reach is split rather than
+  // rejected - the native SDMA swap path chunks oversized transfers too.
+  uint64_t total_dispatches = 0;
+  uint64_t total_bytes = 0;
+  for (uint32_t e = 0; e < num_entries; ++e) {
+    const size_t sz = size_list[e];
+    if (sz == 0) continue;
+    total_dispatches += (sz + kMaxSwapBytesPerDispatch - 1) / kMaxSwapBytesPerDispatch;
+    // Swap moves 2x the size (read both, write both).
+    total_bytes += uint64_t(sz) * 2;
+  }
+
+  if (total_dispatches == 0) {
+    // Every entry is zero-length: nothing to move, but the completion signal
+    // must still wait on the dependencies.
+    return SubmitEmptyCopyCommand(dep_signals, out_signal);
+  }
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+
+  // A batch that spans reservations must not also carry dependency barriers -
+  // see DeferUntilDepsResolved for why the combination cannot make progress.
+  // Signals already at zero gate nothing, so they are dropped first; that
+  // alone keeps the overwhelming majority of batches on the direct path. Swap
+  // reaches this bound easily, emitting at least one dispatch per entry, so a
+  // few dozen entries can already exceed one reservation.
+  if (total_dispatches > MaxDispatchesPerReservation(num_barrier_packet)) {
+    std::vector<core::Signal*> pending_deps;
+    for (core::Signal* dep : dep_signals) {
+      if (dep->LoadRelaxed() != 0) pending_deps.push_back(dep);
+    }
+    if (!pending_deps.empty()) {
+      // Copied because the lists outlive this call once it defers. All three
+      // are validated above, so the resubmission cannot fail.
+      std::vector<void*> a(addr_a_list, addr_a_list + num_entries);
+      std::vector<void*> b(addr_b_list, addr_b_list + num_entries);
+      std::vector<size_t> sizes(size_list, size_list + num_entries);
+      core::Signal* out = &out_signal;
+      return DeferUntilDepsResolved(pending_deps, [this, a, b, sizes, out]() {
+        std::vector<core::Signal*> no_deps;
+        SubmitSwapCopyCommand(uint32_t(a.size()), a.data(), b.data(), sizes.data(), no_deps, *out);
+      });
+    }
+  }
+
+  // Every dispatch carries out_signal and so decrements it once on retirement.
+  // The caller has set it to 1, so raise it by the extra dispatches before any
+  // packet is made visible to the packet processor. Relaxed is sufficient: the
+  // release fence in ReleaseWriteIndex orders this ahead of the doorbell, and
+  // no dispatch exists to observe it before then.
+  if (total_dispatches > 1) out_signal.AddRelaxed(total_dispatches - 1);
+
+  // Walk the entries as a flat stream of chunks, filling one queue reservation
+  // at a time. entry / offset carry the position across reservations.
+  uint32_t entry = 0;
+  size_t offset = 0;
+  uint64_t remaining = total_dispatches;
+  bool barriers_pending = (num_barrier_packet != 0);
+  bool first_reservation = true;
+
+  while (remaining != 0) {
+    const uint32_t barriers_now = barriers_pending ? num_barrier_packet : 0;
+    const uint32_t dispatches_now = uint32_t(std::min<uint64_t>(
+        remaining, MaxDispatchesPerReservation(barriers_now)));
+    const uint32_t total_num_packet = barriers_now + dispatches_now;
+
+    uint64_t write_index;
+    {
+      std::lock_guard<std::mutex> lock(reservation_lock_);
+      write_index = AcquireWriteIndex(total_num_packet);
+      // Attribute the batch's bytes to the first reservation only; the later
+      // ones just extend the packet range those same bytes are pending behind,
+      // so counting them again would double-count against PendingBytes.
+      RecordBlitHistory(first_reservation ? total_bytes : 0,
+                        write_index + total_num_packet - 1);
+      first_reservation = false;
+    }
+
+    if (barriers_now != 0) {
+      SubmitDependentSignalBarriers(write_index, dep_signals);
+      barriers_pending = false;
+    }
+
+    for (uint32_t d = 0; d < dispatches_now; ++d) {
+      // Skip entries that are empty or already fully dispatched. The bound is
+      // redundant with the dispatch count computed above, but keeps a miscount
+      // from walking off the caller's arrays.
+      while (entry < num_entries && offset >= size_list[entry]) {
+        ++entry;
+        offset = 0;
+      }
+
+      size_t chunk = 0;
+      uint32_t chunk_entry = num_entries - 1;
+      if (entry < num_entries) {
+        chunk_entry = entry;
+        chunk = std::min(size_list[entry] - offset, kMaxSwapBytesPerDispatch);
+      } else {
+        // Unreachable: total_dispatches was derived from these same sizes. If
+        // it ever were reached, emit an empty dispatch rather than leaving an
+        // INVALID packet in a slot already reserved and doorbelled, which would
+        // stall the queue and hang every later copy on it.
+        assert(false && "swap dispatch count disagrees with the entry sizes");
+        offset = 0;
+      }
+
+      // Dispatch parameters. The shader runs two phases over one flat thread
+      // index: threads [0, chunk/16) each swap a 16-byte chunk, then threads
+      // [chunk/16, chunk/16 + chunk%16) each swap one of the trailing bytes.
+      // The two phases use disjoint thread ranges, so the grid is their sum -
+      // rounding chunk up to a multiple of 16 instead would leave the last
+      // bytes of a non-multiple-of-16 swap with no thread assigned to them.
+      const uint32_t bytes_per_thread = 16;
+      const uint32_t sz = static_cast<uint32_t>(chunk);
+      const uint32_t total_workitems = (sz / bytes_per_thread) + (sz % bytes_per_thread);
+
+      KernelArgs* args = ObtainAsyncKernelCopyArg();
+      args->swap.addr_a = reinterpret_cast<uint64_t>(addr_a_list[chunk_entry]) + offset;
+      args->swap.addr_b = reinterpret_cast<uint64_t>(addr_b_list[chunk_entry]) + offset;
+      args->swap.swap_size = sz;
+
+      PopulateQueue(write_index + barriers_now + d,
+                    uintptr_t(kernels_[KernelType::SwapCopy].code_buf_), args, total_workitems,
+                    core::Signal::Convert(&out_signal));
+
+      offset += chunk;
+    }
+
+    ReleaseWriteIndex(write_index, total_num_packet);
+    remaining -= dispatches_now;
+  }
+
+  return HSA_STATUS_SUCCESS;
 }
 
 }  // namespace amd
