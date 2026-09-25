@@ -152,6 +152,46 @@ how `HIP_TEST_LEVEL=level_0 ctest` leaves every non-`level_0` entry.
 > reaches the test binary. Use `HIP_TEST_LEVEL=level_0 ctest`, which selects and
 > parameterises in one go and needs no `-L`.
 
+### Test categories
+
+`catch/config/configs/test_categories.yaml` names groups of levels, so a CI stage can ask
+for a tier rather than spell out levels. A test case joins a category when its
+`level:` list overlaps that category's `test_levels`, which makes the categories
+nest: a `level_0` case is in all four.
+
+| Category | Levels | Parameters | Intended stage |
+|---|---|---|---|
+| `quick` | 0 | `level_0` | build/CI sanity check |
+| `standard` | 0, 1 | `level_1` | PR gate for component changes |
+| `comprehensive` | 0, 1, 2 | `level_2` | nightly |
+| `full` | 0–4 | `level_4` | pre-release, on demand |
+
+A category is a Catch2 tag, so it reaches ctest as a label and is accepted
+wherever a level name is:
+
+```bash
+ctest -L quick                    # selects; parameters stay at the default level_2
+HIP_TEST_LEVEL=quick ctest -L quick   # selects and parameterises
+HIP_TEST_LEVEL=full ./MemoryTest1     # every level, level_4 parameters
+./MemoryTest1 "[quick]"               # level_0 parameters
+```
+
+`HIP_TEST_LEVEL=quick` is exactly `HIP_TEST_LEVEL=level_0`, so the rules above
+apply unchanged — including "the highest selected level supplies the
+parameters", which is why `full` runs at `level_4`.
+
+Categories do not carry exclusions. A test case declares its own in the
+`disabled:` field of its group config, where an entry may name the platform and
+OS (`amd_linux`, `amd_windows`, `nvidia_linux`, `nvidia_windows`, `amd_wsl`),
+the exact architecture the build targets (`<arch>`), the two combined
+(`linux_<arch>`, `windows_<arch>`), or `asan`. `test_categories.yaml` lists
+every accepted spelling in full.
+
+A matching entry tags the case `[disabled]` and registers it `DISABLED TRUE` in
+ctest. Every entry also produces an `[exclude_<entry>]` label whether or not it
+matched this build, so a runner can filter on one directly —
+`ctest -L standard -LE exclude_amd_wsl`.
+
 ### Writing level-aware tests with `isQuickLevel()`
 
 Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active test level is `level_0` (set via `HIP_TEST_LEVEL` environment variable or `[level_0]` Catch2 tag filter).

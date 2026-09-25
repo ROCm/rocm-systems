@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_level.hh>
+#include <hip_test_parameters.hh>
 
 #include <regex>
 #include <sstream>
@@ -51,6 +52,42 @@ std::string joinWithCommas(const std::vector<std::string>& parts) {
   return joined;
 }
 
+/**
+ * @brief Levels named by a single tag pattern.
+ *
+ * A pattern names levels either directly ("level_2") or through a test
+ * category ("quick", "full"), whose levels come from test_categories.yaml by
+ * way of the generated hip_test_parameters.hh. Anything else names none: test
+ * names, other tags, and malformed tags such as "level_2x".
+ *
+ * The digit count is bounded so that the conversion cannot overflow.
+ */
+std::set<int> parseLevels(const std::string& tag) {
+  static const std::regex levelRegex("level_([0-9]{1,9})");
+  std::smatch match;
+  if (std::regex_match(tag, match, levelRegex)) {
+    return {std::stoi(match[1].str())};
+  }
+
+  // Built once; the generated table is fixed for the life of the process.
+  static const auto categories = TestCategories::initializeTestCategories();
+  const auto found = categories.find(tag);
+  if (found != categories.end()) {
+    return std::set<int>(found->second.begin(), found->second.end());
+  }
+  return {};
+}
+
+/// @brief Every level the suite supports, as numbers.
+std::set<int> allSupportedLevels() {
+  std::set<int> levels;
+  for (const char* supported : kSupportedLevels) {
+    const auto named = parseLevels(supported);
+    levels.insert(named.begin(), named.end());
+  }
+  return levels;
+}
+
 }  // namespace
 
 bool isSupportedLevel(const std::string& level) {
@@ -66,27 +103,18 @@ std::set<int> collectLevels(const std::string& text, bool allowBareTags) {
   static const std::regex bracketedPattern("(~?)\\[([^\\[\\]]*)\\]");
   static const std::regex barePattern("\\s*(~?)\\s*([^\\s]+)\\s*");
 
-  // Level named by a pattern, or -1 when it does not name one. Anything but
-  // an exact "level_N" is rejected; the digit count is bounded so that the
-  // conversion cannot overflow.
-  const auto parseLevel = [](const std::string& tag) {
-    static const std::regex levelRegex("level_([0-9]{1,9})");
-    std::smatch match;
-    return std::regex_match(tag, match, levelRegex) ? std::stoi(match[1].str()) : -1;
-  };
-
   std::set<int> levels;
   std::stringstream stream(text);
   std::string filter;
   while (std::getline(stream, filter, ',')) {
     std::set<int> included, excluded;
 
-    // Sort this filter's level patterns into included and excluded.
+    // Sort this filter's level patterns into included and excluded. A pattern
+    // that names neither a level nor a category contributes nothing.
     const auto sortPattern = [&](const std::string& negation, const std::string& tag) {
-      const int level = parseLevel(tag);
-      if (level >= 0) {
-        (negation.empty() ? included : excluded).insert(level);
-      }
+      const std::set<int> named = parseLevels(tag);
+      auto& target = negation.empty() ? included : excluded;
+      target.insert(named.begin(), named.end());
     };
 
     bool bracketed = false;
@@ -107,12 +135,7 @@ std::set<int> collectLevels(const std::string& text, bool allowBareTags) {
         continue;  // filter says nothing about the level
       }
       // Exclusion only: everything the suite supports is still in play.
-      for (const char* supported : kSupportedLevels) {
-        const int level = parseLevel(supported);
-        if (level >= 0) {
-          included.insert(level);
-        }
-      }
+      included = allSupportedLevels();
     }
     for (const int level : included) {
       if (excluded.count(level) == 0) {

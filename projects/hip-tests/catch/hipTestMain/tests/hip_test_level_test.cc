@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <hip_test_level.hh>
+#include <hip_test_parameters.hh>
 
 #include <set>
 #include <string>
@@ -64,6 +65,53 @@ TEST_CASE("LevelParse_BareTagAcceptedWhenAllowed") {
 
 TEST_CASE("LevelParse_BareExclusionAcceptedWhenAllowed") {
   REQUIRE(HipTestLevel::collectLevels("~level_4", true) == std::set<int>{0, 1, 2, 3});
+}
+
+TEST_CASE("LevelParse_EveryCategoryNamesItsOwnLevels") {
+  const auto categories = TestCategories::initializeTestCategories();
+  REQUIRE_FALSE(categories.empty());
+  for (const auto& [name, levels] : categories) {
+    const std::set<int> expected(levels.begin(), levels.end());
+    INFO("category: " << name);
+    REQUIRE(HipTestLevel::collectLevels("[" + name + "]", false) == expected);
+    REQUIRE(HipTestLevel::collectLevels(name, true) == expected);
+  }
+}
+
+TEST_CASE("LevelParse_QuickIsLevelZero") {
+  // The contract with TheRock CI: "ctest -L quick" and "HIP_TEST_LEVEL=quick"
+  // both mean level 0.
+  REQUIRE(HipTestLevel::collectLevels("[quick]", false) == std::set<int>{0});
+}
+
+TEST_CASE("LevelParse_CategoryExclusionRemovesItsLevels") {
+  REQUIRE(HipTestLevel::collectLevels("~[standard]", false) == std::set<int>{2, 3, 4});
+}
+
+TEST_CASE("LevelParse_CategoryCombinesWithLevel") {
+  // Patterns within one filter are AND'd, so the level must be one the
+  // category covers.
+  REQUIRE(HipTestLevel::collectLevels("[comprehensive]~[level_0]", false) == std::set<int>{1, 2});
+}
+
+TEST_CASE("LevelParse_UnknownCategoryIsIgnored") {
+  REQUIRE(HipTestLevel::collectLevels("[nightly]", false).empty());
+  REQUIRE(HipTestLevel::collectLevels("nightly", true).empty());
+}
+
+TEST_CASE("LevelResolve_CategoryFromEnvironment") {
+  const auto resolution = HipTestLevel::resolveLevel({}, "quick");
+  REQUIRE(resolution.source == LevelSource::kEnvironment);
+  REQUIRE(resolution.levels == std::set<int>{0});
+  REQUIRE(resolution.level == "level_0");
+  REQUIRE(resolution.firstUnsupportedLevel().empty());
+}
+
+TEST_CASE("LevelResolve_CategoryFromCommandLineBeatsEnvironment") {
+  const auto resolution = HipTestLevel::resolveLevel({"[comprehensive]"}, "level_4");
+  REQUIRE(resolution.source == LevelSource::kCommandLine);
+  REQUIRE(resolution.levels == std::set<int>{0, 1, 2});
+  REQUIRE(resolution.level == "level_2");
 }
 
 TEST_CASE("LevelResolve_DefaultsWhenNothingProvided") {

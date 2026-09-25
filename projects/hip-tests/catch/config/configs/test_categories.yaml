@@ -1,0 +1,109 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Test categories for TheRock CI.
+#
+# A test case joins a category when its `level:` list (see definitions.yaml)
+# intersects that category's `test_levels`, so the categories nest: a level_0
+# case carries all four tags.
+#
+# parse_config.py emits the category as a Catch2 tag, and
+# catch_discover_tests(ADD_TAGS_AS_LABELS) turns every tag into a ctest label:
+#
+#   ctest -L quick
+#
+# That selects tests but leaves parameters at the default level_2, because a
+# ctest label filter never reaches the test binary. Naming the category in
+# HIP_TEST_LEVEL selects *and* parameterizes, which is what actually makes a
+# category fast or exhaustive:
+#
+#   HIP_TEST_LEVEL=quick ctest -L quick
+#
+# Parameters come from the highest selected level, so quick runs at level_0
+# sizes and iteration counts, standard at level_1, and so on.
+test_categories:
+  quick:
+    description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
+    # Level 0 only: smallest sizes, fewest iterations. A build/CI sanity check
+    # that the component runs at all, not coverage of a component change.
+    # TODO: narrow further once per-test timings are profiled.
+    test_levels: [0]
+
+  standard:
+    description: "Core functionality - Run on every PR (target: < 30 min)"
+    # Adds level 1 on top of quick: nightly-grade sizes and iteration counts.
+    # The PR gate for component changes.
+    # TODO: refine once timing data is available.
+    test_levels: [0, 1]
+
+  comprehensive:
+    description: "Extended testing - Run nightly (target: < 2 hours)"
+    # Adds level 2, the release-validation parameter set - allocations up to
+    # 2 GB and the full block-size sweep.
+    # TODO: refine once timing data is available.
+    test_levels: [0, 1, 2]
+
+  full:
+    description: "Full testing - Run weekly (target: < 4 hours)"
+    # Everything, including the level_stress (3, 4) performance and stress
+    # cases. Parameters come from the highest selected level, level_4.
+    # TODO: refine once timing data is available.
+    test_levels: [0, 1, 2, 3, 4]
+
+# ==============================================================================
+# EXCLUSIONS
+#
+# Exclusions are not listed here. Each test case declares its own in the
+# `disabled:` field of its group config (unit/<group>.yaml, or <group>.yaml
+# for the non-unit groups):
+#
+#   Unit_hipMemsetDSync:
+#     <<: *level_default
+#     disabled: [amd_linux, linux_<arch>]
+#
+# Every accepted entry, where <arch> is the exact architecture the build
+# targets (a gfx name):
+#
+#   Platform and OS
+#     amd_linux                  AMD on Linux, any architecture
+#     amd_windows                AMD on Windows, any architecture
+#     nvidia_linux               NVIDIA on Linux, any architecture
+#     nvidia_windows             NVIDIA on Windows, any architecture
+#     amd_wsl                    AMD on WSL - see the note below
+#
+#   Architecture
+#     <arch>                     that architecture, any platform and OS
+#
+#   OS and architecture
+#     linux_<arch>               that architecture on Linux
+#     windows_<arch>             that architecture on Windows
+#
+#   Build flavour
+#     asan                       AddressSanitizer builds only
+#
+# A matching case is tagged [disabled] and registered DISABLED TRUE in ctest,
+# so `ctest -L quick` already skips it. Note that Windows builds do not carry
+# a gfx architecture, so the windows_<arch> forms never match at build time -
+# they only produce the label described next.
+#
+# Every entry additionally produces an [exclude_<entry>] tag, and therefore a
+# ctest label, whether or not it matched this build - so a runner can query or
+# filter them directly:
+#
+#   ctest -L standard -LE exclude_amd_wsl
+#
+# amd_wsl is the one reason resolved at discovery time rather than build time,
+# because the Linux package is shared between native Linux and WSL; see the
+# CatchAddTests.cmake patch in catch/CMakeLists.txt.
+# ==============================================================================
+
+# TODO: not consumed yet - wire into ctest TIMEOUT properties.
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
+  category_timeouts:
+    quick: 300          # 5 minutes
+    standard: 1800      # 30 minutes
+    comprehensive: 7200 # 2 hours
+    full: 14400         # 4 hours
