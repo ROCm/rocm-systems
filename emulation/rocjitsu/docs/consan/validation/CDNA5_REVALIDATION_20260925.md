@@ -793,3 +793,15 @@ remains pending. The full sparse-ML rerun uses this same isolated hook next.
 detections and zero oracle manifestations. Every trial has complete analysis
 and healthy before/after checks, and the paired clean run passes. SuperCollider
 sleep=15 is next in the running driver; Default's next preset is high.
+
+### torch.topk selection-state publication review
+
+`topk-pristine.asm` and the matched rocprofv3 trace identify eight 1024-thread
+blocks for BF16 gatherTopK. Thread zero initializes LDS selection state at
+4096..4107; peer waves consume that state during selection. The first
+signal/wait at .text+0x6ffad8/0x6ffb28 in ELF 9fcdb77e3e68f7f8 unconditionally
+publishes that initialization. The new fault removes only this pair, retaining
+all later selection barriers and the FP64 supporting workload. Eight trials per
+mode and six detections are declared before outcomes. All 208 runner tests pass
+(`topk-spec-tests.log`). Qualification uses a 240 s timeout to accommodate the
+already established need for a longer Default clean deadline.

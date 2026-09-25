@@ -746,6 +746,55 @@
           }
         }
       ]
+    },
+    "pytorch-torch-topk": {
+      "faults": [
+        {
+          "id": "barrier-drop-selection-state-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh gfx1250 inventory ELF 9fcdb77e3e68f7f8, BF16 sbtopk::gatherTopK, reviewed topk-pristine.asm. Matched rocprofv3 trace launches eight blocks of 1024 wave32 threads for the maintained 8x1024 BF16 input, k=32. Thread zero is selected by v_cmp_eq_u32 at VMA 0x9e5544 and initializes shared selection state at LDS 4096..4107 with ds_store_b96 at 0x9e55c8. Peer waves consume that state (ds_load_b64 at 0x9e5ab8, further loads and counter updates during selection). Drop only the first unconditional signal/wait .text+0x6ffad8/0x6ffb28 (VMA 0x9e55d8/0x9e5628), preserving every subsequent selection barrier. The nonempty maintained BF16 case necessarily reaches this initialization edge; the FP64 case remains supporting coverage. Eight trials per mode, minimum six detections, predeclared before outcomes."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:9fcdb77e3e68f7f8|kernel=_ZN2at6native6sbtopk10gatherTopKIN3c108BFloat16EjLi2ELb0EEEvNS_4cuda6detail10TensorInfoIKT_T0_EESA_SA_bSA_SA_NS7_IS8_SA_EESA_NS7_IlSA_EESA_PS8_|kind=barrier|pc=0x00000000006ffad8|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:9fcdb77e3e68f7f8|kernel=_ZN2at6native6sbtopk10gatherTopKIN3c108BFloat16EjLi2ELb0EEEvNS_4cuda6detail10TensorInfoIKT_T0_EESA_SA_bSA_SA_NS7_IS8_SA_EESA_NS7_IlSA_EESA_PS8_|event=barrier|pc=0x00000000006ffad8|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:9fcdb77e3e68f7f8|kernel=_ZN2at6native6sbtopk10gatherTopKIN3c108BFloat16EjLi2ELb0EEEvNS_4cuda6detail10TensorInfoIKT_T0_EESA_SA_bSA_SA_NS7_IS8_SA_EESA_NS7_IlSA_EESA_PS8_|event=barrier|pc=0x00000000006ffb28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
