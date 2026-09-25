@@ -267,7 +267,10 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SignalAndCounterIpc) {
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
   host.ctx.nCounters = 1;
+  DeviceBuffer<uint64_t> d_dirty(1);
+  d_dirty.zero();
   mapIpcToTwo(&host, &d_entry, &d_dst, 32, &d_signals, 2 * sizeof(uint64_t));
+  host.ctx.sdmaDirty = d_dirty.ptr;
   d_h.upload(host);
   resetQuietCount();
   resetThreadfenceCount();
@@ -541,6 +544,92 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_CoopAnyQuietsAllDirtyPeers) {
   syncAndCheck();
   EXPECT_EQ(d_dirty.download(), 0ULL);
   EXPECT_EQ(readQuietCount(), 2ULL);
+}
+
+__global__ void kernelMarkSdmaDirty(TemplateHarness* h, uint64_t* dirty, uint64_t* epoch, int peer) {
+  if (threadIdx.x != 0) return;
+  h->ctx.sdmaDirty = dirty;
+  h->ctx.sdmaEpoch = epoch;
+  nccl::gin::anvil::detail::markSdmaDirty(&h->ctx, peer, h->ctx.numChannels, /*effCh=*/0);
+}
+
+__global__ void kernelFlushWithEpoch(TemplateHarness* h, uint64_t* dirty, uint64_t* epoch) {
+  h->ctx.sdmaDirty = dirty;
+  h->ctx.sdmaEpoch = epoch;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
+                                                         cuda::memory_order_seq_cst, nullptr);
+}
+
+static void setBumpEpochOnQuiet(uint64_t* epoch) {
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubBumpEpochOnQuiet), &epoch, sizeof(epoch)));
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, MarkSdmaDirty_BumpsEpoch) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  DeviceBuffer<uint64_t> d_epoch(1);
+  d_dirty.zero();
+  d_epoch.zero();
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  host.ctx.sdmaEpoch = d_epoch.ptr;
+  d_h.upload(host);
+  kernelMarkSdmaDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr, d_epoch.ptr, /*peer=*/0);
+  syncAndCheck();
+  EXPECT_EQ(d_epoch.download(), 1ULL);
+  EXPECT_EQ(d_dirty.download(), 1ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Flush_StableEpochClearsDirty) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  DeviceBuffer<uint64_t> d_epoch(1);
+  uint64_t one = 1;
+  uint64_t five = 5;
+  d_dirty.copyFrom(&one, 1);
+  d_epoch.copyFrom(&five, 1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  kernelFlushWithEpoch<<<1, 1>>>(d_h.ptr, d_dirty.ptr, d_epoch.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_dirty.download(), 0ULL);
+  EXPECT_EQ(d_epoch.download(), 5ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Flush_EpochBumpDuringQuietSkipsClear) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  DeviceBuffer<uint64_t> d_epoch(1);
+  uint64_t one = 1;
+  d_dirty.copyFrom(&one, 1);
+  d_epoch.zero();
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  setBumpEpochOnQuiet(d_epoch.ptr);
+  kernelFlushWithEpoch<<<1, 1>>>(d_h.ptr, d_dirty.ptr, d_epoch.ptr);
+  syncAndCheck();
+  setBumpEpochOnQuiet(nullptr);
+  EXPECT_EQ(d_dirty.download(), 1ULL);
+  EXPECT_EQ(d_epoch.download(), 1ULL);
 }
 
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;

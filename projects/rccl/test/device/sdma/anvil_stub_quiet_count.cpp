@@ -12,4 +12,5 @@
 
 namespace sdma_anvil {
 __device__ unsigned long long g_sdmaStubQuietCount = 0;
+__device__ uint64_t* g_sdmaStubBumpEpochOnQuiet = nullptr;
 }
