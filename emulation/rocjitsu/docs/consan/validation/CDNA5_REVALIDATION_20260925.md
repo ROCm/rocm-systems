@@ -418,3 +418,10 @@ with eight trials per mode and minimum six detections predeclared.
 
 Tensile HGEMM SuperCollider also finishes its full clean row successfully;
 both mode cells now await fault qualification.
+
+D128 pressure qualifies at **high, 8/8** with matching accepted clean and
+complete, healthy admitted/reached trials (`pressure-lifetime-high-*`).
+Default was 1/8, making high the lowest passing preset at or above default.
+Stream-K finishes 0/8 at Default and SuperCollider sleep=15, with matching
+accepted clean, complete analysis and healthy admitted/reached trials
+(`streamk-lifetime-{default,sleep15}-*`). High Default calibration follows.
