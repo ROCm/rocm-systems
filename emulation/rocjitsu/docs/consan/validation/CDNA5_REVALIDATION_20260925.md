@@ -1859,3 +1859,22 @@ completes eight admitted/reached trials with zero detections;
 emulator checks. All numeric oracles pass independently in both campaigns.
 The Default cell is green at `high`, the lowest qualifying preset tested at or
 above default. These E2E checks test the reviewed spec committed in 1fc167feec1.
+
+### Mixed TDM clean qualification; reviewed MXF8 TDM replay
+
+`tensor-memory-mixed-1200-clean` is accepted across all three shards with complete
+coverage (822/822 accesses, 204/204 barriers, 24/24 atomic/fence sites).
+The Default cell moves to yellow pending reviewed faults.
+
+The MXF8 TDM publication fault binds retained ELF `4f83a0ddd1e45293`, MT32x32x256.
+Pristine `.text` starts at 0xae00; tensor loads at 0xc498/0xc4a4 precede the
+retained tensor wait at 0xc520. Dropping both pairs at .text 0x1724/0x1728 and
+0x173c/0x1740 exposes wave 2's tensor write and wave 1 lane zero's read at LDS
+4352. The exact 127x127x1024 shard runs all six solutions, including this kernel.
+`mxf8-tdm-exact-replay-check` exports then verifies immutable client inputs;
+both runs pass all six numeric rows. Rebuilding changes random symbol labels
+and the whole-ELF identity from the initial review's `68c0a4c3e6b6cc82`;
+all disassembled instruction addresses and encodings match. The spec is rebound
+to exact identities verified in the retained export inventory before any trials.
+Runner tests: 209 passed (`mxf8-tdm-spec-tests.log`); identity-update rerun is
+recorded in `mxf8-tdm-rebound-spec-tests.log`.
