@@ -2634,6 +2634,169 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   EXPECT_EQ(cu->arch(), arch);
 }
 
+TEST_P(CuFactoryTest, ActivityQueriesTrackOverlappingPauseReasonsAndSlotReuse) {
+  amdgpu::GpuMemory memory("activity_memory");
+  amdgpu::L2Cache l2("activity_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 2;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("activity_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  auto launch = [&] { return cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf); };
+  auto *first = launch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  first->set_debug_halted(true);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  auto *second = launch();
+  ASSERT_NE(second, nullptr);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+
+  // Clearing one pause reason cannot make a wave runnable while another holds
+  // it. Repeated assignments must not change the aggregate a second time.
+  for (uint32_t mask = 0; mask < 8; ++mask) {
+    SCOPED_TRACE(mask);
+    for (unsigned repeat = 0; repeat < 2; ++repeat) {
+      second->set_debug_halted(mask & 1);
+      second->set_debug_suspended(mask & 2);
+      second->set_runtime_suspended(mask & 4);
+      EXPECT_TRUE(cu->has_active_wfs());
+      EXPECT_EQ(cu->has_runnable_wfs(), mask == 0);
+    }
+  }
+  second->set_debug_halted(false);
+  second->set_debug_suspended(false);
+  second->set_runtime_suspended(false);
+  const auto saved = second->debug_stop_state();
+  second->debug_trap(1);
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  second->restore_debug_stop_state(saved);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->set_state(amdgpu::WfState::VM_RETRY);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->set_state(amdgpu::WfState::WAITCNT);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->halt();
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  first->halt();
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  first = launch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  first->halt();
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+}
+
+TEST_P(CuFactoryTest, WorkgroupAdmissionTracksResidentSlotsAcrossFailureAndReuse) {
+  amdgpu::GpuMemory memory("admission_memory");
+  amdgpu::L2Cache l2("admission_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 4;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("admission_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  const auto capacity = [&](uint32_t free) {
+    for (uint32_t count = 0; count <= config.num_wf_slots + 1; ++count) {
+      EXPECT_EQ(cu->can_accept_workgroup(count), count <= free) << count;
+    }
+  };
+  capacity(4);
+  // Rejected creation, SGPR allocation, and VGPR allocation leave an idle slot.
+  EXPECT_EQ(cu->dispatch_wf_at(1, 0, 0, 106, 32, 1), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 0, 0, 0, 32), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 0, 0, 106, 0), nullptr);
+  capacity(4);
+  // A restored nonzero slot can coexist with untouched holes.
+  auto *last = cu->dispatch_wf_at(3, 7, 0, 106, 32);
+  ASSERT_NE(last, nullptr);
+  last->set_dispatch_id(11);
+  capacity(3);
+  for (const auto state : {amdgpu::WfState::WAITCNT, amdgpu::WfState::VM_RETRY,
+                           amdgpu::WfState::ENDING, amdgpu::WfState::RUNNING}) {
+    last->set_state(state);
+    capacity(3);
+  }
+  last->set_debug_halted(true);
+  last->set_debug_suspended(true);
+  last->set_runtime_suspended(true);
+  capacity(3);
+  auto *first = cu->dispatch_wf(8, 0, 106, 32);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  first->set_dispatch_id(12);
+  capacity(2);
+  cu->abort_workgroup(11, 7);
+  capacity(3);
+  cu->free_wavefront_resources(*last);
+  capacity(3);
+  cu->abort_dispatch(12);
+  capacity(4);
+  for (uint32_t slot = 0; slot < config.num_wf_slots; ++slot) {
+    auto *wave = cu->dispatch_wf(20 + slot, 0, 106, 32);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->wf_id(), slot);
+    capacity(config.num_wf_slots - slot - 1);
+  }
+  EXPECT_EQ(cu->dispatch_wf(30, 0, 106, 32), nullptr);
+  for (uint32_t slot = 0; slot < config.num_wf_slots; ++slot) {
+    cu->wf(slot)->halt();
+    capacity(slot + 1);
+  }
+  EXPECT_FALSE(cu->can_accept_workgroup(1, 64 * 1024 + 1));
+  EXPECT_TRUE(cu->can_accept_workgroup(4, 64 * 1024));
+}
+
+TEST_P(CuFactoryTest, WorkgroupAdmissionRetainsScratchPrefixAndScoreboardBounds) {
+  amdgpu::GpuMemory memory("scratch_admission_memory");
+  amdgpu::L2Cache l2("scratch_admission_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 4;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("scratch_admission_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  cu->set_scratch_slots_per_cu(1);
+  EXPECT_TRUE(cu->can_accept_workgroup(4));
+  EXPECT_TRUE(cu->can_accept_workgroup(1, 0, 1));
+  EXPECT_FALSE(cu->can_accept_workgroup(2, 0, 1));
+  auto *first = cu->dispatch_wf(0, 0, 106, 32);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  EXPECT_TRUE(cu->can_accept_workgroup(3));
+  EXPECT_FALSE(cu->can_accept_workgroup(1, 0, 1));
+  first->halt();
+  // Even UINT32_MAX is an exclusive physical scoreboard bound.
+  cu->set_shader_engine_location(0, UINT32_MAX - 1);
+  EXPECT_TRUE(cu->can_accept_workgroup(1));
+  EXPECT_FALSE(cu->can_accept_workgroup(2));
+  first = cu->dispatch_wf(1, 0, 106, 32);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  EXPECT_FALSE(cu->can_accept_workgroup(1));
+  EXPECT_EQ(cu->dispatch_wf(2, 0, 106, 32), nullptr);
+  first->halt();
+  cu->set_shader_engine_location(0, UINT32_MAX);
+  EXPECT_FALSE(cu->can_accept_workgroup(1));
+  cu->set_shader_engine_location(0, 0);
+  EXPECT_TRUE(cu->can_accept_workgroup(4));
+}
+
 TEST_P(CuFactoryTest, LdsContentsSurviveWorkgroupAllocationReuse) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");

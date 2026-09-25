@@ -23,6 +23,7 @@ RJ_DIAGNOSTIC_POP
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -427,7 +428,7 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
         pooled_due_ticks_[cu] = tick;
       }
     }
-    const simdojo::Tick next = next_pooled_due_tick(now);
+    const simdojo::Tick next = next_pooled_due_tick();
     if (next != simdojo::TICK_MAX)
       arm_dispatch_continuation(next);
     return;
@@ -824,6 +825,11 @@ void CommandProcessor::startup() {
       arm_stall_recheck(engine()->context(partition_id()).current_tick());
   });
   completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
+  // Waves admitted before engine attachment could not notify the pool driver.
+  // Seed those CUs once; admission and resume callbacks maintain the set later.
+  if (dispatch_threads_ > 1)
+    for (auto *cu : cus_)
+      on_cu_pool_ready(cu);
 }
 
 void CommandProcessor::shutdown() {
@@ -2264,10 +2270,20 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     //     maybe_reset_lds_alloc() cannot reach it; release_wgp_workgroup() is the
     //     matching release (the same call notify_wg_complete uses on the normal path).
     // Without the WGP release a failed WGP dispatch would permanently pin that WGP.
-    std::vector<Wavefront *> wg_wavefronts;
-    wg_wavefronts.reserve(entry.wfs_per_workgroup);
+    // Most workgroups need at most 32 waves. Keep their temporary reservation
+    // list local, with dynamic storage for larger internal workgroups.
+    std::array<Wavefront *, 32> local_wavefronts;
+    std::vector<Wavefront *> large_wavefronts;
+    std::span<Wavefront *> wg_wavefronts;
+    if (entry.wfs_per_workgroup <= local_wavefronts.size()) {
+      wg_wavefronts = std::span(local_wavefronts).first(entry.wfs_per_workgroup);
+    } else {
+      large_wavefronts.resize(entry.wfs_per_workgroup);
+      wg_wavefronts = large_wavefronts;
+    }
+    uint32_t reserved_wavefronts = 0;
     const auto free_reserved = [&]() {
-      for (auto *claimed : wg_wavefronts)
+      for (auto *claimed : wg_wavefronts.first(reserved_wavefronts))
         cu->free_wavefront_resources(*claimed);
       if (entry.wgp_mode) {
         for (auto *spi : spis_)
@@ -2285,7 +2301,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         free_reserved();
         return VmAccessOutcome::Malformed;
       }
-      wg_wavefronts.push_back(wf);
+      wg_wavefronts[reserved_wavefronts++] = wf;
     }
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = wg_wavefronts[w];
@@ -2321,9 +2337,9 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
-    plugin_group_->onAmdgpuWorkgroupDispatched(
-        entry.dispatch_id, global_wg_id, cu->vgpr_allocation_block_size(),
-        cu->sgpr_allocation_block_size(), std::span<Wavefront *>(wg_wavefronts));
+    plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
+                                               cu->vgpr_allocation_block_size(),
+                                               cu->sgpr_allocation_block_size(), wg_wavefronts);
     for (auto *wf : wg_wavefronts)
       plugin_group_->onAmdgpuWavefrontDispatched(*wf);
 
@@ -2748,28 +2764,15 @@ void CommandProcessor::process_queues() {
   }
 }
 
-bool CommandProcessor::has_runnable_cus() const {
-  for (auto *cu : cus_) {
-    if (cu->has_runnable_wfs())
-      return true;
-  }
-  return false;
+void CommandProcessor::prune_pooled_due_ticks() {
+  // Admission and resume notify on_cu_pool_ready(), which inserts runnable
+  // CUs. Only previously scheduled CUs can need pruning after a pause or
+  // cancellation; idle CUs need no wave-state lock or slot scan.
+  std::erase_if(pooled_due_ticks_, [](const auto &due) { return !due.first->has_runnable_wfs(); });
 }
 
-void CommandProcessor::refresh_pooled_due_ticks(simdojo::Tick now) {
-  for (auto it = pooled_due_ticks_.begin(); it != pooled_due_ticks_.end();) {
-    if (!it->first->has_runnable_wfs())
-      it = pooled_due_ticks_.erase(it);
-    else
-      ++it;
-  }
-  for (auto *cu : cus_)
-    if (cu->has_runnable_wfs())
-      pooled_due_ticks_.try_emplace(cu, now + 1);
-}
-
-simdojo::Tick CommandProcessor::next_pooled_due_tick(simdojo::Tick now) {
-  refresh_pooled_due_ticks(now);
+simdojo::Tick CommandProcessor::next_pooled_due_tick() {
+  prune_pooled_due_ticks();
   simdojo::Tick next = simdojo::TICK_MAX;
   for (const auto &[_, tick] : pooled_due_ticks_)
     next = std::min(next, tick);
@@ -2777,21 +2780,23 @@ simdojo::Tick CommandProcessor::next_pooled_due_tick(simdojo::Tick now) {
 }
 
 FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now) {
-  refresh_pooled_due_ticks(now);
+  prune_pooled_due_ticks();
   active_cu_scratch_.clear();
-  if (!spis_.empty()) {
-    for (auto *spi : spis_)
-      spi->append_active_cus(active_cu_scratch_);
-  } else {
-    for (auto *cu : cus_) {
-      if (cu->has_runnable_wfs())
+  // Pruning already checked each CU's runnable-wave count. Keep SPI order
+  // while selecting due work without repeating those checks.
+  const auto append_due = [&](const auto &cus) {
+    for (auto *cu : cus) {
+      const auto due = pooled_due_ticks_.find(cu);
+      if (due != pooled_due_ticks_.end() && due->second <= now)
         active_cu_scratch_.push_back(cu);
     }
+  };
+  if (!spis_.empty()) {
+    for (auto *spi : spis_)
+      append_due(spi->compute_units());
+  } else {
+    append_due(cus_);
   }
-  std::erase_if(active_cu_scratch_, [&](ComputeUnitCore *cu) {
-    auto due = pooled_due_ticks_.find(cu);
-    return !cu->has_runnable_wfs() || due == pooled_due_ticks_.end() || due->second > now;
-  });
 
   if (active_cu_scratch_.empty())
     return {};
@@ -4682,7 +4687,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   bool completion_drain_failed = false;
   auto run_dispatch_workers = [&]() {
     if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || dispatch_threads_ <= 1 ||
-        !has_runnable_cus())
+        pooled_due_ticks_.empty())
       return FunctionalQuantumResult{};
 
     lock.unlock();
@@ -4867,7 +4872,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   }
 
   if (dispatch_threads_ > 1) {
-    const simdojo::Tick next = next_pooled_due_tick(now);
+    const simdojo::Tick next = next_pooled_due_tick();
     if (next != simdojo::TICK_MAX)
       arm_dispatch_continuation(next);
     else
