@@ -243,9 +243,12 @@ def _validate_and_clamp_window(
 
     if adjustments:
         print(
-            f"# WARNING: {'; '.join(adjustments)}; using time window "
+            "\n###\n"
+            f"### WARNING: {'; '.join(adjustments)};\n"
+            "### Using time window "
             f"[{_format_timestamp(clamped_start)}, "
-            f"{_format_timestamp(clamped_end)}] nsec instead",
+            f"{_format_timestamp(clamped_end)}] nsec instead\n"
+            "###\n",
             file=sys.stderr,
         )
 
@@ -399,8 +402,11 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
 
     if upd_delta is None:
         print(
-            f"# WARNING: time window [{_format_timestamp(start_time)}, "
-            f"{_format_timestamp(end_time)}] nsec contains no timed events",
+            "\n###\n"
+            f"### WARNING: time window [{_format_timestamp(start_time)}, "
+            f"{_format_timestamp(end_time)}] nsec contains no timed events\n"
+            "### Try adjusting your start and end times to include more events\n"
+            "###\n",
             file=sys.stderr,
         )
     elif orig_delta is not None and orig_delta > 0:
