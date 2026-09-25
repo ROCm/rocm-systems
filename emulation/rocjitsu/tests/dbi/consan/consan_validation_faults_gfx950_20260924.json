@@ -1865,10 +1865,10 @@
           "family": "atomic-weaken-order",
           "reach_witness": {
             "kind": "reviewed-unconditional-final-isa",
-            "evidence": "Reviewed producer release global_atomic_or at .text+0x198ac, preceded by buffer_wbl2 sc1 at0x198a0 and release wait0x198a8. This is the nonreturning producer publication in source029 line194; the final acq_rel OR at0x8a24 remains unchanged. Active producer leaders publish nonempty partials before this edge. Weaken release ordering, preserving address, OR bits and later final acquire. Native rocprofv3 discovery confirms dispatch. Require exact-one grouped installation, bounded completion, and pre/post health. Retain this selector across preset and delay searches."
+            "evidence": "Fresh native rocprofv3 allowlist and pristine ISA reviewed after the hip-moi cache repair. The same producer release OR is now .text+0x1988c (ELF VA0x1bd8c), occurrence208, preceded by buffer_wbl2 sc1 at .text+0x19880 and combined vmcnt(0)/lgkmcnt(0) at .text+0x19888. Final acq_rel OR .text+0x8a24 remains unchanged. The source029 producer leaders publish nonempty MFMA partials before this edge; final acquire and all numerical and hip-moi consistency checks are preserved. Remove the complete producer release boundary, retain address and OR bits, require exact-one grouped installation, bounded completion, and healthy pre/post probes. Freeze this selector across ascending preset trials before observing any faults."
           },
           "environment": {
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:54bd1535dd7c080c|kernel=_ZN12_GLOBAL__N_134mfma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv4_DF16_S7_PiPf|kind=atomic|pc=0x00000000000198ac|mnemonic=global_atomic_or|occurrence=208",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:304fa2ce12cd1d95|kernel=_ZN12_GLOBAL__N_134mfma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv4_DF16_S7_PiPf|kind=atomic|pc=0x000000000001988c|mnemonic=global_atomic_or|occurrence=208",
             "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER": "1"
           },
           "profiles": {
@@ -1878,28 +1878,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 },
                 {
-                  "RJ_CONSAN_PRESET": "high"
+                  "RJ_CONSAN_PRESET": "higher"
                 }
               ]
             },

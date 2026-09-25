@@ -81,7 +81,12 @@ three-kernel allowlist, and all three `max` clean controls pass with the repaire
 hip-moi library (`tree-fixed/clean-{0,1,2}/`). The rebuilt producer release OR
 is `.text+0x1988c`, occurrence 208, in `fnv1a64:304fa2ce12cd1d95`; the final
 acquire/release OR stays at `.text+0x8a24`. Fresh ISA review and prospective
-qualification are retained in `tree-fixed/`; ascending preset trials are running. No hip-moi oracle, workload synchronization, or numerical check has
+qualification review are retained in `tree-fixed/`. Fresh `default`, `high`, and
+`higher` batches have passing matching clean controls and detect 0/8, 1/8, and
+8/8 respectively. **`higher` is the lowest passing preset and tree is green.**
+All trials are admitted/reached, coverage is complete, and pre/post GPU probes
+are healthy. The three matrices are retained in
+`tree-atomic-or/{default,high,higher}-cache-repair-v1/`. No hip-moi oracle, workload synchronization, or numerical check has
 been weakened. The repair is committed locally in hip-moi as `346343f`; its
 full gfx950 CTest suite passes 184/184 (`tree-fixed/ctest-native-wave-r1.xml`).
 Generic two-subgroup atomic tests were changed to use native wave sizes because
@@ -146,5 +151,5 @@ recheck is `clean-v4-mode-correct-allowlist/`, which uses the current fixture's 
 native trace-derived list and passes.
 
 All physical work uses `/tmp/rocjitsu-consan-destructive-gpu.lock`, the venv TheRock
-ROCm stack, and the unchanged full native rocprofv3 allowlists. Source fixtures and
+ROCm stack, and full native rocprofv3 allowlists (regenerated for the repaired tree). Source fixtures and
 binaries used by the external validation rows are unchanged.
