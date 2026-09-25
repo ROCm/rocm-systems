@@ -1631,6 +1631,14 @@ void hip_capture_init() {
   hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
 
   std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+
+  // Deliberately not gated on AMD_LOG_LEVEL: whoever runs the process must be
+  // able to see that it is being recorded. The path must match the pid-<pid>
+  // directory writer::open() creates.
+  fprintf(stderr,
+          "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
+          "arguments and code objects, to %s/pid-%d\n",
+          hip_capture_output_dir(), amd::Os::getProcessId());
 }
 
 void hip_capture_shutdown() {

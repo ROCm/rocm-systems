@@ -203,6 +203,62 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set, at the
+ *     default AMD_LOG_LEVEL, with stdout and stderr captured. The capture layer
+ *     must print its start notice exactly once, naming the per-process archive
+ *     directory.
+ *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_notice"};
+  const std::string kNotice =
+      "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
+      "arguments and code objects, to ";
+  auto count_notices = [&](const std::string& out) {
+    size_t n = 0;
+    for (size_t at = out.find(kNotice); at != std::string::npos;
+         at = out.find(kNotice, at + kNotice.size()))
+      ++n;
+    return n;
+  };
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    REQUIRE(count_notices(out) == 1);
+
+    const size_t begin = out.find(kNotice) + kNotice.size();
+    std::string named = out.substr(begin, out.find('\n', begin) - begin);
+    if (!named.empty() && named.back() == '\r') named.pop_back();
+    // The writer joins the pid-<pid> component with '/' on every platform.
+    CHECK(fs::path(named).make_preferred().string() ==
+          hrr_single_process_archive(cap.path).string());
+  }
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
+    // still enables capture. Unset the variable so an inherited value cannot arm it.
+    proc.unsetEnv("HIP_HRR_CAPTURE_OUTPUT");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Subprocess output without capture:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns HrrTest Unit_HRR_AllApis_Direct as a subprocess with
  *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Exercises ~55 distinct
  *     HIP APIs covering device queries, streams, events, malloc variants
