@@ -27,6 +27,9 @@
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -37,9 +40,12 @@
 #include <iomanip>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <regex>
+#include <signal.h>
 #include <stdexcept>
 #include <string>
+#include <sys/poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -78,6 +84,192 @@ get_default_max_library_functions()
     // default to 20000
     return rocprofsys::get_env<size_t>(
         rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
+}
+
+constexpr int k_invalid_fd = -1;
+
+struct pipe_fds
+{
+    int read_fd  = k_invalid_fd;
+    int write_fd = k_invalid_fd;
+};
+
+[[nodiscard]] std::optional<pipe_fds>
+create_pipe()
+{
+    auto fds = std::array<int, 2>{ k_invalid_fd, k_invalid_fd };
+    if(::pipe(fds.data()) != 0)
+    {
+        return std::nullopt;
+    }
+
+    return pipe_fds{ .read_fd = fds.at(0), .write_fd = fds.at(1) };
+}
+
+/// The current environment plus LD_TRACE_LOADED_OBJECTS, NULL-terminated.
+/// The result points into environ - only valid while the environment is left untouched.
+[[nodiscard]] std::vector<char*>
+create_dependency_listing_envp()
+{
+    auto envp = std::vector<char*>{};
+
+    // Copy existing environment until nullptr terminator is reached
+    for(char* const* var = ::environ; var != nullptr && *var != nullptr; ++var)
+    {
+        envp.emplace_back(*var);
+    }
+    // Add the loader's listing env var and nullptr terminator
+    envp.emplace_back(const_cast<char*>("LD_TRACE_LOADED_OBJECTS=1"));
+    envp.emplace_back(nullptr);
+
+    return envp;
+}
+
+/// Redirect stdout to the pipe's write end, then become exe_path with the given
+/// environment. Never returns: on success the process image is replaced, on failure exits
+/// with 127. This function is used after fork, and between fork and exec the child may
+/// not allocate or modify the environment, so everything here must be async-signal-safe.
+[[noreturn]] void
+exec_with_stdout_to_pipe(const std::string& exe_path, pipe_fds fds,
+                         const std::vector<char*>& envp)
+{
+    ::close(fds.read_fd);
+    ::dup2(fds.write_fd, STDOUT_FILENO);
+    ::close(fds.write_fd);
+
+    auto argv = std::array<char*, 2>{ const_cast<char*>(exe_path.c_str()), nullptr };
+    ::execve(exe_path.c_str(), argv.data(), envp.data());
+
+    // Return from execve means it failed: use "command could not be executed" status
+    constexpr int k_exec_failure_status = 127;
+    ::_exit(k_exec_failure_status);
+}
+
+/// Read the pipe until EOF and return everything received. Closes both ends and
+/// invalidates fds. Returns std::nullopt on error or if EOF is not reached before
+/// timeout.
+[[nodiscard]] std::optional<std::string>
+read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
+{
+    constexpr size_t k_read_buffer_size = 4096;
+
+    // Pipe's write end should be closed to get EOF signal from read end
+    ::close(fds.write_fd);
+    fds.write_fd = k_invalid_fd;
+
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+
+    auto out = std::string{};
+    auto buf = std::array<char, k_read_buffer_size>{};
+    auto eof = false;
+    while(!eof)
+    {
+        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if(remaining.count() <= 0)
+        {
+            break;
+        }
+
+        // Wait until the pipe is readable (data or EOF) or the deadline passes, so read()
+        // below never blocks
+        auto      pfd   = pollfd{ .fd = fds.read_fd, .events = POLLIN, .revents = 0 };
+        const int ready = ::poll(&pfd, 1, static_cast<int>(remaining.count()));
+        if(ready < 0 && errno == EINTR)
+        {
+            continue;  // interrupted: retry with the time left
+        }
+        if(ready <= 0)
+        {
+            break;  // timed out or poll error
+        }
+
+        // poll said readable, so read() returns at once: >0 data, 0 EOF, <0 error
+        const auto bytes_read = ::read(fds.read_fd, buf.data(), buf.size());
+        if(bytes_read < 0)
+        {
+            break;
+        }
+        if(bytes_read == 0)
+        {
+            eof = true;
+        }
+        else
+        {
+            out.append(buf.data(), static_cast<std::size_t>(bytes_read));
+        }
+    }
+
+    ::close(fds.read_fd);
+    fds.read_fd = k_invalid_fd;
+
+    // Anything but EOF (timeout, error) means the output can't be trusted
+    return eof ? std::optional{ std::move(out) } : std::nullopt;
+}
+
+/// Get the shared libraries exe_path actually loads, as absolute paths. exe_path must be
+/// dynamically linked: the listing works by running it with LD_TRACE_LOADED_OBJECTS=1,
+/// which makes the dynamic loader print every resolved dependency and exit before main().
+/// A static executable has no loader to intercept it, so it would run for real instead.
+[[nodiscard]] std::optional<std::vector<std::string>>
+read_dynamic_dependencies(const std::string& exe_path, std::chrono::milliseconds timeout)
+{
+    auto fds = create_pipe();
+    if(!fds)
+    {
+        return std::nullopt;
+    }
+
+    // Build environment for listing deps. LD_LIBRARY_PATH and LD_PRELOAD are copied from
+    // current env, so the later-listed lib paths will match what a real run would load.
+    // Built before forking: between fork and exec the child must not allocate or modify
+    // the environment.
+    const auto listing_envp = create_dependency_listing_envp();
+
+    const auto pid = ::fork();
+    if(pid < 0)
+    {
+        ::close(fds->read_fd);
+        ::close(fds->write_fd);
+        return std::nullopt;
+    }
+
+    if(pid == 0)  // we are in the child
+    {
+        exec_with_stdout_to_pipe(exe_path, *fds, listing_envp);
+    }
+
+    // If we are here - we are in the parent
+
+    const auto loader_output = read_pipe_until_eof(*fds, timeout);
+    if(!loader_output)
+    {
+        // Timed out: the child is still running. Kill it so the waitpid below returns.
+        ::kill(pid, SIGKILL);
+    }
+
+    // Reap the child
+    auto status = 0;
+    while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+    {
+        // Retry if interrupted by a signal
+    }
+    // Included <sys/wait.h> is correct for W* macros, but <stdlib.h> is included
+    // via "rocprof-sys-instrument.hpp" before <sys/wait.h>, so glibc defines the W*
+    // macros there, <sys/wait.h> skips them, and clang-tidy reports no direct include.
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    if(!loader_output || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    {
+        return std::nullopt;
+    }
+
+    // Loader output lines we need:
+    //   <soname> => <abs path> (<addr>)
+    //   <abs path> (<addr>)
+    // Parse and keep only abs paths.
+    auto out = rocprofsys::delimit(*loader_output, " \n\t=>");
+    std::erase_if(out, [](const std::string& item) { return !item.starts_with('/'); });
+    return out;
 }
 }  // namespace
 
@@ -2516,26 +2708,34 @@ main(int argc, char** argv)
             }
         }
 
-        if(main_func)
+        // read_dynamic_dependencies should not be called on static executables
+        if(main_func && !is_static_exe)
         {
-            verbprintf(0, "Getting linked libraries for %s...\n", cmdv0.c_str());
-            verbprintf(0, "Consider instrumenting the relevant libraries...\n");
-            verbprintf(0, "\n");
+            // no newline: will append result later
+            verbprintf(0, "Getting linked libraries for %s... ", cmdv0.c_str());
 
-            auto cmdv_envp = std::array<char*, 2>{};
-            cmdv_envp.fill(nullptr);
-            cmdv_envp.at(0) = strdup("LD_TRACE_LOADED_OBJECTS=1");
-            auto ldd        = tim::popen::popen(cmdv0.c_str(), nullptr, cmdv_envp.data());
-            auto linked_libs = tim::popen::read_ldd_fork(ldd);
-            auto perr        = tim::popen::pclose(ldd);
-            for(auto& itr : cmdv_envp)
-                ::free(itr);
-
-            if(perr != 0) perror("Error in rocprofsys_fork");
-
-            for(const auto& itr : linked_libs)
-                verbprintf(0, "\t%s\n", itr.c_str());
-
+            constexpr auto k_dep_read_timeout = std::chrono::milliseconds{ 3000 };
+            const auto linked_libs = read_dynamic_dependencies(cmdv0, k_dep_read_timeout);
+            if(!linked_libs)
+            {
+                verbprintf_bare(0, "Error\n");
+            }
+            else
+            {
+                if(linked_libs->empty())
+                {
+                    verbprintf_bare(0, "Not found\n");
+                }
+                else
+                {
+                    verbprintf_bare(0, "Done\n");
+                    verbprintf(0, "Consider instrumenting the relevant libraries:\n");
+                    for(const auto& lib_path : *linked_libs)
+                    {
+                        verbprintf(0, "\t%s\n", lib_path.c_str());
+                    }
+                }
+            }
             verbprintf(0, "\n");
         }
     }

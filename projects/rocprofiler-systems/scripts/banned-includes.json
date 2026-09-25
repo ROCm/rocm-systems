@@ -38,5 +38,9 @@
     {
         "header": "timemory/utility/macros.hpp",
         "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
+    },
+    {
+        "header": "timemory/utility/popen.hpp",
+        "hint": "fork+execv directly; see bin/common to_c_argv()"
     }
 ]
