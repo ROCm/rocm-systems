@@ -717,3 +717,11 @@ finishes eight admitted and reached trials with zero detections and zero oracle
 manifestations. Each result has complete analysis and healthy before/after
 checks. Default clean passed. The next `high` preset is now running as a fresh
 clean/fault bundle in `qwen-cap-high-*`, retaining the same reviewed fault site.
+
+### TP2 family Default fault result
+
+`tp2-cap-default-fault/tp2-family/faults/barrier-drop-attention-max-publication/summary.json`
+completes eight admitted/reached prefill trials: zero detections and zero oracle
+manifestations. All eight have complete analysis and healthy before/after checks.
+All three family clean workloads passed previously. The next preset is `high`;
+decode/combined remain supporting clean runs, not independent injected faults.
