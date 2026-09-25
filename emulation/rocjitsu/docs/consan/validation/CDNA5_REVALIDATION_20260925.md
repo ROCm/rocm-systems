@@ -538,3 +538,12 @@ Evidence: `tp2-pristine.asm` and the fresh family inventory. Decode/combined
 are supporting clean-oracle rows with no standalone admitted fault families;
 the family publication fault runs prefill. Their empty inventories do not
 establish absence of LDS accesses.
+
+### Sparse ML SuperCollider transform failure
+
+The bounded SuperCollider rerun terminates in about 27 seconds for each shard:
+ConSan returns `outcome=invalid errors=1`, then rejects loading with strict
+exit 92 (`transform-error`). No numerical result is produced, so this is a red
+instrumentation failure, distinct from Default's 900 s timeout. The first
+rejected input image is 2,260,856 bytes. Evidence: the three clean run logs and
+`bounded-clean-tensile/tensile-spmm-f8-ml/supercollider/.../result.json`.
