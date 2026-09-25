@@ -1456,3 +1456,20 @@ qualifying the whole row at high, `f8gemm-full-high-clean` runs all nine
 instrumented shards at high with 1800 s inner / 2100 s outer deadlines.
 The table records the successful fault result while keeping the full clean
 gate explicit; no green qualification is claimed prematurely.
+
+### Recovery after interrupted campaign controllers
+
+Process inspection confirmed that the Qwen, TP2, and exact HGEMM controllers
+were no longer running after the interrupted turn. Some Tensile children
+survived; their artifacts are retained and they must finish before relaunching
+the corresponding clean campaign. Aggregate memory remained about 20 GiB,
+with all cgroup memory event counters zero.
+
+Qwen's high clean run passed with the 1200 s allowance. Four completed fault
+trials detected the reviewed race with healthy checks; the remaining trials
+are resumed, so qualification remains yellow. The campaign's original spec
+snapshot is used after checking that its Qwen entry exactly matches the current
+spec; unrelated newly added Tensile entries changed the whole-spec hash.
+HGEMM's exact Default fault campaign is similarly resumed using its matching
+snapshot. TP2 resumes only its unfinished combined clean run before faults;
+its prefill/decode clean results and combined baseline are retained.
