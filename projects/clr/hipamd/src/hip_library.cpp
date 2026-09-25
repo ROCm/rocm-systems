@@ -243,6 +243,18 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
   HIP_RETURN(l->GetManaged(std::string{name}, dptr, bytes));
 }
 
+hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library, const char* symbol) {
+  HIP_INIT_API(hipLibraryGetUnifiedFunction, fptr, library, symbol);
+  if (fptr == nullptr || symbol == nullptr || strlen(symbol) == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (library == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  // No AMD device reports unifiedFunctionPointers, so no symbol can name a unified function.
+  HIP_RETURN(hipErrorNotFound);
+}
+
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
   HIP_INIT_API(hipLibraryEnumerateKernels, kernels, numKernels, library);

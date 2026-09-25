@@ -1818,6 +1818,18 @@ contract:
   Contract_Library_HipKernelGetLibrary_Default_RoundTrips:
     <<: *level_0
     tags: [library, P0]
+  Contract_Library_HipLibraryGetUnifiedFunction_NullFunctionOut_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetUnifiedFunction_NullLibrary_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetUnifiedFunction_KernelSymbol_IsNotUnified:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetUnifiedFunction_UnknownSymbol_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
   Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_ReturnsSaneValues:
     <<: *level_0
     tags: [kernel_object_attributes, P0]

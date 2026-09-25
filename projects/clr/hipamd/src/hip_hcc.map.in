@@ -698,6 +698,7 @@ local:
 hip_7.17 {
 global:
     hipModuleEnumerateFunctions;
+    hipLibraryGetUnifiedFunction;
 local:
     *;
 } hip_7.16;

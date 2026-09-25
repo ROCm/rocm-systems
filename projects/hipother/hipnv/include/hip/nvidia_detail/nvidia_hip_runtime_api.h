@@ -3991,6 +3991,11 @@ inline static hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsign
   return hipCUResultTohipError(cuLibraryEnumerateKernels(kernels, numKernels, library));
 }
 
+inline static hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library,
+                                                      const char* symbol) {
+  return hipCUResultTohipError(cuLibraryGetUnifiedFunction(fptr, library, symbol));
+}
+
 inline static hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
   return hipCUResultTohipError(cuKernelGetLibrary(library, kernel));
 }
