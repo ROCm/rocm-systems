@@ -426,7 +426,8 @@ def gen_vector_unary(
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map_f16 = {
-            'rcp': '1.0f / s',
+            'rcp': 'amdgpu::transcendental::rcp_f16(s, wf.fp_denorm_mode_f16_f64(), '
+            'wf.fp16_ovfl())',
             'sqrt': 'std::sqrt(s)',
             'rsq': 'amdgpu::transcendental::rsq_f16(s, wf.fp_denorm_mode_f16_f64())',
             'floor': 'std::floor(s)',
@@ -448,7 +449,9 @@ def gen_vector_unary(
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            if op in ('log2', 'exp2'):
+            # These helpers return the rounded half; OMOD then scales that half.
+            rounded_result = op in ('log2', 'exp2', 'rcp')
+            if rounded_result:
                 L.extend(
                     [
                         '    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod('
@@ -462,9 +465,10 @@ def gen_vector_unary(
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
             )
-            L.append(
-                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
-            )
+            if not rounded_result:
+                L.append(
+                    '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
+                )
             L.append(_write_vop3_true16_dst(dst[0], 'opsel', 'result_bits'))
         else:
             L.append(

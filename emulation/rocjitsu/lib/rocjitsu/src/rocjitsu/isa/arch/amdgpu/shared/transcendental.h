@@ -12,7 +12,8 @@
 /// V_RSQ_F32, V_RSQ_F16, V_SQRT_F32, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32,
 /// V_RCP_F64, V_RSQ_F64, V_SQRT_F64.
 /// F32 reciprocal and F32/F16 reciprocal square root match the captured RDNA3/4 mappings.
-/// F16 RSQ applies the half input-denormal policy after promotion to F32.
+/// F16 RSQ applies the half input-denormal policy after promotion to F32. F16 RCP also
+/// applies the half output policies and rounds to half before output modifiers.
 /// F32 LOG/EXP and SIN/COS use staged integer arithmetic modeled from RDNA3/4 captures,
 /// including coordinate truncation and intermediate product rounding.
 ///
@@ -51,6 +52,11 @@ inline float flush_denorm_f32(float x) {
 
 /// @brief AMD single-precision reciprocal matching physical RDNA3/4 (within 1 ULP).
 inline float rcp_f32(float x) { return util::amdgpu_rcp_f32(x); }
+
+/// @brief F16 reciprocal with half denormal and FP16_OVFL policies, rounded before OMOD.
+inline float rcp_f16(float x, uint32_t denorm_mode, bool fp16_ovfl) {
+  return util::amdgpu_rcp_f16(x, denorm_mode, fp16_ovfl);
+}
 
 /// @brief AMD single-precision reciprocal square root matching physical RDNA3/4 (within 1 ULP).
 inline float rsq_f32(float x) { return util::amdgpu_rsq_f32(x); }

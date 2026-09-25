@@ -1772,6 +1772,81 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
   return cases;
 }
 
+std::vector<ArithmeticCase> rcp_cases() {
+  struct Captured {
+    const char *name;
+    uint32_t source;
+    uint32_t mode;
+    uint32_t modifier;
+    uint32_t result;
+  };
+  // Raw gfx1201 captures, identical in every FP_ROUND setting and in the VOP1,
+  // VOP3 and pseudo-scalar forms. Modifier 4 is CLAMP; 1..3 are OMOD.
+  const Captured captured[] = {
+      {"FlushInput", 0x0101u, 48u, 0u, 0x7c00u},
+      {"PreserveInput", 0x0101u, 240u, 0u, 0x7bf8u},
+      {"FlushOutput", 0x7401u, 48u, 0u, 0x0000u},
+      {"PreserveOutput", 0x7401u, 240u, 0u, 0x03ffu},
+      {"NearestEven", 0x4200u, 48u, 0u, 0x3555u},
+      {"NegativeNearestEven", 0xc200u, 48u, 0u, 0xb555u},
+      {"NegativeZeroResult", 0xfc00u, 48u, 0u, 0x8000u},
+      {"DivideByZero", 0x0000u, 48u, 0u, 0x7c00u},
+      {"DivideByZeroSaturate", 0x0000u, 8388656u, 0u, 0x7bffu},
+      {"NegativeNanPayload", 0xfd01u, 48u, 0u, 0xff01u},
+      {"ScaleSaturatedDivideByZero", 0x0000u, 8388656u, 3u, 0x77ffu},
+      {"ScaleUnderflowRetainsSign", 0xf001u, 48u, 3u, 0x8000u},
+      {"ScaleUnderflowPreserveMode", 0xf001u, 240u, 3u, 0x8000u},
+      {"ScaleFlushesRoundedSubnormal", 0x7401u, 240u, 1u, 0x0000u},
+      {"ScaleNegativeZeroResult", 0xfc00u, 48u, 1u, 0x0000u},
+      {"ScaleOverflow", 0x0400u, 48u, 2u, 0x7c00u},
+      {"ScaleOverflowSaturate", 0x0400u, 8388656u, 2u, 0x7bffu},
+      {"ScaleNan", 0x7d00u, 48u, 3u, 0x7f00u},
+      {"ClampNegative", 0xc000u, 48u, 4u, 0x0000u},
+      {"ClampLarge", 0x3800u, 48u, 4u, 0x3c00u},
+      {"ClampNan", 0x7d00u, 48u, 4u, 0x0000u},
+  };
+  std::vector<ArithmeticCase> cases;
+  for (const auto &sample : captured)
+    for (bool e64 : {false, true}) {
+      if (!e64 && sample.modifier != 0)
+        continue;
+      // Assembled with llvm-mc for gfx1201.
+      std::array<uint32_t, 3> words{e64 ? 0xd5d40006u : 0x7e0ca900u, e64 ? 0x00000100u : 0u, 0u};
+      if (sample.modifier == 4)
+        words[0] |= 0x8000u;
+      else
+        words[1] |= sample.modifier << 27;
+      for (uint32_t rounding = 0; rounding < 4; ++rounding)
+        cases.push_back({std::string("Rcp") + sample.name + (e64 ? "E64" : "E32") + "Round" +
+                             std::to_string(rounding),
+                         ROCJITSU_CODE_ARCH_RDNA4,
+                         words,
+                         {{0, sample.source}},
+                         {{6, 0xdead0000u | sample.result}},
+                         sample.mode | (rounding << 2),
+                         FE_UPWARD,
+                         0x9fc0u,
+                         0x9f60u});
+    }
+  // V_RCP_F32 -v0 div:2 on gfx1201 in every FP MODE: a finite reciprocal that
+  // underflows while scaling keeps its sign; a reciprocal already zero becomes +0.
+  const uint32_t f32_captured[][2] = {
+      {0x7e000000u, 0x80800000u}, {0x7e000001u, 0x80000000u}, {0x7e800000u, 0x80000000u},
+      {0x7e800001u, 0x00000000u}, {0x7f800000u, 0x00000000u},
+  };
+  for (const auto &sample : f32_captured)
+    for (uint32_t mode : {0u, 0x3u, 0xf0u, 0xf3u})
+      cases.push_back(
+          {"RcpF32NegDiv2Source" + std::to_string(sample[0]) + "Mode" + std::to_string(mode),
+           ROCJITSU_CODE_ARCH_RDNA4,
+           {0xd5aa0006u, 0x38000100u, 0u},
+           {{0, sample[0]}},
+           {{6, sample[1]}},
+           mode,
+           FE_UPWARD});
+  return cases;
+}
+
 class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
@@ -1870,6 +1945,11 @@ INSTANTIATE_TEST_SUITE_P(SdwaLogExp, ValuFpModeTest, testing::ValuesIn(sdwa_log_
 
 INSTANTIATE_TEST_SUITE_P(HalfLogExp, ValuFpModeTest,
                          testing::ValuesIn(half_log_exp_arithmetic_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Rcp, ValuFpModeTest, testing::ValuesIn(rcp_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
