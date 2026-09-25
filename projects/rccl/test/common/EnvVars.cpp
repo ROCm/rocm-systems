@@ -21,6 +21,9 @@
 #include "CollectiveArgs.hpp"
 #include "ProcessIsolatedTestRunner.hpp"
 
+// C++ linkage, matching rocmwrap.h / librccl.so.
+extern int ncclCuMemRuntimeSupported();
+
 namespace RcclUnitTesting
 {
   int const UT_SINGLE_PROCESS = (1<<0);
@@ -101,6 +104,16 @@ namespace RcclUnitTesting
       }
     }
 
+    // cuMem runtime capability (kernel, driver, VMM attribute and a functional
+    // VMM probe). Only evaluated when NCCL_CUMEM_ENABLE requests cuMem, since
+    // the probe allocates and maps device memory.
+    int cuMemSupported = 0;
+    char const* cuMemEnv = getenv("NCCL_CUMEM_ENABLE");
+    if (numGpus > 0 && cuMemEnv != nullptr && atoi(cuMemEnv) > 0 && hipSetDevice(0) == hipSuccess)
+    {
+      cuMemSupported = ncclCuMemRuntimeSupported();
+    }
+
     // GPU priority order: group devices by physical PCI bus id, largest group
     // first (matches the old getDevicePriority()). Falls back to identity order on
     // any error.
@@ -139,8 +152,8 @@ namespace RcclUnitTesting
       }
     }
 
-    // Serialize: runtime version, numGpus, 4 arch flags, cpx flag, then
-    // numGpus priority ints.
+    // Serialize: runtime version, numGpus, 4 arch flags, cpx flag, cuMem flag,
+    // then numGpus priority ints.
     auto writeAll = [fd](void const* buf, size_t len)
     {
       size_t off = 0;
@@ -161,6 +174,7 @@ namespace RcclUnitTesting
     writeAll(&isGfx12, sizeof(isGfx12));
     writeAll(&isGfx90, sizeof(isGfx90));
     writeAll(&isCpx,   sizeof(isCpx));
+    writeAll(&cuMemSupported, sizeof(cuMemSupported));
     if (numGpus > 0)
     {
       writeAll(priority.data(), (size_t)numGpus * sizeof(int));
@@ -231,11 +245,12 @@ namespace RcclUnitTesting
       return true;
     };
 
-    int runtimeVersion = 0, numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g90 = 0, cpx = 0;
+    int runtimeVersion = 0, numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g90 = 0, cpx = 0, cuMem = 0;
     bool ok = readAll(&runtimeVersion, sizeof(runtimeVersion)) && readAll(&numGpus, sizeof(numGpus))
               && readAll(&g94, sizeof(g94))
               && readAll(&g95, sizeof(g95)) && readAll(&g12, sizeof(g12))
-              && readAll(&g90, sizeof(g90)) && readAll(&cpx, sizeof(cpx));
+              && readAll(&g90, sizeof(g90)) && readAll(&cpx, sizeof(cpx))
+              && readAll(&cuMem, sizeof(cuMem));
     std::vector<int> priority;
     if (ok && numGpus > 0)
     {
@@ -254,6 +269,7 @@ namespace RcclUnitTesting
     }
 
     hipRuntimeVersion = runtimeVersion;
+    cuMemRuntimeSupported = (cuMem != 0);
     numDetectedGpus = numGpus;
     isGfx94 = (g94 != 0);
     isGfx95 = (g95 != 0);
@@ -309,6 +325,7 @@ namespace RcclUnitTesting
     // NOTE: HIP must not be used in this parent before the tests launch their own
     // child processes, hence the isolated probe.
     hipRuntimeVersion = 0;
+    cuMemRuntimeSupported = false;
     numDetectedGpus = 0;
     isGfx94 = isGfx95 = isGfx12 = isGfx90 = false;
     bool             isCpxMode = false;

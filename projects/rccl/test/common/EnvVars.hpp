@@ -50,6 +50,9 @@ namespace RcclUnitTesting
     // Detected device count (computed HIP-clean via a forked probe)
     int GetNumDetectedGpus() const { return numDetectedGpus; }
     int GetHipRuntimeVersion() const { return hipRuntimeVersion; }
+    // Whether cuMem VMM works on this platform; only probed (otherwise false)
+    // when NCCL_CUMEM_ENABLE is set to a positive value at construction time.
+    bool IsCuMemRuntimeSupported() const { return cuMemRuntimeSupported; }
     void ShowConfig();
 
   protected:
@@ -59,6 +62,7 @@ namespace RcclUnitTesting
     std::vector<int>            isMultiProcessList; // Single or multi process [UT_PROCESS_MASK]
     int                         numDetectedGpus;
     int                         hipRuntimeVersion;
+    bool                        cuMemRuntimeSupported;
     std::vector<int>            gpuPriorityOrder;   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
 
     // Helper functions to parse environment variables
