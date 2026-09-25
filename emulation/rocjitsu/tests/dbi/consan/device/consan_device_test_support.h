@@ -115,7 +115,7 @@ inline uint32_t fused_epilogue_mix_reference(const uint32_t *input, uint32_t lan
 __device__ __forceinline__ void store_lds_word(volatile uint32_t *address, uint32_t value) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
-#if defined(__gfx1201__) || defined(__gfx950__)
+#if defined(__gfx1201__) || defined(__gfx950__) || defined(__gfx1250__)
   // Make the LDS write visible to the compiler's wait-counter insertion.
   // A memory clobber on inline assembly does not describe its pending DS store.
   using LdsWord = volatile uint32_t __attribute__((address_space(3)));

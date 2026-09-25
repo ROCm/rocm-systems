@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include "rocjitsu/code/patch/consan/targets/cdna4/consan_atomic_observation.h"
+#include "rocjitsu/code/patch/consan/targets/cdna5/consan_atomic_observation.h"
 #include "rocjitsu/code/patch/consan/targets/rdna4/consan_atomic_observation.h"
 
 #include <algorithm>
@@ -201,6 +202,10 @@ std::optional<SyncRole> atomic_role(AtomicEventKind kind, bool is_rmw) {
     if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
       if (!append_rewrite(
               build_cdna4_publication_observation(instruction, *observation_vgpr, !is_rmw)))
+        return false;
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      if (!append_rewrite(
+              build_cdna5_publication_observation(instruction, *observation_vgpr, !is_rmw)))
         return false;
     } else if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
       if (!append_rewrite(is_rmw ? build_rdna4_atomic_observation(instruction, *observation_vgpr)

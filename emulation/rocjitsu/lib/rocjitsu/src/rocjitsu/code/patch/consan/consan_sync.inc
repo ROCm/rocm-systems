@@ -938,7 +938,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
         {std::move(atomic), std::move(*source), semantics, 0, 1, false, std::nullopt});
   }
   const bool capture_publications =
-      (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+       arch == ROCJITSU_CODE_ARCH_CDNA5) &&
       layout.publication_event_capacity != 0u &&
       std::ranges::all_of(candidates, [](const Candidate &candidate) {
         return candidate.source.is_rmw() ||

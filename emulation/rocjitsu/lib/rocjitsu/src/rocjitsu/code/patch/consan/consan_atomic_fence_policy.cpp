@@ -506,7 +506,8 @@ AtomicFencePolicyResult plan_atomic_fence_observation(const ProgramInventory &in
   if (request.publication_modifications_enabled && request.tracking_enabled &&
       request.mode == Mode::Default &&
       (inventory.arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
-       inventory.arch() == ROCJITSU_CODE_ARCH_CDNA4)) {
+       inventory.arch() == ROCJITSU_CODE_ARCH_CDNA4 ||
+       inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5)) {
     // Opaque writes only matter for dispatches that can consume a publication
     // proof. Logging unrelated global traffic can exhaust the bounded event
     // buffer even when all LDS ordering comes from barriers. Retain every

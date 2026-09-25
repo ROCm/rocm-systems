@@ -139,3 +139,27 @@ the mixed-format log records profiler finalization on SIGTERM at the client
 deadline. Their allowlists are not admitted as complete. These two rows remain
 orange while the interrupted shards are retried with longer deadlines.
 Evidence: `cdna5-20260925/discovery-tensile/*/result.json` and command logs.
+
+### CDNA5 publication journal activated and clean tree recovered
+
+The CDNA5 target now enables publication modification capture, using its native
+return-observation encoding (including the scaled-address bit). The out-of-tree
+`tree-atomic-or` filtered Default clean run now passes with complete coverage:
+`cdna5-20260925/publication-tree-clean/tree-atomic-or/clean/default/result.json`.
+Fault qualification remains pending.
+
+Normal GCC verification: all 779 `ConSan.*` host tests and all 67 gfx1250
+atomic/ordering/publication device tests pass. Logs: `publication-host-tests.log`
+and `publication-device-retest.log` under the campaign directory. The three
+arrival/store/tree positive fixtures initially failed because their shared gfx1250
+helper hid its LDS store in inline assembly, preventing compiler wait insertion.
+Disassembly confirmed no producer `s_wait_dscnt`; the publication trace correctly
+retained the producers without release evidence. Use the compiler-visible LDS
+store already used by gfx950/gfx1201 for gfx1250 as well. The three positive and
+three broken-address negative controls now pass (`publication-fixture-tests.log`).
+A temporary expanded journal print was reverted after diagnosis.
+
+The shared helper change also requires rebuilding and running the rest of the
+gfx1250 device fixtures before final qualification. Earlier external results
+retain their recorded hook provenance; final qualification must match the updated
+hook. The HipKittens/TDM teardown corruption remains a separate open issue.
