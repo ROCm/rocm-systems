@@ -30,6 +30,9 @@ public:
   /// Advance only after the preceding shader dispatch has retired and caches are flushed.
   std::optional<DispatchEntry> advance(const GpuVmAccess &memory);
   bool fragment_stage() const { return fragment_stage_; }
+  std::shared_ptr<GsRegisters> gs_registers() const override {
+    return fragment_stage_ ? nullptr : gs_registers_;
+  }
 
 private:
   static constexpr uint32_t kColorTargets = 8;
@@ -41,6 +44,8 @@ private:
   std::vector<uint32_t> indices_;
   std::array<uint32_t, 0x400> sh_;
   std::array<uint32_t, 0x2000> context_;
+  uint64_t attribute_ring_base_;
+  std::shared_ptr<GsRegisters> gs_registers_;
   std::array<std::array<uint32_t, 4>, 64> positions_{};
   std::array<uint32_t, 64> position_masks_{};
   std::array<uint32_t, 64> layer_viewport_{};

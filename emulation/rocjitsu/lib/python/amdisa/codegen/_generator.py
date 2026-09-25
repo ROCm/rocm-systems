@@ -417,6 +417,7 @@ class CodeGenerator:
         'ds_write': 'local',
         'ds_write2': 'local',
         'ds_atomic': 'local',
+        'ds_gs_register': 'local',
         'ds_stack': 'local',
         'ds_atomic2': 'local',
         'ds_mskor': 'local',
@@ -7648,6 +7649,19 @@ class CodeGenerator:
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
 
+        if cls == 'ds_gs_register':
+            L.append('  if (!inst_.gds) throw util::UnimplementedInst(mnemonic());')
+            L.append(
+                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            )
+            self._append_wait_counter_type(L, sem, cls)
+            L.append(
+                '  wf.prepare_gs_register(*d, inst_.offset0, inst_.data0, inst_.vdst, '
+                f'{str(sem.operation == "sub").lower()});'
+            )
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
+
         if cls in ('ds_atomic', 'ds_atomic2'):
             gds_guard = ''
             if self._enc_has_field('gds'):
@@ -7787,88 +7801,40 @@ class CodeGenerator:
         # single base+width Operand cannot express -- so decode it from the
         # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
         # and already modeled.
-        if (
-            self.isa_spec.arch_name
-            in (
-                'rdna3',
-                'rdna3_5',
-                'rdna4',
-            )
-            and inst.name.upper() == 'IMAGE_GET_LOD'
-        ):
-            gfx12 = self.isa_spec.arch_name == 'rdna4'
-            resource = 'inst_.rsrc' if gfx12 else 'inst_.srsrc * 4'
-            sampler = 'inst_.samp' if gfx12 else 'inst_.ssamp * 4'
-            coords = (
-                '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3}'
-                if gfx12
-                else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
-                'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
-            )
-            unsupported = 'inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe'
-            if gfx12:
-                unsupported += ' || inst_.nv'
-            return (
-                f'  amdgpu::execute_image_lod(wf, {resource}, {sampler}, inst_.vdata, '
-                f'{coords}, inst_.dim, inst_.dmask, inst_.d16, {unsupported}, inst_.a16);'
-            )
-
-        if self.isa_spec.arch_name in (
-            'rdna3',
-            'rdna3_5',
-            'rdna4',
-        ) and inst.name.upper() in (
+        image_name = inst.name.upper()
+        if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4') and image_name in (
             'IMAGE_LOAD',
             'IMAGE_STORE',
+            'IMAGE_GET_LOD',
             *self._IMAGE_SAMPLE_MODES,
         ):
             gfx12 = self.isa_spec.arch_name == 'rdna4'
-            sample = inst.name.upper().startswith('IMAGE_SAMPLE')
-            load = inst.name.upper() != 'IMAGE_STORE'
-            counter = (
-                'SAMPLECNT' if sample and gfx12 else ('LOADCNT' if load else 'STORECNT')
-            )
+            query = image_name == 'IMAGE_GET_LOD'
+            sample = query or image_name in self._IMAGE_SAMPLE_MODES
+            load = image_name != 'IMAGE_STORE'
             resource = 'inst_.rsrc' if gfx12 else 'inst_.srsrc * 4'
-            sampler = (
-                (', inst_.samp' if gfx12 else ', inst_.ssamp * 4') if sample else ''
-            )
+            sampler = 'inst_.samp' if gfx12 else 'inst_.ssamp * 4'
             unsupported = 'inst_.r128 || inst_.tfe'
             if gfx12:
                 unsupported += ' || inst_.nv'
             if sample:
                 unsupported += ' || inst_.unorm || inst_.lwe'
-            if inst.name.upper() in ('IMAGE_SAMPLE_D', 'IMAGE_SAMPLE_D_G16'):
-                coords = (
-                    '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, '
-                    'inst_.vaddr3 + 1u, inst_.vaddr3 + 2u, inst_.vaddr3 + 3u}'
-                    if gfx12
-                    else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
-                    'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u, '
-                    'inst_.nsa ? (raw_words_[2] >> 16) & 255 : inst_.vaddr + 3u, '
-                    'inst_.nsa ? raw_words_[2] >> 24 : inst_.vaddr + 4u, '
-                    'inst_.nsa ? (raw_words_[2] >> 24) + 1u : inst_.vaddr + 5u, '
-                    'inst_.nsa ? (raw_words_[2] >> 24) + 2u : inst_.vaddr + 6u}'
+            derivatives = image_name in ('IMAGE_SAMPLE_D', 'IMAGE_SAMPLE_D_G16')
+            coordinate_count = (
+                7 if derivatives else 4 if sample and (gfx12 or not query) else 3
+            )
+            coords = self._image_coordinates(coordinate_count)
+            if query:
+                return (
+                    f'  amdgpu::execute_image_lod(wf, {resource}, {sampler}, inst_.vdata, '
+                    f'{coords}, inst_.dim, inst_.dmask, inst_.d16, {unsupported}, inst_.a16);'
                 )
-            elif sample:
-                coords = (
-                    '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3}'
-                    if gfx12
-                    else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
-                    'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u, '
-                    'inst_.nsa ? (raw_words_[2] >> 16) & 255 : inst_.vaddr + 3u}'
-                )
-            else:
-                coords = (
-                    '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}'
-                    if gfx12
-                    else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
-                    'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
-                )
-            if sample:
-                mode = self._IMAGE_SAMPLE_MODES[inst.name.upper()]
-                sampler += f', amdgpu::ImageSampleMode::{mode}, inst_.a16'
-            else:
-                sampler = ', ~0u, amdgpu::ImageSampleMode::Implicit, inst_.a16'
+            counter = (
+                'SAMPLECNT' if sample and gfx12 else 'LOADCNT' if load else 'STORECNT'
+            )
+            mode = self._IMAGE_SAMPLE_MODES.get(image_name, 'Implicit')
+            if not sample:
+                sampler = '~0u'
             mtype = (
                 'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
                 if gfx12
@@ -7882,7 +7848,7 @@ class CodeGenerator:
                     f'  d->wait_counter_type = amdgpu::WaitCounterType::{counter};',
                     f'  if (!amdgpu::prepare_image_transfer(wf, *d, {resource}, inst_.vdata,',
                     f'      {coords}, inst_.dim, inst_.dmask, inst_.d16,',
-                    f'      {unsupported}{sampler})) return;',
+                    f'      {unsupported}, {sampler}, amdgpu::ImageSampleMode::{mode}, inst_.a16)) return;',
                     '  set_data(std::move(d));',
                 ]
             )
@@ -9088,6 +9054,31 @@ class CodeGenerator:
             L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _image_coordinates(self, count: int) -> str:
+        """Expand image address groups without conflating NSA selectors with register counts."""
+        gfx12 = self.isa_spec.arch_name == 'rdna4'
+        coordinates = []
+        for index in range(count):
+            if gfx12:
+                group = min(index, 3)
+                coordinate = f'inst_.vaddr{group}'
+                if index > group:
+                    coordinate += f' + {index - group}u'
+            elif index == 0:
+                coordinate = 'inst_.vaddr'
+            else:
+                shift = 8 * (min(index, 4) - 1)
+                selector = (
+                    'raw_words_[2]' if shift == 0 else f'(raw_words_[2] >> {shift})'
+                )
+                if index < 4:
+                    selector += ' & 255'
+                elif index > 4:
+                    selector += f' + {index - 4}u'
+                coordinate = f'inst_.nsa ? {selector} : inst_.vaddr + {index}u'
+            coordinates.append(coordinate)
+        return '{' + ', '.join(coordinates) + '}'
 
     def _gen_formatted_buffer(
         self, sem: InstructionSemantics, cls: str, inst: Instruction

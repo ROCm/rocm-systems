@@ -5,6 +5,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/graphics_draw.h"
 #include "rocjitsu/vm/amdgpu/graphics_stage.h"
@@ -26,6 +27,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -38,6 +40,7 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <sys/mman.h>
 #include <thread>
+#include <type_traits>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -3256,11 +3259,8 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         // retires preceding work before these packets, including PFP_SYNC_ME.
         if (opcode == uint32_t(Pm4Opcode::ContextControl))
           require(2);
-        else if (opcode == uint32_t(Pm4Opcode::ClearState) ||
-                 opcode == uint32_t(Pm4Opcode::PfpSyncMe))
+        else
           require(1);
-        else if (words.size() < 2)
-          throw std::runtime_error("invalid graphics register payload");
         break;
       case Pm4Opcode::CondExec: {
         require(4);
@@ -3315,6 +3315,43 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         if (access->write(address(1), {reinterpret_cast<const std::byte *>(words.data() + 3),
                                        (words.size() - 3) * 4}) != VmAccessOutcome::Complete)
           throw std::runtime_error("PM4 WRITE_DATA failed");
+        break;
+      }
+      case Pm4Opcode::AtomicMem: {
+        require(8);
+        // GFX9+ ME/MEC share the integer TC operations. Cache policy does not
+        // change their values. Loop-until-compare commands require CP retry
+        // state and are rejected rather than executed as a single pass.
+        if ((words[0] & ~0x0600007fu) || (words[7] & ~0x1fffu))
+          throw std::runtime_error("unsupported ATOMIC_MEM control");
+        const uint32_t operation = words[0] & 0x1f;
+        const uint32_t width = (words[0] & 0x20) ? 8 : 4;
+        if ((operation != 7 && operation != 8 && (operation < 15 || operation > 25)) ||
+            address(1) % width)
+          throw std::runtime_error("unsupported ATOMIC_MEM operation or alignment");
+        flush_gpu_caches();
+        // TC opcodes are shared by the ME and MEC. Reuse shader-memory atomic
+        // arithmetic after decoding the packet's operation and operand order.
+        static constexpr AtomicOp tc_operations[] = {AtomicOp::ADD,  AtomicOp::SUB,  AtomicOp::SMIN,
+                                                     AtomicOp::UMIN, AtomicOp::SMAX, AtomicOp::UMAX,
+                                                     AtomicOp::AND,  AtomicOp::OR,   AtomicOp::XOR,
+                                                     AtomicOp::INC,  AtomicOp::DEC};
+        const AtomicOp atomic = operation == 7   ? AtomicOp::SWAP
+                                : operation == 8 ? AtomicOp::CMPSWAP
+                                                 : tc_operations[operation - 15];
+        const auto mutate = [&]<typename T>() {
+          return access->atomic_modify(address(1), sizeof(T), [&](std::span<std::byte> bytes) {
+            T value;
+            std::memcpy(&value, bytes.data(), sizeof(value));
+            value = apply_int_atomic(atomic, value, static_cast<T>(address(3)),
+                                     static_cast<T>(address(5)));
+            std::memcpy(bytes.data(), &value, sizeof(value));
+          });
+        };
+        const auto outcome = width == 8 ? mutate.template operator()<uint64_t>()
+                                        : mutate.template operator()<uint32_t>();
+        if (outcome != VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 ATOMIC_MEM access failed");
         break;
       }
       case Pm4Opcode::ReleaseMem: {
@@ -3417,6 +3454,36 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         }
         break;
       }
+      case Pm4Opcode::LoadUconfigReg:
+      case Pm4Opcode::LoadShReg:
+      case Pm4Opcode::LoadContextReg: {
+        if (words.size() < 4 || words.size() % 2 || (words[0] & 3) || (words[1] & 0xffff0000u))
+          throw std::runtime_error("invalid shadow register load payload");
+        if (opcode != uint32_t(Pm4Opcode::LoadShReg) && !submission.graphics_engine)
+          throw std::runtime_error("graphics register load on compute engine");
+        const std::span<uint32_t> registers = opcode == uint32_t(Pm4Opcode::LoadUconfigReg)
+                                                  ? std::span<uint32_t>(state.uconfig_registers)
+                                              : opcode == uint32_t(Pm4Opcode::LoadShReg)
+                                                  ? std::span<uint32_t>(state.sh_registers)
+                                                  : std::span<uint32_t>(state.context_registers);
+        for (size_t i = 2; i < words.size(); i += 2) {
+          const uint32_t first = words[i], count = words[i + 1];
+          if (!count || (count & ~0x3fffu) || first >= registers.size() ||
+              count > registers.size() - first)
+            throw std::runtime_error("invalid shadow register load range");
+        }
+        flush_gpu_caches();
+        for (size_t i = 2; i < words.size(); i += 2) {
+          const uint32_t first = words[i], count = words[i + 1];
+          // Shadow storage is indexed by the register offset, not packed by
+          // the order of the ranges in this packet.
+          if (access->read(address(0) + uint64_t{first} * 4,
+                           {reinterpret_cast<std::byte *>(registers.data() + first), count * 4}) !=
+              VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 shadow register load read failed");
+        }
+        break;
+      }
       case Pm4Opcode::LoadShRegIndex:
       case Pm4Opcode::LoadContextRegIndex: {
         require(4);
@@ -3440,16 +3507,39 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
           throw std::runtime_error("invalid shader register payload");
         const uint32_t index = words[0] >> 28;
         const uint32_t first = words[0] & 0xffff;
+        const bool interleave = submission.graphics_engine && index == 2 && first == 0x22f &&
+                                words.size() == 2 &&
+                                cus_[0]->config().arch == ROCJITSU_CODE_ARCH_RDNA4;
         // Index 3 applies the KMD CU mask to RSRC3/4. CU affinity does not
         // change functional shader results; retain the programmed resources.
+        // GFX12 index 2 updates the dispatch-interleave shadow. Scheduling
+        // interleave likewise does not change register values or shader results.
         if ((words[0] & 0x0fff0000) ||
-            (index && (opcode != uint32_t(Pm4Opcode::SetShRegIndex) || index != 3)) ||
+            (index &&
+             (opcode != uint32_t(Pm4Opcode::SetShRegIndex) || (index != 3 && !interleave))) ||
             first >= state.sh_registers.size() ||
             words.size() - 1 > state.sh_registers.size() - first)
           throw std::runtime_error("invalid shader register range or index");
         std::copy(words.begin() + 1, words.end(), state.sh_registers.begin() + first);
         break;
       }
+      case Pm4Opcode::ContextRegRmw:
+        require(3);
+        if (!submission.graphics_engine || words[0] >= state.context_registers.size())
+          throw std::runtime_error("invalid CONTEXT_REG_RMW register or engine");
+        state.context_registers[words[0]] =
+            (state.context_registers[words[0]] & ~words[1]) | (words[2] & words[1]);
+        break;
+      case Pm4Opcode::PrimeUtcl2:
+        require(4);
+        // PAL also sets the PFP engine selector on compute queues, where the
+        // hardware ignores it. Retain the same accepted control bits there.
+        if ((words[0] & ~0x4000000fu) || (words[1] & 0xfffu) || (words[3] & ~0x3fffu) ||
+            address(1) > UINT64_MAX - (uint64_t{words[3]} << 12))
+          throw std::runtime_error("invalid PRIME_UTCL2 control or range");
+        // Translation prefetch has no data result. Address translation already
+        // completes synchronously when an instruction accesses memory.
+        break;
       case Pm4Opcode::SetShRegPairs: // SET_SH_REG_PAIRS
         if (words.size() % 2)
           throw std::runtime_error("invalid SET_SH_REG_PAIRS payload");
@@ -3510,17 +3600,58 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         break;
       case Pm4Opcode::EventWrite: {
         const uint32_t event = words[0] & 0x3f;
+        const uint32_t event_index = (words[0] >> 8) & 15;
+        if (event == 15 && event_index >= 8 && event_index <= 11) {
+          require(3);
+          const bool has_gs_registers =
+              !cus_.empty() && (cus_[0]->config().arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                cus_[0]->config().arch == ROCJITSU_CODE_ARCH_RDNA3_5);
+          if (!submission.graphics_engine || !has_gs_registers ||
+              words[0] != (15 | (event_index << 8)) || (words[1] & 7))
+            throw std::runtime_error("unsupported PM4 streamout query event");
+          flush_gpu_caches();
+          auto values = state.gs_registers->streamout_stats(event_index - 8);
+          for (auto &value : values)
+            value |= uint64_t{1} << 63; // Query sample validity, separate from counter state.
+          if (access->write(address(1), std::as_bytes(std::span{values})) !=
+              VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 streamout query write failed");
+          break;
+        }
         if (submission.graphics_engine && event == 56) {
           // PIXEL_PIPE_STAT_CONTROL configures graphics counters, not a memory write.
           require(3);
           break;
         }
         require(1);
-        if (event != 7 && !(submission.graphics_engine &&
-                            (event == 15 || event == 16 || event == 25 || event == 26 ||
-                             event == 36 || event == 44 || event == 46)))
+        // Counter START/STOP events also configure compute counters. SQ_NON_EVENT
+        // drains graphics pipeline messages without writing a sampled result.
+        if (event != 7 && event != 23 && event != 24 && event != 25 && event != 26 &&
+            !(submission.graphics_engine &&
+              (event == 15 || event == 16 || event == 36 || event == 38 || event == 44 ||
+               event == 46 || event == 49)))
           throw std::runtime_error(std::format("unsupported PM4 EVENT_WRITE event {}", event));
         flush_gpu_caches();
+        break;
+      }
+      case Pm4Opcode::StreamoutStatsQuery: {
+        require(5);
+        if (!submission.graphics_engine || cus_.empty() ||
+            cus_[0]->config().arch != ROCJITSU_CODE_ARCH_RDNA4 || (words[0] & 7) ||
+            (words[3] & 7) || words[2] > 3 || address(0) > UINT64_MAX - 79)
+          throw std::runtime_error("unsupported PM4 streamout statistics query");
+        // GFX12 shaders maintain four needed/written counter pairs in ordinary memory,
+        // following four dwords of streamout buffer offsets.
+        flush_gpu_caches();
+        std::array<uint64_t, 2> values{};
+        if (access->read(address(0) + 16 + 16 * words[2],
+                         std::as_writable_bytes(std::span{values})) != VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 streamout query read failed");
+        for (auto &value : values)
+          value |= uint64_t{1} << 63;
+        if (access->write(address(3), std::as_bytes(std::span{values})) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 streamout query write failed");
         break;
       }
       case Pm4Opcode::DmaData: {
@@ -3603,12 +3734,20 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
           return;
         break;
       }
+      case Pm4Opcode::DispatchDirectInterleaved:
+        if (!submission.graphics_engine || cus_[0]->config().arch != ROCJITSU_CODE_ARCH_RDNA4)
+          throw std::runtime_error("interleaved dispatch requires a GFX12 graphics queue");
+        [[fallthrough]];
       case Pm4Opcode::DispatchDirect:
         require(4);
         dispatch_pm4(queue, qs, {words[0], words[1], words[2], words[3]});
         if (!qs.entries.empty())
           return;
         break;
+      case Pm4Opcode::DispatchIndirectInterleaved:
+        if (!submission.graphics_engine || cus_[0]->config().arch != ROCJITSU_CODE_ARCH_RDNA4)
+          throw std::runtime_error("interleaved dispatch requires a GFX12 graphics queue");
+        [[fallthrough]];
       case Pm4Opcode::DispatchIndirect: {
         require(submission.graphics_engine ? 2 : 3);
         flush_gpu_caches();

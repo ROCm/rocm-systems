@@ -1874,16 +1874,32 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
     InterposerDrmTest
+    CanonicalSysfsPathsRetainSimulatedDevice
     DeviceInfoReportsActiveCuCount
     OpensWithinCurrentDescriptorLimit
+    PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
 
 set(_rj_interposer_pm4_tests
+    SubmissionFenceQueryPollsAndWaitsForCompletion
+    SubmissionFenceSequencesAreLocalToContextAndEngine
+    SubmissionFenceQueryRejectsInvalidIdentityAndReportsFailure
+    SubmissionFenceQueryRetiresOldHistory
+    TransferWaitsForSubmissionWithoutWaitingForCompletion
     GraphicsRegistersRetainAllPacketForms
+    ContextMaskedUpdatesAndTranslationPrefetchPreserveOtherState
+    DispatchInterleaveShadowIsQualifiedForGfx12
+    ComputeTranslationPrefetchIgnoresPfpSelector
+    StreamoutQuerySamplesAllFourMemoryCounterPairs
+    StreamoutQueryEventMarksZeroCounterSamplesValid
+    InterleavedDispatchExecutesDirectAndIndirectShaders
     ContextRegisterLoadReadsMemoryAndPreservesAdjacentRegisters
     ContextRegisterLoadRejectsRangeOverflow
+    ShadowRegisterLoadsUseSparseMemoryOffsets
+    MemoryAtomicsApplyIntegerOperationsAtBothWidths
+    InvalidMemoryPacketsFailFenceWithoutWritingMemory
     MalformedPackedGraphicsRegistersFailFence
     DependencyDefersMemoryWriteAndCompletion
     MalformedPacketFailsCompletion
@@ -1899,6 +1915,7 @@ set(_rj_interposer_pm4_tests
     TimelineSubmissionWaitsForEarlierQueue
     RepeatedTimelineTransfersVisitSharedDependenciesOnce
     GraphicsQueueAcceptsBufferOwnershipFlushEvents
+    ComputeQueueAcceptsPipelineStatisticsControls
     MergedSyncFilesRetainPendingFenceAcrossDupAndImport
     GridProductOverflowFailsFence
     UnmappedShaderFailsFence

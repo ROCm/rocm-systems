@@ -226,7 +226,7 @@ void ImageGetLodVsample::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_image_lod(
       wf, inst_.rsrc, inst_.samp, inst_.vdata,
       {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3}, inst_.dim, inst_.dmask, inst_.d16,
-      inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe || inst_.nv, inst_.a16);
+      inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.a16);
 }
 
 void ImageSampleDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {

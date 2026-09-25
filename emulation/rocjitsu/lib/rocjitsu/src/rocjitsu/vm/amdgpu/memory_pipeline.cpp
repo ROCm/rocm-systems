@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gs_registers.h"
 #include "rocjitsu/vm/amdgpu/image_metadata.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -505,62 +506,6 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
 }
 
 namespace {
-
-/// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
-template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
-  using S = std::make_signed_t<T>;
-  switch (op) {
-  case AtomicOp::SWAP:
-    return src_val;
-  case AtomicOp::CONDXCHG32: {
-    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
-    T result = old_val;
-    for (uint32_t shift = 0; shift < sizeof(T) * 8; shift += 32) {
-      const T half_mask = T{0xffffffffu} << shift;
-      const T store_mask = T{0x7fffffffu} << shift;
-      if ((src_val >> shift) & 0x80000000u)
-        result = (result & ~half_mask) | (src_val & store_mask);
-    }
-    return result;
-  }
-  case AtomicOp::CMPSWAP:
-    return (old_val == cmp_val) ? src_val : old_val;
-  case AtomicOp::MSKOR:
-    return (old_val & ~src_val) | cmp_val;
-  case AtomicOp::ADD:
-    return old_val + src_val;
-  case AtomicOp::SUB:
-    return old_val - src_val;
-  case AtomicOp::SUB_CLAMP:
-    return old_val >= src_val ? old_val - src_val : T{0};
-  case AtomicOp::COND_SUB:
-    return old_val >= src_val ? old_val - src_val : old_val;
-  case AtomicOp::WRAP:
-    return old_val >= src_val ? old_val - src_val : old_val + cmp_val;
-  case AtomicOp::RSUB:
-    return src_val - old_val;
-  case AtomicOp::SMIN:
-    return static_cast<T>(std::min(static_cast<S>(old_val), static_cast<S>(src_val)));
-  case AtomicOp::UMIN:
-    return std::min(old_val, src_val);
-  case AtomicOp::SMAX:
-    return static_cast<T>(std::max(static_cast<S>(old_val), static_cast<S>(src_val)));
-  case AtomicOp::UMAX:
-    return std::max(old_val, src_val);
-  case AtomicOp::AND:
-    return old_val & src_val;
-  case AtomicOp::OR:
-    return old_val | src_val;
-  case AtomicOp::XOR:
-    return old_val ^ src_val;
-  case AtomicOp::INC:
-    return (old_val >= src_val) ? T{0} : old_val + 1;
-  case AtomicOp::DEC:
-    return (old_val == 0 || old_val > src_val) ? src_val : old_val - 1;
-  default:
-    return old_val;
-  }
-}
 
 // Translate the deferred request into the shared ISA floating-point contract.
 template <typename Bits>
@@ -1188,10 +1133,22 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
 
 VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  if (d.gs_registers) {
+    const uint32_t stride = d.num_elems * d.elem_size;
+    d.response_data.resize(d.wf_size * stride);
+    uint32_t operand = 0;
+    std::memcpy(&operand, d.store_data.data(), sizeof(operand));
+    const uint64_t previous =
+        d.gs_registers->modify(d.gs_register_index, operand, d.atomic_op == AtomicOp::SUB);
+    if (d.lane_mask)
+      std::memcpy(d.response_data.data() + std::countr_zero(d.lane_mask) * stride, &previous,
+                  stride);
+    return VmAccessOutcome::Complete;
+  }
+  auto &lds = wf.lds();
   if (d.lds_stack_inputs) {
     execute_lds_stack(wf, d);
     return VmAccessOutcome::Complete;

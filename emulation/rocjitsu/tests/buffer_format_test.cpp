@@ -286,10 +286,10 @@ protected:
   }
   template <typename Raw, typename Machine, typename Load, typename Store, typename LoadD16,
             typename StoreD16>
-  Instruction *legacy(bool load, bool d16, int format = -1) {
+  Instruction *legacy(bool load, bool d16, int format = -1, uint32_t soffset = 128) {
     Machine m{};
     m.srsrc = 1;
-    m.soffset = 128;
+    m.soffset = soffset;
     m.idxen = 1;
     m.vdata = 8;
     if constexpr (requires { m.glc; })
@@ -306,49 +306,56 @@ protected:
     const auto *raw = reinterpret_cast<const Raw *>(&m);
     return d16 ? execute<LoadD16, StoreD16>(load, raw) : execute<Load, Store>(load, raw);
   }
-  void issue_typed(uint32_t format) {
+  void issue_typed(uint32_t format, uint32_t soffset = 128) {
     Instruction *inst = nullptr;
     switch (GetParam()) {
     case ROCJITSU_CODE_ARCH_RDNA1:
       inst = legacy<rdna1::MachineInst, rdna1::MtbufMachineInst, rdna1::TbufferLoadFormatXyzwMtbuf,
                     rdna1::TbufferStoreFormatXMtbuf, rdna1::TbufferLoadFormatD16XyzMtbuf,
-                    rdna1::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format));
+                    rdna1::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_RDNA2:
       inst = legacy<rdna2::MachineInst, rdna2::MtbufMachineInst, rdna2::TbufferLoadFormatXyzwMtbuf,
                     rdna2::TbufferStoreFormatXMtbuf, rdna2::TbufferLoadFormatD16XyzMtbuf,
-                    rdna2::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format));
+                    rdna2::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_CDNA1:
       inst = legacy<cdna1::MachineInst, cdna1::MtbufMachineInst, cdna1::TbufferLoadFormatXyzwMtbuf,
                     cdna1::TbufferStoreFormatXMtbuf, cdna1::TbufferLoadFormatD16XyzMtbuf,
-                    cdna1::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format));
+                    cdna1::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_CDNA2:
       inst = legacy<cdna2::MachineInst, cdna2::MtbufMachineInst, cdna2::TbufferLoadFormatXyzwMtbuf,
                     cdna2::TbufferStoreFormatXMtbuf, cdna2::TbufferLoadFormatD16XyzMtbuf,
-                    cdna2::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format));
+                    cdna2::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_CDNA3:
       inst = legacy<cdna3::MachineInst, cdna3::MtbufMachineInst, cdna3::TbufferLoadFormatXyzwMtbuf,
                     cdna3::TbufferStoreFormatXMtbuf, cdna3::TbufferLoadFormatD16XyzMtbuf,
-                    cdna3::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format));
+                    cdna3::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_CDNA4:
       inst = legacy<cdna4::MachineInst, cdna4::MtbufMachineInst, cdna4::TbufferLoadFormatXyzwMtbuf,
                     cdna4::TbufferStoreFormatXMtbuf, cdna4::TbufferLoadFormatD16XyzMtbuf,
-                    cdna4::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format));
+                    cdna4::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_RDNA3:
       inst = legacy<rdna3::MachineInst, rdna3::MtbufMachineInst, rdna3::TbufferLoadFormatXyzwMtbuf,
                     rdna3::TbufferStoreFormatXMtbuf, rdna3::TbufferLoadD16FormatXyzMtbuf,
-                    rdna3::TbufferStoreD16FormatXyzwMtbuf>(true, false, encoded_format(format));
+                    rdna3::TbufferStoreD16FormatXyzwMtbuf>(true, false, encoded_format(format),
+                                                           soffset);
       break;
     case ROCJITSU_CODE_ARCH_RDNA3_5:
       inst = legacy<rdna3_5::MachineInst, rdna3_5::MtbufMachineInst,
                     rdna3_5::TbufferLoadFormatXyzwMtbuf, rdna3_5::TbufferStoreFormatXMtbuf,
                     rdna3_5::TbufferLoadD16FormatXyzMtbuf, rdna3_5::TbufferStoreD16FormatXyzwMtbuf>(
-          true, false, encoded_format(format));
+          true, false, encoded_format(format), soffset);
       break;
     case ROCJITSU_CODE_ARCH_RDNA4: {
       rdna4::VbufferMachineInst m{};
@@ -368,7 +375,7 @@ protected:
     amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
     ASSERT_EQ(pipeline.issue(inst, *wf), amdgpu::VmAccessOutcome::Complete);
   }
-  void issue(bool load, bool d16 = false) {
+  void issue(bool load, bool d16 = false, uint32_t soffset = 128) {
     Instruction *inst;
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
       rdna4::VbufferMachineInst m{};
@@ -385,7 +392,7 @@ protected:
     } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
       rdna3::MubufMachineInst m{};
       m.srsrc = 1;
-      m.soffset = 128;
+      m.soffset = soffset;
       m.idxen = 1;
       m.vdata = 8;
       m.glc = m.slc = 1;
@@ -398,31 +405,31 @@ protected:
     } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA1) {
       inst = legacy<rdna1::MachineInst, rdna1::MubufMachineInst, rdna1::BufferLoadFormatXyzwMubuf,
                     rdna1::BufferStoreFormatXMubuf, rdna1::BufferLoadFormatD16XyzMubuf,
-                    rdna1::BufferStoreFormatD16XyzwMubuf>(load, d16);
+                    rdna1::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
     } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA2) {
       inst = legacy<rdna2::MachineInst, rdna2::MubufMachineInst, rdna2::BufferLoadFormatXyzwMubuf,
                     rdna2::BufferStoreFormatXMubuf, rdna2::BufferLoadFormatD16XyzMubuf,
-                    rdna2::BufferStoreFormatD16XyzwMubuf>(load, d16);
+                    rdna2::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
     } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA1) {
       inst = legacy<cdna1::MachineInst, cdna1::MubufMachineInst, cdna1::BufferLoadFormatXyzwMubuf,
                     cdna1::BufferStoreFormatXMubuf, cdna1::BufferLoadFormatD16XyzMubuf,
-                    cdna1::BufferStoreFormatD16XyzwMubuf>(load, d16);
+                    cdna1::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
     } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA2) {
       inst = legacy<cdna2::MachineInst, cdna2::MubufMachineInst, cdna2::BufferLoadFormatXyzwMubuf,
                     cdna2::BufferStoreFormatXMubuf, cdna2::BufferLoadFormatD16XyzMubuf,
-                    cdna2::BufferStoreFormatD16XyzwMubuf>(load, d16);
+                    cdna2::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
     } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA3) {
       inst = legacy<cdna3::MachineInst, cdna3::MubufMachineInst, cdna3::BufferLoadFormatXyzwMubuf,
                     cdna3::BufferStoreFormatXMubuf, cdna3::BufferLoadFormatD16XyzMubuf,
-                    cdna3::BufferStoreFormatD16XyzwMubuf>(load, d16);
+                    cdna3::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
     } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA4) {
       inst = legacy<cdna4::MachineInst, cdna4::MubufMachineInst, cdna4::BufferLoadFormatXyzwMubuf,
                     cdna4::BufferStoreFormatXMubuf, cdna4::BufferLoadFormatD16XyzMubuf,
-                    cdna4::BufferStoreFormatD16XyzwMubuf>(load, d16);
+                    cdna4::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
     } else {
       rdna3_5::MubufMachineInst m{};
       m.srsrc = 1;
-      m.soffset = 128;
+      m.soffset = soffset;
       m.idxen = 1;
       m.vdata = 8;
       m.glc = m.slc = 1;
@@ -575,6 +582,47 @@ TEST_P(BufferFormatExecutionTest, UnsupportedDescriptorFailsBeforeIssuingMemory)
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
   EXPECT_EQ(inst->data(), nullptr);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8, 0), 0xdeadbeef);
+}
+
+TEST_P(BufferFormatExecutionTest, InlineScalarOffsetsUseTheirUnsignedBitsForTypedAndUntypedLoads) {
+  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "VBUFFER uses a seven-bit register selector instead of inline SOFFSET";
+  const uint32_t lane = wf->wf_size() - 1;
+  wf->set_exec(uint64_t{1} << lane);
+  const uint32_t sb = wf->sgpr_alloc().base, vb = wf->vgpr_alloc().base;
+  constexpr uint64_t address = 0x200001000ull;
+  constexpr uint32_t expected = 0x92345678;
+  memory.write32(address, expected);
+  cu->write_vgpr(vb, lane, 0);
+  constexpr uint32_t float_bits[] = {0x3f000000, 0xbf000000, 0x3f800000, 0xbf800000, 0x40000000,
+                                     0xc0000000, 0x40800000, 0xc0800000, 0x3e22f983};
+  for (uint32_t selector = 128; selector <= 255; ++selector) {
+    // Some older ISAs also permit dynamic special sources here. This regression
+    // covers static constants and universally invalid encodings only.
+    if ((selector >= 235 && selector <= 239) || (selector >= 251 && selector <= 253))
+      continue;
+    SCOPED_TRACE(selector);
+    const bool valid = selector <= 208 || (selector >= 240 && selector <= 248);
+    const uint32_t offset = selector <= 192   ? selector - 128
+                            : selector <= 208 ? 192u - selector
+                            : valid           ? float_bits[selector - 240]
+                                              : 0;
+    descriptor(20, 4); // 32_UINT, index-checked so large unsigned offsets remain in range.
+    const uint64_t base = address - offset;
+    cu->write_sgpr(sb + 4, uint32_t(base));
+    cu->write_sgpr(sb + 5, uint32_t(base >> 32) | (4u << 16));
+    for (bool typed : {false, true}) {
+      SCOPED_TRACE(typed);
+      cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+      cu->write_vgpr(vb + 8, 0, 0xabcdef01);
+      if (typed)
+        issue_typed(20, selector);
+      else
+        issue(true, false, selector);
+      EXPECT_EQ(cu->read_vgpr(vb + 8, lane), valid ? expected : 0);
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xabcdef01);
+    }
+  }
 }
 
 TEST_P(BufferFormatExecutionTest, TypedFormatOverridesDescriptorAndExecIncludesTheHighestLane) {
