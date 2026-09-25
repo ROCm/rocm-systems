@@ -352,3 +352,10 @@ trials. High calibration and SuperCollider sleep=15 are running.
 Tensile F8 SuperCollider finishes all nine clean shards successfully under the
 bounded scheduler (`bounded-clean-tensile/tensile-sk-f8gemm-quick/supercollider`);
 its fault qualification remains pending.
+
+WMMA SuperCollider sleep=15 finishes with zero detections despite **8/8
+independent numerical oracle failures**. Clean correctness and complete
+coverage pass on matching provenance; all fault trials are admitted/reached
+and healthy (`wmma-lifetime-sleep15-{clean,fault}`). This is a demonstrated
+miss on a manifested publication fault, not merely an unmanifested injected
+race. It stays yellow under the shared detection-rate scale.
