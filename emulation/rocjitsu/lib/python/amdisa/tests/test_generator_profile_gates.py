@@ -1570,7 +1570,7 @@ def test_s_waitcnt_compat_injection_skips_untargeted_arch():
     assert dte.sub_decode_funcs[9] is None
 
 
-def test_rdna4_s_waitcnt_compat_uses_gfx11_layout():
+def test_rdna4_s_waitcnt_compat_waits_for_idle_without_reading_immediate():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='rdna4',
@@ -1588,9 +1588,7 @@ def test_rdna4_s_waitcnt_compat_uses_gfx11_layout():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOPP')
 
-    assert 'uint8_t exp = imm & 0x7;' in body
-    assert 'uint8_t lgkm = (imm >> 4) & 0x3F;' in body
-    assert 'uint8_t vm = (imm >> 10) & 0x3F;' in body
+    assert body == '  wf.set_wait_all();'
 
 
 def test_s_trap_executes_as_nop_without_a_trap_handler():
@@ -7778,7 +7776,12 @@ def test_flat_store_snapshots_one_observed_vgpr_region(
     body = codegen._gen_flat_store([], [], store)
 
     data_regs = num_elems if elem_size == 4 else 1
-    assert f'RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec)' in body
+    byte_mask = ((1 << elem_size) - 1) << (2 if d16_hi else 0)
+    mask_arg = f', {byte_mask:#x}' if elem_size < 4 else ''
+    assert (
+        f'RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec{mask_arg})'
+        in body
+    )
     assert expected in body
     assert '.read_vgpr(' not in body
 

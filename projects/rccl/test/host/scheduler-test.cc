@@ -798,6 +798,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL128_RoundsChunkSizeTo
   scene.comm->WarpSize = 64;
   scene.comm->ll128DataElems = 1;
   scene.comm->ll128LineElems = 1;
+  scene.comm->ll128ShmemElemsPerThread = 8;
 
   ncclTaskBcast task{};
   task.count = 50000;

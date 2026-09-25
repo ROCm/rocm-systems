@@ -254,6 +254,18 @@ TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_SimpleTermDominatesAtWarp32) {
   EXPECT_EQ(4112, rcclShmemScratchWarpSize(942, 32)) << "measured constant";
 }
 
+TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_Ll128TermDominatesAtGfx1250) {
+  // gfx1250 is the only arch where LL128 wins the max(): 32 elems/thread, and
+  // ncclCollUnroll(1250) is 6 rather than 8.
+  constexpr int kLL128 = (32 * 32) * int(sizeof(uint64_t));
+  constexpr int kSimple = (ncclCollUnroll(1250) * 32 + 1) * 16;
+  static_assert(kLL128 > kSimple, "LL128 is expected to dominate at gfx1250/warp32");
+  EXPECT_EQ((kLL128 + 15) & -16, rcclShmemScratchWarpSize(1250, 32));
+  EXPECT_EQ(8192, rcclShmemScratchWarpSize(1250, 32)) << "measured constant";
+  EXPECT_EQ(8, rcclLL128ShmemElemsPerThread(942)) << "non-gfx1250 unchanged";
+  EXPECT_EQ(32, rcclLL128ShmemElemsPerThread(1250));
+}
+
 TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_NvlsTermNeverWins) {
   // HONEST SCOPE: :66 gates the NVLS term on `cudaArch >= 900`, but that gate is
   // an EQUIVALENT MUTANT today. ncclNvlsUnrollBytes is the constant 4*16 for
@@ -718,7 +730,7 @@ struct ChunkComm {
   explicit ChunkComm(int protoSimpleBuf = 1 << 22) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) comm.buffSizes[p] = protoSimpleBuf;
     // LOAD-BEARING: rcclProtoGrainSize(LL128) (scheduler.h:22) is
-    //   WarpSize * ELEMS_PER_THREAD * ll128DataElems * 8 / ll128LineElems
+    //   WarpSize * ll128ShmemElemsPerThread * ll128DataElems * 8 / ll128LineElems
     // so a zero WarpSize makes grainSize 0, and :3028's
     // `chunkSize / grainSize * grainSize` then SIGFPEs. A zero-initialised
     // ncclComm is not a usable fixture for any LL128 path.
@@ -729,6 +741,7 @@ struct ChunkComm {
     comm.nvlsTreeMaxChunkSize = 128 * 1024;
     comm.ll128LineElems = 120;
     comm.ll128DataElems = 112;
+    comm.ll128ShmemElemsPerThread = 8;
     comm.channels[0].tree.depth = 4;
     comm.channels[0].collnetDirect.depth = 4;
     comm.channels[0].collnetDirect.nHeads = 1;
@@ -1105,8 +1118,8 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
   // divides by zero. This fails loudly instead of core-dumping the suite.
   ChunkComm cc;
   EXPECT_GT(rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()), 0)
-      << "LL128 grain is WarpSize*8*ll128DataElems*8/ll128LineElems -- a zero "
-         "WarpSize or ll128DataElems makes calcCollChunking:3028 SIGFPE";
+      << "LL128 grain is WarpSize*ll128ShmemElemsPerThread*ll128DataElems*8/ll128LineElems -- a zero "
+         "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkSizeIsAlwaysWritten) {

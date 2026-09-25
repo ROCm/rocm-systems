@@ -57,38 +57,22 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
                                rcclDdaVmmThreshold(mockComm_.get(), ncclFuncAllReduce)));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAt4MbThreshold_Enabled)
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAtLL128Threshold_Enabled)
 {
     mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t totalBytes = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll];
-    EXPECT_TRUE(rcclDdaEnabled(
-        mockComm_.get(),
-        totalBytes,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+    const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
+    EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), threshold, threshold));
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold, ncclFloat32));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverThreshold_Disabled)
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverLL128Threshold_Disabled)
 {
     mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t totalBytes = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll] + 1;
-    EXPECT_FALSE(rcclDdaEnabled(
-        mockComm_.get(),
-        totalBytes,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+    const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
+    EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), threshold + 1, threshold));
     EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold + 1, ncclFloat32));
-}
-
-TEST_F(DdaAlltoAllThresholdTest, Gfx1250_AlltoAllIgnoresHighUserThreshold)
-{
-    mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t overCap = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll] + 1;
-    EXPECT_FALSE(rcclDdaEnabled(
-        mockComm_.get(),
-        overCap,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold + 1, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, UnsupportedArch_Disabled)
@@ -197,12 +181,12 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_FourRanks_Enabled)
 {
     mockComm_.reset("gfx1250:sramecc+:xnack-");
     mockComm_.comm.nRanks = 4;
-    const size_t totalBytes = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll];
+    const size_t totalBytes = rcclGetArchThresholds("gfx1250")->ddaLLMax[ncclFuncAlltoAll];
     // gfx1250 has no nRanks<8 gate, so DDA should be enabled at nRanks=4.
     EXPECT_TRUE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+        rcclGetArchThresholds("gfx1250")->ddaLLMax[ncclFuncAlltoAll]));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx942_FourRanks_Disabled)

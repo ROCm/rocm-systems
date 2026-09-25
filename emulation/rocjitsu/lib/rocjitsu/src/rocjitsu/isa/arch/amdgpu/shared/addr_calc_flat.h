@@ -71,7 +71,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // wavefront's scratch_base_ member.
     constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
     const uint32_t lane_count = wf.wf_size();
-    uint64_t scratch_base = wf.scratch_base();
+    uint64_t scratch_base = exec ? wf.read_scratch_base() : wf.scratch_base();
     int64_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
       const uint32_t sb_sel = inst.saddr;
@@ -144,7 +144,6 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
     const uint32_t lane_count = wf.wf_size();
     uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
-    uint64_t scratch_base = wf.scratch_base();
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -154,7 +153,8 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       uint64_t addr = vaddr + offset;
       if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi) {
         uint64_t priv_off = addr & 0xFFFFFFFFULL;
-        addr = scratch_base + (priv_off / kScratchInterleave) * lane_count * kScratchInterleave +
+        addr = wf.read_scratch_base() +
+               (priv_off / kScratchInterleave) * lane_count * kScratchInterleave +
                static_cast<uint64_t>(lane) * kScratchInterleave + (priv_off % kScratchInterleave);
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;

@@ -943,6 +943,7 @@ inline auto simd_mask_as(const Mask &m) {
 template <typename T, typename CmpOp>
   requires(util::has_stdx_simd)
 inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
   constexpr std::size_t W = util::native_width64;
   alignas(64) T abuf[W];
   alignas(64) T bbuf[W];
@@ -955,19 +956,22 @@ inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
       const One av(&abuf[i], util::stdx::element_aligned);
       const One bv(&bbuf[i], util::stdx::element_aligned);
       if (cmp_op(av, bv)[0])
-        bits |= (1ULL << i);
-    } else {
-      if (cmp_op(abuf[i], bbuf[i]))
-        bits |= (1ULL << i);
+        bits |= uint64_t{1} << i;
+    } else if (cmp_op(abuf[i], bbuf[i])) {
+      bits |= uint64_t{1} << i;
     }
   }
   return bits;
+#else
+  return util::simd_mask_to_bits(cmp_op(a, b));
+#endif
 }
 
 template <typename CmpOp>
   requires(util::has_stdx_simd)
 inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
                                    CmpOp cmp_op) {
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
   constexpr std::size_t W = util::native_width64;
   alignas(64) uint64_t sbuf[W];
   alignas(64) uint32_t mbuf[W];
@@ -980,9 +984,12 @@ inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint
     const One64 sv(&sbuf[i], util::stdx::element_aligned);
     const One32 mv(&mbuf[i], util::stdx::element_aligned);
     if (cmp_op(sv, mv)[0])
-      bits |= (1ULL << i);
+      bits |= uint64_t{1} << i;
   }
   return bits;
+#else
+  return util::simd_mask_to_bits(cmp_op(s, mask));
+#endif
 }
 
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`
@@ -1045,7 +1052,7 @@ SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
 /// carry-in ignore it. The result is masked-stored to vdst and the carry mask
 /// is returned through `write_result`, which owns the architectural VCC commit
 /// after any DPP source-validity merge. Inactive-lane bits remain zero.
-template <typename Inst, typename CarryOp, typename WriteResult>
+template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
                                                              CarryOp carry_op,
@@ -1059,7 +1066,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   // Carry-in reads the incoming VCC; the result accumulates from zero so that
   // inactive lanes are zeroed (matching hardware and the scalar bodies).
-  const uint64_t vcc_in = wf.vcc();
+  const uint64_t vcc_in = ReadCarry ? wf.vcc_mask(exec) : 0;
   uint64_t vcc_out = 0;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -1073,18 +1080,12 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto b = src1.template load_native<T>(base);
     // Expand the incoming VCC bits for this chunk to a 0/1-per-lane vector.
     const uint64_t cin_bits = (vcc_in >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t cinbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
-    const auto cin = util::load<T>(cinbuf);
+    const auto cin = util::simd_u32_lanes_from_bits(cin_bits);
     const auto r = carry_op(a, b, cin);
     dst.template store_native<T>(base, r.value, chunk);
     // Pack the per-lane carry mask into the low W bits, then merge into VCC for
     // active lanes only (clear active bits, set from carry; preserve the rest).
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     vcc_out = (vcc_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(vcc_out);
@@ -1092,7 +1093,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 }
 
 /// Unconstrained fallback for the carry path; see the binary-path note above.
-template <typename Inst, typename CarryOp, typename WriteResult>
+template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp, WriteResult) {
   return false;
 }
@@ -1550,7 +1551,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc();
+  const uint64_t vcc = wf.vcc_mask(exec);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.vsrc1, exec);
@@ -1562,11 +1563,8 @@ template <typename Inst>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const uint64_t sel_bits = (vcc >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t selbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
-    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -1608,11 +1606,8 @@ template <typename Inst>
     const auto b = apply_vop3_b32_src_mod(src1.template load_native<T>(base), inst.inst_.abs,
                                           inst.inst_.neg, 1);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t selbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
-    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -1650,11 +1645,8 @@ template <typename Inst>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t selbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
-    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
     r = r & util::native<T>(0xFFFFu);
     dst.template store_native<T>(base, r, chunk);
   }
@@ -1699,11 +1691,7 @@ template <typename T, typename Inst, typename CmpOp, typename WriteResult>
       continue;
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(vcc);
@@ -1855,11 +1843,7 @@ template <bool True16, typename Inst, typename CmpOp, typename WriteResult>
       a = a & ~sm;
     if (do_neg)
       a = a ^ sm;
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(vcc);
@@ -2131,11 +2115,7 @@ template <typename T, bool True16 = false, typename Inst, typename CmpOp, typena
       a = select_vop3_true16_src(a, vop3_opsel(inst.inst_), 0);
       b = select_vop3_true16_src(b, vop3_opsel(inst.inst_), 1);
     }
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(dst);
@@ -2215,11 +2195,7 @@ template <typename Inst, typename CmpOp, typename WriteResult>
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(src1.template load_native<T>(base), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(dst);
@@ -2268,11 +2244,7 @@ template <bool True16, typename Inst, typename CmpOp, typename WriteResult>
     }
     const auto a = apply_vop3_src_mod_f32<0>(util::f16_to_f32_simd(a_raw), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_result(dst);
@@ -3307,7 +3279,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc();
+  const uint64_t vcc = wf.vcc_mask(exec);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -3349,7 +3321,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc();
+  const uint64_t vcc = wf.vcc_mask(exec);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand64(inst.src0, exec);
   auto src1 = regs.read_operand64(inst.src1, exec);
@@ -3486,10 +3458,7 @@ template <typename Inst, typename MadOp, typename WriteResult>
     const auto c = src2.template load_native<uint64_t>(base);
     const auto r = mad_op(a, b, c);
     dst.template store_native<uint64_t>(base, r.value, chunk);
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(carry_out);
@@ -3542,10 +3511,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto b = src1.template load_native<T>(base);
     const auto r = carry_op(a, b, zero_cin);
     dst.template store_native<T>(base, r.value, chunk);
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(carry_out);
@@ -3594,16 +3560,10 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const uint64_t cin_bits = (cin_all >> base) & chunk_full;
-    alignas(util::native<T>) uint32_t cinbuf[W];
-    for (std::size_t i = 0; i < W; ++i)
-      cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
-    const auto cin = util::load<T>(cinbuf);
+    const auto cin = util::simd_u32_lanes_from_bits(cin_bits);
     const auto r = carry_op(a, b, cin);
     dst.template store_native<T>(base, r.value, chunk);
-    uint64_t carry_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (r.carry[i])
-        carry_bits |= (1ULL << i);
+    const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
   write_result(carry_out);
@@ -4670,8 +4630,9 @@ template <bool Vop3, typename Inst>
 
 /// Carry-VOP2 counterpart. The wrapper-owned writer merges DPP-suppressed
 /// lanes and applies the target wave-width policy before the VCC commit.
-#define ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(WRITE_RESULT, ...)                                     \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd(inst, wf, __VA_ARGS__, WRITE_RESULT)) \
+#define ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(WRITE_RESULT, READ_CARRY, ...)                         \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd<READ_CARRY>(inst, wf, __VA_ARGS__,    \
+                                                                         WRITE_RESULT))            \
   return
 
 /// Literal FMA/MAD VOP2 counterpart. `KEXPR` is the inline-literal bits
