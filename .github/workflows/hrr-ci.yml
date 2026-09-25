@@ -125,11 +125,9 @@ jobs:
             exit 1
           fi
           ls -l "${bin[0]}"
-          # Per-test durations here too, so both suites read the same way.
-          "${bin[0]}" \
-            --reporter console \
-            --durations yes \
-            --reporter junit::out=unit-${{ matrix.os }}.xml
+          python3 projects/hrr/tests/run_catch2.py \
+            --xml unit-${{ matrix.os }}.xml \
+            -- "${bin[0]}"
 
       - name: Upload results
         if: always()
@@ -430,15 +428,11 @@ jobs:
           if [ -n "${DEVICES}" ]; then
             export HIP_VISIBLE_DEVICES="${DEVICES}"
           fi
-          # --durations yes makes the console reporter emit one
-          # "<seconds> s: <name>" line per test case and per section, which is
-          # the per-test view the log otherwise lacks: Catch2's console reporter
-          # is silent about passing cases. Failures are unaffected and still
-          # print in full.
-          ./build/hrr/tests/integration/hrr-integration-tests \
-            --reporter console \
-            --durations yes \
-            --reporter junit::out=integration-${{ matrix.family }}.xml
+          # Keep passing logs to one result line per case. The wrapper captures
+          # Catch2 and subprocess output, and only emits it when the suite fails.
+          python3 projects/hrr/tests/run_catch2.py \
+            --xml integration-${{ matrix.family }}.xml \
+            -- ./build/hrr/tests/integration/hrr-integration-tests
 
       # Unit_HRR_StreamWriteValueRoundtrip fails on every RDNA family:
       # hipStreamWriteValue64 returns hipSuccess and the value never lands. The
@@ -504,5 +498,7 @@ jobs:
           files: "*.xml"
           check_name: "HRR test results"
           comment_mode: "off"
-          check_run: false
+          check_run: true
           job_summary: true
+          report_individual_runs: true
+          deduplicate_classes_by_file_name: true
