@@ -227,21 +227,49 @@
     "d128-pressure": {
       "faults": [
         {
-          "id": "barrier-drop",
+          "id": "barrier-drop-kv-publication-group",
           "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Fresh pressure-lifetime-inventory ELF 98ca1f89bb21cd55. FullKvDoubleBuffered16Key FastContextPolicy source 012_gfx1250_d128_attention_pressure_test.hip:346-387 cooperatively stages K and V by thread ID, then publishes before all subgroups read every head fragment at lines 402-406. Pristine pressure-pristine.asm (.text VMA 0x3600) has staging stores 0x3f844/0x3f850, restored EXEC before 0x3fc08, and split publication pairs .text+0x3c608/0x3c624 plus 0x3c628/0x3c64c. Drop both physical pairs, preserve preceding reuse and subsequent score/reduction synchronization. Peer loads follow at VMA 0x3fe1c/0x3fe28. FullKvDoubleBufferedSampledFastMatchesHostReference executes the nonempty key loop and therefore reaches this edge. Eight independent trials per mode, minimum six detections, are predeclared before outcomes."
+          },
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:194e3de66ffe28a8|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:194e3de66ffe28a8|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000918c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:194e3de66ffe28a8|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009190|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:98ca1f89bb21cd55|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003c608|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:98ca1f89bb21cd55|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003c608|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:98ca1f89bb21cd55|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003c624|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:98ca1f89bb21cd55|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000003c628|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:98ca1f89bb21cd55|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003c628|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:98ca1f89bb21cd55|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv16_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000003c64c|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
           },
           "profiles": {
-            "supercollider": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
             "default": {
-              "detector": "not_detected",
-              "oracle": "fail"
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
             }
           }
         }

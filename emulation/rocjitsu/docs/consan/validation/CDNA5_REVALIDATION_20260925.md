@@ -364,3 +364,14 @@ WMMA Default qualifies at high: 8/8 detections, matching accepted clean,
 complete analysis and healthy admitted/reached trials
 (`wmma-lifetime-high-{clean,fault}`). Default was 2/8, so high is the lowest
 passing tested preset at or above default.
+
+### D128 pressure publication fault refresh
+
+The old helper identity is stale. Fresh `pressure-lifetime-inventory` and
+`pressure-pristine.asm` select FullKvDoubleBuffered16Key FastContextPolicy's
+cooperative K/V publication. All subgroups subsequently read fragments staged
+by peers. The pair group `.text+0x3c608/0x3c624` and `0x3c628/0x3c64c`
+is removed together, preserving surrounding reuse and reduction barriers.
+The complete row still executes both full-KV and wide-key variants; this fault
+qualifies the preselected full-KV publication. Eight trials per mode, minimum
+six detections, are declared before running them.
