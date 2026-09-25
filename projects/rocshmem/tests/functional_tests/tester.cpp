@@ -443,12 +443,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case HostPutmemTestType:
       test_name = "Host_Putmem";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostGetmemTestType:
       test_name = "Host_Getmem";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoFAddTestType:
