@@ -38,6 +38,7 @@ if(IS_SPM_DISABLED OR IS_THREAD_SANITIZER)
     set(IS_DISABLED True)
 endif()
 
+# Disabled on CI
 set(IS_DISABLED True)
 
 find_package(rocprofiler-sdk REQUIRED)

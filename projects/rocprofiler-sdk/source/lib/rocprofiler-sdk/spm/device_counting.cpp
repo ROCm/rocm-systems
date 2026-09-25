@@ -273,6 +273,8 @@ spm_start_agent_ctx(const context::context* ctx)
         if(!callback_data.set_profile)
         {
             callback_data.packet.reset();
+            counters::counter_collection_ptl_enable(agent->get_rocp_agent());
+            counters::counter_collection_device_unlock(agent->get_rocp_agent());
             continue;
         }
 
