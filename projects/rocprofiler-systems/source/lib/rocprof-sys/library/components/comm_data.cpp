@@ -16,9 +16,7 @@ using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;
 using rocprofsys::common::units::megabytes;
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -936,5 +934,4 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     if(rocprofsys::get_use_timemory()) add(_data, count * _size);
 }
 #endif
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

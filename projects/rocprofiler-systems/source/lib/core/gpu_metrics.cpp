@@ -6,9 +6,7 @@
 
 #include <stdexcept>
 
-namespace rocprofsys
-{
-namespace gpu
+namespace rocprofsys::gpu
 {
 namespace
 {
@@ -314,5 +312,4 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
     }
 }
 
-}  // namespace gpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::gpu

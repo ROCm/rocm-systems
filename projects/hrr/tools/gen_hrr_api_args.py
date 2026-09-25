@@ -693,6 +693,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipModuleUnload",
     # hipModuleGetFunctionCount — output uint* stale
     "hipModuleGetFunctionCount",
+    # hipModuleEnumerateFunctions — hipFunction_t* output buffer stale at playback
+    "hipModuleEnumerateFunctions",
     # hipModuleLoadFatBinary — fat binary ptr stale at playback (code object already loaded via registered binary)
     "hipModuleLoadFatBinary",
     # hipModule occupancy — hipFunction_t stale handle
@@ -1904,13 +1906,15 @@ _HEADER_PREAMBLE = """\
  * structs) are no longer dropped.
  * v5: hrr_api_id_t is assigned from HipDispatchTable member order, then
  * HipCompilerDispatchTable member order, instead of typedef declaration
- * order, which renumbered 496 of the 552 IDs once. Runtime IDs occupy 0..N-1
- * so a new compiler-table member cannot shift them. Every event stores its
+ * order, which renumbered 496 of the 552 IDs once. Every event stores its
  * ID, so a pre-v5 archive names the wrong API when decoded against this
- * table and needs an ID translation to be read back. From v5 on a new API
- * takes the next free ID in its table and no existing runtime ID moves, so
- * adding APIs no longer needs a version bump. A retired dispatch-table slot
- * (nulled void*) still occupies an ID.
+ * table and needs an ID translation to be read back.
+ * Runtime IDs come first and compiler IDs occupy the tail, so appending a
+ * HipCompilerDispatchTable member moves no existing ID, while appending a
+ * HipDispatchTable member takes the first compiler ID and shifts the whole
+ * compiler tail up by one. Compiler APIs do write events, so that second
+ * case still needs a version bump. A retired dispatch-table slot (nulled
+ * void*) still occupies an ID.
  * v6: pointer arguments whose pointee used to be dropped now carry it inline
  * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
  * before v6 cannot be read by a v6 reader: re-capture rather than replay an

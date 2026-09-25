@@ -33,9 +33,7 @@
 
 //======================================================================================//
 
-namespace tim
-{
-namespace cereal
+namespace tim::cereal
 {
 class SettingsTextArchive
 : public OutputArchive<SettingsTextArchive>
@@ -304,8 +302,7 @@ TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive&, const SizeTag<T>&)
     // nothing to do here, we don't explicitly save the size
 }
 
-}  // namespace cereal
-}  // namespace tim
+}  // namespace tim::cereal
 
 // register archives for polymorphic support
 TIMEMORY_CEREAL_REGISTER_ARCHIVE(SettingsTextArchive)

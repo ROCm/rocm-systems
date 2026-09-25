@@ -130,12 +130,13 @@ TEST(HipKittensBf16MatmulDbtTest, With16x32DispatchesAndMatchesReference) {
 
   for (uint32_t r = 0; r < kFull; ++r) {
     const float a_value = static_cast<float>((r % 4) + 1) * 0.0625f;
-    std::fill_n(host_a.data() + static_cast<size_t>(r) * kFull, kFull, f32_to_bf16_trunc(a_value));
+    std::ranges::fill_n(host_a.data() + static_cast<size_t>(r) * kFull, kFull,
+                        f32_to_bf16_trunc(a_value));
   }
   for (uint32_t col = 0; col < kFull; ++col) {
     const float b_value = static_cast<float>((col % 5) + 1) * 0.03125f;
-    std::fill_n(host_b.data() + static_cast<size_t>(col) * kFull, kFull,
-                f32_to_bf16_trunc(b_value));
+    std::ranges::fill_n(host_b.data() + static_cast<size_t>(col) * kFull, kFull,
+                        f32_to_bf16_trunc(b_value));
   }
 
   uint16_t *dev_a = nullptr;
@@ -183,12 +184,13 @@ TEST(HipKittensBf16MatmulDbtTest, With32x16DispatchesAndMatchesReference) {
 
   for (uint32_t r = 0; r < kFull; ++r) {
     const float a_value = static_cast<float>((r % 4) + 1) * 0.0625f;
-    std::fill_n(host_a.data() + static_cast<size_t>(r) * kFull, kFull, f32_to_bf16_trunc(a_value));
+    std::ranges::fill_n(host_a.data() + static_cast<size_t>(r) * kFull, kFull,
+                        f32_to_bf16_trunc(a_value));
   }
   for (uint32_t col = 0; col < kFull; ++col) {
     const float b_value = static_cast<float>((col % 5) + 1) * 0.03125f;
-    std::fill_n(host_b.data() + static_cast<size_t>(col) * kFull, kFull,
-                f32_to_bf16_trunc(b_value));
+    std::ranges::fill_n(host_b.data() + static_cast<size_t>(col) * kFull, kFull,
+                        f32_to_bf16_trunc(b_value));
   }
 
   uint16_t *dev_a = nullptr;

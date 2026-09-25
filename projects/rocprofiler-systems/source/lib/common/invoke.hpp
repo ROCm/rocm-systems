@@ -26,9 +26,7 @@
 #    define ROCPROFSYS_COMMON_LIBRARY_LOG_END
 #endif
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 namespace
 {
@@ -128,5 +126,4 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
     if constexpr(!std::is_void<return_type>::value) return return_type();
 }
 }  // namespace
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

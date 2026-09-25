@@ -1,0 +1,21 @@
+# Limited cluster scale runners and the shared workflow allowlist.
+#
+# Runners: one label per line (anything not starting with .github/).
+# Workflows: one repo-relative path per line (must start with .github/workflows/).
+# Every runner above may only appear in workflows listed below.
+# Changes require @ROCm/rccl-ci review.
+#
+# Prefer coco (rccl-coco*.yml) for new RCCL cluster jobs.
+
+ruby-linux-slurm-scale-runner
+oci-linux-slurm-scale-runner
+tw-gfx950-ainic-ROCm-scale-runner
+
+.github/workflows/rccl-coco-pr.yml
+.github/workflows/rccl-coco-scheduled.yml
+.github/workflows/rccl-ci.yml
+.github/workflows/rccl-suite.yml
+.github/workflows/rccl-ainic-tw-gfx950-runner.yml
+.github/workflows/rccl_perf_regression.yml
+.github/workflows/therock-rccl-ci-linux.yml
+.github/workflows/therock-rccl-test-madengine.yml

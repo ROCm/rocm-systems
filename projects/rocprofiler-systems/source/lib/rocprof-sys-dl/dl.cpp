@@ -76,9 +76,7 @@ operator<<(std::ostream& _os, const SpaceHandle& _handle)
     return _os;
 }
 
-namespace rocprofsys
-{
-namespace dl
+namespace rocprofsys::dl
 {
 namespace
 {
@@ -571,8 +569,7 @@ bool _rocprofsys_dl_fini = (std::atexit([]() {
                             }),
                             true);
 }  // namespace
-}  // namespace dl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::dl
 
 //--------------------------------------------------------------------------------------//
 
@@ -1159,9 +1156,7 @@ extern "C"
 #endif
 }
 
-namespace rocprofsys
-{
-namespace dl
+namespace rocprofsys::dl
 {
 namespace
 {
@@ -1428,8 +1423,7 @@ bool        _handle_preload = rocprofsys_preload();
 main_func_t main_real       = nullptr;
 init_func_t init_real       = nullptr;
 }  // namespace
-}  // namespace dl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::dl
 
 extern "C"
 {

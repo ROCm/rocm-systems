@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
         double ms = run_kernel(k.name, k.N, t);
         times.push_back(ms);
       }
-      std::sort(times.begin(), times.end());
+      std::ranges::sort(times);
       std::cout << "," << times[RUNS / 2];
     }
     std::cout << "\n";
