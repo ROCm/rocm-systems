@@ -133,6 +133,17 @@ def create_llama_runtime_fixture(build_root: Path, executable_name: str) -> None
 
 
 class ConSanValidationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # Mocked doctor/provenance calls must not queue behind real GPU work.
+        root_context = temporary_root()
+        root = root_context.__enter__()
+        self.addCleanup(root_context.__exit__, None, None, None)
+        lock_default = mock.patch.object(
+            validation_faults, "DEFAULT_GLOBAL_DESTRUCTIVE_LOCK", str(root / "gpu.lock")
+        )
+        lock_default.start()
+        self.addCleanup(lock_default.stop)
+
     def test_launcher_json_is_an_exact_argv_prefix(self) -> None:
         self.assertEqual(
             validation._launcher_from_json(
@@ -573,9 +584,9 @@ class ConSanValidationTest(unittest.TestCase):
                 status = (status_root / filename).read_text()
                 self.assertEqual(status.count("| Set | Priority |"), 1)
                 self.assertEqual(status.count("| --- | ---: | --- | --- | --- |"), 1)
-                # RDNA4 now uses the fault-detection qualification bar;
+                # RDNA4 and CDNA4 use the fault-detection qualification bar;
                 # other ledgers retain the historical support-based legend.
-                if target != "gfx1201":
+                if target not in {"gfx1201", "gfx950"}:
                     self.assertIn(yellow_rule, status)
                 rows = [
                     line
@@ -1269,6 +1280,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workloads["pytorch-torch-histc"]["run_timeout_seconds"], 300)
         self.assertEqual(workloads["pytorch-torch-sort"]["run_timeout_seconds"], 300)
         self.assertEqual(workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120)
+        self.assertEqual(workloads["pytorch-torch-topk"]["run_timeout_seconds"], 120)
         self.assertEqual(workloads["pytorch-norm-softmax"]["run_timeout_seconds"], 60)
         native_spellings = json.dumps(
             [
@@ -6423,6 +6435,70 @@ class ConSanValidationTest(unittest.TestCase):
             ],
         )
 
+    def test_fault_preflight_lock_serializes_and_releases_after_failure(self) -> None:
+        import fcntl
+
+        with temporary_root() as root:
+            lock_path = root / "gpu.lock"
+            with mock.patch.dict(
+                os.environ, {"CONSAN_DESTRUCTIVE_GPU_LOCK": str(lock_path)}
+            ):
+                with self.assertRaisesRegex(RuntimeError, "probe failed"):
+                    with validation_faults._fault_preflight_lock():
+                        with lock_path.open("a+b") as contender:
+                            with self.assertRaises(BlockingIOError):
+                                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        raise RuntimeError("probe failed")
+                # The child fault runner must be able to acquire the same lock.
+                with lock_path.open("a+b") as child:
+                    fcntl.flock(child, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(child, fcntl.LOCK_UN)
+
+    def test_cdna4_mode_fixture_uses_multiwave_shape_in_clean_and_fault_commands(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
+        with temporary_root() as root, mock.patch.dict(os.environ, {}, clear=True):
+            for phase in ("clean", "fault"):
+                cdna = validation._workload_commands(
+                    root, "gfx950", workload, phase, root / "result.json"
+                )[0]
+                self.assertEqual(cdna[cdna.index("--mode-columns") + 1], "256")
+                rdna = validation._workload_commands(
+                    root, "gfx1201", workload, phase, root / "result.json"
+                )[0]
+                self.assertNotIn("--mode-columns", rdna)
+
+    def test_grouped_barrier_spec_requires_both_sequence_identities(self) -> None:
+        environment = {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "first-site",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "first-sequence",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "second-site",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "second-sequence",
+        }
+        document = {
+            "schema_version": validation.SCHEMA_VERSION,
+            "target": "gfx950",
+            "workload": "d128-block",
+            "review_required": False,
+            "faults": [{"id": "drop", "family": "barrier-drop", "environment": environment}],
+        }
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        with temporary_root() as root:
+            path = root / "faults.json"
+            path.write_text(json.dumps(document))
+            validation._load_fault(path, "gfx950", workload, "drop")
+            for key in (
+                "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
+                "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY",
+                "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY",
+            ):
+                with self.subTest(missing=key):
+                    saved = environment.pop(key)
+                    path.write_text(json.dumps(document))
+                    with self.assertRaisesRegex(validation.ValidationError, "grouped barrier"):
+                        validation._load_fault(path, "gfx950", workload, "drop")
+                    environment[key] = saved
+
     def test_fault_spec_requires_target_workload_and_exact_mutation(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         document = {
@@ -6537,7 +6613,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.run_timeout_seconds, 120)
         self.assertEqual(workload.tensile_inner_timeout_seconds, 110)
         self.assertEqual(workload.tensile_expected_numeric_rows, 1)
-        self.assertEqual(workload.tensile_minimum_timed_ms, 1.0)
+        self.assertEqual(workload.tensile_minimum_timed_ms, 0.0)
         fault = validation._load_fault(path, "gfx950", workload, "lds-wrong-address")
         expected_detectors = {
             "supercollider": "detected",
@@ -6764,6 +6840,28 @@ class SuperColliderDelayEnvironmentTest(unittest.TestCase):
                             "supercollider", workload, root / "hook.so", "gfx1201", root)
 
 
+    def test_wave_sleep_rejects_unsupported_target_before_execution(self):
+        with temporary_root() as root, mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_SC_DELAY": "15",
+            "CONSAN_VALIDATION_SC_DELAY_MODE": "sleep_wave",
+        }, clear=True):
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            with self.assertRaisesRegex(validation.ValidationError, "requires gfx1201"):
+                validation_commands._clean_environment(
+                    "supercollider", workload, root / "hook.so", "gfx950", root)
+            environment = validation_commands._clean_environment(
+                "supercollider", workload, root / "hook.so", "gfx1201", root)
+            self.assertEqual(environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep_wave")
+            with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "16"}):
+                with self.assertRaisesRegex(validation.ValidationError, "maximum"):
+                    validation_commands._clean_environment(
+                        "supercollider", workload, root / "hook.so", "gfx1201", root)
+            # A disabled delay does not emit the architecture-specific sequence.
+            with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "0"}):
+                validation_commands._clean_environment(
+                    "supercollider", workload, root / "hook.so", "gfx950", root)
+
+
 class SameValueWriteEnvironmentTest(unittest.TestCase):
     def test_policy_is_explicit_and_matches_clean_and_fault(self):
         knob = "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
@@ -6820,6 +6918,17 @@ class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
             for environment in (clean, inventory, fault):
                 self.assertEqual(environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], str(path))
                 self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST", environment)
+                settings = {
+                    item["name"]: item
+                    for item in validation_commands._audited_settings(environment)
+                }
+                self.assertEqual(
+                    settings["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"]["category"],
+                    "instrumentation-selection",
+                )
+                self.assertFalse(
+                    settings["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"]["usability_exception"]
+                )
             self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST_FILE", native)
             self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST", native)
 

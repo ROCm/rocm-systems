@@ -295,9 +295,8 @@ def _run_descriptor_add(num_ctas: int, repetitions: int) -> dict[str, object]:
     }
 
 
-def _run_mode(repetitions: int) -> dict[str, object]:
+def _run_mode(repetitions: int, *, columns: int = 128) -> dict[str, object]:
     rows = 1
-    columns = 128
     mode_stride = 32
     host_input = torch.arange(rows * columns, dtype=torch.int32).reshape(rows, columns)
     expected_values = torch.empty(rows, dtype=torch.int32)
@@ -775,6 +774,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--label", required=True)
+    parser.add_argument("--mode-columns", type=int, choices=(128, 256), default=128)
     args = parser.parse_args()
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
@@ -784,6 +784,10 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     runner = WORKLOAD_RUNNERS[args.workload]
+    if args.workload == "torch-mode":
+        runner = lambda repetitions: {
+            "large-row": _run_mode(repetitions, columns=args.mode_columns)
+        }
     try:
         result = runner(args.repetitions)
     except Exception as exc:

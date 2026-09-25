@@ -405,10 +405,10 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
-def _positive_float(value: str) -> float:
+def _nonnegative_float(value: str) -> float:
     parsed = float(value)
-    if not math.isfinite(parsed) or parsed <= 0.0:
-        raise argparse.ArgumentTypeError("must be positive and finite")
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise argparse.ArgumentTypeError("must be nonnegative and finite")
     return parsed
 
 
@@ -656,7 +656,12 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--gpu-target", type=_gpu_target, default=DEFAULT_TARGET)
     parser.add_argument("--repetitions", type=int, choices=(1,), default=1)
-    parser.add_argument("--minimum-timed-ms", type=_positive_float, required=True)
+    parser.add_argument(
+        "--minimum-timed-ms",
+        type=_nonnegative_float,
+        required=True,
+        help="Aggregate duration floor; zero requires valid positive device timings only",
+    )
     parser.add_argument("--label", required=True)
     parser.add_argument(
         "--timeout-seconds",

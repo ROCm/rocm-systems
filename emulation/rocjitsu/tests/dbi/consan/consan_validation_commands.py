@@ -903,6 +903,12 @@ def _clean_environment(
         if delay_mode is not None:
             if delay_mode not in {"nop", "sleep", "sleep_var", "sleep_wave"}:
                 raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY_MODE")
+            if delay_mode == "sleep_wave" and int(delay or "0") != 0:
+                if target != "gfx1201" or int(delay) not in {1, 3, 7, 15, 31, 63, 127}:
+                    raise ValidationError(
+                        "nonzero sleep_wave requires gfx1201 and maximum "
+                        "1/3/7/15/31/63/127"
+                    )
             environment["RJ_CONSAN_SC_DELAY_MODE"] = delay_mode
     same_value = os.environ.get(
         "CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
@@ -996,6 +1002,7 @@ def _setting_metadata(name: str) -> dict:
         "RJ_CONSAN_POLICY",
         "RJ_CONSAN_TRACK_BARRIERS",
         "RJ_CONSAN_TRACK_ATOMICS",
+        "RJ_CONSAN_KERNEL_ALLOWLIST_FILE",
     }:
         category = "instrumentation-selection"
     elif name in ORDINARY_FORBIDDEN_ENVIRONMENT or name in {
@@ -1217,6 +1224,7 @@ def _workload_command(
             str(repetitions),
             "--label",
             f"{workload.id}-{phase}",
+            *workload.command_arguments,
         ]
     if workload.kind == "tensile":
         minimum_timed_ms = workload.tensile_minimum_timed_ms

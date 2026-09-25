@@ -208,13 +208,14 @@ class TensileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(argparse.ArgumentTypeError, "must be positive"):
             tensile_validation._positive_int("0")
 
-    def test_positive_float_parser_requires_finite_value(self) -> None:
-        self.assertEqual(tensile_validation._positive_float("250.0"), 250.0)
-        for invalid in ("0", "-1", "nan", "inf"):
+    def test_duration_floor_parser_requires_nonnegative_finite_value(self) -> None:
+        self.assertEqual(tensile_validation._nonnegative_float("250.0"), 250.0)
+        self.assertEqual(tensile_validation._nonnegative_float("0"), 0.0)
+        for invalid in ("-1", "nan", "inf"):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(
-                argparse.ArgumentTypeError, "positive and finite"
+                argparse.ArgumentTypeError, "nonnegative and finite"
             ):
-                tensile_validation._positive_float(invalid)
+                tensile_validation._nonnegative_float(invalid)
 
     def test_gpu_target_parser_accepts_architecture_names(self) -> None:
         self.assertEqual(tensile_validation._gpu_target("gfx950"), "gfx950")
@@ -561,6 +562,37 @@ class TensileValidationTest(unittest.TestCase):
                 for reason in payload["detail"]["reasons"]
             )
         )
+
+    def test_functional_row_without_duration_floor_keeps_timing_and_oracle_gates(self) -> None:
+        for verdict, time_us, expected in (
+            ("PASSED", 10.0, 0),
+            ("FAILED", 10.0, 1),
+            ("PASSED", 0.0, 1),
+            ("PASSED", float("nan"), 1),
+        ):
+            with self.subTest(verdict=verdict, time_us=time_us), temporary_root() as root:
+                paths = self._make_fake_paths(root)
+                self._install_tensile_stub(paths, verdict, time_us=time_us)
+                (root / "case.yaml").write_text("case\n", encoding="utf-8")
+                forwarded = root / "row.json"
+                argv = self._main_argv(root)
+                argv[argv.index("--minimum-timed-ms") + 1] = "0"
+                with (
+                    mock.patch.object(
+                        tensile_validation, "resolve_tensile_validation_paths", return_value=paths
+                    ),
+                    mock.patch.object(
+                        tensile_validation.subprocess, "run", return_value=self._amdgpu_header()
+                    ),
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch.dict(os.environ, {"CONSAN_ROW_RESULT_PATH": str(forwarded)}, clear=True),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
+                ):
+                    returncode = tensile_validation.main()
+                payload = json.loads(forwarded.read_text(encoding="utf-8"))
+                self.assertEqual(returncode, expected)
+                self.assertEqual(payload["oracle"], "pass" if expected == 0 else "fail")
 
     def test_main_writes_pass_and_failed_numeric_oracles(self) -> None:
         for numeric_verdict, expected_returncode, expected_oracle in (

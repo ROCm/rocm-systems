@@ -408,10 +408,10 @@ WORKLOADS = (
         run_timeout_seconds=120,
         tensile_inner_timeout_seconds=110,
         tensile_expected_numeric_rows=1,
-        # This is one exact functional row. Current Tensile v5 reports 3.7 ms
-        # or more of device time for it, so retain a positive timing canary
-        # instead of the repeated performance-row default.
-        tensile_minimum_timed_ms=1.0,
+        # This is one exact functional row, not a duration-qualified benchmark.
+        # Native execution can take microseconds. Require a valid positive
+        # device timing, but do not reject a correct run for finishing quickly.
+        tensile_minimum_timed_ms=0.0,
     ),
     Workload(
         id="hip-matmul-m128-n128-k128",
@@ -1684,6 +1684,13 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         "qwen-prefill": {
             "run_timeout_seconds": 900,
         },
+        # The current native top-k object already takes about 25 seconds to
+        # inventory and instrument. Transactional grouped fault rewriting
+        # needs another analysis pass; the generic 30-second bound expires
+        # before installation. Keep a bounded allowance for the host work.
+        "pytorch-torch-topk": {
+            "run_timeout_seconds": 120,
+        },
         # These compact schedules select no workgroup at the production
         # stride.  A target-resolved validation cadence retains evidence from
         # the same unmodified workloads.  Native execution itself is fast, but
@@ -1730,6 +1737,9 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         },
         "pytorch-torch-mode": {
             "run_timeout_seconds": 120,
+            # The 128-element fixture launches one CDNA4 wave. A 256-element
+            # input selects the native multi-wave sorting specialization.
+            "command_arguments": ("--mode-columns", "256"),
         },
         # The exact HIP matmul row launches only six compact workgroups.  None
         # of their current dispatch identities selects a workgroup at the

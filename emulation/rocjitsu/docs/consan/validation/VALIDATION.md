@@ -402,6 +402,11 @@ before and after each trial. `--health-command-json` and
 `--smoke-command-json` can replace both commands when the defaults are not
 usable; the exact replacements are retained.
 
+Fault-command prerequisite and provenance probes also take this lock: PyTorch
+runtime identification initializes the GPU and launches work. The parent
+releases its probe lock before starting the child trial, which acquires the
+same lock itself. Do not wrap the entire fault command in another `flock`.
+
 A qualifying applied trial requires exactly-one planning and installation,
 complete per-reader and per-process reservation evidence, a matching reviewed
 detector result, a matching independent oracle when required, normal bounded

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import asdict
+import fcntl
 import hashlib
 import json
 import math
@@ -17,6 +19,11 @@ import signal
 import subprocess
 import sys
 import time
+
+from consan_fault_runner import (
+    DEFAULT_GLOBAL_DESTRUCTIVE_LOCK,
+    GLOBAL_DESTRUCTIVE_LOCK_ENV,
+)
 
 from consan_validation_catalog import (
     FAULT_FAMILY_ENVIRONMENTS,
@@ -379,6 +386,18 @@ def _load_fault(
         raise ValidationError("fault spec must enable exactly one mutation family")
     if "RJ_CONSAN_FAULT_SITE_IDENTITY" not in environment:
         raise ValidationError("fault spec must select an exact site identity")
+    companion_site = environment.get("RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY")
+    companion_sequence = environment.get("RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY")
+    if companion_site or companion_sequence:
+        if not (
+            companion_site
+            and companion_sequence
+            and environment.get("RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY")
+            and environment.get("RJ_CONSAN_FAULT_DROP_BARRIER") == "1"
+        ):
+            raise ValidationError(
+                "grouped barrier drop requires exact primary and companion sequence identities"
+            )
     if any("REPLACE_FROM_INVENTORY" in value for value in environment.values()):
         raise ValidationError("fault spec still contains an inventory placeholder")
     site_provenance = fault.get("site_provenance")
@@ -1150,14 +1169,28 @@ def _snapshot_fault_spec(path: Path, root: Path, source_bytes: bytes) -> dict:
     }
 
 
+@contextmanager
+def _fault_preflight_lock():
+    """Serialize GPU-using runtime probes without holding the trial's lock."""
+    path = Path(os.environ.get(GLOBAL_DESTRUCTIVE_LOCK_ENV, DEFAULT_GLOBAL_DESTRUCTIVE_LOCK))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def _fault(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
     workload = _resolved_workload(target, selection.require_workload())
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     workspace = _workspace_from_environment()
-    if not _doctor(workspace, target, (workload.id,), args.launcher)["ok"]:
-        raise ValidationError("workspace doctor failed; run the doctor subcommand")
+    # PyTorch doctor and provenance probes initialize the GPU and launch work.
+    # The child runner's lock starts later, so protect both probes separately.
+    # Release this lock before invoking children, which acquire it themselves.
+    with _fault_preflight_lock():
+        if not _doctor(workspace, target, (workload.id,), args.launcher)["ok"]:
+            raise ValidationError("workspace doctor failed; run the doctor subcommand")
     if not args.allow_destructive:
         raise ValidationError("fault execution requires --allow-destructive")
     spec_path = args.spec.resolve()
@@ -1169,7 +1202,8 @@ def _fault(args: argparse.Namespace) -> int:
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
     fault_root.mkdir(parents=True, exist_ok=args.resume)
     spec_metadata = _snapshot_fault_spec(spec_path, fault_root, spec_bytes)
-    provenance = _write_provenance(workspace, target, workload, fault_root, launcher)
+    with _fault_preflight_lock():
+        provenance = _write_provenance(workspace, target, workload, fault_root, launcher)
     root = fault_root / "rows"
     root.mkdir(exist_ok=args.resume)
     smoke = _health_smoke_command(

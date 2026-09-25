@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import csv
 import json
 import os
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 import consan_fault_runner as runner
 import consan_validation as validation
@@ -25,6 +27,17 @@ RUNNER = Path(__file__).with_name("consan_fault_runner.py")
 
 
 class ConSanFaultRunnerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        resources = ExitStack()
+        self.addCleanup(resources.close)
+        root = resources.enter_context(temporary_root())
+        self.gpu_lock = str(root / "gpu.lock")
+        # Every child in this suite is fake, including destructive rows and
+        # quarantine-clear probes. Keep them off the physical campaign lock.
+        resources.enter_context(
+            mock.patch.dict(os.environ, {runner.GLOBAL_DESTRUCTIVE_LOCK_ENV: self.gpu_lock})
+        )
+
     def run_runner(
         self, root: Path, *args: str, parallel: str = "4"
     ) -> subprocess.CompletedProcess[str]:
@@ -231,7 +244,7 @@ class ConSanFaultRunnerTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = read_row_result(root, "serialized")
             self.assertTrue(result["gpu_serialized"])
-            self.assertEqual(result["gpu_lock"], runner.DEFAULT_GLOBAL_DESTRUCTIVE_LOCK)
+            self.assertEqual(result["gpu_lock"], self.gpu_lock)
             self.assertTrue(result["health_before"]["healthy"])
             self.assertTrue(result["health_after"]["healthy"])
             self.assertGreater(result["metrics"]["elapsed_seconds"], 0.35)
@@ -1851,6 +1864,9 @@ class ConSanFaultRunnerTest(unittest.TestCase):
             ]
             environment = os.environ.copy()
             environment["CTEST_PARALLEL_LEVEL"] = "4"
+            # These CPU-only fake probes test contention between these two
+            # children, not contention with a live physical-GPU campaign.
+            environment[runner.GLOBAL_DESTRUCTIVE_LOCK_ENV] = str(root / "gpu.lock")
             common = [
                 "--artifact-root",
                 str(root),
