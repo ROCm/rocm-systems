@@ -339,52 +339,59 @@ if (NOT BUILD_TESTS_ONLY)
   endif()
 
   if (ASAN)
-    message(STATUS "Removing xnack- entries from GPU_TARGETS because they are invalid with AddressSanitizer (ASAN)")
-    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-    if(GPU_TARGETS_FULL)
-      list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX ".*:xnack-$")
-    endif()
+    # Device ASAN needs xnack. gfx9 must request it explicitly, or a bare arch
+    # name compiles with the sanitizer silently ignored; gfx1250 has it always
+    # on and rejects an explicit xnack term as an invalid target ID; no other
+    # family has it at all. Drop what cannot be instrumented rather than ship
+    # an uninstrumented target inside an ASAN build. Same policy as
+    # projects/rccl/cmake/AsanGpuTargets.cmake, repeated here because rccl
+    # builds rocSHMEM as a separate cmake process.
+    set(_ASAN_XNACK_ALWAYS_ON gfx1250 gfx1250-strict)
 
-    # RDNA archs (gfx11xx/gfx12xx) have no xnack+ variant at all, so device
-    # ASAN can never be enabled for them - clang just ignores
-    # -fsanitize=address for that offload arch with a warning. Drop them
-    # instead of leaving a target in GPU_TARGETS that silently gets no
-    # instrumentation.
-    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250 gfx1250-strict)
-    foreach(_asan_incompatible_arch ${_ASAN_INCOMPATIBLE_ARCHS})
-      list(FILTER GPU_TARGETS EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
-      if(GPU_TARGETS_FULL)
-        list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
+    # GPU_TARGETS_FULL mirrors GPU_TARGETS, so only the first pass reports.
+    set(_asan_report ON)
+    foreach(_asan_list GPU_TARGETS GPU_TARGETS_FULL)
+      if("${${_asan_list}}" STREQUAL "")
+        continue()
       endif()
+
+      set(_asan_kept "")
+      foreach(_asan_target ${${_asan_list}})
+        string(REGEX REPLACE ":.*" "" _asan_base "${_asan_target}")
+        list(FIND _ASAN_XNACK_ALWAYS_ON "${_asan_base}" _asan_always_on)
+        # Other feature terms (e.g. sramecc+) are part of what was asked for
+        # and are kept; xnack sorts last, so re-appending it stays canonical.
+        string(REGEX REPLACE ":xnack[+-]" "" _asan_stripped "${_asan_target}")
+
+        if(_asan_base MATCHES "^gfx9")
+          set(_asan_fixed "${_asan_stripped}:xnack+")
+        elseif(NOT _asan_always_on EQUAL -1)
+          set(_asan_fixed "${_asan_stripped}")
+        else()
+          if(_asan_report)
+            message(STATUS "ASAN: dropping GPU target '${_asan_target}' - no xnack support")
+          endif()
+          continue()
+        endif()
+
+        if(_asan_report AND NOT _asan_fixed STREQUAL _asan_target)
+          message(STATUS "ASAN: GPU target '${_asan_target}' -> '${_asan_fixed}'")
+        endif()
+        list(APPEND _asan_kept "${_asan_fixed}")
+      endforeach()
+
+      # Both xnack spellings of one arch normalise to the same string.
+      if(_asan_kept)
+        list(REMOVE_DUPLICATES _asan_kept)
+      endif()
+      set(${_asan_list} "${_asan_kept}")
+      set(_asan_report OFF)
     endforeach()
 
     if(NOT GPU_TARGETS)
-      message(FATAL_ERROR "ASAN requires a GPU target that supports xnack+ (e.g. gfx90a, gfx942, gfx950). "
-        "None of the requested/default GPU_TARGETS support it.")
-    endif()
-
-    # CDNA archs (gfx90a/gfx942/gfx950) only get ASAN instrumentation with the
-    # xnack+ feature explicitly enabled; a bare arch name compiles without it.
-    # Force :xnack+ onto any entry that doesn't already request it.
-    set(_ASAN_GPU_TARGETS "")
-    foreach(_asan_target ${GPU_TARGETS})
-      if(NOT _asan_target MATCHES "xnack\\+")
-        message(STATUS "ASAN: appending :xnack+ to GPU target '${_asan_target}'")
-        set(_asan_target "${_asan_target}:xnack+")
-      endif()
-      list(APPEND _ASAN_GPU_TARGETS "${_asan_target}")
-    endforeach()
-    set(GPU_TARGETS "${_ASAN_GPU_TARGETS}")
-
-    if(GPU_TARGETS_FULL)
-      set(_ASAN_GPU_TARGETS_FULL "")
-      foreach(_asan_target ${GPU_TARGETS_FULL})
-        if(NOT _asan_target MATCHES "xnack\\+")
-          set(_asan_target "${_asan_target}:xnack+")
-        endif()
-        list(APPEND _ASAN_GPU_TARGETS_FULL "${_asan_target}")
-      endforeach()
-      set(GPU_TARGETS_FULL "${_ASAN_GPU_TARGETS_FULL}")
+      message(FATAL_ERROR "ASAN requires a GPU target that supports xnack (gfx9* with :xnack+, "
+        "or gfx1250 where it is always on). "
+        "None of the requested/default GPU_TARGETS do.")
     endif()
   endif()
 
