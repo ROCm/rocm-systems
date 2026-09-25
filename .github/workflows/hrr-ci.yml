@@ -373,6 +373,17 @@ jobs:
           # posture rather than adding the line above, so nothing here waits on
           # it. Re-check the three signals above before enabling.
     steps:
+      # Only the test runner: this job compiles nothing and takes its binaries
+      # from the build artifact. It has to come first, because checkout cleans
+      # the workspace and would delete an artifact unpacked before it.
+      - name: Checkout test runner
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hrr/tests/run_catch2.py
+          sparse-checkout-cone-mode: false
+          set-safe-directory: true
+
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
