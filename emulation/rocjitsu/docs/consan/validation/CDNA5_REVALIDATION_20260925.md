@@ -1291,3 +1291,21 @@ Inspection used separate output ELF paths, and the complete replay manifest
 was verified afterward. The spec now names that retained identity; all 209
 runner tests pass. `f8gemm-exact-default-qualification.py` is running matching
 shard baseline/Default checks before its eight-trial campaign.
+
+### MXF4 explicit coverage audit and norm deadline retry
+
+`tdm-default-coverage-audit/tensile-sk-mxf4gemm-explicit` completes numerically
+with two passing rows and zero exit status using the lane-retention hook,
+which also includes tensor-DMA inventory accounting. The applicable object
+reports 50 discovered accesses, 42 supported/patched and eight unsupported
+tensor-DMA accesses. Static analysis is incomplete while dynamic evidence is
+complete. This supersedes the earlier yellow Default cell whose hook omitted
+those producers from the coverage denominator. The cell is orange for missing
+modeled LDS ranges; clean numerical correctness alone does not qualify coverage.
+
+`norm-cap-high-fault` detects both admitted/reached trials with complete
+analysis and healthy checks, then stops after the third attempt times out at
+60 s with incomplete mutation-reservation evidence. The timed-out attempt is
+not an admitted detector miss. `norm-cap-high-long` reruns matching clean and
+the full eight-trial batch with a 240 s deadline and fresh artifact roots.
+The table reports the completed 2/2 fraction without claiming qualification.
