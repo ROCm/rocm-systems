@@ -1346,3 +1346,35 @@ tensor-DMA accesses, alongside 992 supported/patched accesses, with complete
 dynamic evidence but incomplete static analysis. The Default cell is orange
 for missing LDS range support rather than awaiting a barrier-drop campaign
 whose producers the detector cannot yet model.
+
+### F8 exact-artifact Default fault campaign completes
+
+`f8gemm-exact-default-fault` completes eight admitted/reached trials with
+exactly one installed mutation per trial. All have complete analysis and
+healthy pre/post checks at recorded default; detection is 0/8. Matching
+replayed baseline/Default checks pass, supplementing the full nine-shard
+clean result. Fresh `f8gemm-exact-high-clean-retry` and fault roots now test
+high using the same retained client inputs.
+
+### What tensor-DMA range support needs
+
+Source review of `isa/arch/amdgpu/shared/tensor_dma.h` shows that tensor
+instructions consume scalar descriptor groups (4, 8, and two optional groups
+of 4 SGPRs), not ordinary per-lane LDS address operands. The descriptor carries
+LDS base, element size, runtime tile dimensions, optional repeated-tile
+increments, gather and padding controls. Loads zero-fill masked elements and
+apply LDS padding; stores ignore load padding and read only in-bounds elements.
+Completion can also arrive at an LDS atomic barrier.
+
+The current ConSan `AccessRange` has a static byte width. Its `TensorLds`
+inventory branch intentionally retains opcode provenance with
+`RangeEncodingUnavailable`, rather than inventing a lane address. Correct
+support needs descriptor-derived ranges with wave-level ownership, exact
+handling of padding gaps/repeated tiles, and the corresponding completion
+ordering. Treating the whole LDS allocation as one write would create false
+conflicts with disjoint tiles and is not a valid shortcut. Runtime scalar
+descriptor reads also need to preserve guest registers and instruction-bank
+selection in emitted instrumentation. The existing emulator implementation is
+a useful reference for tests; implementing only an emulator observer would
+not add ConSan device instrumentation. This explains why the measured orange
+cells need memory-model work rather than a higher sampling preset.
