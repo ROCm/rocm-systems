@@ -1246,3 +1246,22 @@ The F8 reach witness now describes the actual selected fault shard, M=N=127
 and K=1024, whose reduction reaches full DepthU128 iterations. This corrects
 the former reference to other square shards without changing the selected
 fault site or workload. All 209 validation runner tests pass after the change.
+
+### HGEMM fault identity bound to retained replay objects
+
+`hgemm-exact-inventory` is accepted. The reviewed MT16x32x32 publication
+now has ELF identity `7c873b51810c8051`; both the physical site and associated
+signal/wait sequence exist in the fresh inventory. Its entire 40,400-byte
+`.text` matches the previously reviewed input: SHA-256
+`ee482f9917bb42a1e95e4eeea87b5704eea68dce6427dc95ceb2963b61eb2051`.
+The fault spec records this exact identity and the actual M=N=K=127 shard.
+All 209 validation runner tests pass after the update.
+
+The initial supplementary matching-shard clean run rejected changed input
+hashes: an inspection invocation of `llvm-objcopy --dump-section` without an
+output ELF path had rewritten the input. The exact original bytes were restored
+from the prior retained fault artifacts and every manifest hash reverified.
+`hgemm-exact-default-clean-retry` uses a fresh result directory and runs baseline
+and Default before starting `hgemm-exact-default-fault`. This supplementary
+shard check complements the existing full-workload clean result; it does not
+replace the full shard sweep. Fault qualification remains pending.
