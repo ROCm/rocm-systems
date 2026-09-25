@@ -106,7 +106,10 @@ private:
 };
 
 inline PublicationDispatchIsolation &publication_dispatch_isolation() {
-  static PublicationDispatchIsolation state;
-  return state;
+  // Cached queue callbacks can submit work from HIP finalizers after our
+  // process-exit handler. A destructible static would free pending_ before
+  // those callbacks reset and reuse it, corrupting unrelated heap allocations.
+  static auto *state = new PublicationDispatchIsolation;
+  return *state;
 }
 } // namespace rocjitsu::consan::hook

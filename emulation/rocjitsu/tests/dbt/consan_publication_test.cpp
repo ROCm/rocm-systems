@@ -5,6 +5,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_publication_dispatch.h"
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -498,4 +499,31 @@ TEST(ConSanPublicationDispatch, CompletedUninstrumentedSetupDoesNotPoisonLaterCa
   EXPECT_TRUE(state.isolated());
 }
 
+} // namespace rocjitsu::consan::hook
+
+namespace rocjitsu::consan::hook {
+TEST(ConSanPublicationDispatchDeathTest, CachedCallbackSurvivesStaticTeardown) {
+  EXPECT_EXIT(
+      {
+        std::atexit(+[] {
+          // Reuse the size class of a Pending record after static destruction.
+          // Volatile accesses keep this a real allocator-reuse corruption check.
+          auto *storage = new uint64_t[4];
+          volatile uint64_t *guard = storage;
+          for (int i = 0; i < 4; ++i)
+            guard[i] = 0x123456789abcdef0ULL;
+          auto &state = publication_dispatch_isolation();
+          state.reset();
+          state.note(1, true, 10, true, [](uint64_t) -> std::optional<int64_t> { return 1; });
+          for (int i = 0; i < 4; ++i)
+            if (guard[i] != 0x123456789abcdef0ULL)
+              std::_Exit(3);
+          std::_Exit(0);
+        });
+        publication_dispatch_isolation().note(1, true, 10, true,
+                                              [](uint64_t) -> std::optional<int64_t> { return 1; });
+        std::exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
 } // namespace rocjitsu::consan::hook
