@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "data_storage/backends/sqlite_backend.hpp"
+#include "data_storage/schema_version.hpp"
 #include "profiler-hub/reader.hpp"
 #include "profiler-hub/storage.hpp"
 #include "profiler-hub/writer.hpp"
@@ -9,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -35,6 +38,26 @@ protected:
     [[nodiscard]] std::unique_ptr<writer_t> make_writer() const
     {
         return std::make_unique<writer_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+    }
+
+    void flush_empty_trace() const
+    {
+        auto writer = make_writer();
+        writer->flush_in_memory_data_to_disk();
+    }
+
+    void execute_on_trace(const std::string& sql) const
+    {
+        data_storage::sqlite_backend::create(
+            m_db_path, m_uuid, data_storage::sqlite_backend::storage_mode_t::on_disk)
+            ->execute(sql);
+    }
+
+    static void expect_version(const version_t& actual, const version_t& expected)
+    {
+        EXPECT_EQ(actual.major, expected.major);
+        EXPECT_EQ(actual.minor, expected.minor);
+        EXPECT_EQ(actual.patch, expected.patch);
     }
 
     // Registers a minimal node + process pair that most register_*/insert_* calls
@@ -91,6 +114,65 @@ TEST_F(writer_test, register_node_info_is_readable_after_flush)
     EXPECT_EQ(nodes[0]->node_id, 1);
     EXPECT_EQ(nodes[0]->hash, 42);
     EXPECT_EQ(nodes[0]->machine_id, "machine-1");
+}
+
+TEST_F(writer_test, get_storage_version_reads_schema_version_from_trace)
+{
+    flush_empty_trace();
+
+    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(),
+                   data_storage::rocpd_schema_version);
+}
+
+TEST_F(writer_test, get_storage_version_is_zero_when_the_trace_has_no_metadata)
+{
+    flush_empty_trace();
+    execute_on_trace("DROP TABLE rocpd_metadata_" + m_uuid);
+
+    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(), {});
+}
+
+TEST_F(writer_test, get_storage_version_is_zero_when_a_component_is_malformed)
+{
+    flush_empty_trace();
+    execute_on_trace("UPDATE rocpd_metadata_" + m_uuid +
+                     " SET value = 'x' WHERE tag = 'schema_version_minor'");
+
+    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(), {});
+}
+
+TEST_F(writer_test, get_storage_version_is_zero_when_a_component_is_missing)
+{
+    flush_empty_trace();
+    execute_on_trace("DELETE FROM rocpd_metadata_" + m_uuid +
+                     " WHERE tag = 'schema_version_patch'");
+
+    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(), {});
+}
+
+TEST_F(writer_test, get_storage_version_is_zero_for_a_corrupt_file)
+{
+    std::ofstream{ m_db_path } << "this is not a sqlite database, just some text";
+
+    storage_t storage{ m_db_path, m_uuid };
+    version_t version{ 1, 1, 1 };
+    EXPECT_NO_THROW(version = storage.get_storage_version());
+    expect_version(version, {});
+}
+
+TEST_F(writer_test, get_storage_version_does_not_create_the_file_or_pin_the_writer)
+{
+    auto storage = std::make_unique<storage_t>(m_db_path, m_uuid);
+    expect_version(storage->get_storage_version(), {});
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+
+    writer_t writer{ std::move(storage) };
+    writer.register_node_info({ 1, 42, "machine-1" });
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+
+    writer.flush_in_memory_data_to_disk();
+    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(),
+                   data_storage::rocpd_schema_version);
 }
 
 TEST_F(writer_test, register_process_info_is_readable_after_flush)

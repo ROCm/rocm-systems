@@ -5,8 +5,11 @@
 
 #include "database_backend.hpp"
 
+#include "data_storage/schema_version.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
+
+#include <fmt/format.h>
 
 #include <filesystem>
 #include <stdexcept>
@@ -82,21 +85,27 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
     std::regex guid_pattern("\\{\\{guid\\}\\}");
     std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
 
-    // rocpd_metadata.sql references these; hardcoded to the baseline schema version
-    // (3.0.1) for now until schema files are selected by version rather than always
-    // taking the latest cloned/bundled copy.
-    std::regex schema_version_pattern("\\{\\{schema_version\\}\\}");
-    std::regex schema_version_major_pattern("\\{\\{schema_version_major\\}\\}");
-    std::regex schema_version_minor_pattern("\\{\\{schema_version_minor\\}\\}");
-    std::regex schema_version_patch_pattern("\\{\\{schema_version_patch\\}\\}");
+    constexpr auto schema_version = profiler_hub::data_storage::rocpd_schema_version;
+    std::regex     schema_version_pattern("\\{\\{schema_version\\}\\}");
+    std::regex     schema_version_major_pattern("\\{\\{schema_version_major\\}\\}");
+    std::regex     schema_version_minor_pattern("\\{\\{schema_version_minor\\}\\}");
+    std::regex     schema_version_patch_pattern("\\{\\{schema_version_patch\\}\\}");
 
     query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
     query_str = std::regex_replace(query_str, guid_pattern, uuid);
     query_str = std::regex_replace(query_str, view_upid_pattern, "");
-    query_str = std::regex_replace(query_str, schema_version_pattern, "3.0.1");
-    query_str = std::regex_replace(query_str, schema_version_major_pattern, "3");
-    query_str = std::regex_replace(query_str, schema_version_minor_pattern, "0");
-    query_str = std::regex_replace(query_str, schema_version_patch_pattern, "1");
+    query_str = std::regex_replace(query_str,
+                                   schema_version_pattern,
+                                   fmt::format("{}.{}.{}",
+                                               schema_version.major,
+                                               schema_version.minor,
+                                               schema_version.patch));
+    query_str = std::regex_replace(
+        query_str, schema_version_major_pattern, std::to_string(schema_version.major));
+    query_str = std::regex_replace(
+        query_str, schema_version_minor_pattern, std::to_string(schema_version.minor));
+    query_str = std::regex_replace(
+        query_str, schema_version_patch_pattern, std::to_string(schema_version.patch));
 
     return query_str;
 }

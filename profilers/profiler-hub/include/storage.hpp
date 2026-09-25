@@ -24,6 +24,11 @@ public:
     storage_t& operator=(const storage_t&) = delete;
     storage_t& operator=(storage_t&&)      = delete;
 
+    /**
+     * Returns the RocPD schema version stamped in the trace's metadata.
+     * @return {0,0,0} if the trace does not exist yet or its metadata cannot be read.
+     * @note Does not create the file; the result is cached once read.
+     */
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
 
 private:
