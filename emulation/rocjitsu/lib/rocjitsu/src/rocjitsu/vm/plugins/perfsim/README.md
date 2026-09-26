@@ -21,14 +21,18 @@ glibc needed to *load* the backend — on any host, VM, chroot, or container —
 in which case `dlopen` fails with a message such as
 `version 'GLIBC_2.33' not found`. The loader names the first unsatisfied
 symbol version, which can be below the backend's actual floor. Confirm the
-backend's floors for all three families, then the host's glibc and libstdc++:
+backend's floors for all three families, then the host's glibc and the newest
+`GLIBCXX_*` and `CXXABI_*` versions exported by libstdc++. If the loader names
+a different `libstdc++.so.6` (for example one selected through
+`LD_LIBRARY_PATH`), run `strings` on that path instead of GCC's default:
 
 ```bash
 objdump -T /absolute/path/to/libgpucsim_ffm_plugin.so \
   | grep -oE '(GLIBC|GLIBCXX|CXXABI)_[0-9.]+' | sort -Vu
 ldd --version
-strings "$(gcc --print-file-name=libstdc++.so.6)" \
-  | grep -oE '(GLIBCXX|CXXABI)_[0-9.]+' | sort -Vu | tail -5
+libstdcxx="$(gcc --print-file-name=libstdc++.so.6)"
+strings "$libstdcxx" | grep -oE 'GLIBCXX_[0-9.]+' | sort -Vu | tail -1
+strings "$libstdcxx" | grep -oE 'CXXABI_[0-9.]+' | sort -Vu | tail -1
 ```
 
 Run `PerfsimPluginTest.RealBackendMatchesDirectFfmForCanonicalStream` (set
