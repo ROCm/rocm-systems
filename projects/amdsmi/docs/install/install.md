@@ -7,8 +7,43 @@ myst:
 
 # Install the AMD SMI library and CLI tool
 
-This page describes the system requirements for AMD SMI and explains how to
-install the AMD SMI library, Python interface, and `amd-smi` CLI on Linux.
+AMD SMI has three pieces: the `libamd_smi` C library, the `amdsmi` Python
+module, and the `amd-smi` CLI. This page covers the system requirements and
+every supported way to get them onto a Linux system.
+
+(install_choose)=
+## Choose an installation method
+
+Every method below delivers the same AMD SMI release. They differ in what else
+they pull in, where the files land, and how much wiring you do yourself.
+
+| Method | `amd-smi` CLI | `import amdsmi` | Use this when |
+|---|---|---|---|
+| {ref}`ROCm Core SDK <install_rocm>` | Included | After you add `share/amd_smi` to `sys.path` | You want ROCm anyway. **Start here if you are unsure.** |
+| {ref}`Standalone package <install_without_rocm>` | After you add `bin/` to `PATH` | After you add `share/amd_smi` to `sys.path` | You want AMD SMI without the rest of the ROCm libraries and tools |
+| {ref}`Nightly build <install_nightly>` | Included in the virtual environment | After you add `share/amd_smi` to `sys.path` | You need a pre-release fix, or you are testing against an unreleased ROCm |
+| {ref}`Tarball <install_tarball>` | After you add `bin/` to `PATH` | After you add `share/amd_smi` to `sys.path` | You have no root access, need several versions side by side, or the machine cannot reach the package repositories |
+| {ref}`PyPI wheel <install_pypi>` | Not included | Ready to use, but it loads the host's `libamd_smi.so` | You only script against the Python API and already have a ROCm library on the host |
+
+:::{note}
+Whichever method you pick, the machine you query still needs the `amdgpu` kernel
+driver. See {ref}`Driver requirements <install_amdgpu_driver>`.
+:::
+
+Every ROCm-managed method above ships the Python module at
+`<root>/share/amd_smi/amdsmi` and registers it with no interpreter, so
+`import amdsmi` needs one line of setup regardless of which one you choose. The
+procedure, and how to find `<root>` for your method, is in
+{ref}`Make the Python module importable <install_python_module>`.
+
+:::{note}
+ROCm 7.2 and earlier are distributed from `repo.radeon.com` as a separate
+package family, in which AMD SMI is the `amd-smi-lib` deb/rpm installed under
+`/opt/rocm-<major>.<minor>.<patch>`. That package does register the module with
+the system Python, so `import amdsmi` works straight after installing it, and it
+drops an `/etc/ld.so.conf.d` entry for its library. The `amdrocm-amdsmi` package
+described on this page belongs to the ROCm Core SDK and does neither.
+:::
 
 ## Supported platforms
 
@@ -100,12 +135,18 @@ For instructions, see {doc}`Install AMD ROCm <rocm:install/rocm>`. Use the
 selector panel on that page to view instructions appropriate for your system
 environment.
 
+The SDK installs under a versioned prefix, `/opt/rocm/core-<major>.<minor>`, and
+points `/opt/rocm/bin`, `/opt/rocm/lib` and `/opt/rocm/share` at the version it
+selects. It also registers `/usr/bin/amd-smi` through `update-alternatives`, so
+the CLI is on `PATH` with no further setup. The Python module is staged at
+`/opt/rocm/share/amd_smi/amdsmi`; see
+{ref}`Make the Python module importable <install_python_module>`.
+
 (install_without_rocm)=
 ## Install AMD SMI standalone on Linux
 
-Alternatively, if you want to install AMD SMI without additional ROCm libraries
-and tools, install the `amdrocm-amdsmi` package. This includes AMD SMI and
-ROCm system dependencies.
+Install the `amdrocm-amdsmi` package. It includes AMD SMI and the ROCm system
+dependencies it needs, and nothing else.
 
 1. Complete the {doc}`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
@@ -141,8 +182,11 @@ ROCm system dependencies.
    ::::
    :::::
 
-3. Prepend the `amd-smi` binary to your PATH, it is not on PATH by default.
-   Replace `<major>` and `<minor>` with the appropriate ROCm version.
+3. Prepend the `amd-smi` binary to your PATH. The package installs under the
+   versioned prefix `/opt/rocm/core-<major>.<minor>`, and on its own it creates
+   neither the `/opt/rocm/bin` link nor the `/usr/bin/amd-smi` alternative —
+   those come from the rest of the ROCm Core SDK. Replace `<major>` and
+   `<minor>` with the ROCm version you installed.
 
    ```bash
    export PATH="/opt/rocm/core-<major>.<minor>/bin${PATH:+:${PATH}}"
@@ -156,6 +200,11 @@ ROCm system dependencies.
    ```bash
    amd-smi version
    ```
+
+To use the Python API as well, see
+{ref}`Make the Python module importable <install_python_module>`. The package
+stages the module at `/opt/rocm/core-<major>.<minor>/share/amd_smi/amdsmi` and
+installs nothing into any interpreter.
 
 (install_nightly)=
 ## Install a nightly build
@@ -174,11 +223,13 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
    gfx942 (MI300X / MI325X):
 
    ```bash
-   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+   pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
        "rocm[libraries,device-gfx942]"
    ```
 
-   For the full list of `device-*` extras and other release options, see
+   For the full list of `device-*` extras, the other release channels
+   (stable, prerelease), and the legacy index that serves releases before
+   ROCm 10.1, see
    [TheRock RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#supported-python-device--install-extras).
 
 3. Verify your installation:
@@ -186,6 +237,181 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
    ```bash
    amd-smi version
    ```
+
+   `pip` installs a console script for the CLI, so `amd-smi` is on `PATH` while
+   the environment is active. The Python module is *not* installed as a
+   top-level package: it is staged inside the `rocm-sdk-core` payload, at
+   `<site-packages>/_rocm_sdk_core/share/amd_smi/amdsmi`. See
+   {ref}`Make the Python module importable <install_python_module>`.
+
+(install_tarball)=
+## Install from a tarball
+
+A tarball has no install step: the CLI, the library and the Python module run
+from wherever you extract them, and you point your tools at that tree rather
+than installing out of it.
+
+1. Download a ROCm Core tarball,
+   `therock-dist-linux-<gpu-family>-<version>.tar.gz`, from the channel you
+   want. Nightlies are at <https://nightly.repo.amd.com/rocm/core/tarball/>;
+   [TheRock RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md)
+   lists the stable, prerelease and development channels.
+
+2. Extract it into a directory of its own. The archive has no top-level
+   directory — it expands straight into `bin/`, `lib/`, `share/` and the rest of
+   a ROCm tree — so extracting it into a populated directory mixes it into
+   whatever is already there. The examples below call the extraction directory
+   `$AMDSMI_ROOT`.
+
+   ```bash
+   mkdir -p ~/rocm-tarball
+   tar -xf therock-dist-linux-<gpu-family>-<version>.tar.gz -C ~/rocm-tarball
+   export AMDSMI_ROOT=~/rocm-tarball
+
+   ls "$AMDSMI_ROOT/lib/libamd_smi.so."*
+   ls "$AMDSMI_ROOT/share/amd_smi/amdsmi/amdsmi_wrapper.py"
+   ```
+
+   Those two paths are what the CLI and the Python loader key on.
+
+3. Run the CLI.
+
+   ```bash
+   export PATH="$AMDSMI_ROOT/bin${PATH:+:${PATH}}"
+   amd-smi version
+   ```
+
+   You do not need `LD_LIBRARY_PATH`: `libamd_smi.so` is linked with an
+   `$ORIGIN`-relative `RPATH`, so it finds its own dependencies inside the
+   extracted tree.
+
+   :::{warning}
+   `amd-smi` searches `$ROCM_PATH/share/amd_smi` (or `$ROCM_HOME`) before the
+   copy next to its own executable. If either variable points at another ROCm
+   installation, the extracted CLI runs *that* installation's Python modules,
+   and those modules load *that* installation's library — so `amd-smi version`
+   reports a version you did not extract. Unset the variable, or set
+   `ROCM_PATH="$AMDSMI_ROOT"`, before running the tarball's CLI.
+   :::
+
+4. Make the module importable. Follow
+   {ref}`Make the Python module importable <install_python_module>` with
+   `<root>` set to `$AMDSMI_ROOT`.
+
+See [Packaging and install paths](../packaging.md) for the full precedence and
+coexistence rules.
+
+(install_pypi)=
+## Install the Python bindings from PyPI
+
+This method installs the `amdsmi` module only. It does not provide the
+`amd-smi` CLI, and it does not ship a native library: the published wheel is a
+pure-Python `py3-none-any` package whose loader looks for `libamd_smi.so` under
+`$ROCM_HOME`/`$ROCM_PATH`, then through the dynamic linker, then in
+`/opt/rocm/lib`. A ROCm or AMD SMI installation providing that library must
+already be on the host, as must the `amdgpu` kernel driver.
+
+1. Create and activate a virtual environment:
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Install the wheel:
+
+   ```bash
+   python3 -m pip install amdsmi
+   ```
+
+:::{important}
+The PyPI release cadence is independent of ROCm, so the published wheel can sit
+several releases behind the AMD SMI in a current ROCm installation, and its
+bindings are generated from a different release than the `libamd_smi.so` it
+loads off the host.
+
+Compare the published version against `amd-smi version` on the host before
+depending on it, and prefer one of the ROCm-managed methods above when ROCm is
+already installed: those pair the module with the library it was generated
+from.
+:::
+
+(install_python_module)=
+## Make the Python module importable
+
+Every method on this page except the {ref}`PyPI wheel <install_pypi>` *ships*
+the `amdsmi` module without *installing* it: the files land at
+`<root>/share/amd_smi/amdsmi`, and no package manager, `ldconfig` or pip step
+registers that directory with an interpreter. `import amdsmi` therefore fails until you put its parent on
+`sys.path`. The `amd-smi` CLI is unaffected — it adds its own `share/amd_smi` to
+`sys.path` at startup.
+
+`<root>` depends on the method:
+
+| Method | `<root>` |
+|---|---|
+| {ref}`ROCm Core SDK <install_rocm>` | `/opt/rocm` (a link to the selected `/opt/rocm/core-<major>.<minor>`) |
+| {ref}`Standalone package <install_without_rocm>` | `/opt/rocm/core-<major>.<minor>` |
+| {ref}`Nightly build <install_nightly>` | `<site-packages>/_rocm_sdk_core` in the virtual environment |
+| {ref}`Tarball <install_tarball>` | The directory you extracted into |
+
+Pick whichever scope suits you, substituting your `<root>`:
+
+**Current shell** — one variable, no files written:
+
+```bash
+export PYTHONPATH="<root>/share/amd_smi${PYTHONPATH:+:${PYTHONPATH}}"
+```
+
+`PYTHONPATH` outranks every install location, so this also overrides an
+installed `amd-smi-lib` package or a pip `amdsmi` wheel for any Python started
+from this shell. Append the `export` line to your `~/.bashrc` (or equivalent) to
+persist it.
+
+**One virtual environment** — no environment variable, nothing else on the host
+affected:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+echo "<root>/share/amd_smi" > "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/amdsmi.pth"
+```
+
+:::{important}
+Reference the module where the installation put it. Do not copy it elsewhere.
+
+The wrapper finds the library at `<root>/lib/libamd_smi.so.<MAJOR>` by walking
+up from its own file, so it pairs with its own tree's library only while it
+stays at `<root>/share/amd_smi/amdsmi`. Copy it into `site-packages` and that
+relative path stops resolving: the loader falls through to a bare
+`libamd_smi.so.<MAJOR>` lookup and binds whatever the dynamic linker finds
+first. On a host that already has ROCm installed that is `/opt/rocm/lib`, so you
+silently get a different library than the one you installed; on a host without
+one the import fails outright. The directory also ships no `pyproject.toml` or
+`setup.py`, so `pip install` cannot consume it in place either.
+:::
+
+(install_verify)=
+## Verify your installation
+
+These checks apply to every method. Run the ones that match what you installed.
+
+1. Confirm the CLI resolves and can reach the driver:
+
+   ```bash
+   amd-smi version
+   amd-smi list
+   ```
+
+2. Confirm the Python module imports, and check *which* copy answered:
+
+   ```bash
+   python3 -c "import amdsmi; print(amdsmi.__file__); print(amdsmi.amdsmi_get_lib_version())"
+   ```
+
+   On a host with more than one AMD SMI present, the printed path is what tells
+   you which install won. If it is not the one you just installed, see
+   [Packaging and install paths](../packaging.md) for the resolution order.
 
 ## Optional and advanced installation
 
@@ -212,8 +438,12 @@ from your ROCm instance.
 
 #### Manually install the Python library
 
-Multiple ROCm installations may cause `amd-smi` failures.
-Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
+Only one copy of `amdsmi` can own the system interpreter's `site-packages`, so
+with several ROCm instances installed, whichever wrote there last answers
+`import amdsmi` for all of them. `ROCM_PATH` compounds it: the CLI prefers
+`$ROCM_PATH/share/amd_smi` over the modules beside its own executable, so with
+that variable pointing at another instance, one instance's `amd-smi` runs
+another's modules and library.
 
 Starting with ROCm 7.14, the `amd-smi-lib` rpm/deb package no longer
 runs `pip install` during postinst — it installs the `amdsmi` Python package directly into the system
@@ -232,37 +462,34 @@ install needs to be uninstalled manually.
    sudo apt remove amd-smi-lib   # or: sudo dnf remove amd-smi-lib
    ```
 
-2. Install the AMD SMI Python library. Pick **one** of the two paths:
+2. Install the AMD SMI Python library. Pick **one** of these paths:
 
-   - **System package** (recommended when you want the rpm/deb to manage the
-     install). Install or reinstall `amd-smi-lib` from your target ROCm
-     instance; the package installs the wrapper into the system Python's
-     `site-packages` so `import amdsmi` resolves it directly.
-   - **Pip wheel** (recommended for venvs, containers, or when ROCm is not
-     installed on the host but the amdgpu kernel driver is present):
-
-     ```shell
-     python3 -m pip install amdsmi
-     ```
-
-     The wheel ships its own SONAME-renamed `libamd_smi_python.so` next to
-     the wrapper, so it does not depend on `/opt/rocm` being present.
+   - **Classic system package** — install or reinstall `amd-smi-lib` from your
+     target ROCm instance. The package installs the wrapper into the system Python's
+     `site-packages`, so `import amdsmi` resolves it directly. `sudo` is
+     usually required. This is the only delivery that claims a system-wide
+     `import amdsmi`, which also makes it the one that collides across
+     instances.
+   - **ROCm Core SDK package** — each version installs into its own
+     `/opt/rocm/core-<major>.<minor>` prefix and registers nothing with any
+     interpreter, so the instances cannot collide over `site-packages`. Choose
+     between them per shell with `PYTHONPATH`, as described in
+     {ref}`Make the Python module importable <install_python_module>`.
+   - **Tarball** — keeps each version self-contained in its own tree and
+     installs nothing system-wide, which is the cleanest way to keep instances
+     from colliding. See {ref}`Install from a tarball <install_tarball>`.
+   - **PyPI wheel** — isolated inside a virtual environment, but it loads a
+     library from the host, so set `ROCM_PATH` to the instance you want it to
+     bind against. See
+     {ref}`Install the Python bindings from PyPI <install_pypi>`.
 
    See `py-interface/README.md` in the source tree, or
    [Packaging and install paths](../packaging.md) for the full install-paths
    matrix, coexistence rules, and the `AMDSMI_LIB_OVERRIDE` override.
 
-   > **Note:** `sudo` may be required for the system-package path. For pip,
-   > use `--break-system-packages` only if installing into a non-venv
-   > Python that PEP 668 has marked externally managed.
+3. Confirm the right copy is on your Python path. With several ROCm instances
+   installed, the module path matters more than the import succeeding:
 
-3. You should now have the AMD SMI Python library in your Python path:
-
-   ```shell-session
-   ~$ python3
-   Python 3.8.10 (default, May 26 2023, 14:05:08)
-   [GCC 9.4.0] on linux
-   Type "help", "copyright", "credits" or "license" for more information.
-   >>> import amdsmi
-   >>>
+   ```bash
+   python3 -c "import amdsmi; print(amdsmi.__file__)"
    ```

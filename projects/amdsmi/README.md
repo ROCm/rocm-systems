@@ -32,11 +32,19 @@ The following are required to install and use the AMD SMI library through its la
 * `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work. Refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html) for installation instructions.
 
 * AMD EPYC™ CPU support additionally requires the `amd_hsmp` (or `hsmp_acpi`) kernel module with the HSMP interface enabled in BIOS. Without it, CPU discovery is skipped (non-fatal). See the [installation requirements](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html).
-* Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+* C/C++ consumers need `libamd_smi.so` on the run-time search path. Link with an
+  RPATH, or export `LD_LIBRARY_PATH`:
 
   ```bash
   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
   ```
+
+  The `amd-smi` CLI and the Python module do not need this; they locate the
+  library themselves.
+
+* `import amdsmi` needs one step of setup for most deliveries, which stage the
+  module in the ROCm tree rather than installing it into an interpreter. See
+  [Make the Python module importable](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html#make-the-python-module-importable).
 
 ### Python interface and CLI tool prerequisites
 
