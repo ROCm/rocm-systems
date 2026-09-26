@@ -1669,11 +1669,12 @@ configure_settings(bool _init)
            path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
-            throw std::runtime_error(
-                fmt::format("Config file '{}' is missing the expected '{}' root object "
-                            "and cannot be loaded. If this is a hierarchical preset "
-                            "configuration, pass it via --preset instead.",
-                            expanded_filename, TIMEMORY_PROJECT_NAME));
+            LOG_WARNING(
+                "Config file '{}' is missing the expected '{}' root object and cannot "
+                "be loaded via -c. If this is hierarchical preset JSON (e.g. from "
+                "--export-config), pass it via --preset instead.",
+                expanded_filename, TIMEMORY_PROJECT_NAME);
+            continue;
         }
 
         // Timemory parses config files during static init before main() (see
@@ -1690,10 +1691,18 @@ configure_settings(bool _init)
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
-        if(_config->read(filename) && _main_proc &&
-           ((_config->get<bool>(std::string{ env_vars::CI }) &&
-             settings::verbose() >= 0) ||
-            settings::verbose() >= 1 || settings::debug()))
+        if(!_config->read(filename))
+        {
+            LOG_WARNING("Unable to apply configuration file '{}'.The file does not "
+                        "contain valid key/value formatting. If this file is intended to "
+                        "be used as a preset configuration, specify it with '--preset' "
+                        "instead. Otherwise, correct the file structure and try again.",
+                        expanded_filename);
+            continue;
+        }
+        if(_main_proc && ((_config->get<bool>(std::string{ env_vars::CI }) &&
+                           settings::verbose() >= 0) ||
+                          settings::verbose() >= 1 || settings::debug()))
         {
             std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
