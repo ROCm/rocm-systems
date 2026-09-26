@@ -186,11 +186,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return kernel_descriptor_user_sgpr_count(arch, desc);
 }
 
-[[nodiscard]] bool has_kernarg_segment_ptr(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernel_code_properties,
-                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
-}
-
 [[nodiscard]] bool has_dispatch_ptr(const KD &desc) {
   return AMDHSA_BITS_GET(desc.kernel_code_properties,
                          kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
@@ -205,32 +200,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   if (!has_dispatch_ptr(desc))
     return std::nullopt;
   return static_cast<uint16_t>(sgpr);
-}
-
-[[nodiscard]] uint16_t kernarg_segment_ptr_slot(const KD &desc) {
-  const uint32_t properties = desc.kernel_code_properties;
-  uint32_t sgpr = 0;
-  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
-    sgpr += 4;
-  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
-    sgpr += 2;
-  if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
-    sgpr += 2;
-  return static_cast<uint16_t>(sgpr);
-}
-
-[[nodiscard]] std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
-  if (!has_kernarg_segment_ptr(desc))
-    return std::nullopt;
-  return kernarg_segment_ptr_slot(desc);
-}
-
-[[nodiscard]] uint32_t kernarg_preload_length(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
-}
-
-[[nodiscard]] uint32_t kernarg_preload_offset(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET);
 }
 
 [[nodiscard]] bool uses_kernarg_preload_firmware_skip(rj_code_arch_t arch) {
@@ -282,27 +251,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     ++sgpr;
   }
   return -1;
-}
-
-[[nodiscard]] uint32_t source_initial_sgpr_count(const KD &desc, rj_code_arch_t arch) {
-  // USER_SGPR_COUNT covers only the user block. Enabled workgroup IDs and
-  // WORKGROUP_INFO are dense system SGPRs that follow it and must move when a
-  // kernarg pointer is inserted into that user block.
-  uint32_t sgprs = user_sgpr_count(desc, arch);
-  const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
-    ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
-    ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-    ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
-    ++sgprs;
-  // Virtual-LDS translation currently has a gfx950 source. On gfx950 (and its
-  // gfx942 target), ENABLE_PRIVATE_SEGMENT initializes architected FLAT_SCRATCH
-  // special registers rather than appending an ordinary system SGPR, so it is
-  // deliberately absent from this repair range.
-  return sgprs;
 }
 
 [[nodiscard]] bool uses_gfx90a_accum_offset(rj_code_arch_t arch) {
@@ -768,7 +716,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
         result.has_kernarg_segment_ptr = true;
         result.kernarg_segment_ptr_sgpr = inserted_slot;
         result.target_user_sgpr_count = result.source_user_sgpr_count + 2u;
-        const uint32_t source_initial_sgprs = source_initial_sgpr_count(src, guest_arch);
+        const uint32_t source_initial_sgprs = kernel_descriptor_initial_sgpr_count(guest_arch, src);
         if (source_initial_sgprs > inserted_slot) {
           const uint32_t repair_count = source_initial_sgprs - inserted_slot;
           if (repair_count > std::numeric_limits<uint16_t>::max()) {
