@@ -240,6 +240,7 @@ jobs:
           cmake -S projects/clr -B build/clr -GNinja -Wno-dev \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_FLAGS=-DHIP_HRR_CAPTURE_ENABLED \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
             -DROCM_PATH="${ROCM_SDK}" \
