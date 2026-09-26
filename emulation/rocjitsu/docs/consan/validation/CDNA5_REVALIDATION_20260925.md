@@ -2568,3 +2568,14 @@ caller. Both correct cases pass, and both deliberately broken counter-handoff
 cases still report the expected races: four tests pass in
 `sgemm-streamk-wait-tests.log`. The default SGEMM qualification jobs continue
 with their immutable repaired hook.
+
+
+### gfx1250 ConSan regression sweep is green
+
+The second complete selection passes all 588 normal-GCC gfx1250 ConSan tests
+(`sgemm-bank-fix-all-gfx1250-tests-v2.log`), including both repaired Stream-K
+pairs and the stronger shared-helper publication contract. This includes
+437 simulator-labeled tests. Together with the 1,006 passing ConSan unit
+tests, it clears the regression failures found during this repair.
+The full SGEMM family clean and matching fault campaign are still live;
+no green E2E cell is inferred from regression testing alone.
