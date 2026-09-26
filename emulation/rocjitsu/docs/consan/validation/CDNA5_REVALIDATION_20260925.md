@@ -2275,3 +2275,21 @@ through ae9b6c62ca4 and reran the same ConSan/tensor execution filter:
 (`tensor-store-main-build.log`, `tensor-store-main-tests.log`). All builds and
 emulator runs stayed in the shared 40 GiB slice; its `max`, `oom`, and
 `oom_kill` counters remained zero.
+
+### Table evidence audit after tensor-store qualification
+
+`status-evidence-audit.py` and `status-evidence-audit.json` in the campaign
+artifact directory check all 62 cells against 118 completed fault campaigns
+and 140 accepted full clean results for gfx1250. Every displayed fault fraction
+has eight accepted, admitted, reached trials with healthy before/after probes
+and matching preset, bank/report-cap overrides, or SuperCollider delay controls.
+Every green cell has an accepted clean result with complete coverage, matching
+controls, and the full command count from the workload manifest. The grouped
+TP2 row has matching full clean evidence for all three workload IDs.
+
+The snapshot contains 31 green, 26 yellow, and five orange cells. The only
+missing full clean qualifications are those five explicitly running/queued
+cells and the two explicitly global-only scatter-reduce cells. No saved healthy
+fault campaign qualifies a lower Default preset than the table currently names.
+This audit checks recorded evidence; it does not replace the live SGEMM and
+queued SuperCollider full clean gates.
