@@ -21,8 +21,9 @@ namespace amd {
 class Monitor {
  public:
   explicit Monitor() {
-    waits_.store(0);                               // 0 waiting thread initially
-    notifyState_.store(notifyState::notNotified);  // initially not notified
+    waits_.store(0, std::memory_order_relaxed);  // 0 waiting thread initially
+    notifyState_.store(notifyState::notNotified,
+                       std::memory_order_relaxed);  // initially not notified
   }
 
   //! Try to acquire the lock, return true if successful, false if failed.

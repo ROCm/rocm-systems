@@ -141,6 +141,16 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
                         ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
 
     add_executable(${PROJECT_NAME} ${SOURCES})
+    # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
+    # links the system libva, so both load at runtime. librocdecode already depends
+    # on the vendored libva, so force librocdecode to be the FIRST direct dependency
+    # of the executable -- ahead of FFmpeg -- so the vendored libva enters the global
+    # symbol scope first and wins VA symbol interposition, loading the matching
+    # vendored VA driver. It must be injected as a raw path because CMake
+    # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
+    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+      set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
+    endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
     if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)

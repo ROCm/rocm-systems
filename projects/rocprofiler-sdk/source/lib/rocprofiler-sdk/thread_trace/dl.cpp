@@ -33,6 +33,19 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
+namespace
+{
+// EVENT and DISPATCH records arrived with rocprof_trace_decoder_create_handle in 0.2, and
+// rocprof_trace_decoder_get_version was added in 0.2.2, so either symbol implies a decoder
+// new enough to emit them.
+bool
+decoder_supports_event_records(void* handle)
+{
+    return dlsym(handle, "rocprof_trace_decoder_get_version") != nullptr ||
+           dlsym(handle, "rocprof_trace_decoder_create_handle") != nullptr;
+}
+}  // namespace
+
 DL::DL(const char* libpath)
 {
     if(libpath == nullptr) return;
@@ -47,6 +60,14 @@ DL::DL(const char* libpath)
     att_info_fn = reinterpret_cast<InfoFn*>(dlsym(handle, "rocprof_trace_decoder_get_info_string"));
     att_status_fn =
         reinterpret_cast<StatusFn*>(dlsym(handle, "rocprof_trace_decoder_get_status_string"));
+
+    // Occupancy data is unaffected by an old decoder, so warn rather than fail.
+    if(!decoder_supports_event_records(handle))
+        ROCP_WARNING << path.string()
+                     << ": decoder is older than 0.2 and cannot emit ATT event or dispatch "
+                        "records. Event and dispatch timelines will be empty. Check for a "
+                        "standalone rocprof-trace-decoder package shadowing the one shipped "
+                        "with ROCm.";
 };
 
 DL::~DL()

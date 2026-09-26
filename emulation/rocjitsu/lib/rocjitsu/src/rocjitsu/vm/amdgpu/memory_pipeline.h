@@ -151,15 +151,12 @@ private:
 /// @brief Local memory pipeline (LDS).
 class LocalMemPipeline : public MemoryPipeline {
 public:
-  explicit LocalMemPipeline(Lds *lds) : MemoryPipeline(WaitCounterType::LGKMCNT), lds_(lds) {}
+  LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
 
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                          MemoryAccessDeferredCompletion complete) override;
-
-private:
-  Lds *lds_;
 };
 
 } // namespace amdgpu

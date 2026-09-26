@@ -1,7 +1,7 @@
 # nccl4py: Python Bindings for RCCL
 
 Python bindings for the [ROCm Communication Collectives Library
-(RCCL)](https://github.com/ROCm/rccl), AMD's drop-in replacement for
+(RCCL)](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl), AMD's drop-in replacement for
 NVIDIA NCCL on ROCm. This package is a fork of the upstream NVIDIA
 [nccl4py](https://github.com/NVIDIA/nccl/tree/master/bindings/nccl4py)
 v0.2.0 and provides both low-level Cython bindings and a high-level

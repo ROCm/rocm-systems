@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_system.h"
 
@@ -33,6 +14,9 @@
 #include <sstream>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
+#ifdef ENABLE_WSL_BACKEND
+#include "amd_smi/impl/amd_smi_wsl_device.h"
+#endif
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
@@ -306,7 +290,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     // prerequisite not satisfied, etc.). This must NOT be fatal to amdsmi_init()
     // - GPU and NIC functionality must remain usable. Skip CPU population and
     // continue, mirroring the non-fatal BRCM/AI NIC discovery paths.
-    std::cout << "\tESMI Not initialized, drivers not found " << std::endl;
+    std::cerr << "\tESMI not initialized; skipping CPU discovery "
+              << "(load amd_hsmp with HSMP enabled in BIOS for AMD CPU support)." << std::endl;
     return AMDSMI_STATUS_SUCCESS;
   }
 
@@ -354,8 +339,20 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 #endif
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
+#ifdef ENABLE_WSL_BACKEND
+  // WSL path: TryPopulate handles /dev/dxg detection, librocdxg loading, and
+  // device enumeration. Returns NOT_SUPPORTED when not on WSL.
+  amdsmi_status_t wsl_status = WSLGPUBackend::TryPopulate(sockets_, processors_);
+  if (wsl_status == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    std::ostringstream ss;
+    ss << __func__ << ": WSL detected (/dev/dxg) but librocdxg.so.1 failed to load";
+    LOG_INFO(ss);
+  }
+  if (wsl_status != AMDSMI_STATUS_NOT_SUPPORTED) return wsl_status;
+  // Fall through to native Linux path if not on WSL.
+#endif
+  // Native Linux path: use rsmi + libdrm.
   AMDSmiSystem::cleanup();
-  // init rsmi — forward the test flag so the mutex becomes non-blocking
   rsmi_driver_state_t state;
   uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
                             ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
@@ -380,14 +377,12 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   }
 
   for (uint32_t i = 0; i < device_count; i++) {
-    // GPU device uses the bdf as the socket id
     std::string socket_id;
     amd_smi_status = get_gpu_socket_id(i, socket_id);
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
       return amd_smi_status;
     }
 
-    // Multiple devices may share the same socket
     AMDSmiSocket* socket = nullptr;
     for (unsigned int j = 0; j < sockets_.size(); j++) {
       if (sockets_[j]->get_socket_id() == socket_id) {
@@ -701,10 +696,19 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
       sockets_.clear();
     }
     drm_.cleanup();
-    rsmi_status_t ret = rsmi_shut_down();
-    if (ret != RSMI_STATUS_SUCCESS) {
-      return amd::smi::rsmi_to_amdsmi_status(ret);
+#ifdef ENABLE_WSL_BACKEND
+    bool used_wsl = WSLGPUBackend::IsActive();
+    amdsmi_status_t wsl_ret = WSLGPUBackend::Shutdown();
+    if (wsl_ret != AMDSMI_STATUS_SUCCESS) return wsl_ret;
+    if (!used_wsl) {
+#endif
+      rsmi_status_t ret = rsmi_shut_down();
+      if (ret != RSMI_STATUS_SUCCESS) {
+        return amd::smi::rsmi_to_amdsmi_status(ret);
+      }
+#ifdef ENABLE_WSL_BACKEND
     }
+#endif
   }
   if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
     smi_nic_destroy_context(ainic_ctx_);

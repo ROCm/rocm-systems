@@ -228,4 +228,53 @@ TEST_F(WarpSpeedMPITest, MixedThresholdRace)
     TEST_INFO("All %d iterations passed", kTrainIterations);
 }
 
+// High-rank single-node comm init + AllGather; exercises the bootstrap topology
+// AllGather and single-node WarpSpeed channel setup (a regression aborts init).
+TEST_F(WarpSpeedMPITest, HighRankCommInitAndAllGather)
+{
+    // Single node, all available ranks (repro uses 64 on CPX+NPS2).
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          kRequireSingleNode,
+                                          kRequireSingleNode))
+        << "Requires a single-node run";
+
+    // Init exercises the bootstrap topology AllGather and WarpSpeed channel setup.
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+    skipUnlessWarpSpeedAutoEnabled();
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamCreate(&stream_));
+
+    const int    nranks    = MPIEnvironment::world_size;
+    const int    rank      = MPIEnvironment::world_rank;
+    const size_t sendCount = 1u << 20;  // 1M floats (4 MB) per rank
+    const size_t recvCount = sendCount * static_cast<size_t>(nranks);
+
+    void* d_send = nullptr;
+    void* d_recv = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&d_send, sendCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&d_recv, recvCount * sizeof(float)));
+    // Free on any exit path (including early ASSERT/FAIL returns) to avoid leaks.
+    SCOPE_EXIT(if(d_send) { (void)hipFree(d_send); });
+    SCOPE_EXIT(if(d_recv) { (void)hipFree(d_recv); });
+
+    // Each rank fills its send buffer with its own rank value.
+    HIP_TEST_CHECK_GTEST_FAIL(initializeBufferWithPattern<float>(
+        d_send, sendCount, [rank](size_t) { return static_cast<float>(rank); }));
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllGather(d_send, d_recv, sendCount, ncclFloat, comm, stream_));
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream_));
+
+    // After the AllGather, rank i's chunk (indices [i*sendCount, (i+1)*sendCount))
+    // must contain the value i.
+    const bool ok = verifyBufferData<float>(
+        d_recv, recvCount,
+        [sendCount](size_t idx) { return static_cast<float>(idx / sendCount); });
+    EXPECT_TRUE(ok) << "AllGather result mismatch across " << nranks << " ranks";
+
+    TEST_INFO("HighRankCommInitAndAllGather passed on %d ranks (single node)", nranks);
+}
+
 #endif // ENABLE_WARP_SPEED

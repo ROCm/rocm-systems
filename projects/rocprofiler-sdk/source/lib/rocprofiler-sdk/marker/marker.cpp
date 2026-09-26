@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -368,6 +368,60 @@ should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
 
 template <size_t TableIdx, typename Tp, size_t OpIdx>
 void
+restore_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
+{
+    using table_type = typename roctx_table_lookup<TableIdx>::type;
+
+    common::consume_args(_tbl_instance);  // currently unused
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = roctx_api_info<TableIdx, OpIdx>{};
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _orig->size) return;
+
+        // retrieve the function pointer to the implementation
+        auto& _copy_table = _info.get_table(*get_table<TableIdx>());
+        auto& _copy_func  = _info.get_table_func(_copy_table);
+
+        // _copy_func will only be non-null after a call to copy_table has been made
+        if(_copy_func != nullptr)
+        {
+            // retrieve the current function pointer in the dispatch table
+            auto& _curr_table = _info.get_table(_orig);
+            auto& _curr_func  = _info.get_table_func(_curr_table);
+
+            if(_curr_func == nullptr)  // this really shouldn't happen
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "current function pointer for '{}' is null... cannot restore to implementation",
+                    _info.name);
+            }
+            else if(_curr_func == _copy_func)
+            {
+                ROCP_TRACE << fmt::format("current function pointer for '{}' is already the "
+                                          "implementation... nothing to restore",
+                                          _info.name);
+            }
+            else if(_copy_func != nullptr)
+            {
+                ROCP_TRACE << fmt::format("restoring function pointer for '{}' to implementation",
+                                          _info.name);
+                _curr_func = _copy_func;
+            }
+        }
+        else
+        {
+            ROCP_TRACE << fmt::format(
+                "function pointer to implementation of '{}' is null... nothing to restore",
+                _info.name);
+        }
+    }
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx>
+void
 copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
 {
     using table_type = typename roctx_table_lookup<TableIdx>::type;
@@ -388,10 +442,6 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         // 5. save the original function in the saved table
         auto& _copy_table = _info.get_table(*get_table<TableIdx>());
         auto& _copy_func  = _info.get_table_func(_copy_table);
-
-        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
-            << _info.name << " has non-null function pointer " << _copy_func
-            << " despite this being the first instance of the library being copies";
 
         if(!_copy_func)
         {
@@ -437,6 +487,15 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         auto& _func  = _info.get_table_func(_table);
         if(_func) _func = _info.get_functor(_func);
     }
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+void
+restore_table(Tp* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    restore_table<TableIdx>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        restore_table<TableIdx>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
@@ -515,6 +574,16 @@ iterate_args(uint32_t                                              id,
 
 template <typename TableT>
 void
+restore_table(TableT* _orig, uint64_t _tbl_instance)
+{
+    constexpr auto TableIdx = roctx_table_id_lookup<TableT>::value;
+    if(_orig)
+        restore_table<TableIdx>(
+            _orig, _tbl_instance, std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
+}
+
+template <typename TableT>
+void
 copy_table(TableT* _orig, uint64_t _tbl_instance)
 {
     constexpr auto TableIdx = roctx_table_id_lookup<TableT>::value;
@@ -536,14 +605,15 @@ update_table(TableT* _orig)
 using iterate_args_data_t = rocprofiler_callback_tracing_marker_api_data_t;
 using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
 
-#define INSTANTIATE_MARKER_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                       \
-    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
-    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
-    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
-    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
-    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
-    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
-    template void                     iterate_args<TABLE_IDX>(                                     \
+#define INSTANTIATE_MARKER_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                         \
+    template void                     restore_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv); \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);    \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                   \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                               \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                            \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                          \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                        \
+    template void                     iterate_args<TABLE_IDX>(                                       \
         uint32_t, const iterate_args_data_t&, iterate_args_cb_t, int32_t, void*);
 
 INSTANTIATE_MARKER_TABLE_FUNC(roctx_core_api_table_t, ROCPROFILER_MARKER_TABLE_ID_RoctxCore)

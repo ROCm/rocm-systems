@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <ctime>
 #include <mutex>
 #include <pthread.h>
 #include <string>
@@ -39,7 +40,7 @@ to_lower(std::string_view s)
 {
     std::string result;
     result.reserve(s.size());
-    for(char c : s)
+    for(const char c : s)
     {
         result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
@@ -162,7 +163,7 @@ public:
             return *state().instance_ptr;
         }
 
-        std::lock_guard<std::mutex> lock(state().init_mutex);
+        const std::lock_guard<std::mutex> lock(state().init_mutex);
         if(!state().initialized.load(std::memory_order_relaxed))
         {
             state().instance_ptr = create_logger(state().log_lock);
@@ -248,7 +249,13 @@ private:
 
     static std::shared_ptr<spdlog::logger> create_logger(std::atomic<bool>& log_lock)
     {
-        logger_settings_t logger_settings;
+        // Prime glibc's timezone cache once, up front. The spdlog pattern formats
+        // %H:%M:%S per message via localtime_r; without this the first log call on
+        // an arbitrary thread pays the lazy tzset() cost, and hot paths such as the
+        // process sampler repeatedly reach into the non-thread-safe TZ/environ path.
+        ::tzset();
+
+        const logger_settings_t logger_settings;
 
         std::vector<spdlog::sink_ptr> sinks;
 

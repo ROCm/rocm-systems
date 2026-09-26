@@ -349,14 +349,14 @@ FenceOrderingTester::FenceOrderingTester(TesterArguments args)
   r_buf = (char *)rocshmem_malloc(r_buf_size);
   // Per-wave data flags + ack flags: 2 * total_waves entries
   signal = (uint64_t *)rocshmem_malloc(2 * total_waves * sizeof(uint64_t));
-  CHECK_HIP(hipMallocManaged(&error_count, sizeof(int), hipMemAttachGlobal));
+  CHECK_HIP(hipHostMalloc(&error_count, sizeof(int)));
 }
 
 FenceOrderingTester::~FenceOrderingTester() {
   rocshmem_free(s_buf);
   rocshmem_free(r_buf);
   rocshmem_free(signal);
-  CHECK_HIP(hipFree(error_count));
+  CHECK_HIP(hipFreeHost(error_count));
 }
 
 void FenceOrderingTester::resetBuffers(size_t size) {

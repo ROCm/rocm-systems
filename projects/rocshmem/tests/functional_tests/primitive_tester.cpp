@@ -31,9 +31,11 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
+template <TestType Type>
+__global__ void PrimitiveTest(int loop, int skip,
+                              long long int *start_time,
                               long long int *end_time, char *source,
-                              char *dest, size_t size, TestType type,
+                              char *dest, size_t size,
                               ShmemContextType ctx_type, int wf_size,
                               int batch, int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
@@ -81,31 +83,20 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
       }
     }
 
-    switch (type) {
-      case GetTestType:
-        rocshmem_ctx_getmem(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case GetNBITestType:
-        rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case PutTestType:
-        rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case PutNBITestType:
-        rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case PTestType:
-        {
-          /* Assignment required to verify we can send non-symetric memory */
-          char val = source[offset];
-          rocshmem_ctx_char_p(ctx, dest + offset, val, 1);
-        }
-        break;
-      case GTestType:
-        dest[offset] = rocshmem_ctx_char_g(ctx, source + offset, 1);
-        break;
-      default:
-        break;
+    if constexpr (Type == GetTestType) {
+      rocshmem_ctx_getmem(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == GetNBITestType) {
+      rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == PutTestType) {
+      rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == PutNBITestType) {
+      rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == PTestType) {
+      /* Assignment required to verify we can send non-symmetric memory */
+      char val = source[offset];
+      rocshmem_ctx_char_p(ctx, dest + offset, val, 1);
+    } else if constexpr (Type == GTestType) {
+      dest[offset] = rocshmem_ctx_char_g(ctx, source + offset, 1);
     }
   }
 
@@ -147,7 +138,8 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_co_resident_wgs_per_cu, PrimitiveTest, args.wg_size, 0));
+      &max_co_resident_wgs_per_cu, PrimitiveTest<GetTestType>,
+      args.wg_size, 0));
   const int max_sustainable_wgs =
       max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
@@ -213,10 +205,48 @@ void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                    size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(PrimitiveTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, source, dest,
-                     size, _type, _shmem_context, wf_size,
-                     batch_size, grid_psync);
+  switch (_type) {
+    case GetTestType:
+      hipLaunchKernelGGL(PrimitiveTest<GetTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, source, dest, size, _shmem_context,
+                         wf_size, batch_size, grid_psync);
+      break;
+    case GetNBITestType:
+      hipLaunchKernelGGL(PrimitiveTest<GetNBITestType>, gridSize,
+                         blockSize, shared_bytes, stream, loop, args.skip,
+                         start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case PutTestType:
+      hipLaunchKernelGGL(PrimitiveTest<PutTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, source, dest, size, _shmem_context,
+                         wf_size, batch_size, grid_psync);
+      break;
+    case PutNBITestType:
+      hipLaunchKernelGGL(PrimitiveTest<PutNBITestType>, gridSize,
+                         blockSize, shared_bytes, stream, loop, args.skip,
+                         start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case PTestType:
+      hipLaunchKernelGGL(PrimitiveTest<PTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, source, dest, size, _shmem_context,
+                         wf_size, batch_size, grid_psync);
+      break;
+    case GTestType:
+      hipLaunchKernelGGL(PrimitiveTest<GTestType>, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, source, dest, size, _shmem_context,
+                         wf_size, batch_size, grid_psync);
+      break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in PrimitiveTester::launchKernel" << std::endl;
+      exit(-1);
+  }
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;

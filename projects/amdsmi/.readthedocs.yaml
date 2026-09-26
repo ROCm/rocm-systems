@@ -11,7 +11,7 @@ build:
 sphinx:
    configuration: projects/amdsmi/docs/conf.py
 
-formats: [htmlzip, pdf]
+formats: []
 
 python:
    install:

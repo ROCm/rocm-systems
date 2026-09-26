@@ -35,34 +35,42 @@ void write_cluster_lds_target(const ClusterLdsMulticastTransaction &txn,
           "cluster LDS multicast payload too small: lane={} offset={} bytes={} payload={}", lane,
           data_offset, txn.bytes_per_lane, txn.payload.size()));
     }
-    uint32_t lds_addr = cluster_lds_lane_addr(txn, lane, target.lds_base);
-    if (uint64_t(lds_addr) + txn.bytes_per_lane > lds.size_bytes()) {
-      throw std::runtime_error(std::format(
-          "cluster LDS multicast target address out of range: lane={} target_wg={} addr={:#x} "
-          "bytes={} lds_size={}",
-          lane, target.wg_id, lds_addr, txn.bytes_per_lane, lds.size_bytes()));
+    uint64_t lds_addr = cluster_lds_lane_addr(txn, lane, target.lds_base);
+    if (txn.per_lane_addr && lds_addr == kInvalidLdsAddress)
+      continue;
+    if (lds_addr + txn.bytes_per_lane > lds.size_bytes()) {
+      if (!txn.per_lane_addr) {
+        throw std::runtime_error(std::format(
+            "cluster LDS multicast target out of range: lane={} wg={} address={:#x} bytes={} "
+            "LDS={}",
+            lane, target.wg_id, lds_addr, txn.bytes_per_lane, lds.size_bytes()));
+      }
+      continue;
     }
     for (uint32_t b = 0; b < txn.bytes_per_lane; ++b)
-      lds.write8(lds_addr + b, txn.payload[data_offset + b]);
+      lds.write8(static_cast<uint32_t>(lds_addr + b), txn.payload[data_offset + b]);
   }
 }
 
 } // namespace
 
-uint32_t remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
-                                uint32_t source_lds_addr) {
+uint64_t remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
+                                uint64_t source_lds_addr) {
   if (source_lds_addr < source_lds_base) {
     throw std::runtime_error(std::format("cluster LDS source address {:#x} precedes base {:#x}",
                                          source_lds_addr, source_lds_base));
   }
-  return target_lds_base + (source_lds_addr - source_lds_base);
+  return static_cast<uint64_t>(target_lds_base) + (source_lds_addr - source_lds_base);
 }
 
-uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32_t lane,
+uint64_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32_t lane,
                                uint32_t target_lds_base) {
-  uint32_t source_lds_addr = txn.source_lds_base + lane * txn.bytes_per_lane;
-  if (txn.per_lane_addr)
+  uint64_t source_lds_addr = static_cast<uint64_t>(txn.source_lds_base) + lane * txn.bytes_per_lane;
+  if (txn.per_lane_addr) {
     source_lds_addr = txn.per_lane_lds_addr[lane];
+    if (source_lds_addr == kInvalidLdsAddress || source_lds_addr < txn.source_lds_base)
+      return kInvalidLdsAddress;
+  }
   return remap_cluster_lds_addr(txn.source_lds_base, target_lds_base, source_lds_addr);
 }
 

@@ -157,6 +157,8 @@ class ThunkLoader {
                                       HSAuint64 SizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAvailableMemory))(HSAuint32 Node, \
                                       HSAuint64 *AvailableBytes);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetDefaultHostGpu))(HSAuint32 *NodeId, \
+                                      HSAuint32 *GpuId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRegisterMemory))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRegisterMemoryToNodes))(void *MemoryAddress, \
@@ -205,7 +207,7 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes, \
                                       HSAuint64* AlternateVAGPU, \
-                                      HsaMemMapFlags MemMapFlags, \
+                                      HsaMemFlags MemFlags, \
                                       HSAuint64 NumberOfNodes, \
                                       HSAuint32* NodeArray);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU))(void* MemoryAddress);
@@ -275,6 +277,8 @@ class ThunkLoader {
                                       void* UserData);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetQueueInfo))(HSA_QUEUEID QueueId, \
                                       HsaQueueInfo *QueueInfo);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetKernelQueueId))(HSA_QUEUEID QueueId, \
+                                      HSAuint32 *KernelInternalQueueId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAllocQueueGWS))(HSA_QUEUEID QueueId, \
                                       HSAuint32 nGWS, \
                                       HSAuint32 *firstGWS);
@@ -283,6 +287,8 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRuntimeDisable))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities))(HSAuint32 *caps_mask);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo))(struct kfd_runtime_info *runtime_info);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetCoreDeviceInfo))(HSAuint32 gpu_id, struct kfd_dbg_device_info_entry *device_info);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDebugTrapIoctl))(struct kfd_ioctl_dbg_trap_args *arg, \
                                       HSA_QUEUEID *Queues, \
                                       HSAuint64 *DebugReturn);
@@ -475,6 +481,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtAllocMemoryAlign)* HSAKMT_PFN(hsaKmtAllocMemoryAlign);
     HSAKMT_DEF(hsaKmtFreeMemory)* HSAKMT_PFN(hsaKmtFreeMemory);
     HSAKMT_DEF(hsaKmtAvailableMemory)* HSAKMT_PFN(hsaKmtAvailableMemory);
+    HSAKMT_DEF(hsaKmtGetDefaultHostGpu)* HSAKMT_PFN(hsaKmtGetDefaultHostGpu);
     HSAKMT_DEF(hsaKmtRegisterMemory)* HSAKMT_PFN(hsaKmtRegisterMemory);
     HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)* HSAKMT_PFN(hsaKmtRegisterMemoryToNodes);
     HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)* HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags);
@@ -514,11 +521,14 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtQueryPointerInfo)* HSAKMT_PFN(hsaKmtQueryPointerInfo);
     HSAKMT_DEF(hsaKmtSetMemoryUserData)* HSAKMT_PFN(hsaKmtSetMemoryUserData);
     HSAKMT_DEF(hsaKmtGetQueueInfo)* HSAKMT_PFN(hsaKmtGetQueueInfo);
+    HSAKMT_DEF(hsaKmtGetKernelQueueId)* HSAKMT_PFN(hsaKmtGetKernelQueueId);
     HSAKMT_DEF(hsaKmtAllocQueueGWS)* HSAKMT_PFN(hsaKmtAllocQueueGWS);
     HSAKMT_DEF(hsaKmtRuntimeEnable)* HSAKMT_PFN(hsaKmtRuntimeEnable);
     HSAKMT_DEF(hsaKmtRuntimeDisable)* HSAKMT_PFN(hsaKmtRuntimeDisable);
     HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)* HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport);
     HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)* HSAKMT_PFN(hsaKmtGetRuntimeCapabilities);
+    HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)* HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo);
+    HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)* HSAKMT_PFN(hsaKmtGetCoreDeviceInfo);
     HSAKMT_DEF(hsaKmtDebugTrapIoctl)* HSAKMT_PFN(hsaKmtDebugTrapIoctl);
     HSAKMT_DEF(hsaKmtSPMAcquire)* HSAKMT_PFN(hsaKmtSPMAcquire);
     HSAKMT_DEF(hsaKmtSPMRelease)* HSAKMT_PFN(hsaKmtSPMRelease);

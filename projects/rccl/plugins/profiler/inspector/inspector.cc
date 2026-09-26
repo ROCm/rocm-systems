@@ -25,8 +25,8 @@
 #include <cstring>
 #include <chrono>
 #include <thread>
-#include <cuda_runtime.h>
 
+#include "inspector_gpu_compat.h"
 #include "common.h"
 
 #define INS_CUDA_CHK(cmd)                                               \

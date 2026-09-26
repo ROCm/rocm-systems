@@ -6,8 +6,8 @@
 #
 include_guard(DIRECTORY)
 
-if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
-    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems-causal-api-library)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS causal-api)
 endif()
 
 if(NOT coz-profiler_FOUND)
@@ -62,7 +62,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-debug
     )
 
@@ -79,7 +79,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}-rocprofsys
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-debug
     )
 
@@ -96,7 +96,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}-ndebug
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-no-debug
     )
 
@@ -113,7 +113,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         ${_NAME}-rocprofsys-ndebug
         PRIVATE
             ${CAUSAL_LINK_LIBRARIES}
-            rocprofiler-systems::rocprofiler-systems-user-library
+            rocprofiler-systems::rocprofiler-systems-causal-api-library
             rocprofsys-causal-example-lib-no-debug
     )
 

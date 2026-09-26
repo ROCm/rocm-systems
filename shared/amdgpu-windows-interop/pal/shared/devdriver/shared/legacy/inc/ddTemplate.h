@@ -25,4 +25,4 @@
 
 #pragma once
 
-#include "../core/inc/ddcTemplate.h"
+#include <core/inc/ddcTemplate.h>

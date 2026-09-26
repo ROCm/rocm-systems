@@ -28,6 +28,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
   // Create command processor for this XCD.
   auto cp = std::make_unique<CommandProcessor>(xcd_name + ".cp");
   cp_ = cp.get();
+  cp_->configure_for_arch(arch);
 
   // Create shader engines, each with its own CU array sharing the XCD's L2.
   for (uint32_t i = 0; i < config.num_shader_engines; ++i) {
@@ -36,8 +37,11 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
                                        arch, memory, l2_cache_, exec_mode);
     // Register all CUs in this SE with the XCD's command processor.
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
-    for (uint32_t c = 0; c < se->num_compute_units(); ++c)
-      cp_->add_compute_unit(se->compute_unit(c));
+    for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
+      auto *cu = se->compute_unit(c);
+      cu->set_shader_engine_location(i, c);
+      cp_->add_compute_unit(cu);
+    }
     // Register the SE's SPI with the CP so ace_dispatch_all() can use the
     // interleaved SPI path for cross-workgroup spin-wait resolution.
     cp_->add_spi(&se->spi());

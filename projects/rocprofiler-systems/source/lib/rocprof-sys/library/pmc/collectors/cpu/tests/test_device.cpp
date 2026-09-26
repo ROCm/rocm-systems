@@ -82,7 +82,7 @@ TEST_F(cpu_device_test, all_metrics_supported_when_procfs_readable)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // init probe
     EXPECT_CALL(*mock_backend, read_rusage()).Times(1);           // init probe
 
-    device<MockBackend> dev(mock_backend, 0, monitored_cpus);
+    const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
     auto supported = dev.get_supported_metrics();
@@ -106,7 +106,7 @@ TEST_F(cpu_device_test, no_load_when_proc_stat_empty)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // init probe
     EXPECT_CALL(*mock_backend, read_rusage()).Times(1);           // init probe
 
-    device<MockBackend> dev(mock_backend, 0, monitored_cpus);
+    const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_EQ(dev.get_supported_metrics().bits.load, 0u);
@@ -122,7 +122,7 @@ TEST_F(cpu_device_test, no_frequency_when_cpuinfo_empty)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // init probe
     EXPECT_CALL(*mock_backend, read_rusage()).Times(1);           // init probe
 
-    device<MockBackend> dev(mock_backend, 0, monitored_cpus);
+    const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_EQ(dev.get_supported_metrics().bits.frequency, 0u);
@@ -135,7 +135,7 @@ TEST_F(cpu_device_test, device_interface_methods)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // init probe
     EXPECT_CALL(*mock_backend, read_rusage()).Times(1);           // init probe
 
-    device<MockBackend> dev(mock_backend, 0, monitored_cpus);
+    const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
 
     EXPECT_EQ(dev.get_index(), 0u);
     EXPECT_EQ(dev.get_name(), "CPU 0");
@@ -168,9 +168,9 @@ TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(2);  // init + 1 sample
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
-    std::set<size_t>    subset = { 1, 3 };
-    device<MockBackend> dev(mock_backend, 0, subset);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    const std::set<size_t> subset = { 1, 3 };
+    device<MockBackend>    dev(mock_backend, 0, subset);
+    auto                   result = dev.get_cpu_metrics(all_enabled);
 
     std::set<size_t> collected_ids;
     for(const auto& cpu : result.cpu_data)
@@ -300,7 +300,7 @@ TEST_F(cpu_device_test, zero_peak_rss_marks_unsupported)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // init probe
     EXPECT_CALL(*mock_backend, read_rusage()).Times(1);           // init probe
 
-    device<MockBackend> dev(mock_backend, 0, monitored_cpus);
+    const device<MockBackend> dev(mock_backend, 0, monitored_cpus);
     EXPECT_EQ(dev.get_supported_metrics().bits.peak_rss, 0u);
 }
 
@@ -310,9 +310,9 @@ TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(2);  // init + 1 sample
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
-    std::set<size_t>    empty_set;
-    device<MockBackend> dev(mock_backend, 0, empty_set);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    const std::set<size_t> empty_set;
+    device<MockBackend>    dev(mock_backend, 0, empty_set);
+    auto                   result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_TRUE(result.cpu_data.empty());
     EXPECT_GT(result.process_data.page_rss, 0);
@@ -324,9 +324,9 @@ TEST_F(cpu_device_test, single_cpu_monitored)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(2);  // init + 1 sample
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
-    std::set<size_t>    single = { 2 };
-    device<MockBackend> dev(mock_backend, 0, single);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    const std::set<size_t> single = { 2 };
+    device<MockBackend>    dev(mock_backend, 0, single);
+    auto                   result = dev.get_cpu_metrics(all_enabled);
 
     size_t cpu2_count = 0;
     for(const auto& cpu : result.cpu_data)
@@ -342,9 +342,9 @@ TEST_F(cpu_device_test, nonexistent_cpu_id_has_zero_metrics)
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(2);  // init + 1 sample
     EXPECT_CALL(*mock_backend, read_rusage()).Times(2);           // init + 1 sample
 
-    std::set<size_t>    nonexistent = { 99 };
-    device<MockBackend> dev(mock_backend, 0, nonexistent);
-    auto                result = dev.get_cpu_metrics(all_enabled);
+    const std::set<size_t> nonexistent = { 99 };
+    device<MockBackend>    dev(mock_backend, 0, nonexistent);
+    auto                   result = dev.get_cpu_metrics(all_enabled);
 
     // make_empty_metrics pre-populates zero entries for all monitored CPUs,
     // even if they don't appear in /proc/stat. This ensures Perfetto tracks
@@ -515,7 +515,7 @@ TEST_F(cpu_device_test, only_process_metrics_enabled)
 
 TEST_F(cpu_device_test, no_metrics_enabled_skips_all_reads)
 {
-    enabled_metrics none{};
+    const enabled_metrics none{};
 
     EXPECT_CALL(*mock_backend, read_proc_stat()).Times(1);        // only the init probe
     EXPECT_CALL(*mock_backend, read_cpu_frequencies()).Times(1);  // only the init probe

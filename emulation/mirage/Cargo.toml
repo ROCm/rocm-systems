@@ -1,6 +1,6 @@
 [package]
 name = "mirage"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [[bin]]
@@ -8,62 +8,39 @@ name = "mirage"
 path = "src/main.rs"
 
 [dependencies]
-mirage_core = { workspace = true }
 mirage_ctl = { workspace = true }
-mirage_host = { workspace = true }
-# The web UI server (HTTP/WebSocket dashboard). Optional and off by
-# default — pulled in by the `daemon` feature (and transitively by
-# `webui`, which also enables the bundled SPA).
-mirage_daemon = { workspace = true, optional = true }
 # Emulator backends. Each is an optional, link-only dependency pulled in
 # by its matching feature below; the binary never references them
 # directly — they register themselves into the emulator registry via
 # `inventory` at link time (see `src/main.rs`). Toggle a backend on or
 # off with its feature flag.
-mirage_noop = { workspace = true, optional = true }
 mirage_rocjitsu = { workspace = true, optional = true }
 mirage_hotswap = { workspace = true, optional = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
-tracing-subscriber = { workspace = true }
 
 [features]
 # All backends are compiled in by default. Disable a backend by
 # building with `--no-default-features` and selecting the subset you
 # want, e.g. `cargo build --no-default-features --features rocjitsu`.
-#
-# The web UI is OFF by default. Enable just the HTTP API server with
-# `--features daemon`, or the full dashboard (API + bundled SPA, needs
-# the Node.js toolchain) with `--features webui`.
 default = ["rocjitsu"]
-noop = ["dep:mirage_noop"]
 rocjitsu = ["dep:mirage_rocjitsu"]
 hotswap = ["dep:mirage_hotswap"]
-# Compile in the `mirage webui` server (the cross-session HTTP/WS
-# daemon over the control plane). No SPA, no Node.js.
-daemon = ["dep:mirage_daemon"]
-# Everything in `daemon` plus the embedded dashboard SPA and its
-# client-side routing (via `mirage_daemon/webui` ->
-# `mirage_dashboard/webui`).
-webui = ["daemon", "mirage_daemon/webui"]
+
+[lints]
+workspace = true
 
 [build-dependencies]
 serde_json = "1.0"
 
 [dev-dependencies]
-mirage_builtin = { workspace = true }
-assert_cmd = "2"
-predicates = "3"
 tempfile = "3"
 serde = { workspace = true }
 serde_json = "1.0"
 chrono = { workspace = true }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio-tungstenite = "0.24"
-futures-util = "0.3"
 tokio = { workspace = true }
-tungstenite = "0.24"
 libc = { workspace = true }
 nix = { workspace = true }
 
@@ -73,14 +50,87 @@ members = [
     "core",
     "container",
     "ctl",
-    "daemon",
-    "dashboard",
-    "host",
     "hotswap",
-    "noop",
     "rocjitsu",
     "rocjitsu_sys",
+    "supervisor",
 ]
+
+# Fields shared by every crate in the workspace. Members inherit them with
+# `version.workspace = true`, so a release is a one-line change here.
+[workspace.package]
+version = "0.2.0"
+# Edition 2024 needs 1.85; let-chains (`if let … && …`, src/main.rs) need
+# 1.88, which is therefore the real floor. Bump this when a newer feature
+# is actually used, not in step with whatever the toolchain happens to be:
+# the number is a promise to whoever builds mirage, and docs/building.md
+# quotes it.
+rust-version = "1.88"
+
+# =============================================================================
+# Workspace lint policy
+# =============================================================================
+#
+# Every crate opts in with `[lints] workspace = true`. There is exactly
+# one exception, and it is a crate whose entire job is to contain `unsafe`
+# so that nothing else has to: `rocjitsu_sys`, the FFI binding layer to
+# `librocjitsu.so`. It carries its own equivalent `[lints]` table with
+# `unsafe_code` allowed — because `forbid` cannot be relaxed by a later
+# `allow`, it deliberately does not inherit this one rather than trying to
+# override it. Keeping the exception to a crate named for the purpose is
+# what makes "where is the unsafe?" answerable by reading the workspace
+# members.
+#
+# There used to be a second, `mirage_sys`, holding a `pre_exec` closure
+# that set `PR_SET_PDEATHSIG` on every workload so it would be killed by
+# the kernel if mirage were `SIGKILL`ed. It never covered the case that
+# mattered most — node containers are launched from a `spawn_blocking`
+# thread, where pdeathsig tracks a pool thread that may retire while
+# mirage is perfectly healthy — and closing that would have meant a second
+# mechanism rather than one. The trade was taken the other way instead: a
+# `SIGKILL`ed run is allowed to strand its workloads and containers, and
+# `mirage cleanup` reclaims them. Every resource is tagged for it — a
+# `mirage.owner`/`mirage.session`/`mirage.runtime` label on containers and
+# networks, `MIRAGE_SESSION` and `MIRAGE_RUNTIME` in every workload's
+# environment — so the recovery needs no `unsafe` and no bookkeeping file.
+# The runtime half of the pair is what keeps a cleanup to its own state
+# directory; see `core/src/reclaim.rs` for why session alone was not
+# enough.
+#
+# `unwrap_used` / `expect_used` are denied in production code. Test modules
+# opt out locally with an inner
+# `#![allow(clippy::unwrap_used, clippy::expect_used)]`, since a panic in a
+# test *is* the failure mechanism.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+mem_forget = "deny"
+# `panic!` is `unwrap` with a nicer message: a CLI handed arbitrary argv
+# must print something and return a code, not abort with a backtrace.
+# Denied for the same reason, and opted out of in the same places.
+panic = "deny"
+# `process::exit` runs no destructor between the call and `main`, which is
+# precisely how a run would strand its containers and workloads — the one
+# thing mirage promises not to do. Exit codes travel back to `main` as an
+# `ExitCode` instead.
+exit = "deny"
+# Async-correctness lints. The supervisor holds locks around a lot of
+# process bookkeeping; holding a std lock across an await would silently
+# serialise (or deadlock) the runtime.
+await_holding_lock = "deny"
+let_underscore_future = "deny"
 
 [workspace.dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -91,12 +141,14 @@ anyhow = "1.0"
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["codec", "io"] }
 futures = "0.3"
 nix = { version = "0.29", features = [
     "fs",
-    "signal",
+    "poll",
     "process",
+    "resource",
+    "signal",
     "term",
     "user",
 ] }
@@ -104,17 +156,14 @@ libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
-once_cell = "1"
 inventory = "0.3.24"
 libloading = "0.8"
 
 mirage_core = { path = "core" }
 mirage_ctl = { path = "ctl" }
 mirage_builtin = { path = "builtin" }
-mirage_host = { path = "host" }
-mirage_daemon = { path = "daemon" }
+mirage_supervisor = { path = "supervisor" }
 mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
-mirage_noop = { path = "noop" }
 mirage_container = { path = "container" }
 rocjitsu_sys = { path = "rocjitsu_sys" }

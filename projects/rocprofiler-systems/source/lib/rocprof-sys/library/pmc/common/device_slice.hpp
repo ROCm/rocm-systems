@@ -40,7 +40,7 @@ namespace rocprofsys::pmc
  *
  *     // Type recovery when needed
  *     if (auto gpu = devices[0].as<gpu::device<Backend>>()) {
- *         auto metrics = gpu->get_gpu_metrics(enabled, timestamp);
+ *         auto metrics = gpu->get_metrics(enabled, timestamp);
  *     }
  * @endcode
  */

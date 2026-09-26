@@ -301,12 +301,19 @@ class TestOpenMPFortran(RocprofsysTest):
         env = ompt_target_env.copy()
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
+        # libomptarget exceeds the default --max-library-functions threshold and
+        # would normally be skipped. Force it to be kept via module-include
+        runtime_instrument_args = self.RUNTIME_INSTRUMENT_ARGS + [
+            "-MI",
+            "libomptarget",
+        ]
+
         result = self.run_test(
             mode,
             "openmp-fortran-offload",
             env=env,
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+            runtime_instrument_args=runtime_instrument_args,
             check_target_arch=True,
         )
         self.assert_regex(

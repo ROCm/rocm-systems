@@ -62,6 +62,7 @@ struct spm_state_t : public spm_set_dest_buffer_args
     std::mutex                work_mutex{};
     std::condition_variable   work_cond{};
     std::atomic<bool>         data_ready{};
+    std::atomic<bool>         cons_buf_free{true};
 
     std::atomic<int>   signal_data_loss{};
     std::atomic<bool>  stop_prod_thread{};
@@ -541,6 +542,11 @@ producer(std::shared_ptr<spm_state_t> s)
 
         {
             std::unique_lock<std::mutex> lock(s->work_mutex);
+
+            // Wait until consumer has finished reading cons_buf
+            // before rotating, so we don't overwrite data it is still processing.
+            s->work_cond.wait(lock, [&s]() { return s->cons_buf_free || s->stop_cons_thread; });
+
             s->dest_buf = s->prod_buf.exchange(s->cons_buf.exchange(s->dest_buf));
 
             // In the initial XCC SPM design, 'size_copied' and 'is_data_loss' are stored in
@@ -560,6 +566,7 @@ producer(std::shared_ptr<spm_state_t> s)
             }
             s->signal_data_loss.fetch_or(s->is_data_loss);
 
+            s->cons_buf_free = false;
             consumer_handle.notify();
         }
 
@@ -599,6 +606,8 @@ consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback
         char* base  = (char*) s->cons_buf.load();
         int   flags = s->signal_data_loss.exchange(0) << AQLPROFILE_SPM_DATA_FLAGS_DATA_LOSS;
 
+        lock.unlock();
+
         for(int i = 0; i < s->num_xcc; i++)
         {
             auto buf_info = (kfd_ioctl_spm_buffer_header*) base;
@@ -607,6 +616,13 @@ consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback
 
             base += s->buf_size_xcc;
         }
+
+        // Signal producer that cons_buf is now free for rotation
+        {
+            std::lock_guard<std::mutex> lk(s->work_mutex);
+            s->cons_buf_free = true;
+        }
+        s->work_cond.notify_one();
     }
 }
 

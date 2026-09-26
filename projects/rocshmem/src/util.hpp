@@ -402,7 +402,7 @@ constexpr bool is_blocking(MemcpyKind k) {
 }
 
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
-__device__ __forceinline__ void copy_bulk(void* dst, void* src,
+__device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
@@ -430,9 +430,6 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src,
   // Tail: remaining chunks that don't fill a full unrolled batch
   for (int i = offset + tid; i < n_chunks; i += stride) {
     T val = Acc::load(static_cast<uint8_t*>(src) + i * ChunkSize);
-    if constexpr (LoadPolicy != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     Acc::store(static_cast<uint8_t*>(dst) + i * ChunkSize, val);
   }
 }
@@ -448,9 +445,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 
   if (remainder & 1) {
     auto val = AsmAccess<1, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<1, LP, SP>::store(dst, val);
     if (remainder == 1) {
       return;
@@ -460,9 +454,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   }
   if (remainder & 2) {
     auto val = AsmAccess<2, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<2, LP, SP>::store(dst, val);
     if (remainder == 2) {
       return;
@@ -472,9 +463,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   }
   if (remainder & 4) {
     auto val = AsmAccess<4, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<4, LP, SP>::store(dst, val);
     if (remainder == 4) {
       return;
@@ -484,9 +472,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   }
   if (remainder & 8) {
     auto val = AsmAccess<8, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<8, LP, SP>::store(dst, val);
   }
 }
@@ -502,7 +487,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 16;
+  constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -548,7 +533,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 16;
+  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -578,7 +563,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 16;
+  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;

@@ -27,8 +27,9 @@ the :doc:`ROCm Systems Profiler glossary <../reference/rocprof-sys-glossary>`.
 * **Use binary instrumentation for characterizing the performance of every invocation of specific functions**
 * **Use statistical sampling to characterize the performance of the entire application while minimizing overhead**
 * Enable statistical sampling after binary instrumentation to help "fill in the gaps" between instrumented regions
-* Use the user API to create custom regions and enable/disable User API ROCm Systems Profiler for specific processes, threads, and regions
-* Dynamic symbol interception, callback APIs, and the user API are always available with binary instrumentation and sampling
+* Use `ROCTx <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html>`_
+  to create custom regions and to pause and resume data collection for specific processes, threads, and regions
+* Dynamic symbol interception and callback APIs are always available with binary instrumentation and sampling
 
   * Dynamic symbol interception and callback APIs are (generally) controlled through ``ROCPROFSYS_USE_<API>``
     options, for example, ``ROCPROFSYS_USE_KOKKOSP`` and ``ROCPROFSYS_USE_OMPT`` enable Kokkos-Tools and OpenMP-Tools

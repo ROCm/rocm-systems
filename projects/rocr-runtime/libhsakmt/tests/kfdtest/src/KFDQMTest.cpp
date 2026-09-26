@@ -2419,7 +2419,6 @@ TEST_F(KFDQMTest, P2PTest) {
     HSAuint32 *sysBuf;
     HSAuint32 size = 16ULL<<20;  // bigger than 16MB to test non-contiguous memory
     HsaMemFlags memFlags = {0};
-    HsaMemMapFlags mapFlags = {0};
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     memFlags.ui32.HostAccess = 0;
     memFlags.ui32.NonPaged = 1;
@@ -2430,7 +2429,7 @@ TEST_F(KFDQMTest, P2PTest) {
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0, size, m_MemoryFlags,
                                      reinterpret_cast<void **>(&sysBuf)));
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, sysBuf, size, NULL,
-                                             mapFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
+                                             memFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
 #define MAGIC_NUM 0xdeadbeaf
 
     /* First GPU fills mem with MAGIC_NUM */

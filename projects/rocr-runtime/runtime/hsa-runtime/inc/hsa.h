@@ -547,6 +547,11 @@ typedef enum {
    * The type of this attribute is bool.
    */
   HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED = 0x209,
+  /**
+   * Returns true if allocation of dma-buf backed host memory is supported through
+   * virtual memory APIs. The type of this attribute is bool.
+   */
+  HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED = 0x20A,
 } hsa_system_info_t;
 
 /**

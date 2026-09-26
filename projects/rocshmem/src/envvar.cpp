@@ -122,6 +122,9 @@ namespace envvar {
     const var<size_t> heap_size("HEAP_SIZE",
       "Defines the size of the rocSHMEM symmetric heap in bytes (per PE). Size in bytes (per PE); Note: the heap is on GPU memory",
       1L << 30);
+    const var<std::string> heap_allocator_type("HEAP_ALLOCATOR_TYPE",
+      "Selects the allocator type for the symmetric heap. Accepted values: uncached, finegrained, coarsegrained, vmm_posix, vmm_fabric. "
+      "Default is finegrained.");
     const var<std::string> backend("BACKEND",
       "When rocSHMEM is compiled for all backends, this environment variable selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend. ipc: IPC Backend; ro: Reverse Offload Backend; gda: GPU Direct Async Backend");
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS",
@@ -146,6 +149,10 @@ namespace envvar {
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
       "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
       1024);
+    const var<size_t> max_symm_regions("MAX_SYMM_REGIONS",
+      "Maximum number of symmetric user buffers an application can register "
+      "with rocshmem_buffer_register_symmetric. The default value is 4",
+      4);
   }  // inline namespace _base
 
   namespace bootstrap {

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cuid_nic.h"
 #include "cuid_file.h"
@@ -52,6 +33,10 @@ amdcuid_status_t CuidNic::discover(std::vector<DevicePtr> &nics) {
       amdcuid_nic_info info = {};
       std::string device_path =
           std::string(nic_base_path) + "/" + entry->d_name + "/device";
+      // filter out virtual devices by checking device symlink
+      if (CuidUtilities::readlink_bdf(device_path).empty()) {
+        continue;
+      }
       discover_single(&info, device_path);
 
       nics.emplace_back(std::make_shared<CuidNic>(info));
@@ -203,28 +188,28 @@ CuidNic::get_hardware_fingerprint(uint64_t &fingerprint) const {
 
 amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id &id) const {
   bool temp = false;
-  if (geteuid() != 0) {
-    temp = true;
-  }
-
-  // attempt to read the CUID from the file first
-  std::string cuid_file_path = CuidUtilities::priv_cuid_file();
-  CuidFile primary_file(cuid_file_path, false);
-  primary_file.load();
-  std::vector<CuidFileEntry> entries = primary_file.get_entries();
-
-  CuidFileEntry entry;
-  amdcuid_status_t status =
-      primary_file.find_by_device_node(m_info.network_interface, entry);
-  if (status == AMDCUID_STATUS_SUCCESS) {
-    id.UUIDv8_representation = entry.primary_cuid;
-    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-    return AMDCUID_STATUS_SUCCESS;
-  }
-
   uint64_t fingerprint = 0;
-  status = get_hardware_fingerprint(fingerprint);
-  if (status != AMDCUID_STATUS_SUCCESS) {
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+
+  if (geteuid() == 0) {
+    // attempt to read the CUID from the file first
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
+    CuidFile primary_file(cuid_file_path, false);
+    primary_file.load();
+    std::vector<CuidFileEntry> entries = primary_file.get_entries();
+
+    CuidFileEntry entry;
+    status = primary_file.find_by_device_node(m_info.network_interface, entry);
+    if (status == AMDCUID_STATUS_SUCCESS && entry.is_temporary == false) {
+      id.UUIDv8_representation = entry.primary_cuid;
+      CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+      return AMDCUID_STATUS_SUCCESS;
+    }
+
+    status = get_hardware_fingerprint(fingerprint);
+  }
+
+  if (geteuid() != 0 || status != AMDCUID_STATUS_SUCCESS) {
     std::string bdf;
     status = this->get_bdf(bdf);
     if (status != AMDCUID_STATUS_SUCCESS) {

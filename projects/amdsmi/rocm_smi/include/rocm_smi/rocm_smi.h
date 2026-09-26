@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCM_SMI_ROCM_SMI_H_
 #define ROCM_SMI_ROCM_SMI_H_
@@ -1520,8 +1501,8 @@ typedef struct {
   /*
    * v1.1 additions
    */
-  uint32_t gfx_activity_acc;                         // new in v1
-  uint32_t mem_activity_acc;                         // new in v1
+  uint64_t gfx_activity_acc;                         // new in v1
+  uint64_t mem_activity_acc;                         // new in v1
   uint16_t temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
 
   /*
@@ -1589,10 +1570,10 @@ typedef struct {
   uint16_t jpeg_activity[RSMI_MAX_NUM_JPEG_ENGS];
 
   // PCIE NAK sent accumulated count
-  uint32_t pcie_nak_sent_count_acc;
+  uint64_t pcie_nak_sent_count_acc;
 
   // PCIE NAK received accumulated count
-  uint32_t pcie_nak_rcvd_count_acc;
+  uint64_t pcie_nak_rcvd_count_acc;
 
   /*
    * v1.6 additions
@@ -1646,7 +1627,7 @@ typedef struct {
   struct amdgpu_xcp_metrics_t xcp_stats[RSMI_MAX_NUM_XCP];
 
   /* PCIE other end recovery counter */
-  uint32_t pcie_lc_perf_other_end_recovery;
+  uint64_t pcie_lc_perf_other_end_recovery;
 
   /*
    * v1.7 additions
@@ -5852,15 +5833,16 @@ rsmi_status_t rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool* enabled);
  *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @details This function enables or disables PTL (Peak Tops Limiter) operation.
- *  Use rsmi_set_gpu_ptl_enable_with_formats()
+ *  Use rsmi_set_gpu_ptl_formats()
  *  for more control over the preferred data formats when enabling.
  *
- *  @param[in] processor_handle Device to configure
+ *  @param[in] dv_ind a device index
  *
- *  @param[in] enable Boolean flag: true to enable PTL with default formats,
+ *  @param[in] enabled Boolean flag: true to enable PTL with default formats,
  *  false to disable PTL
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
  */
 rsmi_status_t rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
 
@@ -5927,56 +5909,6 @@ rsmi_status_t rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, 
 rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind);
 
 /** @} */  // end of DevMetricsHeaderInfoGet
-
-/*****************************************************************************/
-/** @defgroup DriverControl Driver control mechanisms
- *  These functions provide control over the driver. Users should use with
- *  caution as they may cause the driver to become unstable.
- *  @{
- */
-/**
- *  @brief Restart the device driver (kmod module) for all AMD GPUs on the
- *  system.
- *
- *  @details This function will reload the AMD GPU driver as described in
- *  the Linux kernel documentation -
- *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
- *  with no extra parameters as specified in
- *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- *
- *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
- *
- *  Any process or workload using the AMD GPU driver is REQUIRED to be
- *  stopped before calling this function. Otherwise, function will return
- *  ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver.
- *
- *  User is REQUIRED to have root/admin privileges to call this function.
- *  Otherwise, this function will return ::RSMI_STATUS_PERMISSION.
- *
- *  This API will take time to complete, as we are checking the driver's
- *  loading status to confirm it reloaded properly. If
- *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
- *  did not reload properly and the user should check dmesg logs.
- *
- *  This function has been created in order to conveniently reload the
- *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
- *  successfully has been changed on Baremetal systems.
- *  Now users can control the reload once all GPU processes/workloads
- *  have been stopped on the AMD GPU driver. A (AMD GPU) driver reload
- *  is REQUIRED to complete changing to the new memory partition
- *  configuration (`rsmi_dev_memory_partition_set()`) operation MUST
- *  be successful. This function WILL EFFECT all GPUs in the hive to
- *  be reconfigured with the specified memory partition configuration.
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_PERMISSION function requires root access
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *            the amdgpu driver.
- */
-rsmi_status_t rsmi_dev_amdgpu_driver_reload(void);
-/** @} */  // end of DriverControl
 
 #ifdef __cplusplus
 }

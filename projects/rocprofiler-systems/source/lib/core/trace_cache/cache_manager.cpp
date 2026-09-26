@@ -2,25 +2,26 @@
 // SPDX-License-Identifier: MIT
 
 #include "cache_manager.hpp"
-#include <cstdint>
-
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/cached_perfetto_session.hpp"
+#include "core/timemory.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
 #include "core/trace_cache/post_processor.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
+#include <exception>
 #include <memory>
 #include <unistd.h>
+#include <vector>
 
 namespace rocprofsys
 {
 namespace trace_cache
 {
-
 cache_manager&
 cache_manager::get_instance()
 {
@@ -71,10 +72,36 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
 
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
         post_processor processor{ _tracker, _output_registry };
+
+        const auto combine_traces = config::get_perfetto_combined_traces();
+
+        std::unique_ptr<core::cached_perfetto_session> session;
+        if(enabled_formats.is_perfetto_enabled())
+        {
+            std::vector<int> source_pids;
+            source_pids.reserve(processor_configs.size());
+            for(const auto& cfg : processor_configs)
+                source_pids.push_back(static_cast<int>(cfg->_pid));
+
+            try
+            {
+                session = std::make_unique<core::cached_perfetto_session>(
+                    _output_registry, static_cast<pid_t>(root_pid), combine_traces,
+                    source_pids, processor);
+            } catch(const std::exception& exp)
+            {
+                LOG_ERROR("Perfetto engine initialization failed: {}. Skipping "
+                          "perfetto output; RocPD output unaffected.",
+                          exp.what());
+            }
+        }
+
         processor.process(processor_configs, enabled_formats);
 
-        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
-            discovery::merge_perfetto_files();
+        // Session destruction drives engine.stop() which drains into the
+        // sink (per_pid_file_sink writes per-pid files; single_file_sink
+        // finalizes the cross-process append + flock for merged output).
+        session.reset();
     }
 
     discovery::clear(cache_files);

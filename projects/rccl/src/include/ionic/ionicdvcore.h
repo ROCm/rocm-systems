@@ -13,8 +13,8 @@
 #include "ibvwrap.h"
 
 enum ionicdv_reg_udma_mask {
-    IONIC_UDMA_MASK_LOW    = 1,
-    IONIC_UDMA_MASK_HIGH   = 2
+  IONIC_UDMA_MASK_LOW = 1,
+  IONIC_UDMA_MASK_HIGH = 2
 };
 
 #endif  // NCCL_IONICDV_CORE_H_

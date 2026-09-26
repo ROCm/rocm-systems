@@ -11,6 +11,18 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 
+# TheRock ROCm bundles elfutils and zlib under lib/rocm_sysdeps; prefer them
+# when present, otherwise fall through to the distro packages.
+foreach(rocm_root IN LISTS CMAKE_PREFIX_PATH)
+    if(IS_DIRECTORY "${rocm_root}/lib/rocm_sysdeps/lib")
+        list(PREPEND CMAKE_LIBRARY_PATH "${rocm_root}/lib/rocm_sysdeps/lib")
+        set(ENV{PKG_CONFIG_PATH}
+            "${rocm_root}/lib/rocm_sysdeps/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+        )
+        break()
+    endif()
+endforeach()
+
 # libdw has no upstream CMake config and the SDK's bundled Findlibdw.cmake is
 # brittle across pkg-config / multiarch layouts. Define libdw::libdw via
 # pkg-config up front so the SDK's internal find_package(libdw) check finds
@@ -23,6 +35,12 @@ endif()
 
 find_package(rocprofiler-sdk REQUIRED CONFIG)
 find_package(amd_comgr REQUIRED CONFIG)
+
+# pkg-config zlib: find_package(ZLIB) can pick up ROCm headers without libz.
+pkg_check_modules(zlib REQUIRED IMPORTED_TARGET zlib)
+if(NOT TARGET ZLIB::ZLIB)
+    add_library(ZLIB::ZLIB ALIAS PkgConfig::zlib)
+endif()
 
 add_subdirectory(external)
 add_subdirectory(utils)

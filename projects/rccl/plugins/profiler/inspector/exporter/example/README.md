@@ -23,7 +23,7 @@ One can build similar exporters to integrate with various observability systems 
 
 ```bash
 git clone https://github.com/NVIDIA/nccl.git
-cd nccl/ext-profiler/inspector/exporter/example
+cd nccl/plugins/profiler/inspector/exporter/example
 ```
 
 Install the required dependencies using the provided `requirements.txt` file:

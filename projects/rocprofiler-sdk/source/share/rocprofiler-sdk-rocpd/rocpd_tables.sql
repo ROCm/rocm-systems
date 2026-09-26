@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.1
+-- RocPD schema version 3.0.3
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -106,8 +106,6 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- 2993533, 2269219937, 2993533
--- 2993533, 2269219937, 2993533
 -- Performance monitoring counters (PMC) descriptions
 CREATE TABLE IF NOT EXISTS
     `rocpd_info_pmc{{uuid}}` (
@@ -130,6 +128,7 @@ CREATE TABLE IF NOT EXISTS
         "expression" TEXT,
         "is_constant" INTEGER,
         "is_derived" INTEGER,
+        "spm_support" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
@@ -228,11 +227,16 @@ CREATE TABLE IF NOT EXISTS
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "event_id" INTEGER,
+        "sample_id" INTEGER, -- NULL for PMC, non-NULL for SPM (timestamped streaming counters)
         "pmc_id" INTEGER NOT NULL,
         "value" REAL DEFAULT 0.0,
+        "xcc" INTEGER,              -- SPM only: XCC index
+        "shader_engine" INTEGER,    -- SPM only: shader engine index
+        "instance" INTEGER,         -- SPM only: counter instance index
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (sample_id) REFERENCES `rocpd_sample{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 -- Region with a start/stop on the same thread (CPU)
@@ -290,6 +294,8 @@ CREATE TABLE IF NOT EXISTS
         "grid_size_x" INTEGER NOT NULL,
         "grid_size_y" INTEGER NOT NULL,
         "grid_size_z" INTEGER NOT NULL,
+        "graph_exec_id" INTEGER NOT NULL DEFAULT 0,
+        "graph_node_id" INTEGER NOT NULL DEFAULT 0,
         "region_name_id" INTEGER,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
@@ -321,6 +327,8 @@ CREATE TABLE IF NOT EXISTS
         "size" INTEGER NOT NULL,
         "queue_id" INTEGER,
         "stream_id" INTEGER,
+        "graph_exec_id" INTEGER NOT NULL DEFAULT 0,
+        "graph_node_id" INTEGER NOT NULL DEFAULT 0,
         "region_name_id" INTEGER,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
@@ -360,6 +368,30 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (tid) REFERENCES `rocpd_info_thread{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (stream_id) REFERENCES `rocpd_info_stream{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- HIP graph launch summary records (one per successful hipGraphLaunch).
+CREATE TABLE IF NOT EXISTS
+    `rocpd_graph_launch{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "tid" INTEGER,
+        "agent_id" INTEGER,
+        "queue_id" INTEGER,
+        "start" BIGINT NOT NULL,
+        "end" BIGINT NOT NULL,
+        "graph_exec_id" INTEGER NOT NULL,
+        "kernel_dispatch_count" INTEGER NOT NULL DEFAULT 0,
+        "event_id" INTEGER,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (tid) REFERENCES `rocpd_info_thread{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );

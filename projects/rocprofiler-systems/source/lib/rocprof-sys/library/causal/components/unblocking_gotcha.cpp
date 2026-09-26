@@ -83,7 +83,7 @@ Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
-    auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active)
     {
@@ -91,7 +91,7 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 
         if constexpr(Idx == pthread_barrier_wait_idx)
         {
-            std::int64_t _delay_value =
+            const std::int64_t _delay_value =
                 (_active) ? causal::delay::get_global().load() : 0;
 
             causal::sampling::block_backtrace_samples();
@@ -110,7 +110,7 @@ int
 unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
-    auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     if(_active && _pid == process::get_id()) causal::delay::process();
 

@@ -25,15 +25,13 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
-#include <array>
 #include <memory>
+#include <vector>
 
 namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr size_t NUM_CPU_BUFFERS = 3;
-
 // Lifecycle
 hsa_signal_t
 signal_create();
@@ -45,8 +43,8 @@ void
 signal_destroy(hsa_signal_t sig);
 
 // Operations
-void
-signal_wait(hsa_signal_t sig);
+bool
+signal_wait(hsa_signal_t sig, int64_t timeout = INT64_MAX);
 
 void
 signal_reset(hsa_signal_t sig);
@@ -67,12 +65,14 @@ make_signal(hsa_ext_amd_aql_pm4_packet_t* packet);
 /// Plain data struct for the async DMA queue used by thread trace copies.
 struct att_queue_t
 {
-    hsa_queue_t*                       hsa_queue{nullptr};
-    std::array<void*, NUM_CPU_BUFFERS> triple_buffer_memory{};
-    rocprofiler_agent_id_t             agent_id{};
-    size_t                             buffer_size{0};
-    hsa_agent_t                        hsa_agent{};
-    hsa_agent_t                        near_cpu{};
+    hsa_queue_t* hsa_queue{nullptr};
+    /// CPU staging buffers; size matches the user-supplied NUM_BUFFERS. Empty
+    /// in single-buffer (synchronous) mode.
+    std::vector<void*>     cpu_buffers{};
+    rocprofiler_agent_id_t agent_id{};
+    size_t                 buffer_size{0};
+    hsa_agent_t            hsa_agent{};
+    hsa_agent_t            near_cpu{};
 
     /// Function pointer for submit — allows test injection (replaces virtual dispatch).
     void (*submit_fn)(const att_queue_t&            self,
@@ -80,8 +80,10 @@ struct att_queue_t
                       hsa_signal_t*                 completion){nullptr};
 };
 
+/// @param buffer_size Bytes per CPU staging buffer (0 disables staging).
+/// @param num_buffers Number of CPU staging buffers to allocate (0 if unused).
 att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size);
+att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
 
 void
 att_queue_destroy(att_queue_t& q);
@@ -129,7 +131,7 @@ struct att_queue_deleter_t
 using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
 
 att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t triple_buffer_size);
+make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
 
 };  // namespace thread_trace
 };  // namespace rocprofiler

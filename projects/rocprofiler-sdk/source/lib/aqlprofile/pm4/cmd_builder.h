@@ -28,6 +28,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "lib/common/logging.hpp"
+
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -94,6 +96,8 @@ PrintCommand(const char* function_name, Ts&&... packets)
 
 }  // namespace
 
+typedef void (*pred_exec_flush_callback_t)(void* userdata);
+
 /// @brief Implements the interface CmdBuffer and thus can be used to
 /// translate various Gpu commands as byte stream.
 /// @note: The Api does not require implementations to be thread safe.
@@ -106,8 +110,20 @@ public:
     template <typename T, typename std::enable_if<sizeof(T) % sizeof(uint32_t) == 0, int>::type = 0>
     void Append(T&& packet)
     {
-        size_t pos = data_.size();
-        data_.resize(pos + sizeof(packet) / sizeof(uint32_t));
+        static_assert(std::is_trivially_copyable_v<std::remove_reference_t<T>>,
+                      "Append serialises the packet with memcpy");
+
+        // A pointer here means an Append(ptr, count) bound to the variadic overload, which
+        // happens when count is not exactly uint32_t, splicing the pointer into the stream.
+        // TODO(mkuriche): SFINAE-constrain the overloads so such a call selects
+        // Append(uint32_t*, uint32_t) rather than failing to compile.
+        static_assert(!std::is_pointer_v<std::remove_reference_t<T>>,
+                      "a pointer is not packet data; use Append(uint32_t*, uint32_t)");
+
+        size_t         pos        = data_.size();
+        constexpr auto num_dwords = uint32_t{sizeof(packet) / sizeof(uint32_t)};
+        CheckPredExec(pos, num_dwords);
+        data_.resize(pos + num_dwords);
         memcpy(&data_[pos], &packet, sizeof(T));
     }
     template <typename... Ts>
@@ -123,8 +139,9 @@ public:
     void Append(uint32_t* data_pointer, uint32_t num_dwords)
     {
         size_t pos = data_.size();
+        CheckPredExec(pos, num_dwords);
         data_.resize(pos + num_dwords);
-        memcpy(&data_[pos], data_pointer, num_dwords);
+        memcpy(&data_[pos], data_pointer, num_dwords * sizeof(uint32_t));
     }
 
     /// @brief Return size of Gpu commands in bytes in the underlying buffer
@@ -141,9 +158,37 @@ public:
     /// @brief Clear buffer.
     void Clear() { return data_.clear(); }
 
+    void RegisterPredExecFlush(pred_exec_flush_callback_t cb       = nullptr,
+                               size_t                     end_pos  = 0,
+                               void*                      userdata = nullptr)
+    {
+        // Nested PRED_EXEC unsupported in aqlprofile
+        ROCP_FATAL_IF((pred_exec_.cb != nullptr) && (cb != nullptr))
+            << "Nested PRED_EXEC unsupported in aqlprofile";
+
+        pred_exec_.cb       = cb;
+        pred_exec_.end_pos  = end_pos;
+        pred_exec_.userdata = userdata;
+    }
+
 private:
     /// @brief Defines Gpu command buffer as a vector of uint32_t
-    std::vector<uint32_t> data_;
+    std::vector<uint32_t> data_{};
+
+    void CheckPredExec(size_t& pos, uint32_t num_dwords)
+    {
+        if(pred_exec_.cb && pos + num_dwords > pred_exec_.end_pos)
+        {
+            pred_exec_.cb(pred_exec_.userdata);
+            pos = data_.size();
+        }
+    }
+    struct
+    {
+        pred_exec_flush_callback_t cb{nullptr};
+        size_t                     end_pos{0};
+        void*                      userdata{nullptr};
+    } pred_exec_{};
 };
 
 enum ChipletId

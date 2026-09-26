@@ -42,7 +42,7 @@ endif()
 project(videodecodeperf)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake ${ROCM_PATH}/share/rocmcmakebuildtools/cmake)
 
 # rocdecode sample build type
 set(DEFAULT_BUILD_TYPE "Release")
@@ -60,6 +60,42 @@ else()
   # -fPIC     -- Generate position-independent code if possible
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
 endif()
+
+# Set supported GPU Targets
+if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
+    find_package(ROCmCMakeBuildTools QUIET)
+    if(NOT ROCmCMakeBuildTools_FOUND)
+        find_package(ROCM QUIET)
+    endif()
+    include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
+
+    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
+    if(HAS_ROCM_CHECK_TARGET_IDS)
+        rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
+    else() # if we don't have rocm_check_target_ids, just assume the targets are available
+        set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
+    endif()
+    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+endif()
+
+# Set AMD GPU_TARGETS
+if((AMDGPU_TARGETS OR DEFINED ENV{AMDGPU_TARGETS}) AND (NOT GPU_TARGETS))
+  message("-- ${Red}${PROJECT_NAME} DEPRECATION -- AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS${ColourReset}")
+  if(DEFINED ENV{AMDGPU_TARGETS})
+    set(GPU_TARGETS $ENV{AMDGPU_TARGETS} CACHE STRING "List of specific machine types for library to target")
+  else()
+    set(GPU_TARGETS ${AMDGPU_TARGETS})
+  endif()
+endif()
+
+if(DEFINED ENV{GPU_ARCHS})
+  set(GPU_TARGETS $ENV{GPU_ARCHS} CACHE STRING "List of specific machine types for library to target")
+elseif(GPU_TARGETS)
+  message("-- ${White}${PROJECT_NAME} -- GPU_TARGETS set with -D option${ColourReset}")
+else()
+  set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+endif()
+message("-- ${White}${PROJECT_NAME} -- AMD GPU_TARGETS: ${GPU_TARGETS}${ColourReset}")
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
@@ -98,6 +134,16 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
     else()
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=0)
+    endif()
+    # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
+    # links the system libva, so both load at runtime. librocdecode already depends
+    # on the vendored libva, so force librocdecode to be the FIRST direct dependency
+    # of the executable -- ahead of FFmpeg -- so the vendored libva enters the global
+    # symbol scope first and wins VA symbol interposition, loading the matching
+    # vendored VA driver. It must be injected as a raw path because CMake
+    # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
+    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+      set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 

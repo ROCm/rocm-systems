@@ -123,6 +123,28 @@ class PerfettoReader:
         self.max_depth = None
         self.configure(**kwargs)
 
+    def close(self):
+        """Stop all trace-processor subprocesses owned by this reader."""
+        trace_processors = self.trace_processor
+        self.trace_processor = []
+
+        first_error = None
+        for trace_processor in trace_processors:
+            try:
+                trace_processor.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+
+        if first_error is not None:
+            raise first_error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
     def configure(self, **kwargs):
 
         # pre-compile the regex patterns for extracting the func, file, and line info

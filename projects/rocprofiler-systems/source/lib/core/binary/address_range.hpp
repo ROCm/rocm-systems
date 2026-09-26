@@ -5,7 +5,6 @@
 
 #include "core/binary/fwd.hpp"
 #include "core/common.hpp"
-#include "core/timemory.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/utility/macros.hpp>

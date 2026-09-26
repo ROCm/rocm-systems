@@ -363,7 +363,7 @@ TEST_F(json_config_test, resolves_rocm_enabled_flag)
 // Test env_vars_to_json_schema with non-numeric env var values
 TEST_F(json_config_test, handling_non_numeric_values_for_json_schema)
 {
-    std::map<std::string, std::string> env_vars = {
+    const std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB", "not_a_number" },
         { "ROCPROFSYS_SAMPLING_FREQ", "" },
         { "ROCPROFSYS_VERBOSE", "abc" },
@@ -384,7 +384,7 @@ TEST_F(json_config_test, handling_non_numeric_values_for_json_schema)
 // Test env_vars_to_json_schema round-trip for new fields
 TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
 {
-    std::map<std::string, std::string> env_vars = {
+    const std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_USE_ROCPD", "true" },
         { "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", "/tmp/my-ump" },
         { "ROCPROFSYS_NETWORK_INTERFACE", "ib0" },

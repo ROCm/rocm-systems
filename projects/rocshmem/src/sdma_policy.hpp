@@ -52,7 +52,7 @@ class SdmaImpl {
 
   // Device resources - 2D array: [shm_size * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + sdmaChannel]
-  anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
+  sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
   int shm_size{0};
   int my_pe{0};
   int local_rank{0};
@@ -74,12 +74,12 @@ class SdmaImpl {
   //   When all WGs share one context, the offset spreads N*W wavefronts across
   //   W channels, reducing per-channel CAS contention from N*W to N.
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
+  __device__ sdma_anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
                                                     size_t size, int local_pe) {
     int effective_channel = (sdmaChannel +
         sdmaChannelStride * (get_flat_block_id() / WF_SIZE)) % numChannels;
     int idx = local_pe * numChannels + effective_channel;
-    anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+    sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
       // Flush GL0/GL1 → GL2 before submitting the SDMA descriptor.
       // Fine-grain memory on AMD CDNA is CC (cache-coherent, cached in GL2):
@@ -87,7 +87,7 @@ class SdmaImpl {
       // drains stores to GL0 without flushing to GL2.  Agent scope is sufficient
       // because SDMA probes GL2 via the coherence protocol on the same die.
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
-      anvil::put(*handle, dst, src, size);
+      sdma_anvil::put(*handle, dst, src, size);
       // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
       // channel.  Blocking copies drain inline via quietAll, so the dirty bit
       // is unnecessary and would only cause a redundant poll in a later fence.
@@ -114,8 +114,8 @@ class SdmaImpl {
     // Drain only the channels that were marked dirty.
     for (int ch = 0; ch < numChannels; ch++) {
       if (was_dirty & (1ULL << (local_pe * numChannels + ch))) {
-        anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[local_pe * numChannels + ch];
-        if (handle != nullptr) anvil::quiet(*handle);
+        sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[local_pe * numChannels + ch];
+        if (handle != nullptr) sdma_anvil::quiet(*handle);
       }
     }
   }
@@ -128,9 +128,9 @@ class SdmaImpl {
                                            __HIP_MEMORY_SCOPE_AGENT);
     while (dirty) {
       int bit = __builtin_ffsll(dirty) - 1;  // bit = pe * numChannels + ch
-      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[bit];
+      sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[bit];
       if (handle != nullptr) {
-        anvil::quiet(*handle);
+        sdma_anvil::quiet(*handle);
       }
       dirty &= ~(1ULL << bit);
     }

@@ -1,6 +1,6 @@
 # AMD GPU Mega Kernel Unit Test
 
-A comprehensive unit test kernel that exercises most of the instructions and features available on AMD GPUs including Instinct (MI250/MI300/MI350), Radeon (RX 9060 / RX 9070 families, gfx120x), and Strix/Strix Halo/Krackan (RDNA 3.5, gfx115x) APU iGPUs.
+A comprehensive unit test kernel that exercises most of the instructions and features available on AMD GPUs including Instinct (MI250/MI300/MI350), Radeon (RX 9060 / RX 9070 families, gfx120x), Strix/Strix Halo/Krackan (RDNA 3.5, gfx115x) APU iGPUs, and gfx1250.
 
 ## Supported GPU Architectures
 
@@ -29,30 +29,35 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 | **Strix Halo** | RDNA 3.5 | gfx1151 | Up to 40 CUs, WMMA, Wave32, Async LDS |
 | **Krackan** | RDNA 3.5 | gfx1152 | 32MB Infinity Cache, same as gfx1150 |
 
+### gfx1250
+
+| GPU Series | Architecture | GFXIP | Key Features |
+|------------|--------------|-------|--------------|
+| **gfx1250** | gfx1250 | gfx1250 | FP8/BF8 OCP, HW FP64 atomics, WMMA (gfx1250 builtins), TDM, cluster ops, cooperative atomics, Async LDS |
 
 ## Feature Compatibility Matrix
 
 This table lists **what this sample tries to run** on each GFXIP, plus a few hardware facts that are **not** individually exercised here (no standalone fixed-function graphics or branded accelerator microbenchmarks in this kernel). MFMA/WMMA builtins use **non-zero operands** and pass only if the accumulator fragment has **at least one non-zero lane** (FP paths also require **finite** lanes)—smoke validation, not golden-matrix or full ISA conformance. Dual-issue is **BYPASSED** in the report (patterns only). Async LDS follows `__has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)` in code (gfx942 is treated as unsupported in this sample, matching `mega_kernel_device_arch.h`).
 
-| Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x) | RX 9070 XT (gfx1201) |
-|---------|:--------------:|:--------------:|:--------------:|:-----------------------:|:--------------------:|
-| FP32 Arithmetic | ✅ | ✅ | ✅ | ✅ | ✅ |
-| FP64 Arithmetic | ✅ | ✅ | ✅ | ⚠️ (limited) | ⚠️ (limited) |
-| FP16/BF16 Arithmetic | ✅ | ✅ | ✅ | ✅ | ✅ |
-| INT32/INT64 Operations | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HW FP64 Atomics | ✅ | ✅ | ✅ | ❌ | ❌ |
-| FP8/BF8 Conversions | ❌ | ✅ (FNUZ) | ✅ (OCP) | ❌ | ✅ (OCP) |
-| FP6/FP4 Conversions | ❌ | ❌ | ✅ | ❌ | ❌ |
-| DOT4/DOT8 Products | ✅ | ✅ | ✅ | ✅ | ✅ (software) |
-| Warp/Wave Ops | ✅ (Wave64) | ✅ (Wave64) | ✅ (Wave64) | ✅ (Wave32) | ✅ (Wave32) |
-| LDS Operations | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Async LDS (this sample) | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Dual-Issue VALU (this sample) | — | BYPASS | BYPASS | BYPASS | — |
-| MFMA Matrix Ops | ✅ | ✅ | ✅ | ❌ | ❌ |
-| WMMA Matrix Ops | ❌ | ❌ | ❌ | ✅ (gfx12) | ✅ (gfx12) |
-| Packed FP16 Atomics | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Packed BF16 Atomics | ❌ | ✅ | ✅ | ✅ | ✅ |
-| VMEM Inline ASM | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x) | RX 9070 XT (gfx1201) | gfx1250 |
+|---------|:--------------:|:--------------:|:--------------:|:-----------------------:|:--------------------:|:---------------:|
+| FP32 Arithmetic | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| FP64 Arithmetic | ✅ | ✅ | ✅ | ⚠️ (limited) | ⚠️ (limited) | ✅ |
+| FP16/BF16 Arithmetic | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| INT32/INT64 Operations | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HW FP64 Atomics | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| FP8/BF8 Conversions | ❌ | ✅ (FNUZ) | ✅ (OCP) | ❌ | ✅ (OCP) | ✅ (OCP) |
+| FP6/FP4 Conversions | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| DOT4/DOT8 Products | ✅ | ✅ | ✅ | ✅ | ✅ (software) | ✅ |
+| Warp/Wave Ops | ✅ (Wave64) | ✅ (Wave64) | ✅ (Wave64) | ✅ (Wave32) | ✅ (Wave32) | ✅ (Wave32) |
+| LDS Operations | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Async LDS (this sample) | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Dual-Issue VALU (this sample) | — | BYPASS | BYPASS | BYPASS | — | BYPASS |
+| MFMA Matrix Ops | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| WMMA Matrix Ops | ❌ | ❌ | ❌ | ✅ (gfx12) | ✅ (gfx12) | ✅ (gfx1250) |
+| Packed FP16 Atomics | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Packed BF16 Atomics | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| VMEM Inline ASM | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ⚠️ = Limited support / may vary by ROCm version. **BYPASS** = kernel emits instruction patterns but the host report marks the category bypassed (not a correctness proof). Fixed-function blocks not driven by this VALU/WMMA/TEX-focused kernel are **not exercised here**.
 
@@ -457,8 +462,9 @@ make gfx1151     # Strix Halo (RDNA 3.5)
 make gfx1152     # Krackan (RDNA 3.5)
 make gfx1201     # RX 9070 XT/9070 (RDNA4)
 make gfx1200     # RX 9060 series (RDNA4)
+make gfx1250     # gfx1250
 
-# Build for all architectures (CDNA + RDNA4)
+# Build for all architectures (all ARCHES in Makefile)
 make all-arch
 
 # Build and run
@@ -469,23 +475,6 @@ make help
 
 # Clean build artifacts
 make clean
-```
-
-### Using CMake
-
-```bash
-mkdir build && cd build
-
-# For MI350 (CDNA4)
-cmake .. -DGPU_TARGETS="gfx950"
-
-
-
-# For multiple architectures
-cmake .. -DGPU_TARGETS="gfx950;gfx942;gfx90a;gfx1150;gfx1151;gfx1201;"
-
-make
-./mega_kernel_test
 ```
 
 ### Manual Build
@@ -499,6 +488,9 @@ hipcc -O2 -std=c++17 --offload-arch=gfx950 -o mega_kernel_test main.cpp mega_ker
 hipcc -O2 -std=c++17 --offload-arch=gfx1150 -o mega_kernel_test main.cpp mega_kernel.hip  # Strix Point
 hipcc -O2 -std=c++17 --offload-arch=gfx1151 -o mega_kernel_test main.cpp mega_kernel.hip  # Strix Halo
 hipcc -O2 -std=c++17 --offload-arch=gfx1152 -o mega_kernel_test main.cpp mega_kernel.hip  # Krackan
+
+# For gfx1250
+hipcc -O2 -std=c++17 --offload-arch=gfx1250 -o mega_kernel_test_gfx1250 main.cpp mega_kernel.hip
 ```
 
 ## Running
@@ -513,8 +505,11 @@ hipcc -O2 -std=c++17 --offload-arch=gfx1152 -o mega_kernel_test main.cpp mega_ke
 # Run with larger batch size for stress testing
 ./mega_kernel_test --batch-size 65536
 
-# Run with custom batch size and block size
-./mega_kernel_test -b 65536 -t 512
+# Run with custom batch size and block size (64-256, power of 2)
+./mega_kernel_test -b 65536 -t 256
+
+# gfx1250 metric-health profile workload (default block size 256; do not use -t 32)
+./mega_kernel_test_gfx1250 -b 655360
 
 # Run kernel multiple times (for benchmarking/profiling)
 ./mega_kernel_test -n 100
@@ -541,7 +536,7 @@ hipcc -O2 -std=c++17 --offload-arch=gfx1152 -o mega_kernel_test main.cpp mega_ke
 |--------|-------------|---------|
 | `-b, --batch-size <N>` | Set batch/problem size (64 to 16M) | 1024 |
 | `-t, --block-size <N>` | Set thread block size (power of 2, 64-256) | 256 |
-| `-n, --num-iterations <N>` | Number of kernel iterations (1 to 10000) | 10 |
+| `-n, --num-iterations <N>` | Number of kernel iterations (1 to 10000) | 5 |
 | `-m, --mfma-mode <MODE>` | MFMA test mode: `both`, `asm`, or `builtin` (see note) | both |
 | `-v, --verbose` | Enable verbose output | off |
 | `-h, --help` | Show help message | - |
@@ -636,19 +631,19 @@ Kernel Execution Time:    0.312 ms
 
 Informational hardware notes (not a full map of what this sample executes). For **async LDS in this binary**, see the main compatibility matrix above (gfx942 is off here).
 
-| Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x)  | RX 9070 XT (gfx1201) |
-|---------|:-------------:|:--------------:|:--------------:|:-------------------:|:--------------------:|
-| Architecture | CDNA2 | CDNA3 | CDNA4 | RDNA 3.5 | RDNA4 |
-| FP8 Support | No | FNUZ | OCP | No | OCP |
-| FP6/FP4 Support | No | No | Yes | No | No |
-| WMMA Wave64 | Yes | Yes | No (Wave32) | No | No |
-| VGPRs per Wave32 | 512 | 512 | 1024 | 512 | 512 |
-| Packed FP16 Atomics | Yes | Yes | Yes | Yes | Yes |
-| Packed BF16 Atomics | No | Yes | Yes | Yes | Yes |
-| Dual VALU Issue | No | VOPD | Yes | VOPD | No |
-| Async LDS (hardware) | No | Limited† | Yes | Yes | Yes |
-| MFMA Matrix Ops | Yes | Yes | Yes | No | No |
-| WMMA Matrix Ops | No | No | No | Yes | Yes |
+| Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x)  | RX 9070 XT (gfx1201) | gfx1250 |
+|---------|:-------------:|:--------------:|:--------------:|:-------------------:|:--------------------:|:---------------:|
+| Architecture | CDNA2 | CDNA3 | CDNA4 | RDNA 3.5 | RDNA4 | gfx1250 |
+| FP8 Support | No | FNUZ | OCP | No | OCP | OCP |
+| FP6/FP4 Support | No | No | Yes | No | No | No |
+| WMMA Wave64 | Yes | Yes | No (Wave32) | No | No | No |
+| VGPRs per Wave32 | 512 | 512 | 1024 | 512 | 512 | — |
+| Packed FP16 Atomics | Yes | Yes | Yes | Yes | Yes | Yes |
+| Packed BF16 Atomics | No | Yes | Yes | Yes | Yes | Yes |
+| Dual VALU Issue | No | VOPD | Yes | VOPD | No | Yes |
+| Async LDS (hardware) | No | Limited† | Yes | Yes | Yes | Yes |
+| MFMA Matrix Ops | Yes | Yes | Yes | No | No | No |
+| WMMA Matrix Ops | No | No | No | Yes | Yes | Yes (gfx1250) |
 
 † This sample still treats gfx942 as without the async-LDS builtins path; see `mega_kernel_device_arch.h`.
 

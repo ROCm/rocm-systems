@@ -12,30 +12,7 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-    "gfx1151"
-    "gfx1152")
-
-set(GPU_TARGETS
-    "${DEFAULT_GPU_TARGETS}"
-    CACHE STRING "GPU targets to compile for")
-
-set(AMDGPU_TARGETS
-    "${GPU_TARGETS}"
-    CACHE STRING
-          "GPU targets to compile for AMDGPUs (update GPU_TARGETS, not this variable)"
-          FORCE)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/rocprofiler_test_gpu_targets.cmake")
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
     cmake_policy(SET CMP0135 NEW)
@@ -89,6 +66,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-cereal)
             cereal
             GIT_REPOSITORY https://github.com/jrmadsen/cereal.git
             GIT_TAG rocprofiler
+            GIT_SHALLOW TRUE
             SOURCE_DIR ${PROJECT_BINARY_DIR}/external/cereal BINARY_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-build SUBBUILD_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-subdir)
@@ -111,6 +89,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-perfetto)
         perfetto
         GIT_REPOSITORY https://github.com/google/perfetto
         GIT_TAG v44.0
+        GIT_SHALLOW TRUE
         SOURCE_DIR ${PROJECT_BINARY_DIR}/external/perfetto BINARY_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-build SUBBUILD_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-subdir)
@@ -219,7 +198,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
         )
-    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS" "DISABLED"
+    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
                      "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "ARGS"
@@ -227,6 +206,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
         "ENVIRONMENT"
+        "LABELS"
         "PRELOAD"
         "FIXTURES_SETUP"
         "FIXTURES_REQUIRED"
@@ -394,13 +374,14 @@ function(rocprofiler_add_integration_validate_test NAME)
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
-    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS"
-                     "DISABLED" "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
+    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
+                     "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
     set(_MULTI_OPTS
         "TEST_PATHS"
         "CONFIG"
         "COPY"
         "ARGS"
+        "LABELS"
         "DISCOVERY_ARGS"
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"

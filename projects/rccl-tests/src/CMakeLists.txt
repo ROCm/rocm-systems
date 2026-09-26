@@ -73,15 +73,17 @@ set(COMMON_FILES
   collector.cu
   common.h
   common.cu
+  gin_sdma_devtime.h
+  gin_sdma_devtime_host.h
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
+  rccl_vector_types.h
+  multimem_ops.h
   timer.h
   timer.cc
   util.h
   util.cu
-  ../verifiable/verifiable.h
-  ../verifiable/verifiable.cu
 )
 
 # Hipify common files (copy of source generated into hipify directory)
@@ -131,7 +133,7 @@ add_custom_target(git_version_check
 add_custom_target(hipify DEPENDS ${HIP_COMMON_SOURCES})
 add_library(rccl_common OBJECT ${HIP_COMMON_SOURCES})
 add_dependencies(rccl_common hipify git_version_check)
-target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl)
+target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl nccl_test_os nccl_tests_options verifiable)
 if(USE_MPI)
   target_link_libraries(rccl_common MPI::MPI_CXX)
 endif()
@@ -141,6 +143,34 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
+    target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
+    # symbols unresolved (--allow-shlib-undefined).  The executable must pull
+    # in ALL rocshmem symbols (not just those it references directly) so that
+    # -rdynamic exports them for librccl.so to resolve at runtime.
+    target_link_libraries(alltoall_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+endif()
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
+    add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu PROPERTIES LANGUAGE CXX)
+    target_include_directories(gin_rocshmem_gda_factory_test PRIVATE
+        ${ROCM_PATH}/include
+        ${RCCL_SOURCE_DIR}/src/include
+        ${ROCSHMEM_SOURCE_DIR}/src
+        ${ROCSHMEM_SOURCE_DIR}/include
+        ${ROCSHMEM_INSTALL_DIR}/include
+    )
+    target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc -xhip)
+    target_link_libraries(gin_rocshmem_gda_factory_test PRIVATE
+        roc::rccl -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive
+        $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
+    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
 add_rccl_test(gather)

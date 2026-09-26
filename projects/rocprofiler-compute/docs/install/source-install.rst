@@ -1,7 +1,7 @@
 .. meta::
    :description: ROCm Compute Profiler installation and deployment
    :keywords: rocm, comp, compute, perf, rocprofiler-compute, Instinct, accelerator, AMD,
-              install, deploy, client, configuration, modulefiles
+              install, deploy, client, configuration, modulefiles, sanitizer
 
 *****************************************
 Install ROCm Compute Profiler from source
@@ -88,7 +88,7 @@ follows.
 
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
-        One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, or ``TSAN``. See
+        One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, ``TSAN``, or ``UBSAN``. See
         :ref:`sanitizer builds <source-install-sanitizers>`. Cannot be combined with
         ``STANDALONEBINARY=ON``.
 
@@ -179,6 +179,9 @@ off by default; set ``ENABLE_SANITIZER`` at configure time to one of the followi
 
     * - ``TSAN``
       - ThreadSanitizer for data-race detection.
+
+    * - ``UBSAN``
+      - UndefinedBehaviorSanitizer on host code only.
 
 Add ``-DENABLE_SANITIZER=`` to the configure step. For example, to build with
 AddressSanitizer.

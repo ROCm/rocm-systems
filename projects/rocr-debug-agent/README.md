@@ -202,6 +202,9 @@ The supported options are:
   Saves all loaded code objects.  If the directory is not specified, the code
   objects are saved in the current directory.
 
+  The `%` foramt tokens in the DIR name are expanded according to the supported
+  tokens list below.
+
   The file name in which the code object is saved is the same as the code
   object URI with special characters replaced by ``'_'``, prefixed with a
   unique code object ID.  For example, the code object URI:
@@ -230,6 +233,11 @@ The supported options are:
 
   Saves the output produced by the ROCdebug-agent in the specified file.
 
+  The file-path can contain '%' format tockens which will be expanded to
+  according to the specification below.
+
+  Unrecognised `%` tokens are left unchanged, including the `%` character.
+
   By default, the output is redirected to ``stderr``.
 
 - __``-d``, ``--disable-linux-signals``__
@@ -250,6 +258,16 @@ The supported options are:
 - __``-h``, ``--help``__
 
   Displays a usage message and aborts the process.
+
+For options supporting `%` format tokens expansions, the following tokens are
+supported:
+- `%p`: process ID of the application being debuggged
+- `%h`: host name
+- `%t`: timestanp (seconds since the Epoch) when the patch is expanded
+- `%e`: abbreviated name of the application being debugged
+- `%u`: real user ID (UID) of the process
+- `%g`: real group ID (GID) of the process
+- `%%`: the literal `%` character
 
 Build the ROCdebug-agent library
 ---------------------------------

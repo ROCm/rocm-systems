@@ -810,7 +810,7 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
   int ret;
 
   if (ptr->cpu_agent().handle != 0) {
-    return HSA_STATUS_ERROR;
+    return HSA_STATUS_SUCCESS;  // Already found CPU agent, skip remaining agents
   }
 
 

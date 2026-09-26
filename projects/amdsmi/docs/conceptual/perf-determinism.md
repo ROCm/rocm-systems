@@ -120,25 +120,37 @@ returns an error.
 | Feature | MI200 | MI300 | MI350 | RDNA 3 | RDNA 4 |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | `--perf-level AUTO` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `--perf-level LOW` | ✅ | ✅ | ✅ | ✅ | ❓ |
-| `--perf-level HIGH` | ✅ | ✅ | ✅ | ✅ | ❓ |
-| `--perf-level MANUAL` | ✅ | ✅ | ✅ | ✅ | ❓ |
-| `--perf-level STABLE_*` | ✅ | ✅ | ❓ | ✅ | ❓ |
-| `--perf-determinism` | ✅ | ⚠️ | ❌ | ✅ | ❓ |
+| `--perf-level LOW` | ✅ | ❌ | ❌ | ✅ | ✅ |
+| `--perf-level HIGH` | ✅ | ❌ | ❌ | ✅ | ✅ |
+| `--perf-level MANUAL` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--perf-level STABLE_*` | ✅ | ❌ | ❌ | ✅ | ✅ |
+| `--perf-determinism` | ✅ | ⚠️ | ❌ | ❌ | ❌ |
 
-**Legend:** ✅ Supported  ⚠️ Limited / ASIC-dependent  ❌ Not supported  ❓ Unconfirmed
+**Legend:** ✅ Supported  ⚠️ Limited / ASIC-dependent  ❌ Not supported
 
 **Notes on specific GPU families:**
 
 - **MI200 (Aldebaran)** -- Full support for all performance levels and
   determinism.
-- **MI300 (Aqua Vanjaram)** -- Performance determinism support depends on the
-  PMFW version. Verify with `amd-smi metric --perf-level` after setting.
-- **MI350** -- Performance determinism is **defeatured**. CSC (Clock Stretching
-  Compensation) is intended to address the variability use case that determinism
-  previously covered.
-- **RDNA 3 (Navi 3x)** -- Full support for performance levels and determinism.
-- **RDNA 4 (Navi 4x)** -- Depends on PMFW capabilities for the specific ASIC.
+- **MI300 (Aqua Vanjaram)** -- Only `AUTO` and `MANUAL` are accepted; `LOW`,
+  `HIGH`, and the `STABLE_*` profiling levels are rejected by PMFW
+  (`AMDSMI_STATUS_NOT_SUPPORTED`). Performance determinism is ASIC/PMFW-dependent
+  -- observed working on MI300A but returning `AMDSMI_STATUS_NOT_SUPPORTED` on
+  MI308X. Verify with `amd-smi metric --perf-level` after setting.
+- **MI350** -- Only `AUTO` and `MANUAL` are accepted; `LOW`, `HIGH`, and
+  `STABLE_*` are rejected by PMFW. Performance determinism is **defeatured**; CSC
+  (Clock Stretching Compensation) is intended to address the variability use case
+  that determinism previously covered.
+- **RDNA 3 (Navi 3x)** -- All performance levels (`AUTO`, `LOW`, `HIGH`,
+  `MANUAL`, `STABLE_*`) are supported. Performance determinism is **not**
+  supported on the tested consumer parts (Navi 31 / RX 7900 XTX, Navi 32 /
+  RX 7700 XT): `amd-smi set --perf-determinism` returns
+  `AMDSMI_STATUS_NOT_SUPPORTED` and the `perf_determinism` level is rejected at
+  the sysfs interface. Workstation RDNA SKUs have not been tested.
+- **RDNA 4 (Navi 4x)** -- All performance levels (`AUTO`, `LOW`, `HIGH`,
+  `MANUAL`, `STABLE_*`) are supported on Navi 48 (RX 9070 XT). Performance
+  determinism is **not** supported (`AMDSMI_STATUS_NOT_SUPPORTED`;
+  `perf_determinism` rejected at sysfs).
 
 ## From concept to action
 

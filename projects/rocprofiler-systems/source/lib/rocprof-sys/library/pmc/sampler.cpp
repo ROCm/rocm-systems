@@ -1,6 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Must be first: defines AINIC_SUPPORTED based on the installed AMD SMI version
+// and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
+#include "backends/amd_smi/ainic_feature.hpp"
+
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
@@ -26,6 +30,9 @@
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
 #include "backends/amd_smi/backend.hpp"
+#include "backends/amd_smi/device.hpp"
+#include "backends/amd_smi/wrapper.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -42,7 +49,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
 #include <atomic>
@@ -53,15 +59,16 @@
 #include <new>
 #include <stdexcept>
 #include <sys/resource.h>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofsys::pmc
 {
 
-std::atomic<State>&
+std::atomic<state::process::State>&
 get_state()
 {
-    static std::atomic<State> _v{ State::PreInit };
+    static std::atomic<state::process::State> _v{ state::process::PreInit };
     return _v;
 }
 
@@ -98,20 +105,27 @@ struct cpu_production_config
     using CacheApi    = collectors::cpu::cache_policy;
 };
 
-using provider_factory_t =
-    device_providers::amd_smi::provider_factory<backends::amd_smi::backend_factory>;
-using provider_t      = provider_factory_t::provider_t;
-using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+using provider_factory_t = device_providers::amd_smi::provider_factory<
+    backends::amd_smi::backend_factory<backends::amd_smi::wrapper>>;
+using provider_t = provider_factory_t::provider_t;
+
+using backend_session_t = provider_factory_t::provider_t::backend_t;
+using amd_smi_device_t  = backends::amd_smi::device<backend_session_t>;
+using gpu_device_t      = collectors::gpu::device<amd_smi_device_t>;
+using gpu_collector_t =
+    collectors::gpu::collector<provider_t, gpu_device_t, gpu_production_config>;
 
 #if ROCPROFILER_VERSION >= 600
 using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
-    backends::rocprofiler_sdk::backend_factory>;
+    backends::rocprofiler_sdk::backend_factory<::rocprofsys::rocprofiler_sdk::wrapper>>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
-using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
+using nic_device_t = collectors::nic::device<amd_smi_device_t>;
+using nic_collector_t =
+    collectors::nic::collector<provider_t, nic_device_t, nic_production_config>;
 #endif
 
 using cpu_provider_factory_t =
@@ -200,7 +214,7 @@ reinit_if_pending()
 }  // namespace
 
 void
-set_state(State _v)
+set_state(state::process::State _v)
 {
     pmc::get_state().store(_v);
 }
@@ -213,7 +227,7 @@ config()
         slice.config();
     }
     LOG_DEBUG("Setting PMC sampler state to active...");
-    pmc::set_state(State::Active);
+    pmc::set_state(state::process::Active);
 }
 
 void
@@ -223,7 +237,7 @@ sample()
 
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
-    if(pmc::get_state() != State::Active)
+    if(pmc::get_state() != state::process::Active)
     {
         return;
     }
@@ -318,7 +332,7 @@ pause()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
-    if(pmc::get_state() != State::Active || !is_initialized())
+    if(pmc::get_state() != state::process::Active || !is_initialized())
     {
         return;
     }
@@ -339,7 +353,7 @@ void
 postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");
-    pmc::get_state().store(State::Finalized);
+    pmc::get_state().store(state::process::Finalized);
     for(auto& slice : g_collector_slices)
     {
         slice.shutdown();

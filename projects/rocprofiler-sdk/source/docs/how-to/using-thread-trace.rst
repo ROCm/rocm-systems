@@ -66,6 +66,8 @@ The following table lists the parameters relevant to thread tracing:
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-serialize-all           | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-no-detail               | Bool    |         | False     | Collects occupancy data without instruction-level detail.    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-perfcounter-ctrl        | Integer | 1 - 32  | 2~8       | Available only in gfx9. Streams SQ performance counters to   |
 |                             |         |         |           | the thread trace buffer in the given relative period. As     |
 |                             |         |         |           | this uses high bandwidth, a value too low can cause or worsen|
@@ -280,7 +282,7 @@ Here are some options to handle this:
 
   * A number too high can cause packet losses and/or lead to a full buffer.
 
-* Set the ``HSA_CU_MASK`` to mask out all CUs but the target. For more details, see `setting CUs <https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html>`_.
+* Set the ``HSA_CU_MASK`` to mask out all CUs but the target. For more details, see `setting CUs <https://rocm.docs.amd.com/en/latest/reference/environment-variables/setting-cus.html>`_.
 
   * If only the ``target_cu`` (or a few CUs) are not masked out, then all or most waves will be assigned to the ``target_cu``.
 

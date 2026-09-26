@@ -1,4 +1,25 @@
 //! Profile: a reusable bundle of emulator configuration.
+//!
+//! # Why every document type here rejects unknown fields
+//!
+//! These are files people write and edit by hand, and mirage acts on
+//! them: a profile decides how many GPUs the emulated machine has, which
+//! image its nodes run in, and what is mounted into them. A key serde
+//! does not recognise is, overwhelmingly, a key that was *meant* to do
+//! something — `"descriptoin"`, `"read-only"`, a field from a newer
+//! mirage — and dropping it silently means the machine that comes up is
+//! quietly not the one the file describes. `deny_unknown_fields` turns
+//! that into a parse error naming the key, at the moment the document is
+//! read, which is the only moment the user is still looking at it.
+//!
+//! The cost is forward compatibility in one direction: a document written
+//! by a newer mirage that added a field is rejected by an older one
+//! rather than degraded. That is the trade we want. An older mirage
+//! cannot honour a field it has never heard of, so its choice is between
+//! saying so and running something else instead; and adding an *optional*
+//! field is still fully backward compatible, because older documents that
+//! omit it keep parsing. Only removals and renames need care, and those
+//! need care anyway.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +32,7 @@ use crate::emulator::EmulatorDef;
 /// therefore live on the profile, so a profile fully describes how its
 /// sessions are containerised.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileMount {
     /// Path to the file or directory on the host.
     pub host_path: String,
@@ -84,6 +106,7 @@ impl FileMount {
 /// [`ContainerizedDef`] and therefore live on the profile, so a profile
 /// fully describes which container ports it exposes on the host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PortMapping {
     /// Port published on the host.
     pub host_port: u16,
@@ -121,9 +144,18 @@ impl PortMapping {
             None => (spec, None),
         };
 
+        // Zero is rejected rather than passed through. Docker reads a host
+        // port of 0 as "pick any free one", but mirage never tells the
+        // user which one was picked, so the mapping would be unusable —
+        // and a *container* port of 0 means nothing at all. The message
+        // has always promised 1-65535; this is the code agreeing with it.
         let parse_port = |s: &str| -> Result<u16, String> {
-            s.parse::<u16>()
-                .map_err(|_| format!("invalid port {s:?} in {spec:?} (expected a number 1-65535)"))
+            match s.parse::<u16>() {
+                Ok(0) | Err(_) => Err(format!(
+                    "invalid port {s:?} in {spec:?} (expected a number 1-65535)"
+                )),
+                Ok(p) => Ok(p),
+            }
         };
 
         let (host_port, container_port) = match ports.split_once(':') {
@@ -217,10 +249,29 @@ impl Hack {
     }
 }
 
+/// The hacks a derivative image is really built from: each distinct hack
+/// once, in slug order.
+///
+/// Hacks are a set, not a sequence — each is an idempotent upgrade of the
+/// base image, and `--hack X --hack X` asks for X, not for X twice. The
+/// tag was already computed from the sorted, deduplicated slugs, so it is
+/// the *Dockerfile* that has to agree: two orderings that share a tag must
+/// share a build, and a repeated hack must not be applied (and paid for)
+/// twice under a tag saying it happened once. Both callers therefore
+/// normalise here rather than each in its own way.
+fn distinct_hacks(hacks: &[Hack]) -> Vec<Hack> {
+    let mut out = hacks.to_vec();
+    out.sort_unstable_by_key(|h| h.slug());
+    out.dedup();
+    out
+}
+
 /// Generate the Dockerfile that builds a derivative of `base` with each
-/// of `hacks` applied as an additional layer, in order. Returns `None`
-/// when `hacks` is empty (no derivative image is needed).
+/// distinct hack in `hacks` applied as an additional layer, in the order
+/// `distinct_hacks` fixes. Returns `None` when `hacks` is empty (no
+/// derivative image is needed).
 pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
+    let hacks = distinct_hacks(hacks);
     if hacks.is_empty() {
         return None;
     }
@@ -238,14 +289,13 @@ pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
 /// built image instead of rebuilding it. Returns `None` when `hacks` is
 /// empty.
 pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
+    let hacks = distinct_hacks(hacks);
     if hacks.is_empty() {
         return None;
     }
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    let mut slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
-    slugs.sort_unstable();
-    slugs.dedup();
+    let slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
     let mut hasher = DefaultHasher::new();
     base.hash(&mut hasher);
     slugs.hash(&mut hasher);
@@ -261,6 +311,7 @@ pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
 /// runtime types and `mirage_container` for the engine that drives the
 /// provider CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContainerizedDef {
     /// Provider binary to drive: `"podman"`, `"docker"`, or an absolute
     /// path. `None` auto-detects (preferring podman, then docker).
@@ -300,6 +351,7 @@ pub struct ContainerizedDef {
 /// A profile is a named, on-disk emulator preset that can be referenced
 /// by sessions. Profiles live in `$XDG_CONFIG_HOME/mirage/profile/`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProfileDef {
     /// The profile's name (also used as the filename, `<name>.json`).
     pub name: String,
@@ -317,8 +369,55 @@ pub struct ProfileDef {
     pub containerize: Option<ContainerizedDef>,
 }
 
+impl ProfileDef {
+    /// Ask this profile's emulator backend whether it can run it.
+    ///
+    /// A profile names a backend, and only that backend knows whether the
+    /// rest of the document makes sense to it — an agent it has no model
+    /// for, an option it does not accept, a runtime asset it needs and
+    /// cannot find. Checked when the profile is written rather than when
+    /// a session first tries to use it, so the failure lands on the
+    /// command that could still fix it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend's own explanation, or a rejection naming the
+    /// emulator if no backend by that name is compiled into this build.
+    pub fn validate(&self) -> Result<(), String> {
+        let kind = &self.emulator.emulator;
+        match crate::emulator::get_emulator_backend(kind) {
+            Some(backend) => backend.validate_profile(self),
+            None => Err(format!(
+                "unknown emulator {kind:?}; run `mirage emulators` for the \
+                 backends this build has"
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    /// Port 0 was accepted while the error message promised 1-65535 --
+    /// so `--port 0:8000` produced a mapping the user could never reach.
+    #[test]
+    fn port_zero_is_rejected_on_both_sides() {
+        for spec in ["0", "0:8000", "8000:0", "0:0", "0/tcp", "0:8000/udp"] {
+            let e = PortMapping::parse(spec).expect_err(&format!("{spec:?} should be rejected"));
+            assert!(e.contains("1-65535"), "{spec:?}: {e}");
+        }
+    }
+
+    /// The boundary the message names must itself be accepted, or the
+    /// fix above would have traded one wrong answer for another.
+    #[test]
+    fn the_advertised_port_range_is_accepted() {
+        for spec in ["1", "65535", "1:65535", "65535:1/udp"] {
+            PortMapping::parse(spec).unwrap_or_else(|e| panic!("{spec:?} rejected: {e}"));
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -375,6 +474,30 @@ mod tests {
         assert_eq!(p.container_port, 53);
         assert_eq!(p.protocol.as_deref(), Some("udp"));
         assert_eq!(p.to_publish_arg(), "53:53/udp");
+    }
+
+    #[test]
+    fn a_repeated_hack_is_built_once_because_the_tag_says_it_was() {
+        // The tag deduplicated the slugs and the Dockerfile did not, so
+        // `--hack X --hack X` layered X twice — an apt upgrade paid for
+        // twice — and cached the result under a tag meaning "X, once".
+        let once = hacks_dockerfile("rocm/dev", &[Hack::UpdateGccViaPpa]).unwrap();
+        let twice =
+            hacks_dockerfile("rocm/dev", &[Hack::UpdateGccViaPpa, Hack::UpdateGccViaPpa]).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(
+            twice
+                .matches(Hack::UpdateGccViaPpa.dockerfile_step())
+                .count(),
+            1,
+            "{twice}"
+        );
+        assert_eq!(
+            hacks_image_tag("rocm/dev", &[Hack::UpdateGccViaPpa]),
+            hacks_image_tag("rocm/dev", &[Hack::UpdateGccViaPpa, Hack::UpdateGccViaPpa]),
+            "the tag was already order- and duplicate-independent"
+        );
+        assert_eq!(hacks_dockerfile("rocm/dev", &[]), None);
     }
 
     #[test]

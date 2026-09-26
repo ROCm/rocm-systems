@@ -36,9 +36,9 @@ public:
   Functional(std::string name) : Base(std::move(name)) {}
 
   /// @brief Schedule the first advance event when the simulation starts.
-  void initialize() override {
+  void startup() override {
     assert(this->engine() != nullptr &&
-           "Functional component must be added to a topology before initialize()");
+           "Functional component must be added to a topology before startup()");
     active_ = true;
     this->schedule_event(&step_event_, 1);
   }

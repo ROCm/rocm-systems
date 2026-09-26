@@ -148,13 +148,15 @@ Working with rocpd database format
 
 **Documentation:** :ref:`using-rocpd-output-format`
 
-Collection in various formats
-------------------------------
+Conversion to other formats
+---------------------------
 
 .. code-block:: bash
 
-   # Multiple output formats in one run
-   rocprofv3 --runtime-trace --output-format csv json pftrace otf2 -- ./your_app
+   # Direct CSV, PFTrace, and OTF2 collection is deprecated.
+   # Collect in the default rocpd format, then convert the database.
+   rocprofv3 --runtime-trace -- ./your_app
+   rocpd convert -i hostname/12345_results.db -f csv pftrace otf2
 
 **Documentation:** :ref:`using-rocpd-output-format`
 

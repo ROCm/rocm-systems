@@ -103,6 +103,7 @@ enum rocshmem_stats {
   NUM_PUT_SIGNAL_NBI_WG,
   NUM_PUT_SIGNAL_NBI_WAVE,
   NUM_REDUCE,
+  NUM_REDUCE_SCATTER,
   NUM_STATS,
 };
 

@@ -418,10 +418,50 @@ template <typename T> static bool TestMemoryAccessInAllThread(int test_type, int
 }
 
 /**
- * Local function: Launch kerAlloc<<<>>>
+ * Local function: Thread-safe variant launched from worker threads. Uses the
+ * *_THREAD check macros (which defer failures and early-return on error, so this
+ * must be void) and stores its result in thread_results for the main thread to
+ * validate after HIP_CHECK_THREAD_FINALIZE().
  */
 template <typename T> static void runTestMemoryAccessInAllThread(int test_type, int thread_idx) {
-  thread_results[thread_idx] = TestMemoryAccessInAllThread<T>(test_type, thread_idx);
+  // Default to failure so an early bail-out never leaves a stale result for the
+  // main thread to validate.
+  thread_results[thread_idx] = false;
+
+  T *outputVec_d{nullptr}, *outputVec_h{nullptr};
+  size_t arraysize = (BLOCKSIZE * GRIDSIZE);
+  T data_value = std::numeric_limits<T>::max();
+
+  outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
+  REQUIRE_THREAD(outputVec_h != nullptr);
+  if (outputVec_h == nullptr) {
+    return;
+  }
+
+  HIP_CHECK_THREAD(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  if (outputVec_d == nullptr) {
+    free(outputVec_h);
+    return;
+  }
+
+  // Launch Test Kernel
+  kerTestAccessInAllThreadsInBlock<T>
+      <<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type, data_value, thread_idx);
+
+  HIP_CHECK_THREAD(hipDeviceSynchronize());
+  // Copy to host buffer and validate only when the prior steps succeeded.
+  HIP_CHECK_THREAD(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
+  bool bPassed = true;
+  for (size_t idx = 0; idx < arraysize; idx++) {
+    if (outputVec_h[idx] != data_value) {
+      bPassed = false;
+      break;
+    }
+  }
+  thread_results[thread_idx] = bPassed;
+
+  free(outputVec_h);
+  HIP_CHECK_THREAD(hipFree(outputVec_d));
 }
 
 /**
@@ -1330,6 +1370,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_SingKernels_MulThreads) {
     for (std::thread& t : tests) {
       t.join();
     }
+    HIP_CHECK_THREAD_FINALIZE();
     // Verify All Results
     for (int idx = 0; idx < num_threads; idx++) {
       REQUIRE(thread_results[idx]);
@@ -1347,6 +1388,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_SingKernels_MulThreads) {
     for (std::thread& t : tests) {
       t.join();
     }
+    HIP_CHECK_THREAD_FINALIZE();
     // Verify All Results
     for (int idx = 0; idx < num_threads; idx++) {
       REQUIRE(thread_results[idx]);

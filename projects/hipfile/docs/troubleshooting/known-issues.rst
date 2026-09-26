@@ -40,6 +40,9 @@ Example:
 
 hipFile's fastpath is only supported on GPU physical functions (PFs).
 
+``ais-check`` also detects virtual functions via ``amd-smi`` and prints a warning
+when one is present. This warning won't change the exit code.
+
 High memory utilization with hipFile
 ====================================
 
@@ -97,7 +100,7 @@ be disabled by setting the ``HIPFILE_ALLOW_COMPAT_MODE`` environment variable to
 they do not meet the requirements of the fastpath.
 
 Poor IOPS with small I/O sizes and many threads/processes
-========================================================
+===========================================================
 
 Every I/O operation requires the GPU buffer to be pinned (locked in place) at the
 start of the operation and unpinned at the end of the operation. Pin and unpin

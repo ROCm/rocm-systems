@@ -15,8 +15,7 @@ extern bool rcclUseAinic();
 ncclResult_t wrap_ionicdv_symbols(void) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclUseAinic()) {
-    pthread_once(&initOnceControl,
-                 [](){ initResult = buildIonicdvSymbols(&ionicdvSymbols); });
+    pthread_once(&initOnceControl, []() { initResult = buildIonicdvSymbols(&ionicdvSymbols); });
     return initResult;
   }
 #endif
@@ -27,8 +26,8 @@ ncclResult_t wrap_ionicdv_symbols(void) {
 /* CHECK_NOT_NULL: helper macro to check for NULL symbol */
 #define CHECK_NOT_NULL(container, internal_name) \
   if (container.internal_name == NULL) { \
-     WARN("lib wrapper not initialized."); \
-     return ncclInternalError; \
+    WARN("lib wrapper not initialized."); \
+    return ncclInternalError; \
   }
 
 #define IONICDV_INT_CHECK_RET_ERRNO(container, internal_name, call, success_retval, name) \
@@ -42,18 +41,20 @@ ncclResult_t wrap_ionicdv_symbols(void) {
   } \
   return ncclSuccess;
 
-ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp *qp, bool enable_send, bool enable_recv) {
+ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp* qp, bool enable_send, bool enable_recv) {
   if (ionicdvSymbols.ionicdv_internal_qp_set_gda == NULL) {
     errno = EOPNOTSUPP;
     return ncclSystemError;
   }
-  IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_qp_set_gda, ionicdv_internal_qp_set_gda(qp, enable_send, enable_recv), 0, "ionic_dv_qp_set_gda");
+  IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_qp_set_gda,
+                              ionicdv_internal_qp_set_gda(qp, enable_send, enable_recv), 0, "ionic_dv_qp_set_gda");
 }
 
-ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd *ibpd, uint8_t udma_mask) {
+ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd* ibpd, uint8_t udma_mask) {
   if (ionicdvSymbols.ionicdv_internal_pd_set_udma_mask == NULL) {
     errno = EOPNOTSUPP;
     return ncclSystemError;
   }
-  IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_pd_set_udma_mask, ionicdv_internal_pd_set_udma_mask(ibpd, udma_mask), 0, "ionic_dv_pd_set_udma_mask");
+  IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_pd_set_udma_mask,
+                              ionicdv_internal_pd_set_udma_mask(ibpd, udma_mask), 0, "ionic_dv_pd_set_udma_mask");
 }

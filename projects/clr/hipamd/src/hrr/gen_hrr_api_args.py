@@ -119,6 +119,9 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemcpy3DAsync",
     "hipMemcpy3D_spt",
     "hipMemcpy3DAsync_spt",
+    # hipMemcpy2D family — H2D blob snapshot (pitched host src) + D2H expected blob
+    "hipMemcpy2D",
+    "hipMemcpy2DAsync",
     # Array creation — need handle map (manual capture for output handle)
     "hipArrayCreate",
     "hipArray3DCreate",
@@ -127,10 +130,30 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemGetAllocationGranularity",
     "hipMemPoolSetAccess",
     "hipMemSetAccess",
+    # hipDrv driver 3D/2D memcpy (HIP_MEMCPY3D / hip_Memcpy2D struct ptr; inline + blobs)
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
 }
 
 # Alias for backward compat within the file (some helpers used MANUAL_APIS)
 MANUAL_APIS = MANUAL_CAPTURE_APIS
+
+# Kernel launches recorded as variable-length binary (hip_capture.cpp
+# serialize_kernel_launch), NOT as sizeof(hrr_args_hipModuleLaunchKernel).
+VARIABLE_LENGTH_KERNEL_LAUNCH_APIS: Set[str] = {
+    "hipModuleLaunchKernel",
+    "hipExtModuleLaunchKernel",
+    "hipLaunchKernel",
+    "hipLaunchByPtr",
+}
+
+# Minimum bytes for a valid variable-length kernel launch payload:
+#   header + stream(8) + name_len(2) + co_hash(16) + grid/block/shared(28) + counts(4)
+# (kernel name and per-arg data may add more; spin with 0 args is 94 bytes total).
+_VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR = (
+    "static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u)"
+)
 
 # APIs that are pass-through even for the manual path
 # (hipModuleGetFunction: function handles identified by name at launch time)
@@ -176,6 +199,12 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventCreate",
     "hipEventCreateWithFlags",
     "hipEventDestroy",
+    # Query APIs — capture only logs hipSuccess (event/stream already complete).
+    # Replay may reach the same API sooner relative to GPU work; spin on
+    # hipErrorNotReady until hipSuccess.  See DESIGN.md § HIP-Specific Polling.
+    "hipEventQuery",
+    "hipStreamQuery",
+    "hipStreamQuery_spt",
     # Fat binary registration — load blob as module so kernel names resolve
     "__hipRegisterFatBinary",
     # Host memory registration — need handle map + blob restore + device ptr recording
@@ -194,6 +223,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipStreamBeginCapture",
     "hipStreamEndCapture",
     "hipGraphInstantiate",
+    # hipGraphInstantiateWithFlags — same graph_map guard as hipGraphInstantiate;
+    # must fail loudly (not pass a null graph to the real API) when the graph was
+    # built via the unsupported explicit node API.
+    "hipGraphInstantiateWithFlags",
     "hipGraphLaunch",
     # DtoH driver-style copies — dst is a host pointer (not in alloc_map); need temp buffer
     "hipMemcpyDtoH",
@@ -203,6 +236,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMemcpy3DAsync",
     "hipMemcpy3D_spt",
     "hipMemcpy3DAsync_spt",
+    # hipMemcpy2D family — H2D substitutes the captured blob (host src is a stale VA);
+    # D2H validates the device result against the captured expected blob.
+    "hipMemcpy2D",
+    "hipMemcpy2DAsync",
     # Array creation — handle must be recorded in ctx.array_map
     "hipArrayCreate",
     "hipArray3DCreate",
@@ -220,6 +257,62 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMemRelease",
     "hipMemMap",
     "hipMemUnmap",
+    # Device allocation — must allocate a real buffer and record it in alloc_map
+    # (with padding + zero-init parity with hipMalloc).
+    "hipExtMallocWithFlags",
+    # hipDrv driver 3D/2D memcpy (reconstruct struct, translate device ptrs, blob/validate)
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
+}
+
+# ---------------------------------------------------------------------------
+# Explicit graph-construction APIs that HRR cannot replay. Unlike the generic
+# NOOP handlers (which emit a vague once-per-process message), these emit a
+# loud, attributable "explicit graph construction is not supported" warning
+# naming the specific API (finding H1) — so when replay later fails, the cause
+# is traceable.
+#
+# These are intentionally NON-FATAL (they return hipSuccess): a program may
+# legitimately create/clone/build graphs it never instantiates, or exercise
+# these APIs for coverage. The HARD fail-loud happens at the point that actually
+# matters — hipGraphInstantiate / hipGraphInstantiateWithFlags (manual handlers
+# in hip_playback.cpp) return hipErrorNotSupported (fatal) when asked to
+# instantiate a graph that is absent from graph_map, which can only be a
+# node-API-built graph. That prevents a node-API graph from silently replaying
+# as an empty graph with skipped launches, without aborting programs that merely
+# touch the construction APIs.
+#
+# Only true *construction* calls belong here. Harmless queries
+# (hipGraphGetNodes/Edges, hipStreamGetCaptureInfo_v2, ...) stay in
+# NOOP_PLAYBACK_APIS. The stream-capture chain never emits these APIs, so the
+# supported hipStreamBeginCapture/EndCapture path is unaffected.
+# ---------------------------------------------------------------------------
+ERROR_STUB_PLAYBACK_APIS: Set[str] = {
+    "hipGraphCreate",
+    "hipGraphClone",
+    "hipGraphAddChildGraphNode",
+    "hipGraphAddDependencies",
+    "hipGraphAddEmptyNode",
+    "hipGraphAddEventRecordNode",
+    "hipGraphAddEventWaitNode",
+    "hipGraphAddExternalSemaphoresSignalNode",
+    "hipGraphAddExternalSemaphoresWaitNode",
+    "hipGraphAddHostNode",
+    "hipGraphAddKernelNode",
+    "hipGraphAddMemAllocNode",
+    "hipGraphAddMemFreeNode",
+    "hipGraphAddMemcpyNode",
+    "hipGraphAddMemcpyNode1D",
+    "hipGraphAddMemcpyNodeFromSymbol",
+    "hipGraphAddMemcpyNodeToSymbol",
+    "hipGraphAddMemsetNode",
+    "hipGraphAddNode",
+    "hipGraphAddBatchMemOpNode",
+    "hipDrvGraphAddMemFreeNode",
+    "hipDrvGraphAddMemcpyNode",
+    "hipDrvGraphAddMemsetNode",
+    "hipGraphInstantiateWithParams",
 }
 
 # ---------------------------------------------------------------------------
@@ -252,24 +345,9 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemMapArrayAsync",
     "hipMipmappedArrayGetMemoryRequirements",
     # Category 4: hipGraphNode_t* array params — generator passes void** but API needs hipGraphNode_t*
-    "hipGraphAddChildGraphNode",
-    "hipGraphAddDependencies",
-    "hipGraphAddEmptyNode",
-    "hipGraphAddEventRecordNode",
-    "hipGraphAddEventWaitNode",
-    "hipGraphAddExternalSemaphoresSignalNode",
-    "hipGraphAddExternalSemaphoresWaitNode",
-    "hipGraphAddHostNode",
-    "hipGraphAddKernelNode",
-    "hipGraphAddMemAllocNode",
-    "hipGraphAddMemFreeNode",
-    "hipGraphAddMemcpyNode",
-    "hipGraphAddMemcpyNode1D",
-    "hipGraphAddMemcpyNodeFromSymbol",
-    "hipGraphAddMemcpyNodeToSymbol",
-    "hipGraphAddMemsetNode",
-    "hipGraphAddNode",
-    "hipGraphAddBatchMemOpNode",
+    # NOTE: the explicit node-construction Add*Node APIs were moved to
+    # ERROR_STUB_PLAYBACK_APIS (they now fail loudly, see H1). Only the harmless
+    # query/update calls remain NOOP here.
     "hipGraphExecUpdate",
     "hipGraphGetEdges",
     "hipGraphGetNodes",
@@ -282,9 +360,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipStreamGetCaptureInfo_v2",
     "hipStreamGetCaptureInfo_v2_spt",
     "hipStreamUpdateCaptureDependencies",
-    "hipDrvGraphAddMemFreeNode",
-    "hipDrvGraphAddMemcpyNode",
-    "hipDrvGraphAddMemsetNode",
     # Category 5: Other type mismatches (output handle params stored as void** by generator)
     "hipCtxCreate",
     "hipCtxGetCurrent",
@@ -381,24 +456,13 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemset3DAsync",
     "hipMemset3D_spt",
     "hipMemset3DAsync_spt",
-    # hipMemset_spt / 2D_spt variants — host ptr for dst (stale) or pitched ptr — noop
-    "hipMemset_spt",
-    "hipMemset2D_spt",
-    "hipMemsetAsync_spt",
-    "hipMemset2DAsync_spt",
-    # hipMemsetD2D8/16/32 and Async — hipDeviceptr_t output correctly typed; but not in alloc_map — noop
-    "hipMemsetD2D8",
-    "hipMemsetD2D8Async",
-    "hipMemsetD2D16",
-    "hipMemsetD2D16Async",
-    "hipMemsetD2D32",
-    "hipMemsetD2D32Async",
     # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
     # hipLaunchCooperativeKernel — variable args (void**); handled via regular kernel launch fallback — noop
     "hipLaunchCooperativeKernel",
-    # hipOccupancyMaxActiveBlocksPerMultiprocessor / WithFlags — kernel fn ptr (stale) — noop
-    # Note: already in NOOP via func pointer category above; just confirming
-    "hipExtMallocWithFlags",
+    # NOTE: hipExtMallocWithFlags is intentionally NOT noop'd. It is a real device
+    # allocation (see _ALLOC_CREATE_APIS) and is handled by a manual playback handler
+    # (MANUAL_PLAYBACK_APIS) so the returned device pointer lands in alloc_map and any
+    # H2D/D2H/kernel-arg use of it translates correctly.
     "hipChooseDeviceR0000",
     "hipGetDevicePropertiesR0000",
     "hipGetErrorName",
@@ -433,11 +497,16 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipExtStreamGetCUMask",
     # hipExtGetLinkTypeAndHopCount — output uint32_t* ptrs stale
     "hipExtGetLinkTypeAndHopCount",
-    # StreamWait/Write Value — void* ptr is stale device address (no alloc_map translation in generated shim)
+    # hipStreamWaitValue32/64 stay no-op because a wait can hang on replay: the
+    # condition is satisfied by whatever wrote the value at capture time, and if
+    # that writer is not itself replayed the wait never completes and blocks the
+    # replay. The void* ptr is not the problem here: it is named `ptr`, so the
+    # generated shim would translate it via ctx.translate_ptr like any other.
+    # hipStreamWriteValue32/64 are replayed instead: the void* ptr is translated
+    # via alloc_map (ctx.translate_ptr) and the stream via ctx.translate_stream.
+    # See SKIP_IF_UNMAPPED_PLAYBACK_APIS for the untranslatable-destination case.
     "hipStreamWaitValue32",
     "hipStreamWaitValue64",
-    "hipStreamWriteValue32",
-    "hipStreamWriteValue64",
     # hipStreamAttachMemAsync — void* dev_ptr stale
     "hipStreamAttachMemAsync",
     # hipGetStreamDeviceId — returns int not hipError_t (wrong return type cast)
@@ -507,9 +576,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # hipDrvMemDiscardAndPrefetchBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
     "hipDrvMemDiscardAndPrefetchBatchAsync",
     # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
-    "hipDrvMemcpy3D",
-    "hipDrvMemcpy3DAsync",
-    "hipDrvMemcpy2DUnaligned",
     "hipMemcpy3DPeer",
     "hipMemcpy3DPeerAsync",
     "hipMemcpy2DArrayToArray",
@@ -536,9 +602,9 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGetMipmappedArrayLevel",
     "hipFreeMipmappedArray",
     # Category 15: Graph explicit APIs — stale hipGraph_t/hipGraphExec_t/hipGraphNode_t handles
-    "hipGraphCreate",
+    # NOTE: hipGraphCreate / hipGraphClone / hipGraphInstantiateWithParams moved to
+    # ERROR_STUB_PLAYBACK_APIS (explicit construction now fails loudly, see H1).
     "hipGraphDestroy",
-    "hipGraphClone",
     "hipGraphUpload",
     "hipGraphDebugDotPrint",
     "hipGraphNodeGetType",
@@ -566,7 +632,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphExecGetFlags",
     "hipGraphNodeSetParams",
     "hipGraphExecNodeSetParams",
-    "hipGraphInstantiateWithParams",
     "hipGraphChildGraphNodeGetGraph",
     "hipGraphEventRecordNodeGetEvent",
     "hipGraphEventRecordNodeSetEvent",
@@ -587,6 +652,26 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipDrvGraphExecMemsetNodeSetParams",
     "hipDrvGraphMemcpyNodeGetParams",
     "hipDrvGraphMemcpyNodeSetParams",
+}
+
+# ---------------------------------------------------------------------------
+# Playback APIs whose recorded destination must resolve to a live allocation
+# before the real API is called: API name -> destination parameter name.
+# ---------------------------------------------------------------------------
+#
+# ctx.translate_ptr() returns nullptr when the recorded address is in neither
+# the alloc map nor the VMM reserved-VA map, for instance a write into memory
+# HRR does not track such as a framework sub-allocation carved out of a larger
+# hipMalloc. The stream-operation APIs reject a null ptr with
+# hipErrorInvalidValue (ihipStreamOperation checks it first), and
+# dispatch_event() treats any non-success handler return as fatal, so a single
+# untranslatable destination would abort the entire replay. Warn once and skip
+# the call instead, which is the unmapped-pointer contract the hand-written
+# playback_hipFree / playback_hipFreeAsync / playback_hipHostFree already use.
+# Slightly-wrong data beats no replay at all.
+SKIP_IF_UNMAPPED_PLAYBACK_APIS: Dict[str, str] = {
+    "hipStreamWriteValue32": "ptr",
+    "hipStreamWriteValue64": "ptr",
 }
 
 # ---------------------------------------------------------------------------
@@ -666,7 +751,33 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                              ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
                              ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
                              ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    # hipMemcpy2D family — H2D blob (pitched host src) + D2H expected-output blob.
+    # The copied region is height rows of `width` bytes spaced by spitch/dpitch;
+    # the blob is the contiguous host buffer (pitch * (height-1) + width bytes).
+    "hipMemcpy2D":      [("uint64_t", "blob_hash_lo", "H2D blob hash lo (0 if not H2D)"),
+                         ("uint64_t", "blob_hash_hi", "H2D blob hash hi"),
+                         ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
+                         ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
+    "hipMemcpy2DAsync": [("uint64_t", "blob_hash_lo", "H2D blob hash lo (0 if not H2D)"),
+                         ("uint64_t", "blob_hash_hi", "H2D blob hash hi"),
+                         ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
+                         ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
     # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
+    "hipDrvMemcpy3D":      [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    "hipDrvMemcpy3DAsync": [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    "hipDrvMemcpy2DUnaligned": [("uint8_t", "drv2d_bytes[136]", "hip_Memcpy2D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
     # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
     "hipArray3DCreate": [("uint8_t", "array3d_desc_bytes[40]", "HIP_ARRAY3D_DESCRIPTOR inline copy")],
@@ -686,6 +797,8 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
 _INLINE_STRUCT_ASSERTS: Dict[str, str] = {
     "pool_props_bytes":   "hipMemPoolProps",
     "parms_bytes":        "hipMemcpy3DParms",
+    "drv3d_bytes":        "HIP_MEMCPY3D",
+    "drv2d_bytes":        "hip_Memcpy2D",
     "array_desc_bytes":   "HIP_ARRAY_DESCRIPTOR",
     "array3d_desc_bytes": "HIP_ARRAY3D_DESCRIPTOR",
     "stream_attr_bytes":  "hipStreamAttrValue",
@@ -1080,7 +1193,7 @@ _HEADER_PREAMBLE = """\
  *   - sequence_id    uint64_t  monotonically increasing per capture session
  *   - timestamp_ns   uint64_t  wall-clock at capture time
  *   - thread_id      uint64_t  OS thread that made the call (cached per thread)
- *   - payload_length uint16_t  total record size in bytes (incl. header)
+ *   - payload_length uint32_t  total record size in bytes (incl. header)
  *   - reserved       uint8_t[4]  padding to 32 bytes
  *
  * Payload bytes (after the 32-byte header):
@@ -1099,10 +1212,14 @@ _HEADER_PREAMBLE = """\
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 /* ---- Archive format constants ---- */
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
-#define HRR_VERSION ((uint16_t)3u)
+/* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
+ * larger than 65535 bytes (many args / long mangled names / large by-value
+ * structs) are no longer dropped. */
+#define HRR_VERSION ((uint16_t)4u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -1127,13 +1244,50 @@ typedef struct {
     uint64_t sequence_id;    /* monotonically increasing counter          */
     uint64_t timestamp_ns;   /* wall-clock at capture time (MONOTONIC)    */
     uint64_t thread_id;      /* OS thread ID (cached per thread)          */
-    uint16_t payload_length; /* total record size in bytes (incl. header) */
-    uint8_t  reserved[4];    /* padding to 32 bytes; zero on write        */
+    uint32_t payload_length; /* total record size in bytes (incl. header) */
+    uint8_t  reserved[2];    /* padding to 32 bytes; zero on write        */
 } hrr_event_header;
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_event_header) == 32, "hrr_event_header must be 32 bytes");
 #endif
+
+/* ---- Clean-shutdown trailer ----
+ * Written once at the end of events.bin by the capture writer ONLY on a clean
+ * shutdown (writer::flush). Its ABSENCE tells the reader the capture was
+ * interrupted (e.g. the recorded process crashed) and the trailing record may
+ * be torn — the reader then recovers all complete records instead of failing.
+ * event_type uses a sentinel (HRR_EOF_MARKER) far outside the hrr_api_id_t
+ * range, so playback dispatch and name lookup treat it as unknown/no-op if it
+ * is ever fed to them. */
+#define HRR_EOF_MARKER ((uint16_t)0xFFFFu)     /* hrr_event_header.event_type sentinel */
+#define HRR_EOF_MAGIC  ((uint32_t)0x464F4548u) /* "HEOF" trailer payload magic         */
+
+typedef struct {
+    hrr_event_header hdr;   /* event_type = HRR_EOF_MARKER, payload_length = sizeof(hrr_eof_record) */
+    uint64_t total_events;  /* count of real events written before this trailer */
+    uint32_t eof_magic;     /* HRR_EOF_MAGIC                                     */
+} hrr_eof_record;
+
+#ifdef __cplusplus
+static_assert(sizeof(hrr_eof_record) == 44, "hrr_eof_record must be 44 bytes");
+#endif
+
+/* Build a clean-shutdown trailer record. Single source of truth for the trailer
+ * layout, shared by the capture writer (writer::flush) and the offline repair
+ * tool (hrr-playback --repair) so the two cannot drift. The caller may overwrite
+ * hdr.timestamp_ns / hdr.thread_id afterwards; the offline tool leaves them 0. */
+static inline hrr_eof_record hrr_make_eof_record(uint64_t sequence_id,
+                                                 uint64_t total_events) {
+    hrr_eof_record rec;
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.event_type     = HRR_EOF_MARKER;
+    rec.hdr.sequence_id    = sequence_id;
+    rec.hdr.payload_length = (uint16_t)sizeof(hrr_eof_record);
+    rec.total_events       = total_events;
+    rec.eof_magic          = HRR_EOF_MAGIC;
+    return rec;
+}
 
 """
 
@@ -1434,10 +1588,81 @@ def _fill_output_param_post(lines: List[str], p: Param, name: str) -> None:
         lines.append(f"    if ({name}) a.{name} = reinterpret_cast<uint64_t>(*{name});")
 
 
+# Per-API custom shim/handler bodies that the default emitter cannot express.
+# Used when an API needs special in/out value handling that the generic
+# pointer-vs-value heuristics get wrong. Kept here (not in the MANUAL_* sets) so
+# the function still lives in the generated files and the dispatch tables wire it
+# automatically.
+CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
+    # hipThreadExchangeStreamCaptureMode is an in/out swap: input *mode is the
+    # desired thread capture mode, output *mode is the previous one. The generic
+    # emitter records the POINTER; replay then can't restore the mode and a
+    # hipMalloc bracketed by these calls during a graph capture fails with 900.
+    # Record the input enum VALUE instead.
+    "hipThreadExchangeStreamCaptureMode": (
+        "// Generated shim (custom: record input capture-mode VALUE, not the pointer)\n"
+        "static hipError_t capture_hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {\n"
+        "  hipStreamCaptureMode desired = mode ? *mode : hipStreamCaptureModeGlobal;\n"
+        "  hipError_t r = g_real_table.hipThreadExchangeStreamCaptureMode_fn(mode);\n"
+        "  if (r == hipSuccess) {\n"
+        "    hrr_args_hipThreadExchangeStreamCaptureMode a{};\n"
+        "    a.ret         = static_cast<int32_t>(r);\n"
+        "    a.mode = static_cast<uint64_t>(desired);\n"
+        "    hrr_cap::writer::write_event_raw(HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE, &a.hdr, sizeof(a));\n"
+        "  }\n"
+        "  return r;\n"
+        "}\n"
+    ),
+}
+
+# ---------------------------------------------------------------------------
+# Playback: APIs that must warn-and-skip when their destination pointer cannot
+# be translated.
+#
+# dispatch_event() treats ANY non-hipSuccess handler return as fatal and aborts
+# the whole replay.  So an API whose only device-pointer argument is a
+# destination it writes must not hand a null pointer to the real API: the call
+# returns hipErrorInvalidValue and one untranslatable buffer kills the entire
+# replay of a customer archive.  A recorded destination legitimately has no
+# alloc_map entry whenever the API that produced it is itself a playback no-op,
+# e.g. hipMemAllocPitch (in NOOP_PLAYBACK_APIS), the idiomatic driver-API partner
+# of hipMemsetD2D*.
+#
+# Maps API name -> destination parameter name.  Emits the codebase's standard
+# untranslatable-pointer idiom (playback_hipFree, playback_hipMemRelease, ... all
+# do `if (!live) return hipSuccess;`), plus a once-per-process warning naming the
+# API so the lost fidelity is attributable.  Skipping loses one buffer's
+# contents; aborting loses the whole replay.
+SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS: Dict[str, str] = {
+    "hipMemsetD2D8":       "dst",
+    "hipMemsetD2D8Async":  "dst",
+    "hipMemsetD2D16":      "dst",
+    "hipMemsetD2D16Async": "dst",
+    "hipMemsetD2D32":      "dst",
+    "hipMemsetD2D32Async": "dst",
+}
+
+CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
+    # Restore the recorded desired thread capture mode (stored as enum VALUE) so
+    # allocations bracketed by these calls during a graph capture are permitted.
+    "hipThreadExchangeStreamCaptureMode": (
+        "static hipError_t playback_hipThreadExchangeStreamCaptureMode(PlaybackContext& ctx, const uint8_t* payload) {\n"
+        "  (void)ctx;\n"
+        "  const auto* a = reinterpret_cast<const hrr_args_hipThreadExchangeStreamCaptureMode*>(payload);\n"
+        "  hipStreamCaptureMode mode = static_cast<hipStreamCaptureMode>(a->mode);\n"
+        "  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&mode);\n"
+        "  return _r;\n"
+        "}\n"
+    ),
+}
+
+
 def generate_shim(entry: ApiEntry) -> str:
     """Generate a single capture shim function.
     MANUAL_CAPTURE_APIS: returns empty string — hand-written in hip_capture.cpp.
     """
+    if entry.name in CUSTOM_CAPTURE_SHIMS:
+        return CUSTOM_CAPTURE_SHIMS[entry.name]
     is_manual   = entry.name in MANUAL_CAPTURE_APIS
     is_passonly = entry.name in PASSTHROUGH_ONLY
     is_compiler = entry.table == "compiler"
@@ -1666,11 +1891,16 @@ _ALLOC_CREATE_APIS: Dict[str, Tuple[str, str]] = {
     'hipMallocAsync':        ('dev_ptr', 'size'),
     'hipMallocFromPoolAsync':('dev_ptr', 'size'),
     'hipMallocManaged':      ('dev_ptr', 'size'),
-    'hipExtMallocWithFlags': ('ptr', 'size'),
+    'hipExtMallocWithFlags': ('ptr', 'sizeBytes'),  # manual playback handler; field is sizeBytes
     'hipMallocPitch':        ('ptr', 'width'),  # approximate; width used as proxy
     'hipHostMalloc':         ('ptr', 'size'),
     'hipHostAlloc':          ('ptr', 'size'),
 }
+
+# Subset of _ALLOC_CREATE_APIS whose output is *host* (pinned) memory and must be
+# released with hipHostFree, not hipFree. The teardown loop dispatches on the
+# AllocKind tag recorded here. APIs not listed default to AllocKind::Device.
+_HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
 
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
 _ALLOC_FREE_APIS: Dict[str, str] = {
@@ -1802,6 +2032,29 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     fname = f"playback_{entry.name}"
     sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload)"
 
+    # Error-stub playback APIs: explicit graph construction that HRR cannot
+    # replay. Emit a loud, attributable (per-API) warning, but return hipSuccess
+    # — these are non-fatal. The HARD failure is at hipGraphInstantiate /
+    # hipGraphInstantiateWithFlags, which abort (hipErrorNotSupported) only when
+    # actually asked to instantiate a non-replayable node-API graph (finding H1).
+    # This keeps replay alive for programs that merely create/clone/build graphs
+    # they never instantiate in an unsupported way. Message is once/process.
+    if entry.name in ERROR_STUB_PLAYBACK_APIS:
+        return (f"static hipError_t {fname}"
+                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+                f"  (void)ctx; (void)payload;\n"
+                f"  static bool warned = false;\n"
+                f"  if (!warned) {{\n"
+                f"    warned = true;\n"
+                f"    fprintf(stderr, \"[HRR] {entry.name}: explicit (node-API) graph \"\n"
+                f"            \"construction is NOT supported by HRR replay. Only \"\n"
+                f"            \"stream-capture graphs (hipStreamBeginCapture/EndCapture) \"\n"
+                f"            \"are replayable; instantiating a node-API-built graph will \"\n"
+                f"            \"fail loudly. This call is skipped.\\n\");\n"
+                f"  }}\n"
+                f"  return hipSuccess;\n"
+                f"}}\n")
+
     # No-op playback APIs: emit a one-time warning then return hipSuccess.
     # The static bool ensures the message fires once per process, not once per event,
     # so replays with thousands of events don't spam stderr.
@@ -1817,6 +2070,10 @@ def generate_playback_shim(entry: ApiEntry) -> str:
                 f"  }}\n"
                 f"  return hipSuccess;\n"
                 f"}}\n")
+
+    # Per-API custom handler body (special in/out value handling).
+    if entry.name in CUSTOM_PLAYBACK_BODIES:
+        return CUSTOM_PLAYBACK_BODIES[entry.name]
 
     # Manual playback APIs: emit an extern declaration only, body in hip_playback.cpp
     if entry.name in MANUAL_PLAYBACK_APIS:
@@ -1841,6 +2098,42 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     is_alloc_free    = entry.name in _ALLOC_FREE_APIS
     is_hdl_create    = entry.name in _HANDLE_CREATE_APIS
     is_hdl_destroy   = entry.name in _HANDLE_DESTROY_APIS
+    skip_param       = SKIP_IF_UNMAPPED_PLAYBACK_APIS.get(entry.name)
+
+    # Translate the destination once up front and skip the call when the
+    # recorded address is in no map: returning an error here would abort the
+    # whole replay (see SKIP_IF_UNMAPPED_PLAYBACK_APIS). The live pointer is
+    # reused for the real call below, so there is no second lookup.
+    if skip_param:
+        lines.append(f"  void* _live_dst = ctx.translate_ptr(a->{skip_param});")
+        lines.append(f"  if (_live_dst == nullptr) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name}: recorded destination 0x%llx \"")
+        lines.append(f"              \"is not in the alloc map (memory HRR does not track); \"")
+        lines.append(f"              \"skipping this write. Results may differ from capture.\\n\",")
+        lines.append(f"              (unsigned long long)a->{skip_param});")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
+
+    # Untranslatable destination -> warn once and skip (never abort the replay).
+    # See SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.
+    skip_dst = SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.get(entry.name)
+    if skip_dst:
+        lines.append(f"  void* _live_{skip_dst} = ctx.translate_ptr(a->{skip_dst});")
+        lines.append(f"  if (!_live_{skip_dst}) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name}: {skip_dst} 0x%llx has no alloc_map entry \"")
+        lines.append(f"              \"(its allocation was not replayed), so this call is skipped; the \"")
+        lines.append(f"              \"destination buffer will differ from capture.\\n\",")
+        lines.append(f"              (unsigned long long)a->{skip_dst});")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
 
     # For alloc-free and handle-destroy APIs: grab the recorded key before the call
     if is_alloc_free:
@@ -1861,9 +2154,17 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         name = p.name or f"p{unnamed}"
         if not p.name: unnamed += 1
 
+        # Destination already translated (and null-checked) above
+        if skip_dst and name == skip_dst:
+            call_args.append(f"({p.raw_type.strip()})_live_{skip_dst}")
+            continue
         # For alloc-free: replace the pointer arg with the translated live ptr
         if is_alloc_free and name == _ALLOC_FREE_APIS[entry.name]:
             call_args.append("_live_ptr")
+            continue
+        # For skip-if-unmapped: reuse the destination translated above
+        if skip_param and name == skip_param:
+            call_args.append("_live_dst")
             continue
         # For handle-destroy: replace the handle arg with the live handle
         if is_hdl_destroy and name == _HANDLE_DESTROY_APIS[entry.name][0]:
@@ -1897,9 +2198,11 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     if is_alloc_create:
         rec_param, sz_param = _ALLOC_CREATE_APIS[entry.name]
         # The output ptr is stored in a local _out_{rec_param} by _playback_arg
+        kind = ("AllocKind::HostMalloc"
+                if entry.name in _HOST_ALLOC_CREATE_APIS else "AllocKind::Device")
         lines.append(f"  if ({success_cond}) {{")
         lines.append(f"    ctx.record_alloc(a->{rec_param}, _out_{rec_param},"
-                     f" static_cast<size_t>(a->{sz_param}));")
+                     f" static_cast<size_t>(a->{sz_param}), {kind});")
         lines.append(f"  }}")
     elif is_alloc_free:
         lines.append(f"  if ({success_cond}) {{")
@@ -1939,7 +2242,13 @@ def generate_dispatch_table(entries: List[ApiEntry]) -> str:
     lines.append("const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {")
     for idx, e in enumerate(entries):
         enum_name = "HRR_API_" + e.name.lstrip('_').upper()
-        lines.append(f"    static_cast<uint32_t>(sizeof(hrr_args_{e.name})),  // [{idx}] {enum_name}")
+        if e.name in VARIABLE_LENGTH_KERNEL_LAUNCH_APIS:
+            min_expr = _VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR
+            note = "variable-length kernel launch"
+        else:
+            min_expr = f"static_cast<uint32_t>(sizeof(hrr_args_{e.name}))"
+            note = enum_name
+        lines.append(f"    {min_expr},  // [{idx}] {note}")
     lines.append("};")
     lines.append("")
     lines.append("// ============================================================")
@@ -2023,6 +2332,10 @@ def main() -> None:
         ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("SKIP_IF_UNMAPPED_PLAYBACK_APIS", set(SKIP_IF_UNMAPPED_PLAYBACK_APIS)),
+        ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
+        ("SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS",
+         set(SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.keys())),
         ("EXTRA_FIELDS",         set(EXTRA_FIELDS.keys())),
     ]:
         bad = sorted(n for n in api_set if n not in parsed_names)
@@ -2033,6 +2346,20 @@ def main() -> None:
         for set_name, names in unknown.items():
             for n in names:
                 print(f"  {set_name}: '{n}'")
+        sys.exit(1)
+
+    # generate_playback_shim() returns early for no-op / error-stub / custom /
+    # manual APIs, so a skip-if-unmapped entry that is also in one of those sets
+    # would have no effect at all. Fail loudly rather than silently.
+    shadowed = sorted(
+        set(SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS)
+        & (NOOP_PLAYBACK_APIS | ERROR_STUB_PLAYBACK_APIS
+           | set(CUSTOM_PLAYBACK_BODIES) | MANUAL_PLAYBACK_APIS))
+    if shadowed:
+        print("\nERROR: SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS entries have no effect "
+              "because the API is handled earlier:")
+        for n in shadowed:
+            print(f"  '{n}'")
         sys.exit(1)
     print(f"  Manual capture (hand-written in hip_capture.cpp):  {n_manual_cap}")
     print(f"  Manual playback (hand-written in hip_playback.cpp): {n_manual_play}")

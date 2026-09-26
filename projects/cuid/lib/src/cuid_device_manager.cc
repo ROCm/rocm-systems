@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "src/cuid_device_manager.h"
 #include "include/amd_cuid.h"
@@ -234,20 +215,8 @@ void _convert_entry_to_device(CuidFileEntry &entry, DevicePtr &device) {
     cpu_info.header.fields.cpu.device_id = entry.device_id;
     cpu_info.header.fields.cpu.revision_id = entry.revision_id;
     cpu_info.header.fields.cpu.unit_id = entry.unit_id;
-
-    // Split package_core_id by colon into package and core
-    uint16_t package = 0;
-    uint16_t core = 0;
-    size_t colon_pos = entry.package_core_id.find(':');
-    if (colon_pos != std::string::npos) {
-      package = static_cast<uint16_t>(
-          std::stoul(entry.package_core_id.substr(0, colon_pos)));
-      core = static_cast<uint16_t>(
-          std::stoul(entry.package_core_id.substr(colon_pos + 1)));
-    }
-
-    cpu_info.header.fields.cpu.physical_id = package;
-    cpu_info.header.fields.cpu.core = core;
+    cpu_info.header.fields.cpu.physical_id = entry.package_id;
+    cpu_info.header.fields.cpu.core = entry.core_id;
     // Restore device_node for unique CPU identification (needed for SMT)
     cpu_info.device_node = entry.device_node;
     device = std::make_shared<CuidCpu>(cpu_info);

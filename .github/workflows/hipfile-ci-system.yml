@@ -230,6 +230,9 @@ jobs:
           fi
       - name: Cleanup self-hosted runner workspace
         if: ${{ always() }}
+        shell: bash
+        # ${VAR:?} aborts if GITHUB_WORKSPACE is unset/empty, so a missing value
+        # can never let the glob expand to `/*` and wipe the persistent runner.
         run: |
           shopt -s dotglob
-          rm -rf ${GITHUB_WORKSPACE}/*
+          rm -rf "${GITHUB_WORKSPACE:?}"/*

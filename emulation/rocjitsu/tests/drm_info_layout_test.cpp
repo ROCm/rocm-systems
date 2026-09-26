@@ -2,19 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 /// @file drm_info_layout_test.cpp
-/// @brief Verifies that the local drm_amdgpu_info_device struct in the
-///        interposer matches the layout from the system libdrm header.
+/// @brief Verifies the drm_amdgpu_info_device layout relied on by the
+///        interposer against rocJITsu's vendored DRM UAPI definition.
 
 #include <gtest/gtest.h>
 
 #include <cstddef>
 #include <cstdint>
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES
 #include <libdrm/amdgpu_drm.h>
+RJ_DIAGNOSTIC_POP
 
 namespace {
 
-struct LocalDevInfo {
+struct ExpectedDevInfoLayout {
   uint32_t device_id;
   uint32_t chip_rev;
   uint32_t external_rev;
@@ -67,7 +71,7 @@ struct LocalDevInfo {
 };
 
 #define CHECK_FIELD(field)                                                                         \
-  static_assert(offsetof(LocalDevInfo, field) == offsetof(drm_amdgpu_info_device, field),          \
+  static_assert(offsetof(ExpectedDevInfoLayout, field) == offsetof(drm_amdgpu_info_device, field), \
                 "offset mismatch for " #field)
 
 CHECK_FIELD(device_id);
@@ -89,8 +93,8 @@ CHECK_FIELD(tcc_disabled_mask);
 
 TEST(DrmInfoLayoutTest, VramTypeHbmMatchesKernelDefine) { EXPECT_EQ(6u, AMDGPU_VRAM_TYPE_HBM); }
 
-TEST(DrmInfoLayoutTest, LocalStructSizeDoesNotExceedKernel) {
-  EXPECT_LE(sizeof(LocalDevInfo), sizeof(drm_amdgpu_info_device));
+TEST(DrmInfoLayoutTest, ExpectedLayoutSizeDoesNotExceedKernel) {
+  EXPECT_LE(sizeof(ExpectedDevInfoLayout), sizeof(drm_amdgpu_info_device));
 }
 
 } // namespace

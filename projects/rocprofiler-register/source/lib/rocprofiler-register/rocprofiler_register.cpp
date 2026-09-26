@@ -171,6 +171,8 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_ROCDECODE,
     ROCP_REG_ROCJPEG,
     ROCP_REG_ROCATTACH,
+    ROCP_REG_HIPFILE,
+    ROCP_REG_ROCSHMEM,
     ROCP_REG_LAST,
 };
 
@@ -240,10 +242,20 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCJPEG,
                                "rocprofiler_register_import_rocjpeg",
                                "librocjpeg.so.[0-9]($|\\.[0-9\\.]+)")
 
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCSHMEM,
+                               "rocshmem",
+                               "rocprofiler_register_import_rocshmem",
+                               "librocshmem.so.[0-9]($|\\.[0-9\\.]+)")
+
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCATTACH,
                                "rocattach",
                                "rocprofiler_register_import_attach",
                                "librocprofiler-sdk-attach.so.[0-9]($|\\.[0-9\\.]+)")
+
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HIPFILE,
+                               "hipFile",
+                               "rocprofiler_register_import_hipFile",
+                               "libhipfile.so.[0-9]($|\\.[0-9\\.]+)")
 
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_SUCCESS, "Success")
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_NO_TOOLS, "rocprofiler-register found no tools")

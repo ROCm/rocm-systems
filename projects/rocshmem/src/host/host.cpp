@@ -417,11 +417,11 @@ __host__ void HostInterface::sync_on_stream(rocshmem_team_t team,
 __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                                    void *dest,
                                                    const void *source,
-                                                   size_t size,
+                                                   size_t nelems,
                                                    hipStream_t stream) {
   // Use dynamic block size determination:
   // - Query optimal block size using occupancy API
-  // - Limit block size to size (number of bytes) to avoid over-subscription
+  // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
   int optimal_block_size = 0;
   int grid_size = 0;
@@ -429,16 +429,16 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                               rocshmem_alltoallmem_kernel, 0,
                                               0));
 
-  // Limit block size to size (bytes) to avoid over-subscription
-  int num_threads_per_block = (optimal_block_size > static_cast<int>(size))
-                                  ? static_cast<int>(size)
+  // Limit block size to nelems (bytes) to avoid over-subscription
+  int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
+                                  ? static_cast<int>(nelems)
                                   : optimal_block_size;
 
-  // Launch kernel to do alltoall with given stream                                  
+  // Launch kernel to do alltoall with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
   rocshmem_alltoallmem_kernel<<<gridSize, blockSize, 0, stream>>>(team, dest,
-                                                                  source, size);
+                                                                  source, nelems);
 }
 
 __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,

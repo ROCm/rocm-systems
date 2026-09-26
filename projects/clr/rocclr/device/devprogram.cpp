@@ -11,7 +11,6 @@
 #include "platform/ndrange.hpp"
 #include "devprogram.hpp"
 #include "devkernel.hpp"
-#include "hotswap.hpp"
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -19,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -1556,15 +1556,21 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     return false;
   }
 
-  if (!clBinary()->setElfIn()) {
-    LogError("Setting input OCL binary failed");
+  // Do not rely on amd::Elf to do validations here since it makes copies
+  // and depending on the binary size, that might be costly.
+  auto [binary, binSize] = clBinary()->data();
+  if (binSize < sizeof(amd::Elf64_Ehdr)) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+            "The elf size is way too small to validate: %d \n", binSize);
     return false;
   }
-  uint16_t type;
-  if (!clBinary()->elfIn()->getType(type)) {
-    LogError("Bad OCL Binary: error loading ELF type!");
-    return false;
-  }
+
+  // So we do the validation by explicitly getting the ELF header. Copy it into an
+  // aligned local, since the binary buffer has no alignment guarantee.
+  amd::Elf64_Ehdr ehdr;
+  std::memcpy(&ehdr, binary, sizeof(ehdr));
+  uint16_t type = ehdr.e_type;
+
   switch (type) {
     case ET_NONE: {
       setType(TYPE_NONE);
@@ -1579,9 +1585,7 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
       break;
     }
     case ET_DYN: {
-      char* sect = nullptr;
-      size_t sz = 0;
-      if (clBinary()->elfIn()->isHsaCo()) {
+      if (ehdr.e_machine == EM_AMDGPU) {
         setType(TYPE_EXECUTABLE);
       } else {
         setType(TYPE_LIBRARY);
@@ -1605,7 +1609,6 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     linkOptions_.clear();
   }
 
-  clBinary()->resetElfIn();
   return true;
 }
 
@@ -1781,19 +1784,9 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
 
     if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      // HotSwap: let a supported foreign source ISA past the gate; loader transpiles downstream.
-      const std::string binaryIsaNameStr(binaryIsaName.data());
-      const bool hotswap_ok =
-          amd::hotswap::Enabled() &&
-          amd::hotswap::IsSupportedPair(binaryIsa->processorName(),
-                                        device().isa().processorName());
-      if (!hotswap_ok) {
-        buildLog_ += "Error: The program ISA " + binaryIsaNameStr;
-        buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
-        return false;
-      }
-      buildLog_ += "HotSwap: allowing foreign program ISA " + binaryIsaNameStr +
-                   " for transpilation to " + device().isa().isaName() + "\n";
+      buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
+      buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
+      return false;
     }
   }
 

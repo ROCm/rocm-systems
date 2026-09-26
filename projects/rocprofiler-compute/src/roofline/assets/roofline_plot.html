@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${TITLE}</title>
+<style>
+${CSS}
+</style>
+<script>
+if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+  document.documentElement.classList.add("roofline-theme-dark");
+}
+</script>
+</head>
+<body>
+<div class="roofline-app">
+  <div class="roofline-toolbar">
+    <label class="roofline-control" id="roofline-peak-control"
+           for="roofline-peak-select"
+           title="${PEAK_TITLE}">AI axis
+      <select id="roofline-peak-select"
+              aria-label="Memory level for the arithmetic intensity axis">
+      </select>
+    </label>
+    <span class="roofline-hint">Scroll to zoom &middot; drag to pan &middot;
+      double-click to reset</span>
+    <button type="button" id="roofline-reset-view"
+            class="roofline-btn roofline-btn-sm"
+            title="Frame the kernels currently shown">Reset zoom</button>
+    <button type="button" id="roofline-export-png"
+            class="roofline-btn roofline-btn-sm"
+            title="Download the current chart as a PNG image">Export PNG</button>
+    <button type="button" id="roofline-theme-toggle"
+            class="roofline-btn roofline-btn-sm" aria-pressed="false">Dark mode</button>
+  </div>
+  <div class="roofline-body">
+    <div class="roofline-plot-col">
+${PLOT_FRAGMENT}
+    </div>
+    <div class="roofline-panel-wrap">
+    <aside class="roofline-panel roofline-panel--kernels">
+      <div class="roofline-panel-title">
+        <span class="roofline-panel-title-label">Kernels
+          <span id="roofline-kernel-count" class="roofline-panel-count"></span>
+        </span>
+        <button type="button" id="roofline-show-all"
+                class="roofline-btn roofline-btn-sm">Show all kernels</button>
+      </div>
+      <p class="roofline-panel-help">Click a row to show only that kernel; click
+        again to show all. Ctrl+click (&#8984;+click on Mac) to add or remove
+        kernels.</p>
+      <div id="roofline-runtime-filter" class="roofline-runtime-filter">
+        <label for="roofline-runtime-threshold" title="${RUNTIME_TITLE}">
+          Runtime shown
+          <span id="roofline-runtime-value" class="roofline-runtime-value">100%</span>
+        </label>
+        <input type="range" id="roofline-runtime-threshold" min="0" max="0"
+               step="1" value="0"
+               aria-label="Cumulative percent of GPU resident time to display">
+      </div>
+      <ul id="roofline-kernel-list" class="roofline-panel-list"></ul>
+    </aside>
+    <aside class="roofline-panel roofline-panel--roofs">
+      <div class="roofline-panel-title">
+        <span class="roofline-panel-title-label">Bandwidth rooflines
+          <span id="roofline-roof-count" class="roofline-panel-count"></span>
+        </span>
+        <button type="button" id="roofline-show-all-roofs"
+                class="roofline-btn roofline-btn-sm">Show all rooflines</button>
+      </div>
+      <p class="roofline-panel-help">Click a row to show only that roofline; click
+        again to show all. Ctrl+click (&#8984;+click on Mac) to add or remove
+        rooflines.</p>
+      <ul id="roofline-roof-list" class="roofline-panel-list roofline-roof-list">
+      </ul>
+    </aside>
+    </div>
+  </div>
+</div>
+<script id="roofline-model" type="application/json">${MODEL_JSON}</script>
+<script>
+${JS}
+</script>
+</body>
+</html>

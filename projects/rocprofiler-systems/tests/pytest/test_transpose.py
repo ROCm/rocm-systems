@@ -4,7 +4,7 @@
 """
 Tests for the transpose example.
 Equivalent to rocprof-sys-rocm-tests.cmake
-    Note: MPI is not yet supported
+    Note: MPI multi-process execution is exercised if built with MPI support.
 
 This module tests the transpose HIP example with various instrumentation modes:
 - Baseline execution (no instrumentation)
@@ -202,6 +202,40 @@ class TestTranspose(RocprofsysTest):
         )
         self.assert_regex(result)
 
+    _LOCK_MODE_REGRESSIONS = {
+        "mutex-locks": "hung rocprof-sys-run indefinitely "
+        "(self-deadlock on buffer_storage's m_mutex)",
+        "rw-locks": "aborted rocprof-sys-run with SIGABRT "
+        "(self-deadlock on synchronized<>'s rwlock)",
+    }
+
+    @pytest.mark.locks
+    @pytest.mark.timeout(60)
+    @pytest.mark.parametrize(
+        "lock_mode",
+        [
+            pytest.param("mutex-locks", id="mutex-locks"),
+            pytest.param("rw-locks", id="rw-locks"),
+        ],
+    )
+    def test_locks(self, lock_mode, transpose_env):
+        """
+        Regression test: pthread_mutex_gotcha used to intercept rocprof-sys's
+        own internal locks, recursively re-entering them on the same thread
+        while recording the trace event for the lock acquisition itself.
+        See _LOCK_MODE_REGRESSIONS for the per-mode failure signature.
+        """
+        result = self.run_test(
+            "sys_run",
+            "transpose",
+            env=transpose_env,
+            sys_run_args=["-I", lock_mode],
+            run_args=["2", "50", "10"],
+            check_target_arch=True,
+            fail_message=f"Regression: {self._LOCK_MODE_REGRESSIONS[lock_mode]}",
+        )
+        self.assert_regex(result)
+
     @pytest.mark.timeout(120)
     @pytest.mark.loops
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
@@ -335,8 +369,12 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
         gpu_info,
         validation_rules_dir,
     ):
-        if "gfx1151" in gpu_info.architectures:
-            pytest.skip("transpose GPU perf counter test skipped on gfx1151")
+        unsupported = gpu_info.unsupported_perf_counter_archs
+        if unsupported:
+            pytest.skip(
+                "transpose GPU perf counter test skipped on "
+                f"{', '.join(sorted(unsupported))}"
+            )
 
         result = self.run_test(
             "sampling",

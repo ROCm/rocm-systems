@@ -22,8 +22,8 @@
 # standard layout:
 #   <prefix>/bin/mirage
 #   <prefix>/bin/rocjitsu
-#   <prefix>/lib/librocjitsu.so            (combined rocjitsu library)
-#   <prefix>/lib/librocjitsu_kmd.so        (KMD interposer)
+#   <prefix>/lib/librocjitsu.so            (combined rocjitsu library:
+#                                          VM API + KMD interposer)
 #   <prefix>/lib/librocjitsu_hooks.so      (DBT HSA hooks)
 #   <prefix>/share/rocjitsu/configs/*.json
 # `mirage` searches `../lib` relative to its own binary (see

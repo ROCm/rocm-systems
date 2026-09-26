@@ -19,10 +19,11 @@
 /// inputs, so both runs skip the same lanes. v_mov_b64 is a pure bit copy and is
 /// compared exactly (no NaN carve-out).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -165,7 +166,7 @@ void check_case(const F64UnaryCase &c, uint64_t exec) {
     // src0 = v0:v1 (enc 256), vdst = v2:v3.
     uint32_t enc = vop1_encode(c.opcode, /*vdst=*/2, /*src0=*/256);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, exec);
     delete inst;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "dwarf_entry.hpp"
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -101,7 +102,7 @@ get_dwarf_entry(Dwarf_Die* _die)
                 if(_lineno > 0) itr.line = _lineno;
                 const auto* _file = dwarf_linesrc(_line, nullptr, nullptr);
                 if(!_file) _file = dwarf_diename(_die);
-                itr.file = filepath::realpath(_file, nullptr, false);
+                itr.file = path::realpath(_file);
             }
         }
     }
@@ -149,9 +150,11 @@ dwarf_entry::process_dwarf(int _fd)
         auto& _ranges  = std::get<1>(_data_v);
         auto& _bkpts   = std::get<2>(_data_v);
 
+        // NOLINTBEGIN(misc-const-correctness)
         size_t    cu_header_size = 0;
         Dwarf_Off cu_off         = 0;
         Dwarf_Off next_cu_off    = 0;
+        // NOLINTEND(misc-const-correctness)
         for(; dwarf_nextcu(_dwarf_v, cu_off, &next_cu_off, &cu_header_size, nullptr,
                            nullptr, nullptr) == 0;
             cu_off = next_cu_off)

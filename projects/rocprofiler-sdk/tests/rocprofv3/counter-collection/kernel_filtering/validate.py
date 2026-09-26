@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 import re
 
+from collections import defaultdict
+
 
 def unique(lst):
     return list(set(lst))
@@ -62,6 +64,100 @@ def validate_csv(df, kernel_list, counter_name):
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains(counter_name).all()
     assert (df["Counter_Value"].astype(int).values > 0).all()
+
+
+def validate_csv_per_agent_iteration_count(df, kernel_list, iteration_range):
+
+    # range is applied per kernel per device: each (kernel, agent) pair must have
+    # exactly one row per requested iteration (device-count independent)
+    if iteration_range is None:
+        pytest.skip("input config has no kernel_iteration_range to validate")
+
+    expected_count = len(iteration_range)
+    assert expected_count > 0
+
+    filtered = df[~df["Kernel_Name"].str.contains(r"__amd_rocclr_.*", regex=True)]
+    for kernel_name in kernel_list:
+        per_kernel = filtered[filtered["Kernel_Name"] == kernel_name]
+        assert not per_kernel.empty, f"no rows captured for {kernel_name}"
+        for agent_id, per_agent in per_kernel.groupby("Agent_Id"):
+            assert len(per_agent) == expected_count, (
+                f"{kernel_name} on {agent_id} captured {len(per_agent)} "
+                f"dispatches, expected {expected_count} (iteration range "
+                f"{sorted(iteration_range)})"
+            )
+
+
+def validate_json_iteration_range(json_data, kernel_list, iteration_range):
+
+    # kernel_dispatch is the unfiltered launch trace, counter_collection the
+    # selected dispatches; assert the selected per-kernel ordinals equal the range
+    data = json_data["rocprofiler-sdk-tool"]
+    counter_collection_data = data["callback_records"]["counter_collection"]
+    kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
+
+    def get_kernel_name(kernel_id):
+        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+
+    # the range is applied per kernel per device, so ordinals are counted within
+    # each (kernel, agent) pair rather than across the whole run
+    targeted_dispatches = []
+    for dispatch in kernel_dispatch_data:
+        dispatch_info = dispatch["dispatch_info"]
+        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
+        if kernel_name in kernel_list:
+            targeted_dispatches.append(
+                (
+                    dispatch_info["dispatch_id"],
+                    kernel_name,
+                    dispatch_info["agent_id"]["handle"],
+                )
+            )
+
+    # assign each dispatch its 1-based ordinal in dispatch_id order
+    launches_seen = defaultdict(int)
+    ordinal_by_dispatch_id = {}
+    key_by_dispatch_id = {}
+    for dispatch_id, kernel_name, agent_handle in sorted(targeted_dispatches):
+        key = (kernel_name, agent_handle)
+        launches_seen[key] += 1
+        ordinal_by_dispatch_id[dispatch_id] = launches_seen[key]
+        key_by_dispatch_id[dispatch_id] = key
+
+    assert launches_seen, f"no launches recorded for {kernel_list}"
+
+    # need more launches than the range so ordinals are recoverable
+    expected_ordinals = set(iteration_range)
+    for key, launches in launches_seen.items():
+        assert launches > len(expected_ordinals), (
+            f"{key[0]} on agent {key[1]} launched {launches} times; expected more "
+            f"than the {len(expected_ordinals)} requested iterations so original "
+            "launch ordinals can be recovered"
+        )
+
+    # list, not set, so duplicate records are visible
+    captured_ordinals = defaultdict(list)
+    for counter in counter_collection_data:
+        dispatch_id = counter["dispatch_data"]["dispatch_info"]["dispatch_id"]
+        key = key_by_dispatch_id.get(dispatch_id)
+        if key is None:
+            continue
+        captured_ordinals[key].append(ordinal_by_dispatch_id[dispatch_id])
+
+    assert set(captured_ordinals) == set(launches_seen), (
+        f"captured kernel/agent pairs {sorted(captured_ordinals)} do not match "
+        f"the launched pairs {sorted(launches_seen)}"
+    )
+
+    for key, ordinals in captured_ordinals.items():
+        assert set(ordinals) == expected_ordinals, (
+            f"{key[0]} on agent {key[1]} captured iterations {sorted(set(ordinals))}, "
+            f"expected {sorted(expected_ordinals)}"
+        )
+        assert len(ordinals) == len(expected_ordinals), (
+            f"{key[0]} on agent {key[1]} captured {len(ordinals)} records for "
+            f"{len(expected_ordinals)} requested iterations {sorted(expected_ordinals)}"
+        )
 
 
 def validate_json(json_data, counter_name, check_dispatch):
@@ -123,9 +219,14 @@ def validate_json(json_data, counter_name, check_dispatch):
         assert di_expect == di_uniq
 
 
-def test_validate_counter_collection_csv_pass1(input_csv_pass1: pd.DataFrame):
+def test_validate_counter_collection_csv_pass1(
+    input_csv_pass1: pd.DataFrame, iteration_range_pass1
+):
     kernel_list = sorted(["addition_kernel", "subtract_kernel", "divide_kernel"])
     validate_csv(input_csv_pass1, kernel_list, "SQ_WAVES")
+    validate_csv_per_agent_iteration_count(
+        input_csv_pass1, kernel_list, iteration_range_pass1
+    )
 
 
 def test_validate_counter_collection_csv_pmc1(input_csv_pmc1: pd.DataFrame):
@@ -133,11 +234,39 @@ def test_validate_counter_collection_csv_pmc1(input_csv_pmc1: pd.DataFrame):
     validate_csv(input_csv_pmc1, kernel_list, "SQ_WAVES")
 
 
-def test_validate_counter_collection_csv_pass2(input_csv_pass2: pd.DataFrame):
+def test_validate_counter_collection_csv_iteration_range(
+    input_csv_iteration_range: pd.DataFrame, iteration_range
+):
+    kernel_list = sorted(
+        ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
+    )
+    validate_csv(input_csv_iteration_range, kernel_list, "SQ_WAVES")
+    validate_csv_per_agent_iteration_count(
+        input_csv_iteration_range, kernel_list, iteration_range
+    )
+
+
+def test_validate_counter_collection_json_iteration_range(
+    input_json_iteration_range, iteration_range
+):
+    kernel_list = sorted(
+        ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
+    )
+    validate_json_iteration_range(
+        input_json_iteration_range, kernel_list, iteration_range
+    )
+
+
+def test_validate_counter_collection_csv_pass2(
+    input_csv_pass2: pd.DataFrame, iteration_range_pass2
+):
     kernel_list = sorted(
         ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
     )
     validate_csv(input_csv_pass2, kernel_list, "GRBM_COUNT")
+    validate_csv_per_agent_iteration_count(
+        input_csv_pass2, kernel_list, iteration_range_pass2
+    )
 
 
 def test_validate_counter_collection_csv_pass3(input_csv_pass3: pd.DataFrame):
@@ -166,6 +295,79 @@ def test_validate_counter_collection_json_pass3(input_json_pass3):
 
 def test_validate_counter_collection_json_pass4(input_json_pass4):
     validate_json(input_json_pass4, "SQ_WAVES", False)
+
+
+# --------------------------------------------------------------------------- #
+# CLI filter coverage (kernel-include / kernel-exclude / kernel-iteration-range
+# passed directly on the command line, plus negative / edge-case behavior)
+# --------------------------------------------------------------------------- #
+
+
+def _non_rocclr(df):
+    return df[~df["Kernel_Name"].astype(str).str.contains(r"__amd_rocclr_.*", regex=True)]
+
+
+def validate_csv_present_absent(df, present_kernels, absent_literals, counter_name):
+    assert not df.empty
+    filtered = _non_rocclr(df)
+    names = sorted(filtered["Kernel_Name"].unique().tolist())
+    assert names == sorted(present_kernels), f"unexpected kernel set: {names}"
+    for absent in absent_literals:
+        assert (
+            not df["Kernel_Name"].astype(str).str.contains(absent, regex=False).any()
+        ), f"'{absent}' should not appear anywhere in the output"
+    assert filtered["Counter_Name"].str.contains(counter_name).all()
+    assert (filtered["Counter_Value"].astype(int).values > 0).all()
+
+
+def test_validate_cli_single_kernel_csv(input_csv_file, iteration_range):
+    # --kernel-include-regex narrows to one kernel; the other three must not
+    # appear anywhere, and the range must limit each (kernel, agent) pair.
+    kernel_list = ["addition_kernel"]
+    absent = ["subtract_kernel", "multiply_kernel", "divide_kernel"]
+    validate_csv_present_absent(input_csv_file, kernel_list, absent, "SQ_WAVES")
+    validate_csv_per_agent_iteration_count(input_csv_file, kernel_list, iteration_range)
+
+
+def test_validate_cli_single_kernel_json(input_json_file, iteration_range):
+    # exact-iteration (both-direction) proof for the single included kernel
+    validate_json_iteration_range(input_json_file, ["addition_kernel"], iteration_range)
+
+
+def test_validate_cli_exclude_csv(input_csv_file):
+    # include everything, exclude one kernel: the excluded name must be gone
+    kernel_list = ["addition_kernel", "subtract_kernel", "divide_kernel"]
+    validate_csv_present_absent(
+        input_csv_file, kernel_list, ["multiply_kernel"], "SQ_WAVES"
+    )
+
+
+def test_validate_cli_mangled_csv(input_csv_file):
+    # regex matches the mangled symbol as a substring; names stay mangled
+    filtered = _non_rocclr(input_csv_file)
+    names = set(filtered["Kernel_Name"].astype(str).unique())
+    assert len(names) >= 1, "expected the mangled addition kernel to be profiled"
+    for name in names:
+        assert "addition_kernel" in name
+        assert re.match(r"_Z[0-9]+addition_kernel", name), f"expected mangled: {name}"
+        assert name != "addition_kernel", "expected mangled, not truncated, name"
+    for other in ("subtract", "multiply", "divide"):
+        assert (
+            not input_csv_file["Kernel_Name"]
+            .astype(str)
+            .str.contains(other, regex=False)
+            .any()
+        ), f"'{other}' kernel should not be profiled"
+
+
+def test_validate_cli_empty_result_json(input_json_file):
+    # zero counter records but no crash; kernel_dispatch proves the app ran
+    data = input_json_file["rocprofiler-sdk-tool"]
+    counter_collection_data = data["callback_records"]["counter_collection"]
+    assert (
+        len(counter_collection_data) == 0
+    ), f"expected zero counter_collection records, got {len(counter_collection_data)}"
+    assert len(data["buffer_records"]["kernel_dispatch"]) > 0
 
 
 if __name__ == "__main__":

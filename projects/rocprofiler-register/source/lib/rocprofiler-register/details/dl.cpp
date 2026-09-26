@@ -33,7 +33,7 @@
 
 #include <dlfcn.h>
 #include <elf.h>
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <link.h>
 #include <sys/types.h>
 #include <unistd.h>

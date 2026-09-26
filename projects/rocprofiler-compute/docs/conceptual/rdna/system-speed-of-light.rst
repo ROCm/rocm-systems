@@ -44,9 +44,10 @@ packed ``FP16`` from 256 to 512 FLOPs/CU/cycle.
 
 The aggregate ``VALU FLOPs`` row in this panel uses the ``FP32`` single-issue Fused Multiply-Add (FMA)
 ceiling (128 FLOPs/CU/cycle) as the peak. A workload that issues VOPD heavily,
-or that runs packed ``FP16``, can therefore report a percentage of peak above
-100%. Use ``VALU FLOPs`` against the listed ceilings together with the ISA-level VOPD
-pairing to identify how much throughput is coming from dual-issue paths.
+or that runs packed FP16, can therefore report a percentage of peak above
+100%. To gauge how much of the throughput is coming from VOPD, inspect the
+``Instructions - Dual VALU (VOPD)`` row on the :doc:`wgp` panel, which counts
+``SQ_INSTS_DUAL_VALU_WAVE32``.
 
 Peak theoretical VALU rates
 ---------------------------
@@ -95,7 +96,7 @@ ceiling is one peak transfer per cycle, scaled by instance count and
   cycle per SQC instance -- ``$sqc_per_gpu * 64 B/cycle * $max_sclk``
 
 .. Note::
-  
+
   * For AMD Instinct GPUs (CDNA-CDNA4), see :doc:`../cdna/system-speed-of-light`.
   * Other gfx115x metric tables follow the RDNA3 hierarchy under :doc:`rdna-performance-model` (nested under :doc:`shader-engine` as :doc:`spi`, :doc:`wgp`, :doc:`gl0-cache`, :doc:`gl1-cache`; then :doc:`gl2-cache`, :doc:`gcea`, :doc:`command-processor`, :doc:`grbm`).
 

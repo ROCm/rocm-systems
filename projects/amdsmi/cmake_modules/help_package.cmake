@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # This module provides common functions used for building
 # and packaging ROCm projects
 
@@ -64,6 +67,10 @@ function(generic_package)
         check_cxx_compiler_flag("-Wtrampolines" CXX_SUPPORTS_WTRAMPOLINES)
         if(CXX_SUPPORTS_WTRAMPOLINES)
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wtrampolines" PARENT_SCOPE)
+        endif()
+        check_cxx_compiler_flag("-Werror=stringop-overflow" CXX_SUPPORTS_STRINGOP_OVERFLOW)
+        if(CXX_SUPPORTS_STRINGOP_OVERFLOW)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=stringop-overflow" PARENT_SCOPE)
         endif()
     endif()
 

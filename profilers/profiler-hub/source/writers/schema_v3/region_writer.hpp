@@ -11,7 +11,7 @@
 #include "data_storage/schema_version.hpp"
 #include "profiler-hub/writer_types.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <memory>
 #include <optional>

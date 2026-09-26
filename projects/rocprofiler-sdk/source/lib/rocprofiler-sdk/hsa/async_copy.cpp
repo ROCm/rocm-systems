@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -831,11 +831,7 @@ async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
     // table with copy function
     auto& _copy_func = get_next_dispatch<TableIdx, OpIdx>();
 
-    ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
-        << _meta.name << " has non-null function pointer " << _copy_func
-        << " despite this being the first instance of the library being copies";
-
-    if(!_copy_func)
+    if(_tbl_instance == 0 && _orig_func != _copy_func)
     {
         ROCP_TRACE << "copying table entry for " << _meta.name;
         _copy_func = _orig_func;

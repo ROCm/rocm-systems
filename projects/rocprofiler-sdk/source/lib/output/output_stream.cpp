@@ -25,7 +25,6 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
-#include <fmt/core.h>
 #include <fmt/format.h>
 
 #include <string_view>

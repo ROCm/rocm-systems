@@ -207,7 +207,7 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
  *****************************************************************************/
 TileBroadcastTester::TileBroadcastTester(TesterArguments args)
     : Tester(args) {
-  num_teams = 4;  // Default to 4 teams
+  num_teams = args.num_wgs;  // Default to num_wgs teams.
 
   // Allocate teams using hipHostMalloc
   CHECK_HIP(hipHostMalloc(&teams, num_teams * sizeof(rocshmem_team_t)));

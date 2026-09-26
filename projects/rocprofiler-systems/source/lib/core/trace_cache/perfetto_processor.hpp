@@ -2,21 +2,25 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+
 #include "agent_manager.hpp"
 #include "config.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto_fwd.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include <cstdint>
 
+#include "core/perfetto/category_registry.hpp"
 #include <functional>
 #include <memory>
-#include <perfetto.h>
+#include <optional>
 #include <unordered_map>
 
 namespace rocprofsys
 {
+class track_registry;
+
 namespace trace_cache
 {
 using char_vec_t = std::vector<char>;
@@ -34,10 +38,13 @@ class perfetto_processor_t : public processor_t<perfetto_processor_t>
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                          const std::shared_ptr<agent_manager>& agent_mngr, int pid,
-                         int ppid, output_file_registry& output_registry);
+                         int ppid, output_file_registry& output_registry,
+                         rocprofsys::track_registry& tracks);
 
     void prepare_for_processing();
-    void finalize_processing();
+    // Cached-mode drain runs at cache_manager scope (engine.stop());
+    // per-pid finalize has nothing to do.
+    void finalize_processing() {}
 
     void handle(const kernel_dispatch_sample& sample);
     void handle(const scratch_memory_sample& sample);
@@ -54,14 +61,6 @@ public:
     void handle(const kfd_sample& sample);
 
 private:
-    void       initialize_perfetto();
-    void       setup_perfetto();
-    void       start_session();
-    void       stop_session();
-    void       initialize_pmc_track_map();
-    void       flush(bool& perfetto_output_error);
-    char_vec_t get_session_data();
-
     // Returns a cached ::perfetto::Track for the given (category, args...) key,
     // calling get_perfetto_track only on the first encounter to avoid the global
     // mutex on every event in high-frequency handle() paths.
@@ -80,29 +79,24 @@ private:
     void handle_kfd_page_fault(const kfd_sample& sample);
     void handle_kfd_page_migrate(const kfd_sample& sample);
 
-    metadata_registry&                          m_metadata;
-    std::uint64_t                               m_process_id;
-    std::uint64_t                               m_parrent_pid;
-    agent_manager&                              m_agent_manager;
-    ::perfetto::TraceConfig                     m_session_config;
-    std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
-    std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
-    bool                                        m_use_annotations{ false };
-    bool                                        m_default_group_by_queue{ true };
+    metadata_registry&          m_metadata;
+    std::uint64_t               m_process_id;
+    agent_manager&              m_agent_manager;
+    bool                        m_use_annotations{ false };
+    bool                        m_default_group_by_queue{ true };
+    rocprofsys::track_registry& m_tracks;
 
-    std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
     // Each perfetto_processor_t instance is owned by a single consumer thread
     // for its entire lifetime (see process_buffered_storage in cache_manager.cpp).
     // No synchronization is required for instance-local state below.
-    // Note: m_output_registry is shared across threads; it must be internally
-    // thread-safe.
     std::unordered_map<std::uint64_t, ::perfetto::Track>       m_track_cache;
     std::unordered_map<std::uint64_t, ::perfetto::ThreadTrack> m_thread_track_cache;
     std::unordered_map<std::uint32_t, agent_type>              m_kfd_node_type_cache;
     // KFD node_id -> per-type GPU index matching kfd_sample.device_id.
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
-    output_file_registry&                            m_output_registry;
+    bool                                             m_cpu_pmc_initialized{ false };
+    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

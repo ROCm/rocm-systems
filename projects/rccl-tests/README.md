@@ -29,6 +29,13 @@ $ make MPI=1 NAME_SUFFIX=_mpi MPI_HOME=/path/to/mpi HIP_HOME=/path/to/hip NCCL_H
 
 This will generate test binaries with names such as `all_reduce_perf_mpi`.
 
+Set `DSO=1` to build and dynamically link `libverifiable.so` instead of
+statically linking the verification implementation:
+
+```shell
+$ make -j DSO=1 NCCL_HOME=/path/to/rccl
+```
+
 RCCL Tests can also be built using cmake. A typical sequence will be:
 
 ```shell
@@ -143,10 +150,19 @@ All tests support the same set of arguments :
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
+  * `-I,--per_iter_timing <0/1>` collect per-iteration HIP event timings and print summary columns.
+    `i_p99` uses nearest-rank percentile and may equal `i_max` with fewer than 100 samples.
+    Incompatible with HIP graph capture (`-G`). Default : 0.
+  * `-K,--per_iter_skip <count>` exclude leading samples from `-I` summary statistics.
+    Raw per-iteration JSON data remains complete. Default : 0.
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
-  * `-z,--blocking <0/1/2>` Make RCCL collective blocking: 0=non-blocking, 1=wait for completion and barrier, 2=wait without barrier. Default : 0.
+  * `-z,--blocking <0/1/2/3>` collective blocking mode. Default: 0.
+    * `0` : non-blocking (default)
+    * `1` : wait and barrier after each inner iteration (`-m`)
+    * `2` : wait after each inner iteration, no barrier
+    * `3` : wait and barrier after each outer iteration (`-n`); reported time excludes barrier. Incompatible with HIP graph capture (`-G`).
   * `-y,--stream_null <0/1>` Use NULL stream instead of creating a new stream. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
@@ -154,7 +170,7 @@ All tests support the same set of arguments :
   * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
   * `-J,--output_file <file>` Write JSON output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
-  * `-M,--memory_report <0/1>` enable memory usage report. Default : 0.
+  * `-M,--memory <0/1>` enable memory usage report. Default : 0.
   * `-F,--cache_flush <number of iterations between instruction cache flush>` Enable cache flush after specified number of iterations. Default : 0 (No cache flush).
   * `-O,--out_of_place <0/1>` 0=in-place only, 1=out-of-place only. Default: both.
   * `-q,--delay_inout_place <delay in microseconds>` Delay between out-of-place and in-place runs (in microseconds). Default: 10.

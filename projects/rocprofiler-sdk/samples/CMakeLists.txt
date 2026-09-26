@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-samples LANGUAGES C CXX)
 
@@ -20,6 +20,9 @@ include(GNUInstallDirs)
 
 # always use lib instead of lib64
 set(CMAKE_INSTALL_LIBDIR "lib")
+
+# standalone sample builds do not inherit the top-level PIC settings
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable
 # sample tests in extreme circumstances

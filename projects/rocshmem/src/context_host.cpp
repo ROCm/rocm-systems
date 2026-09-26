@@ -160,11 +160,11 @@ __host__ void Context::sync_on_stream(rocshmem_team_t team,
 }
 
 __host__ void Context::alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                             const void *source, size_t size,
+                                             const void *source, size_t nelems,
                                              hipStream_t stream) {
   ctxHostStats.incStat(NUM_HOST_ALLTOALL);
 
-  HOST_DISPATCH(alltoallmem_on_stream(team, dest, source, size, stream));
+  HOST_DISPATCH(alltoallmem_on_stream(team, dest, source, nelems, stream));
 }
 
 __host__ void Context::broadcastmem_on_stream(rocshmem_team_t team, void *dest,

@@ -344,4 +344,329 @@ namespace RcclUnitTesting
     }
     testBed.Finalize();
   }
+
+  // Group of broadcasts each rooted at a different rank. With >=2 distinct roots
+  // and NCCL_ALLGATHERV_ENABLE=1 the task producer fuses them into a single
+  // ncclFuncAllGatherV ring kernel. Sizes vary per root to exercise AllGatherV's
+  // variable-length partitioning. AllGatherV fusion is disabled by default
+  // (NCCL_ALLGATHERV_ENABLE=0); without the env var this test exercises the
+  // individual-broadcast fallback path.
+  TEST(GroupCall, MultiRootBroadcast)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      // Fusion requires >=2 distinct roots; skip single-GPU.
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      // One broadcast per rank-root => totalRanks distinct roots in one group.
+      int const numCollPerGroup = totalRanks;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MultiRootBroadcast", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = collIdx;                            // distinct root per broadcast
+        size_t const numElements = 1048576 >> (collIdx % 4); // 1M, 512K, 256K, 128K, repeating
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  numElements, numElements,
+                                  options, collIdx);
+      }
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Single broadcast in a group with AllGatherV enabled. BcastPeers==1 triggers the
+  // downgrade path in ncclPrepareTasks (enqueue.cc) that converts the ncclTaskBcast
+  // back into a plain ncclFuncBroadcast ncclTaskColl and inserts it into collSorter.
+  // Validates that the downgrade produces correct data (not silently dropped).
+  TEST(GroupCall, SingleRootBroadcastDowngrade)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      // Exactly one broadcast with a non-zero root => BcastPeers==1 downgrade path.
+      int const numCollPerGroup = 1;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall SingleRootBroadcastDowngrade", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      OptionalColArgs options;
+      options.root = totalRanks - 1; // non-zero root stresses minBcastPeer indexing
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                1048576, 1048576,
+                                options, /*collIdx=*/0);
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Two consecutive group calls on the same communicator with AllGatherV enabled.
+  // The second call uses a different (non-zero) root to exercise reclaimPlannerState:
+  // if minBcastPeer is not reset to INT_MAX after the first call, the second call
+  // indexes into the wrong peer's bcastQueue and silently drops its task.
+  TEST(GroupCall, MultiRootBroadcastConsecutive)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      int const numCollPerGroup = totalRanks;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MultiRootBroadcastConsecutive", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      // First group call: roots 0..N-1
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = collIdx;
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  524288, 524288,
+                                  options, collIdx);
+      }
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+
+      // Second group call on the same communicator: roots in reverse order.
+      // reclaimPlannerState must have reset minBcastPeer=INT_MAX so this call
+      // correctly indexes peers[totalRanks-1] rather than peers[0].
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = (numCollPerGroup - 1) - collIdx; // reverse root order
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  262144, 262144,
+                                  options, collIdx);
+      }
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Group call that mixes a broadcast (distinct root, AllGatherV path) with an AllReduce
+  // (collSorter path) in the same ncclGroupStart/ncclGroupEnd. Exercises the case where
+  // both collTaskAppend branches run in one planning cycle and the resulting plan must
+  // launch both the AllGatherV ring kernel and the AllReduce kernel correctly.
+  TEST(GroupCall, MixedBroadcastAndAllReduce)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      // collIdx 0: Broadcast rooted at rank 1 (enters bcastQueue / AllGatherV path)
+      // collIdx 1: Broadcast rooted at rank 0 (second distinct root -> BcastPeers==2, fuses)
+      // collIdx 2: AllReduce (enters collSorter path)
+      int const numCollPerGroup = 3;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MixedBroadcastAndAllReduce", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      OptionalColArgs bcastOpts0, bcastOpts1;
+      bcastOpts0.root = 1;
+      bcastOpts1.root = 0;
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataType, 524288, 524288, bcastOpts0, /*collIdx=*/0);
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataType, 262144, 262144, bcastOpts1, /*collIdx=*/1);
+      testBed.SetCollectiveArgs(ncclCollAllReduce,  dataType, 262144, 262144, OptionalColArgs(), /*collIdx=*/2);
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Fused broadcast across pinned channel counts. The AllGatherV kernel launches
+  // grid=nChannels and the scheduler charges its work-batch budget per channel
+  // (nChannels * nWorks * sizeof(ncclDevWorkBcast)), so the channel count changes both
+  // the launch geometry and how many device works one batch must hold. nChannels=1
+  // covers the degenerate single-channel ring; larger counts cover multi-channel
+  // partitioning. NCCL_MIN/MAX_NCHANNELS are consumed at communicator init, so they are
+  // set before InitComms and cleared after the comms are destroyed.
+  TEST(GroupCall, MultiRootBroadcastChannelCounts)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+    // Two settings keep CI time bounded while still differing after the WarpSpeed multiplier
+    // is divided out (gfx950 uses 4, so 1/32 land on 1 and 8 channels).
+    std::vector<const char*> const channelList = {"1", "32"};
+
+    bool isCorrect = true;
+    for (auto channels : channelList)
+    {
+      setenv("NCCL_MIN_NCHANNELS", channels, 1);
+      setenv("NCCL_MAX_NCHANNELS", channels, 1);
+
+      for (int totalRanks : testBed.ev.GetNumGpusList())
+      for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+      {
+        // Fusion requires >=2 distinct roots; skip single-GPU.
+        if (totalRanks < 2) continue;
+
+        int const numProcesses = isMultiProcess ? totalRanks : 1;
+        const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+        int const numCollPerGroup = totalRanks;
+        testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+        if (testBed.ev.showNames)
+          TEST_INFO("%s %d-ranks GroupCall MultiRootBroadcastChannelCounts nChannels=%s",
+                    isMultiProcess ? "MP" : "SP", totalRanks, channels);
+
+        for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+        {
+          OptionalColArgs options;
+          options.root = collIdx;
+          size_t const numElements = 1048576 >> (collIdx % 4);
+          testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                    numElements, numElements,
+                                    options, collIdx);
+        }
+
+        testBed.AllocateMem(inPlace, useManagedMem);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives();
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+        testBed.DestroyComms();
+      }
+
+      // Finalize inside the loop: pooled workers snapshot env at fork, so the
+      // next channel count needs a freshly-forked pool to be seen.
+      testBed.Finalize();
+      unsetenv("NCCL_MIN_NCHANNELS");
+      unsetenv("NCCL_MAX_NCHANNELS");
+    }
+  }
+
+  // Fused broadcast with element counts that are not multiples of the protocol grain size
+  // or the 16B pack size. The scheduler rounds chunkSize down to grainSize and slices each
+  // task by ringDepth across channels, so unaligned counts are where a partitioning error
+  // would drop or duplicate a tail. Counts include 1 element (smaller than one grain) and
+  // primes just past a power of two; every receiver's buffer is validated.
+  TEST(GroupCall, MultiRootBroadcastUnalignedSizes)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+    // Deliberately not multiples of 4 elements (16B for fp32), so each slice has a ragged tail:
+    // below one grain, just past a pack, mid-size, and large enough to span multiple chunks.
+    size_t const unalignedCounts[] = {1, 17, 1023, 1048577};
+    int const numUnaligned = (int)(sizeof(unalignedCounts)/sizeof(unalignedCounts[0]));
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      // Fusion requires >=2 distinct roots; skip single-GPU.
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      int const numCollPerGroup = totalRanks;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MultiRootBroadcastUnalignedSizes", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = collIdx;                                          // distinct root per broadcast
+        size_t const numElements = unalignedCounts[collIdx % numUnaligned];
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  numElements, numElements,
+                                  options, collIdx);
+      }
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
 }

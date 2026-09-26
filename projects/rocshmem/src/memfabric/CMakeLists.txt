@@ -25,9 +25,18 @@
 ###############################################################################
 # ADD ROCSHMEM TARGET FOR FILES IN CURRENT DIRECTORY
 ###############################################################################
+# Always compile pod_detection.cpp (provides stubs when fabric support unavailable)
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    amdsmi_loader.cpp
     pod_detection.cpp
 )
+
+# Only compile amdsmi_loader.cpp when fabric support is available
+if(HAVE_AMDSMI_GPU_FABRIC_INFO)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      amdsmi_loader.cpp
+  )
+endif()

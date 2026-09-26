@@ -11,34 +11,44 @@
 #   - Executables: ../../../../share/rocshmem/rocshmem_*_tests
 #   - Wrapper scripts: ../../../../share/rocshmem/test_wrapper.sh
 
-# Find MPI (required for all tests)
-find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
-if(NOT MPIEXEC_EXECUTABLE)
-    message(WARNING "MPI executable not found. Tests cannot run without MPI.")
-    message(WARNING "Set MPIEXEC_EXECUTABLE or ensure mpiexec/mpirun is in PATH")
-    return()
-endif()
+# Launcher mode was determined at build/configure time
+# USE_SLR_LAUNCHER is set based on whether MPI was found during configuration
+set(USE_SLR_LAUNCHER @USE_SLR_LAUNCHER@)
 
-# MPI parameters (can be overridden via CMake variables or environment)
-if(NOT DEFINED MPIEXEC_NUMPROC_FLAG)
-    set(MPIEXEC_NUMPROC_FLAG "-n")
-endif()
+if(NOT USE_SLR_LAUNCHER)
+    # MPI mode - find MPI executable
+    find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
+    if(NOT MPIEXEC_EXECUTABLE)
+        message(WARNING "MPI executable not found at install time, but tests were configured for MPI.")
+        message(WARNING "Set MPIEXEC_EXECUTABLE or ensure mpiexec/mpirun is in PATH")
+        message(WARNING "Alternatively, reconfigure with -DMPIEXEC_EXECUTABLE= to use SLR launcher")
+        return()
+    endif()
 
-# MCA parameters - read from environment or use defaults
-if(DEFINED ENV{OMPI_MCA_pml})
-    set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}")
-elseif(NOT DEFINED OMPI_MCA_PML)
-    set(OMPI_MCA_PML "ucx")
-endif()
+    # MPI parameters (can be overridden via CMake variables or environment)
+    if(NOT DEFINED MPIEXEC_NUMPROC_FLAG)
+        set(MPIEXEC_NUMPROC_FLAG "-n")
+    endif()
 
-if(DEFINED ENV{OMPI_MCA_osc})
-    set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}")
-elseif(NOT DEFINED OMPI_MCA_OSC)
-    set(OMPI_MCA_OSC "ucx")
-endif()
+    # MCA parameters - read from environment or use defaults
+    if(DEFINED ENV{OMPI_MCA_pml})
+        set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}")
+    elseif(NOT DEFINED OMPI_MCA_PML)
+        set(OMPI_MCA_PML "ucx")
+    endif()
 
-message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
-message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
+    if(DEFINED ENV{OMPI_MCA_osc})
+        set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}")
+    elseif(NOT DEFINED OMPI_MCA_OSC)
+        set(OMPI_MCA_OSC "ucx")
+    endif()
+
+    message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
+    message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
+else()
+    # SLR mode - no MPI required
+    message(STATUS "Using SLR (Simple Local Runtime) launcher - MPI not required")
+endif()
 
 # Subdirectories containing test definitions
 @BUILD_FUNCTIONAL_TESTS_SUBDIRS@

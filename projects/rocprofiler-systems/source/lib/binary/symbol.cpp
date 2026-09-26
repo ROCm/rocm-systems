@@ -31,6 +31,7 @@ typedef Elf64_Xword Elf64_Relr;
 #include <elfutils/libdw.h>
 #include <libcoff.h>
 
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
@@ -59,8 +60,7 @@ read_inliner_info(bfd* _inp)
         if(bfd_find_inliner_info(_inp, &_file, &_func, &_line) != 0)
         {
             if(_file && _func && _line > 0)
-                _data.emplace_back(inlined_symbol{
-                    _line, filepath::realpath(_file, nullptr, false), _func });
+                _data.emplace_back(inlined_symbol{ _line, path::realpath(_file), _func });
         }
         else
         {
@@ -212,9 +212,9 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 bool
 symbol::read_bfd_line_info(bfd_file& _bfd)
 {
-    auto*         _section = static_cast<asection*>(section);
-    bfd_vma       _vma     = bfd_section_vma(_section);
-    bfd_size_type _size    = bfd_section_size(_section);
+    auto*               _section = static_cast<asection*>(section);
+    const bfd_vma       _vma     = bfd_section_vma(_section);
+    const bfd_size_type _size    = bfd_section_size(_section);
 
     auto& _pc     = address.low;
     auto& _pc_end = address.high;
@@ -242,7 +242,7 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
                 file = bfd_get_filename(_inp);
             if(!func.empty())
             {
-                file    = filepath::realpath(file, nullptr, false);
+                file    = path::realpath(file);
                 line    = _line;
                 inlines = read_inliner_info(_inp);
                 return true;

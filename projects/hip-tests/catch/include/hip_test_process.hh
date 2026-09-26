@@ -108,6 +108,7 @@ class SpawnProc {
   std::string resultStr_;
   std::string tmpFileName_;
   bool captureOutput_;
+  bool captureStderr_;
   Process process_{};
   bool spawned_ = false;
   std::future<int> asyncFuture_;
@@ -163,7 +164,8 @@ class SpawnProc {
       if (hFile != INVALID_HANDLE_VALUE) {
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hFile;
-        si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+        // Only merge stderr into the captured file when explicitly requested.
+        si.hStdError = captureStderr_ ? hFile : GetStdHandle(STD_ERROR_HANDLE);
         si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
         inheritHandles = TRUE;
       }
@@ -230,6 +232,8 @@ class SpawnProc {
         int fd = open(tmpFileName_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) {
           dup2(fd, STDOUT_FILENO);
+          // Only merge stderr into the captured file when explicitly requested.
+          if (captureStderr_) dup2(fd, STDERR_FILENO);
           close(fd);
         }
       }
@@ -281,14 +285,22 @@ class SpawnProc {
       resultStr_ = std::string((std::istreambuf_iterator<char>(t)),
                                 std::istreambuf_iterator<char>());
       t.close();
+      // Clean up temp file after reading
+      fs::remove(tmpFileName_);
     }
     spawned_ = false;
     return exitCode;
   }
 
  public:
-  SpawnProc(std::string exeName, bool captureOutput = false)
-      : exeName_(std::move(exeName)), captureOutput_(captureOutput) {
+  // captureStderr only takes effect when captureOutput is also true. It merges
+  // the child's stderr into the captured output; leave it false for tests that
+  // compare stdout exactly, so unrelated stderr (diagnostics or banners) does
+  // not corrupt the comparison. Opt in for tests that assert on stderr content
+  // (e.g. AMD_LOG output).
+  SpawnProc(std::string exeName, bool captureOutput = false, bool captureStderr = false)
+      : exeName_(std::move(exeName)), captureOutput_(captureOutput),
+        captureStderr_(captureStderr) {
     if (!fs::path(exeName_).is_absolute()) {
       auto dir = fs::path(TestContext::get().currentPath());
       dir /= exeName_;
