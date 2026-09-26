@@ -2472,6 +2472,38 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   return hsa_vmem_handle.handle;
 }
 
+bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* location_type,
+                             size_t* size) const {
+  if (location_type == nullptr || size == nullptr || hsa_handle == 0) return false;
+
+  // Enhancement entry point: an older ROCr does not export it. Report failure so
+  // the caller keeps its legacy device/size-zero behaviour.
+  if (!Hsa::vmem_get_vmem_info_available()) return false;
+
+  hsa_amd_vmem_alloc_handle_t handle{hsa_handle};
+  hsa_amd_vmem_handle_info_t info{};
+  info.size = sizeof(info);
+
+  // Fails for an import whose placement ROCr could not recover, which is the
+  // case the caller's fallback exists for.
+  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
+    return false;
+  }
+
+  // Ask the owning agent what it is. The allocation's pool is deliberately not
+  // consulted: for an imported handle it names a placement class, not the pool
+  // the exporter allocated from.
+  hsa_device_type_t dev_type{};
+  if (Hsa::agent_get_info(info.agent, HSA_AGENT_INFO_DEVICE, &dev_type) != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  *size = info.alloc_size;
+  *location_type = (dev_type == HSA_DEVICE_TYPE_CPU) ? amd::Device::VmmLocationType::kHost
+                                                     : amd::Device::VmmLocationType::kDevice;
+  return true;
+}
+
 void* Device::reserveMemory(size_t size, size_t alignment) const {
   void* ptr = nullptr;
   // Reserves non registered VA memory using HSA APIs.

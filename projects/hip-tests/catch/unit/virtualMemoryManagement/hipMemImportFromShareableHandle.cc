@@ -76,6 +76,87 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Positive_Basic) {
 /**
  * Test Description
  * ------------------------
+ *    - Imports a host-backed allocation and checks the allocation properties
+ *      reported for the imported handle. The import path derives the location
+ *      from the shareable handle rather than from the importing context, so a
+ *      host-backed allocation must not come back described as device memory.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_HostBackedAlloc) {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+  checkHostAllocDmaBufSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeHost;
+  prop.location.id = 0;  // Not a device index for generic host memory.
+
+  size_t granularity = 0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+
+  hipMemGenericAllocationHandle_t allocation_handle;
+  HIP_CHECK(hipMemCreate(&allocation_handle, granularity * 2, &prop, 0));
+
+  ShareableHandle shareable_handle;
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle,
+                                          hipMemHandleTypePosixFileDescriptor, 0));
+
+  // Import with a different device current where one exists, so location.id has to
+  // describe the allocation rather than whichever device happened to be current.
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count > 1) {
+    HIP_CHECK(hipSetDevice(device_count - 1));
+  }
+
+  hipMemGenericAllocationHandle_t imported_handle;
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+            hipMemHandleTypePosixFileDescriptor));
+
+  hipMemAllocationProp original_prop = {};
+  hipMemAllocationProp imported_prop = {};
+  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&original_prop, allocation_handle));
+  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&imported_prop, imported_handle));
+
+  // The exporting handle keeps describing itself as host memory.
+  REQUIRE(original_prop.location.type == hipMemLocationTypeHost);
+
+  // The imported handle has to agree with it. This is the property that the
+  // import path used to fabricate, reporting every import as device memory.
+  REQUIRE(imported_prop.location.type == original_prop.location.type);
+  REQUIRE(imported_prop.type == hipMemAllocationTypePinned);
+  REQUIRE(imported_prop.requestedHandleTypes == hipMemHandleTypePosixFileDescriptor);
+
+  // Host memory is not device-indexed, so the id must not name a device.
+  REQUIRE(imported_prop.location.id == 0);
+
+  REQUIRE(close(shareable_handle) == 0);
+  HIP_CHECK(hipMemRelease(imported_handle));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+
+  if (device_count > 1) {
+    HIP_CHECK(hipSetDevice(0));
+  }
+
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Negative parameters test.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
