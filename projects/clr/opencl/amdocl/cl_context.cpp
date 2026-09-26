@@ -98,6 +98,11 @@ RUNTIME_ENTRY_RET(cl_context, clCreateContext,
     return (cl_context)0;
   }
 
+  if (pfn_notify == NULL && user_data != NULL) {
+    *not_null(errcode_ret) = CL_INVALID_VALUE;
+    return (cl_context)0;
+  }
+
   std::vector<amd::Device*> devices_;
   devices_.reserve(num_devices);
   for (cl_uint i = 0; i < num_devices; ++i) {
@@ -172,6 +177,11 @@ RUNTIME_ENTRY_RET(cl_context, clCreateContextFromType,
   }
 
   // Get the devices of the given type.
+  if (device_type == 0) {
+    *not_null(errcode_ret) = CL_INVALID_DEVICE_TYPE;
+    return (cl_context)0;
+  }
+
   cl_uint num_devices;
   bool offlineDevices = (info.flags_ & amd::Context::OfflineDevices) ? true : false;
   if (!amd::Device::getDeviceIDs(device_type, 0, NULL, &num_devices, offlineDevices)) {
