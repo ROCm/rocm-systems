@@ -308,12 +308,14 @@ TEST(ConSan, InventoriesGfx1250TensorDmaAsRuntimeDescriptorRanges) {
       EXPECT_EQ(site.lowering.form->element_width_bits, 0u);
       EXPECT_EQ(site.lowering.form->range_count, 1u);
       EXPECT_EQ(site.lowering.form->address_vgpr_count, 0u);
-      EXPECT_EQ(site.lowering.replay_guest_access.available(), site.kind == LdsAccessKind::Write);
+      EXPECT_TRUE(site.lowering.replay_guest_access.available());
       EXPECT_EQ(site.lowering.compare_observed_value.available(),
                 site.kind == LdsAccessKind::Write);
     }
-    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 1u);
-    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported), 1u);
+    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted),
+              mode == Mode::Default ? 2u : 1u);
+    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported),
+              mode == Mode::Default ? 0u : 1u);
     EXPECT_EQ(applicable_access_decision_count(result), 2u);
   }
 }
@@ -404,101 +406,102 @@ TEST(ConSan, RetainsAllTensorDmaScalarDescriptorGroups) {
   }
 }
 
-TEST(ConSan, Gfx1250TensorLoadAddressExecutesRuntimePaddingAndPreservesGuestState) {
+TEST(ConSan, Gfx1250TensorAddressExecutesDirectionSpecificPaddingAndPreservesGuestState) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   ProgramSite site;
   site.origin = AccessOrigin::TensorLds;
-  site.kind = LdsAccessKind::Write;
   site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 20, 124, 124};
-  for (const uint16_t result : {uint16_t{20}, uint16_t{21}}) {
-    amdgpu::GpuMemory memory("tensor_load_address_mem");
-    amdgpu::L2Cache l2("tensor_load_address_l2");
-    l2.set_backing_memory(&memory);
-    amdgpu::ComputeUnitCore::Config config{};
-    config.arch = arch;
-    config.num_wf_slots = 1;
-    config.sgprs_per_wf = 106;
-    config.vgprs_per_wf = 64;
-    config.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("tensor_load_address", config, &memory, &l2);
-    ASSERT_NE(cu, nullptr);
-    auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
-    ASSERT_NE(wave, nullptr);
-    const auto vgpr_base = wave->vgpr_alloc().base;
-    const auto sgpr_base = wave->sgpr_alloc().base;
-    std::vector<uint32_t> words;
-    ASSERT_TRUE(
-        detail::append_materialize_tensor_load_lds_address(words, site, 20, result, 32, arch));
-    for (size_t i = 0; i < words.size(); ++i)
-      memory.write32(i * sizeof(uint32_t), words[i]);
-    for (uint32_t size = 0; size < 4; ++size) {
-      for (uint32_t interval = 0; interval < 8; ++interval) {
-        for (const uint32_t amount : {0u, 3u, 127u}) {
-          for (const bool pad : {false, true}) {
-            for (const uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
-              const uint32_t descriptor =
-                  0xa55au | (size << 16) | (pad << 20) | (interval << 22) | (amount << 25);
-              const uint32_t interval_elements = (1u << (interval + 3u)) >> size;
-              constexpr uint32_t lds_base = 4352;
-              cu->write_sgpr(sgpr_base + 9, lds_base);
-              cu->write_sgpr(sgpr_base + 20, descriptor);
-              std::array<uint32_t, 32> indices{};
-              for (uint32_t lane = 0; lane < 32; ++lane) {
-                indices[lane] = lane < 4 ? interval_elements - 1u + lane : 513u + lane * 17u;
-                for (const uint16_t reg :
-                     {uint16_t{20}, uint16_t{21}, uint16_t{32}, uint16_t{33}, uint16_t{34}})
-                  cu->write_vgpr(vgpr_base + reg, lane, 0xabc00000u + reg * 64u + lane);
-                cu->write_vgpr(vgpr_base + 20, lane, indices[lane]);
-              }
-              wave->pc = 0;
-              wave->set_exec(exec);
-              wave->set_vcc(0x12345678);
-              wave->write_scc(true);
-              size_t steps = 0;
-              while (wave->pc < words.size() * sizeof(uint32_t)) {
-                ASSERT_LT(steps++, words.size());
-                cu->step();
-              }
-              cu->flush_all();
-              for (uint32_t lane = 0; lane < 32; ++lane) {
-                if ((exec >> lane) & 1u) {
-                  namespace tdm = amdgpu::tensor_dma_detail;
-                  // Compare the emitted ISA with the actual tensor-copy address
-                  // path, including its dword (not element) padding units.
-                  const auto desc = tdm::parse_descriptor(
-                      {1, lds_base, 0, 0}, {descriptor, 0, 0, 0, 0, 0, 0, 0}, {}, {});
-                  tdm::TensorDmaState reference(desc, false);
-                  tdm::append_copy(reference, *wave, 0, indices[lane], false);
-                  ASSERT_EQ(reference.elements.size(), 1u);
-                  EXPECT_EQ(cu->read_vgpr(vgpr_base + result, lane),
-                            reference.elements.front().lds_address - wave->lds_base())
-                      << "size=" << size << " interval=" << interval << " amount=" << amount
-                      << " pad=" << pad << " lane=" << lane;
-                } else {
+  for (const bool store : {false, true}) {
+    site.kind = store ? LdsAccessKind::Read : LdsAccessKind::Write;
+    for (const uint16_t result : {uint16_t{20}, uint16_t{21}}) {
+      amdgpu::GpuMemory memory("tensor_load_address_mem");
+      amdgpu::L2Cache l2("tensor_load_address_l2");
+      l2.set_backing_memory(&memory);
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 64;
+      auto cu = amdgpu::ComputeUnitCore::create("tensor_load_address", config, &memory, &l2);
+      ASSERT_NE(cu, nullptr);
+      auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+      ASSERT_NE(wave, nullptr);
+      const auto vgpr_base = wave->vgpr_alloc().base;
+      const auto sgpr_base = wave->sgpr_alloc().base;
+      std::vector<uint32_t> words;
+      ASSERT_TRUE(detail::append_materialize_tensor_lds_address(words, site, 20, result, 32, arch));
+      for (size_t i = 0; i < words.size(); ++i)
+        memory.write32(i * sizeof(uint32_t), words[i]);
+      for (uint32_t size = 0; size < 4; ++size) {
+        for (uint32_t interval = 0; interval < 8; ++interval) {
+          for (const uint32_t amount : {0u, 3u, 127u}) {
+            for (const bool pad : {false, true}) {
+              for (const uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
+                const uint32_t descriptor =
+                    0xa55au | (size << 16) | (pad << 20) | (interval << 22) | (amount << 25);
+                const uint32_t interval_elements = (1u << (interval + 3u)) >> size;
+                constexpr uint32_t lds_base = 4352;
+                cu->write_sgpr(sgpr_base + 9, lds_base);
+                cu->write_sgpr(sgpr_base + 20, descriptor);
+                std::array<uint32_t, 32> indices{};
+                for (uint32_t lane = 0; lane < 32; ++lane) {
+                  indices[lane] = lane < 4 ? interval_elements - 1u + lane : 513u + lane * 17u;
                   for (const uint16_t reg :
                        {uint16_t{20}, uint16_t{21}, uint16_t{32}, uint16_t{33}, uint16_t{34}})
-                    EXPECT_EQ(cu->read_vgpr(vgpr_base + reg, lane),
-                              reg == 20 ? indices[lane] : 0xabc00000u + reg * 64u + lane);
+                    cu->write_vgpr(vgpr_base + reg, lane, 0xabc00000u + reg * 64u + lane);
+                  cu->write_vgpr(vgpr_base + 20, lane, indices[lane]);
                 }
-                if (result != 20) {
-                  EXPECT_EQ(cu->read_vgpr(vgpr_base + 20, lane), indices[lane]);
+                wave->pc = 0;
+                wave->set_exec(exec);
+                wave->set_vcc(0x12345678);
+                wave->write_scc(true);
+                size_t steps = 0;
+                while (wave->pc < words.size() * sizeof(uint32_t)) {
+                  ASSERT_LT(steps++, words.size());
+                  cu->step();
                 }
+                cu->flush_all();
+                for (uint32_t lane = 0; lane < 32; ++lane) {
+                  if ((exec >> lane) & 1u) {
+                    namespace tdm = amdgpu::tensor_dma_detail;
+                    // Compare the emitted ISA with the actual tensor-copy address
+                    // path, including its dword (not element) padding units.
+                    const auto desc = tdm::parse_descriptor(
+                        {1, lds_base, 0, 0}, {descriptor, 0, 0, 0, 0, 0, 0, 0}, {}, {});
+                    tdm::TensorDmaState reference(desc, store);
+                    tdm::append_copy(reference, *wave, 0, indices[lane], false);
+                    ASSERT_EQ(reference.elements.size(), 1u);
+                    EXPECT_EQ(cu->read_vgpr(vgpr_base + result, lane),
+                              reference.elements.front().lds_address - wave->lds_base())
+                        << "store=" << store << " size=" << size << " interval=" << interval
+                        << " amount=" << amount << " pad=" << pad << " lane=" << lane;
+                  } else {
+                    for (const uint16_t reg :
+                         {uint16_t{20}, uint16_t{21}, uint16_t{32}, uint16_t{33}, uint16_t{34}})
+                      EXPECT_EQ(cu->read_vgpr(vgpr_base + reg, lane),
+                                reg == 20 ? indices[lane] : 0xabc00000u + reg * 64u + lane);
+                  }
+                  if (result != 20) {
+                    EXPECT_EQ(cu->read_vgpr(vgpr_base + 20, lane), indices[lane]);
+                  }
+                }
+                EXPECT_EQ(cu->read_sgpr(sgpr_base + 9), lds_base);
+                EXPECT_EQ(cu->read_sgpr(sgpr_base + 20), descriptor);
+                EXPECT_EQ(wave->exec(), exec);
+                EXPECT_EQ(wave->vcc(), 0x12345678u);
+                EXPECT_TRUE(wave->read_scc());
               }
-              EXPECT_EQ(cu->read_sgpr(sgpr_base + 9), lds_base);
-              EXPECT_EQ(cu->read_sgpr(sgpr_base + 20), descriptor);
-              EXPECT_EQ(wave->exec(), exec);
-              EXPECT_EQ(wave->vcc(), 0x12345678u);
-              EXPECT_TRUE(wave->read_scc());
             }
           }
         }
       }
+      wave->halt();
     }
-    wave->halt();
   }
 }
 
-TEST(ConSan, TensorLoadAddressRejectsInvalidOperandsWithoutEmittingWords) {
+TEST(ConSan, TensorAddressRejectsInvalidOperandsWithoutEmittingWords) {
   ProgramSite site;
   site.origin = AccessOrigin::TensorLds;
   site.kind = LdsAccessKind::Write;
@@ -506,7 +509,7 @@ TEST(ConSan, TensorLoadAddressRejectsInvalidOperandsWithoutEmittingWords) {
   const std::vector<uint32_t> prefix{0x12345678u};
   auto words = prefix;
   for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA4}) {
-    EXPECT_FALSE(detail::append_materialize_tensor_load_lds_address(words, site, 20, 21, 32, arch));
+    EXPECT_FALSE(detail::append_materialize_tensor_lds_address(words, site, 20, 21, 32, arch));
     EXPECT_EQ(words, prefix);
   }
   for (const std::array<uint16_t, 3> regs : {std::array<uint16_t, 3>{256, 21, 32},
@@ -514,21 +517,21 @@ TEST(ConSan, TensorLoadAddressRejectsInvalidOperandsWithoutEmittingWords) {
                                              {20, 21, 254},
                                              {32, 21, 32},
                                              {20, 34, 32}}) {
-    EXPECT_FALSE(detail::append_materialize_tensor_load_lds_address(
-        words, site, regs[0], regs[1], regs[2], ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_FALSE(detail::append_materialize_tensor_lds_address(words, site, regs[0], regs[1],
+                                                               regs[2], ROCJITSU_CODE_ARCH_CDNA5));
     EXPECT_EQ(words, prefix);
   }
   for (const std::array<uint16_t, 4> groups :
        {std::array<uint16_t, 4>{103, 20, 124, 124}, {8, 99, 124, 124}, {124, 20, 124, 124}}) {
     site.operands.tensor_descriptor_sgprs = groups;
-    EXPECT_FALSE(detail::append_materialize_tensor_load_lds_address(words, site, 20, 21, 32,
-                                                                    ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_FALSE(detail::append_materialize_tensor_lds_address(words, site, 20, 21, 32,
+                                                               ROCJITSU_CODE_ARCH_CDNA5));
     EXPECT_EQ(words, prefix);
   }
   site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 20, 124, 124};
-  site.kind = LdsAccessKind::Read;
-  EXPECT_FALSE(detail::append_materialize_tensor_load_lds_address(words, site, 20, 21, 32,
-                                                                  ROCJITSU_CODE_ARCH_CDNA5));
+  site.kind = LdsAccessKind::Atomic;
+  EXPECT_FALSE(detail::append_materialize_tensor_lds_address(words, site, 20, 21, 32,
+                                                             ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(words, prefix);
 }
 

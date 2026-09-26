@@ -511,12 +511,9 @@ using detail::WorkitemOwnerDerivationPlan;
         instrumentation::build_v_xor_b32(hash, vector_source_vgpr(tmp_vgpr), hash, arch),
         instrumentation::build_v_mul_lo_u32_literal(iteration_hash, tmp_vgpr, 0x85ebca6bu, hash,
                                                     arch));
-    require_emission(
-        append_select_tensor_load_element(words, candidate.site(), hash, iteration_hash, address,
-                                          count, plan.scratch_vgpr, arch) &&
-            append_materialize_tensor_load_lds_address(words, candidate.site(), address, address,
-                                                       plan.scratch_vgpr, arch),
-        "ConSan tensor probe could not select a descriptor element");
+    require_emission(append_select_tensor_element(words, candidate.site(), hash, iteration_hash,
+                                                  address, count, plan.scratch_vgpr, arch),
+                     "ConSan tensor probe could not select a descriptor element");
     sequence
         .append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), count, arch))
         .branch(restore_label, InstructionSequence::BranchKind::VccZero);
@@ -538,6 +535,22 @@ using detail::WorkitemOwnerDerivationPlan;
         "ConSan tensor probe could not report unmodeled completion");
     sequence.branch(restore_label, InstructionSequence::BranchKind::Unconditional)
         .bind_label(ordinary_completion);
+    if (candidate.site().kind == LdsAccessKind::Read) {
+      const uint16_t in_bounds = address + 3u;
+      require_emission(append_materialize_tensor_global_address(words, candidate.site(), address,
+                                                                count, address + 4u, in_bounds,
+                                                                address + 6u, arch, iteration_hash),
+                       "ConSan tensor store could not check destination bounds");
+      sequence
+          .append(instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), in_bounds,
+                                                          arch))
+          .branch(restore_label, InstructionSequence::BranchKind::VccZero)
+          .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr,
+                                                            kAmdGpuVccLo, arch));
+    }
+    require_emission(append_materialize_tensor_lds_address(words, candidate.site(), address,
+                                                           address, plan.scratch_vgpr, arch),
+                     "ConSan tensor probe could not materialize its LDS address");
     lds_byte_offset_vgpr = address;
   }
   // Publication has several nested EXEC-narrowing paths. Some paths reuse the
@@ -934,7 +947,11 @@ build_direct_watchpoint_words(std::span<const uint8_t> bytes, const Candidate &c
       candidate.site().lowering.form->kind == AccessLoweringFormKind::TensorDescriptor;
   const uint16_t tensor_exec_archive = plan.scratch_vgpr + plan.base_scratch_vgpr_count + 2u;
   if (tensor) {
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5 || candidate.site().kind != LdsAccessKind::Write ||
+    const uint16_t required_count =
+        plan.base_scratch_vgpr_count + (candidate.site().kind == LdsAccessKind::Read ? 38u : 5u);
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+        (candidate.site().kind != LdsAccessKind::Write &&
+         candidate.site().kind != LdsAccessKind::Read) ||
         !tensor_identity_sources_are_wave_uniform(plan.dispatch_id, plan.workgroup_sources,
                                                   plan.automatic_private_epoch) ||
         !plan.tensor_full_wave_resources ||
@@ -942,13 +959,13 @@ build_direct_watchpoint_words(std::span<const uint8_t> bytes, const Candidate &c
         !plan.owner_epoch_vgprs.owner || !plan.owner_epoch_vgprs.epoch ||
         plan.spill_backed_operand_recovery || !candidate.site().operands.tensor_descriptor_sgprs ||
         static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count > 256u ||
-        *plan.owner_epoch_vgprs.owner <= tensor_exec_archive ||
-        *plan.owner_epoch_vgprs.epoch <= tensor_exec_archive ||
+        *plan.owner_epoch_vgprs.owner < plan.scratch_vgpr + required_count - 2u ||
+        *plan.owner_epoch_vgprs.epoch < plan.scratch_vgpr + required_count - 2u ||
         *plan.owner_epoch_vgprs.owner >= plan.scratch_vgpr + plan.scratch_vgpr_count ||
         *plan.owner_epoch_vgprs.epoch >= plan.scratch_vgpr + plan.scratch_vgpr_count ||
         plan.owner_epoch_vgprs.owner == plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr ||
-        plan.base_scratch_vgpr_count < 8u ||
-        plan.scratch_vgpr_count < plan.base_scratch_vgpr_count + 5u || access_ranges.size() != 1u ||
+        plan.base_scratch_vgpr_count < 8u || plan.scratch_vgpr_count < required_count ||
+        access_ranges.size() != 1u ||
         access_ranges.front().geometry != AccessRangeGeometry::TensorDescriptor) {
       errors.emplace_back(
           "ConSan tensor probe requires full-wave resources and scalar owner/epoch state");

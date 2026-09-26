@@ -88,19 +88,20 @@ tensor_full_wave_scalar_spill(const SgprSpillSequence &spill, uint16_t auxiliary
                                                   uint16_t origin_vgpr, uint16_t scratch_vgpr,
                                                   rj_code_arch_t arch);
 
-/// Recover the global source of a selected unpadded LDS element. The inputs
-/// are the element/count produced by append_select_tensor_load_element for an
-/// admitted LDS-fitting descriptor. Repeated overlapping tiles select the last
-/// writer. Dense/gather bounds produce a per-lane 0/1 predicate; a zero predicate
-/// means the expected LDS value is zero and MUST NOT cause a global read.
-/// Outputs are a global-address VGPR pair and the bounds predicate. Inputs,
-/// outputs, and 30 scratch VGPRs must be disjoint. Preserves input registers,
-/// SGPRs, EXEC, SCC, and inactive lanes; clobbers VCC. Caller selects low VGPR banks.
-[[nodiscard]] bool
-append_materialize_tensor_load_source(std::vector<uint32_t> &words, const ProgramSite &site,
-                                      uint16_t element_vgpr, uint16_t count_vgpr,
-                                      uint16_t address_vgpr, uint16_t in_bounds_vgpr,
-                                      uint16_t scratch_vgpr, rj_code_arch_t arch);
+/// Recover the global address and bounds of a selected unpadded LDS element.
+/// Inputs are the element/count from append_select_tensor_element for a valid,
+/// LDS-fitting descriptor. Loads select the last writer of overlapping tiles;
+/// stores require the same iteration hash passed to the selector, and select
+/// that exact read instance. A zero bounds predicate means a load zero-fills
+/// LDS, whereas a store does not read LDS or write global memory at all.
+/// Outputs are a global-address VGPR pair and a per-lane 0/1 bounds predicate.
+/// Inputs, outputs, optional iteration hash, and 30 scratch VGPRs must be disjoint.
+/// Preserves inputs, SGPRs, EXEC, SCC, and inactive lanes; clobbers VCC.
+/// Caller selects low VGPR banks.
+[[nodiscard]] bool append_materialize_tensor_global_address(
+    std::vector<uint32_t> &words, const ProgramSite &site, uint16_t element_vgpr,
+    uint16_t count_vgpr, uint16_t address_vgpr, uint16_t in_bounds_vgpr, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, std::optional<uint16_t> iteration_hash_vgpr = std::nullopt);
 
 inline constexpr uint16_t kTensorLoadCompareScratchVgprs = 46;
 inline constexpr uint16_t kTensorLoadCompareWorkspaceOffset = 16;
@@ -127,20 +128,20 @@ inline constexpr uint16_t kTensorLoadCompareWorkspaceOffset = 16;
                                               std::span<const uint32_t> mismatch_words,
                                               uint32_t &guest_word_offset, rj_code_arch_t arch);
 
-/// Select an element of a valid, LDS-fitting CDNA5 tensor-load descriptor.
+/// Select an element of a valid, LDS-fitting CDNA5 tensor descriptor.
 /// Two caller-provided 32-bit hashes select a position within the tile and an
 /// iteration independently. Returns the linear LDS element index (including
 /// iteration increment) and the tile's element count; count zero suppresses
 /// observation. Global bounds do not suppress load observations: masked loads
-/// still write zeros to LDS. All outputs and five consecutive scratch VGPRs
+/// still write zeros to LDS. Stores must additionally check global bounds before
+/// observing any LDS read. All outputs and five consecutive scratch VGPRs
 /// must be disjoint from the hash inputs. Preserves hashes, SGPRs, EXEC, SCC,
 /// and inactive lanes; clobbers VCC. Caller selects the low VGPR banks.
-[[nodiscard]] bool append_select_tensor_load_element(std::vector<uint32_t> &words,
-                                                     const ProgramSite &site,
-                                                     uint16_t element_hash_vgpr,
-                                                     uint16_t iteration_hash_vgpr,
-                                                     uint16_t element_vgpr, uint16_t count_vgpr,
-                                                     uint16_t scratch_vgpr, rj_code_arch_t arch);
+[[nodiscard]] bool append_select_tensor_element(std::vector<uint32_t> &words,
+                                                const ProgramSite &site, uint16_t element_hash_vgpr,
+                                                uint16_t iteration_hash_vgpr, uint16_t element_vgpr,
+                                                uint16_t count_vgpr, uint16_t scratch_vgpr,
+                                                rj_code_arch_t arch);
 
 } // namespace detail
 } // namespace rocjitsu::consan

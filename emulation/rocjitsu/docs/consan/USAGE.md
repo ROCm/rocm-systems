@@ -186,6 +186,12 @@ that counter currently saturates at 1023, which can merge later synchronization
 phases without making `analysis_complete` false. See
 [identity and barrier epochs](DESIGN.md#identity-and-barrier-epochs).
 
+On gfx1250, Default mode samples the LDS side of tensor-DMA loads and stores.
+Masked loads still write zeros to LDS; masked stores do not read LDS and are
+excluded from observations. Tensor completion through an LDS atomic barrier
+currently reports incomplete synchronization in Default mode. Qualification
+uses the emulator; see the [CDNA5 validation table](validation/STATUS_CDNA5.md).
+
 ## SuperCollider
 
 SuperCollider is a complementary check: it repeats supported LDS accesses and

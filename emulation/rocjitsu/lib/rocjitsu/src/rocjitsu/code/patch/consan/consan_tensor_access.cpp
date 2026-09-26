@@ -267,8 +267,9 @@ bool append_tensor_iteration_origin(std::vector<uint32_t> &words, const ProgramS
                                     uint16_t offset_vgpr, uint16_t origin_vgpr,
                                     uint16_t scratch_vgpr, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
-      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs ||
-      offset_vgpr > 254u || origin_vgpr > 250u || scratch_vgpr > 238u)
+      (site.kind != LdsAccessKind::Write && site.kind != LdsAccessKind::Read) ||
+      !site.operands.tensor_descriptor_sgprs || offset_vgpr > 254u || origin_vgpr > 250u ||
+      scratch_vgpr > 238u)
     return false;
   const auto overlaps = [](uint16_t a, unsigned an, uint16_t b, unsigned bn) {
     return a < b + bn && b < a + an;
@@ -382,12 +383,15 @@ bool append_tensor_iteration_origin(std::vector<uint32_t> &words, const ProgramS
   return sequence.finish();
 }
 
-bool append_materialize_tensor_load_source(std::vector<uint32_t> &words, const ProgramSite &site,
-                                           uint16_t element_vgpr, uint16_t count_vgpr,
-                                           uint16_t address_vgpr, uint16_t in_bounds_vgpr,
-                                           uint16_t scratch_vgpr, rj_code_arch_t arch) {
+bool append_materialize_tensor_global_address(std::vector<uint32_t> &words, const ProgramSite &site,
+                                              uint16_t element_vgpr, uint16_t count_vgpr,
+                                              uint16_t address_vgpr, uint16_t in_bounds_vgpr,
+                                              uint16_t scratch_vgpr, rj_code_arch_t arch,
+                                              std::optional<uint16_t> iteration_hash_vgpr) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
-      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs)
+      (site.kind != LdsAccessKind::Write && site.kind != LdsAccessKind::Read) ||
+      !site.operands.tensor_descriptor_sgprs ||
+      (site.kind == LdsAccessKind::Read && !iteration_hash_vgpr))
     return false;
   const std::array<std::pair<uint16_t, unsigned>, 5> windows{{{element_vgpr, 1},
                                                               {count_vgpr, 1},
@@ -400,6 +404,13 @@ bool append_materialize_tensor_load_source(std::vector<uint32_t> &words, const P
       return false;
     for (size_t j = 0; j < i; ++j)
       if (base < windows[j].first + windows[j].second && windows[j].first < base + size)
+        return false;
+  }
+  if (iteration_hash_vgpr) {
+    if (*iteration_hash_vgpr >= 256u)
+      return false;
+    for (const auto &[base, size] : windows)
+      if (*iteration_hash_vgpr >= base && *iteration_hash_vgpr < base + size)
         return false;
   }
   const auto &groups = *site.operands.tensor_descriptor_sgprs;
@@ -468,12 +479,18 @@ bool append_materialize_tensor_load_source(std::vector<uint32_t> &words, const P
   read_word(wide, 2, 3);
   shr(wide, wide, 16);      // iteration_count - 1
   read_word(divisor, 2, 1); // unpadded LDS element increment
-  sequence.require(append_tensor_divmod_u32(words, element_vgpr, divisor, iteration, linear,
-                                            division_scratch, arch));
-  // e/inc is the final tile that can own e, capped by the descriptor's last
-  // iteration. Division by zero yields UINT32_MAX, selecting the last tile.
-  sequence.append(instrumentation::build_v_min_u32(iteration, vr(wide), iteration, arch),
-                  instrumentation::build_v_cmp_eq_u32_vcc(zero, iterate, arch),
+  if (site.kind == LdsAccessKind::Read) {
+    // A store reads the selected iteration, even when later iterations overlap
+    // its LDS source. A masked later store must not suppress an earlier read.
+    sequence.append(instrumentation::build_v_add_u32(wide, one, wide, arch),
+                    binary(cdna5::kVMulHiU32Vop3, iteration, vr(*iteration_hash_vgpr), vr(wide)));
+  } else {
+    sequence.require(append_tensor_divmod_u32(words, element_vgpr, divisor, iteration, linear,
+                                              division_scratch, arch));
+    // Loads compare against the final writer of an overlapping LDS element.
+    sequence.append(instrumentation::build_v_min_u32(iteration, vr(wide), iteration, arch));
+  }
+  sequence.append(instrumentation::build_v_cmp_eq_u32_vcc(zero, iterate, arch),
                   select(iteration, vr(iteration), zero),
                   binary(cdna5::kVMulLoU32Vop3, coordinate, vr(iteration), vr(divisor)),
                   binary(cdna5::kVSubNcU32Vop3, linear, vr(element_vgpr), vr(coordinate)));
@@ -658,12 +675,11 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
       instrumentation::build_v_xor_b32(hash, groups[0] + 2, hash, arch),
       instrumentation::build_v_mov_b32_literal(work, 0x85ebca6bu, arch),
       binary(cdna5::kVMulLoU32Vop3, iteration_hash, vr(hash), vr(work)));
-  sequence.require(append_select_tensor_load_element(words, site, hash, iteration_hash, element,
-                                                     count, work, arch));
-  sequence.require(append_materialize_tensor_load_source(words, site, element, count, global,
-                                                         bounds, work, arch));
   sequence.require(
-      append_materialize_tensor_load_lds_address(words, site, element, lds, work, arch));
+      append_select_tensor_element(words, site, hash, iteration_hash, element, count, work, arch));
+  sequence.require(append_materialize_tensor_global_address(words, site, element, count, global,
+                                                            bounds, work, arch));
+  sequence.require(append_materialize_tensor_lds_address(words, site, element, lds, work, arch));
   sequence.append(
       build_v_mov_b32_e32(descriptor_archive, groups[1], arch),
       instrumentation::build_v_lshrrev_b32(width, scalar_positive_inline_u32(16),
@@ -764,13 +780,13 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
   return true;
 }
 
-bool append_select_tensor_load_element(std::vector<uint32_t> &words, const ProgramSite &site,
-                                       uint16_t element_hash_vgpr, uint16_t iteration_hash_vgpr,
-                                       uint16_t element_vgpr, uint16_t count_vgpr,
-                                       uint16_t scratch_vgpr, rj_code_arch_t arch) {
+bool append_select_tensor_element(std::vector<uint32_t> &words, const ProgramSite &site,
+                                  uint16_t element_hash_vgpr, uint16_t iteration_hash_vgpr,
+                                  uint16_t element_vgpr, uint16_t count_vgpr, uint16_t scratch_vgpr,
+                                  rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
-      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs ||
-      scratch_vgpr > 251u || element_vgpr == count_vgpr)
+      (site.kind != LdsAccessKind::Write && site.kind != LdsAccessKind::Read) ||
+      !site.operands.tensor_descriptor_sgprs || scratch_vgpr > 251u || element_vgpr == count_vgpr)
     return false;
   for (const uint16_t reg : {element_hash_vgpr, iteration_hash_vgpr, element_vgpr, count_vgpr}) {
     if (reg >= 256u || (reg >= scratch_vgpr && reg < scratch_vgpr + 5u))

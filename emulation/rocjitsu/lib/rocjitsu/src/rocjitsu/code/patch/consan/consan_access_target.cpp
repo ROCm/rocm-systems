@@ -28,6 +28,8 @@ AccessResourceFacts resolve_access_resource_facts(const OperatingPoint &point,
       .wave_wide_tensor =
           candidate.site().lowering.form &&
           candidate.site().lowering.form->kind == AccessLoweringFormKind::TensorDescriptor,
+      .tensor_store = candidate.site().origin == AccessOrigin::TensorLds &&
+                      candidate.site().kind == LdsAccessKind::Read,
       .address_scratch_vgpr_count = flat_address_scratch_count != 0u
                                         ? flat_address_scratch_count
                                         : static_cast<uint16_t>(needs_address_capture),
@@ -149,13 +151,13 @@ append_materialize_direct_to_lds_address(std::vector<uint32_t> &words, const Pro
   return true;
 }
 
-bool append_materialize_tensor_load_lds_address(std::vector<uint32_t> &words,
-                                                const ProgramSite &site,
-                                                uint16_t element_index_vgpr, uint16_t result_vgpr,
-                                                uint16_t temporary_vgpr, rj_code_arch_t arch) {
+bool append_materialize_tensor_lds_address(std::vector<uint32_t> &words, const ProgramSite &site,
+                                           uint16_t element_index_vgpr, uint16_t result_vgpr,
+                                           uint16_t temporary_vgpr, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
-      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs ||
-      element_index_vgpr >= 256u || result_vgpr >= 256u || temporary_vgpr > 253u ||
+      (site.kind != LdsAccessKind::Write && site.kind != LdsAccessKind::Read) ||
+      !site.operands.tensor_descriptor_sgprs || element_index_vgpr >= 256u || result_vgpr >= 256u ||
+      temporary_vgpr > 253u ||
       (element_index_vgpr >= temporary_vgpr && element_index_vgpr < temporary_vgpr + 3u) ||
       (result_vgpr >= temporary_vgpr && result_vgpr < temporary_vgpr + 3u))
     return false;
@@ -172,27 +174,34 @@ bool append_materialize_tensor_load_lds_address(std::vector<uint32_t> &words,
                                                      .src1 = vector_source_vgpr(rhs)});
   };
   InstructionSequence sequence(words);
-  // Descriptor padding is in dwords, independent of element size. Scale the
-  // selected element to bytes first, then insert exact four-byte padding units.
+  // Stores read the dense LDS stream: padding only applies to tensor loads.
+  // For loads, padding units are dwords, independent of element size.
   sequence.append(
       build_v_mov_b32_e32(descriptor, groups[1], arch),
       instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(16), descriptor, arch),
       instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(3), field, arch),
       instrumentation::build_v_lshlrev_b32(result_vgpr, vector_source_vgpr(field),
-                                           element_index_vgpr, arch),
-      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(22), descriptor, arch),
-      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(7), field, arch),
-      instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(3), field, arch),
-      instrumentation::build_v_lshrrev_b32(padding, vector_source_vgpr(field), result_vgpr, arch),
-      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(25), descriptor, arch),
-      instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(1), field, arch),
-      multiply(padding, padding, field),
-      instrumentation::build_v_lshlrev_b32(padding, scalar_positive_inline_u32(2), padding, arch),
-      instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(20), descriptor, arch),
-      instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(1), field, arch),
-      multiply(padding, padding, field),
-      instrumentation::build_v_add_u32(result_vgpr, vector_source_vgpr(padding), result_vgpr, arch),
-      instrumentation::build_v_add_u32(result_vgpr, groups[0] + 1u, result_vgpr, arch));
+                                           element_index_vgpr, arch));
+  if (site.kind == LdsAccessKind::Write) {
+    sequence.append(
+        instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(22), descriptor,
+                                             arch),
+        instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(7), field, arch),
+        instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(3), field, arch),
+        instrumentation::build_v_lshrrev_b32(padding, vector_source_vgpr(field), result_vgpr, arch),
+        instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(25), descriptor,
+                                             arch),
+        instrumentation::build_v_add_u32(field, scalar_positive_inline_u32(1), field, arch),
+        multiply(padding, padding, field),
+        instrumentation::build_v_lshlrev_b32(padding, scalar_positive_inline_u32(2), padding, arch),
+        instrumentation::build_v_lshrrev_b32(field, scalar_positive_inline_u32(20), descriptor,
+                                             arch),
+        instrumentation::build_v_and_b32(field, scalar_positive_inline_u32(1), field, arch),
+        multiply(padding, padding, field),
+        instrumentation::build_v_add_u32(result_vgpr, vector_source_vgpr(padding), result_vgpr,
+                                         arch));
+  }
+  sequence.append(instrumentation::build_v_add_u32(result_vgpr, groups[0] + 1u, result_vgpr, arch));
   return sequence.finish();
 }
 

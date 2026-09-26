@@ -35,7 +35,9 @@ bool access_can_plan_spill_over_guest_operands(const Request &request,
 
 uint16_t direct_scratch_count(const Request &request, const AccessResourceFacts &resource_facts) {
   if (resource_facts.wave_wide_tensor)
-    return 8u + 3u + 2u; // Probe temporaries, selected range/EXEC archive, owner/epoch.
+    // Stores also need a bounds predicate, a global-address pair, and 30
+    // descriptor-decoding temporaries, all before the owner/epoch pair.
+    return 8u + 3u + (resource_facts.tensor_store ? 33u : 0u) + 2u;
   const uint16_t base_scratch_count = request.device_conflict_check ? 7u : 5u;
   return static_cast<uint16_t>(base_scratch_count + 1u + resource_facts.address_scratch_vgpr_count +
                                (resource_facts.uses_private_epoch

@@ -362,11 +362,10 @@ AccessLoweringClassification classify_access_lowering(const ProgramSite &access,
     form.kind = AccessLoweringFormKind::TensorDescriptor;
     form.element_width_bits = 0u;
     form.address_vgpr.reset();
-    // Both modes observe descriptor-defined LDS writes. SuperCollider compares
-    // sampled global source values with LDS after the original DMA completes.
-    // Tensor stores still require a separate LDS-read observation mechanism.
-    replay = access.kind == LdsAccessKind::Write ? Reason::None : Reason::TargetUnavailable;
-    compare = replay;
+    // Default observes descriptor-defined LDS reads and writes. SuperCollider
+    // currently compares sampled global source values with completed LDS loads.
+    replay = Reason::None;
+    compare = access.kind == LdsAccessKind::Write ? Reason::None : Reason::TargetUnavailable;
   } else if (access.origin == AccessOrigin::DirectToLds) {
     form.kind = access.operands.address_vgpr ? AccessLoweringFormKind::DirectToLdsExplicitAddress
                                              : AccessLoweringFormKind::DirectToLdsLaneAddressed;

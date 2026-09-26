@@ -124,152 +124,165 @@ TEST(ConSanTensor, SuperColliderRejectsUnsafeSpillOrMisalignedExplicitScratch) {
 
 TEST(ConSanTensor, DefaultProbeExecutesDmaAndPublishesRuntimeWidthWithGuestStatePreserved) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
-  const auto tensor =
-      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
-                          {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 12, .vaddr2 = 124, .vaddr3 = 124});
-  std::vector<uint32_t> guest(tensor.begin(), tensor.end());
-  guest.push_back(build_s_endpgm(arch));
-  const auto bytes = make_gfx1250_code_object(guest, "tensor_default_emission");
-  const auto inventory = test_lower_consan(bytes, test_options());
-  ASSERT_EQ(inventory.program_inventory.access_sites().size(), 1u);
-  const auto &site = inventory.program_inventory.access_sites().front();
-  const Candidate candidate(site);
-  detail::AccessEmissionPlan plan;
-  plan.tensor_full_wave_resources = true;
-  plan.supercollider_report_buffer_address = 0x200000;
-  plan.report_generation = 1;
-  plan.exec_save_sgpr = 88;
-  plan.persistent_sgprs.set_owner_epoch(80, 81);
-  plan.owner_epoch_vgprs = {.owner = 31, .epoch = 32};
-  plan.dispatch_id.literal = 5;
-  plan.workgroup_sources.x = WorkgroupSource::scalar(82);
-  plan.scratch_vgpr = 20;
-  plan.base_scratch_vgpr_count = 8;
-  plan.scratch_vgpr_count = 13;
-  plan.watchpoints_offset = 0x1000;
-  plan.causal_windows_offset = 0x2000;
-  plan.pending_acquires_offset = 0x3000;
-  plan.pending_acquire_owner_bank_count = 1;
-  std::vector<std::string> errors;
-  uint32_t guest_offset = 0, guest_size = 0;
-  const auto probe = detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch,
-                                                           errors, &guest_offset, &guest_size);
-  ASSERT_TRUE(probe) << testing::PrintToString(errors);
-  EXPECT_EQ(guest_size, 3u);
-  ASSERT_LE(guest_offset / 4 + guest_size, probe->size());
-  EXPECT_TRUE(std::equal(tensor.begin(), tensor.end(), probe->begin() + guest_offset / 4));
-  SpillManager manager(0, 256);
-  const auto spill = build_vgpr_spill_sequence(manager, 20, 13, arch);
-  ASSERT_TRUE(spill);
-  const auto full_spill = detail::tensor_full_wave_spill(*spill, 96, arch);
-  ASSERT_TRUE(full_spill);
-  auto words = full_spill->save_words;
-  words.insert(words.end(), probe->begin(), probe->end());
-  words.insert(words.end(), full_spill->restore_words.begin(), full_spill->restore_words.end());
-  for (const auto [active, global_in_bounds, atomic_barrier] :
-       {std::array<bool, 3>{true, true, false}, std::array<bool, 3>{false, true, false},
-        std::array<bool, 3>{true, false, false}, std::array<bool, 3>{true, true, true},
-        std::array<bool, 3>{false, true, true}}) {
-    for (uint32_t size_log2 = 0; size_log2 < 4; ++size_log2) {
-      for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
-        SCOPED_TRACE(atomic_barrier);
-        SCOPED_TRACE(global_in_bounds);
-        SCOPED_TRACE(active);
-        SCOPED_TRACE(size_log2);
-        SCOPED_TRACE(exec);
-        amdgpu::GpuMemory memory("tensor_probe_mem");
-        amdgpu::L2Cache l2("tensor_probe_l2");
-        l2.set_backing_memory(&memory);
-        amdgpu::ComputeUnitCore::Config config{};
-        config.arch = arch;
-        config.num_wf_slots = 1;
-        config.sgprs_per_wf = 106;
-        config.vgprs_per_wf = 64;
-        config.lds_size_kb = 4;
-        auto cu = amdgpu::ComputeUnitCore::create("tensor_probe", config, &memory, &l2);
-        ASSERT_NE(cu, nullptr);
-        auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
-        ASSERT_NE(wave, nullptr);
-        const auto lds_base = cu->allocate_lds(4096);
-        ASSERT_NE(lds_base, UINT32_MAX);
-        wave->set_lds_base(lds_base);
-        wave->set_scratch_base(0x400000);
-        wave->set_scratch_lane_size(256);
-        const auto sb = wave->sgpr_alloc().base;
-        const auto vb = wave->vgpr_alloc().base;
-        cu->write_sgpr(sb, active ? 1u : 0u);
-        cu->write_sgpr(sb + 1, 0);
-        cu->write_sgpr(sb + 2, 0x100000);
-        cu->write_sgpr(sb + 3, 0x80000000u);
-        cu->write_sgpr(sb + 12, (size_log2 << 16) | (atomic_barrier ? 1u << 18 : 0u));
-        cu->write_sgpr(sb + 13,
-                       (global_in_bounds ? 16u << 16 : 0u) | (atomic_barrier ? 512u >> 3 : 0u));
-        cu->write_sgpr(sb + 14, 0);
-        cu->write_sgpr(sb + 15, 16u << 16);
-        for (uint32_t reg = 16; reg < 20; ++reg)
-          cu->write_sgpr(sb + reg, 0);
-        cu->lds().write64(wave->lds_base() + 512, 0);
-        cu->write_sgpr(sb + 80, 2);
-        cu->write_sgpr(sb + 81, 3);
-        cu->write_sgpr(sb + 82, 4);
-        for (uint32_t byte = 0; byte < (16u << size_log2); ++byte) {
-          memory.write8(0x100000 + byte, static_cast<uint8_t>(byte + 1));
-          cu->lds().write8(wave->lds_base() + byte, 0x5a);
+  for (bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    const auto tensor = cdna5::build_vimage(
+        store ? cdna5::kTensorStoreFromLdsVimage : cdna5::kTensorLoadToLdsVimage,
+        {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 12, .vaddr2 = 124, .vaddr3 = 124});
+    std::vector<uint32_t> guest(tensor.begin(), tensor.end());
+    guest.push_back(build_s_endpgm(arch));
+    const auto bytes = make_gfx1250_code_object(guest, "tensor_default_emission");
+    const auto inventory = test_lower_consan(bytes, test_options());
+    ASSERT_EQ(inventory.program_inventory.access_sites().size(), 1u);
+    const auto &site = inventory.program_inventory.access_sites().front();
+    const Candidate candidate(site);
+    detail::AccessEmissionPlan plan;
+    plan.tensor_full_wave_resources = true;
+    plan.supercollider_report_buffer_address = 0x200000;
+    plan.report_generation = 1;
+    plan.exec_save_sgpr = 88;
+    plan.persistent_sgprs.set_owner_epoch(80, 81);
+    plan.owner_epoch_vgprs = store ? OwnerEpochVgprSources{.owner = 64, .epoch = 65}
+                                   : OwnerEpochVgprSources{.owner = 31, .epoch = 32};
+    plan.dispatch_id.literal = 5;
+    plan.workgroup_sources.x = WorkgroupSource::scalar(82);
+    plan.scratch_vgpr = 20;
+    plan.base_scratch_vgpr_count = 8;
+    plan.scratch_vgpr_count = store ? 46 : 13;
+    plan.watchpoints_offset = 0x1000;
+    plan.causal_windows_offset = 0x2000;
+    plan.pending_acquires_offset = 0x3000;
+    plan.pending_acquire_owner_bank_count = 1;
+    std::vector<std::string> errors;
+    uint32_t guest_offset = 0, guest_size = 0;
+    const auto probe = detail::build_direct_watchpoint_words(
+        bytes, candidate, 0, plan, nullptr, arch, errors, &guest_offset, &guest_size);
+    ASSERT_TRUE(probe) << testing::PrintToString(errors);
+    EXPECT_EQ(guest_size, 3u);
+    ASSERT_LE(guest_offset / 4 + guest_size, probe->size());
+    EXPECT_TRUE(std::equal(tensor.begin(), tensor.end(), probe->begin() + guest_offset / 4));
+    SpillManager manager(0, 256);
+    const auto spill = build_vgpr_spill_sequence(manager, 20, plan.scratch_vgpr_count, arch);
+    ASSERT_TRUE(spill);
+    const auto full_spill = detail::tensor_full_wave_spill(*spill, 96, arch);
+    ASSERT_TRUE(full_spill);
+    auto words = full_spill->save_words;
+    words.insert(words.end(), probe->begin(), probe->end());
+    words.insert(words.end(), full_spill->restore_words.begin(), full_spill->restore_words.end());
+    for (const auto [active, global_in_bounds, atomic_barrier] :
+         {std::array<bool, 3>{true, true, false}, std::array<bool, 3>{false, true, false},
+          std::array<bool, 3>{true, false, false}, std::array<bool, 3>{true, true, true},
+          std::array<bool, 3>{false, true, true}}) {
+      for (uint32_t size_log2 = 0; size_log2 < 4; ++size_log2) {
+        for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+          SCOPED_TRACE(atomic_barrier);
+          SCOPED_TRACE(global_in_bounds);
+          SCOPED_TRACE(active);
+          SCOPED_TRACE(size_log2);
+          SCOPED_TRACE(exec);
+          amdgpu::GpuMemory memory("tensor_probe_mem");
+          amdgpu::L2Cache l2("tensor_probe_l2");
+          l2.set_backing_memory(&memory);
+          amdgpu::ComputeUnitCore::Config config{};
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 106;
+          config.vgprs_per_wf = 96;
+          config.lds_size_kb = 4;
+          auto cu = amdgpu::ComputeUnitCore::create("tensor_probe", config, &memory, &l2);
+          ASSERT_NE(cu, nullptr);
+          auto *wave = cu->dispatch_wf(0, 0, 106, 96, 32);
+          ASSERT_NE(wave, nullptr);
+          const auto lds_base = cu->allocate_lds(4096);
+          ASSERT_NE(lds_base, UINT32_MAX);
+          wave->set_lds_base(lds_base);
+          wave->set_scratch_base(0x400000);
+          wave->set_scratch_lane_size(512);
+          const auto sb = wave->sgpr_alloc().base;
+          const auto vb = wave->vgpr_alloc().base;
+          cu->write_sgpr(sb, active ? 1u : 0u);
+          cu->write_sgpr(sb + 1, 0);
+          cu->write_sgpr(sb + 2, 0x100000);
+          cu->write_sgpr(sb + 3, 0x80000000u);
+          cu->write_sgpr(sb + 12, (size_log2 << 16) | (atomic_barrier ? 1u << 18 : 0u));
+          cu->write_sgpr(sb + 13,
+                         (global_in_bounds ? 7u << 16 : 0u) | (atomic_barrier ? 512u >> 3 : 0u));
+          cu->write_sgpr(sb + 14, 0);
+          cu->write_sgpr(sb + 15, 16u << 16);
+          for (uint32_t reg = 16; reg < 20; ++reg)
+            cu->write_sgpr(sb + reg, 0);
+          cu->lds().write64(wave->lds_base() + 512, 0);
+          cu->write_sgpr(sb + 80, 2);
+          cu->write_sgpr(sb + 81, 3);
+          cu->write_sgpr(sb + 82, 4);
+          for (uint32_t byte = 0; byte < (16u << size_log2); ++byte) {
+            memory.write8(0x100000 + byte, static_cast<uint8_t>(byte + 1));
+            cu->lds().write8(wave->lds_base() + byte, 0x5a);
+          }
+          for (uint32_t byte = 0; byte < 0x4000; byte += 4)
+            memory.write32(0x200000 + byte, 0);
+          for (uint32_t reg = 20; reg < 20u + plan.scratch_vgpr_count; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(vb + reg, lane, 0xaaaa0000u + reg * 32 + lane);
+          for (size_t i = 0; i < words.size(); ++i)
+            memory.write32(i * 4, words[i]);
+          wave->set_exec(exec);
+          wave->set_vcc(0x12345678);
+          wave->write_scc(true);
+          wave->pc = 0;
+          size_t steps = 0;
+          while (wave->pc < words.size() * 4 && steps++ < words.size() * 100)
+            cu->step();
+          cu->flush_all();
+          ASSERT_EQ(wave->pc, words.size() * 4);
+          const auto entry = decode_watchpoint_entry(memory.read64(0x201000));
+          EXPECT_EQ(entry.valid, active && !atomic_barrier && (!store || global_in_bounds));
+          if (entry.valid) {
+            EXPECT_EQ(entry.kind, store ? ShadowAccessKind::Read : ShadowAccessKind::Write);
+            EXPECT_EQ(entry.owner_id, 2u);
+            EXPECT_EQ(entry.epoch, 3u);
+            EXPECT_EQ(entry.byte_count, 1u << size_log2);
+            EXPECT_LT(entry.start_byte, (store ? 7u : 16u) << size_log2);
+            EXPECT_EQ(entry.start_byte % (1u << size_log2), 0u);
+          }
+          EXPECT_EQ(memory.read32(0x200000 + offsetof(ReportHeader, unsupported_sync_count)) != 0,
+                    active && atomic_barrier);
+          EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512) != 0, active && atomic_barrier);
+          for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
+            EXPECT_EQ(cu->lds().read8(wave->lds_base() + byte),
+                      (active && !store) ? ((global_in_bounds && byte < (7u << size_log2))
+                                                ? static_cast<uint8_t>(byte + 1)
+                                                : uint8_t{0})
+                                         : uint8_t{0x5a});
+          if (store) {
+            for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
+              EXPECT_EQ(memory.read8(0x100000 + byte),
+                        active && global_in_bounds && byte < (7u << size_log2)
+                            ? uint8_t{0x5a}
+                            : static_cast<uint8_t>(byte + 1));
+          }
+          EXPECT_EQ(wave->exec(), exec);
+          EXPECT_EQ(wave->vcc(), 0x12345678u);
+          EXPECT_TRUE(wave->read_scc());
+          for (uint32_t reg = 20; reg < 20u + plan.scratch_vgpr_count; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xaaaa0000u + reg * 32 + lane);
+          EXPECT_EQ(cu->read_sgpr(sb), active ? 1u : 0u);
+          EXPECT_EQ(cu->read_sgpr(sb + 12), (size_log2 << 16) | (atomic_barrier ? 1u << 18 : 0u));
+          EXPECT_EQ(cu->read_sgpr(sb + 80), 2u);
+          EXPECT_EQ(cu->read_sgpr(sb + 81), 3u);
+          wave->halt();
         }
-        for (uint32_t byte = 0; byte < 0x4000; byte += 4)
-          memory.write32(0x200000 + byte, 0);
-        for (uint32_t reg = 20; reg < 33; ++reg)
-          for (uint32_t lane = 0; lane < 32; ++lane)
-            cu->write_vgpr(vb + reg, lane, 0xaaaa0000u + reg * 32 + lane);
-        for (size_t i = 0; i < words.size(); ++i)
-          memory.write32(i * 4, words[i]);
-        wave->set_exec(exec);
-        wave->set_vcc(0x12345678);
-        wave->write_scc(true);
-        wave->pc = 0;
-        size_t steps = 0;
-        while (wave->pc < words.size() * 4 && steps++ < words.size() * 100)
-          cu->step();
-        cu->flush_all();
-        ASSERT_EQ(wave->pc, words.size() * 4);
-        const auto entry = decode_watchpoint_entry(memory.read64(0x201000));
-        EXPECT_EQ(entry.valid, active && !atomic_barrier);
-        if (entry.valid) {
-          EXPECT_EQ(entry.kind, ShadowAccessKind::Write);
-          EXPECT_EQ(entry.owner_id, 2u);
-          EXPECT_EQ(entry.epoch, 3u);
-          EXPECT_EQ(entry.byte_count, 1u << size_log2);
-          EXPECT_LT(entry.start_byte, 16u << size_log2);
-          EXPECT_EQ(entry.start_byte % (1u << size_log2), 0u);
-        }
-        EXPECT_EQ(memory.read32(0x200000 + offsetof(ReportHeader, unsupported_sync_count)) != 0,
-                  active && atomic_barrier);
-        EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512) != 0, active && atomic_barrier);
-        for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
-          EXPECT_EQ(cu->lds().read8(wave->lds_base() + byte),
-                    active ? (global_in_bounds ? static_cast<uint8_t>(byte + 1) : uint8_t{0})
-                           : uint8_t{0x5a});
-        EXPECT_EQ(wave->exec(), exec);
-        EXPECT_EQ(wave->vcc(), 0x12345678u);
-        EXPECT_TRUE(wave->read_scc());
-        for (uint32_t reg = 20; reg < 33; ++reg)
-          for (uint32_t lane = 0; lane < 32; ++lane)
-            EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xaaaa0000u + reg * 32 + lane);
-        EXPECT_EQ(cu->read_sgpr(sb), active ? 1u : 0u);
-        EXPECT_EQ(cu->read_sgpr(sb + 12), (size_log2 << 16) | (atomic_barrier ? 1u << 18 : 0u));
-        EXPECT_EQ(cu->read_sgpr(sb + 80), 2u);
-        EXPECT_EQ(cu->read_sgpr(sb + 81), 3u);
-        wave->halt();
       }
     }
+    plan.tensor_full_wave_resources = false;
+    EXPECT_FALSE(
+        detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
+    plan.tensor_full_wave_resources = true;
+    plan.workgroup_sources.x = WorkgroupSource::vector(1);
+    EXPECT_FALSE(
+        detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
   }
-  plan.tensor_full_wave_resources = false;
-  EXPECT_FALSE(
-      detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
-  plan.tensor_full_wave_resources = true;
-  plan.workgroup_sources.x = WorkgroupSource::vector(1);
-  EXPECT_FALSE(
-      detail::build_direct_watchpoint_words(bytes, candidate, 0, plan, nullptr, arch, errors));
 }
 
 TEST(ConSanTensor, TensorOwnerBarrierAdvancesEpochWithEmptyExecAndPreservesAllLanes) {
@@ -627,10 +640,9 @@ TEST(ConSanTensor, SelectedAddressesMatchEnumeratedDenseGatherAndRepeatedTransfe
     site.operands.tensor_descriptor_sgprs =
         std::array<uint16_t, 4>{8, 20, uint16_t(c.null2 ? 124 : 40), uint16_t(c.null3 ? 124 : 50)};
     std::vector<uint32_t> words;
+    ASSERT_TRUE(detail::append_select_tensor_element(words, site, 10, 11, 20, 21, 30, config.arch));
     ASSERT_TRUE(
-        detail::append_select_tensor_load_element(words, site, 10, 11, 20, 21, 30, config.arch));
-    ASSERT_TRUE(
-        detail::append_materialize_tensor_load_lds_address(words, site, 20, 22, 35, config.arch));
+        detail::append_materialize_tensor_lds_address(words, site, 20, 22, 35, config.arch));
     for (size_t i = 0; i < words.size(); ++i)
       memory.write32(i * 4, words[i]);
     const auto desc = tdm::parse_descriptor(c.d0, c.d1, c.null2 ? std::array<uint32_t, 4>{} : c.d2,
@@ -952,7 +964,7 @@ TEST(ConSanTensor, IterationOriginsRejectAliasesAndInvalidDescriptorsWithoutEmis
   EXPECT_EQ(words, prefix);
 }
 
-TEST(ConSanTensor, GlobalSourcesMatchFinalDenseGatherAndRepeatedDmaWrites) {
+TEST(ConSanTensor, GlobalAddressesMatchDenseGatherAndRepeatedDmaInBothDirections) {
   const auto put = [](std::span<uint32_t> words, unsigned offset, unsigned width, uint64_t value) {
     ASSERT_LE(width, 64u);
     ASSERT_LE(static_cast<uint64_t>(offset) + width, words.size() * 32u);
@@ -1031,126 +1043,132 @@ TEST(ConSanTensor, GlobalSourcesMatchFinalDenseGatherAndRepeatedDmaWrites) {
   reordered.d2[3] = 2u << 16;
   cases.push_back(reordered);
 
-  for (size_t case_index = 0; case_index < cases.size(); ++case_index) {
-    for (unsigned size_log2 = 0; size_log2 < 4; ++size_log2) {
-      SCOPED_TRACE(case_index);
-      SCOPED_TRACE(size_log2);
-      auto c = cases[case_index];
-      put(c.d1, 16, 2, size_log2);
-      const auto desc =
-          tdm::parse_descriptor(c.d0, c.d1, c.null2 ? std::array<uint32_t, 4>{} : c.d2,
-                                c.null3 ? std::array<uint32_t, 4>{} : c.d3);
-      const tdm::TensorDmaLayout layout(desc);
-      struct Element {
-        uint64_t global;
-        uint64_t lds;
-        bool in_bounds;
-      };
-      std::vector<Element> reference;
-      if (desc.active())
-        tdm::for_each_tensor_element(desc, layout, [&](uint64_t global, uint64_t lds, bool bounds) {
-          reference.push_back({desc.global_base + (global << size_log2), lds, bounds});
-        });
-      const uint32_t iterations = desc.iterate ? desc.iteration_count : 1;
-      const uint32_t count = reference.size() / iterations;
-      amdgpu::GpuMemory memory("tensor_source_mem");
-      amdgpu::L2Cache l2("tensor_source_l2");
-      l2.set_backing_memory(&memory);
-      amdgpu::ComputeUnitCore::Config config{};
-      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
-      config.num_wf_slots = 1;
-      config.sgprs_per_wf = 106;
-      config.vgprs_per_wf = 64;
-      config.lds_size_kb = 4;
-      auto cu = amdgpu::ComputeUnitCore::create("tensor_source", config, &memory, &l2);
-      ASSERT_NE(cu, nullptr);
-      auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
-      ASSERT_NE(wave, nullptr);
-      const auto vb = wave->vgpr_alloc().base, sb = wave->sgpr_alloc().base;
-      for (uint32_t reg = 0; reg < 106; ++reg)
-        cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
-      const auto write_group = [&](uint32_t base, const auto &values) {
-        for (size_t i = 0; i < values.size(); ++i)
-          cu->write_sgpr(sb + base + i, values[i]);
-      };
-      write_group(8, c.d0);
-      write_group(20, c.d1);
-      write_group(40, c.d2);
-      write_group(50, c.d3);
-      std::array<uint32_t, 106> scalar_before{};
-      for (uint32_t reg = 0; reg < 106; ++reg)
-        scalar_before[reg] = cu->read_sgpr(sb + reg);
-      ProgramSite site;
-      site.origin = AccessOrigin::TensorLds;
-      site.kind = LdsAccessKind::Write;
-      site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{
-          8, 20, uint16_t(c.null2 ? 124 : 40), uint16_t(c.null3 ? 124 : 50)};
-      std::vector<uint32_t> words;
-      ASSERT_TRUE(
-          detail::append_select_tensor_load_element(words, site, 10, 11, 12, 13, 20, config.arch));
-      ASSERT_TRUE(detail::append_materialize_tensor_load_source(words, site, 12, 13, 14, 16, 32,
-                                                                config.arch));
-      for (size_t i = 0; i < words.size(); ++i)
-        memory.write32(i * 4, words[i]);
-      for (uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
-        std::array<uint32_t, 32> hashes{}, iteration_hashes{};
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          hashes[lane] = lane == 31 ? UINT32_MAX : lane * 0x9e3779b9u;
-          iteration_hashes[lane] = lane % 2 ? UINT32_MAX : lane * 0x85ebca6bu;
-          for (uint32_t reg = 0; reg < 64; ++reg)
-            cu->write_vgpr(vb + reg, lane, 0xabc00000u + reg * 64u + lane);
-          cu->write_vgpr(vb + 10, lane, hashes[lane]);
-          cu->write_vgpr(vb + 11, lane, iteration_hashes[lane]);
-        }
-        wave->pc = 0;
-        wave->set_exec(exec);
-        wave->write_scc(case_index % 2 != 0);
-        size_t steps = 0;
-        while (wave->pc < words.size() * 4) {
-          ASSERT_LT(steps++, words.size() * 100);
-          cu->step();
-        }
-        cu->flush_all();
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          const bool active = (exec >> lane) & 1u;
-          for (uint32_t reg = 0; reg < 64; ++reg) {
-            if (active &&
-                ((reg >= 12 && reg <= 16) || (reg >= 20 && reg < 25) || (reg >= 32 && reg < 62)))
-              continue;
-            uint32_t expected = 0xabc00000u + reg * 64u + lane;
-            if (reg == 10)
-              expected = hashes[lane];
-            if (reg == 11)
-              expected = iteration_hashes[lane];
-            EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected);
-          }
-          if (!active)
-            continue;
-          EXPECT_EQ(cu->read_vgpr(vb + 13, lane), count);
-          if (!count) {
-            EXPECT_EQ(cu->read_vgpr(vb + 16, lane), 0u);
-            continue;
-          }
-          const size_t selected = (uint64_t{hashes[lane]} * count) >> 32;
-          const size_t iteration = (uint64_t{iteration_hashes[lane]} * iterations) >> 32;
-          const uint64_t lds = reference[iteration * count + selected].lds;
-          EXPECT_EQ(cu->read_vgpr(vb + 12, lane), lds);
-          auto last = std::find_if(reference.rbegin(), reference.rend(),
-                                   [&](const Element &element) { return element.lds == lds; });
-          ASSERT_NE(last, reference.rend());
-          EXPECT_EQ(cu->read_vgpr(vb + 16, lane), last->in_bounds ? 1u : 0u);
-          if (last->in_bounds) {
-            const uint64_t actual =
-                cu->read_vgpr(vb + 14, lane) | (uint64_t{cu->read_vgpr(vb + 15, lane)} << 32);
-            EXPECT_EQ(actual, last->global) << "lane=" << lane << " lds=" << lds;
-          }
-        }
-        EXPECT_EQ(wave->exec(), exec);
-        EXPECT_EQ(wave->read_scc(), case_index % 2 != 0);
+  for (bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    for (size_t case_index = 0; case_index < cases.size(); ++case_index) {
+      for (unsigned size_log2 = 0; size_log2 < 4; ++size_log2) {
+        SCOPED_TRACE(case_index);
+        SCOPED_TRACE(size_log2);
+        auto c = cases[case_index];
+        put(c.d1, 16, 2, size_log2);
+        const auto desc =
+            tdm::parse_descriptor(c.d0, c.d1, c.null2 ? std::array<uint32_t, 4>{} : c.d2,
+                                  c.null3 ? std::array<uint32_t, 4>{} : c.d3);
+        const tdm::TensorDmaLayout layout(desc);
+        struct Element {
+          uint64_t global;
+          uint64_t lds;
+          bool in_bounds;
+        };
+        std::vector<Element> reference;
+        if (desc.active())
+          tdm::for_each_tensor_element(
+              desc, layout, [&](uint64_t global, uint64_t lds, bool bounds) {
+                reference.push_back({desc.global_base + (global << size_log2), lds, bounds});
+              });
+        const uint32_t iterations = desc.iterate ? desc.iteration_count : 1;
+        const uint32_t count = reference.size() / iterations;
+        amdgpu::GpuMemory memory("tensor_source_mem");
+        amdgpu::L2Cache l2("tensor_source_l2");
+        l2.set_backing_memory(&memory);
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 106;
+        config.vgprs_per_wf = 64;
+        config.lds_size_kb = 4;
+        auto cu = amdgpu::ComputeUnitCore::create("tensor_source", config, &memory, &l2);
+        ASSERT_NE(cu, nullptr);
+        auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+        ASSERT_NE(wave, nullptr);
+        const auto vb = wave->vgpr_alloc().base, sb = wave->sgpr_alloc().base;
         for (uint32_t reg = 0; reg < 106; ++reg)
-          EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]);
+          cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
+        const auto write_group = [&](uint32_t base, const auto &values) {
+          for (size_t i = 0; i < values.size(); ++i)
+            cu->write_sgpr(sb + base + i, values[i]);
+        };
+        write_group(8, c.d0);
+        write_group(20, c.d1);
+        write_group(40, c.d2);
+        write_group(50, c.d3);
+        std::array<uint32_t, 106> scalar_before{};
+        for (uint32_t reg = 0; reg < 106; ++reg)
+          scalar_before[reg] = cu->read_sgpr(sb + reg);
+        ProgramSite site;
+        site.origin = AccessOrigin::TensorLds;
+        site.kind = store ? LdsAccessKind::Read : LdsAccessKind::Write;
+        site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{
+            8, 20, uint16_t(c.null2 ? 124 : 40), uint16_t(c.null3 ? 124 : 50)};
+        std::vector<uint32_t> words;
+        ASSERT_TRUE(
+            detail::append_select_tensor_element(words, site, 10, 11, 12, 13, 20, config.arch));
+        ASSERT_TRUE(detail::append_materialize_tensor_global_address(
+            words, site, 12, 13, 14, 16, 32, config.arch,
+            store ? std::optional<uint16_t>{11} : std::nullopt));
+        for (size_t i = 0; i < words.size(); ++i)
+          memory.write32(i * 4, words[i]);
+        for (uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
+          std::array<uint32_t, 32> hashes{}, iteration_hashes{};
+          for (uint32_t lane = 0; lane < 32; ++lane) {
+            hashes[lane] = lane == 31 ? UINT32_MAX : lane * 0x9e3779b9u;
+            iteration_hashes[lane] = lane % 2 ? UINT32_MAX : lane * 0x85ebca6bu;
+            for (uint32_t reg = 0; reg < 64; ++reg)
+              cu->write_vgpr(vb + reg, lane, 0xabc00000u + reg * 64u + lane);
+            cu->write_vgpr(vb + 10, lane, hashes[lane]);
+            cu->write_vgpr(vb + 11, lane, iteration_hashes[lane]);
+          }
+          wave->pc = 0;
+          wave->set_exec(exec);
+          wave->write_scc(case_index % 2 != 0);
+          size_t steps = 0;
+          while (wave->pc < words.size() * 4) {
+            ASSERT_LT(steps++, words.size() * 100);
+            cu->step();
+          }
+          cu->flush_all();
+          for (uint32_t lane = 0; lane < 32; ++lane) {
+            const bool active = (exec >> lane) & 1u;
+            for (uint32_t reg = 0; reg < 64; ++reg) {
+              if (active &&
+                  ((reg >= 12 && reg <= 16) || (reg >= 20 && reg < 25) || (reg >= 32 && reg < 62)))
+                continue;
+              uint32_t expected = 0xabc00000u + reg * 64u + lane;
+              if (reg == 10)
+                expected = hashes[lane];
+              if (reg == 11)
+                expected = iteration_hashes[lane];
+              EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected);
+            }
+            if (!active)
+              continue;
+            EXPECT_EQ(cu->read_vgpr(vb + 13, lane), count);
+            if (!count) {
+              EXPECT_EQ(cu->read_vgpr(vb + 16, lane), 0u);
+              continue;
+            }
+            const size_t selected = (uint64_t{hashes[lane]} * count) >> 32;
+            const size_t iteration = (uint64_t{iteration_hashes[lane]} * iterations) >> 32;
+            const uint64_t lds = reference[iteration * count + selected].lds;
+            EXPECT_EQ(cu->read_vgpr(vb + 12, lane), lds);
+            auto last = std::find_if(reference.rbegin(), reference.rend(),
+                                     [&](const Element &element) { return element.lds == lds; });
+            ASSERT_NE(last, reference.rend());
+            const auto &expected = store ? reference[iteration * count + selected] : *last;
+            EXPECT_EQ(cu->read_vgpr(vb + 16, lane), expected.in_bounds ? 1u : 0u);
+            if (expected.in_bounds) {
+              const uint64_t actual =
+                  cu->read_vgpr(vb + 14, lane) | (uint64_t{cu->read_vgpr(vb + 15, lane)} << 32);
+              EXPECT_EQ(actual, expected.global) << "lane=" << lane << " lds=" << lds;
+            }
+          }
+          EXPECT_EQ(wave->exec(), exec);
+          EXPECT_EQ(wave->read_scc(), case_index % 2 != 0);
+          for (uint32_t reg = 0; reg < 106; ++reg)
+            EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]);
+        }
+        wave->halt();
       }
-      wave->halt();
     }
   }
 }
@@ -1169,8 +1187,17 @@ TEST(ConSanTensor, GlobalSourceRejectsAliasesWithoutEmission) {
                                              {12, 13, 14, 32, 32},
                                              {12, 13, 14, 16, 227},
                                              {12, 13, 255, 16, 32}}) {
-    EXPECT_FALSE(detail::append_materialize_tensor_load_source(
+    EXPECT_FALSE(detail::append_materialize_tensor_global_address(
         words, site, regs[0], regs[1], regs[2], regs[3], regs[4], ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_EQ(words, prefix);
+  }
+  site.kind = LdsAccessKind::Read;
+  EXPECT_FALSE(detail::append_materialize_tensor_global_address(words, site, 12, 13, 14, 16, 32,
+                                                                ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(words, prefix);
+  for (uint16_t hash : {12u, 13u, 14u, 15u, 16u, 32u, 61u, 256u}) {
+    EXPECT_FALSE(detail::append_materialize_tensor_global_address(words, site, 12, 13, 14, 16, 32,
+                                                                  ROCJITSU_CODE_ARCH_CDNA5, hash));
     EXPECT_EQ(words, prefix);
   }
 }
@@ -1438,13 +1465,13 @@ TEST(ConSanTensor, RejectsDescriptorAndScratchAliasesBeforeEmission) {
                                              {30, 11, 20, 21, 30},
                                              {10, 11, 20, 34, 30},
                                              {256, 11, 20, 21, 30}}) {
-    EXPECT_FALSE(detail::append_select_tensor_load_element(
-        words, site, regs[0], regs[1], regs[2], regs[3], regs[4], ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_FALSE(detail::append_select_tensor_element(words, site, regs[0], regs[1], regs[2],
+                                                      regs[3], regs[4], ROCJITSU_CODE_ARCH_CDNA5));
     EXPECT_EQ(words, prefix);
   }
   site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 20, 103, 124};
-  EXPECT_FALSE(detail::append_select_tensor_load_element(words, site, 10, 11, 20, 21, 30,
-                                                         ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(detail::append_select_tensor_element(words, site, 10, 11, 20, 21, 30,
+                                                    ROCJITSU_CODE_ARCH_CDNA5));
   EXPECT_EQ(words, prefix);
 }
 } // namespace
