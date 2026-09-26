@@ -2653,3 +2653,12 @@ and both clients, with full 34,012-site access coverage and complete analysis
 (`run-2.log`). Its three large shapes are now running. The fresh untimed
 Default comparator baseline has independently passed all 650 cases and
 exported its matching replay manifest; the instrumented comparator is live.
+
+A matching untimed SuperCollider qualification is also running as
+`sgemm-bank-fixed-untimed-sc-qualification.py`. It reuses the successfully
+exported untimed baseline manifest, preserving its inputs and controls, and
+requires its own complete clean before eight fault trials. The profile uses
+`sleep_wave=15` and the full allowlist; its 6,000-second per-run budget and
+health checks match the new Default campaign. The full six-shape clean
+remains a separate required gate; the old timed 0/8 result is not substituted
+for fresh untimed fault evidence. All campaigns share the 40 GiB cap.
