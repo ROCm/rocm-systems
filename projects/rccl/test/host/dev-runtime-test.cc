@@ -2316,8 +2316,8 @@ TEST_F(SymMemoryObtainRegisterTest, LinksOntoMemHeadAndReportsOut) {
   EXPECT_EQ(comm->devrState.memHead, obtained);
   EXPECT_EQ(obtained->next, &existing);
   // `existing` is a stack object, so drop it from the chain before TearDown.
-  // memHead must keep pointing at `obtained`: symMemoryDestroy walks the list
-  // to unlink and dereferences null if its argument is not on it.
+  // memHead must keep pointing at `obtained` so TearDown destroys that object;
+  // a missing entry is left alone, not dereferenced.
   obtained->next = nullptr;
 }
 
@@ -2484,6 +2484,65 @@ TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
 
   symMemoryDestroy(comm, mem);
 
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+TEST_F(SymMemoryObtainTest, DestroyIsIdempotent) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  // Unmap is skipped while lsaFlatBase is null. Point it at a sentinel so the
+  // single LSA rank (one segment) is actually unmapped.
+  comm->devrState.lsaFlatBase = reinterpret_cast<void*>(0x40000000);
+
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  const int releases = release.calls;
+  const int unmaps = unmap.calls;
+  EXPECT_EQ(releases, 1);  // one cuMemRelease, numSegments == 1
+  EXPECT_EQ(unmaps, 1);    // lsaSize == 1 and lsaNumSegments[0] == 1
+
+  // Second destroy must not walk off memHead or repeat unmap/release/free.
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(release.calls, releases);
+  EXPECT_EQ(unmap.calls, unmaps);
+}
+
+TEST_F(SymMemoryObtainTest, DestroyIsIdempotentWhileAnotherMemoryIsLinked) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  struct ncclDevrMemory* first = nullptr;
+  struct ncclDevrMemory* second = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, reinterpret_cast<void*>(0x100000),
+                            /*size=*/4096, /*winFlags=*/0, &first),
+            ncclSuccess);
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, reinterpret_cast<void*>(0x200000),
+                            /*size=*/4096, /*winFlags=*/0, &second),
+            ncclSuccess);
+  ASSERT_EQ(comm->devrState.memHead, second);
+  ASSERT_EQ(second->next, first);
+
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+
+  symMemoryDestroy(comm, first);
+  EXPECT_EQ(comm->devrState.memHead, second);
+  EXPECT_EQ(second->next, nullptr);
+  const int releases = release.calls;
+  EXPECT_EQ(releases, 1);  // one cuMemRelease for the destroyed memory's single segment
+
+  symMemoryDestroy(comm, first);
+  EXPECT_EQ(comm->devrState.memHead, second);
+  EXPECT_EQ(second->next, nullptr);
+  EXPECT_EQ(release.calls, releases);
+
+  symMemoryDestroy(comm, second);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
@@ -2828,8 +2887,9 @@ TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing)
 // allocations, drop it from the sorted list and the global window map.
 //
 // The fixture drives the real lifecycle -- obtain memory, create a window --
-// rather than hand-building state, because symMemoryDestroy walks memHead to
-// unlink and faults if its argument is not on the list.
+// rather than hand-building state. symMemoryDestroy returns without touching
+// a pointer that is not on memHead, so a hand-built window would not exercise
+// the free path.
 
 class SymWindowDestroyTest : public DevRuntimeMicroTest {
 protected:
@@ -3583,24 +3643,45 @@ TEST_F(DevrWindowRegisterInGroupSymTest, WithoutCollSymmetricFlag_SkipsSymKernel
   EXPECT_EQ(symk.calls, 0);
 }
 
+// Branch: stream creation fails after symMemoryObtain. The fail label must
+// destroy that memory and release the local registration, and must not
+// destroy a stream that was never created.
+TEST_F(DevrWindowRegisterInGroupSymTest, StreamCreateFails_UnwindsObtainedMemory) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook create(g_hipStreamCreateWithFlags,
+                    [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(create.calls, 1);
+  EXPECT_EQ(destroy.calls, 0);
+  EXPECT_EQ(dereg.calls, 1);
+}
+
 // Branch: the deepest rollback. cudaStreamSynchronize is the only checked call
 // that jumps to fail_locReg_memHandle_mem_stream_win, so failing it is what
-// drives symWindowDestroy and the labels below it.
+// drives symWindowDestroy and the labels below it. Window destroy already
+// frees the backing memory; fallthrough must not unmap/release it again.
 TEST_F(DevrWindowRegisterInGroupSymTest, StreamSyncFails_UnwindsTheCreatedWindow) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(out, nullptr);                          // the caller's handle is cleared
   EXPECT_EQ(comm->devrState.winSortedCount, 0);     // and the window left no trace
-
-  // dereg.calls is deliberately not asserted. This label deregisters the local
-  // registration twice: symWindowDestroy releases win->localRegHandle, which
-  // symWindowCreate set to the very handle this function then releases again at
-  // fail_locReg. See AICOMRCCL-2180 finding 17. Pinning either count would lock
-  // that in, so only the unwind's observable outcome is checked.
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(dereg.calls, 1);  // localReg transferred to the window; not deregistered twice
+  // One cuMemRelease from ncclCuMemGetAddressRange's sysmem probe, plus one from
+  // the window's backing-memory destroy. A second destroy of that memory would
+  // make this 3.
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: the closing barrier is NCCLCHECKGOTO'd at the same depth, so its
@@ -3609,12 +3690,15 @@ TEST_F(DevrWindowRegisterInGroupSymTest, ClosingBarrierFails_UnwindsTheCreatedWi
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook barrier(g_devrBootstrapBarrier, [](void*, int, int, int) { return ncclSystemError; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(out, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
-  // Same double-deregister as above (AICOMRCCL-2180 finding 17); not asserted.
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: the window-map insert is the last checked call before success.
@@ -3623,12 +3707,16 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MapInsertFails_UnwindsTheCreatedWindow)
   ScopedHook insert(g_devrIntruAddressMapInsert,
                     [](ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*) { return ncclSystemError; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(out, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
   EXPECT_EQ(insert.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: resolving the allocation fails, so nothing is registered.

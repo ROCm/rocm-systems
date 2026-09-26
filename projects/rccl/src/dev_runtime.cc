@@ -960,7 +960,10 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
   while (*memLink != nullptr && *memLink != mem) {
     memLink = &(*memLink)->next;
   }
-  // Idempotent: a window pair or finalize drain may already have destroyed this mem.
+  // Membership check before any field access. The caller's error-path
+  // fallthrough passes mem == nullptr, which already returned above. This
+  // guards an explicit second destroy of a stale pointer: do not walk off a
+  // drained memHead or repeat unmap/release/free.
   if (*memLink != mem) {
     return;
   }
@@ -1124,9 +1127,13 @@ static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vi
 
   NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret, remove_winSorted);
 
-  NCCLCHECKGOTO(ncclCommDeregister(comm, winHost->localRegHandle), ret, remove_winSorted);
-
 remove_winSorted:
+  // Every checked call above jumps here, then winHost is freed. Deregister
+  // first so those exits still release the registration the caller handed off.
+  {
+    ncclResult_t deregRet = ncclCommDeregister(comm, winHost->localRegHandle);
+    if (ret == ncclSuccess) ret = deregRet;
+  }
   {
     int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
                               reinterpret_cast<uintptr_t>(winHost->userPtr));
@@ -1470,12 +1477,13 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                 ret, fail_locReg_memHandle);
   memset(memHandles, 0, numSegments * sizeof(*memHandles)); // symMemoryObtain took our reference
 
-  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_locReg_memHandle_mem_stream);
 
   NCCLCHECKGOTO(symWindowCreate(comm, mem, memOffset, userPtr, userSize, winFlags, localRegHandle, outWinDev, &winHost,
                                 stream),
                 ret, fail_locReg_memHandle_mem_stream);
   mem = nullptr; // symWindowCreate took our reference
+  localRegHandle = nullptr; // window owns the registration; destroy will deregister it
 
   CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_locReg_memHandle_mem_stream_win);
 
@@ -1502,7 +1510,11 @@ fail_locReg_memHandle_mem_stream_win:
   *outWinDev = nullptr;
   CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
-  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  // Stream create jumps here before assigning stream. Destroying a null
+  // handle is the same call windowRegisterNonSym skips.
+  if (stream != nullptr) {
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  }
   symMemoryDestroy(comm, mem);
 fail_locReg_memHandle:
   for (int idx = 0; idx < numSegments; idx++) {
@@ -1512,7 +1524,7 @@ fail_locReg_memHandle:
   }
   free(memHandles);
 fail_locReg:
-  ncclCommDeregister(comm, localRegHandle);
+  if (localRegHandle != nullptr) ncclCommDeregister(comm, localRegHandle);
 fail:
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   *outWinDev = nullptr;
@@ -1976,8 +1988,10 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   return ret;
 
 fail_stream_mem_win:
-  symWindowDestroy(comm, win->vidmem, stream);
-  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  if (win != nullptr) {
+    symWindowDestroy(comm, win->vidmem, stream);
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  }
 fail_stream_mem:
   if (memHandle != 0x0) {
     CUCHECKIGNORE(cuMemRelease(memHandle));
