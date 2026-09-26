@@ -133,6 +133,11 @@ jobs:
           # build-step ordering regression that leaves it enabled fails here
           # rather than shipping a wheel that can silently load a system .so.
           ${{matrix.target.python-bin}} -c "import amdsmi.amdsmi_wrapper as w; assert not w._AMDSMI_ALLOW_SYSTEM_FALLBACK, 'wheel shipped with system fallback enabled'; print('fallback disabled OK')"
+          # A failed dlopen leaves import working: the wrapper installs a
+          # _MissingLibrary sentinel so doc tooling runs without ROCm. Assert on
+          # the resolved path, not just the sentinel, so an AMDSMI_LIB_OVERRIDE
+          # in the environment cannot satisfy this with some other library.
+          ${{matrix.target.python-bin}} -c "import os, amdsmi.amdsmi_wrapper as w; lib = w._libraries['libamd_smi.so']; assert not isinstance(lib, w._MissingLibrary), 'bundled libamd_smi_python.so failed to load: ' + str(lib._err); want = os.path.join(os.path.dirname(w.__file__), 'libamd_smi_python.so'); assert os.path.realpath(w._loaded_lib_path) == os.path.realpath(want), 'loaded ' + str(w._loaded_lib_path) + ', not the bundled ' + want; print('bundled library loaded OK:', w._loaded_lib_path)"
 
       # Not consumed by any downstream job; kept so a reviewer can download the
       # built wheel from a run. Named by commit SHA for traceability.
