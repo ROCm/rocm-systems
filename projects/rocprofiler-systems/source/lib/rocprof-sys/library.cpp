@@ -317,7 +317,7 @@ struct fini_bundle
     std::string as_string(bool _print_prefix = true) const
     {
         std::stringstream _ss;
-        if(_print_prefix && m_label.length() > 0)
+        if(_print_prefix && !m_label.empty())
         {
             _ss << m_label << " : ";
         }
