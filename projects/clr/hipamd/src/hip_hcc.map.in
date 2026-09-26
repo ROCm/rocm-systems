@@ -683,6 +683,7 @@ local:
 hip_7.15 {
 global:
     hipMemGetDefaultMemPool;
+    hipExtMemcpyBatchAsync;
 local:
     *;
 } hip_7.14;
