@@ -48,7 +48,7 @@ namespace
 // parallel ctest -- skip it. GetGpuId() is the same chip-family resolver
 // used elsewhere in aqlprofile (>= GFX10_GPU_ID for sa_number selection,
 // >= GFX12_GPU_ID for trace status2, etc.); the gpu_id_t enum is ordered
-// so >= GFX11_GPU_ID covers GFX11 / GFX115X / GFX12 / MI450 and excludes
+// so >= GFX11_GPU_ID covers GFX11 / GFX115X / GFX117X / GFX12 / MI450 and excludes
 // the GFX9 family (which sits at enum values 1..5) and GFX10 (=6).
 //
 // Heuristic match: we iterate render nodes /dev/dri/renderD128..renderD191
