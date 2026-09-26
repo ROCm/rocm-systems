@@ -2744,3 +2744,13 @@ with the stricter helper yields 151 accepted audit entries and no rejections
 (`default-clean-diagnostic-gate-audit.json`). Thus no existing table verdict
 changes. Running qualifications are preserved; their final retained clean logs
 will also be checked with the updated helper.
+
+### Fourth untimed Default SGEMM fault trial completes
+
+Trial 3 completes in 1,177 seconds with 11 ConSan conflicts, all 650 numerical
+cases passing, complete applicable coverage, exactly one intended mutation,
+and healthy checks before and after. Four completed trials have detected the
+fault; four remain pending. Both full clean sweeps still have three accepted
+small shapes and three pending large shapes. Evidence is the terminal trial-3
+record under `sgemm-bank-fixed-untimed-high-fault`; the table remains orange
+until full clean qualification completes.
