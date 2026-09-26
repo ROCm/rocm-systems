@@ -83,8 +83,8 @@
 #define LITTLEENDIAN_CPU
 #elif defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define BIGENDIAN_CPU
-#elif defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || \
-      defined(_M_X64) || defined(__loongarch64) || defined(__riscv)
+#elif defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64) ||           \
+    defined(__loongarch64) || defined(__riscv) || defined(__aarch64__) || defined(__arm__)
 #define LITTLEENDIAN_CPU
 #endif
 #endif
