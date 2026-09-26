@@ -2096,3 +2096,9 @@ Default tensor-load observation support does not implement that mechanism
 for SuperCollider. Its previous clean-pass label predated this coverage
 accounting, so the cell is now orange. Other tensor rows are being checked
 with the same current immutable hook before updating their cells.
+
+The same current-hook checks completed for MXF4 explicit and sparse FP16
+transposes in `sc-current-tensor-clean`: both numerical oracles pass,
+no mismatch markers occur, and unsupported tensor-DMA accesses make
+analysis incomplete. Those two SuperCollider cells are also orange.
+These are coverage failures, not numerical or instrumentation failures.
