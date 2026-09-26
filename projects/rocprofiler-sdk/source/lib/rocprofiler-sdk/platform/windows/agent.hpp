@@ -38,8 +38,12 @@ namespace windows
 bool
 is_available();
 
-// Native Windows D3DKMT enumeration. Skeleton only at this point - real
-// implementation will mirror the WSL path against the WDK headers.
+// Native Windows GPU enumeration. Resolves the D3DKMT entry points from
+// gdi32.dll (or the ROCPROFILER_D3DKMT_MODULE override), two-pass enumerates
+// compute-only adapters via D3DKMTEnumAdapters3, filters to supported AMD GPUs,
+// and maps each into a rocprofiler_agent_t. Basic identity/addressing/VRAM come
+// from D3DKMT queries; the detailed KFD-parity compute topology comes from the
+// wkmi bridge (or is omitted when this build links the wkmi stub).
 std::vector<unique_agent_t>
 enumerate();
 
