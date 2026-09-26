@@ -443,12 +443,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             _comm_entry.comm  = m_comm_val;
 
             auto _get_rank = [&]() {
-                return (m_rank_ptr) ? std::max<int>(*m_rank_ptr, m_rank) : m_rank;
+                return m_rank_ptr ? std::max<int>(*m_rank_ptr, m_rank) : m_rank;
             };
 
             auto _get_size = [&]() {
-                return (m_size_ptr) ? std::max<int>(*m_size_ptr, m_size)
-                                    : std::max<int>(m_size, _get_rank() + 1);
+                return m_size_ptr ? std::max<int>(*m_size_ptr, m_size)
+                                  : std::max<int>(m_size, _get_rank() + 1);
             };
 
             if(_data.tool_id == "MPI_Comm_rank" || _data.tool_id == "MPI_Comm_size" ||

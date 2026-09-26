@@ -1071,9 +1071,9 @@ configure_settings(bool _init)
 
     auto _backend = rocprofsys::get_env_choice<std::string>(
         env_vars::PERFETTO_BACKEND,
-        (_system_backend) ? "system"      // if ROCPROFSYS_PERFETTO_BACKEND_SYSTEM is
-                                          // true, default to system.
-                          : "inprocess",  // Otherwise, default to inprocess
+        _system_backend ? "system"      // if ROCPROFSYS_PERFETTO_BACKEND_SYSTEM is true,
+                                        // default to system.
+                        : "inprocess",  // Otherwise, default to inprocess
         { "inprocess", "system", "all" });
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::PERFETTO_BACKEND,
@@ -1628,7 +1628,7 @@ configure_settings(bool _init)
     {
         _cmd = rocprofsys::delimit(_cmd_env, " ");
     }
-    auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
+    auto _exe          = _cmd.empty() ? "exe" : _cmd.front();
     get_exe_realpath() = path::realpath(_exe);
     auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1)
@@ -2238,7 +2238,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
             if(_before != _after)
             {
                 std::string _cause =
-                    (_old_setting->second->get_environ_updated()) ? "environ" : "config";
+                    _old_setting->second->get_environ_updated() ? "environ" : "config";
                 LOG_WARNING("#");
                 LOG_WARNING("# {} :: '{}' -> '{}'", _new, _before, _after);
                 LOG_WARNING("#   via {} ({})", _old, _cause);
@@ -2404,7 +2404,7 @@ print_settings(
     _os << _spacer.str() << "\n";
     for(const auto& itr : _data)
     {
-        _os << ((_md) ? "| " : "# ");
+        _os << (_md ? "| " : "# ");
         for(size_t i = 0; i < nfields; ++i)
         {
             switch(i)
@@ -2440,7 +2440,7 @@ print_settings(
                 }
             }
         }
-        _os << ((_md) ? "\n" : "  #\n");
+        _os << (_md ? "\n" : "  #\n");
     }
 
     _os << _spacer.str() << "\n";
@@ -2592,7 +2592,7 @@ is_binary_rewrite()
 bool
 get_debug_env()
 {
-    return (settings_are_configured())
+    return settings_are_configured()
                ? get_debug()
                : rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
 }
@@ -2628,8 +2628,8 @@ get_debug_sampling()
 int
 get_verbose_env()
 {
-    return (settings_are_configured()) ? get_verbose()
-                                       : rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
+    return settings_are_configured() ? get_verbose()
+                                     : rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
 }
 
 int
@@ -3521,7 +3521,7 @@ get_ump_absolute_path()
             path = fmt::format("{}/{}", current_working_directory(), path);
         }
 
-        return (settings_are_configured())
+        return settings_are_configured()
                    ? settings::format(std::move(path), get_config()->get_tag())
                    : path;
     };

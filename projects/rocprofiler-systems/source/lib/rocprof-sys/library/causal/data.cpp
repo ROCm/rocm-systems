@@ -874,7 +874,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
             if(get_causal_mode() == state::process::CausalMode::function)
             {
-                _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
+                _sym_addr = _dl_info.symbol ? _dl_info.symbol.address() : _addr;
             }
 
             // lookup the PC line info at either the address or the symbol address
@@ -889,7 +889,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
                 auto _location =
-                    (_dl_info.location)
+                    _dl_info.location
                         ? path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
                 for(const auto& itr : linfo)

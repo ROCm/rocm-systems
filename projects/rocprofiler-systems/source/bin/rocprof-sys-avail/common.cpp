@@ -299,7 +299,7 @@ is_category_selected(const std::string& _line)
 std::string
 hl_selected(const std::string& _line)
 {
-    return (regex_hl) ? regex_replace(_line) : _line;
+    return regex_hl ? regex_replace(_line) : _line;
 }
 
 //--------------------------------------------------------------------------------------//

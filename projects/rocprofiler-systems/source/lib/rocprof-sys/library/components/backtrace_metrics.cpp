@@ -123,7 +123,7 @@ std::vector<std::string>
 backtrace_metrics::get_hw_counter_labels(std::int64_t _tid)
 {
     auto& _v = get_papi_labels(_tid);
-    return (_v) ? *_v : std::vector<std::string>{};
+    return _v ? *_v : std::vector<std::string>{};
 }
 
 void

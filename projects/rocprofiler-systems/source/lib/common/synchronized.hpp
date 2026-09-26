@@ -72,7 +72,7 @@ public:
     // This overload to wlock allows a synchronized map whose keys map to synchronized
     // data to use a read lock on the key data and then a write lock on the mapped data.
     template <typename FuncT, typename... Args>
-        requires(IsMappedTypeV)
+        requires IsMappedTypeV
     decltype(auto) wlock(FuncT&& lambda, Args&&... args) const;
 
     // Upgradable lock. If read returns false, write will be called with a unique_lock.
@@ -121,7 +121,7 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda
 template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
           bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
-    requires(IsMappedTypeV)
+    requires IsMappedTypeV
 decltype(auto)
 synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
                                                                   Args&&... args) const

@@ -569,7 +569,7 @@ main(int argc, char** argv)
         .set_default(std::string{ "rocprof-sys-config" })
         .action([&_config_file](parser_t& _p) {
             auto _out =
-                (_p.exists("output")) ? _p.get<std::string>("output") : std::string{};
+                _p.exists("output") ? _p.get<std::string>("output") : std::string{};
             if(_p.get_count("generate-config") == 0 && !_out.empty())
             {
                 _config_file = _out;
@@ -944,13 +944,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         {
             int               _selected = 0;
             std::stringstream ss;
-            _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
+            _selected += is_selected(std::get<0>(itr)) ? 1 : 0;
             write_entry(ss, std::get<0>(itr), _widths.at(0), false, true, fmt_opts);
             if(_available_column)
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << std::get<1>(itr);
-                _selected += (is_selected(_avss.str())) ? 1 : 0;
+                _selected += is_selected(_avss.str()) ? 1 : 0;
             }
             write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
@@ -960,15 +960,14 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                     continue;
                 }
                 const bool center = i <= 0;
-                _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
+                _selected += is_selected(std::get<2>(itr).at(i)) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
             }
 
             if(!category_regex_keys.empty())
             {
-                _selected +=
-                    (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+                _selected += is_category_selected(std::get<2>(itr).at(CATEGORY)) ? 1 : 0;
             }
 
             if(_selected == 0)
@@ -1036,13 +1035,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     {
         int               _selected = 0;
         std::stringstream ss;
-        _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
+        _selected += is_selected(std::get<0>(itr)) ? 1 : 0;
         write_entry(ss, std::get<0>(itr), _widths.at(0), false, true, fmt_opts);
         if(_available_column)
         {
             std::stringstream _avss{};
             _avss << std::boolalpha << std::get<1>(itr);
-            _selected += (is_selected(_avss.str())) ? 1 : 0;
+            _selected += is_selected(_avss.str()) ? 1 : 0;
             write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
         }
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
@@ -1052,7 +1051,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                 continue;
             }
             const bool center = i <= 0;
-            _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
+            _selected += is_selected(std::get<2>(itr).at(i)) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
             {
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
@@ -1067,7 +1066,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
         if(!category_regex_keys.empty())
         {
-            _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+            _selected += is_category_selected(std::get<2>(itr).at(CATEGORY)) ? 1 : 0;
         }
 
         if(_selected > 0)
@@ -1274,7 +1273,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             }
             _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), itr.at(i).length() +
                                                                        fmt_opts.padding);
-            _selected += (is_selected(itr.at(i))) ? 1 : 0;
+            _selected += is_selected(itr.at(i)) ? 1 : 0;
             write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                         fmt_opts);
         }
@@ -1319,7 +1318,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             {
                 continue;
             }
-            _selected += (is_selected(itr.at(i))) ? 1 : 0;
+            _selected += is_selected(itr.at(i)) ? 1 : 0;
             if(_labels.at(i) == "DESCRIPTION")
             {
                 write_wrap_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
@@ -1441,14 +1440,14 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
             int                     _selected = 0;
             if(options[0])
             {
-                _selected += (is_selected(itr.symbol())) ? 1 : 0;
+                _selected += is_selected(itr.symbol()) ? 1 : 0;
             }
 
             if(options[2])
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << itr.available();
-                _selected += (is_selected(_avss.str())) ? 1 : 0;
+                _selected += is_selected(_avss.str()) ? 1 : 0;
             }
 
             for(size_t i = 3; i < N; ++i)
@@ -1662,7 +1661,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
             std::stringstream _msg;
             for(size_t i = 0; i < _widths.size(); ++i)
             {
-                _msg << ", " << ((_using.at(i)) ? _widths.at(i) : 0);
+                _msg << ", " << (_using.at(i) ? _widths.at(i) : 0);
             }
             std::cerr << "[ temp]> sum_width = " << _get_sum()
                       << ", max_width = " << _max_width
@@ -1687,7 +1686,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         std::stringstream _msg;
         for(size_t i = 0; i < _widths.size(); ++i)
         {
-            _msg << ", " << ((_using.at(i)) ? _widths.at(i) : 0);
+            _msg << ", " << (_using.at(i) ? _widths.at(i) : 0);
         }
         std::cerr << "[final]> sum_width = " << _get_sum()
                   << ", max_width = " << _max_width

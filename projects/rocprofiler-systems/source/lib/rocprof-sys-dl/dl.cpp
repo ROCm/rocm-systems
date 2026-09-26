@@ -84,7 +84,7 @@ inline int
 get_rocprofsys_env()
 {
     auto&& _debug = get_env(env_vars::DEBUG_MODE, false);
-    return get_env(env_vars::VERBOSE, (_debug) ? 100 : 0);
+    return get_env(env_vars::VERBOSE, _debug ? 100 : 0);
 }
 
 inline int
@@ -620,7 +620,7 @@ extern "C"
 
     int rocprofsys_preload_library(void)
     {
-        return (::rocprofsys::dl::get_rocprofsys_preload()) ? 1 : 0;
+        return ::rocprofsys::dl::get_rocprofsys_preload() ? 1 : 0;
     }
 
     void rocprofsys_init_library(void)
@@ -667,7 +667,7 @@ extern "C"
             if(dl::get_instrumented() >= dl::instrument_mode::none &&
                dl::get_instrumented() < dl::instrument_mode::python_profile)
             {
-                dl::rocprofsys_postinit((c) ? std::string{ c } : std::string{});
+                dl::rocprofsys_postinit(c ? std::string{ c } : std::string{});
             }
         }
     }
