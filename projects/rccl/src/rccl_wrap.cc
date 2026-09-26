@@ -1579,10 +1579,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceUsable = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && ceUsable && (force || symReg);
 
-    // (3) Eager 2-shot once ceARTmpBuf exists. Skip until then so the first
-    // FORCE-unregistered call enqueues REGISTERED and initializes CE. Skip
-    // when symReg: those operands use CE-registered user windows, not staging.
-    if (!symkRequested && !symReg && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    // (3) Eager 2-shot once ceARTmpBuf exists. The first call, before init,
+    // falls through so enqueue can initialize CE. Gate on !symkRequested, not
+    // a local symReg bit: peers can disagree and only one rank would allgather.
+    if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
       return ncclSuccess;
