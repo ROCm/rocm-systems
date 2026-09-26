@@ -2,6 +2,10 @@
 
 Physical gfx1201 validation of the external workloads. Initial runs use recorded settings. Added-bank settings and CLIP sleep=2 are requalifications; the [regression review](/home/benoit/workspace/consan-validation/rdna4-reevaluation-20260926/REGRESSIONS.md) preserves the initial failures. Fractions count detections in eight admitted/reached fault trials; green requires at least 6/8 and matching clean qualification. Pending cells do not inherit historical grades. Raw evidence stays in the [external campaign directory](/home/benoit/workspace/consan-validation/rdna4-reevaluation-20260926).
 
+The **Workload** column identifies the external workload. **Default** reports ConSan's default analysis mode, with the sampling preset selected separately for each row; **SuperCollider** reports the alternative detector that perturbs memory-access timing to expose races.
+
+In Default cells, `high` and `higher` are values of `RJ_CONSAN_PRESET`, not separate detectors: `default` uses workgroup/LDS-cell sampling strides of 256/256, `high` uses 16/16, and `higher` uses 1/4. Smaller strides sample more densely and generally cost more. A bank count overrides the retained-access capacity. In SuperCollider cells, `sleep`, `sleep_wave`, and `nop` identify the timing-perturbation controls; a delay matrix uses the listed settings across the trial batch. See [presets](../USAGE.md#presets) and [expert controls](../EXPERT_CONTROLS.md) for details.
+
 Global-only scatter-reduce remains outside LDS/FLAT coverage; see [the global-memory support analysis](../SUPERCOLLIDER_GLOBAL_MEMORY.md).
 
 Colors: 🟩 qualified; 🟨 clean but below the fault bar or outside scope; 🟧 incomplete qualification; 🟥 correctness/instrumentation failure; 🩶 pending.

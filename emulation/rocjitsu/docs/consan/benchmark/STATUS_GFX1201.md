@@ -1,5 +1,16 @@
 # gfx1201 benchmark reevaluation — September 26, 2026
 
+Columns compare the same workload under these configurations:
+
+- **Workload:** the benchmark being measured.
+- **Native:** execution without ConSan instrumentation.
+- **Default:** ConSan's default analysis mode with `RJ_CONSAN_PRESET=default`.
+- **High:** the same analysis mode with `RJ_CONSAN_PRESET=high`, which samples more workgroups and LDS cells, increasing coverage and usually overhead. It is a sampling preset, not a separate detector.
+- **SuperCollider:** ConSan's alternative detector, which perturbs memory-access timing to expose races.
+- **Native Run drift:** the percentage change between the final native Run sample and the initial native median; large drift makes overhead ratios unreliable.
+
+Parenthesized multipliers are instrumented Run latency divided by native Run latency. See [presets](../USAGE.md#presets) for the sampling controls.
+
 Times are milliseconds. Startup is instrumentation plus the first run; Run is the second-run latency. PyTorch/Gluon use synchronized host timing; hipBLASLt uses GPU event timing, so its Startup excludes host client setup. Every completed row uses fresh native profiling, numerical oracles, and static coverage checks. Drift refers to the final native Run sample versus the initial native median.
 
 | Workload | Native startup / run | Default startup / run | High startup / run | SuperCollider startup / run | Native Run drift |
