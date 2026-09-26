@@ -105,6 +105,16 @@ For SuperCollider timing experiments, the runner forwards
 controls. Use identical settings for clean comparators and prospective fault
 trials. The load-only control filters delays, not instrumentation coverage.
 
+For correctness-only Tensile runs, setting
+`CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP=1` passes
+`--disable-benchmark-sleep` to the driver. It overrides Tensile's host cooldown
+with `SleepPercent=0`; all solutions, numeric checks, warmups, and timing
+enqueues remain unchanged. This is useful in emulation, where sleeping to cool
+a physical GPU adds unnecessary wall time. The default retains the workload's
+cooldown setting. Use the same choice for clean and fault comparators. The
+override is recorded in the oracle and replay contract; generate a matching
+replay manifest instead of reusing one collected with different controls.
+
 ## Explicit sampling configurations
 
 For a separate Default-engine sampling investigation, set

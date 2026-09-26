@@ -526,6 +526,37 @@ class TensileValidationTest(unittest.TestCase):
             (275.0, []),
         )
 
+    def test_cooldown_opt_out_preserves_numeric_checks_and_binds_replay(self) -> None:
+        for disabled in (False, True):
+            with self.subTest(disabled=disabled), temporary_root() as root:
+                paths = self._make_fake_paths(root)
+                self._install_tensile_stub(paths, "PASSED")
+                (root / "case.yaml").write_text("case\n")
+                forwarded = root / "row.json"
+                argv = self._main_argv(root) + ["--export-replay-manifest", str(root / "replay.json")]
+                if disabled:
+                    argv.append("--disable-benchmark-sleep")
+                with (
+                    mock.patch.object(tensile_validation, "resolve_tensile_validation_paths", return_value=paths),
+                    mock.patch.object(tensile_validation.subprocess, "run", return_value=self._amdgpu_header()),
+                    mock.patch.object(tensile_validation, "_run_command", wraps=tensile_validation._run_command) as run,
+                    mock.patch.object(tensile_validation.replay, "freeze", return_value={}) as freeze,
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch.dict(os.environ, {"CONSAN_ROW_RESULT_PATH": str(forwarded)}, clear=True),
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+                ):
+                    self.assertEqual(tensile_validation.main(), 0)
+                command = run.call_args.args[0]
+                self.assertEqual("SleepPercent=0" in command, disabled)
+                for setting in ("NumBenchmarks=1", "NumWarmups=0", "EnqueuesPerSync=1", "SyncsPerBenchmark=1"):
+                    self.assertIn(setting, command)
+                contract = freeze.call_args.args[2]
+                self.assertEqual("benchmark_sleep_percent_override" in contract, disabled)
+                result = json.loads(forwarded.read_text())
+                self.assertEqual(result["oracle"], "pass")
+                self.assertEqual(result["detail"]["numeric_rows"], 1)
+                self.assertEqual(result["detail"]["benchmark_sleep_percent_override"], 0 if disabled else None)
+
     def test_main_rejects_device_timing_below_required_minimum(self) -> None:
         with temporary_root() as root:
             paths = self._make_fake_paths(root)

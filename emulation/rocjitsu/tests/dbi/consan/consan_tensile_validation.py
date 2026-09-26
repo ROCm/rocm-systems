@@ -664,6 +664,10 @@ def main() -> int:
         required=True,
         help="Aggregate duration floor; zero requires valid positive device timings only",
     )
+    parser.add_argument(
+        "--disable-benchmark-sleep", action="store_true",
+        help="Disable host cooldown between cases; retain every validation and timing enqueue",
+    )
     parser.add_argument("--label", required=True)
     parser.add_argument("--export-replay-manifest", type=Path)
     parser.add_argument("--replay-manifest", type=Path,
@@ -791,6 +795,8 @@ def main() -> int:
         "EnqueuesPerSync=1",
         "NumWarmups=0",
     ]
+    if args.disable_benchmark_sleep:
+        command.append("SleepPercent=0")
     contract = {
         "config_sha256": replay.digest(execution_config),
         "source_config_sha256": replay.digest(config),
@@ -803,6 +809,10 @@ def main() -> int:
         "expected_numeric_rows": args.expect_numeric_rows,
         "expected_client_passes": args.expect_client_passes,
     }
+    if args.disable_benchmark_sleep:
+        # Old manifests retain their original contract. Opting out of cooldown
+        # requires a matching manifest, so replay cannot silently change controls.
+        contract["benchmark_sleep_percent_override"] = 0
     replay_manifest = None
     replay_snapshot = work_dir / "replay-manifest.snapshot.json"
     artifact_dir = work_dir
@@ -879,6 +889,7 @@ def main() -> int:
         "expected_client_passes": args.expect_client_passes,
         "label": args.label,
         "minimum_timed_ms": args.minimum_timed_ms,
+        "benchmark_sleep_percent_override": 0 if args.disable_benchmark_sleep else None,
         "numeric_rows": result_count,
         "passing_clients": client_pass_count,
         "rocjitsu_config": str(paths.rocjitsu_config),

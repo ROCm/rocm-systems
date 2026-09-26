@@ -1265,6 +1265,11 @@ def _workload_command(
             "--label",
             f"{workload.id}-{phase}",
         ]
+        disable_sleep = os.environ.get("CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP")
+        if disable_sleep not in (None, "0", "1"):
+            raise ValidationError("invalid CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP")
+        if disable_sleep == "1":
+            command.append("--disable-benchmark-sleep")
         inner_timeout = workload.tensile_inner_timeout_seconds
         timeout_override = os.environ.get("CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS")
         if timeout_override is not None:
