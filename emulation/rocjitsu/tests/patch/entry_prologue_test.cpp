@@ -259,6 +259,35 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
   EXPECT_EQ(prologue->words, expected);
 }
 
+// Every other test here, and every fixture the simulator suites build, puts the
+// kernarg pair at s[0:1]. At slot 0 the SMEM SBASE field's halving is the
+// identity and base+1 is trivially 1, so a regression that dropped the halving,
+// applied it twice, or confused the slot with a register index would be
+// invisible. One descriptor with an earlier user-SGPR property closes that.
+TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) {
+  const KD desc = kernarg_descriptor_at_slot(2);
+  constexpr DbiEntryStorage kStorage{.persistent_base = 26, .entry_temp_base = 28};
+
+  std::string error;
+  const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
+  ASSERT_TRUE(prologue.has_value()) << error;
+
+  const auto payload = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
+                                            prologue->payload_byte_offset, kArch);
+  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, /*sbase=*/2,
+                                             prologue->original_kernarg_pointer_offset, kArch);
+  const std::vector<uint32_t> expected{
+      payload[0],
+      payload[1],
+      original[0],
+      original[1],
+      build_wait_scalar_loads_complete(kArch),
+      build_s_mov_b32(2, kStorage.entry_temp_base, kArch),
+      build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
+  };
+  EXPECT_EQ(prologue->words, expected);
+}
+
 // The two offsets must differ, and the payload must sit past the copied kernarg
 // prefix. Equal offsets would load the same pointer twice and leave the payload
 // unread; a payload inside the prefix would alias a guest kernarg.

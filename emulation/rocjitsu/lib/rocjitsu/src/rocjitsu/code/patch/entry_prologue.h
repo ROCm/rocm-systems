@@ -19,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -68,12 +69,17 @@ plan_dbi_entry_storage(KernelBlockScope blocks, const rocr::llvm::amdhsa::kernel
 ///        pointer the prologue loads into its persistent pair.
 inline constexpr KernargExtensionPayloadLayout kDbiEntryPayloadLayout{.size = 8, .alignment = 8};
 
+/// @brief Variant name DBI declares its kernarg extension under.
+inline constexpr std::string_view kDbiKernargVariantName = "dbi";
+
+/// @brief Payload name within that variant's record.
+inline constexpr std::string_view kDbiEntryPayloadName = "dbi-log-buffer";
+
 /// @brief Prologue words plus the wrapper offsets they encode.
 ///
 /// @details The offsets are returned rather than recomputed by consumers because
 /// they are baked into @ref words as immediates, so whoever writes the matching
-/// `.rocjitsu.kernarg` record has something to check against. Writing that record
-/// is deferred; no Instrumentor path emits one yet.
+/// `.rocjitsu.kernarg` record has something to check against.
 struct DbiEntryPrologue {
   std::vector<uint32_t> words;
   uint32_t payload_byte_offset = 0;             ///< Wrapper offset of the DBI payload.

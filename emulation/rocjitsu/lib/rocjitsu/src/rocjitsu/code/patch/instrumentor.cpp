@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
@@ -28,6 +29,7 @@
 #include <array>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -627,6 +629,51 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_a
   plan.original_words.resize(num_words);
   std::memcpy(plan.original_words.data(), site.original_bytes.data(), site.original_size);
   return plan;
+}
+
+// Declare the kernarg wrapper the entry prologue reads from, so a runtime can
+// build one without knowing how the prologue was encoded.
+//
+// The record carries the wrapper's inputs (the guest's kernarg size and the
+// payload's size and alignment) rather than the offsets themselves. A consumer
+// runs make_kernarg_extension_layout over them and lands on the offsets the
+// prologue encoded, because the prologue derived those from the same helper and
+// the same descriptor.
+//
+// An object that already carries this section is refused: the loader-side
+// reader stops at the first match, so a second one would be unreachable. The
+// check reads the input object rather than the patcher, which is sound only
+// because this is the instrumentor's one append_nonalloc_section call.
+bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObject &obj,
+                               const KernelDescriptorInfo &kernel, std::string *error_out) {
+  for (const auto &section : obj.all_sections()) {
+    if (section->name() != kKernargExtensionMetadataSectionName)
+      continue;
+    report(error_out, ("the code object already carries a " +
+                       std::string(kKernargExtensionMetadataSectionName) +
+                       " section, and a second one would be unreachable to the loader; "
+                       "instrumenting a code object that already declares a kernarg extension "
+                       "is not supported")
+                          .c_str());
+    return false;
+  }
+
+  const KernargExtensionMetadata extension{
+      .kernel_name = kernel.kernel_name,
+      .variant_name = std::string(kDbiKernargVariantName),
+      .original_kernarg_size = kernel.descriptor.kernarg_size,
+      .payloads = {{
+          .size = kDbiEntryPayloadLayout.size,
+          .alignment = kDbiEntryPayloadLayout.alignment,
+          .name = std::string(kDbiEntryPayloadName),
+      }},
+  };
+  const std::vector<uint8_t> bytes = serialize_kernarg_extension_metadata(std::span{&extension, 1});
+  if (!patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, bytes)) {
+    report(error_out, "failed to append the .rocjitsu.kernarg section");
+    return false;
+  }
+  return true;
 }
 
 } // namespace
@@ -1427,6 +1474,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!patcher.replace_text(new_text)) {
     result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;
+  }
+
+  if (entry_patch) {
+    std::string err;
+    if (!append_dbi_kernarg_record(patcher, obj_, kernels.front(), &err)) {
+      result.errors.push_back(std::move(err));
+      return result;
+    }
   }
 
   // Emit and build patch summaries.

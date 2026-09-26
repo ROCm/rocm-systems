@@ -8,8 +8,13 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/entry_prologue.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
@@ -311,7 +316,7 @@ TEST(Validator, RejectsNegativeInstructionSize) {
 }
 
 //==============================================================================
-// Section 1b: validate_inline_nop_plan
+// validate_inline_nop_plan
 //
 // This guardrail used to live in TrampolineBuilder. It now lives at the
 // orchestrator boundary so the builder stays generic. Tests moved with it.
@@ -413,7 +418,7 @@ TEST(MakeTrampolinePlan, FillsCanonicalBodyAndCopiesSiteFields) {
 // make_gfx1200_kernel_elf, make_gfx1200_probe_elf, section_words,
 // patched_private_segment_size, and the kMov*/kProbe* opcode constants are shared
 // via dbi_test_util.h (namespace rocjitsu::test). The make_gfx950_elf_with_*
-// builders below are unique to this integration slice.
+// builders below are used only by this file.
 
 // gfx950 ELF with a single .text of `text_size` bytes filled with `s_nop 0`
 // words (so every dword-aligned offset is a valid anchor). Used for the
@@ -2273,9 +2278,8 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 //
 // A probe asking for the framework's entry storage makes the instrumentor
 // synthesize a site at the kernel entry that defines it. These cover the gates
-// that refuse a kernel the prologue could not cover. Acceptance needs a
-// descriptor carrying ENABLE_SGPR_KERNARG_SEGMENT_PTR, which no fixture builds
-// yet.
+// that refuse a kernel the prologue could not cover, plus the `.rocjitsu.kernarg`
+// record the successful path declares.
 //==============================================================================
 
 namespace {
@@ -2289,6 +2293,42 @@ InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_
   pt.probe_symbol = "rj_test_probe";
   pt.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
   return pt;
+}
+
+// Not payload-aligned, so the wrapper offset is a value only this layout
+// produces rather than a round number anything could.
+constexpr uint32_t kTestKernargSize = 20;
+
+// gfx950 kernel whose descriptor advertises a kernarg segment pointer, so the
+// prologue's success path is reachable. Entry at .text offset 0.
+std::vector<uint8_t> make_gfx950_kernarg_kernel_elf() {
+  return test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0,
+                                       EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
+}
+
+bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint32_t> needle) {
+  return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end()) !=
+         haystack.end();
+}
+
+// The SGPR pair the prologue loaded into, recovered from the site that reads it.
+// The argument v_mov names the pair, so the site and the prologue agreeing is
+// what makes the pair meaningful rather than whatever the planner picked.
+//
+// This decodes *argument 0*, not "the storage pair": every argument lands in
+// v[arg_vgpr_base + i] and arg_vgpr_base is 0, so matching vdst 0 finds whichever
+// source the site declared first. Correct only for a point whose first argument
+// is LogBufferPtrLo, which is every caller here. Put another source ahead of it
+// and this silently returns that one's register instead, so the callers pass
+// points built by log_buffer_point().
+std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
+                                                   rj_code_arch_t arch) {
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+    const uint32_t mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
+    if (std::find(trampoline.begin(), trampoline.end(), mov) != trampoline.end())
+      return sgpr;
+  }
+  return std::nullopt;
 }
 
 } // namespace
@@ -2394,6 +2434,337 @@ TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
   const std::vector<uint32_t> text = section_words(patched, ".text");
   ASSERT_FALSE(text.empty());
   EXPECT_EQ(text[0], 0xBF800000u) << "the kernel entry must still hold its original s_nop";
+}
+
+// The cave is [probe bodies][entry prologue][trampolines]. Without this the
+// middle region is unasserted: deleting the prologue's append leaves the rest of
+// the suite green, since every other test reaches a rejection instead.
+TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampoline) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+  const auto &p = result.patches[0];
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+
+  // One probe body, one word long, at the front of the cave. What follows it up
+  // to the site's trampoline can only be the entry prologue.
+  const uint64_t probe_end = p.probe_target_offset + sizeof(uint32_t);
+  ASSERT_GT(p.trampoline_offset, probe_end)
+      << "nothing lies between the probe body and the site trampoline";
+  ASSERT_LE(p.trampoline_offset / sizeof(uint32_t), text.size());
+  const std::vector<uint32_t> prologue(
+      text.begin() + static_cast<ptrdiff_t>(probe_end / sizeof(uint32_t)),
+      text.begin() + static_cast<ptrdiff_t>(p.trampoline_offset / sizeof(uint32_t)));
+  const std::vector<uint32_t> trampoline(
+      text.begin() + static_cast<ptrdiff_t>(p.trampoline_offset / sizeof(uint32_t)), text.end());
+
+  const auto storage_base = storage_base_from_argument(trampoline, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(storage_base.has_value()) << "the site reads no SGPR pair as its argument";
+
+  // Offsets come from the layout function rather than being written out, because
+  // the record round-trip already pins the layout to what a consumer rebuilds.
+  const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
+  const auto layout = make_kernarg_extension_layout(kTestKernargSize, payloads);
+  ASSERT_TRUE(layout.has_value());
+
+  // Both loads address through the kernarg pair at s[0:1], the only enabled
+  // user SGPR in this descriptor.
+  const auto load_payload = build_s_load_dwordx2(
+      *storage_base, /*sbase=*/0, layout->payload_offsets.front(), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load_guest_ptr =
+      build_s_load_dwordx2(static_cast<uint16_t>(*storage_base + 2), /*sbase=*/0,
+                           layout->original_kernarg_pointer_offset, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_TRUE(contains_words(prologue, load_payload))
+      << "the prologue does not load the payload the record declares";
+  EXPECT_TRUE(contains_words(prologue, load_guest_ptr));
+
+  // The restore, without which the guest reads its kernargs through the wrapper.
+  const uint32_t restore_lo =
+      build_s_mov_b32(0, static_cast<uint16_t>(*storage_base + 2), ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t restore_hi =
+      build_s_mov_b32(1, static_cast<uint16_t>(*storage_base + 3), ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_NE(std::find(prologue.begin(), prologue.end(), restore_lo), prologue.end());
+  EXPECT_NE(std::find(prologue.begin(), prologue.end(), restore_hi), prologue.end());
+
+  // The wait sits after both loads and before the restore. The second half is
+  // the subtle one: the restore overwrites the SBASE the loads are still in
+  // flight against, so a wait placed only ahead of the reads below it would be
+  // too late. Both bounds are asserted, since either alone admits a placement
+  // that would not work.
+  const uint32_t wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_it = std::find(prologue.begin(), prologue.end(), wait);
+  ASSERT_NE(wait_it, prologue.end()) << "the prologue does not wait for its loads";
+  const auto guest_ptr_load_it =
+      std::search(prologue.begin(), prologue.end(), load_guest_ptr.begin(), load_guest_ptr.end());
+  ASSERT_NE(guest_ptr_load_it, prologue.end());
+  EXPECT_LT(guest_ptr_load_it, wait_it) << "the wait runs before a load it is meant to cover";
+  EXPECT_LT(wait_it, std::find(prologue.begin(), prologue.end(), restore_lo));
+
+  // The kernel entry reaches all of it: its original s_nop was replaced by a
+  // branch, and the original runs from the cave instead.
+  EXPECT_NE(text[0], 0xBF800000u) << "the kernel entry still holds its original s_nop";
+  EXPECT_NE(std::find(prologue.begin(), prologue.end(), 0xBF800000u), prologue.end())
+      << "the entry's original instruction was not relocated into the cave";
+}
+
+namespace {
+
+// The storage pair a patch chose, recovered through the site that reads it.
+// nullopt when the patch failed, with the reason in @p error_out.
+std::optional<uint16_t> patch_and_recover_storage(const std::vector<uint32_t> &probe_words,
+                                                  std::string *error_out) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", probe_words);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  if (!result.errors.empty()) {
+    *error_out = result.errors.front();
+    return std::nullopt;
+  }
+  if (result.patches.size() != 1)
+    return std::nullopt;
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const size_t first = result.patches[0].trampoline_offset / sizeof(uint32_t);
+  if (first >= text.size())
+    return std::nullopt;
+  return storage_base_from_argument(
+      std::vector<uint32_t>(text.begin() + static_cast<ptrdiff_t>(first), text.end()),
+      ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+// s_mov_b32 s<n>, 0. Inline constant 0 is scalar source code 128.
+uint32_t clobber_sgpr(uint16_t sgpr) {
+  return build_s_mov_b32(sgpr, 128, ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+} // namespace
+
+// Liveness cannot supply this: the prologue's write lives in the cave, so the
+// pair reads dead at every anchor. A probe body writing the chosen pair would
+// fail at its every site instead, since the clobber set is a property of the
+// body rather than of the anchor.
+TEST(InstrumentorEntryPrologue, StorageAvoidsWhatTheProbeBodyClobbers) {
+  std::string err;
+  const auto baseline = patch_and_recover_storage({kProbeSetpcS30S31}, &err);
+  ASSERT_TRUE(baseline.has_value()) << err;
+  const uint16_t low = *baseline;
+
+  // Clobber the run the planner just chose. It has to pick a different one.
+  const auto moved =
+      patch_and_recover_storage({clobber_sgpr(low), clobber_sgpr(static_cast<uint16_t>(low + 1)),
+                                 clobber_sgpr(static_cast<uint16_t>(low + 2)),
+                                 clobber_sgpr(static_cast<uint16_t>(low + 3)), kProbeSetpcS30S31},
+                                &err);
+  ASSERT_TRUE(moved.has_value()) << err;
+  EXPECT_NE(*moved, low);
+  // Disjoint from the clobbered run, not merely shifted off its base.
+  EXPECT_TRUE(*moved > low + 3 || *moved + 3 < low)
+      << "storage s[" << *moved << ":" << *moved + 3 << "] overlaps the probe's clobbers s[" << low
+      << ":" << low + 3 << "]";
+}
+
+// Runs are 4 SGPRs on an even base within the fixture's 32-SGPR allocation, so a
+// clobber every fourth register from s3 leaves every candidate base blocked by a
+// clobber. The stride has to reach s31: stopping at s27 leaves s[28:31] clear of
+// the clobbers, and the test would then be passing on the probe's link pair
+// rather than on what it set out to exercise. Failing closed is the only safe
+// answer, since the alternative is storage a probe overwrites between the
+// prologue and the site.
+TEST(InstrumentorEntryPrologue, StorageExhaustedByProbeClobbersFailsClosed) {
+  std::vector<uint32_t> body;
+  for (uint16_t sgpr = 3; sgpr < 32; sgpr += 4)
+    body.push_back(clobber_sgpr(sgpr));
+  body.push_back(kProbeSetpcS30S31);
+
+  std::string err;
+  const auto storage = patch_and_recover_storage(body, &err);
+  ASSERT_FALSE(storage.has_value()) << "storage was found where no aligned run fits";
+  EXPECT_NE(err.find("no free SGPR pair run"), std::string::npos) << err;
+  // The kernel is not at fault, so the diagnostic has to name what asked for a
+  // prologue. Otherwise the rejection reads as unprompted.
+  EXPECT_NE(err.find("rj_test_probe"), std::string::npos) << err;
+}
+
+// The union is over every probe on the object, not only the ones passing the
+// pointer on. The pair has to survive from entry to each later site, so a probe
+// that never reads it can still destroy it.
+TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
+  std::string err;
+  const auto baseline = patch_and_recover_storage({kProbeSetpcS30S31}, &err);
+  ASSERT_TRUE(baseline.has_value()) << err;
+  const uint16_t low = *baseline;
+
+  // Three words, so both sites can sit clear of the entry the prologue needs.
+  auto target = test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u, 0xBF800000u},
+                                              /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+                                              kTestKernargSize);
+  auto reader = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  auto writer = make_gfx950_probe_elf(
+      "rj_test_writer", {clobber_sgpr(low), clobber_sgpr(static_cast<uint16_t>(low + 1)),
+                         clobber_sgpr(static_cast<uint16_t>(low + 2)),
+                         clobber_sgpr(static_cast<uint16_t>(low + 3)), kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject reader_obj(reader.data(), reader.size());
+  AmdGpuCodeObject writer_obj(writer.data(), writer.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(reader_obj, /*anchor_offset=*/4));
+  // No log-buffer argument: this probe never reads the storage, it only writes
+  // over where the storage would otherwise go.
+  InstrumentationPoint plain;
+  plain.anchor_offset = 8;
+  plain.probe_obj = &writer_obj;
+  plain.probe_symbol = "rj_test_writer";
+  instr.add_point(plain);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const auto &reader_patch =
+      result.patches[0].anchor_offset == 4 ? result.patches[0] : result.patches[1];
+  const size_t first = reader_patch.trampoline_offset / sizeof(uint32_t);
+  ASSERT_LT(first, text.size());
+  const auto storage = storage_base_from_argument(
+      std::vector<uint32_t>(text.begin() + static_cast<ptrdiff_t>(first), text.end()),
+      ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(storage.has_value());
+
+  EXPECT_TRUE(*storage > low + 3 || *storage + 3 < low)
+      << "storage s[" << *storage << ":" << *storage + 3
+      << "] overlaps the clobbers of a probe that never reads it, s[" << low << ":" << low + 3
+      << "]";
+}
+
+// A runtime builds its wrapper from the record alone, so the layout the record
+// implies must be the one the prologue encoded as immediates.
+TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint8_t> bytes =
+      test::section_bytes(patched, kKernargExtensionMetadataSectionName);
+  ASSERT_FALSE(bytes.empty()) << "no .rocjitsu.kernarg section was appended";
+
+  const auto parsed = parse_kernarg_extension_metadata(bytes);
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  const KernargExtensionMetadata &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, "test_kernel");
+  EXPECT_EQ(record.variant_name, kDbiKernargVariantName);
+  EXPECT_EQ(record.original_kernarg_size, kTestKernargSize);
+  ASSERT_EQ(record.payloads.size(), 1u);
+  EXPECT_EQ(record.payloads.front().name, kDbiEntryPayloadName);
+  EXPECT_EQ(record.payloads.front().size, kDbiEntryPayloadLayout.size);
+  EXPECT_EQ(record.payloads.front().alignment, kDbiEntryPayloadLayout.alignment);
+
+  // Rebuild from the record's own sizes and alignments, as a consumer would.
+  // This pins the record's *fields*, not the layout function: a producer that
+  // wrote the wrapper size into original_kernarg_size, or the wrong payload
+  // alignment, lands somewhere the prologue does not read from.
+  const std::array<KernargExtensionPayloadLayout, 1> payloads{KernargExtensionPayloadLayout{
+      .size = record.payloads.front().size, .alignment = record.payloads.front().alignment}};
+  const auto rebuilt = make_kernarg_extension_layout(record.original_kernarg_size, payloads);
+  ASSERT_TRUE(rebuilt.has_value());
+  ASSERT_EQ(rebuilt->payload_offsets.size(), 1u);
+
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const auto prologue = build_dbi_entry_prologue(kernels.front().descriptor,
+                                                 ROCJITSU_CODE_ARCH_CDNA4, DbiEntryStorage{8, 10});
+  ASSERT_TRUE(prologue.has_value());
+  EXPECT_EQ(rebuilt->payload_offsets.front(), prologue->payload_byte_offset);
+  EXPECT_EQ(rebuilt->original_kernarg_pointer_offset, prologue->original_kernarg_pointer_offset);
+}
+
+// The loader-side reader stops at the first section of this name, so a second
+// record would be silently ignored. The fixture appends one directly rather than
+// instrumenting twice: a second pass never reaches this check, since the entry
+// is a branch by then and the prologue is refused first.
+TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClosed) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  AmdGpuCodeObject plain(target.data(), target.size());
+  ASSERT_TRUE(plain.is_valid());
+
+  CodeObjectPatcher patcher(plain);
+  const std::vector<uint8_t> foreign_record(16, 0);
+  ASSERT_TRUE(
+      patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, foreign_record));
+  const std::vector<uint8_t> with_record = patcher.emit();
+
+  AmdGpuCodeObject obj(with_record.data(), with_record.size());
+  ASSERT_TRUE(obj.is_valid());
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty()) << "a second kernarg record was appended";
+  EXPECT_NE(result.errors.front().find("already carries"), std::string::npos)
+      << result.errors.front();
+}
+
+// A record with no prologue would tell a runtime to build a wrapper the kernel
+// never reads through.
+TEST(InstrumentorKernargRecord, OrdinaryProbeCallDeclaresNothing) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
 }
 
 // An inline nop has nowhere to put arguments.
