@@ -1494,7 +1494,7 @@ HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_loop) {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
 
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < (isQuickLevel() ? 5 : 100); i++) {
     HIP_CHECK(hipSetDevice(i % devcount));
 
     HIP_CHECK(hipStreamCreate(&stream));

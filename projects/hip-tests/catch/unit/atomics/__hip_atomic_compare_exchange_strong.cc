@@ -43,8 +43,9 @@ template <typename TestType> static void runHipAtomicCompareExchangeStrongWorkgr
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
+  const int iterations = isQuickLevel() ? 1 : cmd_options.iterations;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
                                    __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));

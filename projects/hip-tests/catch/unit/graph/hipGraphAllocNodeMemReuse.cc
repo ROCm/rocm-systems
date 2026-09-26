@@ -284,7 +284,8 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
 
-  constexpr size_t kAllocSize = 64ULL * 1024 * 1024;  // 64 MB
+  const size_t kAllocSize =
+      isQuickLevel() ? (8ULL * 1024 * 1024) : (64ULL * 1024 * 1024);  // 8 MB : 64 MB
 
   resetGraphMemAttributes(device);
 
@@ -292,7 +293,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   hipGraphExec_t exec = captureGraphWithAlloc(stream, kAllocSize, 1.0f);
 
   // Launch the same graph multiple times
-  constexpr int numLaunches = 10;
+  const int numLaunches = isQuickLevel() ? 2 : 10;
   for (int i = 0; i < numLaunches; i++) {
     HIP_CHECK(hipGraphLaunch(exec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));

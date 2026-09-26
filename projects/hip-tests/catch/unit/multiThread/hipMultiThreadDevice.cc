@@ -95,4 +95,6 @@ HIP_TEST_CASE(Unit_hipMultiThreadDevice_SerialPyramid) { multiThread_pyramid(tru
 
 HIP_TEST_CASE(Unit_hipMultiThreadDevice_ParallelPyramid) { multiThread_pyramid(false, 3); }
 
-HIP_TEST_CASE(Unit_hipMultiThreadDevice_NearZero) { multiThread_nearzero(false, 1000); }
+HIP_TEST_CASE(Unit_hipMultiThreadDevice_NearZero) {
+  multiThread_nearzero(false, isQuickLevel() ? 50 : 1000);
+}

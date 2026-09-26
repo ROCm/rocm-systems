@@ -39,10 +39,15 @@ constexpr auto kMaskLimit = std::numeric_limits<uint32_t>().max();
 
 static unsigned int GenerateTileSizes() {
 #if HT_AMD
-  return GENERATE(2u, 4u, 8u, 16u, 32u, 64u);
+  const auto sizes = isQuickLevel()
+      ? std::vector<unsigned int>{2u, 16u, 64u}
+      : std::vector<unsigned int>{2u, 4u, 8u, 16u, 32u, 64u};
 #else
-  return GENERATE(2u, 4u, 8u, 16u, 32u);
+  const auto sizes = isQuickLevel()
+      ? std::vector<unsigned int>{2u, 16u, 32u}
+      : std::vector<unsigned int>{2u, 4u, 8u, 16u, 32u};
 #endif
+  return GENERATE_COPY(from_range(sizes));
 }
 
 static inline std::mt19937& GetRandomGenerator() {
