@@ -1295,6 +1295,55 @@
           }
         }
       ]
+    },
+    "tensile-spmm-tdm-all": {
+      "faults": [
+        {
+          "id": "barrier-drop-tensor-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "gfx1250 retained ELF eb2d8991cf489d46, sparse TDM-all NN sparse-A FP16 MT32x32x64, four waves. Reviewed sparse-all-retained-v1-pristine.asm: all 11312 instruction addresses and encodings equal sparse-all-du64-pristine.asm. Wave2 tensor A producer D0 s29 at 0x788c..0x78a4 gives byte1024. Wave1 lane0 reader v71 at 0x6d38..0x6dc8 gives byte1024, read at 0x85cc. Retain tensor completion 0x8230. K64 selects s13==1 path to 0x8554, skipping long-loop publication 0x8280. Drop only reached pair 0x85c0/0x85c4 (.text+0x1ac0/0x1ac4), preserving reuse barriers. Guards require GSU1, alpha1, beta0, full M/N32 tiles, K multiple64. Retained ClientParameters.ini confirms 32x32x64, alpha One, beta Zero; retained numeric replay includes passing MT32x32x64 GSU1 row. Export/replay pass all nine clients. Exact retained site and sequence identities bind this pair. Eight trials per preset and minimum six detections are predeclared; numeric oracle remains independent."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:eb2d8991cf489d46|kernel=Cijk_Alik_Bljk_HSS_BH_SPAML0_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM8_CB0_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1250_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLITDM_MXSFIMS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA0_SS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SIP1_SGRO0_TDMI3_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG32_4_1|kind=barrier|pc=0x0000000000001ac0|mnemonic=s_barrier_signal|occurrence=16",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:eb2d8991cf489d46|kernel=Cijk_Alik_Bljk_HSS_BH_SPAML0_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM8_CB0_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1250_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLITDM_MXSFIMS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA0_SS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SIP1_SGRO0_TDMI3_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG32_4_1|event=barrier|pc=0x0000000000001ac0|mnemonic=s_barrier_signal|occurrence=16|sequence=singleton|associated-with=fnv1a64:eb2d8991cf489d46|kernel=Cijk_Alik_Bljk_HSS_BH_SPAML0_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM8_CB0_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1250_ICIW0_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLITDM_MXSFIMS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA0_SS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SIP1_SGRO0_TDMI3_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG32_4_1|event=barrier|pc=0x0000000000001ac4|mnemonic=s_barrier_wait|occurrence=17|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

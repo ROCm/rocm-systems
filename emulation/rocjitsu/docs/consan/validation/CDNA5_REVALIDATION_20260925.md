@@ -1967,3 +1967,17 @@ site and paired sequence identities occur in the retained inventory log.
 Runner/spec regression tests pass: 209 tests
 (`spmmml-retained-v2-bound-spec-tests.log`). Matching Default and high
 clean replays precede the eight-trial fault campaigns.
+
+### Sparse TDM-all publication review
+
+Retained export and replay (`sparse-all-retained-v1-replay-results.json`)
+pass all nine clients. The reviewed NN sparse-A FP16 MT32x32x64 object is
+`eb2d8991cf489d46`; all 11,312 instruction addresses and encodings match
+the earlier clean object. The 32x32x64 input skips the long-loop publication
+pair. Its reached optimized final-iteration pair is instead
+`.text+0x1ac0/0x1ac4` (occurrences 16/17). The GSU1 passing solution row,
+alpha=1, beta=0, full 32x32 tile and K64 prove the branch guards.
+Wave 2's tensor write and wave 1 lane 0's LDS read overlap at byte 1024.
+The mutation preserves tensor completion and subsequent reuse barriers.
+The shared spec binds the retained site and paired sequence identities;
+209 runner tests pass (`sparse-all-retained-v1-spec-tests.log`).
