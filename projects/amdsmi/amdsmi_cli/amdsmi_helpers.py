@@ -575,6 +575,42 @@ class AMDSMIHelpers:
         return (switch_choices, switch_choices_str)
 
     @staticmethod
+    def is_valid_ampp_field_name(name) -> bool:
+        """Check a candidate AMPP field name against the same constraints
+        amdsmi_configure_ampp_profile()/the driver enforce: a non-empty str
+        whose UTF-8 encoding fits in AMDSMI_MAX_STRING_LENGTH bytes.
+
+        Shared between the CLI's --ampp-configure argv parsing
+        (amdsmi_parser.py) and its @<file> JSON restore path
+        (set_value.py) so the two entry points can't drift apart.
+        """
+        if not isinstance(name, str) or not name:
+            return False
+        try:
+            # A str may contain a lone UTF-16 surrogate (e.g. via
+            # surrogateescape on argv, or from JSON), which is a valid
+            # Unicode code point but not valid UTF-8.
+            return len(name.encode("utf-8")) < amdsmi_interface.AMDSMI_MAX_STRING_LENGTH
+        except UnicodeEncodeError:
+            return False
+
+    @staticmethod
+    def parse_ampp_field_value(value) -> Optional[int]:
+        """Parse and range-check a candidate AMPP field value the same way
+        amdsmi_configure_ampp_profile() will (it assigns straight into an
+        int64 ctypes struct field). Returns the parsed int, or None if
+        `value` isn't representable as an int64 -- int(value) itself raises
+        TypeError/ValueError/OverflowError for a non-numeric or
+        out-of-range value (e.g. bare JSON Infinity/NaN)."""
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not -(2**63) <= parsed < 2**63:
+            return None
+        return parsed
+
+    @staticmethod
     def is_UUID(uuid_question: str) -> bool:
         """Determine if given string is of valid UUID format
         Args:

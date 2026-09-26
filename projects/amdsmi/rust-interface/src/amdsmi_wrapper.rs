@@ -121,7 +121,7 @@ pub const AMDSMI_MAX_NUM_CLKS_PER_MID: u32 = 2;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 27;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 1;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
@@ -5307,6 +5307,93 @@ extern "C" {
         port_index: u32,
         num_stats: *mut u32,
         stats: *mut AmdsmiNicStatT,
+    ) -> AmdsmiStatusT;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiAmppFieldT {
+    pub name: [::std::os::raw::c_char; 256usize],
+    pub unit: [::std::os::raw::c_char; 256usize],
+    pub value: i64,
+    pub limit_min: i64,
+    pub limit_max: i64,
+    pub has_limits: bool,
+    pub reserved: [u32; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiAmppFieldT"][::std::mem::size_of::<AmdsmiAmppFieldT>() - 560usize];
+    ["Alignment of AmdsmiAmppFieldT"][::std::mem::align_of::<AmdsmiAmppFieldT>() - 8usize];
+    ["Offset of field: AmdsmiAmppFieldT::name"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, name) - 0usize];
+    ["Offset of field: AmdsmiAmppFieldT::unit"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, unit) - 256usize];
+    ["Offset of field: AmdsmiAmppFieldT::value"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, value) - 512usize];
+    ["Offset of field: AmdsmiAmppFieldT::limit_min"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, limit_min) - 520usize];
+    ["Offset of field: AmdsmiAmppFieldT::limit_max"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, limit_max) - 528usize];
+    ["Offset of field: AmdsmiAmppFieldT::has_limits"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, has_limits) - 536usize];
+    ["Offset of field: AmdsmiAmppFieldT::reserved"]
+        [::std::mem::offset_of!(AmdsmiAmppFieldT, reserved) - 540usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiAmppProfileT {
+    pub name: [::std::os::raw::c_char; 256usize],
+    pub index: u32,
+    pub is_active: bool,
+    pub is_writable: bool,
+    pub is_configured: bool,
+    pub reserved: [u32; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiAmppProfileT"][::std::mem::size_of::<AmdsmiAmppProfileT>() - 280usize];
+    ["Alignment of AmdsmiAmppProfileT"][::std::mem::align_of::<AmdsmiAmppProfileT>() - 4usize];
+    ["Offset of field: AmdsmiAmppProfileT::name"]
+        [::std::mem::offset_of!(AmdsmiAmppProfileT, name) - 0usize];
+    ["Offset of field: AmdsmiAmppProfileT::index"]
+        [::std::mem::offset_of!(AmdsmiAmppProfileT, index) - 256usize];
+    ["Offset of field: AmdsmiAmppProfileT::is_active"]
+        [::std::mem::offset_of!(AmdsmiAmppProfileT, is_active) - 260usize];
+    ["Offset of field: AmdsmiAmppProfileT::is_writable"]
+        [::std::mem::offset_of!(AmdsmiAmppProfileT, is_writable) - 261usize];
+    ["Offset of field: AmdsmiAmppProfileT::is_configured"]
+        [::std::mem::offset_of!(AmdsmiAmppProfileT, is_configured) - 262usize];
+    ["Offset of field: AmdsmiAmppProfileT::reserved"]
+        [::std::mem::offset_of!(AmdsmiAmppProfileT, reserved) - 264usize];
+};
+extern "C" {
+    pub fn amdsmi_get_ampp_profiles(
+        processor_handle: AmdsmiProcessorHandle,
+        version: *mut ::std::os::raw::c_char,
+        profiles: *mut AmdsmiAmppProfileT,
+        num_profiles: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_ampp_fields(
+        processor_handle: AmdsmiProcessorHandle,
+        profile_name: *const ::std::os::raw::c_char,
+        num_fields: *mut u32,
+        fields: *mut AmdsmiAmppFieldT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_activate_ampp_profile(
+        processor_handle: AmdsmiProcessorHandle,
+        profile_name: *const ::std::os::raw::c_char,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_configure_ampp_profile(
+        processor_handle: AmdsmiProcessorHandle,
+        profile_name: *const ::std::os::raw::c_char,
+        fields: *const AmdsmiAmppFieldT,
+        num_fields: u32,
     ) -> AmdsmiStatusT;
 }
 #[repr(C)]

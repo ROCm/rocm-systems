@@ -210,7 +210,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 1
+#define AMDSMI_LIB_VERSION_MINOR 2
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -9722,6 +9722,229 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
                                                  amdsmi_nic_stat_t* stats);
 
 /** @} End tagNicInfo */
+
+/** @defgroup tagAMPP AMD-SMI Power Profile (AMPP)
+ *  AMPP lets a caller select a predefined power/performance recipe instead of
+ *  tuning individual clocks by hand. Recipes are driver-authored (not
+ *  firmware); PMFW enforces safety bounds. Everything here is dynamically
+ *  enumerated at runtime — the driver does not guarantee a fixed field set,
+ *  profile count, or naming across SoC generations, so nothing is hardcoded.
+ *
+ *  @note This uses a kernel UAPI sysfs interface
+ *  (/sys/class/drm/<device>/device/app_modes/), not libdrm.
+ *
+ *  @note This is unrelated to the legacy ::amdsmi_get_gpu_power_profile_presets /
+ *  ::amdsmi_set_gpu_power_profile preset-mask API; that API is untouched by AMPP.
+ *
+ *  @note Per-partition profile selection is out of scope for AMPP.
+ *  @{
+ */
+
+/**
+ * @brief A single opaque AMPP field name/value/unit tuple.
+ *
+ * Field name and unit are opaque strings taken verbatim from sysfs; AMPP
+ * never maps them to an AMDSMI-defined enum. Value is the numeric portion
+ * parsed from the sysfs content "<value> <unit>" (e.g. "300 W", "1 bool").
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  char name[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque field name (e.g. "PPT0_Limit")
+  char unit[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque unit string (e.g. "W", "-")
+  int64_t value;                        //!< Parsed value
+  int64_t limit_min;                    //!< Guidance-only lower bound from limits/min/<field>
+  int64_t limit_max;                    //!< Guidance-only upper bound from limits/max/<field>
+  bool has_limits;                      //!< True if limit_min/limit_max were found in limits/
+  //! Reserved for future expansion. Callers MUST zero-initialize this (e.g.
+  //! `= {}` or memset) before passing the struct to
+  //! ::amdsmi_configure_ampp_profile -- it is forwarded to the implementation.
+  uint32_t reserved[4];
+} amdsmi_ampp_field_t;
+
+/**
+ * @brief A single AMPP profile slot descriptor (app_modes/profile_N).
+ *
+ * @note After a driver reload, custom slots 5-7 read back as unconfigured
+ * (is_configured == false) via sysfs even if they were previously
+ * committed. PMFW retains the last-committed recipe internally; sysfs
+ * simply does not re-expose it until the slot is reconfigured. This is
+ * expected driver behavior, not data loss.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  char name[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque profile name (e.g. "profile_2")
+  uint32_t index;                       //!< Slot index, as parsed from the profile_N dirname
+  bool is_active;                       //!< True if this is app_modes/active_profile
+  bool is_writable;                     //!< True if index's bit is set in config/writable_slot_mask
+  bool is_configured;                   //!< False for an empty, unconfigured custom slot
+  uint32_t reserved[4];                 //!< Reserved for future expansion
+} amdsmi_ampp_profile_t;
+
+/**
+ *  @brief Get the list of AMPP power profiles published by the driver
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Enumerates whatever profile_N directories currently exist under
+ *  app_modes/ at the time of the call; the set of published slots is
+ *  entirely driver/PMFW defined and is discovered at runtime rather than
+ *  assumed by this API. This follows the "query size first" idiom used
+ *  elsewhere in this header: call
+ *  once with @p profiles == NULL to learn the required array size, allocate,
+ *  then call again with a buffer of at least that size.
+ *
+ *  @param[in] processor_handle Device to query
+ *
+ *  @param[out] version If non-NULL, filled with the app_modes/profile_abi
+ *  string (e.g. "1.0"), NUL-terminated, truncated to fit
+ *  AMDSMI_MAX_STRING_LENGTH. Left as an empty string if profile_abi does not
+ *  exist. This is a single tree-wide ABI version, not a per-profile value.
+ *
+ *  @param[out] profiles If NULL, only @p num_profiles is filled with the
+ *  required size. Otherwise, must point to an array with at least
+ *  @p num_profiles entries on input; filled with up to that many published
+ *  profiles. Exactly one returned entry has is_active set.
+ *
+ *  @param[in,out] num_profiles On input, the capacity of @p profiles (ignored
+ *  if @p profiles is NULL). On output, the number of profiles currently
+ *  published by the driver.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/
+ *          (AMPP not implemented on this ASIC),
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if @p profiles is non-NULL but
+ *          too small to hold all published profiles,
+ *          ::AMDSMI_STATUS_INVAL if @p num_profiles is NULL,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if config/writable_slot_mask
+ *          exists but its content does not parse as a well-formed hex
+ *          bitmask
+ */
+amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
+                                         char version[AMDSMI_MAX_STRING_LENGTH],
+                                         amdsmi_ampp_profile_t* profiles, uint32_t* num_profiles);
+
+/**
+ *  @brief Get the fields of a single AMPP power profile
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Enumerates whatever field files currently exist under
+ *  app_modes/<profile_name>/, merging in guidance bounds from
+ *  limits/min/<field> and limits/max/<field> when present. Field names are
+ *  not a fixed compile-time list; treat each as an opaque string from sysfs.
+ *  Follows the "query size first" idiom: call once with @p fields == NULL to
+ *  learn the required array size.
+ *
+ *  @param[in] processor_handle Device to query
+ *
+ *  @param[in] profile_name Name of the profile to query (e.g. "profile_2"),
+ *  as returned by ::amdsmi_get_ampp_profiles
+ *
+ *  @param[in,out] num_fields On input, the capacity of @p fields (ignored if
+ *  @p fields is NULL). On output, the number of fields currently published
+ *  for this profile.
+ *
+ *  @param[out] fields If NULL, only @p num_fields is filled with the required
+ *  size. Otherwise, must point to an array with at least @p num_fields
+ *  entries on input; filled with up to that many published fields.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/,
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if @p fields is non-NULL but too
+ *          small to hold all published fields,
+ *          ::AMDSMI_STATUS_NO_DATA if @p profile_name is a writable but
+ *          unconfigured custom slot (e.g. an empty profile_5),
+ *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
+ *          profile_N directory currently published, or @p num_fields is NULL,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if config/writable_slot_mask
+ *          exists but its content does not parse as a well-formed hex
+ *          bitmask
+ */
+amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
+                                       const char* profile_name, uint32_t* num_fields,
+                                       amdsmi_ampp_field_t* fields);
+
+/**
+ *  @brief Activate an AMPP profile
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Switches app_modes/active_profile to the slot matching
+ *  @p profile_name.
+ *
+ *  @param[in] processor_handle Device to modify
+ *
+ *  @param[in] profile_name Name of the profile to activate (e.g.
+ *  "profile_2"), as returned by ::amdsmi_get_ampp_profiles
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/,
+ *          ::AMDSMI_STATUS_NO_PERM if the caller lacks root/CAP_SYS_ADMIN,
+ *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
+ *          published profile_N
+ */
+amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_handle,
+                                             const char* profile_name);
+
+/**
+ *  @brief Configure a custom AMPP profile slot
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details @p profile_name must name a writable custom slot (one whose
+ *  index's bit is set in config/writable_slot_mask). Stages each of
+ *  @p fields into config/<field name>, then writes config/commit=1.
+ *  Partial staging is allowed and is not padded/zero-filled by AMDSMI —
+ *  unspecified fields are resolved by the driver from either the active
+ *  profile (first-ever commit to this slot) or the slot's own last-committed
+ *  values (subsequent commits). Because PMFW may silently clamp committed
+ *  values, callers should re-read via ::amdsmi_get_ampp_fields after this
+ *  call rather than trusting the values just written.
+ *
+ *  The driver rejects config/commit with -EINVAL if no field was ever
+ *  staged for this attempt (config/profile alone is not sufficient). This
+ *  function requires @p fields to be non-NULL with @p num_fields >= 1 and
+ *  returns ::AMDSMI_STATUS_INVAL proactively rather than relying on that
+ *  kernel -EINVAL bubbling up uninterpreted.
+ *
+ *  @param[in] processor_handle Device to modify
+ *
+ *  @param[in] profile_name Name of the profile to configure (e.g.
+ *  "profile_5"), as returned by ::amdsmi_get_ampp_profiles
+ *
+ *  @param[in] fields Array of fields to stage; must be non-NULL with at
+ *  least one entry
+ *
+ *  @param[in] num_fields Number of entries in @p fields; must be >= 1
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/, or
+ *          if the profile is not listed in config/writable_slot_mask,
+ *          ::AMDSMI_STATUS_NO_PERM if the caller lacks root/CAP_SYS_ADMIN,
+ *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
+ *          published profile_N, if @p fields contains a field name not
+ *          recognized for this profile, or if @p fields is NULL or
+ *          @p num_fields == 0,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if config/writable_slot_mask
+ *          exists but its content does not parse as a well-formed hex
+ *          bitmask
+ */
+amdsmi_status_t amdsmi_configure_ampp_profile(amdsmi_processor_handle processor_handle,
+                                              const char* profile_name,
+                                              const amdsmi_ampp_field_t* fields,
+                                              uint32_t num_fields);
+
+/** @} End tagAMPP */
 
 /** @defgroup tagMemConfig Memory Configuration
  *  These functions are used to configure UMA (Unified Memory Architecture)

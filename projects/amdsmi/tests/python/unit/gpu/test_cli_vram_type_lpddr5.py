@@ -71,6 +71,7 @@ def _install_fake_modules(holder):
 
     wrapper = types.ModuleType("amdsmi.amdsmi_interface.amdsmi_wrapper")
     wrapper.AMDSMI_VRAM_TYPE__MAX = _VRAM_TYPE__MAX
+    wrapper.AMDSMI_VRAM_TYPE_LPDDR5 = _VRAM_TYPE__MAX
     wrapper.amdsmi_vram_type_t__enumvalues = dict(_ENUMVALUES)
     interface.amdsmi_wrapper = wrapper
 

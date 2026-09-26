@@ -120,6 +120,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        ampp=None,
     ):
         """Get Static information for target gpu
 
@@ -176,6 +177,8 @@ class StaticCommands:
             args.clock = clock
         if mem_carveout:
             args.mem_carveout = mem_carveout
+        if ampp:
+            args.ampp = ampp
 
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
@@ -194,6 +197,7 @@ class StaticCommands:
             "process_isolation",
             "clock",
             "mem_carveout",
+            "ampp",
         ]
         current_platform_values = [
             args.asic,
@@ -207,6 +211,7 @@ class StaticCommands:
             args.process_isolation,
             args.clock,
             args.mem_carveout,
+            getattr(args, "ampp", None),
         ]
 
         # amd-smi static default arguments:
@@ -1021,11 +1026,20 @@ class StaticCommands:
 
                 # Get vram type string
                 vram_type_enum = vram_info["vram_type"]
-                # AMDSMI_VRAM_TYPE__MAX aliases the highest real type (LPDDR5);
-                # the auto-generated enum-value map resolves this shared value
-                # to the "__MAX" label, so translate it to the real type here.
+                # The generated map keeps the sentinel name for aliased values;
+                # prefer the corresponding real enum name when available.
                 if vram_type_enum == amdsmi_interface.amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX:
-                    vram_type = "LPDDR5"
+                    enum_name = next(
+                        (
+                            name
+                            for name, value in vars(amdsmi_interface.amdsmi_wrapper).items()
+                            if name.startswith("AMDSMI_VRAM_TYPE_")
+                            and name != "AMDSMI_VRAM_TYPE__MAX"
+                            and value == vram_type_enum
+                        ),
+                        "AMDSMI_VRAM_TYPE__MAX",
+                    )
+                    vram_type = enum_name.replace("AMDSMI_VRAM_TYPE_", "").replace("_", "")
                 else:
                     vram_type = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[
                         vram_type_enum
@@ -1208,6 +1222,118 @@ class StaticCommands:
                     static_dict["mem_carveout"] = "N/A"
                 logging.debug(
                     "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
+                )
+
+        if getattr(args, "ampp", None):
+            try:
+                ampp_version, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                logging.debug(f"AMPP version: {ampp_version}, profiles: {ampp_profiles}")
+
+                ampp_profile_list = []
+                for ampp_profile in ampp_profiles:
+                    profile_entry = dict(ampp_profile)
+                    if ampp_profile["is_configured"]:
+                        try:
+                            profile_entry["fields"] = amdsmi_interface.amdsmi_get_ampp_fields(
+                                args.gpu, ampp_profile["name"]
+                            )
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            no_data = (
+                                e.get_error_code()
+                                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA
+                            )
+                            profile_entry["fields"] = [] if no_data else "N/A"
+                            logging.debug(
+                                "Failed to get AMPP fields for profile %s on gpu %s | %s",
+                                ampp_profile["name"],
+                                gpu_id,
+                                e.get_error_info(),
+                            )
+                    else:
+                        # Unconfigured writable slot - no fields to report
+                        profile_entry["fields"] = []
+                    ampp_profile_list.append(profile_entry)
+
+                if self.logger.is_json_format():
+                    # JSON: version sits alongside profiles, per spec's
+                    # "ampp": {"version": ..., "profiles": [...]} shape.
+                    static_dict["ampp"] = {"version": ampp_version, "profiles": ampp_profile_list}
+                elif self.logger.is_csv_format():
+                    # CSV: flatten completely to avoid an unparsable
+                    # repr() dump, following this file's established
+                    # flatten-before-CSV convention (see soc_pstate,
+                    # xgmi_plpd, mem_carveout above). Compact string form
+                    # matches the spec's CSV Output example.
+                    profiles_str = (
+                        ", ".join(
+                            f"{p['name']}(active={p['is_active']},"
+                            f"configured={p['is_configured']},"
+                            f"writable={p['is_writable']})"
+                            for p in ampp_profile_list
+                        )
+                        or "N/A"
+                    )
+                    static_dict["ampp_version"] = ampp_version
+                    static_dict["ampp"] = profiles_str
+                else:
+                    # Human readable: nested per-profile / per-field listing
+                    formatted_profiles = []
+                    for profile_entry in ampp_profile_list:
+                        marker = "*" if profile_entry["is_active"] else " "
+                        state_bits = []
+                        if profile_entry["is_writable"]:
+                            state_bits.append("writable")
+                        if profile_entry["is_configured"]:
+                            state_bits.append("configured")
+                        elif profile_entry["is_writable"]:
+                            state_bits.append("unconfigured")
+                        state_str = ", ".join(state_bits) if state_bits else "N/A"
+                        header = (
+                            f"    {marker}[{profile_entry['index']}] {profile_entry['name']} "
+                            f"({state_str})"
+                        )
+                        field_lines = []
+                        if not isinstance(profile_entry["fields"], list):
+                            # Per-profile field fetch failed; "fields" holds the
+                            # "N/A" sentinel rather than a list.
+                            field_lines.append("        FIELDS: N/A")
+                        else:
+                            for field in profile_entry["fields"]:
+                                field_line = (
+                                    f"        {field['name']}: {field['value']} {field['unit']}"
+                                )
+                                if field["has_limits"]:
+                                    field_line += (
+                                        f" (min={field['limit_min']}, max={field['limit_max']})"
+                                    )
+                                field_lines.append(field_line)
+                        formatted_profiles.append(
+                            "\n".join([header] + field_lines) if field_lines else header
+                        )
+                    if formatted_profiles:
+                        # UPPER_CASE label to match the established convention
+                        # for hand-formatted human-readable labels elsewhere
+                        # in the CLI (e.g. node.py's POWER_MANAGEMENT/GTT/
+                        # LIMIT/STATUS/THRESHOLD/SIZE labels).
+                        version_line = f"    ABI_VERSION: {ampp_version}"
+                        static_dict["ampp"] = (
+                            "\n" + version_line + "\n" + "\n".join(formatted_profiles)
+                        )
+                    else:
+                        static_dict["ampp"] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                not_supported = (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if not_supported and not (
+                    self.logger.is_json_format() or self.logger.is_csv_format()
+                ):
+                    static_dict["ampp"] = "N/A (AMPP is not supported on this ASIC/VBIOS)"
+                else:
+                    static_dict["ampp"] = "N/A"
+                logging.debug(
+                    "Failed to get AMPP profiles for gpu %s | %s", gpu_id, e.get_error_info()
                 )
 
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
@@ -1615,6 +1741,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        ampp=None,
     ):
         """Get Static information for target gpu and cpu
 
@@ -1694,6 +1821,7 @@ class StaticCommands:
             "clock",
             "profile",
             "mem_carveout",
+            "ampp",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -1745,6 +1873,7 @@ class StaticCommands:
                     clock,
                     profile,
                     mem_carveout,
+                    ampp,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None:
@@ -1780,6 +1909,7 @@ class StaticCommands:
                 clock,
                 profile,
                 mem_carveout,
+                ampp,
             )
 
         if hasattr(args, "nic") and args.nic:
