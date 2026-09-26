@@ -6,6 +6,7 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
+#include <algorithm>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
@@ -319,10 +320,7 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
             _col2 = std::max(_col2, itr.lineOffset());
         }
 
-        if(_col1 < 0)
-        {
-            _col1 = 0;
-        }
+        _col1 = std::max(_col1, 0);
 
         if(module->getSourceLines(_last_addr, _lines_end))
         {
@@ -331,14 +329,8 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                 _row2 = std::max(_row2, itr.lineNumber());
                 _col2 = std::max(_col2, itr.lineOffset());
             }
-            if(_col2 < 0)
-            {
-                _col2 = 0;
-            }
-            if(_row2 < _row1)
-            {
-                _row1 = _row2;  // Fix for wrong line numbers
-            }
+            _col2 = std::max(_col2, 0);
+            _row1 = std::min(_row2, _row1);  // Fix for wrong line numbers
 
             return function_signature(_return_type, _func_name, _file_name, _param_types,
                                       { _row1, _row2 }, { _col1, _col2 }, true, true,
