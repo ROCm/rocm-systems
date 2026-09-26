@@ -37,6 +37,11 @@ class queue_t;
 class dispatch_t;
 class process_t;
 
+namespace test
+{
+struct workgroup_test_access;
+}
+
 /* AMD Debugger API Workgroup.  */
 
 class workgroup_t : public detail::handle_object<amd_dbgapi_workgroup_id_t>
@@ -54,6 +59,8 @@ private:
   xfer_local_memory (const address_space_t &address_space,
                      amd_dbgapi_segment_address_t segment_address, void *read,
                      const void *write, size_t size);
+
+  friend struct test::workgroup_test_access;
 
 public:
   workgroup_t (amd_dbgapi_workgroup_id_t workgroup_id,

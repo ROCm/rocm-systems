@@ -585,9 +585,35 @@ queue_t::scratch_memory_region (
 namespace detail
 {
 
+class aql_queue_t;
+
+} /* namespace detail */
+
+namespace test
+{
+
+/* Forward declaration of the test factory.  Defined at the bottom of this
+   TU after aql_queue_t / aql_dispatch_t are complete.  Friend-declared by
+   both classes to reach private nested type names and ctors.  */
+std::pair<queue_t *, dispatch_t *> make_aql_queue_and_dispatch_for_test (
+  process_t &process, const agent_t &agent,
+  const os_queue_snapshot_entry_t &os_queue_info,
+  amd_dbgapi_os_queue_packet_id_t packet_id);
+
+} /* namespace test */
+
+namespace detail
+{
+
 class aql_queue_t : public compute_queue_t
 {
 private:
+  /* Test seam: lets the factory name the private nested aql_dispatch_t.  */
+  friend std::pair<queue_t *, dispatch_t *>
+  test::make_aql_queue_and_dispatch_for_test (
+    process_t &, const agent_t &, const os_queue_snapshot_entry_t &,
+    amd_dbgapi_os_queue_packet_id_t);
+
   static constexpr uint64_t aql_packet_size = 64;
 
   class aql_dispatch_t : public dispatch_t
@@ -598,6 +624,13 @@ private:
       m_packet;
     std::unique_ptr<const architecture_t::kernel_descriptor_t>
       m_kernel_descriptor{};
+
+    /* Test seam: lets test::make_aql_queue_and_dispatch_for_test name the
+       private nested type and reach its public ctor.  */
+    friend std::pair<queue_t *, dispatch_t *>
+    test::make_aql_queue_and_dispatch_for_test (
+      process_t &, const agent_t &, const os_queue_snapshot_entry_t &,
+      amd_dbgapi_os_queue_packet_id_t);
 
   public:
     aql_dispatch_t (amd_dbgapi_dispatch_id_t dispatch_id, aql_queue_t &queue,
@@ -1187,6 +1220,23 @@ unsupported_queue_t::allocate_displaced_instruction (const instruction_t &)
 }
 
 } /* namespace detail */
+
+namespace test
+{
+
+std::pair<queue_t *, dispatch_t *>
+make_aql_queue_and_dispatch_for_test (
+  process_t &process, const agent_t &agent,
+  const os_queue_snapshot_entry_t &os_queue_info,
+  amd_dbgapi_os_queue_packet_id_t packet_id)
+{
+  auto &q = process.create<detail::aql_queue_t> (agent, os_queue_info);
+  auto &d
+    = process.create<detail::aql_queue_t::aql_dispatch_t> (q, packet_id);
+  return { &q, &d };
+}
+
+} /* namespace test */
 
 bool
 compute_queue_t::is_all_stopped () const

@@ -143,8 +143,32 @@ private:
   query_debug_event (os_exception_mask_t exceptions_cleared);
 
 public:
+  /* Friend-key for the test-only constructor below.  The default
+     constructor is private; only types listed as friends can build
+     one.  Production code cannot, so the test-only overload is
+     statically unreachable outside of tests.  See
+     test/unit/process_test.cpp.  */
+  class test_access_key_t
+  {
+    test_access_key_t () = default;
+    friend class process_test_access;
+  };
+
   process_t (amd_dbgapi_process_id_t process_id,
              amd_dbgapi_client_process_id_t client_process_id);
+
+  /* Test-only constructor: injects a caller-provided os_driver and
+     skips the client_process_get_info() callback (which requires an
+     installed process_callbacks table that doesn't exist in unit
+     tests).  Does not open the client notifier pipe.  The supplied
+     os_driver must be non-null and is_valid().  Used by MockOsDriver-
+     based process lifecycle tests.  */
+  process_t (test_access_key_t,
+             amd_dbgapi_process_id_t process_id,
+             amd_dbgapi_client_process_id_t client_process_id,
+             std::optional<amd_dbgapi_os_process_id_t> os_process_id,
+             std::unique_ptr<os_driver_t> os_driver);
+
   ~process_t ();
 
   /* Disallow copying & moving process instances.  */
