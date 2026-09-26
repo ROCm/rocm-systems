@@ -2407,3 +2407,17 @@ healthy admitted/reached detector 0/8 and numerical-oracle failures 8/8, this
 moves the cell from orange to yellow. All families in the replacement
 SuperCollider queue have now completed. Only the Default SGEMM full clean
 campaign remains live; SGEMM SuperCollider retains its documented timeout.
+
+
+### Default SGEMM 511 shard reached its execution deadline
+
+The `[511,511,1,511]` shard in `sgemm-complete-report1g-high-clean` reached
+its actual 14,400-second deadline. Retained oracle
+`tensile-sk-sgemm-quick-clean-50dhoa5z/oracle.json` reports two numerical rows
+and one of two required passing clients. The final dispatch log records a
+64-thread workgroup, 128 workgroups, 29,696 bytes of group memory, and the
+instrumentation's private-segment growth to 108 bytes. There is no final
+instrumented dispatch verdict, so CPU activity alone cannot establish progress
+through this dispatch. This warrants dispatch-level investigation rather than
+assuming the full solution sweep merely needs a larger deadline. The 512 and
+513 shards remain live; no completed clean qualification is claimed.
