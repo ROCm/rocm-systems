@@ -2395,3 +2395,15 @@ Solution-index sharding was investigated in Tensile's `AllSolutionsIterator`;
 it was not introduced here. The existing clients already saturate this host
 (load around 72 on 32 logical CPUs, with dozens of threads per client), so
 launching additional partitions now would add CPU and memory contention.
+
+
+### Sparse FP8 ML SuperCollider full clean completed
+
+`sc-parallel-full-clean/tensile-spmm-f8-ml/clean/supercollider/result.json`
+accepts all three commands with zero exit codes, passing numerical oracles
+(17, 25, and 18 rows), and complete static/dynamic 183,108/183,108 access
+coverage. Together with the matching targeted `sleep_wave=15` campaign's
+healthy admitted/reached detector 0/8 and numerical-oracle failures 8/8, this
+moves the cell from orange to yellow. All families in the replacement
+SuperCollider queue have now completed. Only the Default SGEMM full clean
+campaign remains live; SGEMM SuperCollider retains its documented timeout.
