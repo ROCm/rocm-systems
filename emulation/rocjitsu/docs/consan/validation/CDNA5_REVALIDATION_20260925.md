@@ -1981,3 +1981,12 @@ Wave 2's tensor write and wave 1 lane 0's LDS read overlap at byte 1024.
 The mutation preserves tensor completion and subsequent reuse barriers.
 The shared spec binds the retained site and paired sequence identities;
 209 runner tests pass (`sparse-all-retained-v1-spec-tests.log`).
+
+Sparse TDM-all's retained campaigns completed at 0/8 detections for both
+`default` and `high`, with eight admitted/reached trials and passing numeric
+oracles. Full clean sweeps pass all four shards at `high`
+(`sparse-complete-high-clean`) and `higher` (`sparse-all-complete-higher-clean`),
+with complete applicable coverage. Matching retained baseline and `higher`
+clean replay pass; the `sparse-all-retained-v1-higher-fault` campaign is
+running. Its first completed trial detects the reviewed publication race.
+The row remains yellow until the complete predeclared campaign qualifies.
