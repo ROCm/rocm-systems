@@ -62,6 +62,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **`amdsmi_get_gpu_activity()` now reports an unavailable usage as `UINT32_MAX`**.  
+  - The `amdsmi_engine_usage_t` fields are `uint32_t`, but `gfx_activity`, `umc_activity` and `mm_activity` were copied from the `uint16_t` GPU metrics fields, so an unavailable usage arrived as `0x0000FFFF`. They now report `0xFFFFFFFF`, matching the other `uint32_t` fields.
+  - C, Go and Rust callers that compare against `0xFFFF` must also accept `0xFFFFFFFF`. The Python interface and the CLI already render both as `N/A`.
+
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.
 
@@ -139,6 +143,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
 ### Resolved Issues
+
+- **Fixed v2.4 APU metrics reporting an unavailable `average_socket_power` or `average_gfx_power` as `65535` mW**.  
+  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.54 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
 
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
