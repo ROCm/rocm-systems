@@ -2691,3 +2691,10 @@ detects none. The campaign's nonzero exit is the expected rejection of its
 0/8 detector score, not an infrastructure failure. This reproduces the earlier
 timed sampling miss under matching untimed controls. Three large full-clean
 shapes remain running, so the cell stays orange for that outstanding gate.
+
+The matching untimed Default clean now passes all 650 numerical cases in
+1,592 seconds, with complete access, barrier, atomic, and fence coverage
+(`sgemm-bank-fixed-untimed-high-clean-retry/default/result.json`). Its eight
+fault trials have started. This completes the comparator gate that the
+earlier 1,800-second timed run could not finish; full-family qualification
+continues to require all six original clean shards.
