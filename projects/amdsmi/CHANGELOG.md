@@ -60,6 +60,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
+  - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
+
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
 
