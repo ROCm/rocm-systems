@@ -2716,7 +2716,7 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo* asyncInfo)
     : exit(false), info_(asyncInfo) {
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+    throw AMD::hsa_exception(err, "Failed to allocate async handler signal");
 }
 
 void Runtime::AsyncEventsControl::Start() {
