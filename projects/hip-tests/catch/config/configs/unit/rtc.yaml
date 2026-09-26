@@ -3,6 +3,9 @@ rtc:
   Unit_hiprtc_saxpy:
     <<: *level_2
     tags: [compile]
+  Unit_hiprtc_ProfileRuntimeLink:
+    <<: *level_2
+    tags: [link]
   Unit_hiprtc_warpsize:
     <<: *level_2
     tags: [compile]
