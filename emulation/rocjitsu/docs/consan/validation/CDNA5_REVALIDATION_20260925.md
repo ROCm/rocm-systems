@@ -2332,3 +2332,15 @@ passing clients, followed by the explicit timeout; this is incomplete clean
 qualification, not a numeric mismatch or a detector report. The three smaller
 shards passed, while the remaining larger shards continue. The table records
 the timeout without restarting those live runs.
+
+
+### F8GEMM SuperCollider full clean completed
+
+`sc-parallel-full-clean/tensile-sk-f8gemm-quick/clean/supercollider/result.json`
+accepts all nine commands with zero exit codes and complete static/dynamic
+1,772/1,772 access coverage at `sleep=15`. Every numeric oracle passes. Combined
+with the healthy admitted/reached 0/8 campaign in `f8gemm-sc-v1-fault`, this
+moves the cell from orange to yellow. The concurrent scheduling handoff thus
+completed both F8GEMM and HGEMM without restarting either SGEMM run; sparse FP8
+ML remains active. The shared memory slice still reports zero `max`, `oom`,
+and `oom_kill` events.
