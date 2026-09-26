@@ -107,11 +107,8 @@ main(int argc, char** argv)
 
         // Attempt to attach - this should FAIL because bg-attach thread doesn't exist
         //
-        // NOTE: for the attach-tree mode, this test spawns a single child with no descendants,
-        // so rocattach_attach_tree() reduces to one setup() call and the returned last_status
-        // is deterministically ROCATTACH_STATUS_ERROR. If this test is extended to a real
-        // process tree, revisit this expectation because last_status only reflects the last
-        // failure encountered.
+        // NOTE: for attach-tree mode, this child is the non-attachable root. Root setup
+        // fails immediately, so no descendants would be attempted even if the target had any.
         rocattach_status_t status =
             use_tree_attach ? rocattach_attach_tree(child_pid) : rocattach_attach(child_pid);
 
