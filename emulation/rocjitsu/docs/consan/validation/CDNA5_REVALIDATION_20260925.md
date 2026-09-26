@@ -2550,3 +2550,21 @@ policy. It requires complete publication events and a complete analysis verdict.
 The numerical preservation check remains. The corrected case passes
 (`sgemm-bank-atomic-contract-test.log`); a diagnostic run records all three
 required modification sites covered, four events, and publication flags 3.
+
+
+### Stream-K fixture release waits repaired
+
+Debugger captures (`sgemm-bank-events-ConSanDeviceGfx1250Sim.*.log`) show
+correctly observed atomic modification chains, but every RMW has acquire-only
+semantics. Native gfx1250 disassembly contains an LDS store followed by a
+release prefix that drains global stores; it lacks an LDS completion wait.
+Thus the earlier apparent false positives are fixture synchronization gaps,
+not evidence that ConSan should infer the missing release ordering.
+
+The last-arriver fixture now explicitly drains LDS before its handoff atomic
+on gfx1250. The full-bank fixture extends its existing gfx1201 LDS wait to
+gfx1250, where the noinline producer likewise hides pending LDS work from its
+caller. Both correct cases pass, and both deliberately broken counter-handoff
+cases still report the expected races: four tests pass in
+`sgemm-streamk-wait-tests.log`. The default SGEMM qualification jobs continue
+with their immutable repaired hook.

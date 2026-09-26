@@ -35,6 +35,11 @@ __global__ __launch_bounds__(128) void streamk_last_arriver_for_consan(DeviceSta
   uint32_t *handoff = &state->handoff[0];
   if (!state->synchronize && wave + 1u == state->wave_count)
     handoff = &state->handoff[1];
+#if defined(__gfx1250__)
+  // The gfx1250 atomic release prefix drains global stores, not the preceding
+  // LDS publication. Make that completion explicit before publishing a ticket.
+  asm volatile("s_wait_dscnt 0\n\t" : : "v"(handoff) : "memory");
+#endif
   const uint32_t ticket =
       __hip_atomic_fetch_add(handoff, 1u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
   state->tickets[wave] = ticket;
