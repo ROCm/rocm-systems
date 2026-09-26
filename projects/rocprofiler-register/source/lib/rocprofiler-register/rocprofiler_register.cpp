@@ -468,8 +468,7 @@ rocp_reg_scan_for_tools()
     auto  _rocp_tool_libs = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
     auto  _rocp_reg_lib = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
     bool  _force_tool =
-        common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
-                        !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
+        common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD", !_rocp_tool_libs.empty());
 
     bool _found_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
