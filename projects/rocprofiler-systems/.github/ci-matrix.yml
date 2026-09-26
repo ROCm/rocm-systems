@@ -14,6 +14,8 @@ matrix-nightly:
   - { os-release: '24.04', gpu: 'navi3x', arch: 'gfx110X' }
   # Navi 4x
   - { os-release: '24.04', gpu: 'navi4x', arch: 'gfx120X' }
+  # Strix Halo
+  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151' }
 matrix-ci:
   # MI355
   - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }
