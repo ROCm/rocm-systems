@@ -325,6 +325,11 @@ list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 # copy of the device build flags.
 set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  # HOST_ASAN pairs sanitizer flags with a preceding "-Xarch_host" host-scoping
+  # token (see therock_sanitizers.cmake). Filtering out only the flag value
+  # would leave "-Xarch_host" behind with no argument, which clang rejects as
+  # an invalid Xarch argument, so drop the token itself too.
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-Xarch_host")
   list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fsanitize=address")
   list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fno-omit-frame-pointer")
   list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-shared-libasan")
