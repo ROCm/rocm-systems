@@ -1,51 +1,31 @@
-# ConSan validation on RDNA4 (gfx1201)
+# RDNA4 reevaluation — September 26, 2026
 
-**Global-memory support:** the yellow SuperCollider cell for `pytorch-scatter-reduce`
-reflects missing global-access coverage. See [SuperCollider for global memory](../SUPERCOLLIDER_GLOBAL_MEMORY.md)
-for the findings, implementation plan, and expected overhead.
+Physical gfx1201 validation of the external workloads. Initial runs use recorded settings. Added-bank settings and CLIP sleep=2 are requalifications; the [regression review](/home/benoit/workspace/consan-validation/rdna4-reevaluation-20260926/REGRESSIONS.md) preserves the initial failures. Fractions count detections in eight admitted/reached fault trials; green requires at least 6/8 and matching clean qualification. Pending cells do not inherit historical grades. Raw evidence stays in the [external campaign directory](/home/benoit/workspace/consan-validation/rdna4-reevaluation-20260926).
 
-This table records the September 23–24, 2026 end-to-end ConSan revalidation of
-external workloads on this host’s gfx1201 GPU. **Default** names the sampling preset used by the
-Default engine; **SuperCollider** records its replay and timing-perturbation
-configuration. Fault counts such as **8/8** mean eight detections in eight
-fault-injection trials, not eight passing workloads. **Bar 6/8** means at least
-six of eight admitted and reached trials must detect the injected fault. Green
-also requires a passing clean correctness run with matching controls, complete
-coverage evidence, and healthy GPU checks. “Lowest passing” means all smaller
-presets from `default` failed; “lowest verified” means smaller presets remain
-untested or unqualified. Existing cell ratings retain their recorded
-qualification evidence. See [VALIDATION.md](VALIDATION.md)
-for the procedure and qualification rules. The September 24
-[SuperCollider investigation](SUPERCOLLIDER_RDNA4_ANALYSIS.md) explains the
-historical color changes and audits the current clean controls.
+Global-only scatter-reduce remains outside LDS/FLAT coverage; see [the global-memory support analysis](../SUPERCOLLIDER_GLOBAL_MEMORY.md).
 
-Shared [color scale](VALIDATION.md#status-colors): 🟩 qualified; 🟨 clean run
-established, but fault qualification is pending/below bar or the workload is
-outside detector scope; 🟧 clean qualification blocked by prerequisites,
-unsupported applicable operations, incomplete coverage/evidence, or a timeout;
-🟥 observed correctness or instrumentation failure. Empty/🩶 means unassessed
-for this execution target; simulator prerequisites alone do not qualify hardware.
+Colors: 🟩 qualified; 🟨 clean but below the fault bar or outside scope; 🟧 incomplete qualification; 🟥 correctness/instrumentation failure; 🩶 pending.
 
-| Set | Priority | Workload / validation ID | Default | SuperCollider |
-| --- | ---: | --- | --- | --- |
-| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); [latest recheck](HISTC_RDNA4_ANALYSIS.md) | 🟩 wave-dependent sleep, max=15: clean pass; fault 8/8 (bar 6/8); [experiment](SC_SENSITIVITY_RDNA4_20260924.md) |
-| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 wave-dependent sleep, max=15: clean pass; fault 7/8 (bar 6/8); [experiment](SC_SENSITIVITY_RDNA4_20260924.md) |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); [post-fix recheck](../benchmark/SANITY_GFX1201_20260924.md) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 wave sleep, max=15: clean pass; fault 8/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=1: clean pass; fault 2/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md); [sweep](SC_LOAD_DELAY_RDNA4_20260924.md) |
-| PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 Out of scope: clean numerical pass; traced global-atomic kernels have no LDS/FLAT accesses; no applicable race coverage | 🟨 Out of scope: clean numerical pass; traced global-atomic kernels have no LDS/FLAT accesses; no applicable race coverage; [global-support analysis](../SUPERCOLLIDER_GLOBAL_MEMORY.md) |
-| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟨 sleep=1: clean pass; fault 4/8 (bar 6/8); same-value writes allowed; [delay experiments](SC_SENSITIVITY_RDNA4_20260924.md) below bar; [sweep](SC_SWEEP_RDNA4_20260924.md); [sweep](SC_LOAD_DELAY_RDNA4_20260924.md) |
-| PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟩 delay matrix: fault 8/8; matching clean controls pass |
-| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟩 high (lowest passing): clean pass; fault 6/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [delay experiments](SC_SENSITIVITY_RDNA4_20260924.md) below bar; [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 higher (lowest passing): clean pass; fault 7/8 (bar 6/8) | 🟩 sleep=1: clean pass; fault 8/8 (bar 6/8) |
-| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); historical fault also 0/8 with/without allowlist; [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 sleep=1: clean pass; fault 8/8 (bar 6/8) |
-| PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟩 higher + 256 banks: strict clean pass; fault 6/8 (bar 6/8); [coverage/retention fixes](HISTC_RDNA4_ANALYSIS.md) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [delay experiment](SC_SENSITIVITY_RDNA4_20260924.md) also below bar; [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 wave sleep, max=15: clean pass; fault 8/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 higher (lowest passing): strict clean pass; fault 8/8 (bar 6/8) ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)); [histogram-fix recheck](HISTC_RDNA4_ANALYSIS.md) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 higher (lowest passing): strict clean pass; fault 8/8 (bar 6/8) ([analysis](ATOMIC_PUBLICATION_RDNA4_ANALYSIS.md)) | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
-| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8); [sweep](SC_SWEEP_RDNA4_20260924.md) |
+| Workload | Default | SuperCollider |
+| --- | --- | --- |
+| rdna4-matmul-fp16-production | 🟩 clean pass; fault 8/8; high | 🟩 clean pass; fault 7/8; sleep_wave=15 |
+| rdna4-matmul-fp8-production | 🟩 clean pass; fault 8/8; high | 🟩 clean pass; fault 7/8; sleep_wave=15 |
+| qwen-prefill | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 0/8; sleep=15 |
+| pytorch-torch-mode | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 0/8; sleep=15 |
+| tp1-prefill | 🟩 clean pass; fault 8/8; higher | 🟩 clean pass; fault 8/8; sleep_wave=15 |
+| tp1-decode-combined | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 1/8; sleep=1 |
+| pytorch-scatter-reduce | 🟨 numerical pass; global-only scope limitation; default | 🟨 numerical pass; global-only scope limitation; nop=0 |
+| pytorch-rdna4-compiled-softmax | 🟩 clean pass; fault 8/8; higher + 64 banks; same-value writes allowed | 🟩 clean pass; fault 8/8; sleep=1; same-value writes allowed |
+| pytorch-rdna4-split-softmax | 🟩 clean pass; fault 8/8; high; same-value writes allowed | 🟩 clean pass; fault 7/8; nop delay matrix 0/16/64/256 |
+| pytorch-rdna4-llm-topk | 🟩 clean pass; fault 7/8; high | 🟨 clean pass; fault 0/8; sleep=15 |
+| llama-rdna4-mul-mat-vec-q | 🟩 clean pass; fault 8/8; higher + 64 banks | 🟩 clean pass; fault 8/8; sleep=1 |
+| tp2-family | 🟩 clean pass; fault 7/8; high | 🟨 clean pass; fault 0/8; sleep=15 |
+| clip-bf16 | 🟩 clean pass; fault 8/8; high | 🟩 clean pass; fault 8/8; sleep=2 |
+| pytorch-torch-histc | 🟩 clean pass; fault 7/8; higher + 256 banks | 🟨 clean pass; fault 0/8; sleep=15 |
+| llama-rdna4-rms-norm | 🟩 clean pass; fault 8/8; higher | 🟩 clean pass; fault 8/8; sleep_wave=15 |
+| d128-block | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 0/8; sleep=15 |
+| d128-pressure | 🟩 clean pass; fault 8/8; high | 🟨 clean pass; fault 0/8; sleep=15 |
+| wmma-attention | 🟩 clean pass; fault 8/8; high | 🟨 clean pass; fault 5/8; sleep=15 |
+| streamk-arrival | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 0/8; nop=0 |
+| tree-atomic-or | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 0/8; nop=0 |
+| jakub-attention | 🟩 clean pass; fault 8/8; higher | 🟨 clean pass; fault 0/8; sleep=15 |
