@@ -588,6 +588,7 @@ class AmdSmiPowerProfilePresetMasks(IntEnum):
     VR_MASK = amdsmi_wrapper.AMDSMI_PWR_PROF_PRST_VR_MASK
     THREE_D_FULL_SCR_MASK = amdsmi_wrapper.AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK
     BOOTUP_DEFAULT = amdsmi_wrapper.AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT
+    WINDOW_3D_MASK = amdsmi_wrapper.AMDSMI_PWR_PROF_PRST_WINDOW_3D_MASK
     INVALID = amdsmi_wrapper.AMDSMI_PWR_PROF_PRST_INVALID
 
 

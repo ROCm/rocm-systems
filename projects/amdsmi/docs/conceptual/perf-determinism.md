@@ -50,6 +50,16 @@ The request flows through the stack as:
 Setting the level back to `AUTO` restores dynamic power management.
 ```
 
+```{note}
+Performance levels are not the same as *power profiles*. A power profile
+(the `pp_power_profile_mode` interface, set with `amd-smi set --profile`)
+selects a workload-tuned PowerPlay heuristic such as `BOOTUP_DEFAULT`,
+`3D_FULL_SCREEN`, `POWER_SAVING`, `VIDEO`, `VR`, `COMPUTE`, `CUSTOM`, or
+`WINDOW_3D`. It is a separate control from the performance level above; setting
+a profile does not change the performance level. The available profiles vary by
+ASIC, and the `DETERMINISM` level above is unrelated to the graphics profiles.
+```
+
 ### How the driver handles performance levels
 
 The kernel driver (for example,

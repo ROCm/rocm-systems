@@ -187,6 +187,26 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t* rg) {
 }
 
 /**
+ * Maps a pp_power_profile_mode mode name (e.g. "BOOTUP_DEFAULT") to its preset
+ * mask, or RSMI_PWR_PROF_PRST_INVALID for any name this build does not model
+ * (e.g. a profile a future driver adds before amd-smi grows a preset for it).
+ */
+static rsmi_power_profile_preset_masks_t power_prof_name_to_mask(const std::string& mode) {
+  static const std::unordered_map<std::string, rsmi_power_profile_preset_masks_t> mode_map{
+      {"BOOTUP_DEFAULT", RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT},
+      {"3D_FULL_SCREEN", RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK},
+      {"POWER_SAVING", RSMI_PWR_PROF_PRST_POWER_SAVING_MASK},
+      {"VIDEO", RSMI_PWR_PROF_PRST_VIDEO_MASK},
+      {"VR", RSMI_PWR_PROF_PRST_VR_MASK},
+      {"COMPUTE", RSMI_PWR_PROF_PRST_COMPUTE_MASK},
+      {"CUSTOM", RSMI_PWR_PROF_PRST_CUSTOM_MASK},
+      {"WINDOW_3D", RSMI_PWR_PROF_PRST_WINDOW_3D_MASK},
+  };
+  const auto mode_iter = mode_map.find(mode);
+  return mode_iter == mode_map.end() ? RSMI_PWR_PROF_PRST_INVALID : mode_iter->second;
+}
+
+/**
  * Parse a string of the form "<int index> <mode name string> <|*>"
  */
 static rsmi_power_profile_preset_masks power_prof_string_to_int(std::string pow_prof_line,
@@ -196,8 +216,6 @@ static rsmi_power_profile_preset_masks power_prof_string_to_int(std::string pow_
   size_t tmp;
 
   THROW_IF_NULLPTR_DEREF(prof_ind)
-
-  rsmi_power_profile_preset_masks_t ret = RSMI_PWR_PROF_PRST_INVALID;
 
   fs >> *prof_ind;
   fs >> mode;
@@ -211,28 +229,10 @@ static rsmi_power_profile_preset_masks power_prof_string_to_int(std::string pow_
   }
 
   if (is_curr != nullptr) {
-    if (pow_prof_line.find('*') != std::string::npos) {
-      *is_curr = true;
-    } else {
-      *is_curr = false;
-    }
+    *is_curr = pow_prof_line.find('*') != std::string::npos;
   }
 
-  const std::unordered_map<std::string, std::function<void()>> mode_map{
-      {"BOOTUP_DEFAULT", [&]() { ret = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT; }},
-      {"3D_FULL_SCREEN", [&]() { ret = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK; }},
-      {"POWER_SAVING", [&]() { ret = RSMI_PWR_PROF_PRST_POWER_SAVING_MASK; }},
-      {"VIDEO", [&]() { ret = RSMI_PWR_PROF_PRST_VIDEO_MASK; }},
-      {"VR", [&]() { ret = RSMI_PWR_PROF_PRST_VR_MASK; }},
-      {"COMPUTE", [&]() { ret = RSMI_PWR_PROF_PRST_COMPUTE_MASK; }},
-      {"CUSTOM", [&]() { ret = RSMI_PWR_PROF_PRST_CUSTOM_MASK; }},
-  };
-  auto mode_iter = mode_map.find(mode);
-
-  if (mode_iter != mode_map.end()) {
-    mode_iter->second();
-  }
-  return ret;
+  return power_prof_name_to_mask(mode);
 }
 
 static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type, uint32_t dv_ind,
@@ -1425,6 +1425,173 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   CATCH
 }
 
+// The transposed SMU 13.0.7 pp_power_profile_mode layout numbers every profile
+// sequentially starting at 0 on its first line (the driver emits the complete
+// run 0..N-1 -- see smu_v13_0_7_get_power_profile_mode()), interleaved with the
+// profile names. The classic layout's first line is instead a text column
+// header (e.g. "PROFILE_INDEX(NAME) ..." or "NUM MODE_NAME ..."). Requiring
+// that monotonic 0..N-1 index run (N >= 2), rather than just "the first token
+// is a digit", keeps other digit-first layouts this parser was not written for
+// from being misread as transposed.
+static bool is_transposed_power_profile_mode(const std::string& first_line) {
+  std::istringstream fs(first_line);
+  std::string tok;
+  uint32_t expected_idx = 0;
+  bool saw_name_since_idx = true;  // an index and its name must alternate
+  while (fs >> tok) {
+    const bool all_digits =
+        !tok.empty() &&
+        std::all_of(tok.begin(), tok.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (all_digits) {
+      // A real profile index is small and equals the next expected value; an
+      // over-long or out-of-sequence digit run is some other layout.
+      if (tok.size() > 9 || !saw_name_since_idx ||
+          static_cast<uint32_t>(std::stoul(tok)) != expected_idx) {
+        return false;
+      }
+      ++expected_idx;
+      saw_name_since_idx = false;
+    } else if (tok.find_first_not_of('*') != std::string::npos) {
+      // A profile name (a standalone '*' current marker is ignored here).
+      saw_name_since_idx = true;
+    }
+  }
+  return expected_idx >= 2;
+}
+
+// Parses the transposed layout's first line, e.g.
+//   "0 BOOTUP_DEFAULT* 1 3D_FULL_SCREEN 2 POWER_SAVING ..."
+// which lists "<index> <NAME>[*]" for every profile, with '*' on the currently
+// active one. Fills p->available_profiles / p->current / p->num_profiles and,
+// when ind_map is non-null, each recognized profile's driver index.
+static void parse_transposed_power_profile_line(
+    const std::string& line, rsmi_power_profile_status_t* p,
+    std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
+  std::istringstream fs(line);
+  std::string tok;
+  uint32_t count = 0;
+  uint32_t idx = 0;
+  bool have_idx = false;
+  // Mask of the most recently parsed profile name. The driver formats each name
+  // left-justified in a 14-char field followed by the marker ("%-14s%s" with
+  // "* "/" "), so a name shorter than 14 chars pushes the '*' into its own
+  // whitespace-delimited token (e.g. "COMPUTE       * "). Remember the profile
+  // so a trailing standalone '*' can be attributed to it. INVALID means the last
+  // name had no rsmi mask (an unmodeled name) or none has been seen yet.
+  rsmi_power_profile_preset_masks_t last_mask = RSMI_PWR_PROF_PRST_INVALID;
+
+  while (fs >> tok) {
+    const bool all_digits =
+        std::all_of(tok.begin(), tok.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (all_digits) {
+      // A profile index precedes each name. Ignore an absurdly long run of
+      // digits rather than risk overflow.
+      if (tok.size() <= 9) {
+        idx = static_cast<uint32_t>(std::stoul(tok));
+        have_idx = true;
+      }
+      continue;
+    }
+
+    // A standalone '*' marks the profile just parsed as current -- it is not a
+    // profile of its own, so attribute it and do not count it.
+    if (tok.find_first_not_of('*') == std::string::npos) {
+      if (last_mask != RSMI_PWR_PROF_PRST_INVALID && p->current == RSMI_PWR_PROF_PRST_INVALID) {
+        p->current = last_mask;
+      }
+      continue;
+    }
+
+    // Token is a profile name, possibly carrying an adjacent '*' current marker
+    // (the driver prints "NAME* " when the name fills the 14-char field).
+    const bool is_curr = tok.find('*') != std::string::npos;
+    const size_t end = tok.find_first_of("* :");
+    const std::string name = (end == std::string::npos) ? tok : tok.substr(0, end);
+    ++count;
+
+    const rsmi_power_profile_preset_masks_t mask = power_prof_name_to_mask(name);
+    last_mask = mask;
+    if (mask != RSMI_PWR_PROF_PRST_INVALID) {
+      p->available_profiles |= mask;
+      if (ind_map != nullptr && have_idx) {
+        (*ind_map)[mask] = idx;
+      }
+      if (is_curr && p->current == RSMI_PWR_PROF_PRST_INVALID) {
+        p->current = mask;
+      }
+    }
+    have_idx = false;
+  }
+  p->num_profiles = count;
+}
+
+namespace amd::smi {
+
+// Parses raw pp_power_profile_mode text (as read from sysfs) into *p. Split out
+// from get_power_profiles() as a library-local test seam (not a public
+// rsmi_/amdsmi_ entry point), so it stays out of the shared-library ABI; the
+// unit tests reach it through the static archive.
+//
+// - Handles both driver layouts: classic (header line, one profile per line)
+//   and transposed SMU 13.0.7 (every profile and the '*' on the first line;
+//   Navi 33, gfx1102).
+// - The driver marks exactly one profile current. p->current is left
+//   RSMI_PWR_PROF_PRST_INVALID ("current unknown") when the active profile has
+//   no rsmi preset in this build, or when the table carries no marker (a
+//   malformed or truncated read); either way the parsed profiles are returned
+//   and the call never aborts.
+// - Those two "current unknown" cases are not currently distinguishable.
+rsmi_status_t ParsePowerProfileMode(
+    const std::vector<std::string>& lines, rsmi_power_profile_status_t* p,
+    std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
+  if (p == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  if (lines.empty()) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  p->current = RSMI_PWR_PROF_PRST_INVALID;  // init to an invalid value
+  p->available_profiles = 0;
+  p->num_profiles = 0;
+
+  if (is_transposed_power_profile_mode(lines[0])) {
+    parse_transposed_power_profile_line(lines[0], p, ind_map);
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  // Classic layout: skip the header on the first line, then one profile per
+  // line. The '*' marker sits on the current profile's own line.
+  if (lines.size() > RSMI_MAX_NUM_POWER_PROFILES + 1) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+  // -1 for the header line.
+  p->num_profiles = static_cast<uint32_t>(lines.size() - 1);
+
+  bool current = false;
+  rsmi_power_profile_preset_masks_t prof;
+  uint32_t prof_ind;
+  for (size_t i = 1; i < lines.size(); ++i) {
+    prof = power_prof_string_to_int(lines[i], &current, &prof_ind);
+    if (prof == RSMI_PWR_PROF_PRST_INVALID) {
+      continue;
+    }
+    if (ind_map != nullptr) {
+      (*ind_map)[prof] = prof_ind;
+    }
+    p->available_profiles |= prof;
+    // The driver marks exactly one profile current. If a malformed table marks
+    // several, keep the last (this classic path's long-standing behavior); a
+    // healthy driver never exercises this.
+    if (current) {
+      p->current = prof;
+    }
+  }
+  return RSMI_STATUS_SUCCESS;
+}
+
+}  // namespace amd::smi
+
 static rsmi_status_t get_power_profiles(
     uint32_t dv_ind, rsmi_power_profile_status_t* p,
     std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
@@ -1439,40 +1606,7 @@ static rsmi_status_t get_power_profiles(
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
-  assert(val_vec.size() <= RSMI_MAX_NUM_POWER_PROFILES);
-  if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.empty()) {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
-  }
-  // -1 for the header line, below
-  p->num_profiles = static_cast<uint32_t>(val_vec.size() - 1);
-  bool current = false;
-  p->current = RSMI_PWR_PROF_PRST_INVALID;  // init to an invalid value
-  p->available_profiles = 0;
-
-  rsmi_power_profile_preset_masks_t prof;
-  uint32_t prof_ind;
-
-  for (uint32_t i = 1; i < val_vec.size(); ++i) {
-    prof = power_prof_string_to_int(val_vec[i], &current, &prof_ind);
-
-    if (prof == RSMI_PWR_PROF_PRST_INVALID) {
-      continue;
-    }
-
-    if (ind_map != nullptr) {
-      (*ind_map)[prof] = prof_ind;
-    }
-
-    p->available_profiles |= prof;
-    if (current) {
-      // Should only be 1 current profile
-      assert(p->current == RSMI_PWR_PROF_PRST_INVALID);
-      p->current = prof;
-    }
-  }
-
-  assert(p->current != RSMI_PWR_PROF_PRST_INVALID);
-  return RSMI_STATUS_SUCCESS;
+  return amd::smi::ParsePowerProfileMode(val_vec, p, ind_map);
   CATCH
 }
 

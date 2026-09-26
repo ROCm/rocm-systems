@@ -689,7 +689,8 @@ typedef enum {
   //!< 3D Full Screen Power Profile
   RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,
   RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,  //!< Default Boot Up Profile
-  RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
+  RSMI_PWR_PROF_PRST_WINDOW_3D_MASK = 0x80,  //!< Window 3D Power Profile
+  RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_WINDOW_3D_MASK,
 
   //!< Invalid power profile
   RSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF
@@ -942,7 +943,9 @@ typedef struct {
   rsmi_bit_field_t available_profiles;
 
   /**
-   * Which power profile is currently active
+   * Which power profile is currently active, or
+   * ::RSMI_PWR_PROF_PRST_INVALID if no profile is marked active (or, rarely, if
+   * the active profile has no corresponding RSMI preset)
    */
   rsmi_power_profile_preset_masks_t current;
 
@@ -3847,7 +3850,9 @@ rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind, uint32_t* num_
  *  ::RSMI_PWR_PROF_PRST_VR_MASK AND'ed with
  *  ::rsmi_power_profile_status_t.available_profiles. Additionally,
  *  ::rsmi_power_profile_status_t.current will be set to the
- *  ::rsmi_power_profile_preset_masks_t of the profile that is currently active.
+ *  ::rsmi_power_profile_preset_masks_t of the profile that is currently active,
+ *  or ::RSMI_PWR_PROF_PRST_INVALID if the driver does not mark any profile as
+ *  active.
  *
  *  @param[in] dv_ind a device index
  *

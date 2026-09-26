@@ -1446,6 +1446,7 @@ class AMDSMIHelpers:
             "VR": amdsmi_interface.AmdSmiPowerProfilePresetMasks.VR_MASK,
             "3D_FULL_SCREEN": amdsmi_interface.AmdSmiPowerProfilePresetMasks.THREE_D_FULL_SCR_MASK,
             "BOOTUP_DEFAULT": amdsmi_interface.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT,
+            "WINDOW_3D": amdsmi_interface.AmdSmiPowerProfilePresetMasks.WINDOW_3D_MASK,
         }
 
     def get_profile_name_from_mask(self, mask):
