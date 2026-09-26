@@ -111,9 +111,9 @@ private:
 
 #include "fakes/sym_kernels_fakes.h"
 
-// hipMemLocationTypeHost is in hip/driver_types.h from 7.0.2.2. HostNuma is
-// missing below 7.12; hip_compat.h supplies the CUDA enumerator 3. This file
-// is not hipified. static const: below 7.12 HostNuma is outside the enum range.
+// hipMemLocationTypeHost and HostNuma follow NCCL_CUMEM_HOST_VERSION_SUPPORTED:
+// native 7.12.60540 and the 7.0.2.x backport. Outside that, hip_compat.h
+// supplies CUDA enumerator 3. This file is not hipified.
 // ---------------------------------------------------------------------------
 // Shared fixture teardown for suites that leave windows registered.
 //
@@ -141,7 +141,7 @@ static void ReclaimDevrWindows(ncclComm* comm) {
   while (devr->memHead != nullptr) symMemoryDestroy(comm, devr->memHead);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
+#if defined(__HIP_PLATFORM_AMD__) && !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 static const hipMemLocationType kLocHostNuma =
     static_cast<hipMemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
 #else
