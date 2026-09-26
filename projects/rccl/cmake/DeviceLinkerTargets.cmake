@@ -24,6 +24,19 @@ function(dl_parse_gpu_targets)
     set(${P_ID_PREFIX}${_gpu} "${_gpu_raw}" PARENT_SCOPE)
   endforeach()
 
+  # We allow only one target ID for a given processor.
+  set(_unique "${_bare}")
+  list(REMOVE_DUPLICATES _unique)
+  list(LENGTH _bare _n_all)
+  list(LENGTH _unique _n_unique)
+  if(NOT _n_all EQUAL _n_unique)
+    message(FATAL_ERROR
+      "GPU_TARGETS names more than one target ID for the same processor: "
+      "${P_TARGETS}. The device linker keys its CMake targets and output "
+      "directories on the bare processor name, so it can build only one "
+      "variant of each. Choose one per processor.")
+  endif()
+
   set(${P_BARE_VAR} "${_bare}" PARENT_SCOPE)
   set(${P_FLAGS_VAR} "${_flags}" PARENT_SCOPE)
 endfunction()

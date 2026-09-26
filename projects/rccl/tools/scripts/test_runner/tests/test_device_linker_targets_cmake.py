@@ -16,8 +16,12 @@ class DeviceLinkerTargetsCMakeTest(unittest.TestCase):
     against the agent. A dropped suffix here is a silently featureless build.
     """
 
-    def _parse(self, targets):
-        """Call dl_parse_gpu_targets in script mode; return (bare, flags, ids)."""
+    def _parse(self, targets, check=True):
+        """Call dl_parse_gpu_targets in script mode; return (bare, flags, ids).
+
+        With check=False the CompletedProcess is returned instead, for the
+        cases that expect the function to reject its input.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             out = Path(temp_dir) / "out.txt"
             script = Path(temp_dir) / "probe.cmake"
@@ -31,8 +35,10 @@ class DeviceLinkerTargetsCMakeTest(unittest.TestCase):
                 'endforeach()\n'
                 'file(WRITE "${OUT}" "${BARE}\\n${FLAGS}\\n${_ids}\\n")\n'
             )
-            subprocess.run(["cmake", f"-DOUT={out}", "-P", str(script)],
-                           check=True, capture_output=True, text=True)
+            done = subprocess.run(["cmake", f"-DOUT={out}", "-P", str(script)],
+                                  check=check, capture_output=True, text=True)
+            if not check:
+                return done
             bare, flags, ids = out.read_text().splitlines()
         return bare.split(";"), flags.split(";"), ids.split(";")
 
@@ -68,6 +74,16 @@ class DeviceLinkerTargetsCMakeTest(unittest.TestCase):
         self.assertEqual(ids, ["gfx942=gfx942:xnack+",
                                "gfx950=gfx950:xnack+",
                                "gfx1201=gfx1201"])
+
+    def test_two_variants_of_one_processor_are_rejected_by_name(self):
+        """The bare name keys the CMake target and output directory, so only
+        one variant per processor can be built. Both develop and this file
+        stop, but only here does the message say why."""
+        done = self._parse("gfx90a:xnack+ gfx90a:xnack-", check=False)
+
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("more than one target ID for the same processor",
+                      done.stderr)
 
 
 if __name__ == "__main__":
