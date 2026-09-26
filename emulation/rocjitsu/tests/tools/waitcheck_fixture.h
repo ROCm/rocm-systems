@@ -429,4 +429,20 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx1250_code_object({0xD7190002U, 0x0201020CU});
 }
 
+// Independent load/use hazards, each drained before the next pair. This makes
+// the exact diagnostic count independent of outstanding-event interactions.
+[[nodiscard]] inline std::vector<uint8_t> make_diagnostic_count_code_object(size_t count,
+                                                                            bool clean = false) {
+  std::vector<uint32_t> words;
+  for (size_t i = 0; i < count; ++i) {
+    append_inst(words, global_load_b32(0));
+    if (clean)
+      append_inst(words, s_wait_loadcnt(0));
+    append_inst(words, v_mov_b32(1, 0));
+    append_inst(words, s_wait_loadcnt(0));
+  }
+  words.push_back(0xBFB00000U); // s_endpgm
+  return make_gfx1201_code_object(words);
+}
+
 } // namespace rocjitsu::waitcheck_test

@@ -250,13 +250,16 @@ typedef struct rj_waitcheck_result_s {
   size_t memory_events_tracked;
   size_t kernels_discovered;
   size_t kernels_analyzed;
+  /// @brief Exact count on completed analysis, independent of callback limits.
+  /// A lower bound when stopped_early is nonzero.
   size_t diagnostics_observed;
   /// @brief Number of times diagnostic_callback was invoked.
   size_t diagnostics_reported;
   /// @brief Nonzero when no wait hazards were observed.
   uint32_t passed;
-  /// @brief Nonzero when diagnostics_observed is a lower bound because
-  /// callbacks were disabled or limited, or analysis stopped early.
+  /// @brief Nonzero when diagnostic details were omitted because callbacks
+  /// were disabled or limited, or analysis stopped early. Callback limits do
+  /// not make diagnostics_observed a lower bound; stopped_early does.
   uint32_t diagnostics_truncated;
   /// @brief Nonzero when stop_after_first_diagnostic ended analysis early.
   uint32_t stopped_early;
