@@ -1940,3 +1940,22 @@ are verified against the retained export inventory. Eight trials and a minimum
 of six detections are committed for each fault before outcomes.
 
 MXF4/sparse FP16 spec runner tests: 209 passed (`mxf4-sparse-f16-spec-tests.log`).
+
+### MXF4 TDM and sparse FP16 qualification
+
+The `mxf4-tdm-exact-{default,high}-fault` campaigns finished at 0/8 and
+8/8 respectively. The `sparse-f16-tdm-exact-{default,high}-fault` campaigns
+finished at 0/8 and 6/8. All trials were admitted and reached, numeric
+oracles passed, and health checks passed. Matching retained baseline and
+clean replays passed in both presets. Full `high` clean runs in
+`tensor-memory-mxf4-tdm-high-clean` (all six shards, 192 MiB report cap)
+and `tensor-memory-sparse-f16-high-clean` (all four objects) passed with
+complete applicable coverage. Thus `high` is the lowest qualifying preset
+for both rows. These runs use the immutable tensor-memory hook described above.
+
+SGEMM profiler retries in `discovery-sgemm-checkpointed` completed shards
+3, 4 and 5 at the 3600-second client deadline. All six shards now have
+successful traces; the allowlist converter passed. Clean qualification
+can proceed using the regenerated allowlist. Sparse FP8 ML retained export
+and replay also passed (`spmmml-retained-v2-replay-results.json`); its reviewed
+fault still needs binding to that retained object before qualification.
