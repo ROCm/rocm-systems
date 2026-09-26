@@ -709,10 +709,8 @@ void aggregateForTypeAndOp(AggregationType aggType,
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
   hipError_t status;
-  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                         (std::is_signed<T>::value? -1023 : 0);
-  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
-                                         1023;
+  typename distribution::result_type a = TestRange<T>::minimum;
+  typename distribution::result_type b = TestRange<T>::maximum;
   distribution distInput {a, b};
   int numAggregation = 0;
   void* kernelPtr;
@@ -879,7 +877,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, uns
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                       unsigned long long)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1344,7 +1342,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                       unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1359,7 +1357,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsig
   }
 }
 
-HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int,
+                       long long, unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1495,7 +1494,7 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half, bool, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1534,7 +1533,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
 // for all the tile sizes and all input types, using random input values, calculates the scan
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                   unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1559,8 +1558,34 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned
   }
 }
 
+// checks scans that use bool values and cg::less and greater as operators which are completely
+// defined e.g. false < true
+TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_Bool_Less_Greater)
+{
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
+  std::tuple<cooperative_groups::less<bool>,
+             cooperative_groups::greater<bool>> types;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, bool, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, bool, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, bool, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, bool, 64>(AggregationType::ExclusiveScan, types);
+    }
+  }
+}
+
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                   unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1622,7 +1647,7 @@ TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                   unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1648,7 +1673,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned in
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                   unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
