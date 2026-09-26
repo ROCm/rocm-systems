@@ -93,6 +93,12 @@ test_init()
     context::push_client(1);
 }
 
+// These tests dispatch on fake queues that never load a code object, so the tracer has to build
+// its resources up front instead of deferring them to the first code-object load.
+rocprofiler_thread_trace_parameter_t eager_resources = {
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+    {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA}};
+
 rocprofiler_thread_trace_control_flags_t
 start_stop_dispatch_cb(rocprofiler_agent_id_t,
                        rocprofiler_queue_id_t,
@@ -143,8 +149,8 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     ASSERT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
                   ctx,
                   att_agent->get_rocp_agent()->id,
-                  nullptr,
-                  0,
+                  &eager_resources,
+                  1,
                   start_stop_dispatch_cb,
                   [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
                   nullptr),
@@ -224,8 +230,8 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
         EXPECT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
                       data.ctx,
                       att_agent->get_rocp_agent()->id,
-                      nullptr,
-                      0,
+                      &eager_resources,
+                      1,
                       start_stop_dispatch_cb,
                       [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
                       nullptr),
@@ -313,8 +319,8 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     ASSERT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
                   ctx,
                   att_agent->get_rocp_agent()->id,
-                  nullptr,
-                  0,
+                  &eager_resources,
+                  1,
                   start_stop_dispatch_cb,
                   [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
                   nullptr),
