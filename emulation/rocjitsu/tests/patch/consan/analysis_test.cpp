@@ -312,7 +312,7 @@ TEST(ConSan, InventoriesGfx1250TensorDmaAsRuntimeDescriptorRanges) {
       EXPECT_EQ(site.lowering.compare_observed_value.available(),
                 site.kind == LdsAccessKind::Write);
     }
-    EXPECT_EQ(test_admitted_accesses(result).size(), 1u);
+    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 1u);
     EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported), 1u);
     EXPECT_EQ(applicable_access_decision_count(result), 2u);
   }
