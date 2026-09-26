@@ -30,6 +30,8 @@ subtrees:
         title: Copying a file
       - file: tutorials/async-multistream-io
         title: Asynchronous multistream I/O
+      - file: tutorials/batch-io
+        title: Batch I/O
       - file: tutorials/get-version
         title: Query the hipFile version
       - file: tutorials/python-gpu-io
