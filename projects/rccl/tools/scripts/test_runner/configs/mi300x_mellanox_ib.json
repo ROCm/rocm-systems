@@ -227,19 +227,21 @@
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa_AFTER",
-          "description": "Symmetric-window LSA after CE AllReduce with CTA policy ZERO",
+          "description": "Symmetric-window LSA CE AllReduce receive-offset regression. FORCE keeps CE selected when the symmetric kernel is also eligible.",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "1",
+            "RCCL_FORCE_CE_ALLREDUCE": "1",
             "NCCL_CTA_POLICY": "2"
           }
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
-          "description": "CE receive-offset BEFORE control for symmetric LSA",
+          "description": "CE receive-offset BEFORE control for symmetric LSA. FORCE keeps CE selected when the symmetric kernel is also eligible.",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "1",
+            "RCCL_FORCE_CE_ALLREDUCE": "1",
             "NCCL_CTA_POLICY": "2"
           }
         },
