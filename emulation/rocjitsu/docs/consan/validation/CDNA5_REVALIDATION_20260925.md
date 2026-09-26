@@ -2781,3 +2781,15 @@ each constituent clean run has matching hook evidence. This strengthens the
 settings-based table audit: qualification does not rely on combining clean and
 fault results from different detector builds. SGEMM remains excluded from this
 green-cell audit while its full clean sweeps are pending.
+
+The same audit for yellow cells finds 21 full-clean/fault campaigns sharing a
+hook build and two explicit exceptions: F8GEMM and HGEMM SuperCollider. Their
+full clean sweeps used `sc-wave-cdna5-hook`, while their 0/8 fault campaigns used
+`sc-tdm-hook-v1`. Each older fault campaign does have its own accepted matching
+fault-shard clean run (`f8gemm-sc-v1-clean-retry` and
+`hgemm-sc-v1-clean-retry`), with the same hook and replay-manifest hashes across
+all eight trials. Reparsed clean logs pass the stricter diagnostics gate.
+The table now labels these fault counts as earlier-build results. These yellow
+cells establish clean behavior and retain measured misses; they do not claim
+fault qualification on the later full-clean build. See
+`status-yellow-hook-build-audit.json` for the full-family build comparison.
