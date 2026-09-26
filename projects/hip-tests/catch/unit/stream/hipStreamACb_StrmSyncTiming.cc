@@ -100,6 +100,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   while (!cbDone) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+  HIPCHECK(hipStreamSynchronize(mystream));
   HIPCHECK(hipStreamQuery(mystream));
   HIPCHECK(hipStreamDestroy(mystream));
   HIPCHECK(hipFree(A_d));
