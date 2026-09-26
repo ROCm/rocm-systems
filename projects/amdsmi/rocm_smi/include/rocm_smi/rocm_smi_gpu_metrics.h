@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1685,6 +1686,34 @@ class GpuMetricsBaseDynamic_t final : public GpuMetricsBase_t {
   AMDGpuDynamicMetrics_t m_dyn;
   details::AMDGpuDynamicMetricsHeader_v1_t m_header{};
 };
+
+/**
+ * @brief Copy a metric into a wider field while preserving the "unset" sentinel.
+ *
+ * Every field in the public metrics struct is initialized to the maximum value
+ * of its own type and keeps that value until the kernel reports a reading, so
+ * "all ones" means "not reported". The amdgpu table follows the same convention
+ * at its own width. When a public field is wider than the table field it
+ * mirrors -- as with the accumulators widened to 64-bit while the table still
+ * reports 32-bit -- a plain cast zero-extends the sentinel, turning 0xFFFFFFFF
+ * into 0x00000000FFFFFFFF, which no longer compares equal to the destination's
+ * maximum. Callers then surface the sentinel as a real reading: an activity
+ * accumulator of 4294967295 instead of "N/A".
+ *
+ * Widen the sentinel along with the value so the marker survives. Same-width
+ * and narrowing conversions are unaffected.
+ */
+template <typename D, typename S>
+constexpr D widen_keep_sentinel(const S value) {
+  static_assert(std::is_unsigned_v<D> && std::is_unsigned_v<S>,
+                "Error: sentinel widening is only defined for unsigned types...");
+  if constexpr (sizeof(S) < sizeof(D)) {
+    if (value == std::numeric_limits<S>::max()) {
+      return std::numeric_limits<D>::max();
+    }
+  }
+  return static_cast<D>(value);
+}
 
 template <typename T>
 rsmi_status_t rsmi_dev_gpu_metrics_info_query(uint32_t dv_ind,
