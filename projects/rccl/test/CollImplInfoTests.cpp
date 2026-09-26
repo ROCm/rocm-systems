@@ -123,8 +123,11 @@ namespace RcclUnitTesting
           addon = {true, TokenAfter(line, "algo "), false, "", false, 0};
         }
 
-        // CE path logs "<Func> [Copy Engine]:" rather than "impl selected" / "Bytes -> Algo".
-        if (line.find(func + " [Copy Engine]:") != std::string::npos)
+        // "<Func> [Copy Engine]:" confirms a CE dispatch but does not name the
+        // variant. "impl selected: algo CE-Scratch" (or CE / CE2) is the name
+        // rcclGetAlgoName returns, so keep it. Use "CE" only when that line is
+        // absent, which is the registered-window path.
+        if (line.find(func + " [Copy Engine]:") != std::string::npos && addon.algoName.empty())
         {
           addon = {true, "CE", false, "", false, 0};
         }
