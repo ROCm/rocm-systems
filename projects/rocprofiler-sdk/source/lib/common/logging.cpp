@@ -24,6 +24,8 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 
+#include <rocm/sha2/log.h>
+
 #include <absl/debugging/failure_signal_handler.h>
 #include <absl/log/globals.h>
 #include <absl/log/initialize.h>
@@ -64,6 +66,15 @@ constexpr int32_t log_severity_warning = 1;
 constexpr int32_t log_severity_error   = 2;
 constexpr int32_t log_severity_fatal   = 3;
 
+// rocm-sha256 has no logging dependency of its own; it reports a diagnostic message
+// (e.g. update() after finalize()) through a swappable handler. Route it into this
+// project's own logging so ROCPROFILER_CI still promotes it to fatal.
+void
+sha256_log_handler(const char* message)
+{
+    ROCP_CI_LOG_IF(INFO, true) << message;
+}
+
 }  // namespace
 
 void
@@ -71,6 +82,8 @@ init_logging(std::string_view env_prefix, logging_config cfg)
 {
     static auto _once = std::once_flag{};
     std::call_once(_once, [env_prefix, &cfg]() {
+        ::rocm::sha2::set_log_handler(&sha256_log_handler);
+
         auto to_lower = [](std::string val) {
             for(auto& itr : val)
                 itr = tolower(itr);

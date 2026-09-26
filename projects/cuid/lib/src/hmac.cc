@@ -16,7 +16,9 @@
 #include <fstream>
 #include <iostream>
 
-#include "sha256.h"
+#include "cuid_util.h"
+#include "rocm/sha2/log.h"
+#include "rocm/sha2/sha256.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -45,6 +47,21 @@
 #endif
 
 namespace {
+
+// rocm::sha2 has no logging dependency of its own; it reports diagnostics
+// (e.g. update() after finalize(), which should never happen in this library)
+// through a swappable handler that writes straight to stderr by default. Route
+// it into cuid's own Logger instead, so it is subject to the same level
+// filtering as the rest of the library and downstream apps aren't surprised by
+// unconditional stderr output from a dependency they don't call directly.
+void sha2_log_handler(const char* message) { LOG(ERROR, message); }
+
+// Idempotent; called from every cuid_hmac constructor so the handler is
+// installed before any sha256 use regardless of construction order.
+void init_sha2_logging() {
+  static std::once_flag once;
+  std::call_once(once, [] { rocm::sha2::set_log_handler(&sha2_log_handler); });
+}
 
 // Used when no secret is provisioned. Byte-identical to CUID_DEFAULT_SEED in
 // the kernel's amdgpu_cuid.c, so sysfs and this library agree on an
@@ -116,6 +133,8 @@ struct cuid_hmac::Impl {
 
 cuid_hmac::cuid_hmac()
     : impl_(nullptr), key(nullptr), key_len(key_length), valid(false), using_default_key(false) {
+  init_sha2_logging();
+
   // getenv races only against setenv, which this library never calls.
   // NOLINTNEXTLINE(concurrency-mt-unsafe)
   const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
@@ -171,6 +190,8 @@ void cuid_hmac::use_default_key() {
 
 cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
     : impl_(nullptr), key(nullptr), key_len(key_length), valid(false), using_default_key(false) {
+  init_sha2_logging();
+
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
 

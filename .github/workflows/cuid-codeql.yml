@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'projects/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/cuid-codeql.yml'
   schedule:
     - cron: '0 0 * * 1'
