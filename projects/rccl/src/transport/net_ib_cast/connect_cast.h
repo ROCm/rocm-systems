@@ -55,6 +55,7 @@ struct ncclIbQpCreateAttr {
   bool isCtsEnabled;
   int8_t ctsQpSlot;
   int channelId;
+  int qpIndexInDev;
   int ibDevN;
   bool useIonic;
   int isP2p;
