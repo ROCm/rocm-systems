@@ -4,10 +4,13 @@
 # "device-api" testCommand. LSA all_reduce_perf (-D 1/-D 2) is not launched:
 # that binary still does not build under ENABLE_ROCSHMEM_GIN.
 #
-# Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), the in-tree RCCL build at
-# projects/rccl/build/release, and rccl-tests/build. Build paths come from the
-# environment (device-api.sbatch exports them) or, when run standalone, from
-# $WORKDIR/.ci-out/{rocm,ompi,rocshmem}.env.
+# Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), ROCSHMEM_INSTALL_DIR
+# (rocshmem.env), and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR,
+# RCCL_TESTS_DIR). Build paths come from the environment (device-api.sbatch
+# exports them) or, when run standalone, from
+# $WORKDIR/.ci-out/{rocm,ompi,rocshmem,rccl}.env.
+# librccl.so comes from RCCL_INSTALL_PREFIX/lib when that is set, else
+# projects/rccl/build/release. RCCL_TESTS_BIN_DIR defaults to rccl-tests/build.
 #
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
@@ -18,9 +21,10 @@
 # debug_env to every run.
 #
 # Environment overrides:
-#   ROCM_PATH / MPI_HOME / ROCSHMEM_INSTALL_DIR
+#   ROCM_PATH / MPI_HOME / ROCSHMEM_INSTALL_DIR / RCCL_INSTALL_PREFIX
 #                          Else read from matching .ci-out/*.env fragments
-#   RCCL_TESTS_BIN_DIR     rccl-tests build directory (default: rccl-tests/build)
+#   RCCL_TESTS_BIN_DIR     rccl-tests build directory (default: rccl-tests/build;
+#                          device-api.sbatch writes it to .ci-out/rccl.env)
 #   NP                     MPI ranks per run         (default: 8)
 #   BENCH_ARGS             Common bench args         (default: from JSON bench_args)
 #   BENCH_TIMEOUT          Per-bench wall-clock cap  (default: 600s)
@@ -40,16 +44,22 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 RCCL_DIR="$(cd "${script_dir}/../.." && pwd)"
 WORKDIR="$(cd "${RCCL_DIR}/../.." && pwd)"
 
-RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
 RCCL_TESTS_DIR="${WORKDIR}/projects/rccl-tests"
 CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 
 # Prefer the build stages' env fragments over ambient build paths.
-for frag in rocm ompi rocshmem; do
+# rccl.env is written by device-api.sbatch (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR).
+for frag in rocm ompi rocshmem rccl; do
   env_file="${WORKDIR}/.ci-out/${frag}.env"
   # shellcheck source=/dev/null  # runtime fragment written by the build stages
   [[ -f "${env_file}" ]] && source "${env_file}"
 done
+
+if [[ -n "${RCCL_INSTALL_PREFIX:-}" ]]; then
+  RCCL_LIB_DIR="${RCCL_INSTALL_PREFIX}/lib"
+else
+  RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
+fi
 
 : "${ROCM_PATH:?run-device-api-ci.sh: ROCM_PATH unset (provisioned via rocm.env / sbatch)}"
 : "${MPI_HOME:?run-device-api-ci.sh: MPI_HOME unset (run build-ompi.sh / via sbatch)}"

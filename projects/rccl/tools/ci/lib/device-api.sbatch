@@ -4,7 +4,7 @@
 #SBATCH --ntasks=8
 #SBATCH --partition=interactive
 #SBATCH --exclusive
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 #SBATCH --propagate=NONE
@@ -136,7 +136,7 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
   exit 1
 fi
-rccl_cfg="$(ls "${rccl_prefix}"/lib*/cmake/rccl/*[Cc]onfig.cmake 2>/dev/null | head -n1)"
+rccl_cfg="$(ls "${rccl_prefix}"/lib*/cmake/rccl/*[Cc]onfig.cmake 2>/dev/null | head -n1 || true)"
 if [[ -z "${rccl_cfg}" ]]; then
   echo "ERROR: no RCCL cmake config under ${rccl_prefix}/lib*/cmake/rccl" >&2
   ls -laR "${rccl_prefix}"/lib*/cmake 2>/dev/null >&2 || true
@@ -162,10 +162,17 @@ rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${amdgpu_targets}" \
     "${rccl_tests_src}"
-  # all_reduce_perf still fails under ENABLE_ROCSHMEM_GIN; -k keeps the
-  # matrix binaries. Do not require all_reduce_perf (see gin.sbatch).
+  # -k: all_reduce_perf still fails under ENABLE_ROCSHMEM_GIN (see gin.sbatch).
+  # This configure also builds gin_rocshmem_gda_factory_test and the test/
+  # host unit target. required_perf_bins below does not check those, so a
+  # green job only proves the seven matrix binaries exist.
   make -j"${build_jobs}" -k || true
 )
+# Same seven binaries as foreach(_gin_rdc_bin) in
+# projects/rccl-tests/src/CMakeLists.txt and the union of bins in
+# lib/device-api-tests.json. A suite bin missing from that foreach still
+# builds and passes this -x check, then fails at load on an unresolved
+# rocSHMEM host symbol.
 required_perf_bins=(
   all_gather_perf alltoall_perf broadcast_perf
   gather_perf reduce_perf scatter_perf sendrecv_perf
@@ -178,6 +185,13 @@ for perf_bin in "${required_perf_bins[@]}"; do
   fi
 done
 export RCCL_TESTS_BIN_DIR="${rccl_tests_build}"
+# Persist for a standalone run-device-api-ci.sh (the in-process export above
+# does not survive a new shell). Mirrors gin.sbatch's .ci-out/rccl.env.
+{
+  printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
+  printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
+  printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
+} > "${workdir}/.ci-out/rccl.env"
 } > "${build_out}" 2> "${build_err}"
 echo "==> build phase logs: ${build_out} / ${build_err}"
 
