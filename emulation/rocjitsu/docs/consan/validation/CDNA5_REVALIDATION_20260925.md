@@ -2698,3 +2698,10 @@ The matching untimed Default clean now passes all 650 numerical cases in
 fault trials have started. This completes the comparator gate that the
 earlier 1,800-second timed run could not finish; full-family qualification
 continues to require all six original clean shards.
+
+The full Default 129-shape clean completes all 650 cases in 3,794 seconds
+with complete access/barrier/atomic/fence coverage (`run-2.log`). Both full
+sweeps now have three accepted small shapes and three pending large shapes.
+Default fault trial result files are created with `state: running`; their
+existence alone is not a completed verdict. The new campaign's first trial
+is still running at this checkpoint.
