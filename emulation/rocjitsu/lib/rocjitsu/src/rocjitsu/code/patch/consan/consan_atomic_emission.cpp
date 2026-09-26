@@ -356,6 +356,25 @@ struct AtomicPreludeState {
       source.relocates_polling_loop() && plan.polling_loop_entry_vgpr_bank_mode.has_value();
   const uint8_t polling_loop_entry_mode =
       static_cast<uint8_t>(plan.polling_loop_entry_vgpr_bank_mode.value_or(0u));
+  // Ordinary stores/atomics can execute with asymmetric gfx1250 banks (for
+  // example destination bank one and source banks zero). Their scratch address
+  // arithmetic requires bank zero for both source and destination operands.
+  const auto append_bank = [&](uint8_t before, uint8_t after) {
+    return InstructionSequence(words).emit(
+        instrumentation::build_s_set_vgpr_msb_transition(before, after, arch));
+  };
+  if (plan.guest_vgpr_bank_modes && !append_bank(plan.guest_vgpr_bank_modes->first, 0u))
+    return false;
+  const auto append_guest_span = [&](bool rmw, uint32_t *offset, std::span<const uint32_t> leading,
+                                     std::span<const uint32_t> trailing, uint32_t *size = nullptr,
+                                     std::optional<uint16_t> observation = std::nullopt) {
+    if (plan.guest_vgpr_bank_modes && !append_bank(0u, plan.guest_vgpr_bank_modes->first))
+      return false;
+    if (!append_atomic_guest(words, bytes, site, rmw, arch, offset, leading, trailing, size,
+                             observation))
+      return false;
+    return !plan.guest_vgpr_bank_modes || append_bank(plan.guest_vgpr_bank_modes->second, 0u);
+  };
   const auto append_guest = [&]() {
     if (wraps_banked_polling_loop && !guest_first && polling_loop_entry_mode != 0u) {
       const auto restore_entry = instrumentation::build_s_set_vgpr_msb_transition(
@@ -376,22 +395,20 @@ struct AtomicPreludeState {
                   instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u),
                                                           *store_alignment_vgpr, arch),
                   instrumentation::build_s_and_saveexec_b64(saved_exec, kAmdGpuVccLo, arch))
-          .require(append_atomic_guest(words, bytes, site, false, arch, guest_instruction_offset,
-                                       leading_guest_words, trailing_guest_words,
-                                       emitted_guest_size, observation_vgpr))
+          .require(append_guest_span(false, guest_instruction_offset, leading_guest_words,
+                                     trailing_guest_words, emitted_guest_size, observation_vgpr))
           .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch),
                   instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u),
                                                           *store_alignment_vgpr, arch),
                   instrumentation::build_s_andn2_b64(kAmdGpuExecLo, saved_exec, kAmdGpuVccLo, arch))
-          .require(append_atomic_guest(words, bytes, site, false, arch, nullptr, {}, {}, nullptr))
+          .require(append_guest_span(false, nullptr, {}, {}))
           .append(instrumentation::build_s_wait_flat_store0(arch),
                   instrumentation::build_s_mov_b64(kAmdGpuExecLo, saved_exec, arch))
           .require(append_restore_special_state(words, plan.special_state, arch));
       return guard.finish();
     }
-    return append_atomic_guest(words, bytes, site, is_rmw, arch, guest_instruction_offset,
-                               leading_guest_words, trailing_guest_words, emitted_guest_size,
-                               observation_vgpr);
+    return append_guest_span(is_rmw, guest_instruction_offset, leading_guest_words,
+                             trailing_guest_words, emitted_guest_size, observation_vgpr);
   };
   // Returning atomics may overwrite their input operand. Preserve that input
   // before execution, including when the guest overlaps the spill range.
@@ -800,6 +817,9 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  if (plan.guest_vgpr_bank_modes)
+    sequence.append(instrumentation::build_s_set_vgpr_msb_transition(
+        0u, plan.guest_vgpr_bank_modes->second, arch));
   if (!sequence.finish(arch))
     return std::nullopt;
   return words;
@@ -1049,6 +1069,9 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  if (plan.guest_vgpr_bank_modes)
+    sequence.append(instrumentation::build_s_set_vgpr_msb_transition(
+        0u, plan.guest_vgpr_bank_modes->second, arch));
   if (!sequence.finish(arch))
     return std::nullopt;
   return words;
@@ -1335,6 +1358,10 @@ std::optional<std::vector<uint32_t>> build_publication_cave_words(
                  scalar_spill->restore_words.end());
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
+  if (plan.guest_vgpr_bank_modes)
+    sequence.append(instrumentation::build_s_set_vgpr_msb_transition(
+        0u, defer_guest ? plan.guest_vgpr_bank_modes->first : plan.guest_vgpr_bank_modes->second,
+        arch));
   if (defer_guest) {
     std::vector<uint32_t> deferred_guest_words;
     const bool guest_ok =

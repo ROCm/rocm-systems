@@ -2492,3 +2492,20 @@ an instrumentation bank-state mismatch, rather than just a slow clean sweep;
 the Default cell is red pending a repair and fresh clean qualification.
 The scoped diagnostic has the same target kernel and high-preset instrumentation
 as the original full-allowlist failure. No repair is claimed yet.
+
+
+### Normalize ordinary synchronization probes to the low VGPR bank
+
+The retained patched object in `sgemm-debug-dump/objects/` locates the failure
+in release metadata inserted among buffer stores after `s_set_vgpr_msb 64`.
+ConSan now records the entry and exit bank state of non-polling guest spans,
+selects bank zero before scratch preservation/address arithmetic, and restores
+the guest bank around replay and on return. Relocated polling loops retain
+their separate checked bank contract.
+
+The new `Gfx1250BankedReleaseUsesLowBankMetadataAndRestoresGuest` regression
+checks both the low-bank metadata prologue and high-bank displaced store.
+Normal GCC ConSan unit tests pass: 1,006 passed, two existing optional
+artifact-dependent benchmark tests skipped (`sgemm-bank-fix-unit-tests.log`).
+The fresh immutable-hook replay `sgemm-bank-fix-probe-v1` is still pending;
+the red table cell has not been promoted on unit-test evidence alone.

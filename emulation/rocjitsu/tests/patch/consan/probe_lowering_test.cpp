@@ -2009,6 +2009,68 @@ TEST(ConSan, Gfx1250PublishesWideBufferReleaseRange) {
   EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
 }
 
+TEST(ConSan, Gfx1250BankedReleaseUsesLowBankMetadataAndRestoresGuest) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto lds_store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  std::vector<uint32_t> text_words = {
+      lds_store[0], lds_store[1], *build_gfx1250_s_set_vgpr_msb(0x40u, kArch),
+      0xC4074008u,  0x4088800Cu,
+      0x0000008Bu, // buffer_store_b128 v[12:15], v139, s[64:67], s8 offen scope:device
+      0xBF800000u, // s_nop 0
+      0xBFC00000u, // s_wait_loadcnt 0
+      0xBFC10000u, // s_wait_storecnt 0
+      0xEE0B007Cu,  0x00080000u,
+      0x00000000u, // global_wb scope:device
+  };
+  text_words.resize(800u, build_s_nop(0u, kArch));
+  text_words.back() = build_s_endpgm(kArch);
+
+  TestOptions options = test_options();
+  options.track_barriers = false;
+  options.track_atomics = true;
+  options.exec_save_sgpr = 80u;
+  options.dispatch_sgpr.set(70u);
+  options.set_owner_epoch_vgprs(40u, 41u);
+  options.exact_workgroup_vgprs = PersistentWorkgroupRegisters{42u, 43u, 44u};
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(8u);
+  options.max_patches = 4u;
+
+  const TransformArtifacts result = test_lower_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_banked_buffer_release"), options);
+
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.program_inventory.sync().sync_sequences,
+                                  [](const SyncSequence &sequence) {
+                                    return sequence.kind == SyncKind::OrdinaryMemory &&
+                                           sequence.memory_role == SyncMemoryRole::Release;
+                                  }));
+  const auto sync =
+      std::ranges::find(result.patches, PatchKind::TrampolineSyncMetadata, &PatchInfo::kind);
+  ASSERT_NE(sync, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(sync->scratch_vgpr);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, sync->trampoline_offset, sync->trampoline_size);
+  ASSERT_FALSE(cave.empty());
+  EXPECT_EQ(cave.front(), *build_gfx1250_s_set_vgpr_msb_transition(0x40u, 0u, kArch));
+  ASSERT_TRUE(sync->relocated_guest_instruction_offset);
+  const size_t guest_word =
+      (*sync->relocated_guest_instruction_offset - sync->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_GT(guest_word, 0u);
+  ASSERT_LT(guest_word, cave.size());
+  EXPECT_EQ(cave[guest_word - 1u], *build_gfx1250_s_set_vgpr_msb_transition(0u, 0x40u, kArch));
+  EXPECT_EQ(count_subsequence(
+                cave, make_expected_literal_offset_store_words(
+                          offsetof(SyncMetadataPacked, byte_count), /*value=*/16u,
+                          /*address_vgpr=*/*sync->scratch_vgpr,
+                          /*value_vgpr=*/static_cast<uint16_t>(*sync->scratch_vgpr + 2u), kArch)),
+            1u);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
+}
+
 TEST(ConSan, Gfx1250RelocatesBankedPollingLoopWithScalarSpill) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
   constexpr uint8_t kEntryMode = 3u;

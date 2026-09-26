@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::consan::detail {
@@ -79,6 +80,8 @@ struct SyncEmissionPlan {
   /// admitted only when its complete relocated span is proven to exit in bank
   /// zero, which is the state required by the following instrumentation.
   std::optional<uint16_t> polling_loop_entry_vgpr_bank_mode;
+  /// Entry/exit banks of a non-polling guest span. Probe code always uses bank zero.
+  std::optional<std::pair<uint8_t, uint8_t>> guest_vgpr_bank_modes;
 };
 
 /// ConSan atomic scratch ABI owned jointly by its planner and emitter.

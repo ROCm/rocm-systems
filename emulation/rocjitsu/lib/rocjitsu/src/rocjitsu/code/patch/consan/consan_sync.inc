@@ -69,6 +69,7 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
       .owner_epoch_vgprs = owner_epoch_vgprs,
       .scratch_vgpr = scratch_vgpr,
       .polling_loop_entry_vgpr_bank_mode = std::nullopt,
+      .guest_vgpr_bank_modes = std::nullopt,
   };
 }
 
@@ -1355,6 +1356,7 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     std::vector<uint32_t> trailing_guest_words;
     OperatingPoint point;
     std::optional<uint16_t> polling_loop_entry_vgpr_bank_mode;
+    std::optional<std::pair<uint8_t, uint8_t>> guest_vgpr_bank_modes;
     bool composes_access_fragment = false;
   };
   std::vector<Planned> selected;
@@ -1427,6 +1429,23 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
             "exit");
         continue;
       }
+    }
+    std::optional<std::pair<uint8_t, uint8_t>> guest_vgpr_bank_modes;
+    if (!relocates_polling_loop && target_profile->has_selectable_vgpr_bank) {
+      const ProgramContainer *container =
+          resolve_evidence_container(result.program_inventory, candidate.atomic.source_site);
+      const auto mode_at = [&](uint64_t offset) {
+        return container ? selectable_vgpr_bank_mode_at(arch, bytes, container->text_file_offset,
+                                                        container->entry_text_offset, offset)
+                         : std::optional<uint16_t>{};
+      };
+      const auto entry = mode_at(candidate.source.patch_file_offset());
+      const auto exit = mode_at(candidate.source.patch_file_offset() + relocated_guest_size);
+      if (!entry || !exit) {
+        result.warnings.emplace_back("ConSan atomic sync requires known guest VGPR banks");
+        continue;
+      }
+      guest_vgpr_bank_modes = {static_cast<uint8_t>(*entry), static_cast<uint8_t>(*exit)};
     }
     if (physical_anchor_offset > old_text.size() ||
         relocated_guest_size > old_text.size() - physical_anchor_offset)
@@ -1516,6 +1535,7 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
                         physical_anchor_offset, relocated_guest_size,
                         std::move(leading_guest_words), std::move(trailing_guest_words),
                         std::move(candidate_point), polling_loop_entry_vgpr_bank_mode,
+                        guest_vgpr_bank_modes,
                         composed_access_fragment != result.staged_text_fragments.end()});
   }
   if (publication_trace && selected.size() != candidates.size()) {
@@ -1568,6 +1588,7 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
       return;
     emission_plan->publication_modifications_complete = publication_modifications_complete;
     emission_plan->polling_loop_entry_vgpr_bank_mode = planned.polling_loop_entry_vgpr_bank_mode;
+    emission_plan->guest_vgpr_bank_modes = planned.guest_vgpr_bank_modes;
     uint32_t guest_instruction_offset = 0u;
     uint32_t emitted_guest_size = 0u;
     auto words = publication_trace
