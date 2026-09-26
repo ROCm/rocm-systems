@@ -6,6 +6,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
+### Added
+
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
+
 ### Changed
 
 - Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
