@@ -2821,3 +2821,10 @@ in 12,507 seconds. All 650 numerical cases and both clients pass. The retained
 coverage and no incomplete analysis. SuperCollider now has four of six clean
 shards accepted; only the 511 and 513 shapes remain running. Default's three
 large clean shapes remain pending.
+
+SuperCollider shard 3 (511-by-511-by-511) also passes in 13,209 seconds:
+650 numerical cases, both clients, and complete 34,012/34,012 access coverage.
+`run-3.log` passes the diagnostics gate with no findings or incomplete analysis.
+The full sweep now has five accepted shards; only the 513 shape remains running.
+The Default full sweep still has three accepted small shapes and three large
+shapes pending.
