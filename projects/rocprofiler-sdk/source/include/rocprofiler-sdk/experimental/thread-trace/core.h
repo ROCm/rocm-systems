@@ -111,6 +111,19 @@ typedef enum rocprofiler_thread_trace_shader_data_flags_t
 } rocprofiler_thread_trace_shader_data_flags_t;
 
 /**
+ * @brief GPU and system clock values for a thread trace buffer record.
+ *
+ * @p gpu_clock is the timestamp in the GPU clock domain.
+ * @p system_clock is the same timestamp in the system clock domain.
+ * Approximate. Both values are zero when the data has no GPU-defined boundary.
+ */
+typedef struct rocprofiler_thread_trace_timestamp_t
+{
+    uint64_t                gpu_clock;
+    rocprofiler_timestamp_t system_clock;
+} rocprofiler_thread_trace_timestamp_t;
+
+/**
  * @brief Bundle of shader data delivered to
  * rocprofiler_thread_trace_shader_data_callback_t.
  */
@@ -125,6 +138,11 @@ typedef struct rocprofiler_thread_trace_shader_data_t
 
     rocprofiler_agent_id_t                       agent;  ///< Identifier for the target agent.
     rocprofiler_thread_trace_shader_data_flags_t flags;  ///< Flags for this data chunk.
+
+    /// Timestamp at which collection into this data chunk began.
+    rocprofiler_thread_trace_timestamp_t start_timestamp;
+    /// Timestamp at which collection into this data chunk ended.
+    rocprofiler_thread_trace_timestamp_t end_timestamp;
 } rocprofiler_thread_trace_shader_data_t;
 
 /**

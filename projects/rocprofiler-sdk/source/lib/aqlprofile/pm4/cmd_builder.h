@@ -305,7 +305,7 @@ public:
     /// @param cmdBuf  command buffer to be appended with launch command
     virtual void BuildPrimeL2(CmdBuffer* cmdBuf, uint64_t addr) = 0;
 
-    /// @brief Generates RT packets into thread trace buffer (gfx9 only)
+    /// @brief Generates an RT timestamp marker in the thread trace buffer (GFX9 only).
     /// @param cmdBuf  command buffer to be appended with launch command
     /// @param dst  where gpu clock data is r/w. Must persist during packet dispatch
     /// @param reg  userdata register address
@@ -314,6 +314,11 @@ public:
                                      uint64_t*       dst,
                                      const Register& reg,
                                      uint32_t        header){};
+
+    /// @brief Copies the GPU clock to memory without writing SQ thread-trace userdata registers.
+    /// @param cmdBuf command buffer to be appended with the copy command
+    /// @param dst destination for the GPU clock; must persist during packet dispatch
+    virtual void BuildReadGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst){};
 
     /// @brief Release resources used by CmdBuilder
     virtual ~CmdBuilder(){};
