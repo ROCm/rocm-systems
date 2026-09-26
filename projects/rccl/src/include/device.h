@@ -68,7 +68,7 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 // every kernel pays the LDS: 167KB of 320KB at 16KB/warp. The arch check cannot move to CMake:
 // it must be zero on every device pass that is not gfx1250, or those kernels reserve LDS they
 // can never use. Host and non-gfx1250 passes therefore see 0 and the member disappears.
-#if ENABLE_TDM_SIMPLE && defined(__gfx1250__)
+#if ENABLE_TDM_SIMPLE && (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
 #else
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 0
@@ -206,7 +206,7 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
 
 #if __HIP_DEVICE_COMPILE__
-#if defined(__gfx1250__)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define NCCL_LL128_LINESIZE 128
 #else
 #define NCCL_LL128_LINESIZE 64
