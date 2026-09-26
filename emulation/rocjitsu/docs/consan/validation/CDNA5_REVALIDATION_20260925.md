@@ -2217,3 +2217,14 @@ oracles also passed (`sgemm-smoke-wave127-reads-{clean,fault}`). This wider
 read-only delay did not improve qualification. The table retains the
 `sleep_wave=15` result, which exposed numerical failures without detector
 reports, rather than treating a longer delay as stronger evidence by itself.
+
+
+### Corrected two copied Default cells during the evidence audit
+
+Commit `b0d61f63dad` correctly qualified histogram, but its table edit also
+replaced the identically worded TopK and TP1 decode cells with the histogram
+result. No corresponding high/256-bank qualification exists for those two
+workloads. The ledger is corrected: TP1 decode has a verified matching clean
+and 8/8 detections at `higher` in `tp1-decode-cap-higher-{clean,fault}`; TopK's
+completed `topk-cap-high-fault` reports 4/8. TopK needs a fresh qualification
+with the lane-retention repair. Future cell edits must be scoped by workload ID.
