@@ -2228,3 +2228,22 @@ workloads. The ledger is corrected: TP1 decode has a verified matching clean
 and 8/8 detections at `higher` in `tp1-decode-cap-higher-{clean,fault}`; TopK's
 completed `topk-cap-high-fault` reports 4/8. TopK needs a fresh qualification
 with the lane-retention repair. Future cell edits must be scoped by workload ID.
+
+
+### Descriptor-add: Default tensor-store coverage repaired
+
+The fresh `scope-current-clean` run identified two unsupported
+`tensor_store_from_lds` instructions across the descriptor-add code objects.
+Default now samples their LDS reads with per-element destination bounds:
+masked stores do not read LDS, stores ignore load padding, and overlapping
+iterations retain the selected read instance rather than the final load writer.
+
+Normal GCC regression: 1,047 ConSan/tensor tests passed, with two expected
+artifact-dependent benchmark skips (`tensor-store-default-tests-v2.log`).
+The immutable hook in `tensor-store-default-hook-v1` was built from 926962d8af9
+(SHA256 `dd95403a30f97baf8c4cfbb85f602bf3e50dc1868ca22545c19622d9ec784630`).
+`tensor-store-default-v1-clean/pytorch-tdm-descriptor-add` passes both baseline
+and Default, with 12/12 accesses, 24/24 barriers, and complete static/dynamic
+coverage. The row is yellow because its reviewed barrier-drop fault does not
+produce a cross-wave race; it is no longer blocked on Default access support.
+SuperCollider store coverage remains a separate pending fix.
