@@ -500,6 +500,12 @@ void append_global_stores(std::vector<uint32_t> &program, uint32_t count, uint32
   return inst;
 }
 
+void append_gfx1250_ds_bpermute_b32(std::vector<uint32_t> &program, uint32_t vdst, uint32_t addr,
+                                    uint32_t data) {
+  program.push_back(0xDACC0000U);
+  program.push_back((vdst << 24U) | (data << 8U) | addr);
+}
+
 void append_ds_loads(std::vector<uint32_t> &program, uint32_t count, uint32_t addr) {
   for (uint32_t i = 0; i < count; ++i)
     append_inst(program, ds_load_b32(i, addr));
@@ -4965,6 +4971,46 @@ TEST(WaitcheckTest, DscntZeroAlsoClearsDsSourceRead) {
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
   EXPECT_TRUE(report.supported);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+// Internal ordering ages may exceed VM_VSRC's 3-bit wait field, but a reported
+// dependency must remain encodable.
+TEST(WaitcheckTest, Gfx1250ClampsVmVsrcDiagnosticPastDependencyWaitLimit) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  for (uint32_t i = 0; i < 8; ++i)
+    append_gfx1250_ds_bpermute_b32(program, 10 + i, 1, 100 + i);
+  append_inst(program, v_mov_b32(100, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::VmVsrc);
+  EXPECT_EQ(report.diagnostics[0].required_count, 6u);
+}
+
+// Reduced from the gfx1250 top-k/top-p kernel attached to #11864. VM_VSRC has
+// only a 3-bit wait field, but DS_CNT can distinguish more than seven younger
+// source reads. Saturating internal VM_VSRC ages at depctr_vm_vsrc(6) makes the
+// first wait spuriously lose the ordering needed by the second wait.
+TEST(WaitcheckTest, Gfx1250DscntPartialWaitsRetireVmVsrcPastDependencyWaitLimit) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  for (uint32_t i = 0; i < 8; ++i)
+    append_gfx1250_ds_bpermute_b32(program, 10 + i, 1, 100 + i);
+  append_inst(program, sopp(70, 7)); // s_wait_dscnt 7 retires the oldest operation.
+  append_inst(program, sopp(70, 1)); // The source read of v106 is now complete.
+  append_inst(program, v_mov_b32(106, 0));
+
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 

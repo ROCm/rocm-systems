@@ -501,7 +501,10 @@ util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const Pen
     return util::Result::failure();
   if (state.uncertain_order[counter_index(event.counter)] || out_of_order.value())
     return 0;
-  return event.min_younger;
+  const auto max_wait = maximum_dependency_wait(arch, event.counter);
+  if (max_wait.failed())
+    return util::Result::failure();
+  return std::min(event.min_younger, max_wait.value());
 }
 
 bool WaitcheckStateOps::same_operation(const PendingEvent &lhs, const PendingEvent &rhs) {

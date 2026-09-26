@@ -1136,6 +1136,17 @@ private:
     return std::numeric_limits<uint32_t>::max();
   }
 
+  [[nodiscard]] static uint32_t maximum_tracked_event_age(rj_code_arch_t arch,
+                                                          WaitCounterKind counter) {
+    // VM_VSRC's own 3-bit wait field tops out at 6, but primary memory
+    // counters can retire its source hazards with thresholds through 62.
+    // Preserve enough issue order for those implied waits; diagnostic counts
+    // are clamped back to the dependency wait's encodable range.
+    if (counter == WaitCounterKind::VmVsrc)
+      return 62;
+    return maximum_dependency_wait(arch, counter);
+  }
+
   [[nodiscard]] static bool is_counter_token_only(const PendingEvent &event) {
     // Events without a dependency payload exist only to advance the age of
     // older events on the same hardware counter. Once those ages have been
@@ -2979,7 +2990,7 @@ private:
     if (state.uncertain_order[counter_index(event.counter)] ||
         counter_out_of_order(state, event.counter, arch))
       return 0;
-    return event.min_younger;
+    return std::min(event.min_younger, maximum_dependency_wait(arch, event.counter));
   }
 
   static void apply_memory_wait(PendingState &state, WaitCounterKind counter, uint32_t count,
@@ -5328,15 +5339,15 @@ private:
     const size_t idx = counter_index(classification.counter);
     if (classification.kind == WaitEventKind::Smem)
       state.pending_smem[idx] = true;
-    const uint32_t max_wait = maximum_dependency_wait(arch, classification.counter);
+    const uint32_t max_age = maximum_tracked_event_age(arch, classification.counter);
     auto &event_ages = state.pending_event_ages[idx].values;
     for (uint8_t &age : event_ages) {
-      if (age != kNoPendingEventAge && age < max_wait)
+      if (age != kNoPendingEventAge && age < max_age)
         ++age;
     }
     event_ages[static_cast<size_t>(classification.kind)] = 0;
     for (PendingEvent &pending_event : state.pending[idx]) {
-      if (pending_event.min_younger < max_wait)
+      if (pending_event.min_younger < max_age)
         ++pending_event.min_younger;
     }
     if (record_stats)
