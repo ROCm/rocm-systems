@@ -32,6 +32,7 @@
 // Code Specific Header Files(s)
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_file_utils.h"
 
 // Log file name
 // WARNING: File name should be changed here and
@@ -485,7 +486,10 @@ void ROCmLogging::Logger::initialize_resources() {
   // practical effect; the security-relevant part is withholding world-write
   // (S_IWOTH), which would let any local user tamper with a root-owned log
   // (CWE-732).
-  chmod(logFileName, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  // Set the mode via a descriptor opened with O_NOFOLLOW rather than a
+  // path-based chmod(), so a symlink swapped in at logFileName cannot redirect
+  // the mode change to another file (TOCTOU, CWE-367).
+  amd::smi::SetFileModeNoFollow(logFileName, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
 }
 
 void ROCmLogging::Logger::destroy_resources() { m_File.close(); }
