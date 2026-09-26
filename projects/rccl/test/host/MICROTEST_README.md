@@ -105,6 +105,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     channel/warp-selection, and tuning-ID helpers without a GPU. This TU
     defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
     them in `fakes/tuning_fakes.cc`.
+  - `tuning/tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`); suite
+    `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
+    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
+    `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
+    `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result

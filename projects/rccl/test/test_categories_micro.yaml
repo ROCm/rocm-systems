@@ -50,6 +50,7 @@ test_categories:
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
       - "TuningGeneralMicrotest.*"
+      - "TuningMicrotest.*"
       - "GroupEndInternalTest.*"
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
