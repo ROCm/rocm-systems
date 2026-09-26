@@ -10,11 +10,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cuda.h>
+#include <vector>
 #include "rocmwrap.h"
 #include "ce_coll.h"
 #include "alltoallv_meta.h"
 #include "group.h"
 #include "alloc.h"
+#include "bootstrap.h"
 #include "ce_fault_inject.h"
 #include "tuning.h"
 
@@ -52,6 +54,16 @@ static int ncclCeBatchAsyncSupported() {
   return NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(driverVersion);
 }
 #endif
+
+// ncclDevrGetLsaRankPtr takes an LSA-team index, not a world rank.
+// AlltoAllv still iterates world ranks (the size matrix is world-indexed);
+// nNodes==1 is not identity once NCCL_LSA_TEAM_SIZE < nRanks.
+static ncclResult_t ncclCePeerLsaPtr(struct ncclComm* comm, struct ncclDevrWindow* win, size_t offset, int worldRank,
+                                    void** outPtr) {
+  int lsaRank;
+  NCCLCHECK(ncclDevrWorldToLsaRank(comm, worldRank, &lsaRank));
+  return ncclDevrGetLsaRankPtr(comm, win, offset, lsaRank, outPtr);
+}
 
 static int ncclCeBatchAsyncEnable() {
   // Called once per CE collective; warn at most once to avoid flooding the log.
@@ -1089,7 +1101,7 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
       offset = dstPtr - (uint8_t*)args->recvBuff;
       winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
 
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, dstRank, &peerRecvBuff), ret, fail);
+      NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, args->recvWin, winOff, dstRank, &peerRecvBuff), ret, fail);
 
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcPtr;
       batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
@@ -2124,15 +2136,12 @@ static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   uint8_t* ceARTmpBuf = nullptr;
   ncclWindow_vidmem* arWinDev = nullptr;
   ncclWindow_vidmem* arWinDevHost = nullptr;
-  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  size_t maxChunkBytes = 0;
   size_t ceARTmpBufSize = 0;
 
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
   if (!rcclParamCeAllReduce()) return ncclSuccess;
 
-  maxChunkBytes = comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks;
-  ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
+  ceARTmpBufSize = ncclCeAllReduceStagingBufBytes(comm->nRanks, comm->ceColl.ceArStagingBytes);
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                 ret, fail);
@@ -2148,6 +2157,22 @@ fail:
   comm->ceColl.ceARTmpBuf = nullptr;
   comm->ceColl.ceARTmpWin = nullptr;
   return ret;
+}
+
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes) {
+  if (win == nullptr || recvbuff == nullptr) return 0;
+  const uintptr_t winStart = (uintptr_t)win->userPtr;
+  const uintptr_t recvStart = (uintptr_t)recvbuff;
+  const size_t peerSafeSize = ncclDevrWindowPeerSafeSize(win);
+  return recvStart >= winStart && totalBytes <= peerSafeSize &&
+         recvStart - winStart <= peerSafeSize - totalBytes;
+}
+
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes) {
+  if (nRanks <= 0) return 0;
+  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks *
+                   ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+                 (size_t)16);
 }
 
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
@@ -2208,7 +2233,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   uint32_t* signalBuffer = ceColl->signalBuffer;
   void* peerSig = nullptr;
   void* peerSignalAddr = nullptr;
-  bool fastPath = false;
+  bool fastPath = profilerArgs != nullptr && profilerArgs->allReduceFastPath;
   size_t mySlotOffset = 0;
   uint8_t* myRecvSlot = nullptr;
   size_t recvSlotOffset = 0;
@@ -2238,8 +2263,16 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (recvWin == nullptr) {
     NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
   }
-  fastPath = (recvWin != nullptr) && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  // The scheduler agrees this bit across ranks during launch preparation. Do
+  // not perform host-blocking bootstrap collectives from the per-comm launch:
+  // grouped comms may be driven serially by one host thread.
+  fastPath = fastPath && recvWin != nullptr &&
+             (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+             ncclCeRecvRangeContainedInWindow(recvWin, recvbuff, totalBytes) != 0;
   collArgs.recvWin = recvWin;
+
+  // !fastPath AllGather is chunked through one ceARTmpBuf slot, so the message
+  // may exceed staging (32 MiB) up to the 2-shot cap.
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
@@ -2274,17 +2307,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       mySlotOffset = (slot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
       for (int r = 0; r < comm->nRanks; r++) {
         if (r != comm->rank) {
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
+          NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
           basePeerSignalAddr[r] = (uint32_t*)peerSig;
         }
       }
     }
-    // A. Verify that the persistent kernel has fully consumed this slot from the prior loop
-    //
-    // ceARTmpBuf is double-buffered (NUM_SLOTS slots); chunk ch uses slot ch % NUM_SLOTS.
-    // The first NUM_SLOTS chunks get fresh slots — no drain wait. From chunk NUM_SLOTS on,
-    // scatterStream waits for the persistent reduce kernel to clear the slot (signal == 0)
-    // on all ranks before overwriting it (e.g. chunk 2 reuses slot 0 when NUM_SLOTS == 2).
+    // Drain the slot before reuse: after NUM_SLOTS chunks, wait until every rank's
+    // reduce signal is 0 (chunk 2 reuses slot 0).
     if (ch >= NUM_SLOTS) {
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
@@ -2305,7 +2334,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       if (r == comm->rank) {
         dstPtr = tmpBuf + dstSlotOffsetBytes;
       } else {
-        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
+        NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
       }
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcShard;
       batchOpsParams.dsts[batchOpsParams.numOps] = dstPtr;
@@ -2346,7 +2375,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
         if (r == comm->rank) {
           waits[r].waitValue.address = &signalBuffer[drainSlot * comm->nRanks + comm->rank];
         } else {
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
+          NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
           waits[r].waitValue.address = (uint32_t*)peerSig;
         }
       }
@@ -2354,10 +2383,18 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     }
   }
   if (fastPath) {
-    // Phase 3: allgather
+    // Phase 3: allgather directly into the user's receive window.
     batchOpsParams.numOps = 0;
     myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
-    recvSlotOffset = (size_t)comm->rank * shardBytes;
+    size_t recvWindowOffset = (size_t)((uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr);
+#ifdef ENABLE_FAULT_INJECTION
+    if (comm->ceColl.ceFaults & CE_FAULT_LEGACY_RECV_OFFSET) {
+      // WARN only: BEFORE needs AllReduce to finish with a corrupted recv window.
+      WARN("CE: fault injection: CE_FAULT_LEGACY_RECV_OFFSET omitting recv window base (rank %d)", comm->rank);
+      recvWindowOffset = 0;
+    }
+#endif
+    recvSlotOffset = recvWindowOffset + (size_t)comm->rank * shardBytes;
 
     // The reduce kernel writes the reduced shard straight into recvbuff, so outShard and
     // myRecvSlot alias; copying would be a self-overlapping D2D transfer.
@@ -2371,7 +2408,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     for (int r = 1; r < comm->nRanks; r++) {
       int targetRank = (comm->rank + r) % comm->nRanks;
       void* peerRecvBuff;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, recvSlotOffset, targetRank, &peerRecvBuff), ret, fail);
+      NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, recvWin, recvSlotOffset, targetRank, &peerRecvBuff), ret, fail);
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)outShard;
       batchOpsParams.dsts[batchOpsParams.numOps] = peerRecvBuff;
       batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
@@ -2385,21 +2422,30 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     // recvbuff are visible before returning to the user.
     NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   } else {
-    struct ncclCeCollArgs agArgs = {};
-    agArgs.func = ncclFuncAllGather;
-    agArgs.nElts = shardBytes / eltSize;
-    agArgs.eltSize = eltSize;
-    agArgs.sendBuff = outShard;
-    agArgs.recvBuff = tmpBuf;
-    agArgs.sendWin = comm->ceColl.ceARTmpWin;
-    agArgs.recvWin = comm->ceColl.ceARTmpWin;
-    agArgs.collApiEventHandle = collArgs.collApiEventHandle;
-    agArgs.ceCollProfHandle = collArgs.ceCollProfHandle;
-    NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
+    // Slow path: AllGather each chunk into one staging slot, then copy into user recv.
+    for (int ch = 0; ch < (int)chunksPerShard; ch++) {
+      const bool isTail = (ch == (int)chunksPerShard - 1) && (tailChunkElems > 0);
+      const size_t currentChunkBytes = isTail ? tailChunkElems * eltSize : chunkBytes;
+      uint8_t* chunkSrc = outShard + (size_t)ch * chunkBytes;
+      struct ncclCeCollArgs agArgs = {};
+      agArgs.func = ncclFuncAllGather;
+      agArgs.nElts = currentChunkBytes / eltSize;
+      agArgs.eltSize = eltSize;
+      agArgs.sendBuff = chunkSrc;
+      agArgs.recvBuff = tmpBuf;
+      agArgs.sendWin = comm->ceColl.ceARTmpWin;
+      agArgs.recvWin = comm->ceColl.ceARTmpWin;
+      agArgs.collApiEventHandle = collArgs.collApiEventHandle;
+      agArgs.ceCollProfHandle = collArgs.ceCollProfHandle;
+      NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
 
-    // Phase 5 (slow path only): Local Copy — move assembled result from
-    // tmpBuf to user recvbuff.
-    CUDACHECKGOTO(cudaMemcpyAsync(recvbuff, tmpBuf, totalBytes, cudaMemcpyDeviceToDevice, ceStream), ret, fail);
+      for (int r = 0; r < comm->nRanks; r++) {
+        CUDACHECKGOTO(cudaMemcpyAsync((uint8_t*)recvbuff + (size_t)r * shardBytes + (size_t)ch * chunkBytes,
+                                      tmpBuf + (size_t)r * currentChunkBytes, currentChunkBytes,
+                                      cudaMemcpyDeviceToDevice, ceStream),
+                      ret, fail);
+      }
+    }
   }
 
   if (totalSteps > 1) {
@@ -2526,6 +2572,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->sendWin = task->sendWin;
   plan->ceCollArgs->recvWin = task->recvWin;
   plan->ceCollArgs->useDda = task->useDda;
+  plan->ceCollArgs->allReduceFastPath = task->ceAllReduceFastPath;
   plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
   plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
   plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;

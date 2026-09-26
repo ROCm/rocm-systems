@@ -126,6 +126,13 @@ void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
+// Smallest registered size across this window's LSA team. Falls back to the
+// local size for host-only test windows that do not carry runtime memory state.
+size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win);
+// Bytes from userPtr that fit in this window and in every LSA peer allocation.
+// lsaMinSize starts at the allocation base, so a window at memOffset only owns
+// the tail of that minimum.
+size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win);
 
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,

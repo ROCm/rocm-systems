@@ -2162,6 +2162,10 @@ TEST_F(SymMemoryObtainSetupTest, AsymmetricPeerSizes_TrackMinAndMax) {
   EXPECT_EQ(obtained->lsaMaxSize, 16384u);
   EXPECT_EQ(obtained->lsaNumSegments[1], 2);  // the peer's count, from its slice
   EXPECT_EQ(allocSize, 16384);                // reserved for the largest LSA rank
+  ncclDevrWindow win{};
+  win.memory = obtained;
+  win.size = 16384;
+  EXPECT_EQ(ncclDevrWindowLsaMinSize(&win), 4096u);
 }
 
 // Branch: the space allocation fails, so nothing is mapped or linked.

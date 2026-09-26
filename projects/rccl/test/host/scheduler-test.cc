@@ -989,6 +989,72 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAnd
   EXPECT_EQ(remainTasksHead, nullptr);
 }
 
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathRequiresEveryRank) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 2;
+  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
+
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = storage;
+  recvWin.size = sizeof(storage);
+  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+  ncclTaskColl ceTask{};
+  ceTask.func = ncclFuncAllReduce;
+  ceTask.datatype = ncclInt8;
+  ceTask.count = 16;
+  ceTask.recvbuff = storage + 32;
+  ceTask.recvWin = &recvWin;
+  ncclIntruQueueEnqueue(&scene.comm->planner.collCeTaskQueue, &ceTask);
+
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void* data, int size) {
+    EXPECT_EQ(size, static_cast<int>(sizeof(uint8_t)));
+    auto* flags = static_cast<uint8_t*>(data);
+    flags[0] = 1;
+    flags[1] = 0;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_FALSE(ceTask.ceAllReduceFastPath);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CeAllReduceFastPathWhenEveryRankAgrees) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 2;
+  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
+
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = storage;
+  recvWin.size = sizeof(storage);
+  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+  ncclTaskColl ceTask{};
+  ceTask.func = ncclFuncAllReduce;
+  ceTask.datatype = ncclInt8;
+  ceTask.count = 16;
+  ceTask.recvbuff = storage + 32;
+  ceTask.recvWin = &recvWin;
+  ncclIntruQueueEnqueue(&scene.comm->planner.collCeTaskQueue, &ceTask);
+
+  ScopedHook gather(g_bootstrapAllGather, [](void*, void* data, int size) {
+    EXPECT_EQ(size, static_cast<int>(sizeof(uint8_t)));
+    auto* flags = static_cast<uint8_t*>(data);
+    flags[0] = 1;
+    flags[1] = 1;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_TRUE(ceTask.ceAllReduceFastPath);
+}
+
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsDevrInitOnceAndPropagatesItsError) {
   MakeSymmetricTaskList_Scene scene;
   ScopedHook devrInitOnceHook(g_devrInitOnce, [](struct ncclComm*) { return ncclInternalError; });

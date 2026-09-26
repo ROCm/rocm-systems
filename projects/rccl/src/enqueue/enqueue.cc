@@ -633,8 +633,9 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   int fnOpTyIndices[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes];
   int fnOpTyCount = 0;
 
-  // Skip symmetric kernels for cross-clique
-  if (comm->symmetricSupport && !comm->p2pCrossClique) {
+  // CE receive-window agreement also runs here. Cross-clique comms still enter
+  // the preparation pass, while wantSym remains disabled in the scheduler.
+  if (comm->symmetricSupport) {
     NCCLCHECK(ncclMakeSymmetricTaskList(comm, task, &planner->collSymTaskQueue, &task));
   }
 
@@ -2235,6 +2236,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->sendWin = task->sendWin;
         plan->ceCollArgs->recvWin = task->recvWin;
         plan->ceCollArgs->useDda = task->useDda;
+        plan->ceCollArgs->allReduceFastPath = task->ceAllReduceFastPath;
         plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
         plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
         plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
@@ -3893,6 +3895,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   t->sendbuff = info->sendbuff;
   t->recvbuff = ddaRecvBase != nullptr ? ddaRecvBase : info->recvbuff;
   t->useDda = ddaRecvBase != nullptr;
+  t->ceAllReduceFastPath = false;
   t->ddaPeerBases = ddaPeerBasesHost;
   // DDA path stages results in scratch (t->recvbuff); remember the real user
   // recvbuff. The copy-back size is collective-specific and computed at the copy
@@ -4471,11 +4474,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
-        // AllReduce's backend was already chosen once by rcclSelectAllReduce();
-        // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
-        // step 5 reproduces develop's CE-registered condition exactly
-        // (!hasSysmemSegment && ceAvailable && ((CTAPolicy & ZERO) || force)), so
-        // decision.algo == RCCL_CE_REGISTERED <=> the CE branches below would fire.
+        // Honor rcclSelectAllReduce(). 2-shot is in ncclAllReduce_impl; REGISTERED
+        // is the enqueue CE path (ZERO / FORCE / !symEligible).
         if (info->decision.algo == RCCL_CE_REGISTERED) {
           INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,

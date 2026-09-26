@@ -16,6 +16,7 @@
 #include "bootstrap.h"
 #include "config/algorithm_registry.h"
 #include "profiler.h"
+#include "ce_coll.h"
 #include <cuda_fp16.h>
 #include <vector>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
@@ -84,6 +85,33 @@ static bool symBatchAligned16B(struct ncclTaskColl* headTask) {
   return true;
 }
 
+static ncclResult_t agreeCeAllReduceFastPath(struct ncclComm* comm) {
+  struct ncclTaskColl* task = ncclIntruQueueHead(&comm->planner.collCeTaskQueue);
+  while (task != nullptr) {
+    task->ceAllReduceFastPath = false;
+    if (task->func == ncclFuncAllReduce) {
+      const size_t totalBytes = task->count * ncclTypeSize(task->datatype);
+      bool fastPath = task->recvWin != nullptr &&
+                      (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+                      ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
+      if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
+        std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
+        flags[(size_t)comm->rank] = fastPath ? 1 : 0;
+        NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));
+        for (int r = 0; r < comm->nRanks; r++) {
+          if (flags[(size_t)r] == 0) {
+            fastPath = false;
+            break;
+          }
+        }
+      }
+      task->ceAllReduceFastPath = fastPath;
+    }
+    task = task->next;
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead) {
@@ -97,6 +125,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
 
   memset(tasksSymByFnOpTy, 0, sizeof(tasksSymByFnOpTy));
   *remainTasksHead = nullptr;
+  NCCLCHECK(agreeCeAllReduceFastPath(comm));
   if (task) {
     NCCLCHECK(ncclDevrInitOnce(comm));
   }
@@ -111,7 +140,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
     bool cfgAllowsSymk = (effAlgMask == 0) || ((effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0);
 
-    bool wantSym = symAvailable && cfgAllowsSymk;
+    bool wantSym = !comm->p2pCrossClique && symAvailable && cfgAllowsSymk;
     if (wantSym) {
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
       NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
@@ -132,7 +161,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     }
     // Local windows can disagree across ranks (NCCL_CHECK_MODE default does not
     // reject that). Mixing SYM and RING hangs; fall back unless every rank wants SYM.
-    if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
+    if (!comm->p2pCrossClique && comm->nRanks >= 2 && comm->bootstrap != nullptr) {
       std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
       flags[(size_t)comm->rank] = wantSym ? 1 : 0;
       NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));

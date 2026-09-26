@@ -41,9 +41,9 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
-inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
-  return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
+// Per-rank staging capacity in ceARTmpBuf.
+inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks, size_t stagingBytes) {
+  return nRanks > 0 ? stagingBytes / (size_t)nRanks : 0;
 }
 
 // Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
@@ -143,6 +143,7 @@ struct alignas(16) ncclCeCollArgs {
   void* ceCollProfHandle;    // CE collective profiler event handle
   uint64_t userTag;          // Per-call profiler annotation (0 == untagged)
   bool useDda;
+  bool allReduceFastPath;    // agreed during launch preparation, before comm launch
   void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
@@ -222,6 +223,14 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
+
+// True when [recvbuff, recvbuff + totalBytes) lies inside every LSA peer's
+// registration. Pointer-in-window and the local window size are not sufficient:
+// Phase 3 writes the full receive range through peer mappings.
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes);
+
+// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity.
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).

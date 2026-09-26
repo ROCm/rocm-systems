@@ -3463,12 +3463,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
       });
 }
 
-// CE registered wins over symmetric when both are eligible, per the
-// production comment's documented precedence -- distinct from the test
-// above, which only proves symmetric wins when CE ISN'T eligible.
-TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible) {
+// CTAPolicy ZERO and a CE-available window still lose to SYM. Dropping
+// !symEligible from ceRegisteredWindows would select CE_REGISTERED here.
+TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatsCeRegisteredWhenPolicyZero) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible",
+      "Wrap_SelectAllReduce_SymmetricBeatsCeRegisteredWhenPolicyZero",
       []() {
         g_loadParam = [](const char* env, int64_t def) -> int64_t {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
@@ -3493,6 +3492,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothE
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(6, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -3610,6 +3611,55 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredRequiresZeroOrForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeRegisteredRequiresZeroOrForce",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 0;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroRegMaxDisablesRegisteredCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroRegMaxDisablesRegisteredCe",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return 0;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments",
@@ -3690,10 +3740,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
       });
 }
 
-// CE 2-shot: needs ceAllReduceAllowed (rcclUseCeAr2Shot eligible +
-// force-or-symReg) AND a non-null ceARTmpBuf. Uses `force` (via
-// RCCL_FORCE_CE_ALLREDUCE) as the "force || symReg" side, matching
-// rcclUseCeAr2Shot's own ForceBypassesCtaPolicy test precedent.
+// CE 2-shot: unregistered FORCE AllReduce with staging already allocated.
 TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagingBufferReady) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagingBufferReady",
@@ -3725,6 +3772,36 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
       });
 }
 
+// symReg is this rank's window. Skipping 2-shot on it would enqueue REGISTERED
+// and allgather while an unregistered peer stays on 2-shot and never posts.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotStaysWhenLocalSymReg) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotStaysWhenLocalSymReg",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return deft;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ceAllReduceAllowed's final conjunct is `force || symReg`; every prior
 // test drove it true via one side or the other, but never both false at
 // once. Same setup as above (staging buffer ready, rcclUseCeAr2Shot
@@ -3750,19 +3827,22 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
       });
 }
 
-// Complementary proof: ceAllReduceAllowed is true (force set), but
-// ceARTmpBuf is left null -- the "staging buffer initialized" conjunct's
-// own false side had never fired (every prior test either set the buffer
-// or made ceAllReduceAllowed false first).
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferNotInitialized) {
+// First FORCE-unregistered AllReduce enqueues CE so ncclCeInit can allocate
+// staging. Eager 2-shot waits for ceARTmpBuf.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferNotInitialized",
+      "Wrap_SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized",
       []() {
         g_loadParam = [](const char* env, int64_t deft) {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
           return deft;
         };
+        g_ceImplemented = true;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
@@ -3771,7 +3851,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferN
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
