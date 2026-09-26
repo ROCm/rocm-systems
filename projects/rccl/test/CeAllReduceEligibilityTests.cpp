@@ -238,6 +238,34 @@ TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_UsesPeerMinimumSiz
     EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 64), 0);
 }
 
+TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_SubtractsAllocationOffset)
+{
+    ncclDevrMemory memory{};
+    memory.lsaMinSize = 96;
+    memory.bigOffset = 1000;
+
+    ncclDevrWindow win{};
+    alignas(16) uint8_t storage[128];
+    win.memory = &memory;
+    win.userPtr = storage;
+    win.size = sizeof(storage);
+    win.bigOffset = memory.bigOffset + 32;
+    win.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+    // min(win->size, lsaMinSize - memOffset) = min(128, 64).
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage, 64), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage, 80), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 32, 64), 0);
+
+    win.bigOffset = memory.bigOffset + memory.lsaMinSize;
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage, 1), 0);
+
+    memory.lsaMinSize = 256;
+    win.bigOffset = memory.bigOffset;
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage, sizeof(storage)), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 80), 0);
+}
+
 TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
 {
     for (size_t stagingBytes :
