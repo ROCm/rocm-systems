@@ -52,7 +52,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟩 high: all 3 clean shards pass at 1200 s with complete tensor-DMA coverage; fault 8/8 | 🟧 delay-zero: all 3 shards pass numerically at 1200 s; tensor-DMA comparison unsupported |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟩 high: all 6 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟧 delay-zero: all 6 shards pass numerically; tensor-DMA comparison unsupported |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟩 high + 192 MiB report cap: all 6 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟧 delay-zero: all 6 shards pass numerically; tensor-DMA comparison unsupported |
-| Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault trials running |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 high + 1 GiB cap: targeted clean pass and fault 8/8; full clean running | 🟧 profiler discovery complete for all 6 shards; clean qualification pending |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟩 high: all 9 clean shards pass; exact-artifact fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟩 high: all 6 clean shards pass; exact-artifact fault 6/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
