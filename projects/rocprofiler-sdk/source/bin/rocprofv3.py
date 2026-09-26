@@ -1452,9 +1452,14 @@ def services_conflicting_with_kernel_replay(args, environ=None):
     if getattr(args, "advanced_thread_trace", None):
         conflicts.append("--att")
 
+    # --pc-sampling-beta-enabled and ROCPROFILER_PC_SAMPLING_BETA_ENABLED only unlock the feature.
+    # The tool samples only once it gets a sampling method, from these options or from
+    # ROCPROF_PC_SAMPLING_METHOD.
     if (
-        getattr(args, "pc_sampling_beta_enabled", None)
-        or environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+        getattr(args, "pc_sampling_unit", None)
+        or getattr(args, "pc_sampling_method", None)
+        or getattr(args, "pc_sampling_interval", None)
+        or environ.get("ROCPROF_PC_SAMPLING_METHOD", "none").lower() not in ("", "none")
     ):
         conflicts.append("PC sampling")
 

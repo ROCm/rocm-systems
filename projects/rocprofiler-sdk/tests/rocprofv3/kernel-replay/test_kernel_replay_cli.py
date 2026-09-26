@@ -259,15 +259,55 @@ def test_att_conflicts_with_replay():
     assert service_conflicts(advanced_thread_trace=True) == ["--att"]
 
 
-def test_pc_sampling_flag_conflicts_with_replay():
-    assert service_conflicts(pc_sampling_beta_enabled=True) == ["PC sampling"]
+PC_SAMPLING_REQUEST = dict(
+    pc_sampling_beta_enabled=True,
+    pc_sampling_unit="time",
+    pc_sampling_method="host_trap",
+    pc_sampling_interval=1,
+)
 
 
-def test_pc_sampling_env_conflicts_with_replay():
-    # The beta gate can be opened by environment instead of by flag; both reach the same service.
-    assert service_conflicts(environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1"}) == [
+def test_pc_sampling_conflicts_with_replay():
+    assert service_conflicts(**PC_SAMPLING_REQUEST) == ["PC sampling"]
+
+
+def test_any_pc_sampling_option_conflicts_with_replay():
+    # rocprofv3 rejects a partial configuration later on; replay must not be what lets it through.
+    assert service_conflicts(pc_sampling_unit="cycles") == ["PC sampling"]
+    assert service_conflicts(pc_sampling_method="stochastic") == ["PC sampling"]
+    assert service_conflicts(pc_sampling_interval=1048576) == ["PC sampling"]
+
+
+def test_pc_sampling_method_from_environment_conflicts_with_replay():
+    # The tool reads its sampling method from the environment, so a preset one still samples.
+    assert service_conflicts(environ={"ROCPROF_PC_SAMPLING_METHOD": "host_trap"}) == [
         "PC sampling"
     ]
+
+
+def test_pc_sampling_method_none_in_environment_does_not_conflict():
+    assert service_conflicts(environ={"ROCPROF_PC_SAMPLING_METHOD": "none"}) == []
+
+
+def test_pc_sampling_beta_flag_alone_does_not_conflict():
+    """The flag acknowledges the beta; without a sampling configuration nothing is sampled."""
+    assert service_conflicts(pc_sampling_beta_enabled=True, pmc=["SQ_WAVES"]) == []
+
+
+def test_pc_sampling_beta_env_alone_does_not_conflict():
+    """ROCPROFILER_PC_SAMPLING_BETA_ENABLED is often exported for a whole shell or CI job.
+
+    It only unlocks PC sampling, whatever its value; the tool samples only once it has a method.
+    Treating the variable as a request would refuse every replay run in that environment.
+    """
+    for value in ("1", "ON", "0", ""):
+        assert (
+            service_conflicts(
+                environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": value},
+                pmc=["SQ_WAVES"],
+            )
+            == []
+        ), value
 
 
 def test_spm_conflicts_with_replay():
@@ -279,7 +319,7 @@ def test_spm_conflicts_with_replay():
 def test_every_conflicting_service_is_reported_together():
     # A user who asked for all of them should be told about all of them, not one per run.
     assert service_conflicts(
-        advanced_thread_trace=True, pc_sampling_beta_enabled=True, spm=["SQ_WAVES"]
+        advanced_thread_trace=True, spm=["SQ_WAVES"], **PC_SAMPLING_REQUEST
     ) == ["--att", "PC sampling", "--spm"]
 
 
@@ -289,6 +329,9 @@ def test_unset_service_options_do_not_conflict():
         service_conflicts(
             advanced_thread_trace=False,
             pc_sampling_beta_enabled=False,
+            pc_sampling_unit=None,
+            pc_sampling_method=None,
+            pc_sampling_interval=None,
             spm=None,
             pmc=["SQ_WAVES"],
         )
@@ -296,29 +339,14 @@ def test_unset_service_options_do_not_conflict():
     )
 
 
-def test_pc_sampling_env_set_to_zero_still_conflicts():
-    """The gate is presence, not truthiness.
-
-    rocprofv3 opens the PC sampling beta on the variable being set at all, so a user who exported
-    it as 0 still gets the service. If this check tested truthiness instead, that user would be
-    allowed into a replay run that silently collects N times the PC samples they asked for.
-    """
-    assert service_conflicts(environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "0"}) == [
-        "PC sampling"
-    ]
-
-
-def test_pc_sampling_env_set_to_empty_still_conflicts():
-    assert service_conflicts(environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": ""}) == [
-        "PC sampling"
-    ]
-
-
-def test_pc_sampling_flag_and_env_are_reported_once():
+def test_pc_sampling_options_and_env_are_reported_once():
     # Both routes reach the same service; naming it twice would read like two separate problems.
     assert service_conflicts(
-        pc_sampling_beta_enabled=True,
-        environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1"},
+        environ={
+            "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
+            "ROCPROF_PC_SAMPLING_METHOD": "host_trap",
+        },
+        **PC_SAMPLING_REQUEST,
     ) == ["PC sampling"]
 
 
@@ -342,7 +370,7 @@ def test_conflicts_are_reported_in_a_stable_order():
     different text on different runs and defeats matching in tests and docs."""
     for _ in range(5):
         assert service_conflicts(
-            spm=["SQ_WAVES"], advanced_thread_trace=True, pc_sampling_beta_enabled=True
+            spm=["SQ_WAVES"], advanced_thread_trace=True, **PC_SAMPLING_REQUEST
         ) == ["--att", "PC sampling", "--spm"]
 
 
