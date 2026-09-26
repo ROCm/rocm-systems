@@ -49,8 +49,12 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 using namespace rocprofiler::counters;
 using namespace rocprofiler;
@@ -1313,6 +1317,186 @@ TEST(spm_core, disjoint_contexts_no_conflict)
 
         ROCPROFILER_CALL(rocprofiler_stop_context(ctx_a), "stop ctx_a (disjoint)");
         ROCPROFILER_CALL(rocprofiler_stop_context(ctx_b), "stop ctx_b (disjoint)");
+    }
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
+
+namespace
+{
+std::vector<rocprofiler_agent_id_t>
+get_spm_agents()
+{
+    auto ret = std::vector<rocprofiler_agent_id_t>{};
+    for(const auto& [_, agent] : hsa::get_queue_controller()->get_supported_agents())
+    {
+        auto rocp_agent = agent.get_rocp_agent();
+        if(!rocp_agent) continue;
+        if(!rocp_agent->runtime_visibility.hsa || !rocp_agent->runtime_visibility.hip) continue;
+        if(!is_spm_supported_arch(agent)) continue;
+        ret.push_back(rocp_agent->id);
+    }
+    return ret;
+}
+}  // namespace
+
+// start_context() drops the contexts mutex before it publishes the active slot and starts the SPM
+// service. A stop that lands in that window must not run spm::stop_context() ahead of
+// spm::start_context(): the disable would be clamped at zero and the enable that follows would
+// leave the agent serialized by a context that is no longer active.
+TEST(spm_core, concurrent_context_start_stop_does_not_pin_serialization)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    auto spm_agents = get_spm_agents();
+    if(spm_agents.empty())
+    {
+        registration::set_init_status(1);
+        registration::finalize();
+        context::pop_client(1);
+        set_client_ctx(get_client_ctx());
+        ROCP_ERROR << "SPM unavailable";
+        return;
+    }
+
+    rocprofiler_context_id_t ctx_id{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx_id), "create context");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         ctx_id, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                     "configure context");
+    ROCPROFILER_CALL(
+        rocprofiler_spm_dispatch_counting_service_set_agents(ctx_id, &spm_agents[0], 1),
+        "set agents");
+
+    auto unexpected = std::atomic<int>{0};
+    auto go         = std::atomic<bool>{false};
+    auto worker     = [&]() {
+        while(!go.load(std::memory_order_acquire))
+            std::this_thread::yield();
+
+        for(int i = 0; i < 1000; ++i)
+        {
+            if(rocprofiler_start_context(ctx_id) != ROCPROFILER_STATUS_SUCCESS)
+                unexpected.fetch_add(1, std::memory_order_relaxed);
+
+            auto status = rocprofiler_stop_context(ctx_id);
+            if(status != ROCPROFILER_STATUS_SUCCESS &&
+               status != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND)
+                unexpected.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    auto first  = std::thread{worker};
+    auto second = std::thread{worker};
+    go.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+
+    (void) rocprofiler_stop_context(ctx_id);
+
+    EXPECT_EQ(unexpected.load(std::memory_order_relaxed), 0);
+    EXPECT_FALSE(hsa::get_queue_controller()->is_serialization_enabled(spm_agents[0]));
+    EXPECT_FALSE(spm::is_any_active());
+
+    const auto* ctx_p = context::get_registered_context(ctx_id);
+    ASSERT_TRUE(ctx_p && ctx_p->dispatch_spm);
+    bool enabled = true;
+    ctx_p->dispatch_spm->enabled.rlock([&](const auto& value) { enabled = value; });
+    EXPECT_FALSE(enabled);
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
+
+// Two SPM contexts on the same agent started from two threads at once. Each start checks for a
+// conflict against the active array, and the other start has not published its slot yet when it
+// drops the contexts mutex, so without the start-pending marker both can be admitted onto one
+// agent.
+TEST(spm_core, concurrent_overlapping_context_starts_admit_exactly_one)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    auto spm_agents = get_spm_agents();
+    if(spm_agents.empty())
+    {
+        registration::set_init_status(1);
+        registration::finalize();
+        context::pop_client(1);
+        set_client_ctx(get_client_ctx());
+        ROCP_ERROR << "SPM unavailable";
+        return;
+    }
+
+    rocprofiler_context_id_t ctx_a{};
+    rocprofiler_context_id_t ctx_b{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx_a), "create ctx_a");
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx_b), "create ctx_b");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                     "configure ctx_a");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                     "configure ctx_b");
+    ROCPROFILER_CALL(rocprofiler_spm_dispatch_counting_service_set_agents(ctx_a, &spm_agents[0], 1),
+                     "set agents ctx_a");
+    ROCPROFILER_CALL(rocprofiler_spm_dispatch_counting_service_set_agents(ctx_b, &spm_agents[0], 1),
+                     "set agents ctx_b");
+
+    for(int iteration = 0; iteration < 1000; ++iteration)
+    {
+        auto ready    = std::atomic<int>{0};
+        auto go       = std::atomic<bool>{false};
+        auto status_a = ROCPROFILER_STATUS_ERROR;
+        auto status_b = ROCPROFILER_STATUS_ERROR;
+        auto start    = [&](rocprofiler_context_id_t ctx, rocprofiler_status_t& status) {
+            ready.fetch_add(1, std::memory_order_release);
+            while(!go.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            status = rocprofiler_start_context(ctx);
+        };
+
+        auto thread_a = std::thread{start, ctx_a, std::ref(status_a)};
+        auto thread_b = std::thread{start, ctx_b, std::ref(status_b)};
+        while(ready.load(std::memory_order_acquire) != 2)
+            std::this_thread::yield();
+        go.store(true, std::memory_order_release);
+        thread_a.join();
+        thread_b.join();
+
+        const auto a_won = (status_a == ROCPROFILER_STATUS_SUCCESS);
+        const auto b_won = (status_b == ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_NE(a_won, b_won) << "iteration " << iteration;
+        EXPECT_TRUE(a_won || status_a == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT)
+            << "iteration " << iteration << ": " << rocprofiler_get_status_string(status_a);
+        EXPECT_TRUE(b_won || status_b == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT)
+            << "iteration " << iteration << ": " << rocprofiler_get_status_string(status_b);
+
+        if(a_won) EXPECT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+        if(b_won) EXPECT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_FALSE(hsa::get_queue_controller()->is_serialization_enabled(spm_agents[0]))
+            << "iteration " << iteration;
+        EXPECT_FALSE(spm::is_any_active()) << "iteration " << iteration;
+
+        if(HasFailure()) break;
     }
 
     registration::set_init_status(1);
