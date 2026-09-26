@@ -30,6 +30,8 @@ Options:
 
 Environment (common):
   HRR_TRIAGE_WORKDIR   Output directory for findings and replay logs
+                       (default: $TMPDIR/hrr-triage-<uid>, mode 0700, never the
+                       archive; a mktemp directory if that one is not ours)
   HRR_DOCKER_IMAGE     Docker image for --replay docker / auto
   HRR_DOCKER_MOUNT_CLR=1  Overlay host CLR for docker replay (dev builds)
   GPU                  Replay GPU ordinal (default: auto-pick)
@@ -39,17 +41,21 @@ Environment (common):
 EOF
 }
 
+needs_value() {
+  (( $2 >= 2 )) || { echo "error: $1 needs a value" >&2; exit 1; }
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --archive) ARCHIVE="$2"; shift 2 ;;
+    --archive) needs_value --archive $#; ARCHIVE="$2"; shift 2 ;;
     --replay)
       if [[ $# -lt 2 || "$2" == --* ]]; then REPLAY_MODE="native"; shift
       else REPLAY_MODE="$2"; shift 2; fi ;;
     --no-replay) REPLAY_MODE="skip"; shift ;;
     --no-sync) NO_SYNC=1; shift ;;
-    -o|--output) OUTPUT="$2"; shift 2 ;;
-    --format) FORMAT="$2"; shift 2 ;;
+    -o|--output) needs_value --output $#; OUTPUT="$2"; shift 2 ;;
+    --format) needs_value --format $#; FORMAT="$2"; shift 2 ;;
     *) echo "error: unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -60,8 +66,28 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 
 name="$(basename "$ARCHIVE")"
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
-WORKDIR="${HRR_TRIAGE_WORKDIR:-$(pwd)}"
-mkdir -p "$WORKDIR"
+# Never the current directory by default: run from inside a customer's archive
+# and the finding and the replay log land in it, against this skill's own rule
+# that the archive is not to be written to. Per user, because a shared /tmp
+# directory belongs to whoever ran first and the next user cannot write in it.
+if [[ -n "${HRR_TRIAGE_WORKDIR:-}" ]]; then
+  WORKDIR="$HRR_TRIAGE_WORKDIR"
+  # Created private when we are the one creating it. An existing directory is
+  # the caller's business, but the finding inside it is not: see the chmod
+  # where it is written.
+  mkdir -p -m 700 "$WORKDIR"
+else
+  WORKDIR="${TMPDIR:-/tmp}/hrr-triage-$(id -u)"
+  # 0700 and ours, or somewhere else entirely. The name is predictable, so on a
+  # shared host another user can get there first, and a finding names a
+  # customer's kernels and addresses.
+  mkdir -p -m 700 "$WORKDIR" 2>/dev/null || true
+  if [[ -L "$WORKDIR" || ! -d "$WORKDIR" || ! -O "$WORKDIR" || ! -w "$WORKDIR" ]]; then
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hrr-triage-XXXXXX")"
+  else
+    chmod 700 "$WORKDIR" 2>/dev/null || true
+  fi
+fi
 LOG=""
 ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
 FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}${ext}}"
@@ -80,25 +106,44 @@ setup_library_path() {
   if [[ "$bin_dir" == */bin ]]; then
     lib_dirs+=("$(cd "$bin_dir/../lib" 2>/dev/null && pwd || true)")
   fi
-  # A packaged playback ships as bin/ and lib/ siblings rather than inside a
-  # build tree. Without this its libamdhip64 is never on the path, so the
-  # binary loads the system one and fails on the symbols it was built against.
-  if [[ -d "$bin_dir/../lib" ]]; then
-    lib_dirs+=("$(cd "$bin_dir/../lib" && pwd)")
-  fi
+  # A packaged playback ships as bin/, lib/ and runtime-lib/ siblings rather
+  # than inside a build tree. Without these its libamdhip64 and libhsa are
+  # never on the path, so the binary loads the system ones and dies on the
+  # symbols it was built against. runtime-lib was missing here while the
+  # sibling skill's inspector had it, so `verify` could launch a reader that
+  # `triage` could not.
+  for p in lib runtime-lib; do
+    [[ -d "$bin_dir/../$p" ]] && lib_dirs+=("$(cd "$bin_dir/../$p" && pwd)")
+  done
   repo="$(cd "$SCRIPT_DIR/../../../../.." 2>/dev/null && pwd || true)"
   for p in "${ROCR_LIB:-}" "${repo:+$repo/projects/rocr-runtime/build-local/rocr/lib}"; do
     [[ -n "$p" && -f "$p/libhsa-runtime64.so.1" ]] || continue
     lib_dirs+=("$p"); break
   done
-  lib_dirs+=("$ROCM_PATH/lib")
   for p in "${lib_dirs[@]}"; do
     [[ -d "$p" ]] || continue
     [[ ":$seen:" == *":$p:"* ]] && continue
     seen="${seen:+$seen:}$p"
     built="${built:+$built:}$p"
   done
-  export LD_LIBRARY_PATH="${built}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH:-}}"
+  # The caller's own value next, and $ROCM_PATH/lib last. Putting the ROCm
+  # install ahead of an explicitly set LD_LIBRARY_PATH bound libhsa from the
+  # system release in front of the reader's own, and a newer libamdhip64 then
+  # fails on a symbol that release does not have.
+  # Assembled a component at a time. An empty component, which is what
+  # "${built}:..." leaves when nothing was found, means the current directory
+  # to the loader, and this script is run from inside customer archives: a
+  # shared object sitting in one would be loaded ahead of ROCm.
+  local joined=""
+  for p in "$built" "${LD_LIBRARY_PATH:-}" "${ROCM_PATH:+$ROCM_PATH/lib}"; do
+    [[ -n "$p" ]] || continue
+    joined="${joined:+$joined:}$p"
+  done
+  if [[ -n "$joined" ]]; then
+    export LD_LIBRARY_PATH="$joined"
+  else
+    unset LD_LIBRARY_PATH
+  fi
 }
 
 pick_gpu() {
@@ -282,5 +327,7 @@ CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")
 [[ -n "$LOG" && -f "$LOG" ]] && CMD+=(--log "$LOG")
 "${CMD[@]}"
 
+chmod 600 "$FINDING" 2>/dev/null || true
+[[ -n "$LOG" && -f "$LOG" ]] && chmod 600 "$LOG" 2>/dev/null || true
 echo "[triage] finding=$FINDING" >&2
 cat "$FINDING"

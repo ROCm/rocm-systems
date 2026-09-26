@@ -8,7 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import analyze_replay_finding as arf  # noqa: E402
@@ -100,7 +100,7 @@ class RecordedCaptureTests(unittest.TestCase):
     finding.
     """
 
-    FIXTURES = SCRIPT_DIR.parent / "evals" / "fixtures"
+    FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
     def _analyze(self, *names: str) -> arf.Finding:
         finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
