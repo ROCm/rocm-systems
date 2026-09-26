@@ -2267,6 +2267,14 @@ size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win) {
   return win->memory != nullptr ? win->memory->lsaMinSize : win->size;
 }
 
+size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win) {
+  if (win == nullptr) return 0;
+  const size_t allocMin = ncclDevrWindowLsaMinSize(win);
+  const size_t memOffset = win->memory == nullptr ? 0 : win->bigOffset - win->memory->bigOffset;
+  if (allocMin <= memOffset) return 0;
+  return std::min(win->size, allocMin - memOffset);
+}
+
 void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr) {
   memcpy(dstRankPtr, srcRankPtr, offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank));
 }

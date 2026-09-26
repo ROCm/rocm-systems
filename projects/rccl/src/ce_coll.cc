@@ -2163,7 +2163,7 @@ int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void cons
   if (win == nullptr || recvbuff == nullptr) return 0;
   const uintptr_t winStart = (uintptr_t)win->userPtr;
   const uintptr_t recvStart = (uintptr_t)recvbuff;
-  const size_t peerSafeSize = ncclDevrWindowLsaMinSize(win);
+  const size_t peerSafeSize = ncclDevrWindowPeerSafeSize(win);
   return recvStart >= winStart && totalBytes <= peerSafeSize &&
          recvStart - winStart <= peerSafeSize - totalBytes;
 }
