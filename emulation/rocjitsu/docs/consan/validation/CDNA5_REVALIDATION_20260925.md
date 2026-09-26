@@ -2605,3 +2605,15 @@ Default detects 8/8 (`tensile-untimed-smoke-fault`), while SuperCollider detects
 (`tensile-untimed-smoke-sc-fault`). Health checks pass. The latter campaign
 correctly rejects detector qualification; accepting NaN timing fields has not
 masked its numerical failures. The smoke SuperCollider cell stays yellow.
+
+
+### Full untimed SuperCollider SGEMM sweep started
+
+`sgemm-bank-fixed-untimed-sc-full-clean` reruns all six maintained SGEMM
+shapes with the full 84-kernel allowlist, `sleep_wave=15`, the immutable bank-fix
+hook, and the tested untimed/zero-cooldown controls. Both clients and all
+650 numerical rows per shape remain required. Each shard has a 14,400-second
+execution budget, with three shards concurrent under the shared 40 GiB cap.
+The previous timed results remain evidence of three large-shape timeouts;
+the SuperCollider cell stays orange until this full clean finishes.
+The existing Default jobs keep their original controls and continue running.
