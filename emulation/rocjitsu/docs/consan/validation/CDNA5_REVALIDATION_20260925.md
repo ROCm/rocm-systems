@@ -2762,3 +2762,12 @@ before and after. Five completed trials have detected the fault; three remain
 pending. Both full clean sweeps remain at three accepted small shapes, with
 three large shapes still running. The terminal trial-4 record under
 `sgemm-bank-fixed-untimed-high-fault` supplies this checkpoint.
+
+Trial 5 completes in 1,164 seconds with
+7 ConSan conflicts, all 650 numerical cases passing,
+complete applicable coverage, exactly one intended mutation, and healthy checks
+before and after. Six completed trials have detected the fault; two remain
+pending. This reaches the detection count required for green, but does not yet
+finish the eight-trial campaign or qualify the three pending large clean shapes
+in each mode. The terminal trial-5 record under
+`sgemm-bank-fixed-untimed-high-fault` supplies this checkpoint.
