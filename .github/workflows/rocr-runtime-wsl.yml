@@ -1,25 +1,8 @@
 name: ROCR Runtime WSL
 
 on:
+  workflow_call:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "projects/rocr-runtime/**"
-      - "projects/clr/**"
-      - "projects/hip/**"
-      - "projects/hip-tests/**"
-      - ".github/workflows/rocr-runtime-wsl.yml"
-      - "shared/amdgpu-windows-interop/wkmi"
-  push:
-    branches:
-      - develop
-    paths:
-      - "projects/rocr-runtime/**"
-      - "projects/clr/**"
-      - "projects/hip/**"
-      - "projects/hip-tests/**"
-      - ".github/workflows/rocr-runtime-wsl.yml"
-      - "shared/amdgpu-windows-interop/wkmi"
 
 permissions:
   contents: read
