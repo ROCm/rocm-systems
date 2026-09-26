@@ -354,6 +354,16 @@ CONTEXT_SIGNAL_FETCH_DEF()
 CONTEXT_SIGNAL_FETCH_DEF(_wg)
 CONTEXT_SIGNAL_FETCH_DEF(_wave)
 
+__device__ uint64_t Context::signal_wait_until(uint64_t *sig_addr, int cmp,
+                                               uint64_t cmp_value) {
+  while (true) {
+    uint64_t value{uncached_load(sig_addr)};
+    if (test_value(value, cmp, cmp_value)) {
+      return value;
+    }
+  }
+}
+
 __device__ int Context::tile_collective_wait(rocshmem_team_t team, uint64_t flags) {
   DISPATCH_RET(tile_collective_wait(team, flags));
 }
