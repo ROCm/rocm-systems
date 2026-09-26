@@ -19,7 +19,7 @@ backend requires glibc >= 2.34 (and often `GLIBCXX_3.4.29` /
 `CXXABI_1.3.11`). The glibc used to *build* rocJITsu can be older than the
 glibc needed to *load* the backend — on any host, VM, chroot, or container —
 in which case `dlopen` fails with a message such as
-`version 'GLIBC_2.33' not found`. The loader names the first unsatisfied
+``version `GLIBC_2.33' not found``. The loader names the first unsatisfied
 symbol version, which can be below the backend's actual floor. Confirm the
 backend's floors for all three families, then the host's glibc and the newest
 `GLIBCXX_*` and `CXXABI_*` versions exported by libstdc++. If the loader names
@@ -39,7 +39,7 @@ Run `PerfsimPluginTest.RealBackendMatchesDirectFfmForCanonicalStream` (set
 `ROCJITSU_PERFSIM_REAL_BACKEND`) and any Perfsim-enabled workload only where
 the host C and C++ runtimes meet those floors. The test skips when the loader
 reports an unsatisfied `GLIBC_` / `GLIBCXX_` / `CXXABI_` symbol version
-(`version '...' not found`); a genuine ABI rejection still fails.
+(``version `...' not found``); a genuine ABI rejection still fails.
 
 From the repository root, build and install RocJITsu with the adapter enabled:
 
