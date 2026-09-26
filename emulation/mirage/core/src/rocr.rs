@@ -191,22 +191,14 @@ pub fn check_target_for_process(
     {
         return TargetSupport::Unknown;
     }
-    let Some(runtime) = locate_for_process(command, workdir, &effective) else {
+    let Some((runtime, image)) = locate_for_process(command, workdir, &effective) else {
         return TargetSupport::Unknown;
     };
-    check_target_at(target, &runtime)
-}
-
-/// Whether one already-resolved ROCm runtime rules out `target`.
-///
-/// Private: the size cap that makes reading the image safe is applied
-/// while the loader trace selects it, so this is the second half of
-/// [`check_target_for_process`] rather than an entry point of its own.
-fn check_target_at(target: &str, runtime: &Path) -> TargetSupport {
-    let Ok(image) = std::fs::read(runtime) else {
-        return TargetSupport::Unknown;
-    };
-    verdict(target, runtime, rocm_version_beside(runtime), &image)
+    // The image the loader trace already read, size-capped and checked
+    // against the executable's ELF class: judging those bytes rather than
+    // a second read of the file means reading a runtime of up to
+    // `MAX_RUNTIME_BYTES` once per workload, not twice.
+    verdict(target, &runtime, rocm_version_beside(&runtime), &image)
 }
 
 fn merged_environment(
@@ -298,7 +290,7 @@ fn locate_for_process(
     command: &str,
     workdir: Option<&Path>,
     effective: &std::collections::BTreeMap<OsString, OsString>,
-) -> Option<PathBuf> {
+) -> Option<(PathBuf, Vec<u8>)> {
     let workdir = absolute_workdir(workdir)?;
     let executable = resolve_command(command, Some(&workdir), effective)?;
     let executable = trusted_system_file(&executable)?;
@@ -306,15 +298,17 @@ fn locate_for_process(
     let metadata = executable.metadata().ok()?;
     (metadata.len() <= MAX_EXECUTABLE_BYTES).then_some(())?;
     let image = std::fs::read(&executable).ok()?;
-    let runtime = direct_runpath_runtime(&executable, &image, true)?;
-    trusted_system_file(&runtime)
+    let (runtime, runtime_image) = direct_runpath_runtime(&executable, &image, true)?;
+    Some((trusted_system_file(&runtime)?, runtime_image))
 }
 
+/// The ROCr the loader resolves for `executable` through its `RUNPATH`,
+/// with the image read while checking it.
 fn direct_runpath_runtime(
     executable: &Path,
     image: &[u8],
     require_trusted_paths: bool,
-) -> Option<PathBuf> {
+) -> Option<(PathBuf, Vec<u8>)> {
     let Object::Elf(elf) = Object::parse(image).ok()? else {
         return None;
     };
@@ -347,15 +341,16 @@ fn direct_runpath_runtime(
             if !directory.is_absolute() {
                 return None;
             }
-            // A `RUNPATH` entry that is not there is not ambiguous: the
-            // loader finds nothing in it and moves on to the next entry,
-            // and so does this. Anything else about it — unreadable,
-            // untrusted — is a directory the loader *will* search and
-            // this cannot vouch for, which is a verdict declined rather
-            // than an entry skipped.
-            match std::fs::symlink_metadata(&directory) {
+            // A `RUNPATH` entry that is not there, or is not a directory,
+            // is not ambiguous: the loader finds nothing in it and moves on
+            // to the next entry, and so does this. Anything else about it —
+            // unreadable, untrusted — is a directory the loader *will*
+            // search and this cannot vouch for, which is a verdict declined
+            // rather than an entry skipped.
+            match directory.metadata() {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(_) => return None,
+                Ok(metadata) if !metadata.is_dir() => continue,
                 Ok(_) => {}
             }
             if require_trusted_paths {
@@ -379,7 +374,7 @@ fn direct_runpath_runtime(
                 {
                     return None;
                 }
-                return std::fs::canonicalize(candidate).ok();
+                return Some((std::fs::canonicalize(candidate).ok()?, candidate_image));
             }
         }
     }
@@ -1115,7 +1110,7 @@ mod tests {
 
         let workload_image = std::fs::read(&workload).unwrap();
         assert_eq!(
-            direct_runpath_runtime(&workload, &workload_image, false),
+            direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
             None,
             "the linker's propagated DT_DEPAUDIT must suppress the verdict"
         );
@@ -1147,7 +1142,7 @@ mod tests {
         assert!(built_workload.success(), "linking the clean workload");
         let workload_image = std::fs::read(&workload).unwrap();
         assert_eq!(
-            direct_runpath_runtime(&workload, &workload_image, false),
+            direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
             Some(runtime.canonicalize().unwrap())
         );
 
@@ -1155,7 +1150,7 @@ mod tests {
         std::fs::create_dir_all(&unrelated).unwrap();
         std::os::unix::fs::symlink(&runtime, unrelated.join(ROCR_SONAME)).unwrap();
         assert_eq!(
-            direct_runpath_runtime(&workload, &workload_image, false),
+            direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
             Some(runtime.canonicalize().unwrap()),
             "a library below an unrelated asset directory is not a loader alternative"
         );
@@ -1164,7 +1159,7 @@ mod tests {
         std::fs::create_dir_all(&hwcap).unwrap();
         std::os::unix::fs::symlink(&runtime, hwcap.join(ROCR_SONAME)).unwrap();
         assert_eq!(
-            direct_runpath_runtime(&workload, &workload_image, false),
+            direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
             None,
             "a symlinked hardware-capability alternative makes the selected runtime ambiguous"
         );
@@ -1179,7 +1174,7 @@ mod tests {
         std::fs::create_dir_all(&legacy).unwrap();
         std::os::unix::fs::symlink(&runtime, legacy.join(ROCR_SONAME)).unwrap();
         assert_eq!(
-            direct_runpath_runtime(&workload, &workload_image, false),
+            direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
             None,
             "a pre-2.37 glibc searches <dir>/tls, so the selected runtime is ambiguous"
         );
@@ -1191,7 +1186,7 @@ mod tests {
             std::fs::create_dir_all(&nested).unwrap();
             std::os::unix::fs::symlink(&runtime, nested.join(ROCR_SONAME)).unwrap();
             assert_eq!(
-                direct_runpath_runtime(&workload, &workload_image, false),
+                direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
                 None,
                 "the bounded legacy combination {combination:?} must be treated as ambiguous"
             );
@@ -1199,7 +1194,7 @@ mod tests {
         }
 
         assert_eq!(
-            direct_runpath_runtime(&workload, &workload_image, false),
+            direct_runpath_runtime(&workload, &workload_image, false).map(|(path, _)| path),
             Some(runtime.canonicalize().unwrap()),
             "and the verdict comes back once every loader alternative is gone"
         );
@@ -1242,10 +1237,22 @@ mod tests {
             elf.runpaths
         );
         assert_eq!(
-            direct_runpath_runtime(&multi_entry, &multi_image, false),
+            direct_runpath_runtime(&multi_entry, &multi_image, false).map(|(path, _)| path),
             Some(runtime.canonicalize().unwrap()),
             "a missing RUNPATH entry must be skipped, not treated as ambiguous"
         );
+
+        // Nor is an entry that names a file rather than a directory: the
+        // loader's open of `<file>/libhsa-runtime64.so.1` fails and it
+        // moves on, so this must too rather than decline the verdict.
+        std::fs::write(&stale, b"not a directory").unwrap();
+        let (resolved, resolved_image) = direct_runpath_runtime(&multi_entry, &multi_image, false)
+            .expect("a non-directory RUNPATH entry must be skipped, not treated as ambiguous");
+        assert_eq!(resolved, runtime.canonicalize().unwrap());
+        // The verdict judges these bytes rather than reading the runtime a
+        // second time, so they have to be the runtime's own.
+        assert_eq!(resolved_image, std::fs::read(&runtime).unwrap());
+        std::fs::remove_file(&stale).unwrap();
 
         for tag in ["--audit", "--depaudit"] {
             let audited_workload = tmp
@@ -1269,7 +1276,8 @@ mod tests {
                     &audited_workload,
                     &std::fs::read(&audited_workload).unwrap(),
                     false
-                ),
+                )
+                .map(|(path, _)| path),
                 None,
                 "{tag} can redirect the runtime lookup and must suppress a verdict"
             );

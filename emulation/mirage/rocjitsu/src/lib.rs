@@ -1410,10 +1410,14 @@ fn mentions_external_reference(bytes: &[u8]) -> bool {
 /// rule for which of those it is would be a second thing to keep in step
 /// with the first.
 ///
-/// Private for the reason `mirage_core::rocr::check_target_at` is: it is
-/// the second half of a sequence bring-up owns, not an entry point of
-/// its own, and reading a session's configuration before bring-up wrote
-/// one is a question with no good answer.
+/// The path is the file's first line, with one trailing `\r` removed and
+/// nothing else trimmed. That is how rocjitsu's own reader
+/// (`parse_dbt_runtime_config_handoff`) takes it, so a config whose path
+/// begins or ends with a space names the same file here as there.
+///
+/// Private because it is the second half of a sequence bring-up owns,
+/// not an entry point of its own, and reading a session's configuration
+/// before bring-up wrote one is a question with no good answer.
 ///
 /// # Errors
 ///
@@ -1432,7 +1436,8 @@ fn session_config(session_dir: &std::path::Path) -> Result<PathBuf> {
         }
         Err(_) => String::new(),
     };
-    let recorded = recorded.trim();
+    let recorded = recorded.split('\n').next().unwrap_or_default();
+    let recorded = recorded.strip_suffix('\r').unwrap_or(recorded);
     if recorded.is_empty() {
         return Err(MirageError::Other(format!(
             "rocjitsu: no configuration recorded at {}; bring-up writes \
@@ -2790,6 +2795,21 @@ mod tests {
         write_config_discovery(tmp.path(), std::path::Path::new("")).unwrap();
         let err = session_config(tmp.path()).unwrap_err().to_string();
         assert!(err.contains(CONFIG_PATH_NAME), "{err}");
+    }
+
+    /// The recorded path is read the way rocjitsu reads it: the first
+    /// line, less one trailing `\r`, with spaces kept. Trimming them named
+    /// a different file from the one the interposer opens.
+    #[test]
+    fn a_recorded_config_path_keeps_its_spaces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spaced = tmp.path().join(" cfg .json");
+        write_config_discovery(tmp.path(), &spaced).unwrap();
+        assert_eq!(session_config(tmp.path()).unwrap(), spaced);
+
+        let discovery = tmp.path().join(RUNTIME_SUBDIR).join(CONFIG_PATH_NAME);
+        std::fs::write(&discovery, format!("{}\r\n12\n", spaced.display())).unwrap();
+        assert_eq!(session_config(tmp.path()).unwrap(), spaced);
     }
 
     /// Without the interposer there is nothing to emulate the workload,
