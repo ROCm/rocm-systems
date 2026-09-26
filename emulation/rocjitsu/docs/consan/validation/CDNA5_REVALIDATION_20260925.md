@@ -2016,3 +2016,17 @@ finished at **2/8**, with all eight trials admitted/reached and numeric
 oracles passing. A separate `high` + 256 watchpoint bank campaign tests
 whether retaining more address histories improves the detection rate;
 the existing 6/8 threshold and eight-trial count remain unchanged.
+
+Sparse TDM-all qualifies at **higher + 256 banks**, 8/8, all trials admitted
+and reached with passing numeric oracles and healthy checks. Matching
+retained baseline/clean replays and full four-shard clean sweep pass with
+complete coverage (`sparse-all-retained-v1-higher-banks256-fault` and
+`sparse-all-complete-higher-banks256-clean`). The same bank count at `high`
+passed the full clean sweep but detected only 1/8, so `higher` is the lowest
+qualifying tested preset.
+
+SGEMM verbose replay identifies the rejected transformation precisely:
+`report-reason=per_buffer_ceiling`, required 879,844,152 bytes versus the
+134,217,728-byte cap (`sgemm-second-client-diagnostic.log`). The next step
+is sufficient report capacity, followed by complete clean qualification;
+this result does not establish an unsupported instruction or correctness bug.
