@@ -327,9 +327,14 @@ endif()
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
 # the device bitcode — HIP error 209 occurs if the suffix in the bitcode
 # metadata does not match the active feature configuration of the GPU.
-# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
-# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
-if(GPU_TARGETS)
+# Keyed on whether SUPPORTED_GPUS actually carries a suffix rather than on
+# whether the user set GPU_TARGETS: under ASAN the defaults path produces
+# :xnack+ as well, and testing GPU_TARGETS would skip it and leave the bitcode
+# compile on DeviceBitcode.cmake's bare _BITCODE_DEFAULT_ARCHS fallback.
+# Explicitly cleared otherwise so a stale cached value from a previous
+# -DGPU_TARGETS=... configure run cannot persist into the defaults path; that
+# arm loses nothing, since the fallback is the same bare list.
+if(SUPPORTED_GPUS MATCHES ":")
   set(GPU_TARGETS_FULL "${SUPPORTED_GPUS}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
 else()
