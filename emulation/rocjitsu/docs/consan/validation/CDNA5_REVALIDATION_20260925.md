@@ -1990,3 +1990,8 @@ with complete applicable coverage. Matching retained baseline and `higher`
 clean replay pass; the `sparse-all-retained-v1-higher-fault` campaign is
 running. Its first completed trial detects the reviewed publication race.
 The row remains yellow until the complete predeclared campaign qualifies.
+
+The complete sparse TDM-all `higher` campaign finished at **4/8**, with
+eight admitted/reached trials, passing numerical oracles and healthy checks.
+It does not qualify. The same reviewed fault is now being tested at `max`,
+with an independent full clean sweep; neither trial count nor threshold changes.
