@@ -2268,3 +2268,10 @@ and SuperCollider (`sleep_wave=15`). Both detector modes have complete 12/12
 access coverage; Default also has complete 24/24 barrier coverage. Both cells
 are now yellow only because the existing barrier-drop fault does not create a
 cross-wave race, rather than because of missing tensor-store support.
+
+The regular `rocjitsu-gcc-build` tree was then rebuilt from the shared branch
+through ae9b6c62ca4 and reran the same ConSan/tensor execution filter:
+1,047 passed, two expected artifact-dependent skips
+(`tensor-store-main-build.log`, `tensor-store-main-tests.log`). All builds and
+emulator runs stayed in the shared 40 GiB slice; its `max`, `oom`, and
+`oom_kill` counters remained zero.
