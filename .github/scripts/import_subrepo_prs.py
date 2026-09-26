@@ -1,16 +1,25 @@
 import os
 import sys
 import subprocess
-from github import Github
-from git import Repo
+import shlex
 
 
 def run(cmd, **kwargs):
-    print(f">> {cmd}")
-    subprocess.check_call(cmd, shell=True, **kwargs)
+    # Execute as an argv list without a shell so interpolated values (PR head
+    # refs/URLs, env vars) cannot be interpreted as shell syntax (CWE-78). A
+    # string is tokenised with shlex.split rather than handed to a shell.
+    if isinstance(cmd, str):
+        cmd = shlex.split(cmd)
+    print(f">> {shlex.join(cmd)}")
+    subprocess.check_call(cmd, **kwargs)
 
 
 def main():
+    # Imported lazily so `run` (and its tests) can be imported without the
+    # optional github/git packages installed.
+    from github import Github
+    from git import Repo
+
     # 1) Read and validate env vars
     token = os.getenv("GITHUB_TOKEN")
     repo_full = os.getenv("GITHUB_REPOSITORY")
@@ -29,8 +38,8 @@ def main():
 
     # 2) Init local repo and configure Git user
     repo = Repo(os.getcwd())
-    run("git config user.name  'systems-assistant[bot]'")
-    run("git config user.email 'systems-assistant[bot]@users.noreply.github.com'")
+    run(["git", "config", "user.name", "systems-assistant[bot]"])
+    run(["git", "config", "user.email", "systems-assistant[bot]@users.noreply.github.com"])
 
     # 3) Init GitHub clients
     gh = Github(token)
@@ -38,11 +47,11 @@ def main():
     sub_repo = gh.get_repo(upstream)
 
     # 4) Ensure target branch is checked out
-    run(f"git fetch origin {target}")
+    run(["git", "fetch", "origin", target])
     try:
-        run(f"git checkout {target}")
+        run(["git", "checkout", target])
     except subprocess.CalledProcessError:
-        run(f"git checkout -b {target} origin/{target}")
+        run(["git", "checkout", "-b", target, f"origin/{target}"])
 
     # 5) Loop over each PR
     for pr_num in pr_numbers:
@@ -61,22 +70,25 @@ def main():
         branch = f"import/{tclean}/{src_clean}/pr-{pr_num}"
 
         try:
-            run(f"git checkout -b {branch}")
+            run(["git", "checkout", "-b", branch])
         except subprocess.CalledProcessError:
-            run(f"git branch -D {branch}")
-            run(f"git checkout -b {branch}")
+            run(["git", "branch", "-D", branch])
+            run(["git", "checkout", "-b", branch])
 
         try:
-            run(f"git subtree pull --prefix={prefix} {head_url} {head_ref}")
+            run(["git", "subtree", "pull", f"--prefix={prefix}", head_url, head_ref])
         except subprocess.CalledProcessError:
             print(f"❌ Merge conflict: subtree pull failed for PR #{pr_num}, skipping.")
             conflicted_prs.append(pr_num)  # 🔹 Track the failed PR
-            run(f"git merge --abort || true")  # Clean up merge state if needed
-            run(f"git reset --hard")  # Ensure clean state
-            run(f"git checkout {target}")
+            try:
+                run(["git", "merge", "--abort"])  # Clean up merge state if needed
+            except subprocess.CalledProcessError:
+                pass  # No merge in progress; nothing to abort
+            run(["git", "reset", "--hard"])  # Ensure clean state
+            run(["git", "checkout", target])
             continue
 
-        run(f"git push origin {branch}")
+        run(["git", "push", "origin", branch])
 
         footer = (
             "\n\n---\n"
@@ -94,7 +106,7 @@ def main():
         )
         new_pr.add_to_labels("imported pr")
 
-        run(f"git checkout {target}")
+        run(["git", "checkout", target])
 
     # 🔹 Summary of failed PRs due to conflict
     if conflicted_prs:
