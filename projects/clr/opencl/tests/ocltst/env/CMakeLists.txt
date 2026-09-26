@@ -50,6 +50,12 @@ if (NOT WIN32)
   endif()
 endif()
 
-set_target_properties(ocltst PROPERTIES INSTALL_RPATH "$ORIGIN")
+
+if(UNIX AND NOT APPLE)
+  set_target_properties(ocltst PROPERTIES
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/opencl;$ORIGIN/../lib")
+  # Use RUNPATH (not RPATH) so LD_LIBRARY_PATH can override
+  target_link_options(ocltst PRIVATE "LINKER:--enable-new-dtags")
+endif()
 
 INSTALL(TARGETS ocltst DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
