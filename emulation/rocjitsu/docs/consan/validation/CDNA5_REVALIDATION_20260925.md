@@ -2598,3 +2598,10 @@ validation/replay tests pass, including rejection of numerical failures,
 missing rows/client passes, nonzero exits, mismatched manifests, and attempts
 to use this option for timing measurements. This smoke test does not qualify
 the full SGEMM family or change its cells.
+
+The fresh untimed smoke fault replays also preserve the existing observations:
+Default detects 8/8 (`tensile-untimed-smoke-fault`), while SuperCollider detects
+0/8 and the independent numerical oracle fails in all eight reached trials
+(`tensile-untimed-smoke-sc-fault`). Health checks pass. The latter campaign
+correctly rejects detector qualification; accepting NaN timing fields has not
+masked its numerical failures. The smoke SuperCollider cell stays yellow.
