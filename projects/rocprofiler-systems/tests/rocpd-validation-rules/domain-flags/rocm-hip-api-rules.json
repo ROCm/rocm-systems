@@ -1,0 +1,54 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "top_kernels",
+            "required_columns": [
+                "name",
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
+            ]
+        },
+        {
+            "min_rows": 0,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ]
+        },
+        {
+            "min_rows": 1,
+            "name": "regions",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "HIP API regions collected without kernel_dispatch domain",
+                    "error_message": "--rocm=hip produced fewer than 50 rocm_hip_api regions",
+                    "expected_result": 50,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "kernel_dispatch excluded by the domain filter",
+                    "error_message": "OVER-COLLECTION: kernel_dispatch regions present though --rocm=hip did not request them",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM kernels;"
+                }
+            ]
+        }
+    ]
+}

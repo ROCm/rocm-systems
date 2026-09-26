@@ -89,7 +89,7 @@ def rocpd_env() -> dict[str, str]:
 @pytest.mark.rocpd("rocpd_env")
 @pytest.mark.sys_run
 class TestRankFilter(RocprofsysTest):
-    """End-to-end tests for the MPI rank-based output filtering feature."""
+    """MPI rank-filter through rocprof-sys-run (shared CLI path with sample)."""
 
     @pytest.mark.parametrize(
         "filter_source",
@@ -321,6 +321,7 @@ class TestRankFilter(RocprofsysTest):
                 r"--rank-filter-id requires one of the options: "
                 r"\[--rank-filter-logs, --rank-filter-output\]"
             ],
+            use_abort_fail_regex=False,
         )
         assert (
             banner_count(result.test_output) == 0
@@ -329,4 +330,33 @@ class TestRankFilter(RocprofsysTest):
             self.test_output_dir,
             ranks_with_output=[],
             ranks_without_output=[0, 1, 2],
+        )
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.mpi
+@pytest.mark.rank_filter
+@pytest.mark.sampling
+@pytest.mark.rocpd("rocpd_env")
+@pytest.mark.class_name("rank-filter-sample")
+class TestRankFilterSample(RocprofsysTest):
+    """Smoke test: rank-filter file output via rocprof-sys-sample + MPI."""
+
+    def test_output_range(self, rocpd_env):
+        result = self.run_test(
+            "sampling",
+            TARGET,
+            env=rocpd_env,
+            sampling_args=["--rank-filter-output", "0-1"],
+            launcher="mpi",
+            num_procs=NUM_PROCS,
+        )
+        self.assert_regex(result)
+        assert (
+            banner_count(result.test_output) == 3
+        ), f"Expected 3 banners, got {banner_count(result.test_output)}"
+        assert_per_rank_outputs(
+            self.test_output_dir,
+            ranks_with_output=[0, 1],
+            ranks_without_output=[2],
         )
