@@ -61,7 +61,12 @@ typedef enum rocprofiler_thread_trace_parameter_type_t
                                                      ///< no async copy). 2 is not allowed. Values
                                                      ///< >= 3 enable the async copy pipeline and
                                                      ///< require a single shader engine.
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
     ROCPROFILER_THREAD_TRACE_PARAMETER_LAST
+
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE
+    /// @brief Chooses when the profiler should initialize thread trace resources.
+    /// One of ::rocprofiler_thread_trace_resource_mode_t.
 } rocprofiler_thread_trace_parameter_type_t;
 
 /**
@@ -109,6 +114,34 @@ typedef enum rocprofiler_thread_trace_shader_data_flags_t
     /// @brief Trace was interrupted due to CPU buffer locked. This usually happens when the user
     /// handling of rocprofiler_thread_trace_shader_data_callback_t takes too long.
 } rocprofiler_thread_trace_shader_data_flags_t;
+
+/**
+ * @brief Modes to be used with ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE.
+ * Defines if and when the profiler should initialize the resources.
+ */
+typedef enum rocprofiler_thread_trace_resource_mode_t
+{
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT = 0,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HIP,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_ALL,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DISPATCH,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_LAST
+
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT
+    /// @brief The profiler chooses initialization mode. Default.
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_ALL
+    /// @brief Initializes resources for all GPUs reported by KFD as soon as possible.
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA
+    /// @brief Initializes at hsa_init(), respects ROCR_VISIBLE_DEVICES
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HIP
+    /// @brief Initializes during HIP bringup, respects HIP_VISIBLE_DEVICES
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT
+    /// @brief Initializes resources only for GPUs which had a code object registered to them.
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DISPATCH
+    /// @brief Initializes resources at first kernel dispatch per GPU.
+} rocprofiler_thread_trace_resource_mode_t;
 
 /**
  * @brief Bundle of shader data delivered to

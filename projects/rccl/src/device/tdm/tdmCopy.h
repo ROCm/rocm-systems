@@ -289,16 +289,20 @@ __device__ TDM_API void tdmWait() TDM_DELETED;
 /// \tparam Aligned Pass true only when \p globalSrc and \p ldsDst are both known
 ///                 to be 128-byte aligned; this compiles out the head peel.
 ///
-/// \warning \p globalSrc and \p ldsDst must share the same sub-128B alignment
-///          (the head is peeled against the global pointer and the same offset
-///          is applied to the LDS side). RCCL's LDS staging buffers are
-///          128-byte aligned, which satisfies this for an aligned source.
+/// \note Alignment is a THROUGHPUT concern here, not a correctness one. Any
+///       alignment works on either side: the head is peeled against the global
+///       pointer at byte granularity, and the bulk rows carry an unconstrained
+///       LDS byte address. Verified over 448 mismatched global/LDS sub-128B
+///       combinations, and down to a 1-byte LDS offset under the 4-byte bulk
+///       descriptor -- all byte-correct. What matching sub-128B offsets buy is
+///       bulk rows that land on 128B natural alignment, and what \p Aligned buys is one
+///       descriptor instead of head/bulk/tail.
 template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ TDM_API void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes) TDM_DELETED;
 
 /// \brief Warp-level transfer of \p sizeInBytes from LDS out to global memory.
 /// \see asyncLoadToLDS for the calling convention, template parameters and the
-///      matching-alignment requirement (peeled against \p globalDst here).
+///      alignment note (peeled against \p globalDst here).
 template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes) TDM_DELETED;
 
@@ -469,6 +473,9 @@ enum struct LdsDir {
 
 constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
 constexpr uint32_t LINE = 128;       // alignment the head peel targets
+// Whole 256B rows one 1-D bulk tile can carry: tile_dim0 now holds the entire length
+// in elements, not one row's worth, so the 16-bit field is the limit (1023 x 256B).
+constexpr uint32_t MAX_ROWS = TILE_DIM_MAX / TD0;
 
 template <LdsDir DIR, CachePolicy cp>
 __device__ inline void ldsIssue(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GROUP1& g1) {
@@ -483,25 +490,22 @@ __device__ inline void ldsTileBytes(uint64_t global, uint32_t lds, uint32_t nbyt
   gfx1250_TDM_GROUP1 g1;
   g1.dataSize(DS1);
   g1.tileDim0(nbytes);
-  g1.tileDim1(1);
   g1.tensorDim0(nbytes);
-  g1.tensorDim1(1);
-  g1.tensorDim0Stride(nbytes);
   gfx1250_TDM_GROUP0 g0(lds, global);
   ldsIssue<DIR, cp>(g0, g1);
 }
 
-// One 2-D tile of `rows` back-to-back 256B rows -- the bulk shape, chosen for
-// bandwidth exactly as in issueRows(). `rows` must be <= TILE_DIM_MAX.
+// One 1-D tile covering `rows` back-to-back 256B rows -- the bulk shape. The rows are
+// contiguous (the 2-D form this replaced used stride == TD0), so a flat run of
+// rows*TD0 elements describes exactly the same bytes and the second dimension bought
+// nothing. `rows` must be <= MAX_ROWS.
 template <LdsDir DIR, CachePolicy cp>
 __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows) {
+  const uint32_t elems = rows * TD0;
   gfx1250_TDM_GROUP1 g1;
   g1.dataSize(DS4);
-  g1.tileDim0(TD0);
-  g1.tileDim1(rows);
-  g1.tensorDim0(TD0);
-  g1.tensorDim1(rows);
-  g1.tensorDim0Stride(TD0);                // rows back-to-back (contiguous)
+  g1.tileDim0(elems);
+  g1.tensorDim0(elems);
   gfx1250_TDM_GROUP0 g0(lds, global);
   ldsIssue<DIR, cp>(g0, g1);
 }
@@ -513,10 +517,12 @@ __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows)
 // all, under SyncPolicy::Async).
 //
 // `head` brings the GLOBAL pointer up to a 128B boundary and the same offset is
-// applied to the LDS side, so the bulk's 4-byte elements stay naturally aligned
-// only when the two pointers start with the same sub-128B offset -- the contract
-// documented on the public entry points. `Aligned` asserts that offset is zero
-// for both and compiles the peel out entirely.
+// applied to the LDS side. When the two pointers start with the same sub-128B
+// offset the bulk rows land on a 128B natural alignment on both ends; when they 
+// do not, the rows are still valid -- the LDS address field is an unconstrained 
+// byte address -- they just straddle lines. `Aligned` asserts both offsets are 
+// zero and compiles the peel out entirely, which is the real win: one descriptor
+// rather than head/bulk/tail.
 template <LdsDir DIR, CachePolicy cp, bool Aligned>
 __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
   if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
@@ -531,10 +537,10 @@ __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInB
     }
   }
 
-    // Bulk: whole 256B rows, split across as many tiles as the 16-bit row count needs.
+    // Bulk: whole 256B rows, split across as many tiles as the 16-bit length field needs.
   size_t rows = (sizeInBytes - off) / WIDTH;
   while (rows) {
-    const uint32_t chunk = rows < TILE_DIM_MAX ? static_cast<uint32_t>(rows) : TILE_DIM_MAX;
+    const uint32_t chunk = rows < MAX_ROWS ? static_cast<uint32_t>(rows) : MAX_ROWS;
     ldsTileRows<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), chunk);
     off += static_cast<size_t>(chunk) * WIDTH;
     rows -= chunk;

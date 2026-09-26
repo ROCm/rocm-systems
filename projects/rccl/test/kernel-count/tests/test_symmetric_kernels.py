@@ -49,6 +49,27 @@ EXPECTED_DIMS = {
     "ty": {"f32", "f16", "bf16", "f8e4m3", "f8e5m2"},
 }
 
+# The generator takes GPU_TARGETS as its second argument and emits the Tma* algos
+# only when a target carries a DMA tile mover (gfx1250's Tensor Data Mover). Those
+# kernels are therefore invisible to the baselines above, so guard them separately:
+# +1 AllGather (TmaST), +5 AllReduce (RSxTmaLD_AGxTmaST, sum only), +10 ReduceScatter
+# (TmaLD, sum and avg).
+#
+# These two are GPU_TARGETS lists, not lists of movers: gfx942 has no TDM and is in
+# both on purpose. A build always passes GPU_TARGETS whole (src/CMakeLists.txt), so a
+# mixed list is the only shape the generator ever really sees, and testing a bare
+# "gfx1250" against a no-argument run would not distinguish a gate that looks for the
+# arch from one that only asks whether any target was given.
+GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
+GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
+EXPECTED_TDM_TOTAL = 58
+EXPECTED_TDM_PER_COLL = {
+    "AllGather": 3,
+    "AllReduce": 15,
+    "ReduceScatter": 40,
+}
+EXPECTED_TDM_ALGOS = {"TmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
+
 # Anchors for parsing kernel names. Reductions carry a trailing _<red>_<ty>;
 # non-reductions (AllGather) carry only _<algo>. Algorithm tokens themselves
 # contain underscores (RSxLD_AGxST, RailA2A_LsaLD), so names are parsed by
@@ -154,19 +175,33 @@ def _dims(records):
     return {dim: {r[dim] for r in records if r[dim] is not None} for dim in DIMENSIONS}
 
 
-@pytest.fixture(scope="session")
-def sym_host(tmp_path_factory):
+def _generate(tmp_path_factory, name, *args):
     if not GENERATE_PY.exists():
         pytest.fail("symmetric generate.py not found: %s" % GENERATE_PY)
-    d = tmp_path_factory.mktemp("sym")
+    d = tmp_path_factory.mktemp(name)
     subprocess.run(
-        [sys.executable, str(GENERATE_PY), str(d)],
+        [sys.executable, str(GENERATE_PY), str(d), *args],
         check=True,
         capture_output=True,
         text=True,
     )
     with open(os.path.join(str(d), "sym_kernels_host.cc")) as f:
         return f.read()
+
+
+@pytest.fixture(scope="session")
+def sym_host(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym")
+
+
+@pytest.fixture(scope="session")
+def sym_host_no_tdm(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym_no_tdm", GPU_TARGETS_WITHOUT_TDM)
+
+
+@pytest.fixture(scope="session")
+def sym_host_tdm(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym_tdm", GPU_TARGETS_WITH_TDM)
 
 
 def _count_literal(host):
@@ -285,6 +320,53 @@ def test_requirements_values_match_required_cuda(sym_host, sym_module):
                 "index %d (%s): emitted %d, required_cuda() says %d" % (index, name, emitted_cudart, expected_cudart)
             )
     assert not mismatches, "ncclSymkKernelRequirements[] disagrees with required_cuda():\n" + "\n".join(mismatches)
+
+
+@pytest.mark.symmetric_generator
+def test_non_tdm_target_list_stays_at_the_baseline(sym_host_no_tdm):
+    """A populated GPU_TARGETS without gfx1250 emits no Tma algos at all."""
+    records = [parse_kernel_name(c) for c in _list_cnames(sym_host_no_tdm)]
+    report = diff_report(
+        EXPECTED_TOTAL, len(records),
+        EXPECTED_PER_COLL, _per_coll(records),
+        EXPECTED_DIMS, _dims(records),
+    )
+    assert report is None, report
+
+    assert _count_literal(sym_host_no_tdm) == EXPECTED_TOTAL, (
+        "ncclSymkKernelCount %d != expected %d for %s"
+        % (_count_literal(sym_host_no_tdm), EXPECTED_TOTAL, GPU_TARGETS_WITHOUT_TDM)
+    )
+    emitted = {r["algo"] for r in records}
+    assert not (emitted & EXPECTED_TDM_ALGOS), (
+        "%s emitted mover algos %s; the gate must key on the arch, not on GPU_TARGETS "
+        "being non-empty" % (GPU_TARGETS_WITHOUT_TDM, sorted(emitted & EXPECTED_TDM_ALGOS))
+    )
+
+
+@pytest.mark.symmetric_generator
+def test_tdm_target_adds_only_the_tma_algos(sym_host_no_tdm, sym_host_tdm):
+    """Adding gfx1250 to GPU_TARGETS gains exactly the Tma* algos, nothing else moves."""
+    base = [parse_kernel_name(c) for c in _list_cnames(sym_host_no_tdm)]
+    tdm = [parse_kernel_name(c) for c in _list_cnames(sym_host_tdm)]
+
+    expected_dims = dict(EXPECTED_DIMS)
+    expected_dims["algo"] = EXPECTED_DIMS["algo"] | EXPECTED_TDM_ALGOS
+    report = diff_report(
+        EXPECTED_TDM_TOTAL, len(tdm),
+        EXPECTED_TDM_PER_COLL, _per_coll(tdm),
+        expected_dims, _dims(tdm),
+    )
+    assert report is None, report
+
+    assert _count_literal(sym_host_tdm) == EXPECTED_TDM_TOTAL, (
+        "ncclSymkKernelCount %d != expected %d for %s"
+        % (_count_literal(sym_host_tdm), EXPECTED_TDM_TOTAL, GPU_TARGETS_WITH_TDM)
+    )
+    # Every baseline kernel must survive: the arch algos are additive, never a swap.
+    assert {tuple(sorted(r.items())) for r in base} <= {tuple(sorted(r.items())) for r in tdm}, (
+        "GPU_TARGETS=%s dropped kernels that %s emits" % (GPU_TARGETS_WITH_TDM, GPU_TARGETS_WITHOUT_TDM)
+    )
 
 
 # --- anchored name parser: valid cases --------------------------------------

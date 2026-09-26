@@ -61,6 +61,19 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+# gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
+# keep its kRegAccessFlags and both reg.cc copies spelling the same set.
+set(_rccl_reg_access_flags
+  "IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;")
+foreach(_reg_cc transport/net_ib/reg.cc transport/net_ib_cast/reg.cc)
+  rccl_assert_source_line("${_rccl_src_root}/${_reg_cc}"
+    "${_rccl_reg_access_flags}" "gdr-probe-test.cc: kRegAccessFlags")
+  rccl_assert_source_line("${_rccl_src_root}/${_reg_cc}"
+    "if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;" "gdr-probe-test.cc: the relaxed-ordering flags")
+endforeach()
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
+  "${_rccl_reg_access_flags}" "the production registration flags")
+unset(_rccl_reg_access_flags)
 unset(_rccl_src_root)
 
 set(RCCL_MICRO_TEST_SOURCES
@@ -70,6 +83,7 @@ set(RCCL_MICRO_TEST_SOURCES
   rma-test.cc                          # RMA launch dispatch + plan scheduling coverage
   rma-ce-test.cc                       # RMA CE init/finalize + put/wait launch coverage
   ras-test.cc                          # src/ras/ras.cc: complete host-side line coverage
+  ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
   tuning-general-test.cc               # src/tuning/tuning_general.cc
   ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
   group-test.cc
@@ -77,7 +91,9 @@ set(RCCL_MICRO_TEST_SOURCES
   wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
   dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
   # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
+  gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
   fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
+  fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
@@ -174,6 +190,7 @@ if(BUILD_TESTS)
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/ras.cc"
+    RAS_DIAGNOSTICS_COMMON_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/diagnostics_checks_common.cc"
     TUNING_GENERAL_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/tuning/tuning_general.cc"
     RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
@@ -192,6 +209,7 @@ if(BUILD_TESTS)
     DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/plugin/gin.cc"
+    GDR_PROBE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/misc/gdr_probe.cc"
   )
 
   # sym_kernels_host.cc only exists when GENERATE_SYM_KERNELS is ON (OFF via --disable-sym-kernels).
@@ -691,7 +709,8 @@ if(BUILD_TESTS)
     add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
     target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
-      ${RCCL_COMMON_INCLUDE_DIRS})
+      ${RCCL_COMMON_INCLUDE_DIRS}
+      ${PROJECT_BINARY_DIR}/hipify/src/device)  # sym_kernels.cc includes "tdm/tdmCopy.h"
     target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
@@ -1213,6 +1232,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/ras.cc"
+  RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
   TUNING_GENERAL_CC_PATH="${RCCL_HIPIFY_DIR}/src/tuning/tuning_general.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -1227,6 +1247,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
   DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
   GIN_CC_PATH="${RCCL_HIPIFY_DIR}/src/plugin/gin.cc"
+  GDR_PROBE_CC_PATH="${RCCL_HIPIFY_DIR}/src/misc/gdr_probe.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
@@ -1528,6 +1549,7 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
   target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_INCLUDE_DIRS}
+    ${RCCL_HIPIFY_DIR}/src/device  # sym_kernels.cc includes "tdm/tdmCopy.h"
   )
 
   target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE
