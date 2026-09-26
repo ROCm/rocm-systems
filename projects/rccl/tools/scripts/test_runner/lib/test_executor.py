@@ -523,6 +523,15 @@ def relocate_rma_reload_counter(env, workspace_dir):
     env[key] = path
 
 
+def finish_run_result(result, identity, executed=True):
+    """Attach the run identity and whether this entry actually executed."""
+    result["run_identity"] = identity
+    result["executed"] = executed
+    if result.get("case_details"):
+        result["case_details"] = stamp_run_identity(result["case_details"], identity)
+    return result
+
+
 def stamp_run_identity(details, identity):
     """Copy leaf dicts and attach ``run_identity`` for unique/duplicate accounting."""
     if not details:
@@ -835,6 +844,22 @@ def format_case_counts(counts):
     return f"{cases} cases"
 
 
+def print_case_result(result, case_counts, case_details, trailer):
+    """Print the Result line and any FAILED/SKIPPED/TIMEOUT leaves.
+
+    ``trailer`` is the text after the optional case counts, for example
+    ``"(1.250 seconds)"`` or ``"after 30 seconds"``.
+    """
+    cases_suffix = format_case_counts(case_counts)
+    if cases_suffix:
+        print(f"\n  Result: {result} [{cases_suffix}] {trailer}")
+    else:
+        print(f"\n  Result: {result} {trailer}")
+    issue_tree = format_issue_leaves(case_details)
+    if issue_tree:
+        print(issue_tree)
+
+
 def infer_gtest_result_from_json_file(json_path: str, returncode: int, details=None) -> str:
     """
     Map gtest exit code + JSON report to TestResult.
@@ -893,21 +918,31 @@ def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
     return TestResult.RESULT_PASSED.value
 
 
+# Job ids for allocators whose host list this runner does not parse. An empty
+# mpi_hosts under one of these is "topology unknown", not "this one machine".
+_UNRESOLVED_ALLOCATION_ENV = (
+    "SLURM_JOB_ID",
+    "PBS_JOBID",
+    "LSB_JOBID",
+    "FLUX_JOB_ID",
+    "COBALT_JOBID",
+)
+
+
 def _distinct_host_count(mpi_hosts: dict) -> int:
     """
     Count distinct hosts from SLURM host_list or Open MPI hostfile.
 
-    An empty dict normally means neither a hostfile nor a SLURM allocation was
-    found, so mpirun places every rank on the local host. An active SLURM job is
-    different: host detection may be disabled or scontrol may have failed. Keep
-    that topology unknown rather than incorrectly classifying it as one host.
+    An empty dict with no batch job means mpirun places every rank on the local
+    host, so the count is 1 and a multi-node entry is skipped. An active
+    allocation whose hosts were not detected stays 0: the caller then does not
+    skip, because 0 means the topology is unknown.
 
     Returns 0 when an active allocation cannot be resolved or a declared host
-    source cannot be read, so callers skip the insufficient-nodes check when
-    topology genuinely cannot be determined.
+    source cannot be read.
     """
     if not mpi_hosts:
-        if os.environ.get("SLURM_JOB_ID"):
+        if any(os.environ.get(name) for name in _UNRESOLVED_ALLOCATION_ENV):
             return 0
         return 1
     if "host_list" in mpi_hosts:
@@ -1878,13 +1913,7 @@ class TestExecutor:
         )
 
         def _done(result, executed=True):
-            result["run_identity"] = run_identity
-            result["executed"] = executed
-            if result.get("case_details"):
-                result["case_details"] = stamp_run_identity(
-                    result["case_details"], run_identity
-                )
-            return result
+            return finish_run_result(result, run_identity, executed)
 
         print(f"\n{'='*80}")
         print(f"Test: {test_name}")
@@ -1936,7 +1965,7 @@ class TestExecutor:
             # is present (GIN-SDMA AllGather/Broadcast need sibling rccl-tests
             # headers). Those configurations set skip_if_missing so a standalone
             # RCCL build reports SKIPPED instead of failing before any test runs.
-            if suite_config.get("skip_if_missing") or test_config.get("skip_if_missing"):
+            if suite_config.get("skip_if_missing"):
                 print(f"SKIP: optional test binary not found: {test_binary_path}")
                 return {
                     "name": test_name,
@@ -1945,12 +1974,17 @@ class TestExecutor:
                     "error": f"Optional binary not found: {test_binary_path}"
                 }
             print(f"ERROR: Test binary not found: {test_binary_path}")
-            return {
+            missing_details = [synthetic_case_detail(
+                test_name, test_filter, TestResult.RESULT_FAILED.value
+            )]
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
-                "error": f"Binary not found: {test_binary_path}"
-            }
+                "error": f"Binary not found: {test_binary_path}",
+                "case_details": missing_details,
+                "case_counts": _counts_from_details(missing_details),
+            })
 
         # For MPI tests, verify mpirun is available
         if num_ranks > 1:
@@ -2281,14 +2315,12 @@ class TestExecutor:
                     parsed, test_name, test_filter, timeout
                 )
                 case_counts = _counts_from_details(case_details)
-                cases_suffix = format_case_counts(case_counts)
-                if cases_suffix:
-                    print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} [{cases_suffix}] after {timeout} seconds")
-                else:
-                    print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-                issue_tree = format_issue_leaves(case_details)
-                if issue_tree:
-                    print(issue_tree)
+                print_case_result(
+                    TestResult.RESULT_TIMEOUT.value,
+                    case_counts,
+                    case_details,
+                    f"after {timeout} seconds",
+                )
                 return _done({
                     "name": test_name,
                     "result": TestResult.RESULT_TIMEOUT.value,
@@ -2336,6 +2368,10 @@ class TestExecutor:
                     case_details = merge_process_failure_details(
                         case_details, test_name, test_filter
                     )
+                elif test_result == TestResult.RESULT_TIMEOUT.value:
+                    case_details = merge_timeout_details(
+                        case_details, test_name, test_filter, timeout
+                    )
                 if case_details is not None:
                     case_counts = _counts_from_details(case_details)
             else:
@@ -2346,14 +2382,12 @@ class TestExecutor:
                 else:
                     test_result = TestResult.RESULT_FAILED.value
 
-            cases_suffix = format_case_counts(case_counts)
-            if cases_suffix:
-                print(f"\n  Result: {test_result} [{cases_suffix}] ({duration:.3f} seconds)")
-            else:
-                print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
-            issue_tree = format_issue_leaves(case_details)
-            if issue_tree:
-                print(issue_tree)
+            print_case_result(
+                test_result,
+                case_counts,
+                case_details,
+                f"({duration:.3f} seconds)",
+            )
 
             result = {
                 "name": test_name,
@@ -2420,17 +2454,39 @@ class TestExecutor:
         python_bin (default <test_dir>/venv else python3), timeout."""
         test_name = test_config.get("name")
         timeout = test_config.get("timeout", 0)
+        test_filter = test_config.get("test_filter", "*")
 
-        # Resolve harness dir (absolute, or relative to workdir).
+        # Identity and _done are created before the pre-launch failures so a
+        # missing harness still shows up in the issue tree.
         test_dir = test_config.get("test_dir", "")
-        if not test_dir:
-            print(f"ERROR: pytest test '{test_name}' is missing required 'test_dir'")
-            return {
+        run_identity = make_run_identity_key(
+            binary="pytest",
+            num_ranks=1,
+            num_nodes=1,
+            env_vars=merged_env,
+            extra=f"pytest:{os.path.normpath(test_dir) if test_dir else ''}",
+        )
+
+        def _done(result, executed=True):
+            return finish_run_result(result, run_identity, executed)
+
+        def _failed(error):
+            details = [synthetic_case_detail(
+                test_name, test_filter, TestResult.RESULT_FAILED.value
+            )]
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
-                "error": "pytest test missing 'test_dir'",
-            }
+                "error": error,
+                "case_details": details,
+                "case_counts": _counts_from_details(details),
+            })
+
+        # Resolve harness dir (absolute, or relative to workdir).
+        if not test_dir:
+            print(f"ERROR: pytest test '{test_name}' is missing required 'test_dir'")
+            return _failed("pytest test missing 'test_dir'")
         test_dir = os.path.expanduser(os.path.expandvars(test_dir))
         if not os.path.isabs(test_dir):
             workdir = self.paths.get("workdir", os.getcwd())
@@ -2451,12 +2507,7 @@ class TestExecutor:
             python_bin, setup_err = self._setup_pytest_venv(test_dir, test_config)
             if setup_err:
                 print(f"\n  Result: {TestResult.RESULT_FAILED.value} ({setup_err})")
-                return {
-                    "name": test_name,
-                    "result": TestResult.RESULT_FAILED.value,
-                    "duration": 0,
-                    "error": setup_err,
-                }
+                return _failed(setup_err)
         else:
             python_bin = test_config.get("python_bin", "")
             if not python_bin:
@@ -2464,7 +2515,6 @@ class TestExecutor:
                 python_bin = venv_py if os.path.isfile(venv_py) else "python3"
 
         # test_filter -> pytest selection args (raw args if leading '-', else -k expr).
-        test_filter = test_config.get("test_filter", "*")
         select_args = []
         if test_filter and test_filter not in ("*", "ALL"):
             if test_filter.lstrip().startswith("-"):
@@ -2472,6 +2522,8 @@ class TestExecutor:
             else:
                 select_args = ["-k", test_filter]
 
+        # Resolved directory replaces the pre-launch identity. _done looks the
+        # name up when it runs, so later returns see this value.
         run_identity = make_run_identity_key(
             binary="pytest",
             num_ranks=1,
@@ -2479,15 +2531,6 @@ class TestExecutor:
             env_vars=merged_env,
             extra=f"pytest:{os.path.normpath(test_dir)}",
         )
-
-        def _done(result, executed=True):
-            result["run_identity"] = run_identity
-            result["executed"] = executed
-            if result.get("case_details"):
-                result["case_details"] = stamp_run_identity(
-                    result["case_details"], run_identity
-                )
-            return result
 
         # Env: build_dir first on LD_LIBRARY_PATH, then a per-test LD_LIBRARY_PATH
         # from the JSON env (mirrors the gtest/MPI path), then rocm/mpi libs.
@@ -2548,14 +2591,12 @@ class TestExecutor:
                 parsed, test_name, test_filter, timeout
             )
             case_counts = _counts_from_details(case_details)
-            cases_suffix = format_case_counts(case_counts)
-            if cases_suffix:
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} [{cases_suffix}] after {timeout} seconds")
-            else:
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-            issue_tree = format_issue_leaves(case_details)
-            if issue_tree:
-                print(issue_tree)
+            print_case_result(
+                TestResult.RESULT_TIMEOUT.value,
+                case_counts,
+                case_details,
+                f"after {timeout} seconds",
+            )
             return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_TIMEOUT.value,
@@ -2585,14 +2626,12 @@ class TestExecutor:
         ):
             case_details = [synthetic_case_detail(test_name, test_filter, test_result)]
         case_counts = _counts_from_details(case_details) if case_details is not None else None
-        cases_suffix = format_case_counts(case_counts)
-        if cases_suffix:
-            print(f"\n  Result: {test_result} [{cases_suffix}] ({duration:.3f} seconds)")
-        else:
-            print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
-        issue_tree = format_issue_leaves(case_details)
-        if issue_tree:
-            print(issue_tree)
+        print_case_result(
+            test_result,
+            case_counts,
+            case_details,
+            f"({duration:.3f} seconds)",
+        )
         if self.args.verbose:
             print(f"  JUnit report: {junit_path}")
         out = {

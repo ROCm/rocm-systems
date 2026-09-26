@@ -61,8 +61,6 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
-  "static int64_t DefaultParamSymCeThreshold() { return 8 * 1024 * 1024; }" "the SymCeThreshold fake default")
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags

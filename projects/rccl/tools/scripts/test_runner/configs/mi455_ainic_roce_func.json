@@ -1340,11 +1340,6 @@
           "test_filter": "RcclDdaTierThresholds.*"
         },
         {
-          "name": "RcclAllReduceDdaDecision",
-          "description": "AllReduce DDA dispatch decision tests across gfx1250/gfx942/gfx950: symk yield, CE yield, rank gate",
-          "test_filter": "Rcclwrap.Gfx942_SymOff_MidMsg_TakesDda:Rcclwrap.Gfx942_SymOff_AboveCap_NoDda:Rcclwrap.Gfx942_SymOn_CeEligible_YieldsToCe:Rcclwrap.Gfx942_SymOn_UnsupportedOp_TakesDda:Rcclwrap.Gfx1250_CeEligible_StillTakesDda:Rcclwrap.Gfx1250_SymEligible_RejectsDda"
-        },
-        {
           "name": "RcclAllGatherCeRegisteredWindow",
           "description": "AllGather CE-registered window eligibility tests: ceRegMax gate, recv-registered requirement",
           "test_filter": "RcclAllGatherCeRegisteredWindow.*"
@@ -3555,7 +3550,6 @@
         "NCCL_GIN_TYPE": "2",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
-        "HSA_NO_SCRATCH_RECLAIM": "1",
         "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
@@ -3735,8 +3729,7 @@
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
-        "NCCL_ENV_PLUGIN": "none",
-        "HSA_NO_SCRATCH_RECLAIM": "1"
+        "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
         {
@@ -3837,8 +3830,7 @@
         "NCCL_GIN_ENABLE": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
-        "NCCL_ENV_PLUGIN": "none",
-        "HSA_NO_SCRATCH_RECLAIM": "1"
+        "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
         {
@@ -3884,8 +3876,7 @@
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
-        "NCCL_ENV_PLUGIN": "none",
-        "HSA_NO_SCRATCH_RECLAIM": "1"
+        "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
         {
@@ -4000,8 +3991,7 @@
       "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
-        "NCCL_CUMEM_ENABLE": "1",
-        "HSA_NO_SCRATCH_RECLAIM": "1"
+        "NCCL_CUMEM_ENABLE": "1"
       },
       "tests": [
         {

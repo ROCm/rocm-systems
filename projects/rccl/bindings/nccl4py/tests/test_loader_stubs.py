@@ -34,7 +34,7 @@ def test_import_top_level_without_ep_bindings():
     version = nccl.get_version()
     if version.nccl_ep is not None:
         pytest.skip("libnccl_ep loaded on this host")
-    assert version.nccl_ep is None
+    assert version.nccl.version is not None
 
 
 def test_import_top_level_with_ep_bindings():

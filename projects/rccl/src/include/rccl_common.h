@@ -275,6 +275,10 @@ bool rcclAlltoAllShouldTakeDdaPath(const struct ncclComm* comm, size_t totalByte
 // True when DDA / CE 2-shot / GIN-SDMA early-returns must yield to ncclEnqueueCheck
 // so NCCL_CHECK_MODE pointer checks and the suspend guard still run.
 bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
+// Suspend is in effect, or still queued, and no resume is pending. Shared by
+// the enqueue reject and the collective divert. mem_manager.cc's double-Suspend
+// check is separate: a queued suspend has not set released yet.
+bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);

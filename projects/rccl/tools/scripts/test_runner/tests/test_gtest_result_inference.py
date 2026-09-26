@@ -73,11 +73,16 @@ ONE_TEST_FAILED = (
 )
 
 
-def _write_json(payload):
-    fd, path = tempfile.mkstemp(suffix=".json")
+def _write_temp(test, suffix, write):
+    fd, path = tempfile.mkstemp(suffix=suffix)
     with os.fdopen(fd, "w") as f:
-        json.dump(payload, f)
+        write(f)
+    test.addCleanup(os.unlink, path)
     return path
+
+
+def _write_json(test, payload):
+    return _write_temp(test, ".json", lambda f: json.dump(payload, f))
 
 
 class TestInferFromOutput(unittest.TestCase):
@@ -110,38 +115,29 @@ class TestInferFromOutput(unittest.TestCase):
 
 class TestInferFromJsonFile(unittest.TestCase):
     def test_report_with_no_tests_is_skipped_not_passed(self):
-        path = _write_json({"tests": 0, "failures": 0, "testsuites": []})
-        try:
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0), "SKIPPED")
-        finally:
-            os.unlink(path)
+        path = _write_json(self, {"tests": 0, "failures": 0, "testsuites": []})
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0), "SKIPPED")
 
     def test_report_with_passing_test_passes(self):
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {"name": "Suite", "testsuite": [{"name": "Case", "result": "COMPLETED"}]}
             ],
         })
-        try:
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0), "PASSED")
-        finally:
-            os.unlink(path)
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0), "PASSED")
 
     def test_report_with_skipped_test_skips(self):
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {"name": "Suite", "testsuite": [{"name": "Case", "result": "SKIPPED"}]}
             ],
         })
-        try:
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0), "SKIPPED")
-        finally:
-            os.unlink(path)
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0), "SKIPPED")
 
     def test_report_with_failure_fails(self):
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {
@@ -153,10 +149,7 @@ class TestInferFromJsonFile(unittest.TestCase):
                 }
             ],
         })
-        try:
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0), "FAILED")
-        finally:
-            os.unlink(path)
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0), "FAILED")
 
     def test_missing_json_falls_back_to_exit_code(self):
         """Exit 0 with no report uses the stdout fallback.
@@ -176,62 +169,50 @@ class TestInferFromJsonFile(unittest.TestCase):
 
     def test_nonzero_exit_fails_even_when_json_passed(self):
         """A passing report must not override a non-zero process exit."""
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {"name": "Suite", "testsuite": [{"name": "Case", "result": "COMPLETED"}]}
             ],
         })
-        try:
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0), "PASSED")
-            self.assertEqual(infer_gtest_result_from_json_file(path, 1), "FAILED")
-        finally:
-            os.unlink(path)
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0), "PASSED")
+        self.assertEqual(infer_gtest_result_from_json_file(path, 1), "FAILED")
 
     def test_leaf_without_result_agrees_with_details(self):
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {"name": "Suite", "testsuite": [{"name": "Case"}]}
             ],
         })
-        try:
-            details = collect_gtest_case_details_from_file(path)
-            self.assertEqual(details[0]["status"], "FAILED")
-            self.assertEqual(
-                infer_gtest_result_from_json_file(path, 0, details=details),
-                "FAILED",
-            )
-        finally:
-            os.unlink(path)
+        details = collect_gtest_case_details_from_file(path)
+        self.assertEqual(details[0]["status"], "FAILED")
+        self.assertEqual(
+            infer_gtest_result_from_json_file(path, 0, details=details),
+            "FAILED",
+        )
 
     def test_started_leaf_without_result_is_failed(self):
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {"name": "Suite", "testsuite": [{"name": "Case", "status": "RUN"}]}
             ],
         })
-        try:
-            details = collect_gtest_case_details_from_file(path)
-            self.assertEqual(details[0]["status"], "FAILED")
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "FAILED")
-        finally:
-            os.unlink(path)
+        details = collect_gtest_case_details_from_file(path)
+        self.assertEqual(details[0]["status"], "FAILED")
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "FAILED")
 
     def test_notrun_leaf_without_result_is_skipped(self):
-        path = _write_json({
+        path = _write_json(self, {
             "tests": 1,
             "testsuites": [
                 {"name": "Suite", "testsuite": [{"name": "Case", "status": "NOTRUN"}]}
             ],
         })
-        try:
-            details = collect_gtest_case_details_from_file(path)
-            self.assertEqual(details[0]["status"], "SKIPPED")
-            self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "SKIPPED")
-        finally:
-            os.unlink(path)
+        details = collect_gtest_case_details_from_file(path)
+        self.assertEqual(details[0]["status"], "SKIPPED")
+        self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "SKIPPED")
 
 
 class TestProcessFailureDetails(unittest.TestCase):
@@ -295,15 +276,12 @@ class TestCountGtestCases(unittest.TestCase):
         self.assertEqual(counts["cases"], 0)
 
     def test_file_helper_reads_the_same_counts(self):
-        path = _write_json(WILDCARD_SUITE_JSON)
-        try:
-            self.assertEqual(
-                _counts_from_details(collect_gtest_case_details_from_file(path)),
-                {"cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0,
-                 "disabled": 0},
-            )
-        finally:
-            os.unlink(path)
+        path = _write_json(self, WILDCARD_SUITE_JSON)
+        self.assertEqual(
+            _counts_from_details(collect_gtest_case_details_from_file(path)),
+            {"cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0,
+             "disabled": 0},
+        )
 
     def test_missing_file_is_unknown(self):
         missing = os.path.join(tempfile.gettempdir(), "rccl-no-such-gtest-report.json")
@@ -731,17 +709,12 @@ class TestCountPytestCases(unittest.TestCase):
   </testsuite>
 </testsuites>
 """
-        fd, path = tempfile.mkstemp(suffix=".xml")
-        with os.fdopen(fd, "w") as f:
-            f.write(xml)
-        try:
-            self.assertEqual(
-                _counts_from_details(collect_pytest_case_details_from_junit(path)),
-                {"cases": 3, "passed": 1, "failed": 1, "skipped": 1, "timeout": 0,
-                 "disabled": 0},
-            )
-        finally:
-            os.unlink(path)
+        path = _write_temp(self, ".xml", lambda f: f.write(xml))
+        self.assertEqual(
+            _counts_from_details(collect_pytest_case_details_from_junit(path)),
+            {"cases": 3, "passed": 1, "failed": 1, "skipped": 1, "timeout": 0,
+             "disabled": 0},
+        )
 
 
 class TestDisabledConfigAccounting(unittest.TestCase):

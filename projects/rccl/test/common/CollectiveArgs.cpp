@@ -167,6 +167,16 @@ namespace RcclUnitTesting
 
     if (this->funcType == ncclCollRecv && numOutputBytes != 0)
     {
+      // outputCpu comes from AllocateCpuMem, which is calloc, so the buffer is
+      // pageable. Send returns above; only Recv reads a result. ExecuteCollectives
+      // has already synchronized the collective streams, including the extra
+      // stream sync that flushes the GPU cache before validation. That does not
+      // cover this copy. On gfx1250, hipMemcpy into the pageable buffer can
+      // still return success before the GPU has a stable mapping for the
+      // destination. SendRecv.SinglePairs then faulted on the host heap or
+      // compared a partial result. Copy into page-locked memory, wait for the
+      // device, then memcpy into the comparison buffer. Other collectives did
+      // not hit this and keep the direct hipMemcpy below.
       PtrUnion staging;
       CHECK_HIP(hipHostMalloc(&staging.ptr, numOutputBytes));
       // CHECK_HIP returns on failure, so free the staging buffer before that

@@ -31,9 +31,18 @@ class TestDistinctHostCount(unittest.TestCase):
             self.assertEqual(_distinct_host_count({}), 1)
 
     def test_no_host_source_skips_multi_node(self):
-        """The returned count must be low enough for a 2-node test to be skipped."""
+        """Caller skips only when 0 < avail < num_nodes. Zero means unknown and does not skip."""
         with patch.dict(os.environ, {}, clear=True):
-            self.assertLess(_distinct_host_count({}), 2)
+            avail = _distinct_host_count({})
+        num_nodes = 2
+        self.assertTrue(avail > 0 and avail < num_nodes)
+
+    def test_other_allocators_without_hosts_stay_unknown(self):
+        """PBS/LSF/Flux/Cobalt with no parsed host list must not look like one local host."""
+        for key in ("PBS_JOBID", "LSB_JOBID", "FLUX_JOB_ID", "COBALT_JOBID"):
+            with self.subTest(key=key):
+                with patch.dict(os.environ, {key: "99"}, clear=True):
+                    self.assertEqual(_distinct_host_count({}), 0)
 
     def test_slurm_allocation_without_detected_hosts_is_unknown(self):
         """Do not collapse an active allocation to the local host."""

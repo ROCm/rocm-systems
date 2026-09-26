@@ -2780,6 +2780,12 @@ TEST(Rcclwrap, EnqueueGuards_DebugLocal_CollectivesRejectHostPointers)
                 {
                     GTEST_SKIP() << "Needs 2 devices so DDA is eligible if enqueue is skipped.";
                 }
+                hipDeviceProp_t prop{};
+                ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+                if(strncmp(prop.gcnArchName, "gfx1250", 7) != 0)
+                {
+                    GTEST_SKIP() << "2-rank DDA is eligible on gfx1250 only; other archs reject it either way.";
+                }
 
                 int        devs[2]   = {0, 1};
                 ncclComm_t comms[2]  = {};

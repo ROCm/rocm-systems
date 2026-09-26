@@ -261,17 +261,22 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
 // without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks and the
 // suspend-while-collective guard live. Divert those calls through enqueue so the
 // guards still fire; debug-mode collectives then use the native/CE path.
+bool ncclCommIsSuspended(ncclComm* comm) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (comm == nullptr || comm->memManager == nullptr) return false;
+  return ncclIntruQueueEmpty(&comm->resumeTaskQueue) &&
+         (!ncclIntruQueueEmpty(&comm->suspendTaskQueue) ||
+          __atomic_load_n(&comm->memManager->released, __ATOMIC_ACQUIRE));
+#else
+  (void)comm;
+  return false;
+#endif
+}
+
 bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
   if (comm == nullptr) return true;
   if (comm->checkMode != ncclCheckModeDefault) return true;
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (comm->memManager) {
-    const bool commIsSuspended = ncclIntruQueueEmpty(&comm->resumeTaskQueue) &&
-                                  (!ncclIntruQueueEmpty(&comm->suspendTaskQueue) ||
-                                   __atomic_load_n(&comm->memManager->released, __ATOMIC_ACQUIRE));
-    if (commIsSuspended) return true;
-  }
-#endif
+  if (ncclCommIsSuspended(comm)) return true;
   return false;
 }
 
@@ -443,18 +448,16 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   info.decision = decision;
   info.decisionValid = true;
 
-  // Canonical selection line for addon backends (CE / DDA / Direct / Hier /
-  // symmetric). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
-  // line instead; this names the addon RCCL runs so rcclGetCollImplInfo can be
-  // checked against it.
+  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
+    return ncclEnqueueCheck(&info);
+  }
+
+  // Name the addon only after the check-mode divert. Logging first would claim
+  // DDA / hier / GIN for a call that ncclEnqueueCheck is about to run instead.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "AllGather impl selected: algo %s", an ? an : "?");
-  }
-
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {
@@ -516,16 +519,6 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype, stream, /*query=*/false,
                                /*graphCapturingHint=*/false, &decision));
 
-  // Canonical selection line for addon backends (CE / DDA / Pivot / GDA /
-  // Direct). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
-  // line instead; this names the addon RCCL runs so rcclGetCollImplInfo can be
-  // checked against it. DDA launchers already log grid/block at launch.
-  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
-    const char* an = nullptr;
-    rcclGetAlgoName(decision.algo, &an);
-    INFO(NCCL_COLL, "AlltoAll impl selected: algo %s", an ? an : "?");
-  }
-
   struct ncclInfo info = {
     ncclFuncAlltoAll, "AlltoAll", sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
     ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
@@ -534,6 +527,14 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   info.decisionValid = true;
   if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
     return ncclEnqueueCheck(&info);
+  }
+
+  // Name the addon only after the check-mode divert. DDA launchers also log
+  // grid/block at launch.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "AlltoAll impl selected: algo %s", an ? an : "?");
   }
 
   switch (decision.algo) {
@@ -759,17 +760,15 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.decision = decision;
   info.decisionValid = true;
 
-  // Canonical selection line for addon backends (GIN / CE / DDA / symmetric). Native
-  // kernels report via the enqueue.cc channel{Lo..Hi} tuning line instead; this
-  // names the addon RCCL runs so rcclGetCollImplInfo can be checked against it.
+  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
+    return ncclEnqueueCheck(&info);
+  }
+
+  // Name the addon only after the check-mode divert.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "AllReduce impl selected: algo %s", an ? an : "?");
-  }
-
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {
@@ -1170,15 +1169,15 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   info.decision = decision;
   info.decisionValid = true;
 
-  // Canonical line for addon backends; native kernels report via the enqueue tuning line.
+  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
+    return ncclEnqueueCheck(&info);
+  }
+
+  // Name the addon only after the check-mode divert.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "ReduceScatter impl selected: algo %s", an ? an : "?");
-  }
-
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {
