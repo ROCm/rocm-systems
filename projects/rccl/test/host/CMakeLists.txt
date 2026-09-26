@@ -564,6 +564,7 @@ if(BUILD_TESTS)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/ce_fakes.cc                    # src/ce_coll.cc
     fakes/collconfig_fakes.cc            # src/config/collconfig.cc
     fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
@@ -787,6 +788,7 @@ if(BUILD_TESTS)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/ce_fakes.cc                    # src/ce_coll.cc
     fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
     fakes/comm_fakes.cc                  # src/init.cc comm lifecycle + CTA/channel params
@@ -1442,6 +1444,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/allocator_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collconfig_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
@@ -1585,6 +1588,7 @@ set(TEST_MICRO_TASKPREP_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/allocator_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
