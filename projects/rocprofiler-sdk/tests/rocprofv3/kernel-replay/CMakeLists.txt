@@ -145,6 +145,61 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Regression test for AIPROFSDK-1130: --kernel-iteration-range selects logical launches,
+# so replay passes must not consume iterations. With four launches, range 2-3, and two
+# counter groups, exactly two logical dispatches must survive and each must carry passes
+# [0, 1]. This exercises rejecting launch 1, accepting launches 2 and 3, rejecting launch
+# 4, and resetting the cached decision between dispatches.
+add_test(
+    NAME rocprofv3-test-kernel-replay-iteration-range-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
+        --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-replay-beta-enabled --kernel-include-regex saxpy
+        --kernel-iteration-range "2-3" --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range -o out --
+        $<TARGET_FILE:kernel-replay> 65536 4)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-iteration-range-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-iteration-range-data)
+
+# Validate the exact ticket invariant: two selected logical dispatches, each carrying two
+# distinct counter-group passes. Numeric dispatch IDs are deliberately not pinned.
+add_test(
+    NAME rocprofv3-test-kernel-replay-iteration-range-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range/out_results.json
+        --passes 2 --expected-dispatch-count 2 --common-counters SQ_WAVES SQ_INSTS_VALU
+        -k
+        "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch"
+    )
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-iteration-range-validate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-kernel-replay-iteration-range-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
 add_test(
     NAME rocprofv3-test-kernel-replay-baseline-generate
