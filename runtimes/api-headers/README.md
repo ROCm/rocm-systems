@@ -22,9 +22,11 @@ These files are mirrors for runtime consumers; their primary sources remain:
 - KFD and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux` in
   this repository.
 
-Changes belong in the primary location first and are then copied here without
-local edits. The HSA, DRM, KFD, and UDMABUF mirrors are byte-identical to their
-primary files in this checkout.
+Changes belong in the primary location first and are then copied here. The AMDF
+headers preserve upstream contents except that their copyright line names
+Advanced Micro Devices, Inc. and their SPDX identifier is MIT. The HSA, DRM,
+KFD, and UDMABUF mirrors are byte-identical to their primary files in this
+checkout.
 
 `abce` is not a mirror: `include/abce` is its primary location, and it is
 edited here.
