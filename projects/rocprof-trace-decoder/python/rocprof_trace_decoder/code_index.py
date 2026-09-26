@@ -172,12 +172,13 @@ class CodeIndex:
         for inst in wave.instructions:
             if inst.pc.code_object_id == 0 and inst.pc.address == 0:
                 continue
+            latency = max(inst.stall, inst.duration)
             entry = self.get_or_create(inst.pc)
             entry.hitcount += 1
-            entry.latency += inst.duration
+            entry.latency += latency
             entry.stall += inst.stall
             entry.idle += max(inst.time - prev_inst_time, 0)
-            prev_inst_time = max(prev_inst_time, inst.time + inst.duration)
+            prev_inst_time = max(prev_inst_time, inst.time + latency)
 
     def write_code_json(self, path: str | Path) -> None:
         out_doc = dict(self.document)

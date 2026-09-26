@@ -8,7 +8,7 @@ from pathlib import Path
 
 from _code_object_paths import code_objects_from_paths
 from rocprof_trace_decoder.codegen import generate_code_artifacts, llvm_objdump
-from rocprof_trace_decoder.rcv import write_source_snapshots
+from rocprof_trace_decoder.analysis.rcv import write_source_snapshots
 
 CODE_SUFFIXES = {".co", ".hsaco", ".o", ".out"}
 
