@@ -109,9 +109,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                       __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                       __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_compare_exchange_n(lock, &lock_val, SPIN_LOCK_LOCKED, /* weak */ false,
+                                     __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -130,8 +129,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave releases a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                     __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 }
 
 /*
@@ -142,9 +140,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                         __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_compare_exchange_n(lock, &lock_val, SPIN_LOCK_LOCKED, /* weak */ false,
+                                       __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -165,8 +162,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                       __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_store_n(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
   }
 }
 
