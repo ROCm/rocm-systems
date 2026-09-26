@@ -39,7 +39,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 higher: all 3 clean runs pass; prefill fault 8/8 | 🟨 sleep=15: all 3 current-hook clean runs pass; prefill fault 0/8 |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
@@ -62,6 +62,6 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
-| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
+| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) | 🟨 default: clean pass; same-lane LDS accesses, barrier drop does not create a race | 🟨 delay-zero: clean pass; same-lane LDS accesses, barrier drop does not create a race |
