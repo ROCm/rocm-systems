@@ -2840,3 +2840,15 @@ zero reported diagnostics/conflicts. Coverage is incomplete after termination,
 so neither shard qualifies as clean. The cell remains orange and now explicitly
 records both timeouts. The 513 shape remains running; the completed 8/8 fault
 campaign and its accepted untimed matching clean remain valid separate evidence.
+
+### SuperCollider full sweep ends with one execution-limit failure
+
+`sgemm-bank-fixed-untimed-sc-full-clean` exits one with return codes
+`[0, 0, 0, 0, 0, 1]`. Its 513 shape reaches the actual 14,400-second budget
+after 435 numerical cases and one of two passing clients. The terminal oracle
+reports only the execution limit and missing second client; retained summary
+and reader records show no SuperCollider mismatch or report failure. Final
+coverage is incomplete after termination, so the row remains orange despite
+the five accepted clean shapes. The matching targeted clean and healthy 0/8
+detector campaign (8/8 numerical oracle failures) remain separate valid
+evidence. Default's 513 shape is still running.
