@@ -17,6 +17,22 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 
+# SPM JSON execute with the MI450 reference clock
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-refclk-json-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
+        ${COUNTER_LIST} --spm-sample-interval-unit refclk_cycles --spm-sample-interval
+        1200 --kernel-trace --hip-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_refclk --output-format json -o spm_refclk --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 60
+    LABELS "integration-tests;spm"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
+
 # PMC compare execute
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-json-compare-to-pmc
@@ -43,6 +59,21 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;spm"
     FIXTURES_REQUIRED
         "rocprofv3-test-spm-json-execute;rocprofv3-test-spm-json-compare-to-pmc"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
+
+# REFCLK JSON validation
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-spm-refclk-json-validate
+    TEST_PATHS validate.py
+    DISCOVERY_ARGS -k "not multigpu"
+    ARGS --pmc-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_results.json --spm-json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_refclk/spm_refclk_results.json
+    CONFIG pytest.ini
+    COPY spm_input.json conftest.py
+    LABELS "integration-tests;spm"
+    FIXTURES_REQUIRED
+        "rocprofv3-test-spm-refclk-json-execute;rocprofv3-test-spm-json-compare-to-pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 

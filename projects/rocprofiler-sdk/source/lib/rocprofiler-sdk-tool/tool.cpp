@@ -2194,6 +2194,12 @@ get_spm_config(rocprofiler_agent_id_t agent_id)
                         ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
                         tool::get_config().spm_sample_interval);
                     break;
+                case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES:
+                    param = common::init_public_api_struct(
+                        rocprofiler_spm_parameters_t{},
+                        ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES,
+                        tool::get_config().spm_sample_interval);
+                    break;
                 case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
                 case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:
                 default: break;
