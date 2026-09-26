@@ -25,6 +25,7 @@
 #include <sys/prctl.h>
 #endif
 #include <sys/resource.h>
+#include <tuple>
 #include <utility>
 #include <atomic>
 #include <thread>
@@ -6122,6 +6123,271 @@ TEST_F(InitMicrotest, CommFree_HierarchicalSubComms_DestroysIntraThenInter) {
 
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(std::vector<ncclComm*>({intra.get(), inter.get()}), destroyed);
+}
+
+namespace {
+// Eligible parent at rank 11 of 64, on node 1 as local rank 3. It points into
+// the caller's rank maps, which must outlive it.
+std::unique_ptr<ncclComm> Hier_MakeEligibleParent(int (&rankToNode)[64], int (&rankToLocalRank)[64]) {
+  auto parent = std::make_unique<ncclComm>();
+  const ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  parent->config = config;
+  parent->config.blocking = 0;
+  parent->hierarchicalEligible = true;
+  parent->nNodes = 8;
+  parent->nRanks = 64;
+  parent->rank = 11;
+  rankToNode[parent->rank] = 1;
+  rankToLocalRank[parent->rank] = 3;
+  parent->rankToNode = rankToNode;
+  parent->rankToLocalRank = rankToLocalRank;
+  return parent;
+}
+
+// The same parent before init has decided anything: 8 GPUs on each of 8 nodes,
+// compact rank maps, eligibility still unset.
+std::unique_ptr<ncclComm> Hier_MakeCompactComm(int (&rankToNode)[64], int (&rankToLocalRank)[64]) {
+  auto comm = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  comm->hierarchicalEligible = false;
+  comm->minLocalRanks = 8;
+  comm->maxLocalRanks = 8;
+  for (int r = 0; r < 64; ++r) {
+    rankToNode[r] = r / 8;
+    rankToLocalRank[r] = r % 8;
+  }
+  return comm;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, HierarchicalCommsNeededAtInit_EagerUnlessLazyInitDefersAllGather) {
+  auto comm = std::make_unique<ncclComm>();
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 1;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "topology not eligible";
+
+  // Eager setup, the default, builds for either hierarchical collective.
+  comm->hierarchicalEligible = true;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  EXPECT_TRUE(hierarchicalCommsNeededAtInit(comm.get())) << "eager, hierarchical ReduceScatter";
+  g_rcclParamHierarchicalReduceScatter = 0;
+  EXPECT_TRUE(hierarchicalCommsNeededAtInit(comm.get())) << "eager, hierarchical AllGather";
+  g_rcclParamHierarchicalAllGather = 0;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "eager, both hierarchical flags off";
+
+  // Lazy setup builds at init only for the users without a lazy trigger.
+  g_rcclParamHierarchicalLazyInit = 1;
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 1;
+  EXPECT_TRUE(hierarchicalCommsNeededAtInit(comm.get())) << "lazy, hierarchical ReduceScatter";
+  g_rcclParamHierarchicalReduceScatter = 0;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "lazy, AllGather alone builds on first use";
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "lazy, AllGather alone builds on first use";
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_TRUE(hierarchicalCommsNeededAtInit(comm.get())) << "lazy, hierarchical CE under the zero-CTA policy";
+  g_rcclParamHierarchicalAllGather = 0;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "lazy, both hierarchical flags off";
+}
+
+TEST_F(InitMicrotest, HierarchicalCommsInit_EagerBuildsTheSubCommsAtInit) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto comm = Hier_MakeCompactComm(rankToNode, rankToLocalRank);
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  ScopedHook allocation(g_hipExtMallocWithFlags, [](void** ptr, size_t bytes, unsigned) {
+    *ptr = std::malloc(bytes);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  });
+  ScopedHook captureMode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t* child, ncclConfig_t*) {
+    *child = splitCalls++ == 0 ? intra.get() : inter.get();
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, hierarchicalCommsInit(comm.get(), /*hasParent=*/false));
+  EXPECT_TRUE(comm->hierarchicalEligible);
+  EXPECT_FALSE(comm->hierarchicalLazyInit);
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_TRUE(comm->hierarchicalCommsInitialized);
+  EXPECT_EQ(hipSuccess, hipFree(comm->hierarchicalTempBuffer));
+}
+
+TEST_F(InitMicrotest, HierarchicalCommsInit_LazyInitDefersTheSubComms) {
+  g_rcclParamHierarchicalLazyInit = 1;
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto comm = Hier_MakeCompactComm(rankToNode, rankToLocalRank);
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) {
+    ++splitCalls;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, hierarchicalCommsInit(comm.get(), /*hasParent=*/false));
+  EXPECT_TRUE(comm->hierarchicalEligible);
+  EXPECT_TRUE(comm->hierarchicalLazyInit);
+  EXPECT_EQ(0, splitCalls);
+  EXPECT_FALSE(comm->hierarchicalCommsInitialized);
+}
+
+TEST_F(InitMicrotest, HierarchicalCommsInit_IneligibleCommsSkipTheHierarchy) {
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) {
+    ++splitCalls;
+    return ncclSuccess;
+  });
+  auto expectSkipped = [&](const char* why, bool hasParent, const std::function<void(ncclComm*, int*, int*)>& mutate) {
+    int rankToNode[64]{};
+    int rankToLocalRank[64]{};
+    auto comm = Hier_MakeCompactComm(rankToNode, rankToLocalRank);
+    mutate(comm.get(), rankToNode, rankToLocalRank);
+    EXPECT_EQ(ncclSuccess, hierarchicalCommsInit(comm.get(), hasParent)) << why;
+    EXPECT_FALSE(comm->hierarchicalEligible) << why;
+    EXPECT_FALSE(comm->hierarchicalLazyInit) << why;
+    EXPECT_FALSE(comm->hierarchicalCommsInitialized) << why;
+  };
+  auto unchanged = [](ncclComm*, int*, int*) {};
+
+  expectSkipped("split child", /*hasParent=*/true, unchanged);
+  expectSkipped("grown comm", false, [](ncclComm* c, int*, int*) { c->isGrow = true; });
+  expectSkipped("fewer than 8 nodes", false, [](ncclComm* c, int*, int*) { c->nNodes = 7; });
+  expectSkipped("one GPU per node", false, [](ncclComm* c, int*, int*) { c->minLocalRanks = c->maxLocalRanks = 1; });
+  expectSkipped("non-uniform GPUs per node", false, [](ncclComm* c, int*, int*) { c->minLocalRanks = 7; });
+  expectSkipped("non-compact ranks", false, [](ncclComm*, int* node, int*) { std::swap(node[0], node[8]); });
+  g_rcclParamHierarchicalAllGather = 0;
+  g_rcclParamHierarchicalReduceScatter = 0;
+  expectSkipped("both hierarchical flags off", false, unchanged);
+  EXPECT_EQ(0, splitCalls);
+}
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRestoresParentState) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 0;
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  parent->pxnDisable = 7;
+
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  intra->nRanks = 8;
+  inter->nRanks = 8;
+  constexpr size_t kTempBufferBytes = size_t{3} << 20;
+  std::tuple<int, bool, bool> tempBufferArgs{};
+  ScopedHook tempBufferSize(g_rcclHierarchicalTempBufferSize, [&](int nNodes, bool allGather, bool reduceScatter) {
+    tempBufferArgs = std::make_tuple(nNodes, allGather, reduceScatter);
+    return kTempBufferBytes;
+  });
+  size_t allocatedBytes = 0;
+  ScopedHook allocation(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned) {
+    allocatedBytes = bytes;
+    *ptr = std::malloc(bytes);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  });
+  ScopedHook captureMode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  int splitCalls = 0;
+  std::vector<std::pair<int, int>> splitArgs;
+  std::vector<bool> forcePatStates;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t comm, int color, int key, ncclComm_t* child, ncclConfig_t* config) {
+    EXPECT_EQ(parent.get(), comm);
+    EXPECT_EQ(1, parent->config.blocking);
+    EXPECT_EQ(nullptr, config);
+    splitArgs.emplace_back(color, key);
+    forcePatStates.push_back(parent->forcePatEnable);
+    *child = splitCalls++ == 0 ? intra.get() : inter.get();
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_EQ((std::vector<std::pair<int, int>>{{1, 3}, {3, 1}}), splitArgs);
+  EXPECT_EQ((std::vector<bool>{false, true}), forcePatStates);
+  EXPECT_EQ(intra.get(), parent->hierarchicalIntraComm);
+  EXPECT_EQ(inter.get(), parent->hierarchicalInterComm);
+  EXPECT_EQ(parent->pxnDisable, inter->pxnDisable);
+  EXPECT_NE(nullptr, parent->hierarchicalTempBuffer);
+  EXPECT_EQ(1, tempBufferSize.calls);
+  EXPECT_EQ(std::make_tuple(8, true, false), tempBufferArgs);
+  EXPECT_EQ(kTempBufferBytes, allocatedBytes);
+  EXPECT_TRUE(parent->hierarchicalCommsInitialized);
+  EXPECT_TRUE(parent->hierarchicalInitAttempted);
+  EXPECT_EQ(ncclSuccess, parent->hierarchicalInitResult);
+  EXPECT_EQ(0, parent->config.blocking);
+  EXPECT_FALSE(parent->forcePatEnable);
+  EXPECT_EQ(hipSuccess, hipFree(parent->hierarchicalTempBuffer));
+}
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_FailureIsRetainedAndDoesNotRetry) {
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+
+  auto intra = std::make_unique<ncclComm>();
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t* child, ncclConfig_t*) {
+    EXPECT_EQ(1, parent->config.blocking);
+    if (splitCalls++ == 0) {
+      *child = intra.get();
+      return ncclSuccess;
+    }
+    return ncclSystemError;
+  });
+
+  EXPECT_EQ(ncclSystemError, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_FALSE(parent->hierarchicalCommsInitialized);
+  EXPECT_TRUE(parent->hierarchicalInitAttempted);
+  EXPECT_EQ(ncclSystemError, parent->hierarchicalInitResult);
+  EXPECT_EQ(0, parent->config.blocking);
+  EXPECT_FALSE(parent->forcePatEnable);
+
+  EXPECT_EQ(ncclSystemError, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls) << "the failed collective split must not be retried";
+}
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_AllocationFailureLeavesTheHierarchyUninitialized) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t* child, ncclConfig_t*) {
+    *child = splitCalls++ == 0 ? intra.get() : inter.get();
+    return ncclSuccess;
+  });
+  ScopedHook allocation(g_hipExtMallocWithFlags, [](void** ptr, size_t, unsigned) {
+    *ptr = nullptr;
+    return hipErrorOutOfMemory;
+  });
+  ScopedHook captureMode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+
+  const ncclResult_t res = rcclEnsureHierarchicalComms(parent.get());
+  EXPECT_NE(ncclSuccess, res);
+  EXPECT_EQ(res, parent->hierarchicalInitResult);
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_EQ(1, allocation.calls);
+  EXPECT_EQ(nullptr, parent->hierarchicalTempBuffer);
+  EXPECT_FALSE(parent->hierarchicalCommsInitialized);
+
+  EXPECT_EQ(res, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls) << "the failed setup must not be retried";
+  EXPECT_EQ(1, allocation.calls);
 }
 
 TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {

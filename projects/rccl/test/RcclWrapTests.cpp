@@ -1420,6 +1420,19 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         {"Enabled_64Nodes_AtFull",       64, true,  FULL,        true,  {}},
         // env var forces off --> disabled
         {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+
+        // Lower bound on the total gathered size (the size rccl-tests reports),
+        // default 1 KiB. CreateMockComm below sets nRanks = 8 * nNodes; the
+        // bound stays at 1 KiB whatever the rank count.
+        {"Disabled_8Nodes_Under1KB",       8,  true, 1023,       false, {}},
+        {"Enabled_8Nodes_At1KB",           8,  true, 1024,       true,  {}},
+        {"Disabled_64Nodes_Under1KB",      64, true, 1023,       false, {}},
+        {"Enabled_64Nodes_At1KB",          64, true, 1024,       true,  {}},
+        // The floor is tunable, and 0 removes it.
+        {"MinBytesZeroRemovesFloor",       16, true, 8,          true,
+         {{"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES", "0"}}},
+        {"MinBytesRaised",                 16, true, 1ULL << 20, false,
+         {{"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES", "2097152"}}},
     };
 
     // Base environment shared by every case
@@ -1519,6 +1532,17 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"Enabled_16Nodes_AboveHalf", 16, true,  HALF + 1,   true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
         {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // Lower bound on the total size (the size rccl-tests reports), default
+        // 1 KiB whatever the rank count.
+        {"Disabled_16Nodes_Under1KB", 16, true,  1023,       false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Enabled_16Nodes_At1KB",     16, true,  1024,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Disabled_64Nodes_Under1KB", 64, true,  1023,       false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Enabled_64Nodes_At1KB",     64, true,  1024,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // The floor is tunable, and 0 removes it.
+        {"MinBytesZeroRemovesFloor",  16, true,  8,          true,
+         {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}, {"RCCL_HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES", "0"}}},
+        {"MinBytesRaised",            16, true,  1ULL << 20, false,
+         {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}, {"RCCL_HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES", "2097152"}}},
     };
 
     // Base environment shared by every case

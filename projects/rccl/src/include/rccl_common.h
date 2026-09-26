@@ -219,10 +219,14 @@ NCCL_API(ncclResult_t, rcclSymKGetInfo, struct ncclComm* comm, ncclFunc_t coll, 
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclHierarchicalAllGatherEligible(struct ncclComm* comm, size_t msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
 size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
+// Builds hierarchical sub-communicators and temporary storage. This operation
+// is collective; every rank in comm must call it together.
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm);
 // Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.
 ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                       int* algo, int* protocol, int* maxChannels);
@@ -286,6 +290,8 @@ RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 // Hierarchical ReduceScatter enabled
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+// Hierarchical sub-communicators deferred to the first eligible AllGather
+RCCL_PARAM_DECLARE(HierarchicalLazyInit);
 // Pivot AlltoAll enabled (defined in collectives.cc)
 RCCL_PARAM_DECLARE(AlltoAllPivotEnable);
 #define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB

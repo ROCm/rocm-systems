@@ -89,6 +89,14 @@ extern int g_rcclParamWarpSpeedForceEnableCalls;
 extern bool g_rcclCanUseWarpSpeedAutoResult;
 extern int g_rcclCanUseWarpSpeedAutoCalls;
 
+// Hierarchical collectives (rcclEnsureHierarchicalComms). The temp-buffer size
+// is a hook so a test can check the arguments it was sized from, not only that
+// the returned size reached the allocator.
+extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
+extern int64_t g_rcclParamHierarchicalAllGather;
+extern int64_t g_rcclParamHierarchicalReduceScatter;
+extern int64_t g_rcclParamHierarchicalLazyInit;
+
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.
 extern bool g_validHsaScratch;

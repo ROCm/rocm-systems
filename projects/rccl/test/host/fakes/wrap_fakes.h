@@ -61,5 +61,6 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, i
     g_getAlgoInfo;
 extern std::function<int(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int)> g_kernelPackedChannels;
 extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms;
 
 #endif  // RCCL_TEST_HOST_WRAP_FAKES_H_

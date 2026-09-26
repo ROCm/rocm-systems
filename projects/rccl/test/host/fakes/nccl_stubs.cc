@@ -147,8 +147,8 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
 }
 // src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
 // rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
-// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter):
-// rccl_wrap_fakes.cc.
+// rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter,
+// rcclParamHierarchicalLazyInit): rccl_wrap_fakes.cc.
 // rcclGetTuningIndexForArch (src/graph/tuning.cc): tuning_fakes.cc.
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
@@ -197,7 +197,11 @@ static ncclResult_t DefaultNcclCommDestroy(ncclComm_t) { return ncclSuccess; }
 std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy = DefaultNcclCommDestroy;
 ncclResult_t ncclCommDestroy(ncclComm_t comm) { return g_ncclCommDestroy(comm); }
 ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
-ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
+static ncclResult_t DefaultNcclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
+std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit = DefaultNcclCommSplit;
+ncclResult_t ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config) {
+  return g_ncclCommSplit(comm, color, key, newcomm, config);
+}
 char ncclLastError[1024] = {};
 thread_local int ncclGroupDepth = 0;
 thread_local ncclResult_t ncclGroupError = ncclSuccess;
@@ -242,6 +246,7 @@ void ResetNcclStubs() {
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
+  g_ncclCommSplit = DefaultNcclCommSplit;
   g_collTraceDestroy = DefaultCollTraceDestroy;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
