@@ -73,6 +73,12 @@ static const char* ceRecvOffsetEnvSkipReason()
     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
         return "CE receive-offset regression requires RCCL_CE_ALLREDUCE=1";
     }
+    // gfx942 symMaxR2[AllReduce] is unlimited, so CTA ZERO alone still selects
+    // the symmetric kernel. FORCE takes the staged CE arm.
+    const char* force = std::getenv("RCCL_FORCE_CE_ALLREDUCE");
+    if (force == nullptr || std::atoi(force) != 1) {
+        return "CE receive-offset regression requires RCCL_FORCE_CE_ALLREDUCE=1";
+    }
     if (!envCtaPolicyIsZero()) {
         return "CE receive-offset regression requires NCCL_CTA_POLICY=2 or ZERO";
     }
