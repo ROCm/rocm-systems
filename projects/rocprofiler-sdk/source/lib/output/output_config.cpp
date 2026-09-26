@@ -83,9 +83,22 @@ output_config::parse_env()
     perfetto_buffer_size = common::get_env("ROCPROF_PERFETTO_BUFFER_SIZE_KB", perfetto_buffer_size);
     defaults::validate_perfetto_buffer_size(perfetto_buffer_size);
 
-    output_path    = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
-    output_file    = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
-    tmp_directory  = common::get_env("ROCPROF_TMPDIR", tmp_directory);
+    const auto previous_output_path = output_path;
+    const auto previous_tmp_dir     = tmp_directory;
+
+    output_path = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
+    output_file = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
+
+    if(auto tmp_dir = common::get_env_optional("ROCPROF_TMPDIR"))
+    {
+        tmp_directory = *tmp_dir;
+    }
+    // Keep the default tmp directory aligned with ROCPROF_OUTPUT_PATH when it was not
+    // explicitly overridden, while preserving a caller-provided tmp_directory value.
+    else if(previous_tmp_dir == previous_output_path)
+    {
+        tmp_directory = output_path;
+    }
     kernel_rename  = common::get_env("ROCPROF_KERNEL_RENAME", false);
     group_by_queue = common::get_env("ROCPROF_GROUP_BY_QUEUE", false);
     annotate_args  = common::get_env("ROCPROF_ANNOTATE_ARGS", false);
