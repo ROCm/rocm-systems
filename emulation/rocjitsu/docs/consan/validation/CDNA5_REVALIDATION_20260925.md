@@ -2045,3 +2045,16 @@ The spec binds the exact retained site/sequence; 209 runner tests pass
 (`sgemm-quick-retained-v1-spec-tests.log`). Matching clean and fault runs
 use the explicit 1 GiB report cap; the full six-shard Default clean rerun
 is `sgemm-report1g-default-clean`.
+
+### Corrected sparse FP8 SuperCollider status
+
+The table had retained the subword-fix result after newer saved-address
+evidence existed. `spmm-saved-address-clean/.../clean/supercollider/result.json`
+records all three shards stopping at the 900-second deadline. Each oracle
+records six passing clients of the required eight. Every shard log has six
+`mismatch=false` reports and zero `mismatch=true` reports; completed coverage
+is complete but cannot stand in for the unfinished clients. The isolated
+`spmm-sc-saved-address-client.log` also exits zero, with three PASSED numerical
+rows and a clear marker. The newer evidence removes the observed mismatch
+from the status, leaving an orange timeout. Full eight-client completion
+is still required before claiming a clean row.
