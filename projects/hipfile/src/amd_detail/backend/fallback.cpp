@@ -39,8 +39,6 @@ using std::min;
 using std::shared_ptr;
 using std::unique_ptr;
 
-static const size_t DefaultChunkSize = 16 * 1024 * 1024;
-
 namespace {
 
 // Makes the buffer's GPU current for the lifetime of the guard (hipMemcpy operates on the current

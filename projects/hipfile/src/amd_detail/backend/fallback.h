@@ -29,6 +29,8 @@ struct Fallback : public Backend {
     using Backend::io;
     virtual ~Fallback() override = default;
 
+    static constexpr size_t DefaultChunkSize = 16 * 1024 * 1024;
+
     int score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
               hoff_t file_offset, hoff_t buffer_offset) const override;
 
