@@ -1457,10 +1457,10 @@ __BF16_HOST_DEVICE_STATIC__ bool __hbne2(const __hip_bfloat162 a, const __hip_bf
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT162_COMP
- * \brief Check for a != b
+ * \brief Check for a != b - unordered
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hbneu2(const __hip_bfloat162 a, const __hip_bfloat162 b) {
-  return __hneu(a.x, b.x) || __hneu(a.y, b.y);
+  return __hneu(a.x, b.x) && __hneu(a.y, b.y);
 }
 
 /**
@@ -1490,7 +1490,7 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hge2(const __hip_bfloat162 a,
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hgt2(const __hip_bfloat162 a,
                                                    const __hip_bfloat162 b) {
   return __hip_bfloat162{{__hgt(a.x, b.x) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16},
-                         {__hgt(a.y, b.y) ? HIPRT_ONE_BF16 : HIPRT_ONE_BF16}};
+                         {__hgt(a.y, b.y) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16}};
 }
 
 /**
@@ -1499,7 +1499,7 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hgt2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hisnan2(const __hip_bfloat162 a) {
   return __hip_bfloat162{{__hisnan(a.x) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16},
-                         {__hisnan(a.y) ? HIPRT_ONE_BF16 : HIPRT_ONE_BF16}};
+                         {__hisnan(a.y) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16}};
 }
 
 /**
@@ -1620,8 +1620,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator!=(const __hip_bfloat162& l, const __hi
  * \brief Operator to perform a less than on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator<(const __hip_bfloat162& l, const __hip_bfloat162& r) {
-  float2 fl = l, fr = r;
-  return fl.x < fr.x && fl.x < fr.y;
+  return __hblt2(l, r);
 }
 
 /**
@@ -1629,8 +1628,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator<(const __hip_bfloat162& l, const __hip
  * \brief Operator to perform a less than equal on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator<=(const __hip_bfloat162& l, const __hip_bfloat162& r) {
-  float2 fl = l, fr = r;
-  return fl.x <= fr.x && fl.x <= fr.y;
+  return __hble2(l, r);
 }
 
 /**
@@ -1638,8 +1636,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator<=(const __hip_bfloat162& l, const __hi
  * \brief Operator to perform a greater than on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator>(const __hip_bfloat162& l, const __hip_bfloat162& r) {
-  float2 fl = l, fr = r;
-  return fl.x > fr.x && fl.x > fr.y;
+  return __hbgt2(l, r);
 }
 
 /**
@@ -1647,8 +1644,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator>(const __hip_bfloat162& l, const __hip
  * \brief Operator to perform a greater than equal on two __hip_bfloat16 numbers
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator>=(const __hip_bfloat162& l, const __hip_bfloat162& r) {
-  float2 fl = l, fr = r;
-  return fl.x >= fr.x && fl.x >= fr.y;
+  return __hbge2(l, r);
 }
 
 #if defined(__clang__) && defined(__HIP__)
