@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -94,6 +95,53 @@ FfmMemoryAccess make_memory_access(EntityId instruction_id, FfmWaveInfo wave_inf
     }
   }
   return access;
+}
+
+// glibc's dlerror is "<object>: <reason>". A missing file uses the path passed
+// to dlopen as <object>, so that path can contain `version `GLIBC_2.33' not
+// found` and still be a missing file. A symbol-version mismatch uses the
+// dependency as <object> and `version `GLIBC_2.33' not found (required by ...)`
+// as <reason>. opened_path is the dlopen argument; when the error starts with
+// "<opened_path>: ", only <reason> is classified.
+bool runtime_symbol_version_not_found(std::string_view text) {
+  constexpr std::string_view families[] = {"GLIBC_", "GLIBCXX_", "CXXABI_"};
+  constexpr std::string_view marker = "version `";
+  constexpr std::string_view tail = "' not found";
+  std::size_t pos = 0;
+  while ((pos = text.find(marker, pos)) != std::string_view::npos) {
+    const std::size_t token = pos + marker.size();
+    pos = token;
+    for (const std::string_view family : families) {
+      if (!text.substr(token).starts_with(family))
+        continue;
+      std::size_t end = token + family.size();
+      if (end >= text.size() || !std::isdigit(static_cast<unsigned char>(text[end])))
+        continue;
+      while (end < text.size() &&
+             (std::isdigit(static_cast<unsigned char>(text[end])) || text[end] == '.'))
+        ++end;
+      if (!text.substr(end).starts_with(tail))
+        continue;
+      const std::size_t after = end + tail.size();
+      if (after == text.size() || text[after] == ' ' || text[after] == '(')
+        return true;
+    }
+  }
+  return false;
+}
+
+std::string_view loader_reason(std::string_view error, std::string_view opened_path) {
+  if (opened_path.empty() || error.size() < opened_path.size() + 2)
+    return error;
+  if (!error.starts_with(opened_path))
+    return error;
+  if (error[opened_path.size()] != ':' || error[opened_path.size() + 1] != ' ')
+    return error;
+  return error.substr(opened_path.size() + 2);
+}
+
+bool is_loader_symbol_version_error(std::string_view error, std::string_view opened_path = {}) {
+  return runtime_symbol_version_not_found(loader_reason(error, opened_path));
 }
 
 class SyntheticInstruction final : public Instruction {
@@ -330,6 +378,62 @@ private:
   std::condition_variable cv_;
   bool write_started_ = false;
 };
+
+TEST(PerfsimLoaderErrorTest, RecognizesQuotedRuntimeSymbolVersion) {
+  constexpr std::string_view backend = "/so/libgpucsim_ffm_plugin.so";
+  EXPECT_TRUE(is_loader_symbol_version_error(
+      "/lib64/libc.so.6: version `GLIBC_2.33' not found (required by "
+      "/so/libgpucsim_ffm_plugin.so)",
+      backend));
+  EXPECT_TRUE(is_loader_symbol_version_error(
+      "/lib64/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by "
+      "/so/libgpucsim_ffm_plugin.so)",
+      backend));
+  EXPECT_TRUE(is_loader_symbol_version_error(
+      "/lib64/libstdc++.so.6: version `CXXABI_1.3.11' not found (required by "
+      "/so/libgpucsim_ffm_plugin.so)",
+      backend));
+  const std::string prefixed = std::string(backend) +
+                               ": /lib64/libc.so.6: version `GLIBC_2.33' not found (required by " +
+                               std::string(backend) + ")";
+  EXPECT_TRUE(is_loader_symbol_version_error(prefixed, backend));
+}
+
+TEST(PerfsimLoaderErrorTest, MissingPathWithVersionTokenStillFails) {
+  auto missing = [](std::string_view path) {
+    return std::string(path) + ": cannot open shared object file: No such file or directory";
+  };
+  EXPECT_FALSE(
+      is_loader_symbol_version_error(missing("/tmp/GLIBC_/missing.so"), "/tmp/GLIBC_/missing.so"));
+  EXPECT_FALSE(is_loader_symbol_version_error(missing("/tmp/GLIBCXX_/missing.so"),
+                                              "/tmp/GLIBCXX_/missing.so"));
+  EXPECT_FALSE(
+      is_loader_symbol_version_error(missing("/tmp/version GLIBC_2.33 not found/missing.so"),
+                                     "/tmp/version GLIBC_2.33 not found/missing.so"));
+  EXPECT_FALSE(
+      is_loader_symbol_version_error(missing("/tmp/version `GLIBC_2.33' not found/missing.so"),
+                                     "/tmp/version `GLIBC_2.33' not found/missing.so"));
+  EXPECT_FALSE(is_loader_symbol_version_error(
+      missing("/tmp/version `GLIBC_2.33' not found (required by x)/missing.so"),
+      "/tmp/version `GLIBC_2.33' not found (required by x)/missing.so"));
+  EXPECT_FALSE(is_loader_symbol_version_error(missing("/tmp/version `CXXABI_/missing.so"),
+                                              "/tmp/version `CXXABI_/missing.so"));
+  EXPECT_FALSE(is_loader_symbol_version_error("cannot load Perfsim backend: unknown error"));
+}
+
+TEST(PerfsimLoaderErrorTest, ActualMissingFileIsNotASymbolVersionError) {
+  const char *paths[] = {
+      "/tmp/version `GLIBC_2.33' not found/missing.so",
+      "/tmp/version `CXXABI_/missing.so",
+  };
+  for (const char *path : paths) {
+    SCOPED_TRACE(path);
+    ASSERT_EQ(util::open_library(path), nullptr);
+    const std::string error = util::last_library_error();
+    EXPECT_NE(error.find("cannot open shared object file"), std::string::npos) << error;
+    EXPECT_FALSE(is_loader_symbol_version_error(error, path));
+  }
+}
 
 TEST(PerfsimPluginConfigTest, EscapesBackendPathAsJson) {
   std::string path{"a\"b\\c\n"};
@@ -2008,7 +2112,13 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   // The direct half retains its mapping for the process lifetime, matching the
   // adapter. Some Perfsim builds perform LLVM-global cleanup when finally unloaded.
   const util::LibraryHandle direct_backend = util::open_library(backend_path.c_str());
-  ASSERT_NE(direct_backend, nullptr) << util::last_library_error();
+  if (!direct_backend) {
+    const std::string error = util::last_library_error();
+    if (is_loader_symbol_version_error(error, backend_path))
+      GTEST_SKIP() << "Perfsim backend needs a newer C/C++ runtime than this host: " << error
+                   << " (runtime library version mismatch, not an observer ABI rejection)";
+    FAIL() << "Perfsim backend failed to load: " << error;
+  }
   const auto get_api =
       util::lookup_symbol<FfmObserverPluginGetApiFn>(direct_backend, "ffm_observer_plugin_get_api");
   ASSERT_NE(get_api, nullptr) << util::last_library_error();
