@@ -135,11 +135,11 @@ Each PR migrates only its own service; on every branch the other three still reg
 | Completion finds its owner by | packet address in each callback's `packet_return_map` | same, in SPM's own `packet_return_map` | `THREAD_TRACE_CLIENT_ID`, then the tracer id stamped on the `TraceControlAQLPacket` | the agent's session, then the dispatch's correlation id |
 | Drain in the service stop | `queue_controller_sync()`; a timeout is logged | `queue_controller_sync()`; result discarded | none | none; `stop_service` stops sampling and flushes |
 | Serialization reference | taken and dropped only on an `enabled` transition | taken on every start, dropped on every stop | taken on every start, dropped on the `enabled` transition | none |
-| Start marker in `context::start_context` | yes | no | no | no |
+| Start marker in `context::start_context` | yes | yes | yes | no |
 | Two contexts of this service | conflict at start if their agent sets intersect; develop rejected any second one | conflict at start if their agent sets intersect; develop had no rule | conflict at start if their configured agents intersect; develop had no rule | a second configuration on the same agent fails with `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`, as before |
 | Shared code carried | `client_ids.hpp`, per-agent serialization refcount, context registry rework | same | same | none |
 
-The drain, serialization-reference and start-marker rows are where the siblings are weaker than
+The drain and serialization-reference rows are where the siblings are weaker than
 counter collection; each sibling's page lists what that leaves open at its head.
 
 ## 3. Enqueue and completion use different context sets
@@ -249,8 +249,6 @@ completion path becomes an application hang rather than data loss.
    agent a counter context collects on. Scoping the predicate to the agent keeps unrelated GPUs
    batching, but the cost on the collecting agent, combined with kernel replay's own gate, has not
    been measured.
-4. The start-side marker in `context::start_context` and the boolean result of
-   `hsa::queue_controller_sync()` exist only on this branch. The SPM and thread trace branches
-   carry the same registry rework without them. The marker is service-agnostic, so it would close
-   their start windows too once they share a branch with this change; until then those windows are
-   open, as their pages state.
+4. The boolean result of `hsa::queue_controller_sync()` exists only on this branch; the SPM and thread
+   trace branches carry the same registry rework without it. The start-side marker in
+   `context::start_context` is on all three branches that carry the rework.
