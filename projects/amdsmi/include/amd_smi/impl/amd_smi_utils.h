@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <iosfwd>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -308,5 +309,57 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  *  @param[out] info Structure to reset to its not-supported state.
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
+/**
+ * PACKAGE_VERSION (key) mapped to PACKAGE_NAME (value) for each amdgpu DKMS package.
+ */
+using smi_amdgpu_dkms_packages_t = std::map<std::string, std::string>;
+
+inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
+inline constexpr auto kAmdgpuDkmsSourcePrefix = std::string_view{"/usr/src/amdgpu-"};
+
+auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
+                                      std::string_view package_version, amdsmi_driver_info_t* info)
+    -> amdsmi_status_t;
+
+/**
+ *  @brief Select the DKMS package built for a running kernel.
+ *
+ *  @details Reads ``kernel-<release>-<machine>`` under @p dkms_root, then
+ *  validates only that PACKAGE_VERSION directory (source symlink and
+ *  dkms.conf). Does not scan sibling packages.
+ *
+ *  @param[in] dkms_root Directory that contains kernel-* symlinks (for example
+ *             /var/lib/dkms/amdgpu).
+ *  @param[in] source_tree_prefix Prefix for the ``source`` symlink target path.
+ *  @param[in] release Kernel release from uname, such as 6.8.0-124-generic.
+ *  @param[in] machine Hardware name from uname, such as x86_64.
+ *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION when
+ *              the kernel symlink points at a validated package.
+ */
+auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root,
+                                        std::string_view source_tree_prefix,
+                                        std::string_view release, std::string_view machine,
+                                        std::string* active_version) -> amdsmi_status_t;
+
+/**
+ *  @brief List amdgpu DKMS packages under a caller-supplied root and source tree.
+ *
+ *  @details Walks version-shaped subdirectories, checks that each source
+ *  symlink points to @p source_tree_prefix concatenated with the version
+ *  directory name (for example ``/usr/src/amdgpu-`` +
+ *  ``6.19.14-2370381.24.04``), reads dkms.conf, and records
+ *  PACKAGE_VERSION -> PACKAGE_NAME pairs. Ignores kernel-* symlinks and
+ *  any directory that fails validation. Results are sorted by version
+ *  string. Unit tests pass a temporary prefix.
+ *
+ *  @param[in] dkms_root Base directory containing version subdirectories.
+ *  @param[in] source_tree_prefix Prefix for the ``source`` symlink target path.
+ *  @param[out] packages Cleared on entry, then filled with one entry per
+ *  valid package.
+ */
+auto smi_amdgpu_get_dkms_versions_from(std::string_view dkms_root,
+                                       std::string_view source_tree_prefix,
+                                       smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

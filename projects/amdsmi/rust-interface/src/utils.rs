@@ -156,7 +156,15 @@ impl_cstr_getters!(
 );
 
 // Implement the getters for the C string fields in AmdsmiDriverInfoT
-impl_cstr_getters!(AmdsmiDriverInfoT, driver_version, driver_date, driver_name);
+impl_cstr_getters!(
+    AmdsmiDriverInfoT,
+    driver_version,
+    driver_date,
+    driver_name,
+    driver_kernel_version,
+    driver_build_version,
+    driver_full_version
+);
 
 // Implement the getters for the C string fields in AmdsmiNameValueT
 impl_cstr_getters!(AmdsmiNameValueT, name);

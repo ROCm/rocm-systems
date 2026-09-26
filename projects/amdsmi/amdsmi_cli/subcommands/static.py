@@ -675,12 +675,12 @@ class StaticCommands:
 
                 static_dict["limit"] = limit_info
         if args.driver:
-            driver_info_dict = {"name": "N/A", "version": "N/A", "os_kernel_version": "N/A"}
+            driver_info_dict = {"name": "N/A", "amdgpu_version": "N/A", "os_kernel_version": "N/A"}
 
             try:
                 driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
                 driver_info_dict["name"] = driver_info["driver_name"]
-                driver_info_dict["version"] = driver_info["driver_version"]
+                driver_info_dict["amdgpu_version"] = driver_info["driver_full_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
                     "Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info()
