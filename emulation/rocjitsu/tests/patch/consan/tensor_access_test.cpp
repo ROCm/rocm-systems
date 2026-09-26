@@ -34,15 +34,24 @@ TensorCase tile(std::array<uint32_t, 5> dimensions) {
 }
 
 TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) {
-  for (const bool alias : {false, true}) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  for (const auto [alias, bank] : {std::pair{false, 0u}, std::pair{true, 0u},
+                                   std::pair{false, 0x55u}, std::pair{true, 0x55u}}) {
     SCOPED_TRACE(alias);
+    SCOPED_TRACE(bank);
     const auto tensor = cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
                                             {.vaddr4 = 124,
                                              .vaddr0 = 0,
                                              .vaddr1 = static_cast<uint8_t>(alias ? 1 : 12),
                                              .vaddr2 = 124,
                                              .vaddr3 = 124});
-    std::vector<uint32_t> guest(tensor.begin(), tensor.end());
+    std::vector<uint32_t> guest;
+    if (bank != 0u) {
+      const auto select = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
+      ASSERT_TRUE(select);
+      guest.push_back(*select);
+    }
+    guest.insert(guest.end(), tensor.begin(), tensor.end());
     guest.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
     TestOptions options = test_options();
     options.mode = Mode::SuperCollider;
@@ -58,7 +67,28 @@ TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) 
     EXPECT_EQ(patch.spilled_vgpr_count, detail::kTensorLoadCompareScratchVgprs);
     EXPECT_GE(patch.required_private_segment_size, detail::kTensorLoadCompareScratchVgprs * 4u);
     EXPECT_GE(patch.required_sgpr_count, alias ? 12u : 4u);
-    EXPECT_TRUE(patch.relocated_guest_instruction_offset.has_value());
+    ASSERT_TRUE(patch.relocated_guest_instruction_offset.has_value());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.text_sections().size(), 1u);
+    const auto *text = patched.text_sections().front();
+    const auto body = patched_words_at_file_offset(
+        result, text->sectionOffset() + patch.trampoline_offset, patch.trampoline_size);
+    ASSERT_FALSE(body.empty());
+    if (bank != 0u) {
+      const auto low = instrumentation::build_s_set_vgpr_msb_transition(bank, 0u, arch);
+      const auto restore = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
+      ASSERT_TRUE(low);
+      ASSERT_TRUE(restore);
+      EXPECT_EQ(body.front(), *low);
+      EXPECT_EQ(body.back(), *restore);
+    }
+    const auto guest_index = *patch.relocated_guest_instruction_offset / sizeof(uint32_t);
+    ASSERT_LE(guest_index + tensor.size(), body.size());
+    EXPECT_EQ(body[guest_index], tensor[0]);
+    EXPECT_EQ(body[guest_index + 1u], tensor[1]);
+    // Aliases rewrite only the descriptor-copy operand of the original DMA.
+    EXPECT_EQ(body[guest_index + 2u] & ~0xff00u, tensor[2] & ~0xff00u);
   }
 }
 
