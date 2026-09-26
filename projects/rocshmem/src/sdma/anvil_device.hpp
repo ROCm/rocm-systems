@@ -34,7 +34,6 @@
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
-#include "log.hpp"
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 

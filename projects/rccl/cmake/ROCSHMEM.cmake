@@ -29,13 +29,6 @@ set(ROCSHMEM_MONO_HASH "33d980d7ca1f0bf90cfe4ff9106310abcf47b550" CACHE STRING
 
 function(add_rocshmem_targets)
 
-    # Common dependency: libibverbs is required for all rocSHMEM paths
-    find_library(_IBVERBS ibverbs)
-    if(NOT _IBVERBS)
-        message(FATAL_ERROR "libibverbs not found (install rdma-core/libibverbs-dev)")
-    endif()
-    set(IBVERBS ${_IBVERBS} PARENT_SCOPE)
-
     # -----------------------------------------------------------------
     # Auto-detect ROCSHMEM_SOURCE_DIR if not provided.
     # Runs first so source headers are available regardless of whether
@@ -106,7 +99,7 @@ function(add_rocshmem_targets)
         if(rocshmem_static_FOUND)
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
-            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   PARENT_SCOPE)
+            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   CACHE INTERNAL "rocSHMEM source directory")
             return()
         endif()
     endif()
@@ -159,7 +152,9 @@ function(add_rocshmem_targets)
         add_custom_target(rocshmem_static ALL DEPENDS rocshmem_ext)
     endif()
 
-    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" PARENT_SCOPE)
+    # CACHE INTERNAL (not PARENT_SCOPE): SOURCE_DIR is consumed by the
+    # top-level CMakeLists.txt install rules, outside add_subdirectory(src).
+    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" CACHE INTERNAL "rocSHMEM source directory")
 
 endfunction()
 
@@ -174,6 +169,8 @@ function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
       OUTPUT "${dst_file}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
+      # Qualify log.hpp include to prevent shadowing by consumer headers.
+      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${dst_file}"
       DEPENDS "${src_file}"
       COMMENT "Copying ${src_file} -> ${dst_file}"
       VERBATIM

@@ -4,7 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Suite G: gin_plugin_anvil_sdma.cc host plugin unit tests.
+// Suite G: RCCL GIN SDMA plugin vtable tests (stubbed factory, no HW required).
+// Verifies the plugin dispatch logic (init/connect/regMr/close) with the SDMA
+// factory stubbed out — no real SDMA queues are created.
 
 #include "gin_anvil_plugin_test_stubs.h"
 
@@ -20,6 +22,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -56,7 +59,8 @@ struct GinAnvilMockComm {
   GinAnvilMockComm() { reset(); }
 
   void reset() {
-    std::memset(&comm, 0, sizeof(comm));
+    comm.~ncclComm();
+    new(&comm) ncclComm{};
     comm.bootstrap = &bootstrapPlaceholder;
     comm.devrState.lsaSelf = 0;
     comm.devrState.lsaSize = 2;
