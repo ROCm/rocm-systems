@@ -2,7 +2,7 @@
 
 How queue-interposed services are wired into dispatch interception after the per-queue callback
 registry is removed, why completion routing and enqueue routing deliberately use different context
-sets, and why `stop_context` drains the GPU.
+sets, and why counter collection's `stop_context` drains the GPU.
 
 Paths are relative to `projects/rocprofiler-sdk/source/`. Symbols are named rather than cited by
 line number, since line numbers rot faster than the code they point at.
@@ -10,7 +10,8 @@ line number, since line numbers rot faster than the code they point at.
 The migration is one PR per service: counter collection (#11970), SPM (#11968), thread trace
 (#11967) and PC sampling (#11969). Each PR carries the shared `hsa/queue_hooks/` pieces it needs, so
 they can land in any order. This document describes the mechanism as a whole, and flags
-which service each part currently lives on.
+which service each part currently lives on. Section 2.1 lists where the other three services depart
+from counter collection; each of those PRs adds a page for its own service beneath this one.
 
 ## 1. Diagram
 
@@ -103,8 +104,9 @@ For counter collection:
 
 The hook names describe the dispatch phase they run in: the enter hook runs when a dispatch is being
 submitted, the exit hook when its completion signal fires. The activity predicates are neither
-phase, so they keep plain names. Each remaining service mirrors this set in its own
-`queue_hooks.{hpp,cpp}`.
+phase, so they keep plain names. SPM and thread trace define the same four functions in their own
+`queue_hooks.{hpp,cpp}`; PC sampling defines only an exit hook and a configuration predicate.
+Section 2.1 lists the differences.
 
 `is_active_on_agent()` is the form the per-queue gate uses, and it exists because
 `kernel_dispatch_phase_enter_hook()` already skips contexts that do not collect on the dispatch's
@@ -118,6 +120,27 @@ the id attached to an instrumentation packet no longer depends on the order in w
 register. The tags are negative, keeping them disjoint from the positive ClientIDs still used by
 services that have not migrated yet. Each migrated service identifies its own packets by its tag,
 so any tag added here must remain negative and unique.
+
+### 2.1 How the other services differ
+
+Each PR migrates only its own service; on every branch the other three still register through
+`QueueController::add_callback`. The table compares the four PR heads.
+
+| | Counter collection (#11970) | SPM (#11968) | Thread trace (#11967) | PC sampling (#11969) |
+|---|---|---|---|---|
+| Hooks | enter and exit hooks, `is_any_active`, `is_active_on_agent` | same four | same four | exit hook and `is_configured_on_agent` only; the marker packet is still added inline by the write interceptor |
+| Interceptor gate in `no_real_consumers` | an active context collects on the queue's agent | same | same | a session is configured on the queue's agent, started or not |
+| Packet batching | off on the agent while a context is active | same | same | unaffected, as before |
+| Exit hook iterates | registered contexts | registered contexts | registered contexts | no contexts; looks up the agent's `PCSAgentSession` |
+| Completion finds its owner by | packet address in each callback's `packet_return_map` | same, in SPM's own `packet_return_map` | `THREAD_TRACE_CLIENT_ID`, then the tracer id stamped on the `TraceControlAQLPacket` | the agent's session, then the dispatch's correlation id |
+| Drain in the service stop | `queue_controller_sync()`; a timeout is logged | `queue_controller_sync()`; result discarded | none | none; `stop_service` stops sampling and flushes |
+| Serialization reference | taken and dropped only on an `enabled` transition | taken on every start, dropped on every stop | taken on every start, dropped on the `enabled` transition | none |
+| Start marker in `context::start_context` | yes | no | no | no |
+| Two contexts of this service | conflict at start if their agent sets intersect; develop rejected any second one | conflict at start if their agent sets intersect; develop had no rule | conflict at start if their configured agents intersect; develop had no rule | a second configuration on the same agent fails with `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`, as before |
+| Shared code carried | `client_ids.hpp`, per-agent serialization refcount, context registry rework | same | same | none |
+
+The drain, serialization-reference and start-marker rows are where the siblings are weaker than
+counter collection; each sibling's page lists what that leaves open at its head.
 
 ## 3. Enqueue and completion use different context sets
 
@@ -144,6 +167,9 @@ looking the packet up in its own context's `packet_return_map` and returns early
 not own. Each context therefore still processes only its own packets, and the guarantee is restored
 without reintroducing a registry.
 
+PC sampling (#11969) needs neither set: its exit hook keys off the queue's agent rather than the
+context list, and a configured session is never removed from the global session map.
+
 ## 4. The stop path
 
 Two orderings matter, both stated at their call sites in the code.
@@ -152,11 +178,14 @@ Two orderings matter, both stated at their call sites in the code.
 collection, SPM, device thread trace and dispatch thread trace are all stopped ahead of the
 `compare_exchange_strong` that nulls the context's active slot. Clearing the slot first opens a
 window in which the enter hook sees no active context, so a dispatch is submitted without serializer
-packets while the serializer is still enabled.
+packets while the serializer is still enabled. This ordering is part of the context registry rework
+that #11970, #11968 and #11967 each carry; develop, and #11969, still clear the slot first while
+holding the contexts mutex.
 
 **`counters::stop_context` drains the GPU before disabling serialization.** The order is: clear the
 service's `enabled` flag, `hsa::queue_controller_sync()`, `disable_serialization()`, then
-`callback_thread_stop()`.
+`callback_thread_stop()`. SPM (#11968) drains at the same point; thread trace (#11967) does not
+drain.
 
 ### 4.1 Why the drain is kept
 
@@ -176,9 +205,13 @@ notice rather than a reason to omit it:
 | Serializer transition with in-flight serialized dispatches | GPU-ordered independently. `profiler_serializer::disable()` records the previous state and pushes an `hsa_barrier` across the queues, and `kernel_completion_signal` reconciles in-flight dispatches against it. |
 | No separate "draining" flag is needed | `context::stop_context` calls the service stop path while the context is still in the active list, so throughout the drain the enter hook still reaches `queue_cb`, whose disabled path returns `serialize=true` and keeps the serialized-to-unserialized transition coordinated. This only works because the drain happens before the slot is cleared. |
 
-The drain is a bound, not a hard barrier: `Queue::sync` uses a five-second hint and only warns on
-timeout, and `_active_kernels` counts intercepted dispatches only. It is the ordering guarantee for
-teardown, and provenance routing in the exit hook is what makes individual completions correct.
+The drain is a bound, not a hard barrier: `Queue::sync` waits a single five-second slice
+(`drain_slice` in `hsa/queue.cpp`), warns, and returns false if kernels are still active, and
+`_active_kernels` counts intercepted dispatches only. `hsa::queue_controller_sync()` syncs every
+queue and reports whether all of them drained; `counters::stop_context` logs a timeout and finishes
+the stop anyway, pinned by `counters_queue_hooks.stop_context_completes_when_queue_drain_times_out`
+in `counters/tests/queue_hooks_test.cpp`. It is the ordering guarantee for teardown, and provenance
+routing in the exit hook is what makes individual completions correct.
 
 One hazard is not covered by either mechanism: the drain incidentally protects the sequence "stop the
 context, then destroy the counter config". If a tool does that, the guard belongs at the destroy
@@ -216,3 +249,8 @@ completion path becomes an application hang rather than data loss.
    agent a counter context collects on. Scoping the predicate to the agent keeps unrelated GPUs
    batching, but the cost on the collecting agent, combined with kernel replay's own gate, has not
    been measured.
+4. The start-side marker in `context::start_context` and the boolean result of
+   `hsa::queue_controller_sync()` exist only on this branch. The SPM and thread trace branches
+   carry the same registry rework without them. The marker is service-agnostic, so it would close
+   their start windows too once they share a branch with this change; until then those windows are
+   open, as their pages state.
