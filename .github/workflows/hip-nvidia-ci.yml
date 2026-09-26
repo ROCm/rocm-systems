@@ -60,7 +60,7 @@ jobs:
     name: "Build clr + hip-tests (NVIDIA)"
     needs: nvidia-clr-build-setup
     if: ${{ needs.nvidia-clr-build-setup.outputs.should_build == 'true' }}
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     container:
       # CUDA 13.2.0 devel Ubuntu 24.04
       image: nvidia/cuda@sha256:d266e59b88c295bc5fa0e4cef9064eaff84939381b09e2c3d76a5532a303e42d
