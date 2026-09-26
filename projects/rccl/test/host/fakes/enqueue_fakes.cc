@@ -59,9 +59,9 @@ std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKe
 
 // No-op default: nothing here inspects the plan's work-batch fifo directly.
 static void DefaultAddWorkBatchToPlan(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int,
-                                     uint32_t, int, int, bool) {}
-std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int, int,
-                   bool)>
+                                     int, uint32_t, int, int, bool) {}
+std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t, int,
+                   int, bool)>
     g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
 
 // Generous default: accepts every proxy op, matching an always-available proxy thread.
@@ -117,9 +117,10 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, i
   return g_ncclGetAlgoInfo(comm, task, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo);
 }
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
-                            enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch,
-                            int p2pRound, bool newBatch) {
-  g_addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, workOffset, p2pEpoch, p2pRound, newBatch);
+                            enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
+                            int p2pEpoch, int p2pRound, bool newBatch) {
+  g_addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, progressSlot, workOffset, p2pEpoch, p2pRound,
+                       newBatch);
 }
 void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   g_planSetDefaultKernel(comm, plan);

@@ -2095,7 +2095,7 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_FirstItem_OpensABatchAndCountsIt) {
   // "can we append?" decision reads these back.
   BatchPlanComm bp;
   addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl,
-                     /*devFuncId=*/7, /*workOffset=*/0);
+                     /*devFuncId=*/7, /*progressSlot=*/0, /*workOffset=*/0);
   ASSERT_EQ(1, bp.queueLength());
   EXPECT_EQ(1, bp.p()->nWorkBatches);
   auto* b = bp.tailBatch();
@@ -2121,8 +2121,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondCollItem_ExceedsByteBudgetAndOpensNe
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeColl);
   ASSERT_GT(2 * ws, size_t(NCCL_MAX_DEV_WORK_BATCH_BYTES))
       << "precondition: two coll items must not fit in one batch";
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, uint32_t(ws));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, uint32_t(ws));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
 }
@@ -2132,8 +2132,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondContiguousP2p_AppendsToSameBatch) {
   // contiguous offset, same epoch, distinct rounds -> one batch, two bits set.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(1, bp.queueLength()) << "must reuse the open batch";
   EXPECT_EQ(1, bp.p()->nWorkBatches);
@@ -2155,12 +2155,12 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_BcastCapSplitsAtExactlyMaxItem) {
   // than opening a batch of its own: `0 != offset % workSize` is what would
   // otherwise split these and mask the cap.
   for (int i = 0; i < maxitem; ++i) {
-    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(i * bcastSize));
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(i * bcastSize));
   }
   const int beforeCap = bp.queueLength();
 
   // The (maxitem + 1)th item is the first to see nBcasts == maxitem.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(maxitem * bcastSize));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(maxitem * bcastSize));
   EXPECT_EQ(beforeCap + 1, bp.queueLength())
       << "the cap at :240 must open a new batch on the item that reaches maxitem";
 }
@@ -2187,8 +2187,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_DifferentWorkType_ForcesNewBatch) {
   const size_t bcastSize = ncclDevWorkSize(ncclDevWorkTypeBcast);
   ASSERT_LT(1, ncclMaxDevWorkBatchBytes(bp.c()->cudaArch) / int(sizeof(ncclDevWorkBcast)))
       << "maxitem must exceed the single bcast item, or the :240 cap is the splitter";
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(bcastSize));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(bcastSize));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
   EXPECT_EQ(0, bp.chan()->workBatchQueue.head->batch.nextExtends)
@@ -2210,9 +2210,9 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_NonMultipleOffset_CreatesExtensionBatch) {
   // before the extension logic could be reached.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
   auto* first = bp.tailBatch();
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws / 2),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws / 2),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(1, first->nextExtends) << "the previous batch must be marked as extended";
@@ -2225,15 +2225,15 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_OffsetBeyondBitsetRange_CreatesExtensionBa
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   {
     BatchPlanComm fits(/*nNodes=*/4);
-    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(63 * ws), 1, true);
+    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(63 * ws), 1, true);
     EXPECT_EQ(1, fits.queueLength()) << "slot 63 is the last representable one";
     EXPECT_NE(0ull, fits.tailBatch()->offsetBitset & (1ull << 63));
   }
   {
     BatchPlanComm over(/*nNodes=*/4);
-    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(64 * ws), 1, true);
+    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(64 * ws), 1, true);
     EXPECT_EQ(2, over.queueLength()) << "slot 64 must spill to an extension batch";
   }
 }
@@ -2244,13 +2244,13 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_ExtensionBatchDoesNotResetWipCounters) {
   // genuinely new batch resets it.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws / 2),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws / 2),
                      /*p2pRound=*/1, true);  // misaligned -> extension
   EXPECT_EQ(2 * ws, bp.chan()->wipBatch.workBytes) << "extension must ACCUMULATE";
 
   // A different funcId forces a genuinely new batch, which DOES reset.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 9, 0, /*p2pRound=*/2, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 9, /*progressSlot=*/0, 0, /*p2pRound=*/2, true);
   EXPECT_EQ(ws, bp.chan()->wipBatch.workBytes) << "a new batch must RESET";
 }
 
@@ -2258,8 +2258,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_ChannelsAreIndependent) {
   // Every decision reads comm->planner.wipPlan.channels[channelId], so work on
   // one channel must not disturb another. Catches a hardcoded index.
   BatchPlanComm bp;
-  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/1, ncclDevWorkTypeColl, 7, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/1, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
   EXPECT_EQ(1, bp.queueLength(0));
   EXPECT_EQ(1, bp.queueLength(1));
   EXPECT_EQ(2, bp.p()->nWorkBatches) << "but the plan-wide count sums both";
@@ -2278,8 +2278,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDifferentEpoch_ForcesNewBatch) {
   // batching uniform across ranks and prevents hangs.
   BatchPlanComm bp(/*nNodes=*/4);  // >2 so the per-batch cap is the epoch size
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/NCCL_MAX_DEV_WORK_P2P_PER_BATCH, true);
   EXPECT_EQ(2, bp.queueLength()) << "cross-epoch p2ps must not fuse";
 }
@@ -2290,8 +2290,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pSameEpochDifferentRounds_MayShareABatch
   // Without this, "always makes a new batch" would pass the other two.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(1, bp.queueLength()) << "same epoch, different rounds -> one batch";
   EXPECT_EQ(2, bp.chan()->wipBatch.nP2ps);
@@ -2303,8 +2303,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pTwoNodesOrFewer_CapsAtOnePerBatch) {
   // which differs ONLY in nNodes.
   BatchPlanComm bp(/*nNodes=*/2);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength()) << "nNodes<=2 allows only one p2p per batch";
 }
@@ -2320,8 +2320,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pRecordsRoundAndBatchEligibility) {
   const int r0 = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;      // first round of an epoch
   const int r1 = r0 + 1;                                   // same epoch
   ASSERT_EQ(r0 / NCCL_MAX_DEV_WORK_P2P_PER_BATCH, r1 / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, r0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r1, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r1, true);
   EXPECT_TRUE(bp.chan()->wipBatch.batchP2P);
   ASSERT_EQ(2, bp.chan()->wipBatch.nP2ps);
   EXPECT_EQ(r0, bp.chan()->wipBatch.p2pRounds[0]);
@@ -2341,8 +2341,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pEligibleAfterIneligible_ForcesNewBatch)
   // and lets a mutant that drops :227 survive.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, /*batchP2P=*/false);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1,
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, /*batchP2P=*/false);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), 1,
                      /*batchP2P=*/true);
   EXPECT_EQ(2, bp.queueLength()) << "an ineligible batch must not absorb an eligible op";
 }
@@ -2352,12 +2352,12 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_CountsP2pBatchesSeparately) {
   // because it derives a proxyOpCount that fused ops must share.
   BatchPlanComm bp(/*nNodes=*/2);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), 1, true);
   EXPECT_EQ(2, bp.chan()->nWorkBatchesP2p);
 
   // A coll batch must NOT bump the p2p counter.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
   EXPECT_EQ(2, bp.chan()->nWorkBatchesP2p) << "coll work must not count as p2p";
 }
 
@@ -2370,7 +2370,7 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   const int kItems = 6;
   for (int i = 0; i < kItems; ++i) {
-    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(i * ws),
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(i * ws),
                        /*p2pRound=*/i, true);
   }
   int bits = 0;
@@ -2448,7 +2448,7 @@ struct FinishComm {
   void addBatches(int c, int n, int funcIdBase) {
     for (int i = 0; i < n; ++i) {
       addWorkBatchToPlan(this->c(), p(), c, ncclDevWorkTypeColl,
-                         funcIdBase + i, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
+                         funcIdBase + i, /*progressSlot=*/0, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
     }
     markChannel(c);
   }
@@ -2969,16 +2969,16 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDifferentFuncId_ForcesNewBatch_Isolated
   // Same epoch, distinct rounds, contiguous offsets, within budget: every OTHER
   // guard is satisfied, so only the funcId difference can open a new batch.
   const int r0 = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/7, 0, r0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/8,
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/8, /*progressSlot=*/0,
                      uint32_t(ws), r0 + 1, true);
   EXPECT_EQ(2, bp.queueLength()) << "a different funcId must force a new batch";
 
   // Control: identical call with the SAME funcId shares a batch. Without this
   // pair the assertion above could also be satisfied by an unconditional split.
   BatchPlanComm same(/*nNodes=*/4);
-  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, 0, r0, true);
-  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r0 + 1, true);
+  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r0 + 1, true);
   EXPECT_EQ(1, same.queueLength()) << "same funcId must still share";
 }
 
@@ -2995,8 +2995,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDuplicateRoundSameEpoch_ForcesNewBatch_
   const int r = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;  // first round of an epoch
   // Identical round twice: same epoch, so the epoch rule CANNOT fire. Only the
   // duplicate-round guard can split these.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, r, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r, true);
   EXPECT_EQ(2, bp.queueLength())
       << "two p2ps of the SAME round use the same connections and must not fuse";
 }

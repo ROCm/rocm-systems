@@ -127,6 +127,14 @@ class SymKernelMaskTest : public SymKernelMicrotest {
  protected:
   static constexpr ncclDataType_t kTy = ncclFloat32;
 
+  // NCCL 2.32's ncclSymkTmaAvailable also requires enough opt-in shared memory for 16 warps of TMA
+  // scratch. Report exactly that, so the TMA cases below are still gated only by compute capability,
+  // SYM_TMA_ENABLE and alignment.
+  void SetUp() override {
+    SymKernelMicrotest::SetUp();
+    comm_->maxSharedMemOptin = ncclTmaShmemScratchWarpSize() * 16;
+  }
+
   // AllReduce's nBusBytes multiplier is 1, so nElts*4 (f32) controls the byte count exactly, cell-aligned.
   static size_t NEltsForBytes(size_t bytes) { return bytes / ncclTypeSize(kTy); }
 };

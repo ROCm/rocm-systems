@@ -1,4 +1,11 @@
-"""1 MiB NCCL GIN put example using CuTeDSL ``cute.Tensor`` views.
+#!/usr/bin/env python3
+#
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# See LICENSE.txt for more license information
+#
+"""Compile a CuTeDSL NCCL function before creating its host resources.
 
 Demonstrates the canonical workflow for the nccl4py CuTeDSL device API:
 register two windows (send / recv) on the host, construct ``cute.Tensor``
@@ -6,24 +13,20 @@ views over them inside the kernel via Window.tensor, issue a
 single Gin.put with a completion signal, wait on the signal on
 the destination rank, and validate the payload host-side.
 
-The same kernel is launched twice, through the two ways of passing NCCL
-resources into a ``@cute.jit`` function:
+The ``@cute.jit`` function is compiled with type-only placeholders before a
+communicator or registered window exists. The resulting callable is invoked
+later against the real NCCL resources, which supply the runtime values for the
+already-compiled signature. The placeholders belong to ``cute.compile`` alone:
+passing one to the compiled callable launches with garbage rather than
+raising.
 
-    * :func:`test_nccl_put` annotates the ``nccl_cute`` types and takes
-      objects the caller converted;
-    * :func:`test_nccl_put_resources` annotates the ``nccl.core``
-      resource types and takes them unconverted, letting the registered
-      JIT arg adapters do the conversion.
+Run with exactly two MPI ranks; the transfer is hardcoded from rank 0 to
+rank 1::
 
-The annotations are what pick the form: CuTeDSL validates an argument
-against its annotation before it looks for an adapter, so annotating the
-converted type rejects a raw resource outright.
-
-Run with two MPI ranks::
-
-    mpirun -n 2 python main.py
+    mpirun -n 2 python 07_compile_with_fake_args.py
 """
 
+import os
 import sys
 
 try:
@@ -50,13 +53,13 @@ from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 import nccl.core as nccl
 import nccl.core.device.cute as nccl_cute
 
+
+NAME = os.path.basename(__file__)
+
 # 1 MiB transfer: 131072 Int64 elements * 8 bytes = 1,048,576 bytes.
 NUM_ELEMS = 1024 * 1024 // 8
 DST_RANK = 1
-# One signal per launch, so the second transfer waits on its own arrival
-# instead of seeing the first one's signal already raised.
-SIGNAL_ID1 = 1
-SIGNAL_ID2 = 2
+SIGNAL_ID = 1
 
 @cute.kernel
 def test_nccl_put_kernel(
@@ -80,8 +83,8 @@ def test_nccl_put_kernel(
     unused.
 
     Args:
-        dev_comm: Value-mode nccl_cute.DevComm reconstructed while
-            tracing from the host-mode instance.
+        dev_comm: Value-mode nccl_cute.DevComm reconstructed while tracing
+            from the placeholder's MLIR argument.
         send_win: CuTeDSL view of the registered source window.
         recv_win: CuTeDSL view of the registered destination window.
         signal_id: GIN signal slot this launch uses; a Python int, so it
@@ -117,17 +120,10 @@ def test_nccl_put_kernel(
                 cute.printf(f"After Put:  recv[0]={recv[0]} recv[{NUM_ELEMS - 1}]={recv[NUM_ELEMS - 1]}")
 
 
-# A @cute.jit function can take NCCL resources in two forms, and the
-# parameter annotations decide which one the caller may use: as of
-# cutlass-dsl 4.6, CuTeDSL type-checks each argument against its annotation
-# before it looks for a JIT arg adapter. So annotating the converted type and
-# passing a raw resource is an error CuTeDSL reports, not something the
-# adapter registered by @cutlass.register_jit_arg_adapter gets to fix.
-# Leaving a parameter unannotated skips the check, and then either form works.
-#
-# Both wrappers below launch the same kernel; only their signatures and call
-# sites differ. Each uses its own signal slot so the second transfer waits on
-# its own arrival.
+# The annotations name the views reconstructed while tracing, and the
+# compile-only placeholders satisfy them without owning NCCL resources. As in
+# 00_basic.py, they also fix the argument form: the caller passes nccl_cute
+# objects, not raw resources.
 
 
 @cute.jit
@@ -136,46 +132,18 @@ def test_nccl_put(
         send_win: nccl_cute.Window,
         recv_win: nccl_cute.Window,
     ):
-    """Launch the kernel, taking arguments the caller already converted.
+    """Launch the kernel with a signature described by device views.
 
-    The caller wraps each resource — nccl_cute.DevComm(resource) /
-    nccl_cute.Window(resource) — so no adapter is needed. Costs a line
-    per argument but gives better IDE completion and keeps static
-    analysis honest, since the annotations name the types the body
-    actually sees.
+    This example compiles the function with type-only placeholders before
+    any NCCL resources exist, then invokes the compiled callable with views
+    wrapping the real resources.
 
     Args:
         dev_comm: CuTeDSL view of the NCCL device communicator.
         send_win: CuTeDSL view of the registered source window.
         recv_win: CuTeDSL view of the registered destination window.
     """
-    test_nccl_put_kernel(dev_comm, send_win, recv_win, SIGNAL_ID1).launch(
-        grid=[1, 1, 1],
-        block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
-        cooperative=True
-    )
-
-
-@cute.jit
-def test_nccl_put_resources(
-        dev_comm: nccl.DevCommResource,
-        send_win: nccl.RegisteredWindowHandle,
-        recv_win: nccl.RegisteredWindowHandle,
-    ):
-    """Same launch, taking the nccl.core resources unconverted.
-
-    The registered JIT arg adapters convert each argument on the way in,
-    so inside this body the parameters are already nccl_cute.DevComm /
-    nccl_cute.Window. Saves a conversion per argument at the call site.
-
-    Args:
-        dev_comm: DevCommResource as returned by
-            nccl_comm.create_dev_comm.
-        send_win: source RegisteredWindowHandle as returned by
-            nccl_comm.register_window.
-        recv_win: destination RegisteredWindowHandle, likewise.
-    """
-    test_nccl_put_kernel(dev_comm, send_win, recv_win, SIGNAL_ID2).launch(
+    test_nccl_put_kernel(dev_comm, send_win, recv_win, SIGNAL_ID).launch(
         grid=[1, 1, 1],
         block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
         cooperative=True
@@ -183,19 +151,38 @@ def test_nccl_put_resources(
 
 
 def main():
-    """Run a 1 MiB GIN put + signal demo across two MPI ranks.
+    """Run a 1 MiB GIN put + signal demo across exactly two MPI ranks.
 
     Returns:
-        Exit code; 0 on success. Host-side validation on the receiver
-        prints ``[SUCCESS]`` or ``[ERROR N / NUM_ELEMS mismatches]``.
+        Exit code; 1 on a wrong rank count or a payload mismatch, otherwise 0.
+        Host-side validation prints ``[SUCCESS]`` or
+        ``[ERROR N / NUM_ELEMS mismatches]``.
     """
     comm_mpi = MPI.COMM_WORLD
     rank = comm_mpi.Get_rank()
     nranks = comm_mpi.Get_size()
     root = 0
 
+    if nranks != 2:
+        if rank == root:
+            print(f"\n[{NAME}] ERROR: needs exactly 2 ranks, got {nranks}")
+        return 1
+
+    if rank == root:
+        print(f"\n===== {NAME} =====", flush=True)
+
     device = Device(rank % system.get_num_devices())
     device.set_current()
+
+    # Compile before any NCCL communicator or registered window exists. These
+    # placeholders contribute only MLIR argument types; the compiled callable
+    # receives real resources below.
+    compiled_test_nccl_put = cute.compile(
+        test_nccl_put,
+        nccl_cute.runtime.make_fake_dev_comm(),
+        nccl_cute.runtime.make_fake_window(),
+        nccl_cute.runtime.make_fake_window(),
+    )
 
     unique_id = nccl.get_unique_id() if rank == root else None
     unique_id = comm_mpi.bcast(unique_id, root=root)
@@ -212,7 +199,8 @@ def main():
         return 0
 
     if rank == root:
-        print(f"Running with {nranks} ranks, transferring {NUM_ELEMS * 8} bytes...")
+        print(f"Running with {nranks} ranks, transferring {NUM_ELEMS * 8} bytes "
+              f"from rank 0 to rank {DST_RANK}...")
 
     # Rank 0 fills send_buf with a pattern; rank 1's recv_buf starts zeroed
     # so the transfer is visible. Each rank registers both windows because
@@ -233,16 +221,15 @@ def main():
 
     reqs = nccl.NCCLDevCommRequirements(
         gin_connection_type=nccl.NcclGinConnectionType.FULL,
-        gin_signal_count=max(SIGNAL_ID1, SIGNAL_ID2) + 1,
+        gin_signal_count=SIGNAL_ID + 1,
     )
     dev_comm_resource = nccl_comm.create_dev_comm(requirements=reqs)
     assert dev_comm_resource.is_valid
     assert dev_comm_resource.ptr != 0
 
-    # Convert here; the annotations on test_nccl_put name these types.
     if rank == root:
-        print("Launch 1: passing converted nccl_cute objects")
-    test_nccl_put(
+        print("Launching a function compiled before NCCL resources existed")
+    compiled_test_nccl_put(
         nccl_cute.DevComm(dev_comm_resource),
         nccl_cute.Window(send_win_resource),
         nccl_cute.Window(recv_win_resource),
@@ -250,22 +237,8 @@ def main():
     device.sync()
     comm_mpi.Barrier()
 
-    # Clear the destination so the second launch has to transfer the payload
-    # again rather than inheriting the first one's result.
-    if rank == DST_RANK:
-        recv_buf[:] = 0
-        device.sync()
-    comm_mpi.Barrier()
-
-    # Hand the resources over as nccl.core returned them and let the
-    # registered JIT arg adapters convert them.
-    if rank == root:
-        print("Launch 2: passing the resources straight through")
-    test_nccl_put_resources(dev_comm_resource, send_win_resource, recv_win_resource)
-    device.sync()
-    comm_mpi.Barrier()
-
-    # Host-side validation on the receiver — compare the full 1 MiB payload.
+    # Host-side validation on the receiver -- compare the full 1 MiB payload.
+    mismatches = 0
     if rank == DST_RANK:
         expected = cp.arange(NUM_ELEMS, dtype='int64')
         mismatches = int((recv_buf != expected).sum().item())
@@ -274,12 +247,16 @@ def main():
         else:
             print(f"[rank {rank}] [ERROR] {mismatches} / {NUM_ELEMS} mismatches")
 
+    # Only the destination rank validates, so share the verdict for the exit
+    # code.
+    mismatches = comm_mpi.bcast(mismatches, root=DST_RANK)
+
     dev_comm_resource.close()
     send_win_resource.close()
     recv_win_resource.close()
     nccl_comm.destroy()
 
-    return 0
+    return 0 if mismatches == 0 else 1
 
 
 if __name__ == "__main__":

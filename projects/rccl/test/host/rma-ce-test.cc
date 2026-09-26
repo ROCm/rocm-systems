@@ -903,11 +903,14 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
+  // NCCL 2.32 orders peers LSA-cyclically from lsaSelf+1 (not in enqueue order) to
+  // avoid destination incast. With kLsaSelf=3 and kLsaWorld={4,3,1,0,2} the walk
+  // visits world ranks 2,4,3,1, so peer 3 precedes peer 1.
   auto batches = Batches();
   ASSERT_EQ(batches.size(), 2u);
   ASSERT_EQ(batches[0].size(), 2u);
-  EXPECT_EQ(batches[0][0].dst, PeerData(1));
-  EXPECT_EQ(batches[0][1].dst, PeerData(3));
+  EXPECT_EQ(batches[0][0].dst, PeerData(3));
+  EXPECT_EQ(batches[0][1].dst, PeerData(1));
 
   // Both peers signal in the same round, so each takes its own staging slot --
   // sharing one would make the second overwrite the first. Pinned on the staging
@@ -919,8 +922,8 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
   ASSERT_EQ(batches[1].size(), 2u);
   EXPECT_EQ(batches[1][0].src, &ceCtx->signalOpSeqsDev[0]);
   EXPECT_EQ(batches[1][1].src, &ceCtx->signalOpSeqsDev[1]);
-  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(1, ceCtx->signalOffset));
-  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(1, ceCtx->signalOffset));
 }
 
 // Two tasks for the same peer cannot share a batch, because a batched copy does

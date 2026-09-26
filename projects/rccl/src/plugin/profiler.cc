@@ -126,7 +126,8 @@ static ncclResult_t ncclProfilerProxyTraceSiblingPath(char* out, size_t outSz) {
 }
 
 static ncclResult_t ncclProfilerPluginLoad(void) {
-  const char* profilerName;
+  const char* profilerName = nullptr;
+  bool profilerPluginRequested = false;
   if (profilerPluginLoadFailed == profilerPluginStatus) {
     return ncclSuccess;
   }
@@ -138,6 +139,7 @@ static ncclResult_t ncclProfilerPluginLoad(void) {
   }
 
   if ((profilerName = ncclGetEnv("NCCL_PROFILER_PLUGIN")) != nullptr) {
+    profilerPluginRequested = true;
     INFO(NCCL_ENV, "NCCL_PROFILER_PLUGIN set by environment to %s", profilerName);
     if (strcasecmp(profilerName, "none") == 0) goto fail;
   }
@@ -183,7 +185,10 @@ static ncclResult_t ncclProfilerPluginLoad(void) {
     ncclProfiler = getNcclProfiler_v1(profilerPluginLib);
   }
   if (ncclProfiler == NULL) {
-    if (profilerName) INFO(NCCL_INIT, "External profiler plugin %s is unsupported", profilerName);
+    if (profilerName) {
+      if (profilerPluginRequested) ATTN("External profiler plugin %s is unsupported", profilerName);
+      else INFO(NCCL_INIT, "External profiler plugin %s is unsupported", profilerName);
+    }
     goto fail;
   }
   if (profilerName) INFO(NCCL_INIT, "Successfully loaded external profiler plugin %s", profilerName);
@@ -385,7 +390,7 @@ ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) {
                                  comm->nNodes, comm->nRanks, comm->rank, ncclDebugLog);
     if (err) {
       ncclProfilerPluginUnload();
-      INFO(NCCL_INIT, "Profiler init failed with error '%d': %s. Continue without profiler.", err, strerror(errno));
+      ATTN("Profiler init failed with error '%d': %s. Continue without profiler.", err, strerror(errno));
     }
 
     // KernelPhase requires KernelCh; enable it implicitly (logs if it changes the mask).
@@ -419,6 +424,7 @@ ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) {
 ncclResult_t ncclProfilerStartGroupApiEvent(struct ncclInfo* info, bool isGraphCaptured) {
   ncclProfilerEventDescr_t eDescr = {0};
   eDescr.type = ncclProfileGroupApi;
+  eDescr.rank = info->comm->rank;
   eDescr.groupApi.graphCaptured = isGraphCaptured;
 
   ncclProfilerApiState.eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
@@ -469,6 +475,7 @@ ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t eStat
 ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo* info, bool isGraphCaptured) {
   ncclProfilerEventDescr_t eDescr = {0};
   eDescr.type = ncclProfileP2pApi;
+  eDescr.rank = info->comm->rank;
   eDescr.parentObj = ncclProfilerApiState.groupApiEventHandle;
   eDescr.p2pApi.func = ncclFuncToString(info->coll);
   eDescr.p2pApi.count = info->count;
@@ -501,6 +508,7 @@ ncclResult_t ncclProfilerStopP2pApiEvent() {
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo* info, bool isGraphCaptured) {
   ncclProfilerEventDescr_t eDescr = {0};
   eDescr.type = ncclProfileCollApi;
+  eDescr.rank = info->comm->rank;
   eDescr.parentObj = ncclProfilerApiState.groupApiEventHandle;
   eDescr.collApi.func = ncclFuncToString(info->coll);
   eDescr.collApi.count = info->count;
@@ -561,6 +569,7 @@ ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cud
   startKernelLaunchEvent:
     if (eActivationMask_ & ncclProfileKernelLaunch) {
       eDescr.type = ncclProfileKernelLaunch;
+      eDescr.rank = plan->comm->rank;
       eDescr.parentObj = groupApiEventHandle;
       eDescr.kernelLaunch.stream = (void*)stream;
       ncclProfiler->startEvent(plan->comm->profilerContext, &plan->kernelLaunchEventHandle, &eDescr);
@@ -644,12 +653,9 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         eDescr.coll.root = ct->root;
         eDescr.coll.datatype = ncclDatatypeToString(ct->datatype);
         eDescr.coll.nChannels = ct->nChannels;
-        // Sym plans post all KernelCh ops against the head task's event
-        // (profilerPostPlanWorkSym), covering countOneBits(plan->channelMask)
-        // channels, while ct->nChannels stays 0. Advertise the real count on the
-        // head so completion-gating plugins balance their per-channel refs.
-        if (plan->isSymColl && (ct->eActivationMask & ncclProfileKernelCh) &&
-            ct == ncclIntruQueueHead(&plan->collTaskQueue))
+        // Sym plans use plan->channelMask while ct->nChannels stays 0.
+        // Advertise the real count on the head task.
+        if (plan->isSymColl && ct == ncclIntruQueueHead(&plan->collTaskQueue))
           eDescr.coll.nChannels = (uint8_t)countOneBits(plan->channelMask);
         eDescr.coll.nWarps = ct->nWarps;
         eDescr.coll.isSymColl = plan->isSymColl;
@@ -1303,7 +1309,9 @@ static void profilerEnqueueOp(struct ncclProfilerThread* pt, struct ncclComm* co
       // Sym collectives poll a dedicated buffer set (see ncclProfilerCommState).
       op->workStarted = sym ? comm->profiler.symWorkStarted : comm->profiler.workStarted;
       op->workCompleted = sym ? comm->profiler.symWorkCompleted : comm->profiler.workCompleted;
-      op->workPhases = sym ? comm->profiler.symWorkPhases : comm->profiler.workPhases;
+      // Null for regular/p2p: they never publish a phases counter, so the completion
+      // check would otherwise wait on it forever.
+      op->workPhases = sym ? comm->profiler.symWorkPhases : nullptr;
       op->kernelEventHandle = nullptr;
       op->started = false;
       op->completed = false;
@@ -1363,7 +1371,7 @@ void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan
   struct ncclTaskColl* sct = ncclIntruQueueHead(&plan->collTaskQueue);
   if (sct == nullptr || !(sct->eActivationMask & ncclProfileKernelCh)) return;
   struct ncclSymkDevWorkArgs* argsBuf = (struct ncclSymkDevWorkArgs*)plan->kernelSymArgs;
-  if (!argsBuf->profilerEnabled) return;
+  if (!argsBuf->profilerMode) return;
   uint64_t* counters = argsBuf->getProfilerCounters();
   int nChannels = countOneBits(plan->channelMask);
   for (int c = 0; c < nChannels; c++) counters[c] = ++comm->profiler.symWorkCounter[c];
@@ -1378,7 +1386,7 @@ static void profilerPostPlanWorkSym(struct ncclComm* comm, struct ncclKernelPlan
   struct ncclProfilerThread* pt = comm->profiler.profilerThread;
   if (pt == nullptr) return;
   struct ncclSymkDevWorkArgs* argsBuf = (struct ncclSymkDevWorkArgs*)plan->kernelSymArgs;
-  if (!argsBuf->profilerEnabled) return;
+  if (!argsBuf->profilerMode) return;
   uint64_t* counters = argsBuf->getProfilerCounters();
   int nChannels = countOneBits(plan->channelMask);
   for (int c = 0; c < nChannels; c++) {
@@ -1453,6 +1461,17 @@ bool ncclProfilerPluginLoaded(void) {
   return (COMPILER_EXPECT(ncclProfiler != NULL, 0));
 }
 
+uint8_t ncclProfilerDeviceMode(int eActivationMask) {
+  if (!ncclProfilerPluginLoaded()) return ncclDevProfilerModeNone;
+
+  uint8_t mode = ncclDevProfilerModeNone;
+  if (eActivationMask & ncclProfileKernelCh) mode |= ncclDevProfilerModeKernelCh;
+  if (eActivationMask & ncclProfileKernelPhase) {
+    mode |= ncclDevProfilerModeKernelCh | ncclDevProfilerModeKernelPhase;
+  }
+  return mode;
+}
+
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData) {
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
     if (type == ncclProfilerNetEventStart) { // start
@@ -1507,8 +1526,7 @@ ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCo
       eDescr.ceColl.count = args->nElts;
       eDescr.ceColl.root = args->rootRank;
       eDescr.ceColl.datatype = ncclDatatypeToString(args->datatype);
-      // NVLS multicast isn't available across cliques - report UC for cross-clique
-      eDescr.ceColl.syncStrategy = (comm->nvlsSupport && !comm->p2pCrossClique) ? "MC" : "UC";
+      eDescr.ceColl.syncStrategy = comm->symkState.hasLsaMultimem ? "MC" : "UC";
       eDescr.ceColl.intraBatchSync = false;
       eDescr.ceColl.batchSize = 0;
       eDescr.ceColl.numBatches = 0;

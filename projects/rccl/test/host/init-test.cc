@@ -1423,6 +1423,7 @@ void FillParentConfig(ncclConfig_t& c) {
   c.numRmaSig = 6;
   c.rmaEagerInit = 1;
   c.hostCftMode = ncclHostCftEnable;
+  c.nvlsHostMode = ncclNvlsHostModeDisableTransport;
 }
 
 void FillChildConfig(ncclConfig_t& c) {
@@ -1451,11 +1452,12 @@ void FillChildConfig(ncclConfig_t& c) {
   c.numRmaSig = 7;
   c.rmaEagerInit = 0;
   c.hostCftMode = ncclHostCftFallback;
+  c.nvlsHostMode = ncclNvlsHostModeDisableSymmetricMultimem;
 }
 
 // TRIPWIRE: a new ncclConfig_t field must be added to both fills and to ExpectConfigFieldsEqual, or a
 // memcpy truncated just before it would go unnoticed. Update all four sites together.
-static_assert(sizeof(ncclConfig_t) == 112, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
+static_assert(sizeof(ncclConfig_t) == 120, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
 
 // Field-by-field so a failure names the field. netName by content: envConfigOverride re-mallocs it.
 void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) {
@@ -1485,6 +1487,7 @@ void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) 
   EXPECT_EQ(want.numRmaSig, got.numRmaSig);
   EXPECT_EQ(want.rmaEagerInit, got.rmaEagerInit);
   EXPECT_EQ(want.hostCftMode, got.hostCftMode);
+  EXPECT_EQ(want.nvlsHostMode, got.nvlsHostMode);
 }
 
 // envConfigOverride always replaces config.netName with a fresh malloc; free it so the copy tests do not leak.
@@ -5482,7 +5485,8 @@ TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
   ncclResult_t ret = ncclSuccess;
   const std::string log = CaptureInfoLog([&] { ret = Teardown_RunDestroySync(c.get()); });
   EXPECT_EQ(ncclInternalError, ret);
-  EXPECT_TRUE(LogHas(log, "commDestroySync: comm")) << "actual log:\n" << log;
+  // NCCL 2.32 reworded this INFO without the "commDestroySync:" prefix.
+  EXPECT_TRUE(LogHas(log, "proxy stop error")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallbacksClearThem) {
@@ -5537,7 +5541,8 @@ TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsR
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get())); });
   EXPECT_EQ(2, ran);
-  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed comm")) << "actual log:\n" << log;
+  // NCCL 2.32 wording: "... failed for comm 0x<hash> rank <r>".
+  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed for comm")) << "actual log:\n" << log;
   EXPECT_TRUE(ncclIntruQueueEmpty(&c.get()->legacyRegCleanupQueue));
 }
 
@@ -5650,8 +5655,8 @@ TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) 
 
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
-  EXPECT_TRUE(LogHas(log, "commReclaim: comm")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "in commDestroySync, error")) << "actual log:\n" << log;
+  // NCCL 2.32 raised this to ATTN and reworded it: "comm 0x<hash> rank <r> commDestroySync error <e>".
+  EXPECT_TRUE(LogHas(log, "commDestroySync error")) << "actual log:\n" << log;
   for (int i = 0; i < kChainLength; ++i) EXPECT_EQ(1, members[i].rec.finalizeCalls);
 }
 
@@ -6290,7 +6295,8 @@ TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfT
 
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
-  EXPECT_TRUE(LogHas(log, "commReclaim: cleanup comm")) << "actual log:\n" << log;
+  // NCCL 2.32 raised this to ATTN and dropped the "commReclaim: " prefix.
+  EXPECT_TRUE(LogHas(log, "cleanup comm")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "failed in destroy/abort, error")) << "actual log:\n" << log;
   EXPECT_EQ(1, members[1].rec.finalizeCalls);
   members[0].comm->tuner = nullptr;
@@ -7173,8 +7179,9 @@ TEST_F(InitMicrotest, CommInitRankFunc_DevicePropertiesFail_ReturnsBeforeKernelI
   EXPECT_EQ(0, s.comm()->cuCount);
 }
 
-// LATENT BUG (init.cc:2669): a bare NCCLCHECK returns past the fail: free, leaking the archName strdup'd at :2661.
-TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenReturnsWithoutPublishing) {
+// NCCL 2.32 fixed the former latent bug here: kernel-init failure now goes through NCCLCHECKGOTO to fail:,
+// which records the error in initState and still publishes via exit:, instead of returning past both.
+TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenFailsThroughExit) {
   Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
   ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
   int seenArch = -1;
@@ -7192,8 +7199,8 @@ TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemT
   EXPECT_EQ(Rank_kCudaArch, seenArch);
   EXPECT_EQ(Rank_kMaxSharedMem, seenSharedMem);
   EXPECT_EQ(1, kernels.calls);
-  EXPECT_EQ(nullptr, s.published()) << "a bare NCCLCHECK returns directly, skipping the exit: publish";
-  EXPECT_EQ(ncclSuccess, s.comm()->initState) << "and skipping the fail: initState store";
+  EXPECT_NE(nullptr, s.published()) << "NCCLCHECKGOTO reaches the exit: publish";
+  EXPECT_EQ(ncclInternalError, s.comm()->initState) << "and the fail: initState store";
 }
 
 TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantStackSpace_RaisesTheDeviceStackLimitToThatSize) {
@@ -8618,7 +8625,7 @@ TEST_F(InitMicrotest, InitChildComm_Split_AllocatesChildAndLaunchesOnTheParent) 
   EXPECT_FALSE(r.isGrow);
   EXPECT_EQ(NCCL_MAGIC, child->startMagic);
   EXPECT_EQ(NCCL_MAGIC, child->endMagic);
-  EXPECT_EQ(ncclInternalError, child->initState);
+  EXPECT_EQ(ncclInProgress, child->initState);  // NCCL 2.32: was ncclInternalError until init succeeded
   EXPECT_FALSE(parent->shareResources);
   ASSERT_NE(nullptr, child->abortFlag);
   EXPECT_NE(parent->abortFlag, child->abortFlag);

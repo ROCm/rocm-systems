@@ -549,7 +549,7 @@ TEST_F(RasDiagnosticsCommonMicrotest, ReportIncompleteIncludesCountsAndFullCommI
   EXPECT_EQ(ncclSuccess, rasDiagnosticsReportIncomplete(&reporter, "GPU model", &rank, 12));
   ASSERT_EQ(1u, state.lines.size());
   EXPECT_EQ("[INFO] GPU model: diagnostics incomplete, gathered 12/16 ranks in comm "
-            "0x1122334455667788/0x99aabbccddeeff00/0x123456789abcdef (RAS overlay may not be ready)",
+            "0x1122334455667788/0x99aabbccddeeff00/0x123456789abcdef",  // NCCL 2.32 dropped the "(RAS overlay may not be ready)" suffix
             state.lines[0]);
 
   state.emitResult = ncclRemoteError;

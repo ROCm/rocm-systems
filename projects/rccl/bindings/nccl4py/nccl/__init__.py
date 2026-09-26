@@ -14,7 +14,7 @@ point-to-point communication, and advanced features like buffer registration
 and custom reduction operators.
 """
 
-from nccl._version import __version__
+from nccl.core._version import __version__
 from nccl._show_versions import LibraryInfo, VersionInfo, get_version, show_versions
 
 # Register the local HIP-backed cuda.core shim under the `cuda.core`

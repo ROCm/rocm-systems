@@ -75,12 +75,15 @@ class Primitives<T, RedOp, Fan, Direct,
     else barrier();
   }
 
+  // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
+  template <bool isHierarchical>
   inline __device__ void patBarrier() {
+    constexpr int nPatWorkers = isHierarchical ? NCCL_PAT_MULTI_RPN_NWORKERS : NCCL_PAT_NWORKERS;
     // To be revisited for correctness on gfx1250
 #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
-    barrier_generic(__threadfence_block(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
+    barrier_generic(__threadfence_block(), nPatWorkers, barrier_next_pat, barriers_pat);
 #else
-    barrier_generic(__threadfence(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
+    barrier_generic(__threadfence(), nPatWorkers, barrier_next_pat, barriers_pat);
 #endif
   }
 
@@ -842,7 +845,11 @@ public:
         }
       }
     }
-    patBarrier();
+    if (localRanks > 1) {
+      patBarrier</*isHierarchical=*/true>();
+    } else {
+      patBarrier</*isHierarchical=*/false>();
+    }
   }
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
@@ -1199,11 +1206,11 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
     }
   }
   if (ps->flags & PatSkipped) {
-    patBarrier();
+    patBarrier</*isHierarchical=*/needsNvlsReduce>();
     if (nvlsPoster) {
       nvlsReducePeer->step += StepPerSlice;
     }
-    patBarrier();
+    patBarrier</*isHierarchical=*/needsNvlsReduce>();
     if (nvlsPoster) {
       st_relaxed_sys_global(nvlsReducePeer->headPtr, nvlsReducePeer->step);
     }
@@ -1268,7 +1275,7 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
       ncclShmem.groups[group].srcs[needsNvlsReduce ? 0 : 1] = ncclShmem.groups[group].dsts[0];
     }
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsNvlsReduce>();
   int nSrcs = (ps->recvDim < 0) ? 1 : 2;
   // No peer to receive from, remove one source
   void** srcs =
@@ -1309,7 +1316,7 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
     nvlsReducePeer->step += StepPerSlice;
   }
 
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsNvlsReduce>();
 
   if (postSend && (flags & RolePostSend)) {
     if (nelem > 0 || peer->connFifo) fence_acq_rel_sys();
@@ -1338,7 +1345,7 @@ __device__ __forceinline__ void patNvlsBcast(struct ncclPatStep* ps, struct nccl
     ncclShmem.groups[group].dsts[1] =
       ((T*)nvlsBcastPeer->buff) + (nvlsBcastPeer->step % NCCL_STEPS) * nvlsBcastPeer->connStepSize + ps->nvlsOffset;
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/true>();
   if (workSize > 0) {
     reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 1, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
                                                                             ncclShmem.groups[group].redOpArgs,
@@ -1346,7 +1353,7 @@ __device__ __forceinline__ void patNvlsBcast(struct ncclPatStep* ps, struct nccl
                                                                             ncclShmem.groups[group].srcs, 1,
                                                                             ncclShmem.groups[group].dsts + 1, workSize);
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/true>();
 
   if (flags & RolePostPatNvls) {
     nvlsBcastPeer->step += StepPerSlice;
@@ -1360,8 +1367,8 @@ template <bool needsBcast = false>
 __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatShmem* shmem) {
   bool skipped = ps->flags & PatSkipped;
   if (skipped) {
-    patBarrier();
-    patBarrier();
+    patBarrier</*isHierarchical=*/needsBcast>();
+    patBarrier</*isHierarchical=*/needsBcast>();
     if (needsBcast) patNvlsBcast(ps, shmem, 0, /*skipped=*/true);
     return;
   } // Skipped
@@ -1420,7 +1427,7 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
       ncclShmem.groups[group].dsts[1] = ncclShmem.groups[group].srcs[0];
     }
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsBcast>();
 
   int workSize = ncclShmem.aborted ? 0 : nelem;
 
@@ -1462,7 +1469,7 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
   if (ps->recvDim >= 0 && (flags & RoleWaitRecv))
     atomicMax(&peer->accSize, ps->recvOffset + nelem + (step + ps->stepOffset) * peer->connStepSize);
 
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsBcast>();
 
   if (postSend && (flags & RolePostSend)) {
     if (nelem > 0 || peer->connFifo) fence_acq_rel_sys();

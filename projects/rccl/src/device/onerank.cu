@@ -7,6 +7,7 @@
 
 #include "alloc.h"
 #include "collectives.h"
+#include "cudawrap.h"
 #include "common_kernel.h"
 #include <cuda_runtime.h>
 
@@ -65,7 +66,8 @@ __global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, vo
 } // namespace
 
 ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
-                               ncclDataType_t eltType, cudaStream_t stream, void const* acc) {
+                               ncclDataType_t eltType, cudaStream_t stream, cudaEvent_t launchCompletionEvent,
+                               void const* acc) {
   size_t eltSize = ncclTypeSize(eltType);
 
   // handles all_reduce for non-PreMulSum ops
@@ -141,6 +143,31 @@ ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct 
   void* mutableSrc = const_cast<void*>(src);
   void* mutableAcc = const_cast<void*>(acc);
   void* args[6] = {&dst, &mutableSrc, &mutableAcc, &nElts, &redOp.scalarArg, &redOp.scalarArgIsPtr};
+
+#if CUDART_VERSION >= 12030
+  if (launchCompletionEvent != nullptr) {
+    int driverVersion;
+    NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
+    if (driverVersion >= 12030) {
+      cudaLaunchAttribute attr = {};
+      attr.id = cudaLaunchAttributeLaunchCompletionEvent;
+      attr.val.launchCompletionEvent.event = launchCompletionEvent;
+      attr.val.launchCompletionEvent.flags = 0;
+      cudaLaunchConfig_t config = {};
+      config.gridDim = grid;
+      config.blockDim = block;
+      config.stream = stream;
+      config.attrs = &attr;
+      config.numAttrs = 1;
+      CUDACHECK(cudaLaunchKernelExC(&config, kernel, args));
+      return ncclSuccess;
+    }
+  }
+#endif
+  if (launchCompletionEvent != nullptr) {
+    WARN("CUDA launch-completion events require CUDA 12.3 or newer; recording the user event before launch");
+    CUDACHECK(cudaEventRecord(launchCompletionEvent, stream));
+  }
   CUDACHECK(cudaLaunchKernel(kernel, grid, block, args, 0, stream));
   return ncclSuccess;
 }

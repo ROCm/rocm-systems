@@ -425,6 +425,15 @@ public:
 
 // Need a power of two to ensure it divides by parallelFactor (which is also a power of two)
 #define NCCL_PAT_NWORKERS 128
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// [RCCL] Upstream uses 256 (of 640 threads). RCCL blocks are NCCL_MAX_NTHREADS=256 with 64-wide
+// warps, so 256 workers would leave no gather workers and overflow the barrier group index.
+#define NCCL_PAT_MULTI_RPN_NWORKERS NCCL_PAT_NWORKERS
+static_assert(NCCL_PAT_MULTI_RPN_NWORKERS + WARP_SIZE < NCCL_MAX_NTHREADS,
+              "multi-RPN PAT needs room for the gather workers");
+#else
+#define NCCL_PAT_MULTI_RPN_NWORKERS 256
+#endif
 
 static constexpr int PatUsed = 0x1, PatSkipped = 0x2;
 

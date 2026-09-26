@@ -53,7 +53,7 @@ void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
 
 }  // namespace GinAnvilPluginStubs
 
-int ncclDebugLevel = NCCL_LOG_VERSION;
+uint32_t ncclDebugLevelMask = (1u << NCCL_LOG_ERROR) | (1u << NCCL_LOG_VERSION);
 uint64_t ncclDebugMask = NCCL_INIT;
 thread_local int ncclDebugNoWarn = 0;
 

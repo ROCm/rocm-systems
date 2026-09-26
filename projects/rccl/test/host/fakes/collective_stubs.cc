@@ -30,6 +30,11 @@
 
 // enqueue.h
 ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
+// group.cc validates every comm's launch-completion events on the happy path, so mirror
+// enqueue.cc rather than abort: at most one per communicator per group.
+ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm) {
+  return comm->planner.nCollConfigLaunchCompletionEvents > 1 ? ncclInvalidUsage : ncclSuccess;
+}
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchPrepare(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }

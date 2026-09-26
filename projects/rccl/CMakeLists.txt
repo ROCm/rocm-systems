@@ -243,6 +243,10 @@ else()
   set(SUPPORTED_GPUS ${DEFAULT_GPUS})
 endif()
 
+# TLS backend for socket encryption (empty = disabled; OPENSSL3 = headers only, libssl is dlopen'd at runtime)
+set(TLS_BACKEND "$ENV{TLS_BACKEND}" CACHE STRING "TLS backend (empty or OPENSSL3)")
+set_property(CACHE TLS_BACKEND PROPERTY STRINGS "" OPENSSL3)
+
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 
 # Fail fast if we ended up with no GPU targets at all
@@ -629,6 +633,17 @@ set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy lo
 #     set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
 #   endif ()
 # endif()
+
+## Check for TLS backend (socket encryption, see src/misc/crypt.cc)
+set(NCCL_TLS_INCLUDE_DIRS)
+if(TLS_BACKEND STREQUAL "OPENSSL3")
+  find_package(OpenSSL 3.0 REQUIRED COMPONENTS SSL Crypto)
+  add_compile_definitions(NCCL_TLS_BACKEND_OPENSSL3=1)
+  list(APPEND NCCL_TLS_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR})
+  include_directories(${NCCL_TLS_INCLUDE_DIRS})
+elseif(NOT TLS_BACKEND STREQUAL "")
+  message(FATAL_ERROR "Unsupported TLS_BACKEND '${TLS_BACKEND}'; expected OPENSSL3 or empty")
+endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)

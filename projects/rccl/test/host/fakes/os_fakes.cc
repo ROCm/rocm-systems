@@ -27,6 +27,7 @@ void ncclOsAlignedFree(void* ptr) { free(ptr); }
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
 size_t ncclOsGetPageSize() { return 4096; }
+size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no cap
 
 // Controllable (was fail-loud). Records the mask too: :1608 and exit::2403 both call this, and without the
 // recorder either call site could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity)

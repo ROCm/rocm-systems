@@ -24,6 +24,11 @@
 
 #include "fail_loud.h"
 
+// Mirrors src/config/collconfig.cc: a zero-size config means no user config.
+hipEvent_t ncclCollConfigGetLaunchCompletionEvent(const ncclCollConfig_t* c) {
+  return (c == nullptr || c->size == 0) ? nullptr : c->launchCompletionEvent;
+}
+
 bool ncclCollConfigHasAlgSelection(const ncclCollConfig_t* config) {
   if (config == NULL) return false;
   return config->algSelection != NCCL_CONFIG_UNDEF_PTR && config->algSelection[0] != '\0';

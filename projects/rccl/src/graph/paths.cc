@@ -589,7 +589,19 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   }
 
   // Check if we are close enough that it makes sense to enable GDR
-  int netGdrLevel = system->netGdrLevel == -2 ? (ncclParamNetGdrC2c() ? PATH_P2C : PATH_PXB) : system->netGdrLevel;
+  int netGdrLevel = PATH_PXB;
+  if (ncclParamNetGdrC2c()) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // The MLOPart C2C restriction below keys on the CUDA driver version; RCCL's MLOPart GDR policy is
+    // NCCL_NET_GDR_MLOPART above, so partitions follow the whole-GPU level here.
+    netGdrLevel = PATH_P2C;
+#else
+    // MloPart over C2C requires cuMem GDR support with CUDA 13.4+ (must be available communicator wide)
+    bool gdrSupport = system->cuMemGdrSupport && system->minDriverVersion >= 13040;
+    if (gpu->gpu.mloPart == NCCL_TOPO_UNDEF || gdrSupport) netGdrLevel = PATH_P2C;
+#endif
+  }
+  if (system->netGdrLevel != -2) netGdrLevel = system->netGdrLevel;
   NCCLCHECK(ncclGetLevel(&ncclTopoUserGdrLevel, NULL, "NCCL_NET_GDR_LEVEL"));
   if (ncclTopoUserGdrLevel != -2) netGdrLevel = ncclTopoUserGdrLevel;
   else {

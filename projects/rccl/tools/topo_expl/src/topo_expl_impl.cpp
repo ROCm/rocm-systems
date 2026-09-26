@@ -181,7 +181,7 @@ void ncclMemoryStackDestruct(struct ncclMemoryStack* me) {
   }
 }
 
-int ncclDebugLevel = -1;
+static int ncclDebugLevel = -1;
 
 void ncclDebugInit() {
   if (ncclDebugLevel != -1) return;

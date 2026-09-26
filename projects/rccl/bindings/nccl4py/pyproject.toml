@@ -54,15 +54,29 @@ issues = "https://github.com/ROCm/rocm-systems/issues"
 
 [build-system]
 requires = [
-    "setuptools>=77.0.3",
+    "setuptools>=80",
+    "setuptools-scm>=10.2,<11",
     "Cython>=3.1"
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+root = "../.."
+version_scheme = "no-guess-dev"
+local_scheme = "node-and-date"
+
+# [RCCL] upstream sets [tool.setuptools_scm.scm.git] pre_parse = "fail_on_shallow"; dropped so
+# shallow CI clones of rocm-systems can still build nccl4py.
+
+[tool.setuptools_scm.tag]
+prefix = "nccl4py-v"
+strict = true
 
 [tool.setuptools]
 include-package-data = false
 
 [tool.setuptools.packages.find]
+where = ["."]
 # Only the `nccl` package is shipped on disk. The HIP-backed
 # `cuda.core` surface is registered in `sys.modules` lazily on
 # `import nccl` (see `nccl/__init__.py` -> `_register_as_cuda_core`)
@@ -80,15 +94,13 @@ include = ["nccl*"]
 
 [tool.setuptools.package-data]
 "nccl.bindings" = ["cynccl.pxd", "cynccl_ep.pxd"]
+"nccl.core" = ["py.typed"]
 "nccl.ep" = [
     "lib/libnccl_ep.so",
     "include/*.h",
     "include/*.hpp",
     "include/device/*.cuh",
 ]
-
-[tool.setuptools.dynamic]
-version = { attr = "nccl._version.__version__" }
 
 [tool.ruff]
 line-length = 100
@@ -116,7 +128,7 @@ skip = "*-musllinux_*"
 build-verbosity = 1
 
 [tool.cibuildwheel.linux]
-archs = ["native"]  # Fast local builds; override in CI for multi-arch
+archs = ["native"]  # Each local or CI runner builds its native architecture
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 repair-wheel-command = "auditwheel repair --exclude libnccl.so.2 --exclude libcuda.so.1 -w {dest_dir} {wheel}"

@@ -23,6 +23,26 @@ int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENAB
 
 int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
 int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }
+// src/ras/ras.cc (NCCL 2.32): init.cc gates the progress-counter monitor on RAS being enabled.
+int64_t ncclParamRasEnable() { return g_loadParam("RAS_ENABLE", 1); }
+
+// src/cft_dev_runtime.cc: CFT needs CUDA >= 13.3 logical endpoints, so on HIP every capability is off.
+ncclResult_t ncclGpuCftSupport(struct ncclComm*, int* gpuCftSupport, bool* gpuCftMulticastSupport,
+                               bool* gpuCftCountedSupport) {
+  *gpuCftSupport = 0;
+  *gpuCftMulticastSupport = false;
+  *gpuCftCountedSupport = false;
+  return ncclSuccess;
+}
+
+// src/ras/progress_monitor.cc (NCCL 2.32). NCCL_PROGRESS_COUNTERS defaults to 0, so the suites here never
+// start a monitor; Destroy runs on every comm teardown and must succeed.
+ncclResult_t ncclProgressCounterMonitorInit(struct ncclComm*) { return ncclSuccess; }
+ncclResult_t ncclProgressCounterMonitorDestroy(struct ncclComm*) { return ncclSuccess; }
+
+// src/device/common.cu's __global__ ncclProgressCounterCaptureGpuTime. init.cc only takes its address to hand
+// to the (faked) kernel launch, so a host function with the same mangled name satisfies the link.
+void ncclProgressCounterCaptureGpuTime(uint64_t*) {}
 int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }
 
 // Dead seam: no src/*.cc defines ncclTopoGetStrFromSys and no unit under test calls it. Kept as-is

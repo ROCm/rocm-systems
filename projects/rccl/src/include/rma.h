@@ -17,5 +17,6 @@ ncclResult_t ncclRmaFinalize(struct ncclComm* comm);
 
 extern ncclRma_t ncclRmaIbProxy;
 extern ncclRma_t IbCastRmaIbProxy;
+extern ncclRma_t ncclRmaSocketProxy;
 
 #endif

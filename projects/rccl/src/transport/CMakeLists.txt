@@ -1,13 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# See LICENSE.txt for more license information
+
 # Transport sources
 set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/nvls.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/nvls_ub.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/mc_arena.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/multicast.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net_socket.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_socket/common.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/coll_net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/shm.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc
 )
+
+if(NCCL_OS_LINUX)
+    list(APPEND TRANSPORT_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/rma_socket.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/rma_socket_mem.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/rma_socket_setup.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/rma_socket_progress_recver.cc
+    )
+endif()
 
 add_subdirectory(net_ib)
 add_subdirectory(net_ib_cast)

@@ -68,7 +68,7 @@ ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 // rcclGetProtocolName) call WARN on their invalid-input arms, and tests assert
 // on that text via gtest's stderr capture.
 //
-// ncclDebugLevel / ncclDebugMask / ncclDebugNoWarn / ncclDebugLog() itself
+// ncclDebugLevelMask / ncclDebugMask / ncclDebugNoWarn / ncclDebugLog() itself
 // are defined once, by fakes/nccl_fakes.cc, which this binary already links
 // for p2p.cc's tests -- defining them again here would be a duplicate-symbol
 // error. ncclDebugMask's default there (0) differs from what this file used

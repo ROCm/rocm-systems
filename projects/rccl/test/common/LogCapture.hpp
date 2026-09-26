@@ -14,7 +14,7 @@
 
 // Declared here rather than including debug.h, which drags in the whole RCCL
 // logging layer; the definitions are supplied by whatever the test links.
-extern int ncclDebugLevel;
+extern uint32_t ncclDebugLevelMask;
 extern uint64_t ncclDebugMask;
 
 namespace RcclUnitTesting {
@@ -57,29 +57,43 @@ inline bool LogHas(const std::string& log, const char* needle) {
 }
 
 /**
- * @brief Raise ncclDebugLevel/ncclDebugMask for a scope, then restore both.
+ * @brief Bitmask enabling every log level from 1 (ERROR) up to @p level.
  *
- * INFO is gated on ncclDebugLevel, which the fake logging layer pins to
- * NCCL_LOG_NONE, so an INFO-emitting path writes nothing and CaptureLog returns
+ * NCCL 2.32 replaced the scalar ncclDebugLevel with the ncclDebugLevelMask
+ * bitmask (bit N enables level N). This keeps the old "level and below"
+ * semantics for tests that think in NCCL_LOG_* levels. A negative level meant
+ * "not yet initialized", which let every INFO call through to ncclDebugLog;
+ * the mask spells that NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED (~0u).
+ */
+inline uint32_t DebugLevelToMask(int level) {
+  if (level < 0) return ~0u;
+  return level == 0 ? 0u : ((1u << (level + 1)) - 2u);
+}
+
+/**
+ * @brief Raise ncclDebugLevelMask/ncclDebugMask for a scope, then restore both.
+ *
+ * INFO is gated on ncclDebugLevelMask, which the fake logging layer pins to
+ * 0 (NCCL_LOG_NONE), so an INFO-emitting path writes nothing and CaptureLog returns
  * an empty string. WARN and VERSION are ungated and need no guard. Construct
  * this before CaptureLog. Values are passed in so the caller keeps the
  * dependency on the NCCL_LOG_* / NCCL_ALL constants.
  */
 class ScopedDebugLogging {
  public:
-  ScopedDebugLogging(int level, uint64_t mask) : level_(ncclDebugLevel), mask_(ncclDebugMask) {
-    ncclDebugLevel = level;
+  ScopedDebugLogging(int level, uint64_t mask) : level_(ncclDebugLevelMask), mask_(ncclDebugMask) {
+    ncclDebugLevelMask = DebugLevelToMask(level);
     ncclDebugMask = mask;
   }
   ~ScopedDebugLogging() {
-    ncclDebugLevel = level_;
+    ncclDebugLevelMask = level_;
     ncclDebugMask = mask_;
   }
   ScopedDebugLogging(const ScopedDebugLogging&) = delete;
   ScopedDebugLogging& operator=(const ScopedDebugLogging&) = delete;
 
  private:
-  int level_;
+  uint32_t level_;
   uint64_t mask_;
 };
 

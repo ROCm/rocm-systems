@@ -13,11 +13,11 @@ interfaces for NCCL operations with comprehensive type hints.
 
 from __future__ import annotations
 
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from typing import Any, Protocol, TypeAlias, Union
 
 import numpy as _np
-from cuda.core import Buffer, Device, Stream
+from cuda.core import Buffer, Device, Event, Stream
 from cuda.core.typing import IsStreamType
 
 __all__ = [
@@ -25,11 +25,16 @@ __all__ = [
     "NcclRedOp",
     "NcclGinType",
     "NcclGinConnectionType",
+    "NcclHostCftMode",
+    "NcclNvlsHostMode",
+    "NcclCftTeamMode",
+    "NcclCftCap",
     "NcclCommMemStat",
     "NcclBufferSpec",
     "NcclScalarSpec",
     "NcclDeviceSpec",
     "NcclStreamSpec",
+    "NcclEventSpec",
     "NcclInvalid",
     # Data type constants
     "INT8",
@@ -139,11 +144,14 @@ class NcclGinType(IntEnum):
 
     Reported by :py:attr:`Communicator.gin_type` and
     :py:attr:`Communicator.railed_gin_type` to indicate which device-side
-    network transport, if any, is available on the communicator.
+    network transport, if any, is available on the communicator, and accepted
+    by :py:attr:`NCCLDevCommRequirements.gin_type` to request one.
     """
 
     NONE = 0
-    """GIN not available on this communicator."""
+    """No GIN transport. When reported, none is available; when set on
+    :py:attr:`NCCLDevCommRequirements.gin_type` it instead means any
+    available transport is acceptable."""
     PROXY = 2
     """Proxy-based GIN. Network operations issued from a device kernel are
     relayed through a CPU proxy thread."""
@@ -154,6 +162,9 @@ class NcclGinType(IntEnum):
     """GPU-Push Interface. GPU threads push network descriptors directly
     to a NIC-visible MMIO queue, with no CPU involvement and no memory
     barriers."""
+    EFA_GDA = 5
+    """EFA GPUDirect Async. Kernel-initiated network operations on AWS
+    Elastic Fabric Adapter NICs."""
 
 
 class NcclGinConnectionType(IntEnum):
@@ -173,6 +184,80 @@ class NcclGinConnectionType(IntEnum):
     RAIL = 2
     """Rail-restricted. Ranks must be reachable via GIN only within the
     same rail (network plane)."""
+    CUSTOM_STRIDE = 3
+    """Strided. Ranks must be reachable via GIN at the stride given by
+    :py:attr:`NCCLDevCommRequirements.gin_custom_stride`."""
+
+
+class NcclHostCftMode(IntEnum):
+    """Host-side Compute Fabric Transport (CFT) mode, mirroring
+    :c:type:`ncclHostCftMode_t`.
+
+    Set on :py:attr:`NCCLConfig.host_cft_mode` to control whether the
+    communicator creates the CUDA fabric logical endpoints that back the
+    host-side CFT queries.
+    """
+
+    DEFAULT = -2147483648
+    """Use the version-specific default."""
+    ENABLE = 1
+    """Enable host-side CFT support, creating the communicator's unicast and
+    multicast logical endpoints during the first window registration."""
+    DISABLE = 2
+    """Disable host-side CFT support."""
+    FALLBACK = 3
+    """Try to create the logical endpoints; on error, disable host-side CFT
+    instead of failing."""
+
+
+class NcclNvlsHostMode(IntFlag):
+    """Host-side NVLS mode, mirroring :c:type:`ncclNvlsHostMode_t`.
+
+    Set on :py:attr:`NCCLConfig.nvls_host_mode` to select which host NVLS
+    components the communicator uses. The two ``DISABLE_`` members combine;
+    leave the field unset for the library default.
+    """
+
+    ENABLE = 0
+    """Enable all host NVLS components."""
+    DISABLE_TRANSPORT = 1
+    """Disable the NVLS transport and the registered-buffer optimization."""
+    DISABLE_SYMMETRIC_MULTIMEM = 2
+    """Disable multimem in NCCL's symmetric kernels and copy-engine paths."""
+    DISABLE = 2147483647
+    """Disable all present and future host NVLS components."""
+
+
+class NcclCftTeamMode(IntEnum):
+    """CFT team layout, mirroring :c:type:`ncclCftTeamMode_t`.
+
+    Selects which ranks in the CFT unicast group the CFT team
+    :py:meth:`Communicator.team_cft` includes.
+    """
+
+    FLAT = 0
+    """Every rank in the CFT unicast group."""
+    HIER_MULTIMEM = 1
+    """The ranks of the CFT unicast group sharing the same index across
+    multicast CFT groups."""
+    HIER_LSA = 2
+    """The ranks of the CFT unicast group sharing the same index across
+    LSA groups."""
+
+
+class NcclCftCap(IntFlag):
+    """Compute Fabric Transport capabilities, mirroring
+    :c:type:`ncclCftCap_t`.
+
+    Combined as a bitmask on :py:attr:`NCCLDevCommRequirements.cft_caps`.
+    """
+
+    NONE = 0x0
+    """No CFT capability requested."""
+    CFT = 0x1
+    """Request unicast CFT logical endpoints."""
+    MULTIMEM = 0x2
+    """Request multicast CFT operations and multimem CFT barriers."""
 
 
 class NcclDataType(IntEnum):
@@ -407,4 +492,9 @@ NcclDeviceSpec: TypeAlias = Union[Device, int]
 
 NcclStreamSpec: TypeAlias = Union[Stream, IsStreamType, int]
 """A CUDA stream: a :py:class:`cuda.core.Stream`, an object implementing
-``__cuda_stream__``, or an integer stream handle."""
+``__cuda_stream__``, or an integer ``cudaStream_t`` handle. Integer 0 denotes
+the default stream."""
+
+NcclEventSpec: TypeAlias = Union[Event, int]
+"""A CUDA event: a :py:class:`cuda.core.Event` or an integer ``cudaEvent_t``
+handle. Integer 0 is invalid."""

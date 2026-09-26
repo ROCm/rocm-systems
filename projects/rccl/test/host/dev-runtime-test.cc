@@ -1470,8 +1470,10 @@ protected:
   // symTeamObtainMcLe, which need the CFT device APIs this binary does not
   // provide, so this suite drives the non-CFT path only: both flags stay
   // false, which is also how every non-CFT production call site invokes it.
+  // 2.32 added the CFT `counted` flag ahead of them; it is likewise false.
   static ncclResult_t Obtain(ncclComm* comm, ncclTeam team, bool multimem, ncclDevrTeam** out) {
-    return symTeamObtain(comm, team, multimem, /*cftUc=*/false, /*cftMc=*/false, out, /*needBarrier=*/nullptr);
+    return symTeamObtain(comm, team, multimem, /*counted=*/false, /*cftUc=*/false, /*cftMc=*/false, out,
+                         /*needBarrier=*/nullptr);
   }
 };
 
@@ -2061,16 +2063,27 @@ protected:
   std::vector<hipMemGenericAllocationHandle_t> memHandles;
   ncclDevrMemory* obtained = nullptr;
 
-  // Mirrors the anonymous struct symMemoryObtain all-gathers. Layout must match
-  // for the hook to populate what the function then reads back. 2.31 appended
-  // hostCftMode, which the function then requires every rank to agree on; the
-  // per-rank literals below leave it zero-initialised, matching the value a
-  // value-initialised comm reports.
+  // Per-rank values a test chooses; GatherReporting fills in the rest.
   struct SegmentInfo {
     int numSegments;
     bool hasSysmemSegment;
     size_t totalSize;
+  };
+
+  // Mirrors the struct symMemoryObtain all-gathers. Layout must match for the
+  // hook to populate what the function then reads back. 2.31 appended
+  // hostCftMode and 2.32 added registerMask and candidateRegistryId, all of
+  // which every rank must agree on (or, for the registry id, which only gates
+  // reuse). They are filled with what this rank itself reports: a
+  // value-initialised comm's hostCftMode, winFlags=0's register mask, and "no
+  // existing registration".
+  struct GatheredSegmentInfo {
+    int numSegments;
+    bool hasSysmemSegment;
+    int registerMask;
+    size_t totalSize;
     int hostCftMode;
+    uint64_t candidateRegistryId;
   };
 
   void SetUp() override {
@@ -2109,10 +2122,18 @@ protected:
   // buffer is sized by comm->nRanks, so clamp: a table longer than the comm
   // overflows it and corrupts the heap for whatever runs next.
   std::function<ncclResult_t(void*, void*, int)> GatherReporting(std::vector<SegmentInfo> perRank) {
-    return [this, perRank](void*, void* buf, int) {
-      auto* info = static_cast<SegmentInfo*>(buf);
+    return [this, perRank](void*, void* buf, int size) {
+      EXPECT_EQ(size, static_cast<int>(sizeof(GatheredSegmentInfo))) << "SegmentInfo mirror drifted from dev_runtime.cc";
+      auto* info = static_cast<GatheredSegmentInfo*>(buf);
       const int n = std::min(static_cast<int>(perRank.size()), comm->nRanks);
-      for (int r = 0; r < n; r++) info[r] = perRank[r];
+      // Ranks past the table keep zero segments/size, as before 2.32; the agreed-on
+      // fields are published for every rank, since any disagreement is fatal.
+      for (int r = 0; r < comm->nRanks; r++) {
+        const SegmentInfo mine = r < n ? perRank[r] : SegmentInfo{};
+        info[r] = GatheredSegmentInfo{mine.numSegments, mine.hasSysmemSegment,
+                                      ncclDevrRegisterMaskFromWinFlags(/*winFlags=*/0), mine.totalSize,
+                                      /*hostCftMode=*/0, /*candidateRegistryId=*/UINT64_MAX};
+      }
       return ncclSuccess;
     };
   }
@@ -2183,13 +2204,16 @@ TEST_F(SymMemoryObtainSetupTest, AllGatherFails_ReturnsErrorWithoutLinking) {
 }
 
 // Branch: populating our own segment sizes fails.
+// NCCL 2.32 moved segment-size population after the all-gather (a rank must first learn whether every
+// rank can reuse an existing registration), so the gather now runs once before the failure.
 TEST_F(SymMemoryObtainSetupTest, PopulateSegmentSizesFails_ReturnsError) {
   ScopedHook populate(g_devrPopulateSegmentSizes,
                       [](ncclDevrMemory*, int) { return ncclSystemError; });
-  ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  ScopedHook gather(g_devrBootstrapAllGather, GatherReporting({{1, false, 4096}, {1, false, 4096}}));
 
   EXPECT_NE(Obtain(), ncclSuccess);
-  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(populate.calls, 1);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 

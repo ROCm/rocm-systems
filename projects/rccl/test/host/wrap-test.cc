@@ -3010,7 +3010,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_DisabledByDefaultWarnsOnce) {
   RUN_ISOLATED_TEST(
       "Wrap_UseCeAllReduce_DisabledByDefaultWarnsOnce",
       []() {
-        // "CE AllReduce not enabled" is an INFO log, gated on ncclDebugLevel
+        // "CE AllReduce not enabled" is an INFO log, gated on ncclDebugLevelMask
         // (defaults to suppressed) unlike this file's WARN-based messages.
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
         ncclComm* comm = MakeZeroedComm();

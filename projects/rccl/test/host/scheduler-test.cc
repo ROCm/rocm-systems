@@ -654,7 +654,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FourRingDepths_BuildsWorkIte
   std::vector<WorkBatchCall> workBatchCalls;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
                            [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType workType,
-                               int devFuncId, uint32_t workOffset, int, int, bool newBatch) {
+                               int devFuncId, int /*progressSlot*/, uint32_t workOffset, int, int, bool newBatch) {
                              workBatchCalls.push_back({channelId, workType, devFuncId, workOffset, newBatch});
                            });
   struct ncclProxyOp recordedProxyOp {};
@@ -727,7 +727,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_EmptySliceFromZeroCount_Skip
   auto algoInfoHook = ScheduleBcastTasksToPlan_StubAlgoInfoAndFuncId(NCCL_PROTO_SIMPLE);
   int workBatchCalls = 0;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
-                           [&](struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t,
+                           [&](struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t,
                                int, int, bool) { ++workBatchCalls; });
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
@@ -836,7 +836,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ThreeChannels_SplitsBytesPer
   std::vector<int> workBatchChannelIds;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
                            [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType, int,
-                               uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
+                               int, uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
   std::vector<int> proxyOpChannelIds;
   ScopedHook proxyOpHook(g_addProxyOpIfNeeded, [&](struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp* op) {
     proxyOpChannelIds.push_back(op->channelId);
@@ -914,7 +914,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_WarpSpeedMultiplierAbove1_Ha
   std::vector<int> workBatchChannelIds;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
                            [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType, int,
-                               uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
+                               int, uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_COLL);
   ncclResult_t result = ncclInternalError;
@@ -2543,7 +2543,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetOneW
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
   ASSERT_NE(argsBuf, nullptr);
-  EXPECT_EQ(argsBuf->profilerEnabled, 1);
+  EXPECT_EQ(argsBuf->profilerMode, ncclDevProfilerModeKernelCh);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetZeroWhenFalse) {
@@ -2553,7 +2553,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetZero
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
   ASSERT_NE(argsBuf, nullptr);
-  EXPECT_EQ(argsBuf->profilerEnabled, 0);
+  EXPECT_EQ(argsBuf->profilerMode, ncclDevProfilerModeNone);
 }
 
 // profilerEnabled=true catches ordering bugs; nMaxChannels=5 (not 3) avoids the alignUp(n*4,16)==16 bucket tie.

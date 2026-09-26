@@ -573,6 +573,14 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   out = f.write
   out('#include "device.h"\n')
   out("\n")
+
+  # funcId travels in an NCCL_DEV_WORK_BATCH_FUNC_ID_BITS-wide ncclDevWorkBatch
+  # field. RCCL indexes a per-unroll table, so the largest per-unroll function
+  # count must fit.
+  max_funcs_per_unroll = max([sum(1 for fn in primary_funcs if fn.unroll == u) for u in all_unrolls] + [0])
+  out("static_assert(%d <= (1 << NCCL_DEV_WORK_BATCH_FUNC_ID_BITS), " % max_funcs_per_unroll)
+  out('"Device function IDs must fit in ncclDevWorkBatch");\n')
+  out("\n")
   out("// The key for the ncclDevFuncNameToId map is a 64-bit unsigned integer.\n")
   out("// Each field (coll, algo, proto, redop, ty, acc, pipeline) is packed into 4 bits,\n")
   out("// This allows up to 16 unique values per field. The layout is:\n")

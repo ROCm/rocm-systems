@@ -108,6 +108,7 @@ extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
 // Backs hipDeviceGetAttribute(hipDeviceAttributeDirectManagedMemAccessFromHost); 1 is the MI300A answer.
 extern int g_hipDirectManagedMemAccess;
+extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSupported (default 1)
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {

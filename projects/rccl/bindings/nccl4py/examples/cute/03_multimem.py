@@ -9,8 +9,8 @@
 
 A multimem (multicast) mapping lets one store reach every LSA peer's copy
 of a window. This requests one for the LSA team and shows the two places
-the handle comes from — embedded in the devcomm, or returned to the host
-by ``create_dev_comm`` — and the three places it is consumed.
+the handle comes from -- embedded in the devcomm, or returned to the host
+by ``create_dev_comm`` -- and the three places it is consumed.
 
 The CuTeDSL layer exposes multimem *addresses*; the multimem load-reduce
 and store instructions themselves are PTX and are not wrapped here.
@@ -87,12 +87,14 @@ def multimem_kernel(
     bar = nccl_cute.lsa_default(
         coop, dev_comm, index=BARRIER_INDEX, multimem=True, mm_handle=embedded_mm)
     bar.sync(coop, nccl_cute.MemoryOrder.ACQ_REL)
+    bar.destroy()
 
     # Same barrier, with team and handle named by the caller.
     explicit = nccl_cute.lsa_session(
         coop, dev_comm, dev_comm.team_lsa, dev_comm.lsa_barrier,
         index=BARRIER_INDEX, multimem=True, mm_handle=host_mm)
     explicit.sync(coop, nccl_cute.MemoryOrder.ACQ_REL)
+    explicit.destroy()
 
     if 0 == tidx:
         cute.printf(f"rank {dev_comm.rank}: multimem barriers passed")
@@ -122,12 +124,18 @@ def main():
     """Request an LSA multimem mapping and exercise it from a kernel.
 
     Returns:
-        Exit code; 0 on success, 1 if multimem is unavailable.
+        Exit code; 1 on a wrong rank count or topology error, otherwise 0.
+        Missing multicast support is reported as a skipped run.
     """
     comm_mpi = MPI.COMM_WORLD
     rank = comm_mpi.Get_rank()
     nranks = comm_mpi.Get_size()
     root = 0
+
+    if nranks < 2:
+        if rank == root:
+            print(f"\n[{NAME}] ERROR: needs at least 2 ranks, got {nranks}")
+        return 1
 
     if rank == root:
         print(f"\n===== {NAME} =====", flush=True)

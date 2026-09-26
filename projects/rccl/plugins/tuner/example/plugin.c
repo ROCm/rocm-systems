@@ -211,11 +211,9 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
     strncpy(lineCopy, line, sizeof(lineCopy));
     lineCopy[sizeof(lineCopy) - 1] = '\0';
 
-    // Tokenize by comma. Use strtok_r (reentrant): strtok keeps parser state in
-    // a shared static, so concurrent multi-comm init would corrupt each other's
-    // parse and load a partial config set, causing per-rank algo split-brain.
-    char* saveptr = NULL;
-    token = strtok_r(lineCopy, ",", &saveptr);
+    // Tokenize by comma
+    char* savePtr = NULL;
+    token = strtok_r(lineCopy, ",", &savePtr);
     while (token != NULL && tokenCount < CONFIG_FIELDS_MAX) {
       // Trim whitespace
       while (*token == ' ' || *token == '\t') token++;
@@ -225,7 +223,7 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
         end--;
       }
       tokens[tokenCount++] = token;
-      token = strtok_r(NULL, ",", &saveptr);
+      token = strtok_r(NULL, ",", &savePtr);
     }
 
     // Validate field count: support required fields (8), with pipeOps (9), or with regBuff (10)
