@@ -2640,3 +2640,10 @@ generates a new retained baseline manifest, requires a matching instrumented
 clean, and only then runs eight faults with health checks. It preserves all
 650 cases, the full allowlist, the repaired hook, high preset, and 1 GiB cap.
 The Default cell stays orange pending complete results.
+
+The original full Default sweep now passes its 127 and 128 shapes in 2,046
+and 2,028 seconds. Each completes all 650 numerical cases, both clients, and
+coverage of 34,012 access sites, 1,826 barriers, 330 atomics, and 330 fences,
+with complete static/dynamic analysis. Four shapes remain pending. These
+completed full-clean shards are distinct from the shorter replay comparator
+that timed out; the latter's failure does not invalidate their results.
