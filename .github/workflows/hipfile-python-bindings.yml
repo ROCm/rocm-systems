@@ -10,6 +10,9 @@ env:
   AIS_INPUT_HIPFILE_PKG_FILENAME: ${{ inputs.ais_hipfile_pkg_filename }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  AIS_INPUT_RUN_HARDWARE_TEST: ${{ inputs.run_hardware_test }}
+  # Host path of the AIS-capable filesystem the hardware test does its IO on.
+  AIS_MOUNT_PATH: /mnt/ais/ext4
   AIS_PKG_MGR: >-
     ${{
       startsWith(inputs.platform, 'rocky') && 'dnf' ||
@@ -44,6 +47,17 @@ on:
         description: "Target ROCm MAJOR.MINOR.PATCH Version"
         required: true
         type: string
+      run_hardware_test:
+        description: >-
+          Run python/main.py against real hardware. Also selects the runner:
+          when true the job moves off the GitHub-hosted runner onto a
+          self-hosted AIS one. Off by default: it needs a GPU and an
+          AIS-capable filesystem, and it is platform/compiler independent, so
+          the caller enables it for a single representative matrix leg rather
+          than all of them.
+        required: false
+        default: false
+        type: boolean
     outputs:
       hipfile_python_sdist_filename:
         description: "Filename of the hipFile Python sdist artifact"
@@ -55,7 +69,10 @@ permissions:
 
 jobs:
   build_python_bindings:
-    runs-on: [ubuntu-24.04]
+    # The sdist build itself is platform-agnostic and happy on a GitHub-hosted
+    # runner, so only the leg that also runs the hardware test claims one of the
+    # scarce self-hosted AIS runners (shared with the AIS_system_* jobs).
+    runs-on: ${{ inputs.run_hardware_test && fromJSON('["AIS"]') || fromJSON('["ubuntu-24.04"]') }}
     outputs:
       hipfile_python_sdist_filename: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
     steps:
@@ -89,11 +106,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Starting Docker Container
+        # The GPU devices and the AIS filesystem mount only exist on the AIS
+        # runner, so they are spliced in solely for the hardware-test leg.
         run: |
+          AIS_HARDWARE_ARGS=()
+          if [[ "${AIS_INPUT_RUN_HARDWARE_TEST}" == "true" ]]; then
+            AIS_HARDWARE_ARGS=(
+              --device=/dev/kfd
+              --device=/dev/dri
+              --security-opt seccomp=unconfined
+              -v "${AIS_MOUNT_PATH}:/mnt/ais-fs"
+            )
+          fi
           docker run \
             -dt \
             --rm \
             --pull always \
+            "${AIS_HARDWARE_ARGS[@]}" \
             -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
             -v "${AIS_GHA_CMD_FILES_DIR}:${AIS_GHA_CMD_FILES_DOCKER_DIR}" \
             --name "${AIS_CONTAINER_NAME}" \
@@ -208,6 +237,37 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+      # End-to-end exercise of the *real* Cython extension, and the reason this
+      # job claims an AIS runner for one matrix leg: python/tests above is
+      # deliberately hermetic (it fakes hipfile._hipfile), so nothing there
+      # touches a GPU or AIS storage. main.py does. It runs after the artifact
+      # upload so a hardware failure still leaves the sdist published for
+      # downstream consumers, while the red job keeps gating them.
+      #
+      # -P is load-bearing: without it Python prepends main.py's own directory
+      # to sys.path, and python/ contains the *source* hipfile package (.py
+      # files plus an uncompiled _hipfile.pyx). That would shadow the installed
+      # sdist and fail at `from hipfile._hipfile import ...`.
+      - name: Run python/main.py against AIS hardware
+        if: ${{ inputs.run_hardware_test }}
+        run: |
+          docker exec \
+            -t \
+            -e "_AIS_IO_DIR=/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
+            -w /ais/rocm-systems/projects/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              set -e
+              mkdir -p "${_AIS_IO_DIR}"
+              head --bytes 2M /dev/urandom > "${_AIS_IO_DIR}/random_2MiB.bin"
+              .venv/bin/python -P python/main.py \
+                "${_AIS_IO_DIR}/random_2MiB.bin" \
+                "${_AIS_IO_DIR}/output.bin"
+            '
+      - name: Destroy hipfile IO test directory
+        if: ${{ always() && inputs.run_hardware_test }}
+        run: |
+          docker exec -t "${AIS_CONTAINER_NAME}" /bin/bash -c "rm -fr /mnt/ais-fs/${AIS_CONTAINER_NAME}"
       - name: Cleanup & Stop the Docker container
         if: ${{ always() }}
         run: |
@@ -216,3 +276,12 @@ jobs:
           else
             echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
           fi
+      # Only the self-hosted AIS runner has a persistent workspace to clean.
+      - name: Cleanup self-hosted runner workspace
+        if: ${{ always() && inputs.run_hardware_test }}
+        shell: bash
+        # ${VAR:?} aborts if GITHUB_WORKSPACE is unset/empty, so a missing value
+        # can never let the glob expand to `/*` and wipe the persistent runner.
+        run: |
+          shopt -s dotglob
+          rm -rf "${GITHUB_WORKSPACE:?}"/*

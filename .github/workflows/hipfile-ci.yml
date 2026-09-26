@@ -55,6 +55,11 @@ jobs:
       cxx_standard: ${{ inputs.cxx_standard }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
+      # python/main.py is an end-to-end hardware exercise of the bindings, and
+      # is platform/compiler/standard independent, so run it once on an AIS
+      # runner for a single representative leg rather than fanning it out. This
+      # is the same ubuntu-7.14.0 leg codeql/sanitizers/clang_tidy target.
+      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == '7.14.0' }}
 
   AIS_system_tests:
     needs: [build_and_test]
