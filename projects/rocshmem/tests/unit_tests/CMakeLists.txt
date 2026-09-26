@@ -98,6 +98,17 @@ if (USE_GDA)
   )
 endif()
 
+if (USE_VERBS)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      net_helpers_gtest.cpp
+      ibv_shim_gtest.cpp
+      ib_ctrl_gtest.cpp
+      rdma_loopback_gtest.cpp
+  )
+endif()
+
 ###############################################################################
 # ROCSHMEM DEPENDENCY
 ###############################################################################
