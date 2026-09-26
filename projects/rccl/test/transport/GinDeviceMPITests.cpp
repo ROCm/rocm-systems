@@ -8,6 +8,7 @@
 // gin.{put|putValue|waitSignal|...} kernel against a real proxy thread + IB,
 // and validates the wire-level result on the receiving rank.
 
+#include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "SymmetricMemPrereq.hpp"
@@ -608,6 +609,57 @@ void GinMPIDeviceTests::runPutBasicAndOffsets(int nContexts) {
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
   runPutBasicAndOffsets(/*nContexts=*/1);
+}
+
+// GIN IB links pass nQpsPerDev=1. Collective links still follow
+// NCCL_IB_QPS_PER_CONNECTION. The param is cached on first read, so the
+// variable has to be set before this process starts.
+TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
+  const char* qpEnv = std::getenv("NCCL_IB_QPS_PER_CONNECTION");
+  const int qpPerConn = qpEnv ? std::atoi(qpEnv) : 1;
+  if (qpPerConn <= 1)
+    GTEST_SKIP() << "Set NCCL_IB_QPS_PER_CONNECTION>1 before the process";
+
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_PROXY)
+    GTEST_SKIP() << "IB QP override applies to the proxy backend (NCCL_GIN_TYPE="
+                 << NCCL_NET_DEVICE_GIN_PROXY << ")";
+
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+  // MPI collective: must run on every rank before the self-check, which can
+  // return early on one rank only.
+  const bool crossNode = crossNodeReason().empty();
+
+  MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+  MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "NET");
+  MPIHelpers::TestLogAssertionContext logCtx(
+      MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+  runBasicPutSelfCheck();
+  if (HasFatalFailure()) return;
+
+  ncclComm_t comm = getActiveCommunicator();
+  if (!comm || !comm->ncclNet || std::strcmp(comm->ncclNet->name, "IB") != 0)
+    GTEST_SKIP() << "qpPerDev is only logged by the IB network transport";
+
+  const std::string log = logCtx.readNcclDebugLog();
+  const std::string marker = "qpPerDev=";
+  bool sawGin = false;
+  bool sawEnv = false;
+  for (size_t pos = 0; (pos = log.find(marker, pos)) != std::string::npos; pos += marker.size()) {
+    const int perDev = std::atoi(log.c_str() + pos + marker.size());
+    if (perDev == 1) sawGin = true;
+    if (perDev == qpPerConn) sawEnv = true;
+  }
+  // qpPerDev is the per-device multiplier, so a GIN link logs 1 for any ndevs.
+  EXPECT_TRUE(sawGin) << "no IB connect used one QP per device while NCCL_IB_QPS_PER_CONNECTION="
+                      << qpPerConn;
+  // Two nodes also open collective links. Those must still follow the env value.
+  if (crossNode) {
+    EXPECT_TRUE(sawEnv) << "no collective IB connect logged qpPerDev=" << qpPerConn;
+  }
 }
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {

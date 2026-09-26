@@ -3971,7 +3971,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall)",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext:-GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
           "timeout": 600
         },
         {
@@ -3996,6 +3996,14 @@
           "test_filter": "GinMPIDeviceTests.RailConnection_Create",
           "env_variables": {
             "NCCL_CROSS_NIC": "0"
+          }
+        },
+        {
+          "name": "GIN_QpCount_StaysAtOne",
+          "description": "GIN proxy IB links stay at one QP per device when NCCL_IB_QPS_PER_CONNECTION is raised",
+          "test_filter": "GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
+          "env_variables": {
+            "NCCL_IB_QPS_PER_CONNECTION": "4"
           }
         }
       ]
