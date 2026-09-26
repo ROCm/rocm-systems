@@ -2197,6 +2197,7 @@ typedef enum {
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_RECT                    = 6,  /**< Rectangular copies of num_entries boxes */
 } hsa_amd_memory_copy_op_type_t;
 
 /**
@@ -2238,6 +2239,29 @@ typedef enum {
  * operations whose version it does not recognise.
  */
 #define HSA_AMD_MEMORY_COPY_OP_VERSION 1
+
+/*
+[Provisional API]
+Pitched memory descriptor.
+All elements must be 4 byte aligned.  Pitch and slice are in bytes.
+*/
+typedef struct hsa_pitched_ptr_s {
+  void* base;
+  size_t pitch;
+  size_t slice;
+} hsa_pitched_ptr_t;
+
+/**
+ * @brief Pitched memory and the origin of a rectangular region within it.
+ *
+ * @c pitched_ptr identifies the allocation. Its base, pitch, and slice must be
+ * 4-byte aligned, and pitch and slice are in bytes. @c offset is the origin of
+ * the region: x in bytes, y in rows, and z in layers.
+ */
+typedef struct hsa_amd_memory_copy_rect_ptr_s {
+  hsa_pitched_ptr_t pitched_ptr;
+  hsa_dim3_t offset;
+} hsa_amd_memory_copy_rect_ptr_t;
 
 /**
  * @brief Describes a single copy operation within a batch.
@@ -2333,6 +2357,15 @@ typedef enum {
  *   num_entries     -- >= 1 and <= 1024
  *   wait.scope      -- hsa_fence_scope_t for indirect address reads
  *
+ * RECT (one or more boxes, one signal for all boxes):
+ *   rect_src        -- caller-owned array of num_entries sources
+ *   rect_dst        -- caller-owned array of num_entries destinations
+ *   range_list      -- caller-owned array of num_entries ranges; x in bytes, y and z in rows and layers
+ *   src_agent       -- common source agent (GPU or CPU); if CPU, all dst_agent_list entries must be GPU
+ *   dst_agent_list  -- caller-owned array of num_entries destination agents
+ *   reserved0       -- must be 0
+ *   num_entries     -- number of boxes (>= 1); every range component must be >= 1
+ *
  * Future-proofing unions (reserved, must not be used):
  *   src_agent_list           -- reserved for future gather operations
  *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
@@ -2346,6 +2379,7 @@ typedef struct hsa_amd_memory_copy_op_s {
   union {
     void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
     void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
+    hsa_amd_memory_copy_rect_ptr_t* rect_src; /**< RECT: caller-owned array of num_entries sources */
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
@@ -2358,6 +2392,7 @@ typedef struct hsa_amd_memory_copy_op_s {
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
     void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination pointers */
+    hsa_amd_memory_copy_rect_ptr_t* rect_dst; /**< RECT: caller-owned array of num_entries destinations */
   };
   union {
     struct {
@@ -2370,8 +2405,9 @@ typedef struct hsa_amd_memory_copy_op_s {
     };
     struct {
       size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_entries copy sizes */
-      size_t reserved0;                   /**< Must be 0 for LINEAR multi */
+      size_t reserved0;                   /**< Must be 0 for LINEAR multi and RECT */
     };
+    hsa_dim3_t* range_list;               /**< RECT: caller-owned array of num_entries ranges */
   };
   /** Wait-before-copy. Set to {0} to disable. */
   struct {
@@ -2406,7 +2442,9 @@ typedef struct hsa_amd_memory_copy_op_s {
  * is a single op that copies one source to multiple destinations via @c dst_list
  * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
  * @c dst_size. SWAP operations require addresses to be 64-byte aligned for gfx94x/gfx95x
- * and 32-byte aligned for gfx1250.
+ * and 32-byte aligned for gfx1250. A RECT operation copies the boxes described
+ * by @c rect_src, @c rect_dst, and @c range_list, each under the requirements of
+ * hsa_amd_memory_async_copy_rect, and requires SDMA.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
  *
@@ -2462,17 +2500,6 @@ hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
 hsa_status_t HSA_API
 hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                          uint32_t* recommended_ids_mask);
-
-/*
-[Provisional API]
-Pitched memory descriptor.
-All elements must be 4 byte aligned.  Pitch and slice are in bytes.
-*/
-typedef struct hsa_pitched_ptr_s {
-  void* base;
-  size_t pitch;
-  size_t slice;
-} hsa_pitched_ptr_t;
 
 /*
 [Provisional API]

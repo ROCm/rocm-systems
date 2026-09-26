@@ -3807,6 +3807,41 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) {
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const std::vector<amd::BatchCopyRectOp>& copy_ops = cmd.CopyOps();
+
+  device::Memory::SyncFlags sync_flags;
+  sync_flags.skipEntire_ = false;
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    dev().getRocMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
+    dev().getRocMemory(op.src_memory)->syncCacheFromHost(*this);
+  }
+
+  if (!blitMgr().CopyBufferRectBatch(copy_ops)) {
+    LogError("SubmitBatchCopyMemoryRect: Batch rect copy failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  // Several SDMA engines each complete their own signal. The barrier joins those signals
+  // into the one completion signal attached to this command.
+  if (!Barriers().IsExternalSignalListEmpty()) {
+    dispatchBarrierPacket(kNopPacketHeader);
+  }
+
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    op.dst_memory->signalWrite(&dev());
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
 void VirtualGPU::SchedulePinnedMemoryRelease(amd::HostQueue& queue,
                                              std::vector<amd::Memory*> pinned_memory) {
   if (pinned_memory.empty()) {
