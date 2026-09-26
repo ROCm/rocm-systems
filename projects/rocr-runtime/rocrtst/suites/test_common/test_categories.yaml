@@ -224,6 +224,7 @@ test_categories:
       - "rocrtstStress.Queue_Add_Write_Index_ConcurrentTest"
       - "rocrtstStress.Queue_CAS_Write_Index_ConcurrentTest"
       - "rocrtstStress.Queue_LoadStore_Write_Index_ConcurrentTest"
+      - "rocrtstStress.Signal_Silent_Store_Semantics"
       - "rocrtstPerf.ENQUEUE_LATENCY"
       - "rocrtstPerf.AQL_Dispatch_Time_Single_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"

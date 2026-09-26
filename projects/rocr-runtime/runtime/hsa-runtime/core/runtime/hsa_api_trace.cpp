@@ -345,9 +345,9 @@ void HsaApiTable::UpdateCore() {
   core_api.hsa_agent_major_extension_supported_fn = HSA::hsa_agent_major_extension_supported;
   core_api.hsa_cache_get_info_fn = HSA::hsa_cache_get_info;
   core_api.hsa_agent_iterate_caches_fn = HSA::hsa_agent_iterate_caches;
-  // Silent store optimization is present in all signal ops when no agents are sleeping.
-  core_api.hsa_signal_silent_store_relaxed_fn = HSA::hsa_signal_store_relaxed;
-  core_api.hsa_signal_silent_store_screlease_fn = HSA::hsa_signal_store_screlease;
+  // Silent stores skip SetEvent() to avoid syscalls when there are no waiters
+  core_api.hsa_signal_silent_store_relaxed_fn = HSA::hsa_signal_silent_store_relaxed;
+  core_api.hsa_signal_silent_store_screlease_fn = HSA::hsa_signal_silent_store_screlease;
   core_api.hsa_signal_group_create_fn = HSA::hsa_signal_group_create;
   core_api.hsa_signal_group_destroy_fn = HSA::hsa_signal_group_destroy;
   core_api.hsa_signal_group_wait_any_scacquire_fn = HSA::hsa_signal_group_wait_any_scacquire;

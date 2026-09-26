@@ -127,13 +127,13 @@ inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition
                                hsa_signal_value_t compare_value) {
   switch (condition) {
     case HSA_SIGNAL_CONDITION_EQ:
-      return value == compare_value;
+      return (value == compare_value);
     case HSA_SIGNAL_CONDITION_NE:
-      return value != compare_value;
+      return (value != compare_value);
     case HSA_SIGNAL_CONDITION_GTE:
-      return value >= compare_value;
+      return (value >= compare_value);
     case HSA_SIGNAL_CONDITION_LT:
-      return value < compare_value;
+      return (value < compare_value);
     default:
       return false;
   }
@@ -354,10 +354,13 @@ class Signal {
   virtual void StoreRelaxed(hsa_signal_value_t value) = 0;
   virtual void StoreRelease(hsa_signal_value_t value) = 0;
 
+  virtual void SilentStoreRelaxed(hsa_signal_value_t value) = 0;
+  virtual void SilentStoreRelease(hsa_signal_value_t value) = 0;
   /// @brief Store with release semantics and notify the driver even when no
   /// waiter is registered. Use on paths that must break a wait which may be
   /// about to start; SetEvent() alone can skip the notification.
   virtual void StoreReleaseAndNotify(hsa_signal_value_t value) { StoreRelease(value); }
+
 
   virtual hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
                                          hsa_signal_value_t compare_value,

@@ -114,7 +114,12 @@ class InterruptSignal : private LocalSignal, public Signal {
 
   void StoreRelease(hsa_signal_value_t value);
 
+
   void StoreReleaseAndNotify(hsa_signal_value_t value);
+
+  void SilentStoreRelaxed(hsa_signal_value_t value);
+
+  void SilentStoreRelease(hsa_signal_value_t value);
 
   hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
                                  hsa_signal_value_t compare_value,
