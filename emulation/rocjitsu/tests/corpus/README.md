@@ -80,7 +80,10 @@ The release configuration runs the corpus's opt-in `vulkan` suite separately on
 the job container and builds an unmodified pinned headless Vulkan CTS. CI selects 735
 compute and 2,543 texel-buffer cases, leaving twelve expensive
 maximum-workgroup/LDS stress cases available for local runs. Both targets run
-in the main corpus workflow's release configuration. Any CI coverage including
+in the main corpus workflow's release configuration, after the existing HIP
+and DBT corpus steps. Vulkan setup and execution use their own prerequisite
+checks, so a Vulkan setup failure cannot suppress that earlier coverage and
+Vulkan can still run after a HIP/DBT test failure. Any CI coverage including
 the stress cases must use a separate workflow. Graphics and image sampling are
 out of scope. Exact hardware-baseline unsupported cases are reported as skips;
 unexpected unsupported results and incomplete logs fail.
@@ -105,18 +108,23 @@ export ROCJITSU_BUILD_DIR=/path/to/rocjitsu/build
 bash /path/to/rocm-systems/emulation/rocjitsu/tests/corpus/run-vulkan-cts.sh all --case smoke
 ```
 
-The RocJITsu build should use `CMAKE_BUILD_TYPE=Release`. Use `--case ci` to
-reproduce the release workflow, omit `--case smoke` for all 3,290 cases, or use
+The RocJITsu build should use `CMAKE_BUILD_TYPE=Release`. An explicit
+`ROCJITSU_BUILD_DIR` selects its launcher; otherwise the wrapper looks for
+`rocjitsu` on `PATH`, then under `emulation/rocjitsu/build`. Set
+`ROCJITSU_SOURCE_DIR` to override the source directory used for target configs.
+Use `--case ci` to reproduce the release workflow, omit `--case smoke` for
+all 3,290 cases, or use
 `--case stress` for just the twelve expensive cases. Replace `all` with one
-target to narrow the run. The wrapper bounds pytest to four workers by default
+target to narrow the run. The wrapper bounds pytest to sixteen workers by default
 and divides `VULKAN_CTS_CPU_BUDGET` among them through RocJITsu's
-`cpu_thread_budget` setting. By default the total budget is at most four, so a
-typical run uses four processes with one execution thread each. Set
+`--cpu-thread-budget` option. By default the total budget is the smaller of 64
+and the available CPU count, so a host with at least 64 CPUs uses sixteen
+processes with four execution threads each. Set
 `VULKAN_CTS_WORKERS` and `VULKAN_CTS_CPU_BUDGET` to compare other allocations;
 runtime service threads and Mesa compilation are outside this budget.
-Each generated config retains the shipped target's allocation table and sets
-`cpu_thread_budget` to `floor(VULKAN_CTS_CPU_BUDGET / VULKAN_CTS_WORKERS)`.
-For example, budget 16 with four workers gives each simulator four execution
+Each launch uses the shipped target config and passes
+`--cpu-thread-budget floor(VULKAN_CTS_CPU_BUDGET / VULKAN_CTS_WORKERS)`.
+For example, budget 64 with sixteen workers gives each simulator four execution
 threads. Budget three with two workers leaves one execution thread unused.
 The wrapper selects the system RADV ICD, avoiding SDK library overrides.
 CTS verifies the requested device and driver in each result. Logs

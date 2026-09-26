@@ -184,31 +184,6 @@ jobs:
             .github
             shared/machine-readable-isa/isa
 
-      - name: Install Mesa RADV for Vulkan compute CTS
-        if: matrix.name == 'release'
-        shell: bash
-        run: |
-          apt-get install -y --no-install-recommends \
-            mesa-vulkan-drivers \
-            libvulkan1 \
-            libdrm-amdgpu1 \
-            libpng-dev \
-            pkg-config
-          # The recorded RDNA3/RDNA4 selection used these versions. Fail here
-          # if an old container mirror cannot provide RDNA4-capable userspace.
-          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers)" ge 25.2.8
-          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libdrm-amdgpu1)" ge 2.4.125
-          dpkg-query -W mesa-vulkan-drivers libvulkan1 libdrm-amdgpu1
-
-      # Keep the existing simulator/DBT pin and its translation baseline stable.
-      - name: Checkout Vulkan corpus
-        if: matrix.name == 'release'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          ref: ${{ github.event.inputs.vulkan_corpus_ref || env.ROCJITSU_VULKAN_CORPUS_REF }}
-          path: rocjitsu-vulkan-corpus
-
       - name: Checkout corpus
         if: matrix.run_simulator_corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -450,47 +425,8 @@ jobs:
           uv pip install --system -e lib/python
           python -m pytest lib/python/amdisa/tests
 
-      - name: Build pinned Vulkan CTS
-        id: build_vulkan_cts
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
-        # Includes dependency downloads and a fresh Release build.
-        timeout-minutes: 30
-        working-directory: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
-        shell: bash
-        run: |
-          uv pip install --system -r corpus/vulkan/requirements.txt
-          python3 -m pytest tests/test_vulkan_suite.py -q
-          bash scripts/build_vulkan_cts.sh
-
-      # The selection took about four minutes per target locally; allow runner headroom.
-      - name: Run Vulkan compute and buffer CTS on RDNA3
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_vulkan_cts.outcome == 'success' }}
-        timeout-minutes: 30
-        shell: bash
-        env:
-          ROCJITSU_CORPUS_DIR: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
-        run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1100 --case ci
-
-      - name: Run Vulkan compute and buffer CTS on RDNA4
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_vulkan_cts.outcome == 'success' }}
-        timeout-minutes: 30
-        shell: bash
-        env:
-          ROCJITSU_CORPUS_DIR: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
-        run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1201 --case ci
-
-      - name: Upload Vulkan CTS diagnostics
-        if: ${{ always() && matrix.name == 'release' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rocjitsu-vulkan-cts-release
-          path: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}/.pytest-artifacts/vulkan-*
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Run corpus tests
-        # Keep the HIP corpus signal even if the independent Vulkan steps fail.
+        # Keep the HIP corpus signal even if an independent test step fails.
         if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
         # Clean runs on this change completed in 4-13 minutes. The sanitizer
         # rerun budget is capped at 20 minutes within this step-level failsafe.
@@ -745,4 +681,71 @@ jobs:
           name: gfx1250-dbt-logs-${{ matrix.name }}
           path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
           if-no-files-found: ignore
+          retention-days: 7
+
+      # Finish existing HIP/DBT coverage before starting Vulkan-only setup.
+      - name: Install Mesa RADV for Vulkan compute CTS
+        id: install_vulkan_dependencies
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
+        shell: bash
+        run: |
+          apt-get install -y --no-install-recommends \
+            mesa-vulkan-drivers \
+            libvulkan1 \
+            libdrm-amdgpu1 \
+            libpng-dev \
+            pkg-config
+          # The recorded RDNA3/RDNA4 selection used these versions. Fail here
+          # if an old container mirror cannot provide RDNA4-capable userspace.
+          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers)" ge 25.2.8
+          dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libdrm-amdgpu1)" ge 2.4.125
+          dpkg-query -W mesa-vulkan-drivers libvulkan1 libdrm-amdgpu1
+
+      # Keep the existing simulator/DBT pin and its translation baseline stable.
+      - name: Checkout Vulkan corpus
+        id: checkout_vulkan_corpus
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.install_vulkan_dependencies.outcome == 'success' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
+          ref: ${{ github.event.inputs.vulkan_corpus_ref || env.ROCJITSU_VULKAN_CORPUS_REF }}
+          path: rocjitsu-vulkan-corpus
+
+      - name: Build pinned Vulkan CTS
+        id: build_vulkan_cts
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.install_vulkan_dependencies.outcome == 'success' && steps.checkout_vulkan_corpus.outcome == 'success' }}
+        # Includes dependency downloads and a fresh Release build.
+        timeout-minutes: 30
+        working-directory: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
+        shell: bash
+        run: |
+          uv pip install --system -r corpus/vulkan/requirements.txt
+          python3 -m pytest tests/test_vulkan_suite.py -q
+          bash scripts/build_vulkan_cts.sh
+
+      # Allow runner headroom for the full compute/buffer selection.
+      - name: Run Vulkan compute and buffer CTS on RDNA3
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_vulkan_cts.outcome == 'success' }}
+        timeout-minutes: 30
+        shell: bash
+        env:
+          ROCJITSU_CORPUS_DIR: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
+        run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1100 --case ci
+
+      - name: Run Vulkan compute and buffer CTS on RDNA4
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_vulkan_cts.outcome == 'success' }}
+        timeout-minutes: 30
+        shell: bash
+        env:
+          ROCJITSU_CORPUS_DIR: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
+        run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1201 --case ci
+
+      - name: Upload Vulkan CTS diagnostics
+        if: ${{ always() && matrix.name == 'release' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-vulkan-cts-release
+          path: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}/.pytest-artifacts/vulkan-*
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 7
