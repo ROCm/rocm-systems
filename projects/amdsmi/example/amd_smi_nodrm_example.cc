@@ -136,9 +136,9 @@ int main() {
       ret = amdsmi_get_gpu_activity(processor_handles[j], &engine_usage);
       CHK_AMDSMI_RET(ret)
       printf("    Output of amdsmi_get_gpu_activity:\n");
-      printf("\tAverage GFX Activity: %d\n", engine_usage.gfx_activity);
-      printf("\tAverage MM Activity: %d\n", engine_usage.mm_activity);
-      printf("\tAverage UMC Activity: %d\n\n", engine_usage.umc_activity);
+      printf("\tAverage GFX Activity: %u\n", engine_usage.gfx_activity);
+      printf("\tAverage MM Activity: %u\n", engine_usage.mm_activity);
+      printf("\tAverage UMC Activity: %u\n\n", engine_usage.umc_activity);
 
       // Get firmware info
       amdsmi_fw_info_t fw_information = {};

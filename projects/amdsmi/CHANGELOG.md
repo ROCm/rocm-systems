@@ -18,7 +18,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
 
 - **Fixed v2.4 APU metrics reporting an unavailable `average_socket_power` or `average_gfx_power` as `65535` mW**.  
-  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.54 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
+  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.53 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
 
 ## amd_smi_lib for ROCm 10.2.0
 
