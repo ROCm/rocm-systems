@@ -2793,3 +2793,11 @@ The table now labels these fault counts as earlier-build results. These yellow
 cells establish clean behavior and retain measured misses; they do not claim
 fault qualification on the later full-clean build. See
 `status-yellow-hook-build-audit.json` for the full-family build comparison.
+
+Trial 6 completes in 1,440 seconds with
+9 ConSan conflicts, all 650 numerical cases passing,
+complete applicable coverage, exactly one intended mutation, and healthy checks
+before and after. Seven completed trials have detected the fault; the eighth
+trial is running. The three large clean shapes in each mode remain pending.
+The terminal trial-6 record under `sgemm-bank-fixed-untimed-high-fault` supplies
+this checkpoint.
