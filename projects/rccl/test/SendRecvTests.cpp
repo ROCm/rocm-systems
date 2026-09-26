@@ -16,14 +16,12 @@
 
 namespace RcclUnitTesting
 {
-  // Return true if device 0's architecture is one for which the LL128 P2P send/recv kernel is
-  // generated and activated (gfx942/gfx950 only; see reg_values_of("SendRecv") and the enqueue
-  // gate). The arch is queried in a forked child so the parent test process does not initialize
-  // HIP (mirrors EnvVars' isolated arch detection).
-  static bool DeviceSupportsLL128SendRecv()
+  // Return device 0's gcnArchName. Queried in a forked child so the parent test process
+  // does not initialize HIP (mirrors EnvVars' isolated arch detection).
+  static std::string DeviceGcnArchName()
   {
     int pipefd[2];
-    if (pipe(pipefd) != 0) return false;
+    if (pipe(pipefd) != 0) return "";
     pid_t pid = fork();
     if (pid == 0)
     {
@@ -43,8 +41,22 @@ namespace RcclUnitTesting
     (void)r;
     close(pipefd[0]);
     waitpid(pid, nullptr, 0);
-    std::string a(arch);
-    return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos;
+    return std::string(arch);
+  }
+
+  // Return true if device 0's architecture is one for which the LL128 P2P send/recv kernel is
+  // generated and activated (gfx942/gfx950/gfx1250; see reg_values_of("SendRecv") and the enqueue
+  // gate).
+  static bool DeviceSupportsLL128SendRecv()
+  {
+    std::string a = DeviceGcnArchName();
+    return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos ||
+           a.find("gfx1250") != std::string::npos;
+  }
+
+  static bool DeviceIsGfx1250()
+  {
+    return DeviceGcnArchName().find("gfx1250") != std::string::npos;
   }
 
   // Scan the NCCL_DEBUG_SUBSYS=COLL log files matching globPattern for the per-op protocol line
@@ -330,7 +342,7 @@ namespace RcclUnitTesting
                    << testBed.ev.maxGpus << ")";
     }
     if (expect == ExpectProto::LL128 && !DeviceSupportsLL128SendRecv()) {
-      GTEST_SKIP() << "Skipping... LL128 P2P send/recv is only enabled on gfx942/gfx950.";
+      GTEST_SKIP() << "Skipping... LL128 P2P send/recv is only enabled on gfx942/gfx950/gfx1250.";
     }
 
     bool isCorrect = true;
@@ -459,10 +471,15 @@ namespace RcclUnitTesting
   // P2P send/recv protocol-selection matrix (host gate in enqueue.cc). LL128 is selected only when
   // ALL of the following hold; otherwise the legacy LL kernel is used (SIMPLE above threshold):
   //
-  //     useLL128SendRecv = defined(ENABLE_LL128)          // compile-time (HIP >= 6.1.33591)
-  //                        && comm->topo->ll128Enabled    // comm LL128 gate (RCCL_LL128_FORCE_ENABLE)
-  //                        && comm->allocP2pNetLLBuffers  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
-  //                        && (cudaArch == 940 || 950);   // gfx942 / gfx950 only
+  //     useLL128SendRecv = defined(ENABLE_LL128)
+  //                        && comm->topo->ll128Enabled
+  //                        && ( (cudaArch == 940 || 950) && allocP2pNetLLBuffers   // gfx942/gfx950
+  //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE=1)     // gfx1250 opt-in
+  //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE unset  // gfx1250 SendRecv auto
+  //                               && SendRecv 4ppn size window) );
+  //
+  // gfx1250 SendRecv auto windows (ENABLE default -1): 1-node 4 GPU 4 KiB-1 MiB, 2-node 8 GPU
+  // 4-512 KiB, 4-node 16 GPU 4-256 KiB. Tests that pin the legacy-LL path set ENABLE=0.
   //
   // ll128Enabled is required so P2P stays consistent with the comm's collective protocol choice: if
   // LL128 is not enabled for the comm, send/recv must not use it even with the opt-in flag set. For
@@ -484,7 +501,7 @@ namespace RcclUnitTesting
   //   off         | any          | any        | below | legacy LL | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
   //   off         | any          | any        | above | SIMPLE    | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
   //
-  // Non-gfx942/950 archs behave like the ENABLE_LL128=off rows (useLL128SendRecv is always false);
+  // Non-gfx942/950/gfx1250 archs behave like the ENABLE_LL128=off rows (useLL128SendRecv is always false);
   // the LL128 cases are skipped there via DeviceSupportsLL128SendRecv().
   // ---------------------------------------------------------------------------
 
@@ -499,6 +516,7 @@ namespace RcclUnitTesting
     // P2P and SHM left ENABLED so cross-GPU pairs use intranode connections, which always allocate
     // the LL staging buffer -> legacy LL is the deterministic below-threshold choice.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // pin legacy-LL threshold to the 16 KiB boundary the sweep straddles
     std::string const debugGlob = "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".*";
@@ -517,6 +535,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   // NCCL_ALLOC_P2P_NET_LL_BUFFERS=0: exercises the branch of the net.cc staging-buffer allocation
@@ -529,6 +548,7 @@ namespace RcclUnitTesting
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
     PinNetLoopbackTransport();
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // disabled case
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs when the LL128 path is off
     // Capture the per-op protocol selection so we can assert LL128/SIMPLE were used (see helper).
@@ -548,6 +568,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
     UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
@@ -566,6 +587,7 @@ namespace RcclUnitTesting
     PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: opt-in, not the SendRecv auto window
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // pin LL128 threshold to the 16 KiB boundary the sweep straddles
     // Capture the per-op protocol selection so we can assert LL128 was actually chosen (see helper).
@@ -592,6 +614,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL128_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
     UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
@@ -608,6 +631,7 @@ namespace RcclUnitTesting
   {
     // ll128Enabled left at its gfx942/gfx950 default (off): RCCL_LL128_FORCE_ENABLE is NOT set.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // P2P opt-in ON, but ll128Enabled off -> no LL128
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
@@ -626,6 +650,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   // Both conditions required (mirror of the above): forcing ll128Enabled on with
@@ -641,6 +666,7 @@ namespace RcclUnitTesting
     // below off useLL128SendRecv stays false.
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // force comm->topo->ll128Enabled = true
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // P2P LL128 opt-in OFF -> useLL128SendRecv=false
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
@@ -659,6 +685,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
   }
 
@@ -684,6 +711,7 @@ namespace RcclUnitTesting
     PinNetLoopbackTransport();
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
+    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: opt-in, not the SendRecv auto window
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL_THRESHOLD", "0", 1);         // legacy-LL knob at 0: must NOT affect the LL128 path
     setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // LL128 knob governs -> LL128 below 16 KiB
@@ -708,6 +736,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
     UnpinNetLoopbackTransport();
     unsetenv("NCCL_SHM_DISABLE");
@@ -721,6 +750,7 @@ namespace RcclUnitTesting
   TEST(SendRecv, SeparateThresholdLegacyLLUsesLLKnob)
   {
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 SendRecv auto windows
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     setenv("NCCL_P2P_LL128_THRESHOLD", "0", 1);      // LL128 knob at 0: must NOT affect the legacy-LL path
     setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL knob governs -> legacy LL below 16 KiB
@@ -741,11 +771,13 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL128_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   TEST(SendRecv, UserBufferRegister)
   {
     setenv("RCCL_ENABLE_INTRANET", "1", 1);
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1); // keep UBR on SIMPLE; auto windows would skip it
     TestBed testBed;
 
     // Configuration
@@ -840,6 +872,74 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
     }
     testBed.Finalize();
+    unsetenv("NCCL_P2P_LL128_ENABLE");
     unsetenv("RCCL_ENABLE_INTRANET");
+  }
+
+  // gfx1250 auto windows (ENABLE unset): 4/8/16 ranks pick LL below 4 KiB, LL128 in the
+  // window, SIMPLE above it. Host table tests cannot see enqueue selection; this scrapes
+  // NCCL_DEBUG COLL on a 4ppn-shaped comm.
+  TEST(SendRecv, Gfx1250AutoWindowSelectsLL128)
+  {
+    if (!DeviceIsGfx1250()) {
+      GTEST_SKIP() << "Skipping... gfx1250 SendRecv auto windows are gfx1250-only.";
+    }
+    unsetenv("NCCL_P2P_LL128_ENABLE");
+    std::string const debugGlob = "/tmp/rccl_gfx1250_auto_win_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_auto_win_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus != 4 && testBed.ev.maxGpus != 8 && testBed.ev.maxGpus != 16) {
+        testBed.Finalize();
+        RemoveGlobbedFiles(debugGlob);
+        unsetenv("NCCL_DEBUG_FILE");
+        unsetenv("NCCL_DEBUG_SUBSYS");
+        unsetenv("NCCL_DEBUG");
+        GTEST_SKIP() << "Skipping... auto windows key off nRanks 4/8/16 (detected "
+                     << testBed.ev.maxGpus << " GPUs).";
+      }
+      int numGpus = testBed.ev.maxGpus;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(1, numGpus, 1, gpuPriorityOrder), {1},
+                        testBed.GetNumStreamsPerGroup(1, 1), 1);
+      if (::testing::Test::HasFatalFailure()) return;
+
+      OptionalColArgs options;
+      // int8 so element count is the byte size. 2 KiB = LL, 16 KiB = LL128 (in every window),
+      // 2 MiB = SIMPLE (above the 1 MiB / 512 KiB / 256 KiB caps).
+      std::vector<int> const numElements = {2048, 16384, 1 << 21};
+      bool isCorrect = true;
+      for (int numIdx = 0; numIdx < (int)numElements.size() && isCorrect; ++numIdx) {
+        int n = numElements[numIdx];
+        options.root = 1;
+        testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, n, n, options, 0, 0, 0);
+        testBed.AllocateMem(false, false, 0, 0, 0);
+        testBed.PrepareData(0, 0, 0);
+        options.root = 0;
+        testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, n, n, options, 0, 0, 1);
+        testBed.AllocateMem(false, false, 0, 0, 1);
+        testBed.PrepareData(0, 0, 1);
+        testBed.ExecuteCollectives({0, 1}, 0);
+        testBed.ValidateResults(isCorrect, 0, 0, 1);
+        testBed.DeallocateMem(0, 0, 1);
+        testBed.DeallocateMem(0, 0, 0);
+      }
+      EXPECT_TRUE(isCorrect);
+      testBed.DestroyComms();
+      testBed.Finalize();
+    }
+    bool const sawLL     = DebugLogsContainProtocol(debugGlob, "LL");
+    bool const sawLL128  = DebugLogsContainProtocol(debugGlob, "LL128");
+    bool const sawSimple = DebugLogsContainProtocol(debugGlob, "Simple");
+    EXPECT_TRUE(sawLL) << "2 KiB should stay legacy LL below the 4 KiB floor";
+    EXPECT_TRUE(sawLL128) << "16 KiB should take the gfx1250 SendRecv auto LL128 window";
+    EXPECT_TRUE(sawSimple) << "2 MiB should be SIMPLE above the auto-window cap";
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
   }
 }

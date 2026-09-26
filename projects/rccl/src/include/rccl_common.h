@@ -375,6 +375,25 @@ inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool un
   if (cudaArch == 940 || cudaArch == 1250) return 0;
   return 1;
 }
+
+// gfx1250 SendRecv (ncclSend/ncclRecv only, not AlltoAll) LL128 message-size windows
+// for 4 GPU/node. 0 means this communicator has no auto window.
+// Inclusive: [rcclGfx1250SendRecvLl128MinBytes, max].
+// nNodes is unused: MNNVL folds multi-host gfx1250 into one NVL domain (comm->nNodes=1
+// and comm->localRanks=nRanks), so localRanks cannot tell 4 GPU/node hosts apart from
+// CPX or 1 GPU/node. Callers pass different nNodes meanings (physical hosts in init,
+// NVL domains in enqueue); key off nRanks 4 / 8 / 16 instead.
+constexpr ssize_t rcclGfx1250SendRecvLl128MinBytes = 4 << 10;
+inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nRanks) {
+  if (cudaArch != 1250) return 0;
+  // MNNVL folds multi-host gfx1250 into nNodes=1 (one NVL domain). 4 GPU/node
+  // SendRecv windows are keyed off nRanks: 4 / 8 / 16.
+  (void)nNodes;
+  if (nRanks == 4) return 1 << 20;     // 1 host, 4 KiB .. 1 MiB
+  if (nRanks == 8) return 512 << 10;   // 2 host, 4 KiB .. 512 KiB
+  if (nRanks == 16) return 256 << 10;  // 4 host, 4 KiB .. 256 KiB
+  return 0;
+}
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

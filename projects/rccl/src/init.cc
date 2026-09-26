@@ -146,6 +146,7 @@ extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
 extern int64_t ncclParamRasDiagnostics();
 extern int64_t ncclParamDiagnostics();
+extern int64_t ncclParamP2pLL128Enable();
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -1976,8 +1977,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       allXgmi &= isXGMI;
     }
   }
-  // Initialize num P2P LL buffers for this communicator
-  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1;
+  // Initialize num P2P LL buffers for this communicator. gfx1250 internodal LL128 needs the
+  // NET staging buffer even when NCCL_ALLOC_P2P_NET_LL_BUFFERS is unset: ENABLE=1 is the
+  // all-P2P opt-in (any nRanks), ENABLE=-1 auto-windows need it for 8/16-rank 4 GPU/node.
+  comm->allocP2pNetLLBuffers = ncclParamAllocP2pNetLLBuffers() == 1 ||
+                               (comm->cudaArch == 1250 && ncclParamP2pLL128Enable() > 0) ||
+                               (ncclParamP2pLL128Enable() < 0 &&
+                                rcclGfx1250SendRecvLl128MaxBytes(comm->cudaArch, nNodes, nranks) > 0 && nranks > 4);
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[5] = {ringGraph, treeGraph, collNetDirectGraph, collNetChainGraph, nvlsGraph};

@@ -1709,11 +1709,21 @@ NCCL_P2P_LL128_THRESHOLD
 ------------------------
 (since 2.28)
 
-The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the LL128 low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold is used instead of ``NCCL_P2P_LL_THRESHOLD`` whenever the LL128 P2P send/recv path is active (gfx942/gfx950 with ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1`` and LL128 enabled for the communicator). LL128's much lower per-line flag overhead keeps it faster than SIMPLE to larger per-channel sizes than legacy LL, so it can be set higher than ``NCCL_P2P_LL_THRESHOLD``.
+The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the LL128 low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold is used instead of ``NCCL_P2P_LL_THRESHOLD`` whenever the LL128 P2P send/recv path is active (gfx942/gfx950 with ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1``, or gfx1250 with ``NCCL_P2P_LL128_ENABLE=1``, and LL128 enabled for the communicator). LL128's much lower per-line flag overhead (~1/8 on gfx9, ~1/16 on gfx1250) keeps it faster than SIMPLE to larger per-channel sizes than legacy LL, so it can be set higher than ``NCCL_P2P_LL_THRESHOLD``. A value of 0 means no upper bound.
 
 Values accepted
 ^^^^^^^^^^^^^^^
 Decimal number. Default is 16384.
+
+NCCL_P2P_LL128_ENABLE
+---------------------
+(since 2.28)
+
+``NCCL_P2P_LL128_ENABLE`` controls gfx1250 LL128 send/recv. Default ``-1`` (auto) selects LL128 for ``ncclSend``/``ncclRecv`` only (not AlltoAll) on 4 GPU/node in these inclusive message-size windows: 1-node 4 GPU from 4 KiB to 1 MiB, 2-node 8 GPU from 4 KiB to 512 KiB, 4-node 16 GPU from 4 KiB to 256 KiB. Below 4 KiB stays legacy LL; above the window uses SIMPLE. Set to ``1`` to opt all P2P (including AlltoAll) into LL128 below ``NCCL_P2P_LL128_THRESHOLD``. Set to ``0`` to disable. gfx942/gfx950 do not use this flag; they select LL128 via ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``. Internodal gfx1250 LL128 still needs the net staging buffer; RCCL allocates it when ``ENABLE=1`` and for the 2-node and 4-node auto windows even if ``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` is unset.
+
+Values accepted
+^^^^^^^^^^^^^^^
+-1 (auto), 0 (disabled), or 1 (force on). Default value is -1.
 
 NCCL_ALLOC_P2P_NET_LL_BUFFERS
 -----------------------------
