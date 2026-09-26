@@ -1,3 +1,4 @@
+import argparse
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -81,6 +82,166 @@ class BuildLinkCmdTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
                                   "gfx942", "/nonexistent/lib.a")
+
+
+class TargetIdTest(unittest.TestCase):
+    """Each case pins one side of the --arch / --target-id split, so
+    collapsing them into one option fails here and not in a clean-looking
+    build. The driver's module docstring explains the split.
+    """
+
+    def _main_with(self, argv, mode="compile"):
+        """Run main() with do_<mode> stubbed, and return the parsed args."""
+        captured = {}
+
+        def fake(args, forwarded_flags):
+            captured["args"] = args
+
+        real = getattr(driver, f"do_{mode}")
+        real_argv = driver.sys.argv
+        setattr(driver, f"do_{mode}", fake)
+        driver.sys.argv = ["rccl-device-compile"] + argv
+        try:
+            driver.main()
+        finally:
+            setattr(driver, f"do_{mode}", real)
+            driver.sys.argv = real_argv
+        return captured["args"]
+
+    def test_joined_form_is_our_arg(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--compile", "--arch=gfx942", "--target-id=gfx942:xnack+",
+             "-DFOO", "-o", "out.o", "in.cpp"]
+        )
+
+        self.assertIn("--target-id=gfx942:xnack+", our)
+        self.assertEqual(forwarded, ["-DFOO"])
+        self.assertEqual(sources, ["in.cpp"])
+
+    def test_separate_form_consumes_value(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--compile", "--target-id", "gfx950:xnack+", "-O3", "in.cpp"]
+        )
+
+        self.assertEqual(our, ["--compile", "--target-id", "gfx950:xnack+"])
+        self.assertEqual(forwarded, ["-O3"])
+        self.assertEqual(sources, ["in.cpp"])
+
+    def test_defaults_to_arch_when_absent(self):
+        args = self._main_with(["--compile", "--arch=gfx942",
+                                "-o", "out.o", "in.cpp"])
+
+        self.assertEqual(args.target_id, "gfx942")
+
+    def test_does_not_overwrite_an_explicit_value(self):
+        args = self._main_with(["--compile", "--arch=gfx942",
+                                "--target-id=gfx942:xnack+",
+                                "-o", "out.o", "in.cpp"])
+
+        self.assertEqual(args.arch, "gfx942")
+        self.assertEqual(args.target_id, "gfx942:xnack+")
+
+    def test_codegen_command_builders_emit_the_id_they_are_given(self):
+        compile_cmd = driver.dispatcher_compile_cmd(
+            "clang", "gfx942:xnack+", [], "disp.s", "common.cu.cpp")
+        assemble_cmd = driver.device_assemble_cmd(
+            "clang", "gfx942:xnack+", "disp.o", "disp.s")
+
+        self.assertIn("--offload-arch=gfx942:xnack+", compile_cmd)
+        self.assertIn("-mcpu=gfx942:xnack+", assemble_cmd)
+
+    def test_link_hands_the_target_id_to_the_dispatcher_compile(self):
+        """The builders above only prove they interpolate their argument;
+        this pins do_link to reaching them with --target-id, not --arch."""
+        seen = {}
+
+        class Reached(Exception):
+            pass
+
+        def spy(clang, target_id, forwarded_flags, disp_asm, dispatcher):
+            seen["target_id"] = target_id
+            raise Reached
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            obj = Path(temp_dir) / "kernel.o"
+            obj.touch()
+            (Path(temp_dir) / "kernel.resources.json").write_text(
+                '{"vgpr_count": 8, "agpr_count": 0, "sgpr_count": 16}')
+
+            args = argparse.Namespace(
+                clang="clang", arch="gfx942", target_id="gfx942:xnack+",
+                objects=[str(obj)], output=str(Path(temp_dir) / "device.elf"),
+                dispatcher="common.cu.cpp", keep_temps=False,
+                rocshmem_bitcode=None, profile_rt=None)
+
+            real_discover, real_dispatch = (driver.discover_tools,
+                                            driver.dispatcher_compile_cmd)
+            driver.discover_tools = lambda _: ("clang", "ld.lld")
+            driver.dispatcher_compile_cmd = spy
+            try:
+                with self.assertRaises(Reached):
+                    driver.do_link(args, [])
+            finally:
+                driver.discover_tools = real_discover
+                driver.dispatcher_compile_cmd = real_dispatch
+
+        self.assertEqual(seen["target_id"], "gfx942:xnack+")
+
+    def test_compile_hands_the_target_id_to_both_codegen_steps(self):
+        """The codegen path a whole build goes through. Only run() and the
+        extractor are stubbed, so both commands do_compile issues are the
+        real ones."""
+        calls = []
+
+        def fake_run(cmd, description=""):
+            calls.append(cmd)
+            if '-S' in cmd:
+                Path(cmd[cmd.index('-S') + 2]).write_text("")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args = argparse.Namespace(
+                clang="clang", arch="gfx942", target_id="gfx942:xnack+",
+                source="kernel.cpp", keep_temps=False,
+                output=str(Path(temp_dir) / "kernel.o"))
+
+            saved = (driver.discover_tools, driver.run,
+                     driver.extract_device_function)
+            driver.discover_tools = lambda _: ("clang", "ld.lld")
+            driver.run = fake_run
+            driver.extract_device_function = lambda lines: ([], {})
+            try:
+                driver.do_compile(args, [])
+            finally:
+                (driver.discover_tools, driver.run,
+                 driver.extract_device_function) = saved
+
+        compile_cmd, assemble_cmd = calls
+        self.assertIn("--offload-arch=gfx942:xnack+", compile_cmd)
+        self.assertIn("-mcpu=gfx942:xnack+", assemble_cmd)
+
+    def test_lld_lto_plugin_takes_the_bare_arch(self):
+        """Given a target ID, ld.lld warns "not a recognized processor" and
+        links with no subtarget at all -- worse than the bare name."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive = Path(temp_dir) / "libclang_rt.profile.a"
+            archive.touch()
+
+            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                        "gfx942", str(archive))
+
+        self.assertIn("--plugin-opt=mcpu=gfx942", cmd)
+
+    def test_a_suffixed_arch_is_stripped(self):
+        """A target ID on args.arch reaches lld and the register model, both
+        of which misread it silently."""
+        args = self._main_with(["--link", "--arch=gfx942:xnack+",
+                                "--dispatcher=common.cu.cpp",
+                                "-o", "device.elf", "kernel.o"],
+                               mode="link")
+
+        self.assertEqual(args.arch, "gfx942")
+        self.assertEqual(args.target_id, "gfx942:xnack+")
+        self.assertTrue(driver._has_unified_vgpr_agpr(args.arch))
 
 
 class DispatcherCompileCmdTest(unittest.TestCase):

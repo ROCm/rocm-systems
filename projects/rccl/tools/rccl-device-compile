@@ -20,6 +20,15 @@ Link mode (--link):
     5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
     6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
+Target selection (--arch / --target-id):
+    --arch is the bare processor name (gfx942); --target-id is the full target
+    ID (gfx942:xnack+) and defaults to --arch. Both are needed: --target-id
+    drives codegen, where a requested feature applies only if the suffix
+    survives, while --arch drives what keys on an exact processor name --
+    resource aggregation, temp-file names, and ld.lld's LTO plugin, which
+    rejects a target ID. A suffix on --arch is stripped once --target-id has
+    defaulted from it, so --arch=gfx942:xnack+ alone serves both roles.
+
 Tool discovery:
     amdclang++, ld.lld are found relative to --clang=<path> or by searching
     PATH and the directory containing the system C++ compiler.
@@ -461,6 +470,21 @@ def discover_tools(clang_path):
 # Run subprocess with error handling
 # ---------------------------------------------------------------------------
 
+def device_assemble_cmd(clang, target_id, obj_out, asm_in):
+    """Assemble device assembly text to an amdgcn object.
+
+    Takes the target ID: the assembler encodes its features into e_flags and
+    amdhsa.target metadata, which the loader matches against the agent.
+    """
+    return [
+        clang,
+        '-x', 'assembler',
+        '-target', 'amdgcn-amd-amdhsa',
+        f'-mcpu={target_id}',
+        '-c', '-o', obj_out, asm_in,
+    ]
+
+
 def run(cmd, description=""):
     """Run a command, raising on failure with the full command for diagnosis."""
     try:
@@ -483,7 +507,7 @@ def run(cmd, description=""):
 
 def do_compile(args, forwarded_flags):
     clang, _ = discover_tools(args.clang)
-    arch = args.arch
+    target_id = args.target_id
     source = args.source
     output = args.output
     keep_temps = args.keep_temps
@@ -514,7 +538,7 @@ def do_compile(args, forwarded_flags):
             clang,
             '-x', 'hip',
             '--offload-device-only',
-            f'--offload-arch={arch}',
+            f'--offload-arch={target_id}',
             '-gline-tables-only',
             '-w',
         ] + forwarded_flags + [
@@ -541,13 +565,7 @@ def do_compile(args, forwarded_flags):
             json.dump(resources, f, indent=2)
 
         # Step 3: Assemble to object
-        assemble_cmd = [
-            clang,
-            '-x', 'assembler',
-            '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
-            '-c', '-o', output, ext_file,
-        ]
+        assemble_cmd = device_assemble_cmd(clang, target_id, output, ext_file)
         run(assemble_cmd, f"assemble {os.path.basename(source)}")
 
     finally:
@@ -566,8 +584,11 @@ def do_compile(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
-def dispatcher_compile_cmd(clang, arch, forwarded_flags, disp_asm, dispatcher):
+def dispatcher_compile_cmd(clang, target_id, forwarded_flags, disp_asm, dispatcher):
     """Device-only dispatcher compile to assembly.
+
+    Takes the full target ID, not the bare processor name: this is a codegen
+    invocation, so a requested feature suffix has to survive to it.
 
     -gline-tables-only is placed before forwarded_flags so it matches the
     per-kernel compile. Clang takes the last debug-info option, so coverage's
@@ -579,7 +600,7 @@ def dispatcher_compile_cmd(clang, arch, forwarded_flags, disp_asm, dispatcher):
         clang,
         '-x', 'hip',
         '--offload-device-only',
-        f'--offload-arch={arch}',
+        f'--offload-arch={target_id}',
         '-gline-tables-only',
         '-w',
     ] + list(forwarded_flags) + [
@@ -594,6 +615,13 @@ def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     is appended together with --plugin-opt=mcpu=<arch> so lld's LTO codegen of
     the bitcode archive targets amdgcn-amd-amdhsa for this arch instead of the
     host triple (otherwise lld errors out with "incompatible mach").
+
+    This is the one codegen-adjacent site that takes the BARE processor name
+    rather than the full target ID. lld's LTO plugin does not parse target
+    IDs: given mcpu=gfx942:xnack+ it prints "'gfx942:xnack+' is not a
+    recognized processor for this target (ignoring processor)" and links on
+    with no subtarget at all, which is worse than the bare name. Passing
+    --arch here is deliberate; see the module docstring.
 
     CMake EXISTS-checks the archive before passing --profile-rt
     (cmake/DeviceLinker.cmake), so a missing archive here means the driver was
@@ -614,6 +642,7 @@ def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
 def do_link(args, forwarded_flags):
     clang, lld = discover_tools(args.clang)
     arch = args.arch
+    target_id = args.target_id
     objects = args.objects
     output = args.output
     dispatcher = args.dispatcher
@@ -662,7 +691,7 @@ def do_link(args, forwarded_flags):
     try:
         # Step 2: Compile dispatcher to assembly.
         disp_compile_cmd = dispatcher_compile_cmd(
-            clang, arch, forwarded_flags, disp_asm, dispatcher)
+            clang, target_id, forwarded_flags, disp_asm, dispatcher)
         run(disp_compile_cmd, f"compile dispatcher for {arch}")
 
         # Step 3: Patch dispatcher with aggregated resources
@@ -673,13 +702,8 @@ def do_link(args, forwarded_flags):
             f.writelines(patched_lines)
 
         # Step 4: Assemble patched dispatcher
-        disp_assemble_cmd = [
-            clang,
-            '-x', 'assembler',
-            '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
-            '-c', '-o', disp_obj, disp_patched,
-        ]
+        disp_assemble_cmd = device_assemble_cmd(
+            clang, target_id, disp_obj, disp_patched)
         run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
 
         # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
@@ -696,7 +720,7 @@ def do_link(args, forwarded_flags):
                 bc_compile_cmd = [
                     clang,
                     '-target', 'amdgcn-amd-amdhsa',
-                    f'-mcpu={arch}',
+                    f'-mcpu={target_id}',
                     '-c', '-x', 'ir',
                     '-o', rocshmem_obj, rocshmem_bitcode,
                 ]
@@ -756,6 +780,11 @@ def parse_compiler_flags(argv):
         elif arg.startswith('--arch='):
             our_args.append(arg)
         elif arg == '--arch' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--target-id='):
+            our_args.append(arg)
+        elif arg == '--target-id' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
         elif arg.startswith('--clang='):
@@ -831,6 +860,7 @@ def main():
     parser.add_argument('--compile', action='store_true')
     parser.add_argument('--link', action='store_true')
     parser.add_argument('--arch', required=False)
+    parser.add_argument('--target-id', required=False)
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
@@ -844,6 +874,14 @@ def main():
     if args.version:
         print("rccl-device-compile 1.0")
         sys.exit(0)
+
+    # Take the default before stripping, so the feature lands on target_id.
+    # arch's consumers (ld.lld's LTO plugin, _has_unified_vgpr_agpr) misread a
+    # target ID without failing.
+    if not args.target_id:
+        args.target_id = args.arch
+    if args.arch:
+        args.arch = args.arch.split(':', 1)[0]
 
     if args.compile:
         if not positional:

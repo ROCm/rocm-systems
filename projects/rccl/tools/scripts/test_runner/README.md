@@ -1528,3 +1528,5 @@ python3 -m unittest discover -s tests -t . -v
 ```
 
 `pytest` also discovers them via `pytest.ini` (`pytest tests/`) if you prefer, but the `unittest discover` command above is the one contributors and CI should use so the two entry points never diverge.
+
+CI runs exactly that command: `do_device_compile_guards` in `test/host/run_host_tests.sh` invokes it as part of the `guards` phase, so a failure here fails the host-test pipeline. Add new driver cases to this suite rather than starting a second one elsewhere — `add_test()` registrations in `test/CMakeLists.txt` do not gate, because nothing in RCCL CI runs `ctest`.
