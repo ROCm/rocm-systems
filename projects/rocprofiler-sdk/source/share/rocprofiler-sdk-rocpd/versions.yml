@@ -59,3 +59,4 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.4
 # - Added rocpd_hip_event table for HIP event barrier records (hipEventRecord, hipStreamWaitEvent)
 # - Added hip_events data view
+# - Added shader_array and wgp columns to SPM counter records
