@@ -1206,6 +1206,95 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   return HSA_STATUS_ERROR;
 }
 
+hsa_status_t Runtime::DriverPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info,
+                                    void* (*alloc)(size_t), uint32_t* num_agents_accessible,
+                                    hsa_agent_t** accessible, PtrInfoBlockData* block_info) {
+  auto it = allocation_map_.upper_bound(ptr);
+  if (it == allocation_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  --it;
+
+  const auto* base = reinterpret_cast<const uint8_t*>(it->first);
+  // size_requested, not size: an allocation is rounded up to the region's granularity, and the
+  // padding past what the caller asked for belongs to nobody. PtrInfo's own fragment lookup draws
+  // the line in the same place. Admitting one bound while reporting sizeInBytes from the other
+  // would hand out an agentBaseAddress for an address the caller never owned -- and that address
+  // is patched into a design's control code, where a wrong value hangs the dispatch rather than
+  // faulting.
+  if (ptr < base || ptr >= base + it->second.size_requested)
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  const AMD::MemoryRegion* region = static_cast<const AMD::MemoryRegion*>(it->second.region);
+  Agent* owner = (region != nullptr) ? region->owner() : nullptr;
+  if (owner == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  uint64_t device_address = 0;
+  const hsa_status_t err =
+      owner->driver().GetMemoryDeviceAddress(it->second.driver_handle, &device_address);
+  if (err != HSA_STATUS_SUCCESS) return err;
+
+  info->type = HSA_EXT_POINTER_TYPE_HSA;
+  info->hostBaseAddress = const_cast<void*>(it->first);
+  // An allocation the agent reaches at its host address has no separate device address, and the
+  // driver reports 0 for it. Either way this is the address at which the agent accesses it.
+  info->agentBaseAddress = (device_address != 0) ? reinterpret_cast<void*>(device_address)
+                                                 : const_cast<void*>(it->first);
+  info->sizeInBytes = it->second.size_requested;
+  info->registered = true;
+  info->userData = it->second.user_ptr;
+  info->agentOwner = owner->public_handle();
+
+  // The same mapping VMemoryPtrInfo applies, in the same order. Reporting a subset here would
+  // make an allocation's flags depend on which path resolved it -- and the kernarg case is not
+  // hypothetical: AMD::MemoryRegion sets Uncached for a kernarg pool, so an AIE kernarg
+  // allocation would silently lose HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT.
+  const HsaMemFlags& regionFlags = region->mem_flags();
+  info->global_flags = regionFlags.ui32.CoarseGrain ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
+                                                    : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+  info->global_flags |=
+      regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+  info->global_flags |= regionFlags.ui32.ExtendedCoherent
+      ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
+      : 0;
+
+  info->alloc_flags = 0;
+  if (regionFlags.ui32.ReadOnly) info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
+  if (regionFlags.ui32.HostAccess)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
+  if (regionFlags.ui32.AtomicAccessFull)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
+  if (regionFlags.ui32.AtomicAccessPartial)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
+
+  // And the per-allocation flags, which are the caller's own request rather than a property of
+  // the pool -- allocation_map_ keeps them for exactly this.
+  const MemoryRegion::AllocateFlags af = it->second.alloc_flags;
+  if (af & core::MemoryRegion::AllocateExecutable)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
+  if (af & core::MemoryRegion::AllocateContiguous)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS;
+  if (af & core::MemoryRegion::AllocateNonPaged)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED;
+
+  if (block_info != nullptr) {
+    // There is no suballocation here: the block is the allocation.
+    block_info->base = info->hostBaseAddress;
+    block_info->length = info->sizeInBytes;
+    block_info->agentOwner = owner;
+  }
+
+  if (alloc && num_agents_accessible && accessible) {
+    // The allocation came from one agent's pool and carries no per-agent imports, so that agent
+    // is the only one able to reach it.
+    AMD::callback_t<decltype(alloc)> Alloc(alloc);
+    *accessible = reinterpret_cast<hsa_agent_t*>(Alloc(sizeof(hsa_agent_t)));
+    if (*accessible == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    (*accessible)[0] = info->agentOwner;
+    *num_agents_accessible = 1;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible,
                               PtrInfoBlockData* block_info) {
@@ -1268,6 +1357,15 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
+
+      // The thunk only knows KFD allocations, so memory another kernel driver allocated -- an AIE
+      // agent's, say -- looks unknown to it. Ask the runtime's own allocation map before giving up.
+      if (DriverPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible, block_info) ==
+          HSA_STATUS_SUCCESS) {
+        memcpy(info, &retInfo, retInfo.size);
+        return HSA_STATUS_SUCCESS;
+      }
+
       retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
       memcpy(info, &retInfo, retInfo.size);
       return HSA_STATUS_SUCCESS;

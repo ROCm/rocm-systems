@@ -184,6 +184,23 @@ public:
   /// @param[in] handle driver identity returned by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(const DriverMemoryHandle& handle) = 0;
 
+  /// @brief Reports the address at which the owning agent accesses an allocation.
+  ///
+  /// Drivers whose allocations the agent reaches at their host virtual address need not
+  /// implement this. Those that give an allocation a separate device address report it here, so
+  /// that @c hsa_amd_pointer_info can answer with the address the agent actually uses.
+  ///
+  /// @param[in] handle driver identity returned by @ref AllocateMemory.
+  /// @param[out] device_address address the agent accesses the allocation at, or 0 if the
+  /// allocation has no address distinct from its host one. Zero does NOT mean unreachable: an
+  /// allocation shared with the host is reached at its host virtual address, which is what
+  /// XdnaDriver's GetBODevAddr reports zero for, and the caller should use that address.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the driver has no such notion.
+  virtual hsa_status_t GetMemoryDeviceAddress(const DriverMemoryHandle& handle,
+                                              uint64_t* device_address) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// @brief Create an agent dispatch queue with user-mode access rights.
   /// @param[in] node_id Node ID of the agent on which the queue is being created.
   /// @param[in] type Queue's type.

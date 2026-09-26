@@ -88,6 +88,8 @@ public:
                               core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
                               uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t GetMemoryDeviceAddress(const core::DriverMemoryHandle& handle,
+                                      uint64_t* device_address) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,

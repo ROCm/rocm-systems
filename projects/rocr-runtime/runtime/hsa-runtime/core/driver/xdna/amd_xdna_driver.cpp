@@ -1276,6 +1276,18 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   return DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle);
 }
 
+hsa_status_t XdnaDriver::GetMemoryDeviceAddress(const core::DriverMemoryHandle& handle,
+                                                uint64_t* device_address) const {
+  if (device_address == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if (handle.handle == AMDXDNA_INVALID_BO_HANDLE) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  return GetBODevAddr(fd_, static_cast<uint32_t>(handle.handle), device_address);
+}
+
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                      HSA::hsa_amd_queue_priority_internal_t priority,
                                      uint32_t sdma_engine_id, void* queue_addr,
