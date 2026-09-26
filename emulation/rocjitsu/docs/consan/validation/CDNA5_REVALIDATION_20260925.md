@@ -2323,3 +2323,12 @@ the original immutable wave-delay hook and full allowlist. Combined with the
 healthy admitted/reached 0/8 targeted fault campaign in `hgemm-sc-v1-fault`,
 this moves the SuperCollider cell from orange to yellow. Sparse FP8 ML started
 in the freed family slot; F8GEMM and both original SGEMM runs remain active.
+
+
+The full SGEMM SuperCollider run's `[511,511,1,511]` shard reached its actual
+3,600-second execution deadline. Its `oracle.json` in the original
+`sc-remaining-full-clean` root records 79 numeric rows and one of two required
+passing clients, followed by the explicit timeout; this is incomplete clean
+qualification, not a numeric mismatch or a detector report. The three smaller
+shards passed, while the remaining larger shards continue. The table records
+the timeout without restarting those live runs.
