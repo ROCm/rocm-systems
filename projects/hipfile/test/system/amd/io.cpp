@@ -14,13 +14,22 @@
 #include "test-options.h"
 
 #include <array>
+#include <algorithm>
 #include <bit>
-#include <cstdlib>
+#include <chrono>
+#include <compare>
+#include <cstddef>
+#include <cstdint>
+#include <errno.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <latch>
 #include <linux/stat.h>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -195,6 +204,96 @@ TEST_P(HipFileIo, writeAtNegativeBufferOffsetReturnsEINVAL)
     ASSERT_EQ(
         -1, hipFileWrite(tmpfile_handle, unregistered_device_buffer, unregistered_device_buffer_size, 0, -1));
     ASSERT_EQ(EINVAL, errno);
+}
+
+// This test ensures that a hipFileRead into GPU memory is observable by the
+// CPU. On XGMI-connected systems, the CPU may cache GPU memory, so this test
+// verifies that CPU caches are properly invalidated. On PCIe-connected systems,
+// the CPU does not cache GPU memory, so all reads from the CPU will go directly
+// to GPU memory.
+TEST_P(HipFileIo, ReadIntoVramIsObservableByCpu)
+{
+    // Initialize GPU data
+    constexpr uint16_t    initial_value{0xFFFF};
+    std::vector<uint16_t> test_buffer(unregistered_device_buffer_size / sizeof(initial_value), initial_value);
+    ASSERT_EQ(hipSuccess, hipMemcpy(unregistered_device_buffer, test_buffer.data(),
+                                    unregistered_device_buffer_size, hipMemcpyHostToDevice));
+    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+    // Determine the CPU cache line size
+    const long _cache_line_size{sysconf(_SC_LEVEL1_DCACHE_LINESIZE)};
+    ASSERT_LT(0U, _cache_line_size);
+    const size_t cache_line_size{static_cast<size_t>(_cache_line_size)};
+    ASSERT_EQ(reinterpret_cast<uintptr_t>(unregistered_device_buffer) % cache_line_size, 0);
+
+    // Initialize file data so that when read into GPU memory, each cache line
+    // will begin with a unique value
+    ASSERT_EQ(cache_line_size % sizeof(uint16_t), 0);
+    const size_t cache_line_stride{cache_line_size / sizeof(uint16_t)};
+    for (size_t i{0}; i * cache_line_stride < test_buffer.size(); i++) {
+        test_buffer[i * cache_line_stride] = static_cast<uint16_t>(i);
+    }
+    {
+        auto nbytes{std::span(test_buffer).size_bytes()};
+        ASSERT_EQ(static_cast<ssize_t>(nbytes), pwrite(tmpfile.fd, test_buffer.data(), nbytes, 0));
+    }
+
+    // Number of watchers observing GPU memory (ideally one per core)
+    const size_t watcher_count{
+        std::min(std::max(1U, std::thread::hardware_concurrency()),
+                 static_cast<unsigned>(unregistered_device_buffer_size / cache_line_size))};
+    ASSERT_LT(0U, watcher_count);
+
+    // Used by watcher threads to signal the main thread that they are ready to observe the read
+    std::latch watchers_ready{static_cast<std::ptrdiff_t>(watcher_count)};
+
+    // Watcher timeout for observing the new value in GPU memory
+    constexpr auto watcher_timeout{std::chrono::seconds{5}};
+
+    // Time to wait after all watchers are ready before initiating the read into GPU memory
+    constexpr auto wait_after_watchers_ready{std::chrono::milliseconds{500}};
+    ASSERT_LT(wait_after_watchers_ready, watcher_timeout);
+
+    {
+        std::vector<std::jthread> watcher_threads;
+
+        for (size_t i{0}; i < watcher_count; i++) {
+            // Each watcher observes a value in GPU memory which maps to a unique cache line
+            auto value{static_cast<volatile uint16_t *>(unregistered_device_buffer) + i * cache_line_stride};
+
+            watcher_threads.emplace_back([i, value, &watchers_ready, watcher_timeout]() {
+                if (*value != initial_value) {
+                    ADD_FAILURE() << "Watcher[" << i << "] did not observe initial value";
+                }
+
+                watchers_ready.arrive_and_wait();
+
+                std::chrono::steady_clock::time_point start_time{std::chrono::steady_clock::now()};
+                do {
+                    for (size_t j{0}; j < 1'000'000; j++) {
+                        auto observed{*value};
+                        if (observed == static_cast<uint16_t>(i)) {
+                            return;
+                        }
+                        else if (observed != initial_value) {
+                            ADD_FAILURE() << "Watcher[" << i
+                                          << "] observed an unexpected value: " << static_cast<int>(observed);
+                            return;
+                        }
+                    }
+                } while (std::chrono::steady_clock::now() - start_time < watcher_timeout);
+                ADD_FAILURE() << "Watcher[" << i << "] did not observe the new byte within timeout";
+            });
+        }
+
+        // Once all watchers are ready, give them a moment to start observing
+        watchers_ready.wait();
+        std::this_thread::sleep_for(wait_after_watchers_ready);
+
+        // Read the file into GPU memory
+        ASSERT_EQ(unregistered_device_buffer_size, hipFileRead(tmpfile_handle, unregistered_device_buffer,
+                                                               unregistered_device_buffer_size, 0, 0));
+    }
 }
 
 // Zero-sized IO tests require >= ROCm 7.14
