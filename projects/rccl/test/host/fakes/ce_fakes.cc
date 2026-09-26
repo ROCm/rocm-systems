@@ -21,6 +21,7 @@
 ASSERT_HOOK_MATCHES_PROD(g_ceAvailable, ncclCeAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_ceScratchAvailable, ncclCeScratchAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_hierCeAvailableFn, ncclHierCeAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_ceInitBatchOpsParams, ncclCeInitBatchOpsParams);
 ASSERT_HOOK_MATCHES_PROD(g_ceLaunchBatchOps, ncclCeLaunchBatchOps);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCeInit, ncclCeInit);
@@ -46,6 +47,14 @@ std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymReg
                    struct ncclDevrWindow*, struct ncclDevrWindow*)>
     g_ceAvailable = DefaultCeAvailable;
 
+static bool DefaultHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                                   struct ncclDevrWindow*, struct ncclDevrWindow*) {
+  return g_hierCeAvailable;
+}
+std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                   struct ncclDevrWindow*, struct ncclDevrWindow*)>
+    g_hierCeAvailableFn = DefaultHierCeAvailable;
+
 static bool DefaultCeScratchAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
   return g_ceScratchAvailableValue;
 }
@@ -66,9 +75,10 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t func, int op, nccl
   return g_ceScratchAvailable(comm, func, op, type, regType);
 }
 int ncclCeLocalReduceBlocks(ncclDataType_t type, size_t count) { return g_ceLocalReduceBlocks(type, count); }
-bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
-                         struct ncclDevrWindow*, struct ncclDevrWindow*) {
-  return g_hierCeAvailable;
+bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDataType_t type,
+                         ncclSymRegType_t regType, struct ncclDevrWindow* sendWin,
+                         struct ncclDevrWindow* recvWin) {
+  return g_hierCeAvailableFn(comm, func, op, type, regType, sendWin, recvWin);
 }
 
 // Allocates the op arrays, as src/ce_coll.cc does: callers write straight into
@@ -132,6 +142,7 @@ void ResetCeFakes() {
   g_ceScratchAvailableValue = false;
   g_hierCeAvailable = false;
   g_ceAvailable = DefaultCeAvailable;
+  g_hierCeAvailableFn = DefaultHierCeAvailable;
   g_ceScratchAvailable = DefaultCeScratchAvailable;
   g_ceLocalReduceBlocks = DefaultCeLocalReduceBlocks;
 }

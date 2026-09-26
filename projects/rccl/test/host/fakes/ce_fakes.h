@@ -32,6 +32,9 @@ extern bool g_hierCeAvailable;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                           struct ncclDevrWindow*, struct ncclDevrWindow*)>
     g_ceAvailable;
+extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                          struct ncclDevrWindow*, struct ncclDevrWindow*)>
+    g_hierCeAvailableFn;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)>
     g_ceScratchAvailable;
 extern std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks;
