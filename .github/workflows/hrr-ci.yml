@@ -441,7 +441,9 @@ jobs:
           # precede the SDK, which ships a plain build under the same soname.
           # No ROCr preload here: CLR was built against the SDK's ROCr, so the
           # two agree and there is no in-tree runtime to substitute.
-          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib"
+          # Keep the runner's existing path: setup-python puts libpython there,
+          # and replacing it makes python3 fail to start on some GPU machines.
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           if [ -n "${DEVICES}" ]; then
             export HIP_VISIBLE_DEVICES="${DEVICES}"
           fi
