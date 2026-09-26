@@ -148,6 +148,17 @@ rocprofiler_spm_configure_callback_dispatch_service(
                                                              record_callback_args);
 }
 
+rocprofiler_status_t
+rocprofiler_spm_dispatch_counting_service_set_agents(rocprofiler_context_id_t      context_id,
+                                                     const rocprofiler_agent_id_t* agents,
+                                                     size_t                        num_agents)
+{
+    if(!rocprofiler::spm::is_spm_explicitly_enabled())
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    return rocprofiler::spm::set_dispatch_agents(context_id, agents, num_agents);
+}
+
 /**
  * @brief Query Agent Counters Availability.
  *

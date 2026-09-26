@@ -54,8 +54,24 @@ pc_sampling_service_stop(context::pc_sampling_service* service);
 void
 pc_sampling_service_finish_configuration(context::pc_sampling_service* service);
 
+// Notifies the CID manager that the kernel's correlation ID has completed.
+// Invoked from pc_sampling::signal_completion_hook (pc_sampling/queue_hooks.cpp),
+// which is called by the HSA async signal handler in hsa/queue.cpp.
+void
+kernel_completion_cb(const rocprofiler_agent_t*                    rocp_agent,
+                     rocprofiler::hsa::rocprofiler_packet&         kernel_pkt,
+                     const rocprofiler::hsa::queue_info_session_t& session);
+
 rocprofiler_status_t
 flush_internal_agent_buffers(const PCSAgentSession* agent_session);
+
+// Called from pc_sampling::signal_completion_hook on kernel completion.
+// Marks the dispatch's correlation id as completed in the agent's CID manager
+// if PC sampling is configured on that agent.
+void
+kernel_completion_cb(const rocprofiler_agent_t*                    rocp_agent,
+                     rocprofiler::hsa::rocprofiler_packet&         kernel_pkt,
+                     const rocprofiler::hsa::queue_info_session_t& session);
 }  // namespace hsa
 }  // namespace pc_sampling
 }  // namespace rocprofiler

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,31 +22,34 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {
-namespace pc_sampling
-{
-void
-post_hsa_init_start_active_service();
-
 namespace hsa
 {
-extern void
-amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* packet,
-                                      hsa_queue_t*                             queue,
-                                      uint64_t                                 packet_id);
+// Test-only Queue subclass that overrides get_agent() / get_id() to bypass
+// HSA queue construction.
+class FakeQueue : public Queue
+{
+public:
+    FakeQueue(const AgentCache& a, rocprofiler_queue_id_t id)
+    : Queue(a, ::rocprofiler::counters::test_constants::get_api_table())
+    , _agent(a)
+    , _id(id)
+    {}
+    const AgentCache&      get_agent() const final { return _agent; }
+    rocprofiler_queue_id_t get_id() const final { return _id; }
 
-extern void
-data_ready_callback(void*                                client_callback_data,
-                    size_t                               data_size,
-                    size_t                               lost_sample_count,
-                    hsa_ven_amd_pcs_data_copy_callback_t data_copy_callback,
-                    void*                                hsa_callback_data);
+    ~FakeQueue() override = default;
 
+private:
+    const AgentCache&      _agent;
+    rocprofiler_queue_id_t _id = {};
+};
 }  // namespace hsa
-}  // namespace pc_sampling
 }  // namespace rocprofiler

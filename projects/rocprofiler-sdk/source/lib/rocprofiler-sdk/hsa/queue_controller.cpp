@@ -274,68 +274,6 @@ create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t
 }
 #endif
 
-constexpr rocprofiler_agent_t default_agent =
-    rocprofiler_agent_t{.size                       = sizeof(rocprofiler_agent_t),
-                        .id                         = rocprofiler_agent_id_t{.handle = 0},
-                        .type                       = ROCPROFILER_AGENT_TYPE_NONE,
-                        .cpu_cores_count            = 0,
-                        .simd_count                 = 0,
-                        .mem_banks_count            = 0,
-                        .caches_count               = 0,
-                        .io_links_count             = 0,
-                        .cpu_core_id_base           = 0,
-                        .simd_id_base               = 0,
-                        .max_waves_per_simd         = 0,
-                        .lds_size_in_kb             = 0,
-                        .gds_size_in_kb             = 0,
-                        .num_gws                    = 0,
-                        .wave_front_size            = 0,
-                        .num_xcc                    = 0,
-                        .cu_count                   = 0,
-                        .array_count                = 0,
-                        .num_shader_banks           = 0,
-                        .simd_arrays_per_engine     = 0,
-                        .cu_per_simd_array          = 0,
-                        .simd_per_cu                = 0,
-                        .max_slots_scratch_cu       = 0,
-                        .gfx_target_version         = 0,
-                        .vendor_id                  = 0,
-                        .device_id                  = 0,
-                        .location_id                = 0,
-                        .domain                     = 0,
-                        .drm_render_minor           = 0,
-                        .num_sdma_engines           = 0,
-                        .num_sdma_xgmi_engines      = 0,
-                        .num_sdma_queues_per_engine = 0,
-                        .num_cp_queues              = 0,
-                        .max_engine_clk_ccompute    = 0,
-                        .max_engine_clk_fcompute    = 0,
-                        .sdma_fw_version            = {},
-                        .fw_version                 = {},
-                        .capability                 = {},
-                        .cu_per_engine              = 0,
-                        .max_waves_per_cu           = 0,
-                        .family_id                  = 0,
-                        .workgroup_max_size         = 0,
-                        .grid_max_size              = 0,
-                        .local_mem_size             = 0,
-                        .hive_id                    = 0,
-                        .gpu_id                     = 0,
-                        .workgroup_max_dim          = {.x = 0, .y = 0, .z = 0},
-                        .grid_max_dim               = {.x = 0, .y = 0, .z = 0},
-                        .mem_banks                  = nullptr,
-                        .caches                     = nullptr,
-                        .io_links                   = nullptr,
-                        .name                       = nullptr,
-                        .vendor_name                = nullptr,
-                        .product_name               = nullptr,
-                        .model_name                 = nullptr,
-                        .node_id                    = 0,
-                        .logical_node_id            = 0,
-                        .logical_node_type_id       = 0,
-                        .runtime_visibility         = {0, 0, 0, 0, 0},
-                        .uuid = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{})};
-
 RocAttachDispatchTable**
 get_attach_table()
 {
@@ -419,19 +357,7 @@ QueueController::add_queue(hsa_queue_t*           id,
     CHECK(queue);
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
-    _callback_cache.wlock([&](auto& callbacks) {
-        _queues.wlock([&](auto& map) {
-            map[id] = std::move(queue);
-            for(const auto& [cbid, cb_data] : callbacks)
-            {
-                auto& [agent, cb] = cb_data;
-                if(agent.id == default_agent.id || agent.id == agent_id)
-                {
-                    map[id]->register_callback(cbid, cb);
-                }
-            }
-        });
-    });
+    _queues.wlock([&](auto& map) { map[id] = std::move(queue); });
 
     // signal-less live-queue bookkeeping and window open. Gated on
     // is_compute -- only a compute queue's doorbell can source a CP dispatch-log
@@ -567,50 +493,6 @@ QueueController::destroy_queue(hsa_queue_t* id)
     _queues.wlock([&](auto& map) { map.erase(id); });
 }
 
-ClientID
-QueueController::add_callback(std::optional<rocprofiler_agent_t> agent, queue_callbacks_t callbacks)
-{
-    static auto client_id = std::atomic<ClientID>{1};
-    ClientID    return_id = -1;
-    _callback_cache.wlock([&](auto& cb_cache) {
-        return_id = client_id;
-        if(agent)
-        {
-            cb_cache[client_id] = std::make_tuple(*agent, callbacks);
-        }
-        else
-        {
-            cb_cache[client_id] = std::make_tuple(default_agent, callbacks);
-        }
-        client_id++;
-
-        _queues.wlock([&](auto& map) {
-            for(auto& [_, queue] : map)
-            {
-                if(!agent || queue->get_agent().get_rocp_agent()->id.handle == agent->id.handle)
-                {
-                    queue->register_callback(return_id, callbacks);
-                }
-            }
-        });
-    });
-    return return_id;
-}
-
-void
-QueueController::remove_callback(ClientID id)
-{
-    _callback_cache.wlock([&](auto& cb_cache) {
-        cb_cache.erase(id);
-        _queues.wlock([&](auto& map) {
-            for(auto& [_, queue] : map)
-            {
-                queue->remove_callback(id);
-            }
-        });
-    });
-}
-
 void
 QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 {
@@ -677,26 +559,37 @@ common::Synchronized<hsa::profiler_serializer>&
 QueueController::serializer(const Queue* queue)
 {
     CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
     common::Synchronized<hsa::profiler_serializer>* ret = nullptr;
-    _profiler_serializer.ulock(
-        [&](const auto& m) {
-            if(auto ptr = m.find(queue->get_agent().get_rocp_agent()->id); ptr != m.end())
-            {
-                ret = ptr->second.get();
+    // Hold the refcount read lock across the lookup/insertion so that a concurrent
+    // update_serialization() cannot run between reading the refcount and inserting the
+    // entry: if it did, it would find no serializer to transition and the new entry would
+    // be created in the wrong state.  update_serialization() holds the refcount write lock
+    // then the serializer write lock, so taking them in the same order here is deadlock-free.
+    _serialization_refcount.rlock([&](const auto& state) {
+        const bool should_serialize = state.enabled(agent_id);
+        _profiler_serializer.ulock(
+            [&](const auto& m) {
+                if(auto ptr = m.find(agent_id); ptr != m.end())
+                {
+                    ret = ptr->second.get();
+                    return true;
+                }
+                return false;
+            },
+            [&](auto& m) {
+                ret =
+                    m.emplace(agent_id,
+                              std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                        .first->second.get();
+                if(should_serialize)
+                {
+                    ret->wlock([&](auto& serializer) { serializer.enable({}); });
+                }
                 return true;
-            }
-            return false;
-        },
-        [&](auto& m) {
-            ret = m.emplace(queue->get_agent().get_rocp_agent()->id,
-                            std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                      .first->second.get();
-            if(_serialized_enabled.load() == true)
-            {
-                ret->wlock([&](auto& serializer) { serializer.enable({}); });
-            }
-            return true;
-        });
+            });
+    });
     return *ret;
 }
 
@@ -715,47 +608,104 @@ per_dev_map(const QueueController::queue_map_t& _queues_v)
 };  // namespace
 
 void
-QueueController::disable_serialization()
+QueueController::update_serialization(const agent_handle_set_t& agents, bool enable)
 {
     _queues.rlock([&](const queue_map_t& _queues_v) {
-        _serialized_enabled.store(false);
         auto pd_map = per_dev_map(_queues_v);
-        _profiler_serializer.wlock([&](auto& m) {
-            for(auto& [k, v] : m)
+
+        // Agents whose effective refcount crossed zero in this call; only those get their
+        // serializer toggled. Both refcount mutation and serializer transitions happen
+        // together inside the refcount lock to prevent concurrent calls from interleaving.
+        bool any_enabled = false;
+
+        _serialization_refcount.wlock([&](auto& state) {
+            // An agent can be covered by `all` and by an explicit entry at the same time, so
+            // the transition has to be decided by comparing effective counts across the
+            // update rather than by watching a single counter hit zero.
+            auto was_enabled = std::unordered_map<rocprofiler_agent_id_t, bool>{};
+            _profiler_serializer.rlock([&](const auto& serializers) {
+                for(const auto& [agent_id, _] : serializers)
+                    was_enabled.emplace(agent_id, state.enabled(agent_id));
+            });
+
+            if(agents.empty())
             {
-                if(auto it = pd_map.find(k); it != pd_map.end())
+                if(enable)
+                    ++state.all;
+                else if(state.all > 0)
+                    --state.all;
+            }
+            else
+            {
+                for(const auto& agent_id : agents)
                 {
-                    v->wlock([&](auto& serializer) { serializer.disable(it->second); });
-                }
-                else
-                {
-                    v->wlock([&](auto& serializer) { serializer.disable({}); });
+                    auto& count = state.per_agent[agent_id];
+                    if(enable)
+                        ++count;
+                    else if(count > 0)
+                        --count;
                 }
             }
+
+            _profiler_serializer.wlock([&](auto& serializers) {
+                for(const auto& [agent_id, _] : serializers)
+                {
+                    auto itr = was_enabled.find(agent_id);
+                    if(itr == was_enabled.end()) continue;
+                    if(itr->second == state.enabled(agent_id)) continue;
+
+                    auto queues = hsa_barrier::queue_map_ptr_t{};
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end())
+                        queues = it->second;
+
+                    auto ser_itr = serializers.find(agent_id);
+                    if(ser_itr == serializers.end() || !ser_itr->second) continue;
+                    ser_itr->second->wlock([&](auto& serializer) {
+                        if(enable)
+                            serializer.enable(queues);
+                        else
+                            serializer.disable(queues);
+                    });
+                }
+            });
+
+            any_enabled = state.any();
         });
+
+        _serialized_enabled.store(any_enabled);
     });
+}
+
+void
+QueueController::disable_serialization()
+{
+    update_serialization({}, false);
 }
 
 void
 QueueController::enable_serialization()
 {
-    _queues.rlock([&](const queue_map_t& _queues_v) {
-        _serialized_enabled.store(true);
-        auto pd_map = per_dev_map(_queues_v);
-        _profiler_serializer.wlock([&](auto& m) {
-            for(auto& [k, v] : m)
-            {
-                if(auto it = pd_map.find(k); it != pd_map.end())
-                {
-                    v->wlock([&](auto& serializer) { serializer.enable(it->second); });
-                }
-                else
-                {
-                    v->wlock([&](auto& serializer) { serializer.enable({}); });
-                }
-            }
-        });
-    });
+    update_serialization({}, true);
+}
+
+void
+QueueController::disable_serialization(const agent_handle_set_t& agents)
+{
+    update_serialization(agents, false);
+}
+
+void
+QueueController::enable_serialization(const agent_handle_set_t& agents)
+{
+    update_serialization(agents, true);
+}
+
+bool
+QueueController::is_serialization_enabled(rocprofiler_agent_id_t agent_id) const
+{
+    bool enabled = false;
+    _serialization_refcount.rlock([&](const auto& state) { enabled = state.enabled(agent_id); });
+    return enabled;
 }
 
 void
@@ -795,17 +745,6 @@ QueueController::iterate_queues(const queue_iterator_cb_t& cb) const
         for(const auto& itr : _queues_v)
         {
             if(itr.second) cb(itr.second.get());
-        }
-    });
-}
-
-void
-QueueController::iterate_callbacks(const callback_iterator_cb_t& cb) const
-{
-    _callback_cache.rlock([&cb](const auto& map) {
-        for(const auto& [cid, tuple] : map)
-        {
-            cb(cid, tuple);
         }
     });
 }
