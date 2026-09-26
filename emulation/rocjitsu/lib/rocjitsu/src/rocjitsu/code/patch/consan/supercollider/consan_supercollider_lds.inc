@@ -13,9 +13,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                  AccessOrigin::DirectToLds);
   admitted_lds_file_offsets.insert(admitted_direct_file_offsets.begin(),
                                    admitted_direct_file_offsets.end());
+  const auto admitted_tensor_file_offsets = supercollider_admitted_access_file_offsets(
+      result.program_inventory, result.coverage_ledger, AccessOrigin::TensorLds);
+  admitted_lds_file_offsets.insert(admitted_tensor_file_offsets.begin(),
+                                   admitted_tensor_file_offsets.end());
   std::map<uint64_t, const ProgramSite *> admitted_sites;
   for (const ProgramSite &access : result.program_inventory.access_sites())
-    if ((access.origin == AccessOrigin::NativeLds || access.origin == AccessOrigin::DirectToLds) &&
+    if ((access.origin == AccessOrigin::NativeLds || access.origin == AccessOrigin::DirectToLds ||
+         access.origin == AccessOrigin::TensorLds) &&
         admitted_lds_file_offsets.contains(access.decoded_file_offset()))
       admitted_sites.try_emplace(access.decoded_file_offset(), &access);
 
@@ -180,7 +185,18 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                site.physical_id.original_text_offset,
                                            container->entry_text_offset, site.decoded_file_offset())
             : std::nullopt;
-    auto required_vgprs = access_dword_count(site);
+    const bool tensor = site.origin == AccessOrigin::TensorLds;
+    // Tensor DMA is wave-wide even under empty EXEC. Dynamic-stack spills do
+    // not yet provide an all-lane preservation contract.
+    if (tensor && site_context.owners.any_dynamic_stack) {
+      ++dynamic_stack_private_spill_rejection_count;
+      (void)publish_supercollider_access_rejection(
+          result.coverage_ledger, result.errors, site.physical_id,
+          LoweringOutcomeKind::ResourceRejected,
+          "SuperCollider tensor comparison requires a fixed full-wave private spill");
+      continue;
+    }
+    auto required_vgprs = tensor ? std::optional<uint16_t>(2u) : access_dword_count(site);
     if (!required_vgprs) {
       ++missing_width_plan_site_count;
       continue;
@@ -199,16 +215,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     // rather than the smallest preexisting descriptor, defines the reusable
     // register set.
     constexpr uint16_t dead_vcc_selection_limit = REGISTER_SET_ALLOCATABLE_SGPRS;
+    const uint16_t vcc_save_sgpr_width = tensor ? detail::tensor_load_compare_state_sgprs(site)
+                                                : supercollider_vcc_save_sgpr_width(target);
+    std::array<std::pair<uint16_t, uint16_t>, 4> forbidden_scalars{};
+    if (tensor && site.operands.tensor_descriptor_sgprs) {
+      const auto &groups = *site.operands.tensor_descriptor_sgprs;
+      for (size_t i = 0; i < groups.size(); ++i)
+        forbidden_scalars[i] = {
+            groups[i], static_cast<uint16_t>(groups[i] == 124u ? 0u : (i == 1u ? 8u : 4u))};
+    }
     auto vcc_save =
         allocated_sgpr_count
             ? choose_supercollider_dead_vcc_save_sgpr(
                   site_inst, owner_liveness, *allocated_sgpr_count, min_preferred_vcc_save_sgpr,
-                  dead_vcc_selection_limit, supercollider_vcc_save_sgpr_width(target),
+                  dead_vcc_selection_limit, vcc_save_sgpr_width,
                   target.scalar_placement_model == ScalarPlacementModel::DescriptorPartitioned,
-                  options)
+                  options, false, forbidden_scalars)
             : std::nullopt;
     bool spill_vcc_save_to_vgpr = false;
-    if (!vcc_save && target.scalar_placement_model == ScalarPlacementModel::SpillBacked &&
+    if (!tensor && !vcc_save &&
+        target.scalar_placement_model == ScalarPlacementModel::SpillBacked &&
         allocated_sgpr_count) {
       vcc_save = choose_supercollider_borrowed_scalar_range(*allocated_sgpr_count, 1u, options);
       spill_vcc_save_to_vgpr = vcc_save.has_value();
@@ -217,10 +243,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       ++missing_vcc_save_site_count;
       continue;
     }
-    const uint16_t vcc_save_sgpr_width = supercollider_vcc_save_sgpr_width(target);
     uint32_t probe_scratch_vgprs = 0u;
     bool reuse_readback_for_report = false;
-    if (site.origin == AccessOrigin::DirectToLds) {
+    if (tensor) {
+      probe_scratch_vgprs = detail::kTensorLoadCompareScratchVgprs;
+    } else if (site.origin == AccessOrigin::DirectToLds) {
       const auto direct_layout = direct_to_lds_scratch_layout(site, target, options, 0u);
       if (!direct_layout) {
         ++missing_width_plan_site_count;
@@ -247,7 +274,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                               ? 0u
                                               : min_auto_scratch_vgpr.value_or(0u);
     const uint16_t access_scratch_alignment =
-        access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
+        !tensor && access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
     // Spill fallback must preserve this alignment too: an odd base changes
     // the report layout and can move the saved address outside its spill.
     const uint16_t scratch_alignment = reuse_readback_for_report && target.requires_even_vgpr_tuples
@@ -363,6 +390,31 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         }
       }
     }
+    if (tensor && scratch_selected && (scratch_vgpr & 1u) != 0u) {
+      ++invalid_scratch_allocation_site_count;
+      (void)publish_supercollider_access_rejection(
+          result.coverage_ledger, result.errors, site.physical_id,
+          LoweringOutcomeKind::ResourceRejected,
+          "SuperCollider tensor comparison requires an even scratch VGPR base");
+      continue;
+    }
+    if (tensor && scratch_selected && !private_spill_plans.contains(&site)) {
+      // Liveness alone cannot justify clobbering inactive guest lanes. Preserve
+      // the entire tuple, including when it is dead under the guest EXEC.
+      const auto private_limit = address_free_private_limit(arch);
+      if (!private_limit) {
+        ++private_spill_encoding_failure_count;
+        continue;
+      }
+      private_spill_plans.emplace(
+          &site, SuperColliderBracketLocalPrivateSpillPlan{
+                     .owner_descriptor_file_offsets = site_context.owners.descriptor_file_offsets,
+                     .original_private_bytes = site_context.owners.max_private_segment_size,
+                     .private_limit = *private_limit,
+                     .vgpr_base = scratch_vgpr,
+                     .vgpr_count = static_cast<uint16_t>(scratch_vgprs),
+                 });
+    }
     if (!scratch_selected) {
       ++missing_scratch_site_count;
       continue;
@@ -453,6 +505,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       manager.emplace(plan->second.original_private_bytes, plan->second.private_limit);
     auto sequence =
         build_vgpr_spill_sequence(*manager, plan->second.vgpr_base, plan->second.vgpr_count, arch);
+    if (sequence && candidate.site->origin == AccessOrigin::TensorLds)
+      sequence = detail::tensor_full_wave_spill(*sequence, candidate.vcc_save_sgpr + 2u, arch);
     if (!sequence)
       return false;
     state.managers.insert_or_assign(key, std::move(*manager));
@@ -532,15 +586,33 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto split_two_address =
         split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;
-    auto words =
-        site.origin == AccessOrigin::DirectToLds
-            ? build_direct_to_lds_check_trap_words(original_bytes, site, target, options,
-                                                   candidate.scratch_vgpr, candidate.vcc_save_sgpr,
-                                                   *delay_words, result.errors)
-            : build_lds_check_trap_words(
-                  original_bytes, site, target, options, candidate.scratch_vgpr,
-                  candidate.vcc_save_sgpr, candidate.selectable_vgpr_bank_mode.value_or(0u),
-                  *delay_words, guest_instruction_word_offset, result.errors);
+    std::optional<std::vector<uint32_t>> words;
+    if (site.origin == AccessOrigin::TensorLds) {
+      std::array<uint32_t, 3> original{};
+      const auto mismatch = build_mismatch_action_words(
+          options, target, candidate.scratch_vgpr + detail::kTensorLoadCompareWorkspaceOffset,
+          result.errors, "ConSan tensor check/trap");
+      uint32_t guest_offset = 0;
+      words.emplace();
+      if (!mismatch ||
+          !read_words_at(original_bytes, site.decoded_file_offset(),
+                         std::span<uint32_t>(original)) ||
+          !detail::append_tensor_load_compare(*words, site, original, candidate.scratch_vgpr,
+                                              candidate.vcc_save_sgpr, *delay_words, *mismatch,
+                                              guest_offset, arch)) {
+        result.errors.emplace_back("ConSan tensor check/trap could not encode value comparison");
+        return;
+      }
+      guest_instruction_word_offset = guest_offset;
+    } else
+      words = site.origin == AccessOrigin::DirectToLds
+                  ? build_direct_to_lds_check_trap_words(
+                        original_bytes, site, target, options, candidate.scratch_vgpr,
+                        candidate.vcc_save_sgpr, *delay_words, result.errors)
+                  : build_lds_check_trap_words(
+                        original_bytes, site, target, options, candidate.scratch_vgpr,
+                        candidate.vcc_save_sgpr, candidate.selectable_vgpr_bank_mode.value_or(0u),
+                        *delay_words, guest_instruction_word_offset, result.errors);
     if (!words)
       return;
     const auto spill = selected_spills.sequences.find(&site);
@@ -559,7 +631,34 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         return;
       }
     }
-    if (candidate.selectable_vgpr_bank_mode.value_or(0u) != 0u) {
+    if (site.origin == AccessOrigin::TensorLds) {
+      if (spill == selected_spills.sequences.end()) {
+        result.errors.emplace_back("ConSan tensor comparison lost its full-wave spill");
+        return;
+      }
+      std::vector<uint32_t> wrapped;
+      const uint8_t bank = static_cast<uint8_t>(candidate.selectable_vgpr_bank_mode.value_or(0u));
+      std::optional<uint32_t> restore_bank;
+      if (bank != 0u) {
+        const auto select_low = instrumentation::build_s_set_vgpr_msb_transition(bank, 0u, arch);
+        restore_bank = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
+        if (!select_low || !restore_bank) {
+          result.errors.emplace_back("ConSan tensor comparison could not preserve VGPR banks");
+          return;
+        }
+        wrapped.push_back(*select_low);
+      }
+      wrapped.insert(wrapped.end(), spill->second.save_words.begin(),
+                     spill->second.save_words.end());
+      guest_instruction_word_offset =
+          static_cast<uint32_t>(wrapped.size() + *guest_instruction_word_offset);
+      wrapped.insert(wrapped.end(), words->begin(), words->end());
+      wrapped.insert(wrapped.end(), spill->second.restore_words.begin(),
+                     spill->second.restore_words.end());
+      if (restore_bank)
+        wrapped.push_back(*restore_bank);
+      words = std::move(wrapped);
+    } else if (candidate.selectable_vgpr_bank_mode.value_or(0u) != 0u) {
       const auto select_low = instrumentation::build_s_set_vgpr_msb_transition(
           static_cast<uint8_t>(*candidate.selectable_vgpr_bank_mode), 0u, arch);
       const auto restore_guest = instrumentation::build_s_set_vgpr_msb_transition(
@@ -688,8 +787,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.trampoline_size = static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
     planned.info.scalar_vcc_spill = candidate.scalar_vcc_spill;
-    planned.info.required_sgpr_count =
-        static_cast<uint16_t>(candidate.vcc_save_sgpr + supercollider_vcc_save_sgpr_width(target));
+    planned.info.required_sgpr_count = static_cast<uint16_t>(
+        candidate.vcc_save_sgpr + (site.origin == AccessOrigin::TensorLds
+                                       ? detail::tensor_load_compare_state_sgprs(site)
+                                       : supercollider_vcc_save_sgpr_width(target)));
     if (const auto plan = private_spill_plans.find(&site);
         plan != private_spill_plans.end() && plan->second.uses_dynamic_stack_frame) {
       planned.info.required_sgpr_count = std::max<uint16_t>(

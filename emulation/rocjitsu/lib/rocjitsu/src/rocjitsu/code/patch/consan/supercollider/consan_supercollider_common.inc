@@ -327,19 +327,25 @@ choose_supercollider_borrowed_scalar_range(uint16_t allocated_sgpr_count, uint16
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
     uint16_t allocated_sgpr_count, std::optional<uint16_t> min_preferred_sgpr,
     uint16_t selection_limit, uint16_t width, bool prefer_allocated_hole, const Options &options,
-    bool preserve_dynamic_stack_abi = false) {
-  if (inst == nullptr || owner_liveness.empty() ||
+    bool preserve_dynamic_stack_abi = false,
+    std::span<const std::pair<uint16_t, uint16_t>> forbidden_ranges = {}) {
+  if (width == 0u || inst == nullptr || owner_liveness.empty() ||
       std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
   const uint16_t limit = std::min<uint16_t>(selection_limit, REGISTER_SET_ALLOCATABLE_SGPRS);
   const auto find_free = [&](uint16_t start, uint16_t end) -> std::optional<uint16_t> {
-    if (width == 2u && (start & 1u) != 0u)
+    if (width >= 2u && (start & 1u) != 0u)
       ++start;
     for (uint16_t base = start; static_cast<uint32_t>(base) + width <= end;
-         base = static_cast<uint16_t>(base + width)) {
+         base = static_cast<uint16_t>(base + (width >= 2u ? 2u : 1u))) {
       if (supercollider_sgpr_range_overlaps_delay_source(base, width, options) ||
           (preserve_dynamic_stack_abi &&
            supercollider_sgpr_ranges_overlap(base, width, kDynamicStackTopSgpr, 2u)))
+        continue;
+      if (std::ranges::any_of(forbidden_ranges, [&](const auto &range) {
+            return range.second != 0u &&
+                   supercollider_sgpr_ranges_overlap(base, width, range.first, range.second);
+          }))
         continue;
       const RegisterRef ref{RegClass::SGPR, base, static_cast<uint8_t>(width)};
       if (std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
