@@ -30,6 +30,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.3/data_views.sql
       rocpd_summary_views: versions/3.0.3/summary_views.sql
     - version: "3.0.4"
+      rocpd_metadata: versions/3.0.4/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.4/rocpd_tables.sql
+      rocpd_views: versions/3.0.4/rocpd_views.sql
+      rocpd_indexes: versions/3.0.4/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.4/data_views.sql
+      rocpd_summary_views: versions/3.0.4/summary_views.sql
+    - version: "3.0.5"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -59,3 +66,12 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.4
 # - Added rocpd_hip_event table for HIP event barrier records (hipEventRecord, hipStreamWaitEvent)
 # - Added hip_events data view
+
+# Version 3.0.5
+# - rocpd_kernel_dispatch: added replay_pass column (NULL outside kernel replay). Kernel replay
+#   re-executes one dispatch_id once per counter group, so dispatch_id no longer identifies a
+#   single execution; replay_pass completes the key.
+# - Modified counters_collection view to aggregate per event instead of per dispatch_id, so the
+#   passes of a replayed dispatch stay separate. Outside kernel replay there is exactly one event
+#   per dispatch_id, so this grouping is identical to the 3.0.4 grouping.
+# - counters_collection additionally exposes replay_pass.
