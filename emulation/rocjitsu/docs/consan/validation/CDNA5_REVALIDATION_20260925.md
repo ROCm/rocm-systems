@@ -2705,3 +2705,14 @@ sweeps now have three accepted small shapes and three pending large shapes.
 Default fault trial result files are created with `state: running`; their
 existence alone is not a completed verdict. The new campaign's first trial
 is still running at this checkpoint.
+
+
+### First untimed Default fault trial completes
+
+Trial 0 in `sgemm-bank-fixed-untimed-high-fault` has a terminal `complete`
+record and passed execution after 1,442 seconds. ConSan reports 10 conflicts;
+all 650 numerical cases and both clients pass, with complete applicable
+coverage and exactly one intended mutation applied. Health and smoke checks
+pass before and after the run. Trial 1 is running; seven planned trials remain
+unqualified, so this first detection does not establish the eight-trial gate.
+The three large full-clean shapes also remain pending.
