@@ -2122,3 +2122,10 @@ is unsupported and analysis remains incomplete
 The resumed `topk-current-sc-clean` passes with sleep=15 and the current
 hook; its predeclared fault campaign is running with independent health
 and smoke checks.
+
+MXF4 TDM finishes the current SuperCollider tensor sweep: all six shards
+pass their numerical oracles without mismatch markers, but tensor-DMA
+comparison is unsupported (`sc-current-tensor-clean/tensile-sk-mxf4gemm-tdm`).
+All seven tensor-family SuperCollider cells now reflect current applicable
+coverage. Development of tensor comparison is isolated in the local
+`consan/cdna5-sc-tdm` worktree while Default campaigns retain their hooks.
