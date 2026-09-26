@@ -9,9 +9,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -37,6 +41,7 @@
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "fakes/tuning_fakes.h"
+#include "register.h"
 #include "transport.h"
 
 constexpr int kRanks = 4;
@@ -159,12 +164,57 @@ class TaskPrepScene {
     ncclIntruQueueEnqueue(&comm_->rawTaskQueue.bcastQueue, raw);
   }
 
+  // A zero-initialized comm reads as capturing, so every graph-sensitive test must state its intent.
+  void SetGraphCapture(bool capturing) {
+    struct ncclCudaGraph graph = ncclCudaGraphNone(kNoGraphUsageMode);
+    if (capturing) {
+      graph.graphId = kCapturingGraphId;
+    }
+    comm_->planner.capturingGraph = graph;
+  }
+
  private:
   static constexpr int kNoGraphUsageMode = 0;
+  static constexpr unsigned long long kCapturingGraphId = 1;
 
   std::unique_ptr<ncclComm> comm_;
   std::vector<float> sendBuf_;
   std::vector<float> recvBuf_;
+};
+
+// Slots are sorted here because the real inline ncclRegFind bails at the first slot above the query.
+class RegisteredRanges {
+ public:
+  RegisteredRanges(TaskPrepScene* scene,
+                   std::initializer_list<std::pair<const void*, size_t>> ranges)
+    : comm_(scene->comm()) {
+    for (const std::pair<const void*, size_t>& range : ranges) {
+      struct ncclReg reg{};
+      reg.begAddr = reinterpret_cast<uintptr_t>(range.first);
+      reg.endAddr = reg.begAddr + range.second;
+      regs_.push_back(reg);
+    }
+    std::sort(regs_.begin(), regs_.end(),
+              [](const struct ncclReg& a, const struct ncclReg& b) { return a.begAddr < b.begAddr; });
+    for (struct ncclReg& reg : regs_) {
+      slots_.push_back(&reg);
+    }
+    comm_->regCache.slots = slots_.data();
+    comm_->regCache.capacity = static_cast<int>(slots_.size());
+    comm_->regCache.population = static_cast<int>(slots_.size());
+  }
+
+  // The scene outlives this object at every use site, so the slots it published have to go with it.
+  ~RegisteredRanges() {
+    comm_->regCache.slots = nullptr;
+    comm_->regCache.capacity = 0;
+    comm_->regCache.population = 0;
+  }
+
+ private:
+  struct ncclComm* comm_;
+  std::vector<struct ncclReg> regs_;
+  std::vector<struct ncclReg*> slots_;
 };
 
 inline std::vector<struct ncclTaskTuningInfo*> QueueTasks(TaskTuningInfoQueue* queue) {
