@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - rccl-develop
       - release/therock-*
   pull_request:
     types:
