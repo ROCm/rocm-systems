@@ -21,7 +21,8 @@ std::optional<uint32_t> supercollider_build_guest_flat_completion_wait(rj_code_a
 std::optional<std::vector<uint32_t>>
 supercollider_build_delay_words(const TargetProfile &target, const Request &request,
                                 uint16_t temporary_sgpr, LdsAccessKind access_kind,
-                                std::vector<std::string> &errors, std::string_view context) {
+                                std::vector<std::string> &errors, std::string_view context,
+                                std::optional<uint16_t> temporary_save_vgpr) {
   const rj_code_arch_t arch = target.arch;
   std::vector<uint32_t> words;
   if (request.supercollider_delay_nops == 0 ||
@@ -43,15 +44,16 @@ supercollider_build_delay_words(const TargetProfile &target, const Request &requ
     return words;
   case SuperColliderDelayMode::SleepWave: {
     const uint32_t maximum = request.supercollider_delay_nops;
-    if (arch != ROCJITSU_CODE_ARCH_RDNA4 || maximum > 127u || !std::has_single_bit(maximum + 1u) ||
+    if (!arch_is_rdna4_or_cdna5(arch) || maximum > 127u || !std::has_single_bit(maximum + 1u) ||
         temporary_sgpr >= REGISTER_SET_ALLOCATABLE_SGPRS) {
       errors.emplace_back(
           std::string(context) +
-          " sleep_wave requires RDNA4, scalar scratch, and maximum 1/3/7/15/31/63/127");
+          " sleep_wave requires RDNA4/CDNA5, scalar scratch, and maximum 1/3/7/15/31/63/127");
       return std::nullopt;
     }
-    // The VCC-save scratch is not live yet. Read a bounded resident-wave
-    // identity without changing SCC, EXEC or VCC; no extra register allocation.
+    // Read a bounded resident-wave identity without changing SCC, EXEC or
+    // VCC. Most callers use a dead scalar; tensor comparison has already saved
+    // VCC there, so it supplies a free workspace VGPR to preserve that value.
     const auto &identity = target.resident_wave_identity;
     const auto width = static_cast<uint8_t>(std::bit_width(maximum));
     // Include the SIMD bits at the top of this identity. Neighboring waves
@@ -65,9 +67,29 @@ supercollider_build_delay_words(const TargetProfile &target, const Request &requ
       errors.emplace_back(std::string(context) + " could not encode resident-wave delay");
       return std::nullopt;
     }
+    std::optional<std::array<uint32_t, 2>> restore;
+    std::optional<uint32_t> restore_wait;
+    if (temporary_save_vgpr) {
+      if (*temporary_save_vgpr > 255u) {
+        errors.emplace_back(std::string(context) + " wave-delay save VGPR exceeds its encoding");
+        return std::nullopt;
+      }
+      restore =
+          instrumentation::build_v_readlane_b32(temporary_sgpr, *temporary_save_vgpr, 0u, arch);
+      restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+      if (!restore || !restore_wait) {
+        errors.emplace_back(std::string(context) + " could not preserve wave-delay scalar state");
+        return std::nullopt;
+      }
+      words.push_back(build_v_mov_b32_e32(*temporary_save_vgpr, temporary_sgpr, arch));
+    }
     words.push_back(*read);
     words.push_back(*wait);
     words.push_back(build_s_sleep_var(temporary_sgpr, arch));
+    if (restore) {
+      words.insert(words.end(), restore->begin(), restore->end());
+      words.push_back(*restore_wait);
+    }
     return words;
   }
   case SuperColliderDelayMode::SleepVar:

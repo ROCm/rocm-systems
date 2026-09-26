@@ -4,6 +4,8 @@
 #include "rocjitsu/code/patch/consan/consan_access_emission.h"
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_tensor_access.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -57,6 +59,10 @@ TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) 
     options.mode = Mode::SuperCollider;
     options.probe_lds_check_trap = true;
     options.supercollider_report_buffer_address = 0x200000;
+    if (bank != 0u) {
+      options.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
+      options.supercollider_delay_nops = 15u;
+    }
     const auto result =
         test_lower_consan(make_gfx1250_code_object(guest, "tensor_compare"), options);
     ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -1171,8 +1177,10 @@ TEST(ConSanTensor, GlobalSourceRejectsAliasesWithoutEmission) {
 
 TEST(ConSanTensor, ValueComparisonPreservesStateAndDefersExactlyOneCompletionArrival) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
-  for (bool alias : {false, true}) {
+  for (const auto [alias, wave_delay] : {std::pair{false, false}, std::pair{true, false},
+                                         std::pair{false, true}, std::pair{true, true}}) {
     SCOPED_TRACE(alias);
+    SCOPED_TRACE(wave_delay);
     constexpr uint16_t scratch = 8;
     constexpr uint16_t state = 88;
     const uint16_t spill_exec = alias ? 100 : 96;
@@ -1212,7 +1220,16 @@ TEST(ConSanTensor, ValueComparisonPreservesStateAndDefersExactlyOneCompletionArr
     ASSERT_TRUE(append(instrumentation::build_s_wait_global_store0(arch)));
     auto words = full_spill->save_words;
     uint32_t guest_offset = UINT32_MAX;
-    ASSERT_TRUE(detail::append_tensor_load_compare(words, site, tensor, scratch, state, {},
+    const auto target = std::ranges::find(kTargetProfiles, arch, &TargetProfile::arch);
+    ASSERT_NE(target, kTargetProfiles.end());
+    Request request;
+    request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
+    request.supercollider_delay_nops = wave_delay ? 15u : 0u;
+    std::vector<std::string> errors;
+    const auto delay = supercollider_build_delay_words(*target, request, state, site.kind, errors,
+                                                       "tensor test", report_scratch);
+    ASSERT_TRUE(delay) << testing::PrintToString(errors);
+    ASSERT_TRUE(detail::append_tensor_load_compare(words, site, tensor, scratch, state, *delay,
                                                    mismatch, guest_offset, arch));
     ASSERT_LE(guest_offset + tensor.size(), words.size());
     if (!alias)
