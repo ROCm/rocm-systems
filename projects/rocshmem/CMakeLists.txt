@@ -241,6 +241,71 @@ if(GPU_TARGETS)
   list(REMOVE_DUPLICATES GPU_TARGETS)
 endif()
 
+# Device ASAN needs xnack. gfx9 must request it explicitly, or a bare arch name
+# compiles with the sanitizer silently ignored; gfx1250 has it always on and
+# rejects an explicit xnack term as an invalid target ID; no other family has
+# it at all. Drop what cannot be instrumented rather than ship an
+# uninstrumented target inside an ASAN build. Same policy as
+# projects/rccl/cmake/AsanGpuTargets.cmake, repeated here because rccl builds
+# rocSHMEM as a separate cmake process.
+#
+# This runs before rocm_check_target_ids, not after. gfx1250:xnack+ is a hard
+# "invalid target ID" error from clang, so a target this policy exists to
+# normalise to gfx1250 would otherwise fail validation and be dropped before
+# the policy ever saw it. Normalising first also means SUPPORTED_GPUS, and so
+# both GPU_TARGETS and GPU_TARGETS_FULL below, are already correct.
+function(rocshmem_asan_adjust_gpu_targets OUT_VAR)
+  set(_always_on gfx1250 gfx1250-strict)
+  set(_kept "")
+
+  foreach(_target ${ARGN})
+    if(_target STREQUAL "")
+      continue()
+    endif()
+    # A requested suffix says what the caller wants, not what the part
+    # supports, so classify on the bare name.
+    string(REGEX REPLACE ":.*" "" _base "${_target}")
+    list(FIND _always_on "${_base}" _is_always_on)
+    # Other feature terms (e.g. sramecc+) are part of what was asked for and
+    # are kept; xnack sorts last, so re-appending it stays canonical.
+    string(REGEX REPLACE ":xnack[+-]" "" _stripped "${_target}")
+
+    if(_base MATCHES "^gfx9")
+      set(_fixed "${_stripped}:xnack+")
+    elseif(NOT _is_always_on EQUAL -1)
+      set(_fixed "${_stripped}")
+    else()
+      message(STATUS "ASAN: dropping GPU target '${_target}' - no xnack support")
+      continue()
+    endif()
+
+    if(NOT _fixed STREQUAL _target)
+      message(STATUS "ASAN: GPU target '${_target}' -> '${_fixed}'")
+    endif()
+    list(APPEND _kept "${_fixed}")
+  endforeach()
+
+  # Both xnack spellings of one arch normalise to the same string.
+  if(_kept)
+    list(REMOVE_DUPLICATES _kept)
+  endif()
+  if(NOT _kept)
+    message(FATAL_ERROR "ASAN requires a GPU target that supports xnack (gfx9* with :xnack+, "
+      "or gfx1250 where it is always on). "
+      "None of the requested/default GPU_TARGETS do: ${ARGN}")
+  endif()
+
+  set(${OUT_VAR} "${_kept}" PARENT_SCOPE)
+endfunction()
+
+if(ASAN)
+  if(GPU_TARGETS)
+    rocshmem_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+  else()
+    rocshmem_asan_adjust_gpu_targets(DEFAULT_GPU_TARGETS ${DEFAULT_GPU_TARGETS})
+  endif()
+endif()
+
 if(COMMAND rocm_check_target_ids)
   if(GPU_TARGETS)
     message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
@@ -338,69 +403,21 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
   endif()
 
-  if (ASAN)
-    # Device ASAN needs xnack. gfx9 must request it explicitly, or a bare arch
-    # name compiles with the sanitizer silently ignored; gfx1250 has it always
-    # on and rejects an explicit xnack term as an invalid target ID; no other
-    # family has it at all. Drop what cannot be instrumented rather than ship
-    # an uninstrumented target inside an ASAN build. Same policy as
-    # projects/rccl/cmake/AsanGpuTargets.cmake, repeated here because rccl
-    # builds rocSHMEM as a separate cmake process.
-    set(_ASAN_XNACK_ALWAYS_ON gfx1250 gfx1250-strict)
-
-    # GPU_TARGETS_FULL mirrors GPU_TARGETS, so only the first pass reports.
-    set(_asan_report ON)
-    foreach(_asan_list GPU_TARGETS GPU_TARGETS_FULL)
-      if("${${_asan_list}}" STREQUAL "")
-        continue()
-      endif()
-
-      set(_asan_kept "")
-      foreach(_asan_target ${${_asan_list}})
-        string(REGEX REPLACE ":.*" "" _asan_base "${_asan_target}")
-        list(FIND _ASAN_XNACK_ALWAYS_ON "${_asan_base}" _asan_always_on)
-        # Other feature terms (e.g. sramecc+) are part of what was asked for
-        # and are kept; xnack sorts last, so re-appending it stays canonical.
-        string(REGEX REPLACE ":xnack[+-]" "" _asan_stripped "${_asan_target}")
-
-        if(_asan_base MATCHES "^gfx9")
-          set(_asan_fixed "${_asan_stripped}:xnack+")
-        elseif(NOT _asan_always_on EQUAL -1)
-          set(_asan_fixed "${_asan_stripped}")
-        else()
-          if(_asan_report)
-            message(STATUS "ASAN: dropping GPU target '${_asan_target}' - no xnack support")
-          endif()
-          continue()
-        endif()
-
-        if(_asan_report AND NOT _asan_fixed STREQUAL _asan_target)
-          message(STATUS "ASAN: GPU target '${_asan_target}' -> '${_asan_fixed}'")
-        endif()
-        list(APPEND _asan_kept "${_asan_fixed}")
-      endforeach()
-
-      # Both xnack spellings of one arch normalise to the same string.
-      if(_asan_kept)
-        list(REMOVE_DUPLICATES _asan_kept)
-      endif()
-      set(${_asan_list} "${_asan_kept}")
-      set(_asan_report OFF)
-    endforeach()
-
-    if(NOT GPU_TARGETS)
-      message(FATAL_ERROR "ASAN requires a GPU target that supports xnack (gfx9* with :xnack+, "
-        "or gfx1250 where it is always on). "
-        "None of the requested/default GPU_TARGETS do.")
-    endif()
-  endif()
-
   # hip-config-amd.cmake caches GPU_BUILD_TARGETS without FORCE, so on a
   # reconfigure of an existing build directory it can retain a stale value
   # (e.g. from before ASAN was enabled, or from a previous GPU_TARGETS) even
   # though GPU_TARGETS itself was correctly refreshed above. Force it to match
   # on every configure so hip::device's --offload-arch flags stay in sync.
   set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for" FORCE)
+
+  # cmake/DeviceBitcode.cmake derives BITCODE_GPU_ARCHS_FULL from
+  # GPU_TARGETS_FULL, also without FORCE, so it goes stale the same way: a
+  # build directory first configured without ASAN keeps the bare gfx942 and the
+  # bitcode compile loses the :xnack+ this policy just added. Same treatment.
+  if(GPU_TARGETS_FULL)
+    set(BITCODE_GPU_ARCHS_FULL "${GPU_TARGETS_FULL}" CACHE STRING
+      "Full GPU arch strings with feature suffixes for device bitcode" FORCE)
+  endif()
 
   find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)
