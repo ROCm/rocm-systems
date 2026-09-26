@@ -454,6 +454,28 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(summary["accepted"])
         self.assertIn("analysis incomplete", summary["reasons"])
 
+    def test_clean_coverage_rejects_default_findings_and_malformed_counts(self) -> None:
+        good = auto_report(7, 1)
+        self.assertTrue(validation._coverage_summary(
+            complete_coverage_log(good), profile="default")["accepted"])
+        for field in ("diagnostics", "conflicts", "immediate_conflicts"):
+            for value in ("1", "-1", "invalid"):
+                with self.subTest(field=field, value=value):
+                    bad = good.replace(f" {field}=0", f" {field}={value}")
+                    summary = validation._coverage_summary(
+                        complete_coverage_log(bad, good), profile="default")
+                    self.assertFalse(summary["accepted"])
+                    self.assertTrue(summary["analysis_complete"])
+            with self.subTest(field=field, missing=True):
+                bad = good.replace(f" {field}=0", "")
+                self.assertFalse(validation._coverage_summary(
+                    complete_coverage_log(bad), profile="default")["accepted"])
+        self.assertFalse(validation._coverage_summary(complete_coverage_log(
+            good + " conflicts=0"), profile="default")["accepted"])
+        self.assertFalse(validation._coverage_summary(complete_coverage_log(
+            "ConSan auto report reader=7 has invalid header magic=0"),
+            profile="default")["accepted"])
+
     def test_clean_coverage_rejects_supercollider_reports(self) -> None:
         # The historical runner accepted TP2 clean logs with six mismatches.
         # Exercise both spellings, even when execution exits successfully and

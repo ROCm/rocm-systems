@@ -2729,3 +2729,18 @@ and healthy checks before/after. Three completed trials have detected the
 fault; five remain pending. A separate non-consuming live-output sample
 (`sgemm-live-output-observation-v3.json`) also confirms later epoch progress
 in the large clean sweeps, without substituting for their final verdicts.
+
+### Reject Default diagnostics in clean-run acceptance
+
+The clean-run coverage helper now rejects nonzero Default diagnostic, conflict,
+and immediate-conflict counts, as well as malformed counts. These findings can
+accompany a successful workload exit and numerical oracle, so those checks alone
+were insufficient. Fault admission remains separate and still accepts detected
+mutations. The validation, Tensile validation, and replay suites pass all 260 tests
+(`default-clean-diagnostic-gate-tests.log`).
+
+Reparsing retained accepted clean results and completed SGEMM clean shard logs
+with the stricter helper yields 151 accepted audit entries and no rejections
+(`default-clean-diagnostic-gate-audit.json`). Thus no existing table verdict
+changes. Running qualifications are preserved; their final retained clean logs
+will also be checked with the updated helper.

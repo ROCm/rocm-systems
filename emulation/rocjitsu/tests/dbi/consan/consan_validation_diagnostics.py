@@ -126,10 +126,21 @@ def _coverage_summary(
     if any(record.expert_limit for record in evidence.coverage):
         reasons.append("expert patch limit enabled")
     # Coverage and a zero exit status do not establish a clean detector run:
-    # automatic SuperCollider reporting can record a mismatch without trapping.
+    # both engines can report findings without terminating the workload.
     # Accept the historical spelling too, so retained logs can be re-audited.
     for line in log_text.splitlines():
         line = line.replace("ConSan SC ", "ConSan SuperCollider ")
+        marker = "ConSan auto report "
+        if marker + "reader=" in line:
+            fields = _parse_log_fields(line, marker, "Default report", reasons)
+            if fields is None:
+                continue
+            for name in ("diagnostics", "conflicts", "immediate_conflicts"):
+                value = _unsigned(fields, name)
+                if value is None:
+                    reasons.append(f"invalid Default {name}")
+                elif value:
+                    reasons.append(f"Default {name}={value}")
         marker = "ConSan SuperCollider report summary "
         if marker in line:
             fields = _parse_log_fields(line, marker, "SuperCollider summary", reasons)
