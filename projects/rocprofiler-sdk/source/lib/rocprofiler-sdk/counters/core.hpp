@@ -52,9 +52,6 @@ struct counter_callback_info
     rocprofiler_context_id_t context{.handle = 0};
     // Link to the internal context this is associated with
     const context::context* internal_context{nullptr};
-    // HSA Queue ClientID. This is an ID we get when we insert a callback into the
-    // HSA queue interceptor. This ID can be used to disable the callback.
-    rocprofiler::hsa::ClientID queue_id{-1};
     // Buffer to use for storing counter data. Used if callback is not set.
     std::optional<rocprofiler_buffer_id_t> buffer;
 
@@ -90,6 +87,11 @@ configure_callback_dispatch(rocprofiler_context_id_t                   context_i
                             void*                                      callback_data_args,
                             rocprofiler_dispatch_counting_record_cb_t  record_callback,
                             void*                                      record_callback_args);
+
+rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents);
 
 rocprofiler_status_t
 configure_agent_collection(rocprofiler_context_id_t                 context_id,
