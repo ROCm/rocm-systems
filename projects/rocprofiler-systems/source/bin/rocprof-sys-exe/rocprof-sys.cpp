@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/avail_command.hpp"
 #include "common/cli_dispatcher.hpp"
 #include "common/defines.h"
 #include "common/path.hpp"
@@ -47,6 +48,12 @@ main(int argc, char** argv)
             auto fwd = make_forwarded_argv(argc, argv, parsed.strip_subcommand);
             return rocprofsys::common_utils::run_tool(fwd.argc(), fwd.argv(),
                                                       parsed.mode);
+        }
+        case dispatch_kind::in_process_avail:
+        {
+            auto fwd = make_forwarded_argv(argc, argv, parsed.strip_subcommand);
+            return rocprofsys::cli::run_avail(fwd.argc(), fwd.argv(), std::cout,
+                                              std::cerr);
         }
         case dispatch_kind::exec_tool:
         {

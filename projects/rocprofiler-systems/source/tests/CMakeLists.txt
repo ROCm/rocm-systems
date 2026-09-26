@@ -31,6 +31,7 @@ set(UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )
 
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:avail-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-amd-smi-provider-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
@@ -68,6 +69,7 @@ target_link_libraries(
         rocprofiler-systems-common-library
         rocprofiler-systems-core-library
         rocprofiler-systems::rocprofiler-systems-binary
+        rocprofiler-systems::rocprofiler-systems-avail
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         rocprofiler-systems::rocprofiler-systems-interface-library
 )

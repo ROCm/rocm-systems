@@ -208,6 +208,21 @@ export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 
 For manual testing, you can find the executables in `rocprof-sys-build/bin`.
 
+### Query devices and GPU counters
+
+Use `rocsys avail` to print a capability summary without launching a sibling
+tool. Add `--devices` for ROCProfiler SDK agents enriched with AMD SMI details,
+or `--gpu-counters` for counters grouped by GPU. The options can be combined.
+
+```console
+rocsys avail
+rocsys avail --devices
+rocsys avail --gpu-counters
+```
+
+The standalone `rocprof-sys-avail` command remains available for configuration
+generation and its existing options.
+
 ### ROCm Systems Profiler settings
 
 Generate a rocprofiler-systems configuration file using `rocprof-sys-avail -G rocprof-sys.cfg`. Optionally, use `rocprof-sys-avail -G rocprof-sys.cfg --all` for

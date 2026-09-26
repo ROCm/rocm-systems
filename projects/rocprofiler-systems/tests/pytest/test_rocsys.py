@@ -30,6 +30,8 @@ def _sibling_exists(config: RocprofsysConfig, name: str) -> bool:
     return (config.rocprofsys_bin_dir / name).is_file()
 
 
+# `avail` is served in-process by the capability catalog, so it is absent here.
+# The standalone rocprof-sys-avail binary keeps its own coverage.
 FORWARD_HELP_CASES = [
     pytest.param(
         "profile",
@@ -58,13 +60,6 @@ FORWARD_HELP_CASES = [
         [r"Usage|usage|causal"],
         False,
         id="causal",
-    ),
-    pytest.param(
-        "avail",
-        "rocprof-sys-avail",
-        [r"rocprof-sys-avail"],
-        False,
-        id="avail",
     ),
     pytest.param(
         "python",
@@ -196,6 +191,134 @@ class TestRocsys(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(30)
+    def test_avail_help(self) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["avail", "--help"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"Usage: rocsys avail",
+                r"^Query$",
+                r"Hardware",
+                r"--devices",
+                r"--cpu-devices",
+                r"--nic-devices",
+                r"--traces",
+                r"--list-operations",
+                r"--gpu-counters",
+                r"--cpu-counters",
+                r"--cpu-metrics",
+                r"--gpu-metrics",
+                r"--nic-metrics",
+                r"--storage-metrics",
+                r"^Output$",
+                r"--output FILE",
+                r"--no-pager",
+                r"--help=TOPIC",
+                r"rocsys profile --help",
+            ],
+        )
+
+    @pytest.mark.timeout(60)
+    def test_avail_summary(self) -> None:
+        """A machine without an AMD GPU is a successful empty result."""
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["avail"],
+            fail_on_not_found=True,
+        )
+        assert result.success, result.test_output
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"What this machine can profile",
+                r"GPU devices",
+                r"rocsys avail --devices",
+                r"rocsys avail --gpu-counters",
+                r"rocsys avail --traces",
+                r"rocsys avail --help",
+            ],
+        )
+
+    @pytest.mark.timeout(60)
+    @pytest.mark.parametrize(
+        "flags, pass_regex",
+        [
+            pytest.param(
+                ["--devices"],
+                [r"Available GPUs that can be profiled", r"GPU devices \(\d+\)"],
+                id="devices",
+            ),
+            pytest.param(
+                ["--gpu-counters"],
+                [
+                    r"Hardware counters that can be collected",
+                    r"This listing can be long; use '--output FILE'",
+                    r"GPU counters",
+                ],
+                id="gpu-counters",
+            ),
+            pytest.param(
+                ["--traces"],
+                [
+                    r"Available APIs and runtimes that can be traced",
+                    r"Defaults: hip_runtime_api, marker_api, kernel_dispatch, "
+                    r"memory_copy, scratch_memory",
+                    r"GPU / ROCm runtime",
+                    r"Host runtimes",
+                    r"^Other$",
+                    r"alias of hip_compiler_api, hip_runtime_api",
+                    r"--list-operations NAME",
+                    r"--list-operations marker_api",
+                ],
+                id="traces",
+            ),
+            pytest.param(
+                ["--list-operations", "hip_runtime_api"],
+                [r"Operations for hip_runtime_api"],
+                id="list-operations",
+            ),
+            pytest.param(
+                ["--devices", "--gpu-counters"],
+                [r"GPU devices \(\d+\)", r"GPU counters"],
+                id="combined",
+            ),
+        ],
+    )
+    def test_avail_selectors(self, flags: list[str], pass_regex: list[str]) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["avail", *flags],
+            fail_on_not_found=True,
+        )
+        assert result.success, result.test_output
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(30)
+    def test_avail_rejects_unknown_option(self) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["avail", "--not-an-option"],
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"unrecognized option '--not-an-option'",
+                r"rocsys avail --help",
+            ],
+            use_abort_fail_regex=False,
+        )
 
     @pytest.mark.timeout(120)
     @pytest.mark.sys_run
