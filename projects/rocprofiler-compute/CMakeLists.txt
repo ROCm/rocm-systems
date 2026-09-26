@@ -426,6 +426,13 @@ add_test(
         ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_membw
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_membw.xml
+        ${COV_OPTION} tests/integration/test_profile_membw.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -444,6 +451,7 @@ set_tests_properties(
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
     test_profile_triton_trace
+    test_profile_membw
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -886,7 +894,7 @@ if(TARGET test-torch-trace-collector)
         ROCPROF_TEST_LD_LIBRARY_PATH
     )
     set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
-    sanitizer_runtime_env(_san_env OFF)
+    sanitizer_runtime_env(_san_env)
     list(APPEND _ttc_test_env ${_san_env})
     set_tests_properties(
         test-torch-trace-collector
@@ -1015,7 +1023,7 @@ if(TARGET test-rocprofiler-compute-tool)
         set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
     endif()
     add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
-    sanitizer_runtime_env(_san_env OFF)
+    sanitizer_runtime_env(_san_env)
     if(_san_env)
         set_tests_properties(
             test-rocprofiler-compute-tool
@@ -1031,7 +1039,7 @@ if(TARGET test-pc-sampling-collector)
         set(_pcs_test_cmd $<TARGET_FILE:test-pc-sampling-collector>)
     endif()
     add_test(NAME test-pc-sampling-collector COMMAND ${_pcs_test_cmd})
-    sanitizer_runtime_env(_san_env OFF)
+    sanitizer_runtime_env(_san_env)
     if(_san_env)
         set_tests_properties(
             test-pc-sampling-collector
@@ -1051,7 +1059,7 @@ if(TARGET test-compression)
         set(_compression_test_cmd $<TARGET_FILE:test-compression>)
     endif()
     add_test(NAME test-compression COMMAND ${_compression_test_cmd})
-    sanitizer_runtime_env(_san_env OFF)
+    sanitizer_runtime_env(_san_env)
     if(_san_env)
         set_tests_properties(test-compression PROPERTIES ENVIRONMENT "${_san_env}")
     endif()
@@ -1075,6 +1083,7 @@ if(${ENABLE_COVERAGE})
         test_profile_roofline_validation
         test_profile_section
         test_profile_sets_func
+        test_profile_membw
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
@@ -1330,14 +1339,13 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so and
-# torch_trace_collector-<torch-version>.so
+# Install librocprofiler-compute-tool.so and the generic Torch collector.
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
-# The collector is skipped when PyTorch is absent or an unsupported version.
-# The loader searches lib/rocprofiler-compute/ for the versioned artifact.
+# The collector builds without PyTorch and is loaded through its plain-C ABI.
+# The loader searches lib/rocprofiler-compute/ for the generic artifact.
 if(TARGET torch-trace-collector-module)
     install(
         TARGETS torch-trace-collector-module

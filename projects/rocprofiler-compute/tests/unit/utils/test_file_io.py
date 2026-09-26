@@ -3,6 +3,7 @@
 
 """Unit tests for utils.file_io."""
 
+import gzip
 import tempfile
 
 import common
@@ -13,9 +14,12 @@ from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
+    load_kernel_short_names,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
 )
+
+KERNEL_SYMBOLS_COLUMNS = ["Kernel_Name", "Kernel_Short_Name"]
 
 
 def _raw_pmc() -> pd.DataFrame:
@@ -260,6 +264,95 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
     assert create_df_pmc(str(tmp_path), verbose=0).empty
+
+
+def test_load_kernel_short_names_dedupes_repeated_symbols(tmp_path):
+    """A symbol repeats per process and per run, and folds to one entry."""
+    pd.DataFrame(
+        [("vecCopy(double*)", "vecCopy"), ("vecCopy(double*)", "vecCopy")],
+        columns=KERNEL_SYMBOLS_COLUMNS,
+    ).to_csv(tmp_path / "kernel_symbols_run0.csv.gz", index=False)
+    pd.DataFrame(
+        [("vecCopy(double*)", "vecCopy"), ("vecAdd()", "vecAdd")],
+        columns=KERNEL_SYMBOLS_COLUMNS,
+    ).to_csv(tmp_path / "kernel_symbols_run1.csv.gz", index=False)
+
+    assert load_kernel_short_names(str(tmp_path), []) == {
+        "vecCopy(double*)": "vecCopy",
+        "vecAdd()": "vecAdd",
+    }
+
+
+def test_load_kernel_short_names_falls_back_to_the_sampling_results(tmp_path):
+    """A PC-sampling-only workload has no rocpd db, so its JSON carries them."""
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecCopy(double*)",
+                    "truncated_kernel_name": "vecCopy",
+                }
+            ]
+        },
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        },
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecCopy(double*)": "vecCopy",
+        "vecAdd()": "vecAdd",
+    }
+
+
+def test_load_kernel_short_names_prefers_the_profiled_csv(tmp_path):
+    """A counter run that also sampled takes the CSV, which covers every kernel."""
+    pd.DataFrame(
+        [("vecCopy(double*)", "vecCopy")], columns=KERNEL_SYMBOLS_COLUMNS
+    ).to_csv(tmp_path / "kernel_symbols_run0.csv.gz", index=False)
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        }
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecCopy(double*)": "vecCopy"
+    }
+
+
+def test_load_kernel_short_names_falls_back_past_an_empty_csv(tmp_path):
+    """A failed extract leaves the file behind, which is a miss, not a mapping."""
+    gzip.open(tmp_path / "kernel_symbols_run0.csv.gz", "wt").close()
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        }
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecAdd()": "vecAdd"
+    }
+
+
+def test_load_kernel_short_names_tolerates_a_record_without_symbols(tmp_path):
+    """The fallback runs when things went wrong, so a bare record is not fatal."""
+    assert load_kernel_short_names(str(tmp_path), [{"metadata": {"pid": 1}}]) == {}
 
 
 @pytest.mark.misc

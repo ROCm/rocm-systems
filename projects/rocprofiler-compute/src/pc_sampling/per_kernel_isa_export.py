@@ -12,22 +12,31 @@ counts collected on them.
 """
 
 import csv
+import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Optional, Tuple
 
+from utils.analysis_orm import PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
 from utils.logger import console_debug, console_warning
 
 PER_KERNEL_DIRECTORY_NAME = "per_kernel_pc_sampling"
 STALL_COLUMN_PREFIX = "Stall "
 
-# The row columns naming the file, ahead of the columns written into it.
-FILE_KEY_COLUMN_COUNT = 5
+# Characters a short name can hold that a path component should not. `_` is
+# not in the safe set, so consecutive underscores are collapsed into one.
+UNSAFE_PATH_CHARACTERS = re.compile(r"[^A-Za-z0-9.-]+")
+KERNEL_DESCRIPTOR_SUFFIX = ".kd"
+# Generous for a truncated name, and keeps the whole path inside PATH_MAX.
+MAX_SHORT_NAME_LENGTH = 64
+# Names the folder of a kernel with no short name
+UNNAMED_KERNEL_FOLDER_PREFIX = "kernel"
 
 BASE_COLUMNS = (
     "Instruction line number",
     "Code object offset",
     "Instruction line",
+    "Instruction type",
     "Total count",
     "Active count",
     "Stall count",
@@ -40,8 +49,9 @@ TRAILING_COLUMNS = (
     "Pid",
 )
 
-# (workload name, workload sub-name, kernel uuid, code object id, pid)
-FileKey = tuple[str, str, int, int, int]
+# The leading row columns, in the order analysis_orm selects them:
+# (workload name, workload sub-name, kernel uuid, short name, code object id, pid)
+FileKey = Tuple[str, str, int, Optional[str], int, int]
 
 
 class WorkloadIsaExport(NamedTuple):
@@ -52,8 +62,8 @@ class WorkloadIsaExport(NamedTuple):
     """
 
     workload_id: int
-    stall_reasons: list[str]
-    isa_rows: Iterator[tuple[Any, ...]]
+    stall_reasons: List[str]
+    isa_rows: Iterator[Tuple[Any, ...]]
 
 
 def export_per_kernel_isa_files(
@@ -83,7 +93,7 @@ def export_per_kernel_isa_files(
     return per_kernel_directory
 
 
-def _build_isa_header(stall_reasons: Iterable[str]) -> list[str]:
+def _build_isa_header(stall_reasons: Iterable[str]) -> List[str]:
     """Return the column names of one workload's ISA files.
 
     A workload's stall reasons vary with how it was sampled, so the columns
@@ -100,23 +110,48 @@ def _build_isa_header(stall_reasons: Iterable[str]) -> list[str]:
 def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> Path:
     """Return the file one kernel's ISA is written to.
 
-    The folder is named by kernel uuid because a kernel name is a C++
-    signature, which cannot be a path. ``kernel.csv`` maps the uuid back.
+    The folder leads with the kernel's short name so it reads as the kernel it
+    holds. Two kernels can share a short name, so the kernel uuid follows it to
+    keep the folder unique and to map it back to its kernel.csv row.
     """
-    workload_name, workload_sub_name, kernel_uuid, code_object_id, pid = file_key
+    (
+        workload_name,
+        workload_sub_name,
+        kernel_uuid,
+        short_name,
+        code_object_id,
+        pid,
+    ) = file_key
+    folder_prefix = _sanitize_short_name(short_name) or UNNAMED_KERNEL_FOLDER_PREFIX
     return (
         per_kernel_directory
         / workload_name
         / workload_sub_name
-        / f"kernel_{kernel_uuid}"
+        / f"{folder_prefix}_uuid_{kernel_uuid}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
 
 
+def _sanitize_short_name(short_name: Optional[str]) -> Optional[str]:
+    """Reduce a kernel's short name to a path component.
+
+    A short name is the identifier a C++ signature demangles down to, which can
+    still hold characters a path cannot, such as the / of operator/.
+    """
+    if short_name is None:
+        return None
+
+    identifier = short_name
+    if identifier.endswith(KERNEL_DESCRIPTOR_SUFFIX):
+        identifier = identifier[: -len(KERNEL_DESCRIPTOR_SUFFIX)]
+    identifier = UNSAFE_PATH_CHARACTERS.sub("_", identifier)
+    return identifier.strip("_.")[:MAX_SHORT_NAME_LENGTH].strip("_.")
+
+
 def _write_per_kernel_isa_files(
     per_kernel_directory: Path,
-    isa_rows: Iterator[tuple[Any, ...]],
-    stall_reasons: list[str],
+    isa_rows: Iterator[Tuple[Any, ...]],
+    stall_reasons: List[str],
 ) -> int:
     """Write one workload's grouped ISA rows, returning the file count.
 
@@ -140,22 +175,22 @@ def _write_per_kernel_isa_files(
 
 
 def _group_rows_by_file(
-    isa_rows: Iterator[tuple[Any, ...]],
-) -> Iterator[tuple[FileKey, list[tuple[Any, ...]]]]:
+    isa_rows: Iterator[Tuple[Any, ...]],
+) -> Iterator[Tuple[FileKey, List[Tuple[Any, ...]]]]:
     """Split the ordered row stream into the rows of one file at a time.
 
     Only the file being written is held, so the whole result set never is.
     """
     current_key = None
-    current_rows: list[tuple[Any, ...]] = []
+    current_rows: List[Tuple[Any, ...]] = []
     for row in isa_rows:
-        file_key: FileKey = row[:FILE_KEY_COLUMN_COUNT]
+        file_key: FileKey = row[:PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT]
         if file_key != current_key:
             if current_key is not None:
                 yield current_key, current_rows
             current_key = file_key
             current_rows = []
-        current_rows.append(row[FILE_KEY_COLUMN_COUNT:])
+        current_rows.append(row[PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT:])
 
     if current_key is not None:
         yield current_key, current_rows

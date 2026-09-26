@@ -336,6 +336,7 @@ PEAK_VALUES = {
     "I64Ops": 6000.0,
     "MFMAF8Flops": 9000.0,
     "MFMAF16Flops": 10000.0,
+    "MFMABF16Flops": 10500.0,
     "MFMAF32Flops": 11000.0,
     "MFMAF64Flops": 12000.0,
     "MFMAI8Ops": 13000.0,
@@ -354,7 +355,7 @@ MFMA_CASES = [
     ("I8", "I8Ops", "MFMAI8Ops"),
     ("I32", "I32Ops", None),
     ("I64", "I64Ops", None),
-    ("BF16", None, "MFMAF16Flops"),
+    ("BF16", None, "MFMABF16Flops"),
     ("FP8", None, "MFMAF8Flops"),
 ]
 
@@ -494,7 +495,7 @@ def test_missing_peak_ops_column_returns_empty() -> None:
 
 @pytest.mark.parametrize(
     ("matrix_ops_type", "gpu_model", "gpu_arch", "matrix_col"),
-    [("MFMA", MFMA_GPU_MODEL, MFMA_GPU_ARCH, "MFMAF16Flops")],
+    [("MFMA", MFMA_GPU_MODEL, MFMA_GPU_ARCH, "MFMABF16Flops")],
     ids=["MFMA"],
 )
 def test_missing_matrix_column_skips_matrix_roof(

@@ -998,20 +998,23 @@ def test_analyze_per_kernel_export_output_format(
         ),
     }
 
-    # Each ISA folder is one kernel of kernel.csv, named by its recorded uuid.
+    # Each ISA folder is one kernel of kernel.csv, named by its short name and
+    # its recorded uuid.
     isa_paths = sorted(workload_export_path.rglob("isa_*.csv"))
     assert isa_paths
     kernel_frame = pd.read_csv(output_path / "kernel.csv")
     assert {isa_path.parent.name for isa_path in isa_paths} <= {
-        f"kernel_{kernel_uuid}" for kernel_uuid in kernel_frame["kernel_uuid"]
+        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        for kernel_row in kernel_frame.itertuples()
     }
 
     with isa_paths[0].open(newline="", encoding="utf-8") as isa_file:
         header, *rows = list(csv.reader(isa_file))
-    assert header[:3] == [
+    assert header[:4] == [
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
     ]
     assert header[-3:] == ["Source", "Code object id", "Pid"]
     assert [row[0] for row in rows] == [
