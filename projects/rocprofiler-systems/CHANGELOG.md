@@ -27,6 +27,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   now restricted to its two documented, supported values (realtime,
   cputime), and an invalid value now fails cleanly at startup instead of
   aborting mid-run.
+- Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
+  running in a different mount namespace (for example, a container). The tool library
+  path is now validated against the target's mount namespace before attaching, failing
+  cleanly with a diagnostic instead.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
