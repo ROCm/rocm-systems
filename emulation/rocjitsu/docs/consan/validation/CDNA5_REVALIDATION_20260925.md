@@ -2344,3 +2344,35 @@ moves the cell from orange to yellow. The concurrent scheduling handoff thus
 completed both F8GEMM and HGEMM without restarting either SGEMM run; sparse FP8
 ML remains active. The shared memory slice still reports zero `max`, `oom`,
 and `oom_kill` events.
+
+
+### Optional Tensile cooldown removal qualified
+
+The full SGEMM clients spend time in Tensile's host benchmark cooldown:
+`BenchmarkTimer::validateEnqueues` sleeps for `sleep-percent` times the measured
+enqueue duration. These workload configurations specify 50 percent. The
+validation helper now offers `--disable-benchmark-sleep`, also forwarded by
+`CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP=1`. This changes only
+`SleepPercent` to zero; numerical validation, solution selection, warmups, and
+timing enqueue counts remain unchanged. The replay contract records the
+explicit override, so clean and fault replay cannot silently disagree.
+Existing runs retain their original settings.
+
+Normal Python harness tests passed: 46 Tensile/replay tests and 210 runner
+tests (`tensile-no-cooldown-unit-v2.log` and
+`tensile-no-cooldown-runner-unit.log`). The first test invocation used a Python
+without PyYAML; the passing runs use the existing TheRock venv.
+
+`tensile-no-cooldown-probe` additionally qualifies the option on the existing
+`[33,33,1,65]` Stream-K runtime-smoke fixture. Baseline generates a fresh replay
+manifest; Default `high` and SuperCollider `sleep_wave=15` replay those exact
+artifacts with the immutable tensor-store hook. All three numerical oracles
+pass, both detector runs have complete 320/320 access coverage, and Default
+also covers 22/22 barriers, 4/4 atomics, and 4/4 fences. Generated client INIs
+retain one benchmark, one enqueue per sync, one sync per benchmark, and full
+numerical validation while setting `sleep-percent=0`.
+
+This verifies the harness option, not a measured speedup or a replacement
+qualification for table cells whose matching clean/fault evidence uses the
+original cooldown. The long-running SGEMM and sparse FP8 ML jobs were left
+intact. The shared 40 GiB slice continues to report zero OOM events.
