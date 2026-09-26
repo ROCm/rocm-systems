@@ -1983,7 +1983,6 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
                                        bool entire, amd::CopyMetadata copyMetadata) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;
-  bool rejected = false;
 
   // hsa_amd_memory_async_copy_rect requires dword-aligned row/slice pitches.
   // When they are not aligned, DmaBlitManager::copyBufferRect falls back to one
@@ -2002,10 +2001,7 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   const bool sdmaRectWouldSerialize =
       !dwordAlignedRect && hostDeviceRect && ((sizeIn[1] * sizeIn[2]) > kSdmaRectRowSerializeLimit);
 
-  // Fall into the ROC path for rejected transfers
-  if (dev().info().pcie_atomics_ && !sdmaRectWouldSerialize &&
-      (setup_.disableCopyBufferRect_ || srcMemory.isHostMemDirectAccess() ||
-       dstMemory.isHostMemDirectAccess())) {
+  if (dev().info().pcie_atomics_ && !sdmaRectWouldSerialize) {
     result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
                                             entire, copyMetadata);
 
