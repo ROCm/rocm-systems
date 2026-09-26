@@ -6,6 +6,14 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
+### Added
+
+- `rocsys` unified CLI entry point. `rocsys -- ./app` and `rocsys profile -- ./app`
+  produce a full trace profile. `rocsys rewrite` runs `rocprof-sys-instrument`
+  in binary-rewrite mode (`-o`). Other subcommands (`instrument`, `causal`,
+  `avail`, `python`, `attach`) forward to the existing tools. The
+  `rocprof-sys-*` binaries are unchanged.
+
 ### Changed
 
 - Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
