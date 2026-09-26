@@ -2080,7 +2080,7 @@ run explicitly uses the gfx1250 emulator. The retained hook is
 `f101a84869f760bbe0d16545872c2e835ea7fd20ab15274f8d698b1f2f220600`.
 Existing sparse FP8 campaigns continue with their original immutable hook.
 
-### Sparse FP8 full high clean and current SuperCollider tensor coverage
+### Sparse FP8 full high clean and initial SuperCollider tensor coverage
 
 `sparse-complete-high-clean/tensile-spmm-f8-ml` passes all three full
 shards with complete coverage (183,108/183,108 accesses and 6,552/6,552
@@ -2164,3 +2164,35 @@ The full `high` clean sweep uses the original 84-kernel allowlist and all six
 shards, with a 14400-second inner bound and a 14700-second outer bound per
 command. Artifacts: `sgemm-complete-report1g-high-clean`. It remains necessary
 before a green cell, even if targeted fault qualification passes.
+
+
+### Tensor-DMA comparison and CDNA5 per-wave delay
+
+The tensor-DMA coverage limitation recorded above is now resolved for all seven
+selected Tensile families. The implementation executes each DMA once, compares
+sampled LDS values with their mapped global sources, handles masked zero fill
+and overlapping iterations, and defers completion arrival until comparison is
+finished. It preserves guest registers and flags, including nonzero VGPR banks.
+It does not add general global-memory race detection or tensor stores from LDS.
+Normal GCC regression runs passed 1,047 tests with two artifact-dependent
+benchmark skips (`sc-tdm-main-merge-tests.log`).
+
+The immutable `sc-tdm-hook-v1` hook passes every applicable clean shard with
+complete analysis and numerical correctness at `sleep=15`: MXF8 explicit,
+MXF4 explicit, sparse FP16 transposes, sparse TDM-all, mixed MXF8/F4 TDM,
+MXF8 TDM, and MXF4 TDM. Results are in `sc-tdm-v1-mxf8-explicit-clean` and
+`sc-tdm-v1-clean`. These results supersede the unsupported-coverage checks in
+`sc-current-tensor-clean`. Clean coverage alone does not qualify fault detection;
+[STATUS_CDNA5.md](STATUS_CDNA5.md) tracks the separate eight-trial outcomes.
+
+The subsequent `sc-wave-cdna5-hook` adds CDNA5 support for `sleep_wave`, preserving
+the tensor comparator's live scalar scratch across the delay. Its normal GCC
+regression run also passed 1,047 tests with two artifact-dependent benchmark
+skips (`sc-cdna5-wave-delay-tests.log`); validation runner tests passed 209/209
+(`sc-wave-runner-tests.log`). With `sleep_wave=15`, WMMA attention passes clean
+qualification and detects 8/8 admitted and reached faults
+(`wmma-wave15-v2-{clean,fault}`). Stream-K smoke passes clean qualification but
+misses all eight faults despite numerical failures in all eight trials
+(`sgemm-smoke-wave15-v2-{clean,fault}`). This distinguishes successful timing
+perturbation from successful detection; numerical failure alone is not a
+SuperCollider detection.
