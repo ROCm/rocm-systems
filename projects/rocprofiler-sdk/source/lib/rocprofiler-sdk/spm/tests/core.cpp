@@ -1490,8 +1490,14 @@ TEST(spm_core, concurrent_overlapping_context_starts_admit_exactly_one)
         EXPECT_TRUE(b_won || status_b == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT)
             << "iteration " << iteration << ": " << rocprofiler_get_status_string(status_b);
 
-        if(a_won) EXPECT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
-        if(b_won) EXPECT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+        if(a_won)
+        {
+            EXPECT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+        }
+        if(b_won)
+        {
+            EXPECT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+        }
         EXPECT_FALSE(hsa::get_queue_controller()->is_serialization_enabled(spm_agents[0]))
             << "iteration " << iteration;
         EXPECT_FALSE(spm::is_any_active()) << "iteration " << iteration;
