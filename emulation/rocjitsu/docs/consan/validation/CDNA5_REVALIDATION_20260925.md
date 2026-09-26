@@ -2647,3 +2647,9 @@ coverage of 34,012 access sites, 1,826 barriers, 330 atomics, and 330 fences,
 with complete static/dynamic analysis. Four shapes remain pending. These
 completed full-clean shards are distinct from the shorter replay comparator
 that timed out; the latter's failure does not invalidate their results.
+
+The untimed SuperCollider 129 shape also completes all 650 numerical cases
+and both clients, with full 34,012-site access coverage and complete analysis
+(`run-2.log`). Its three large shapes are now running. The fresh untimed
+Default comparator baseline has independently passed all 650 cases and
+exported its matching replay manifest; the instrumented comparator is live.
