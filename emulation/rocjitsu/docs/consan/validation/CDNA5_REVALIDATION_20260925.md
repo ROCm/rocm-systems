@@ -2532,3 +2532,21 @@ reproduces with both preserved pre-fix hooks, `tensor-store-default-hook-v1`
 and `report-cap1g-hook`: publication records are incomplete and the expected
 `visible_sync` evidence is absent. This is being tracked separately from the
 bank repair. The wider gfx1250 ConSan test selection is running.
+
+
+### gfx1250 regression sweep and shared-helper evidence contract
+
+The wider normal-GCC gfx1250 ConSan selection completed 588 tests: 585 pass;
+`ConSanGfx1250Sim.Atomic`, `ConSanStreamKLastArriver.Correct`, and
+`ConSanFullBankStreamK.Correct` fail. All three also fail with both immutable
+pre-bank-fix hooks. The latter two report false-positive LDS conflicts and
+remain under investigation; they were not introduced by the bank repair.
+
+The shared-helper test's helper-only filter excluded the callers' stores,
+leaving its publication trace explicitly incomplete. Its old `visible_sync`
+expectation also described the earlier sampled metadata path. The test now
+includes the shared callers, uses the full patch budget, and runs strict
+policy. It requires complete publication events and a complete analysis verdict.
+The numerical preservation check remains. The corrected case passes
+(`sgemm-bank-atomic-contract-test.log`); a diagnostic run records all three
+required modification sites covered, four events, and publication flags 3.

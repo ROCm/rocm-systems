@@ -3256,18 +3256,21 @@ function(rj_add_consan_gfx1250_sim_cases)
         CONFIG "${_sim_CONFIG}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "visible_sync=[1-9][0-9]*"
+        PASS_REGEX "ConSan publication reader=[0-9]+ flags=3 .*events=[1-9][0-9]*"
+        ALSO_PASS_REGEX
+            "ConSan publication event .*operation=1 observed=0 written=1 release=true .*complete=true"
+            "ConSan analysis verdict applicable=true analysis_complete=true"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=default"
+            "RJ_CONSAN_POLICY=strict"
             "RJ_CONSAN_REQUIRE_RECORDS=1"
             "RJ_CONSAN_FORBID_DIAGNOSTICS=1"
             "RJ_CONSAN_TRACK_BARRIERS=0"
             "RJ_CONSAN_TRACK_ATOMICS=1"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=shared_noinline_atomic_add_for_instrumentation"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=shared_"
             "RJ_CONSAN_LOG=1"
-            "RJ_CONSAN_MAX_PATCHES=8"
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
 
