@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 project(profiler-hub VERSION 0.2.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -18,9 +18,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # ------------------------------------------------------------ #
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
-option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PROFILER_HUB_FETCH_DEPENDENCIES
+    "Download missing or unsuitable dependencies at configure time"
+    OFF
+)
 
 if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()

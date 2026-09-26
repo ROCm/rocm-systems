@@ -3,20 +3,24 @@
 
 include_guard(DIRECTORY)
 
-set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Google Benchmark version")
+set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Minimum Google Benchmark version")
 
-find_package(benchmark QUIET)
+# Fetching is Off by default: a missing or old package errors out.
+if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    find_package(benchmark ${BENCHMARK_VERSION})
 
-if(benchmark_FOUND)
+    if(NOT benchmark_FOUND)
+        message(
+            FATAL_ERROR
+            "profiler-hub requires Google Benchmark ${BENCHMARK_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_BUILD_BENCHMARKS=OFF to skip the benchmarks, or with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+        )
+    endif()
+
     message(
         STATUS
         "Using system Google Benchmark (version ${benchmark_VERSION})"
     )
 else()
-    message(
-        STATUS
-        "System Google Benchmark not found, fetching version ${BENCHMARK_VERSION}"
-    )
     include(FetchContent)
 
     FetchContent_Declare(
@@ -24,6 +28,10 @@ else()
         GIT_REPOSITORY https://github.com/google/benchmark.git
         GIT_TAG v${BENCHMARK_VERSION}
         GIT_SHALLOW TRUE
+        # Without this, the MakeAvailable below always fetches.
+        # FetchContent derives the find_package call from the content name, which
+        # here is not the name Google Benchmark installs itself under.
+        FIND_PACKAGE_ARGS ${BENCHMARK_VERSION} NAMES benchmark
     )
 
     set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
@@ -31,6 +39,7 @@ else()
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_USE_BUNDLED_GTEST OFF CACHE BOOL "" FORCE)
 
+    # Tries find_package() first, fetches only if that fails.
     FetchContent_MakeAvailable(googlebenchmark)
 
     if(NOT TARGET benchmark::benchmark)

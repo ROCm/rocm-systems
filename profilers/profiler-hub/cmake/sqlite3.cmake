@@ -23,11 +23,6 @@ set(SQLITE3_GIT_TAG
     "Upstream SQLite3 git tag to check out"
 )
 
-message(
-    STATUS
-    "[profiler-hub] Cloning SQLite3 from ${SQLITE3_GIT_URL} @ ${SQLITE3_GIT_TAG}"
-)
-
 find_package(Git REQUIRED)
 find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
 
@@ -37,6 +32,10 @@ set(SQLITE3_AMALG_H "${SQLITE3_SOURCE_DIR}/sqlite3.h")
 
 # checkout: shallow + partial first, retry full on failure
 if(NOT EXISTS "${SQLITE3_SOURCE_DIR}/configure")
+    message(
+        STATUS
+        "[profiler-hub] Cloning SQLite3 from ${SQLITE3_GIT_URL} @ ${SQLITE3_GIT_TAG}"
+    )
     if(EXISTS "${SQLITE3_SOURCE_DIR}")
         file(REMOVE_RECURSE "${SQLITE3_SOURCE_DIR}")
     endif()
@@ -67,6 +66,11 @@ if(NOT EXISTS "${SQLITE3_SOURCE_DIR}/configure")
             "[profiler-hub] git clone of SQLite3 failed (rc=${_sqlite3_clone_rc})"
         )
     endif()
+else()
+    message(
+        STATUS
+        "[profiler-hub] Reusing SQLite3 sources in ${SQLITE3_SOURCE_DIR}"
+    )
 endif()
 
 # generate amalgamation (sqlite3.c + sqlite3.h) via upstream autotools
