@@ -60,6 +60,44 @@ HIP_TEST_CASE(Unit_hipMemPoolDestroy_Negative_Parameter) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemPoolDestroy while a stream is capturing. The API is allowed in
+ * relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolDestroy.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolDestroy_Capture) {
+  checkMempoolSupported(0)
+
+      hipMemPoolProps pool_props;
+  memset(&pool_props, 0, sizeof(pool_props));
+  pool_props.allocType = hipMemAllocationTypePinned;
+  pool_props.handleTypes = hipMemHandleTypeNone;
+  pool_props.location.type = hipMemLocationTypeDevice;
+  pool_props.location.id = 0;
+  pool_props.win32SecurityAttributes = nullptr;
+
+  hipMemPool_t mem_pool = nullptr;
+  HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemPoolDestroy(mem_pool), capture_err);
+  END_CAPTURE_SYNC(capture_err);
+
+  // If capture prevented the destroy, the pool still exists and must be freed.
+  if (capture_err != hipSuccess) {
+    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  }
+}
+
+/**
  * End doxygen group StreamOTest.
  * @}
  */

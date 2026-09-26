@@ -308,6 +308,31 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Multithreaded) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Test hipMemPoolTrimTo while a stream is capturing. The API is allowed in
+ * relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolTrimTo.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Capture) {
+  int device_id = 0;
+  HIP_CHECK(hipSetDevice(device_id));
+  checkMempoolSupported(device_id)
+  MemPoolGuard mempool(MemPools::created, device_id);
+
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemPoolTrimTo(mempool.mempool(), 0), capture_err);
+  END_CAPTURE_SYNC(capture_err);
+}
+
+/**
  * End doxygen group StreamOTest.
  * @}
  */
