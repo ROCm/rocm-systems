@@ -67,6 +67,7 @@ extern std::function<hipError_t(void* /*data*/,
 
 // Device model + inventory seams. Defaults succeed with plausible values.
 extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
+extern std::function<hipError_t(int* /*version*/)> g_hipDriverGetVersion;
 extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
     g_hipGetDeviceProperties;
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,

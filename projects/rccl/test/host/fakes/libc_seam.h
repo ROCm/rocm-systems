@@ -31,6 +31,7 @@
 
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -55,6 +56,12 @@ int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
+int micro_bind(int, const struct sockaddr*, socklen_t);
+int micro_listen(int, int);
+int micro_accept(int, struct sockaddr*, socklen_t*);
+int micro_fcntl(int, int, ...);
+ssize_t micro_recv(int, void*, size_t, int);
+ssize_t micro_send(int, const void*, size_t, int);
 }  // extern "C"
 
 #define write micro_write
@@ -72,3 +79,9 @@ int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)))
 #define perror micro_perror
 #define exit micro_exit
 #define fprintf micro_fprintf
+#define bind micro_bind
+#define listen micro_listen
+#define accept micro_accept
+#define fcntl micro_fcntl
+#define recv micro_recv
+#define send micro_send

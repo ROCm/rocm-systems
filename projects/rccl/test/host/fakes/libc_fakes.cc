@@ -49,6 +49,22 @@ int g_addrinfoBasePort = 28028;
 int g_freeaddrinfoCalls = 0;
 int g_connectResult = 0;
 int g_connectErrno = ECONNREFUSED;
+std::vector<int> g_boundFds;
+int g_bindResult = 0;
+int g_bindErrno = EADDRINUSE;
+std::vector<int> g_listenedFds;
+int g_listenResult = 0;
+int g_listenErrno = EADDRINUSE;
+int g_nextAcceptFd = 44;
+int g_acceptErrno = ECONNABORTED;
+std::vector<int> g_acceptedFds;
+std::vector<MicroFcntlCall> g_fcntlCalls;
+int g_fcntlResult = 0;
+std::string g_sentData;
+std::vector<int> g_sentFds;
+std::vector<int> g_recvFds;
+std::vector<MicroReadStep> g_recvScript;
+size_t g_recvScriptPos = 0;
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -112,6 +128,57 @@ static int DefaultSetsockopt(int, int level, int optname, const void* optval, so
     std::memcpy(&g_lastSetsockoptTimeval, optval, sizeof(struct timeval));
   }
   return 0;
+}
+
+static int DefaultBind(int fd, const struct sockaddr*, socklen_t) {
+  g_boundFds.push_back(fd);
+  if (g_bindResult != 0) errno = g_bindErrno;
+  return g_bindResult;
+}
+
+static int DefaultListen(int fd, int) {
+  g_listenedFds.push_back(fd);
+  if (g_listenResult != 0) errno = g_listenErrno;
+  return g_listenResult;
+}
+
+static int DefaultAccept(int fd, struct sockaddr* addr, socklen_t* addrlen) {
+  g_acceptedFds.push_back(fd);
+  if (g_nextAcceptFd == -1) {
+    errno = g_acceptErrno;
+    return -1;
+  }
+  if (addr && addrlen && *addrlen >= static_cast<socklen_t>(sizeof(struct sockaddr_in))) {
+    struct sockaddr_in sa = {};
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(0);
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    std::memcpy(addr, &sa, sizeof(sa));
+    *addrlen = sizeof(sa);
+  }
+  return g_nextAcceptFd;
+}
+
+// F_GETFL/F_SETFL are the only commands client_support.cc issues; both take at most one int
+// argument, so normalizing the variadic tail to a single int (via the micro_fcntl trampoline)
+// covers every real call site without a per-command va_arg dispatch here.
+static int DefaultFcntl(int fd, int cmd, int arg) {
+  g_fcntlCalls.push_back(MicroFcntlCall{fd, cmd, arg});
+  return g_fcntlResult;
+}
+
+static ssize_t DefaultRecv(int fd, void* buf, size_t count, int) {
+  g_recvFds.push_back(fd);
+  if (count == 0) return 0;
+  if (g_recvScriptPos >= g_recvScript.size()) return 0;  // EOF past the end of the script
+  const MicroReadStep& step = g_recvScript[g_recvScriptPos++];
+  return DeliverReadStep(step, buf, count);
+}
+
+static ssize_t DefaultSend(int fd, const void* buf, size_t count, int) {
+  g_sentFds.push_back(fd);
+  g_sentData.append(static_cast<const char*>(buf), count);
+  return static_cast<ssize_t>(count);
 }
 
 // Builds g_addrinfoCount single-linked IPv4 entries. Paired with
@@ -215,6 +282,12 @@ std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite = DefaultFwri
 std::function<int(FILE*)> g_fflush = DefaultFflush;
 std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
+std::function<int(int, const struct sockaddr*, socklen_t)> g_bind = DefaultBind;
+std::function<int(int, int)> g_listen = DefaultListen;
+std::function<int(int, struct sockaddr*, socklen_t*)> g_accept = DefaultAccept;
+std::function<int(int, int, int)> g_fcntl = DefaultFcntl;
+std::function<ssize_t(int, void*, size_t, int)> g_recv = DefaultRecv;
+std::function<ssize_t(int, const void*, size_t, int)> g_send = DefaultSend;
 
 void ScriptRead(ssize_t ret, int err, std::string data) {
   g_readScript.push_back(MicroReadStep{ret, err, std::move(data)});
@@ -223,6 +296,15 @@ void ScriptRead(ssize_t ret, int err, std::string data) {
 void ScriptReadData(std::string data) {
   const ssize_t n = static_cast<ssize_t>(data.size());
   g_readScript.push_back(MicroReadStep{n, 0, std::move(data)});
+}
+
+void ScriptRecv(ssize_t ret, int err, std::string data) {
+  g_recvScript.push_back(MicroReadStep{ret, err, std::move(data)});
+}
+
+void ScriptRecvData(std::string data) {
+  const ssize_t n = static_cast<ssize_t>(data.size());
+  g_recvScript.push_back(MicroReadStep{n, 0, std::move(data)});
 }
 
 void ResetLibcFakes() {
@@ -262,6 +344,28 @@ void ResetLibcFakes() {
   g_freeaddrinfoCalls = 0;
   g_connectResult = 0;
   g_connectErrno = ECONNREFUSED;
+  g_bind = DefaultBind;
+  g_listen = DefaultListen;
+  g_accept = DefaultAccept;
+  g_fcntl = DefaultFcntl;
+  g_recv = DefaultRecv;
+  g_send = DefaultSend;
+  g_boundFds.clear();
+  g_bindResult = 0;
+  g_bindErrno = EADDRINUSE;
+  g_listenedFds.clear();
+  g_listenResult = 0;
+  g_listenErrno = EADDRINUSE;
+  g_nextAcceptFd = 44;
+  g_acceptErrno = ECONNABORTED;
+  g_acceptedFds.clear();
+  g_fcntlCalls.clear();
+  g_fcntlResult = 0;
+  g_sentData.clear();
+  g_sentFds.clear();
+  g_recvFds.clear();
+  g_recvScript.clear();
+  g_recvScriptPos = 0;
   errno = 0;
 }
 
@@ -294,6 +398,22 @@ size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 }
 int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
+int micro_bind(int fd, const struct sockaddr* addr, socklen_t len) { return g_bind(fd, addr, len); }
+int micro_listen(int fd, int backlog) { return g_listen(fd, backlog); }
+int micro_accept(int fd, struct sockaddr* addr, socklen_t* addrlen) { return g_accept(fd, addr, addrlen); }
+// fcntl is variadic in libc; client_support.cc only ever issues F_GETFL (no argument) and
+// F_SETFL (one int argument), so reading a single int off the tail covers every real call site
+// without a per-command va_arg dispatch. A cmd this seam doesn't expect would read garbage, but
+// nothing under test issues one.
+int micro_fcntl(int fd, int cmd, ...) {
+  va_list args;
+  va_start(args, cmd);
+  const int arg = va_arg(args, int);
+  va_end(args);
+  return g_fcntl(fd, cmd, arg);
+}
+ssize_t micro_recv(int fd, void* buf, size_t count, int flags) { return g_recv(fd, buf, count, flags); }
+ssize_t micro_send(int fd, const void* buf, size_t count, int flags) { return g_send(fd, buf, count, flags); }
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.

@@ -381,6 +381,83 @@ if(BUILD_TESTS)
   endif()
 
   # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroRasClientSupport -- host-only microtests for
+  # src/ras/client_support.cc. Dedicated executable (NOT shared with
+  # rccl-UnitTestsMicro): ras-test.cc already defines file-scope fakes for
+  # rasClientInitSocket/rasClientAcceptNewSocket/rasClientEventLoop/
+  # rasClientSupportTerminate/rasClientsNotifyEvent (client_support.cc's own
+  # exports, needed there because ras.cc calls them) -- linking the real
+  # client_support.cc into the same binary would duplicate-define all five.
+  set(TEST_MICRO_RAS_CLIENT_SUPPORT_SOURCE_FILES
+    client-support-test.cc
+    fakes/nccl_fakes.cc
+    fakes/libc_fakes.cc                  # libc seams: this is the first unit needing bind/listen/accept/fcntl/recv/send
+    fakes/hip_fakes.cc
+    fakes/env_fakes.cc                   # ncclGetEnv (NCCL_RAS_ADDR)
+    fakes/collectives_fakes.cc           # ncclFuncToString
+    ../common/main_altrsmi.cpp
+    # rasTimeoutFactorNs (RAS_COLLECTIVE_LEG_TIMEOUT) is a TU-local fake in
+    # client-support-test.cc itself, same one-liner as ras-test.cc's -- NOT
+    # fakes/ras_param_fakes.cc, which only provides rasTimeoutFactorSec (for
+    # client.cc's RAS_CLIENT-side timeout math, which this file never calls).
+  )
+
+  add_executable(rccl-UnitTestsMicroRasClientSupport ${TEST_MICRO_RAS_CLIENT_SUPPORT_SOURCE_FILES})
+  target_include_directories(rccl-UnitTestsMicroRasClientSupport PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS})
+  target_compile_definitions(rccl-UnitTestsMicroRasClientSupport PRIVATE
+    ${RCCL_COMMON_COMPILE_DEFS}
+    CLIENT_SUPPORT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client_support.cc")
+
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsMicroRasClientSupport PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+  endif()
+
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-UnitTestsMicroRasClientSupport PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-UnitTestsMicroRasClientSupport PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(rccl-UnitTestsMicroRasClientSupport PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_link_libraries(rccl-UnitTestsMicroRasClientSupport PRIVATE ${MICRO_TEST_LINK_LIBS})
+  add_dependencies(rccl-UnitTestsMicroRasClientSupport hipify_all copy_nccl_device_headers)
+  target_compile_options(rccl-UnitTestsMicroRasClientSupport PRIVATE
+    --offload-host-only -ffunction-sections
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicroRasClientSupport PRIVATE
+    -no-hip-rt
+    -fprofile-instr-generate -fcoverage-mapping
+    -Wl,--gc-sections)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(rccl-UnitTestsMicroRasClientSupport PRIVATE -fsanitize=address)
+    target_link_options(rccl-UnitTestsMicroRasClientSupport PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(rccl-UnitTestsMicroRasClientSupport PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+  rocm_install(TARGETS rccl-UnitTestsMicroRasClientSupport COMPONENT tests)
+  if(COMMAND apply_test_category_labels)
+    set(_ras_client_support_categories_yaml
+        "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_ras_client_support.yaml")
+    if(EXISTS "${_ras_client_support_categories_yaml}")
+      message(STATUS "Applying test categories for rccl-UnitTestsMicroRasClientSupport")
+      apply_test_category_labels(
+        rccl-UnitTestsMicroRasClientSupport
+        "${_ras_client_support_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for rccl-UnitTestsMicroRasClientSupport: missing ${_ras_client_support_categories_yaml}")
+    endif()
+  endif()
+
+  # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for src/init.cc
   # (AICOMRCCL-1685). Dedicated executables (NOT shared with rccl-UnitTestsMicro)
   # so init.cc's symbols and std::once_flag state stay isolated. They also compile
@@ -1337,6 +1414,43 @@ target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE
 )
 target_link_options(rccl-UnitTestsMicroWarpSpeed PRIVATE -no-hip-rt -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE
+  GTest::GTest
+  Threads::Threads
+  fmt::fmt-header-only
+)
+
+# --- Standalone RAS client-support micro-test binary --------------------
+# rccl-UnitTestsMicroRasClientSupport -- see the in-build block for the
+# rationale behind the separate binary (duplicate-symbol clash with
+# ras-test.cc's own fakes for client_support.cc's exports).
+set(TEST_MICRO_RAS_CLIENT_SUPPORT_SOURCE_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/client-support-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/libc_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
+  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+)
+
+add_test_executable(rccl-UnitTestsMicroRasClientSupport ${TEST_MICRO_RAS_CLIENT_SUPPORT_SOURCE_FILES})
+target_compile_options(rccl-UnitTestsMicroRasClientSupport PRIVATE
+  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+target_include_directories(rccl-UnitTestsMicroRasClientSupport PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${RCCL_INCLUDE_DIRS}
+)
+target_compile_definitions(rccl-UnitTestsMicroRasClientSupport PRIVATE
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  CLIENT_SUPPORT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client_support.cc"
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+)
+target_link_options(rccl-UnitTestsMicroRasClientSupport PRIVATE -no-hip-rt -Wl,--gc-sections)
+target_link_libraries(rccl-UnitTestsMicroRasClientSupport PRIVATE
   GTest::GTest
   Threads::Threads
   fmt::fmt-header-only
