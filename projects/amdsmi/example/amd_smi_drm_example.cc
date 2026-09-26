@@ -459,7 +459,7 @@ int main() {
     // For each socket, get identifier and devices
     for (uint32_t i = 0; i < socket_count; i++) {
       // Get Socket info
-      char socket_info[128];
+      char socket_info[128] = {};
       ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
       PRINT_AMDSMI_RET(ret)
       std::cout << "\t**Socket Info: " << socket_info << std::endl;
@@ -484,8 +484,8 @@ int main() {
         std::cout << "\t**GPU Number: " << gpu_number << std::endl;
 
         // Get the original accelerator partition
-        amdsmi_accelerator_partition_profile_t profile;
-        uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
+        amdsmi_accelerator_partition_profile_t profile = {};
+        uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE] = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                            &profile, partition_id);
         std::string original_accelerator_partition =
@@ -556,7 +556,7 @@ int main() {
     // For each socket, get identifier and devices
     for (uint32_t i = 0; i < socket_count; i++) {
       // Get Socket info
-      char socket_info[128];
+      char socket_info[128] = {};
       ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
       PRINT_AMDSMI_RET(ret)
       std::cout << "\t**Socket Info: " << socket_info << std::endl;
@@ -581,8 +581,8 @@ int main() {
         std::cout << "\t**GPU Number: " << gpu_number << std::endl;
 
         // Get the original accelerator partition
-        amdsmi_accelerator_partition_profile_t profile;
-        uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
+        amdsmi_accelerator_partition_profile_t profile = {};
+        uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE] = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                            &profile, partition_id);
         std::string original_accelerator_partition =
@@ -604,40 +604,42 @@ int main() {
         }
 
         // Iterate through all available accelerator partition profiles
-        amdsmi_accelerator_partition_profile_config_t profile_config;
+        amdsmi_accelerator_partition_profile_config_t profile_config{};
         ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles[device_index],
                                                                   &profile_config);
-        for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
-          amdsmi_accelerator_partition_type_t updatePartition =
-              profile_config.profiles[profile_idx].profile_type;
-          amdsmi_status_t ret_set = amdsmi_set_gpu_accelerator_partition_profile(
-              processor_handles[device_index], profile_idx);
-          amdsmi_status_code_to_string(ret_set, &err_str);
-          if (ret_set == AMDSMI_STATUS_SUCCESS) {
-            PRINT_AMDSMI_RET(ret_set)
-          }
-          std::cout << "\tamdsmi_set_gpu_accelerator_partition_profile(" << gpu_number << ", "
-                    << acceleratorPartitionString(updatePartition) << "): " << err_str << "\n\n";
+        if (ret == AMDSMI_STATUS_SUCCESS) {
+          for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
+            amdsmi_accelerator_partition_type_t updatePartition =
+                profile_config.profiles[profile_idx].profile_type;
+            amdsmi_status_t ret_set = amdsmi_set_gpu_accelerator_partition_profile(
+                processor_handles[device_index], profile_idx);
+            amdsmi_status_code_to_string(ret_set, &err_str);
+            if (ret_set == AMDSMI_STATUS_SUCCESS) {
+              PRINT_AMDSMI_RET(ret_set)
+            }
+            std::cout << "\tamdsmi_set_gpu_accelerator_partition_profile(" << gpu_number << ", "
+                      << acceleratorPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
-          // Get the current accelerator partition
-          amdsmi_accelerator_partition_profile_t profile;
-          uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
-          ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
-                                                             &profile, partition_id);
-          std::string current_accelerator_partition =
-              acceleratorPartitionString(profile.profile_type);
-          amdsmi_status_code_to_string(ret, &err_str);
-          if (ret == AMDSMI_STATUS_SUCCESS) {
-            PRINT_AMDSMI_RET(ret)
-            std::cout << "    Output of amdsmi_get_gpu_accelerator_partition:\n";
-            std::cout << "\tamdsmi_get_gpu_accelerator_partition_profile(" << gpu_number << ", "
-                      << profile.profile_type << "): " << err_str << "\n\n";
-            std::cout << "\tAccelerator Partition (current): " << current_accelerator_partition
-                      << "\n\n";
-          } else {
-            std::cout << "\tamdsmi_get_gpu_accelerator_partition_profile(" << gpu_number << ", "
-                      << acceleratorPartitionString(AMDSMI_ACCELERATOR_PARTITION_INVALID)
-                      << "): " << err_str << "\n\n";
+            // Get the current accelerator partition
+            amdsmi_accelerator_partition_profile_t profile = {};
+            uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE] = {};
+            ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
+                                                               &profile, partition_id);
+            std::string current_accelerator_partition =
+                acceleratorPartitionString(profile.profile_type);
+            amdsmi_status_code_to_string(ret, &err_str);
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+              PRINT_AMDSMI_RET(ret)
+              std::cout << "    Output of amdsmi_get_gpu_accelerator_partition:\n";
+              std::cout << "\tamdsmi_get_gpu_accelerator_partition_profile(" << gpu_number << ", "
+                        << profile.profile_type << "): " << err_str << "\n\n";
+              std::cout << "\tAccelerator Partition (current): " << current_accelerator_partition
+                        << "\n\n";
+            } else {
+              std::cout << "\tamdsmi_get_gpu_accelerator_partition_profile(" << gpu_number << ", "
+                        << acceleratorPartitionString(AMDSMI_ACCELERATOR_PARTITION_INVALID)
+                        << "): " << err_str << "\n\n";
+            }
           }
         }
         gpu_number++;
@@ -654,7 +656,7 @@ int main() {
     // For each socket, get identifier and devices
     for (uint32_t i = 0; i < socket_count; i++) {
       // Get Socket info
-      char socket_info[128];
+      char socket_info[128] = {};
       ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
       PRINT_AMDSMI_RET(ret)
       std::cout << "\t**Socket Info: " << socket_info << std::endl;
@@ -769,7 +771,7 @@ int main() {
     // For each socket, get identifier and devices
     for (uint32_t i = 0; i < socket_count; i++) {
       // Get Socket info
-      char socket_info[128];
+      char socket_info[128] = {};
       ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
       PRINT_AMDSMI_RET(ret)
       std::cout << "\t**Socket Info: " << socket_info << std::endl;
@@ -854,7 +856,7 @@ int main() {
     // For each socket, get identifier and devices
     for (uint32_t i = 0; i < socket_count; i++) {
       // Get Socket info
-      char socket_info[128];
+      char socket_info[128] = {};
       ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
       PRINT_AMDSMI_RET(ret)
       std::cout << "\t**Socket Info: " << socket_info << std::endl;
@@ -892,8 +894,8 @@ int main() {
                   << orig_partition << "): " << err_str << "\n\n";
 
         // Get the current accelerator partition
-        amdsmi_accelerator_partition_profile_t profile;
-        uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
+        amdsmi_accelerator_partition_profile_t profile = {};
+        uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE] = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                            &profile, partition_id);
         std::string current_accelerator_partition =
@@ -1131,7 +1133,7 @@ int main() {
         std::cout << "\tPower Management is disabled" << std::endl;
       }
 
-      amdsmi_virtualization_mode_t vmode;
+      amdsmi_virtualization_mode_t vmode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
       ret = amdsmi_get_gpu_virtualization_mode(processor_handles[device_index], &vmode);
       if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
         CHK_AMDSMI_RET(ret)
@@ -1357,7 +1359,8 @@ int main() {
       // Get temperature measurements
       // amdsmi_temperature_t edge_temp, hotspot_temp, vram_temp,
       // plx_temp;
-      int64_t temp_measurements[AMDSMI_TEMPERATURE_TYPE__MAX + 1];
+      // Zero-initialized: entries stay unset (and unread) when a type is NOT_SUPPORTED.
+      int64_t temp_measurements[AMDSMI_TEMPERATURE_TYPE__MAX + 1] = {};
       amdsmi_temperature_type_t temp_types[4] = {
           AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
           AMDSMI_TEMPERATURE_TYPE_VRAM, AMDSMI_TEMPERATURE_TYPE_PLX};
