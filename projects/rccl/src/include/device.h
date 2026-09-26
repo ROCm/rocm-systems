@@ -121,9 +121,8 @@ struct ncclDevRedOpFull {
   uint64_t scalarArg;
 };
 
-#ifdef __HIP_DEVICE_COMPILE__
-#include "rccl_ptr.h"
-#endif
+
+#include "nccl_device/rccl_ptr.h"
 
 union ncclLLFifoLine {
   /* Flags have to be *after* data, because otherwise, an incomplete receive
@@ -138,10 +137,11 @@ union ncclLLFifoLine {
   };
   uint64_t v[2];
   int4 i4;
-#if defined(__HIP_DEVICE_COMPILE__) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   v4u v4u; /* same layout as data1,flag1,data2,flag2 for b128 load/store */
-#endif
 };
+
+static_assert(sizeof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16 bytes");
+static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-byte aligned");
 
 #if __HIP_DEVICE_COMPILE__
 #if defined(__GFX9__)
@@ -226,7 +226,20 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_ELEMS_PER_THREAD 120
 #endif
 
+/* Same host/device split as NCCL_LL128_LINESIZE above.
+ * Device code: 32 on gfx1250 (wider slices roughly double large-message LL128 bandwidth),
+ * 8 elsewhere. Host code: must NOT use this macro for logic as it defaults to 8. Use
+ * rcclLL128ShmemElemsPerThreadFromArch() (archinfo.h) or comm->ll128ShmemElemsPerThread
+ * instead. */
+#if __HIP_DEVICE_COMPILE__
+#if defined(__gfx1250__)
+#define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 32
+#else
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
+#endif
+#else
+#define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
+#endif
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_MAX_NTHREADS)
 
 #define NCCL_P2P_WRITE 0x01
@@ -820,8 +833,12 @@ __device__ constexpr int ncclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH)
          -16; // pad to 16 bytes
 }
 
+// Per-warp async-tile staging window. The widest tile any deep loop stages is 16 KiB
+// (ncclSymkDeepUnrollPacks(4) x 2 peers, and AllGather's 256 B tier), so this leaves a
+// little slack above that. At the symmetric kernels' 16 warps that is 288 KiB of the
+// 320 KiB these kernels already reserve via cudaFuncAttributeMaxDynamicSharedMemorySize.
 __host__ __device__ constexpr int ncclTmaShmemScratchWarpSize(void) {
-  return 10 << 10;
+  return 18 << 10;
 }
 
 // RCCL has its own varient of ncclShmemDynamicSize and ncclShmemScratchWarpSize

@@ -16,9 +16,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace
@@ -633,10 +631,16 @@ metadata_registry::find_gpu_perf_counter_by_id(std::uint32_t device_id,
                                                std::uint64_t counter_id) const
 {
     auto idx_it = m_gpu_perf_counter_index.find(device_id);
-    if(idx_it == m_gpu_perf_counter_index.end()) return std::nullopt;
+    if(idx_it == m_gpu_perf_counter_index.end())
+    {
+        return std::nullopt;
+    }
 
     auto entry_it = idx_it->second.find(counter_id);
-    if(entry_it == idx_it->second.end()) return std::nullopt;
+    if(entry_it == idx_it->second.end())
+    {
+        return std::nullopt;
+    }
 
     return std::cref(m_gpu_perf_counter_counter_names.at(device_id)[entry_it->second]);
 }
@@ -715,7 +719,10 @@ metadata_registry::overwrite_callback_names(
         std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
         rename_table)
 {
-    if(rename_table.size() == 0) return;
+    if(rename_table.size() == 0)
+    {
+        return;
+    }
 
     using callback_kind_t   = rocprofiler_callback_tracing_kind_t;
     using operation_names_t = std::vector<std::string_view>;
@@ -732,7 +739,9 @@ metadata_registry::overwrite_callback_names(
         operation_names.reserve(operations_data.size());
 
         for(const auto& [op_idx, op_name] : operations_data)
+        {
             operation_names.push_back(*op_name);
+        }
 
         return operation_names;
     };
@@ -757,7 +766,10 @@ metadata_registry::overwrite_callback_names(
             i < ROCPROFILER_CALLBACK_TRACING_LAST;
             i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
         {
-            if(modified_ops.find(i) != modified_ops.end()) break;
+            if(modified_ops.find(i) != modified_ops.end())
+            {
+                break;
+            }
             modified_ops[i] = extract_operations(i);
         }
 
@@ -786,7 +798,10 @@ metadata_registry::overwrite_callback_names(
         }
         modified_ops[callback_kind] = std::move(operation_names);
     }
-    if(modified_ops.empty()) return;
+    if(modified_ops.empty())
+    {
+        return;
+    }
 
     // Emplace the changed category operations
     for(callback_kind_t i = modified_ops.begin()->first;
@@ -891,5 +906,4 @@ metadata_registry::load_from_file(const std::string&                   filepath,
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

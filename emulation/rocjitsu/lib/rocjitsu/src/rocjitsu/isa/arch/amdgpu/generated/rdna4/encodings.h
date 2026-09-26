@@ -790,6 +790,10 @@ public:
     case 36:
     case 37:
     case 39:
+    case 132:
+    case 133:
+    case 134:
+    case 135:
     case 140:
     case 141:
     case 142:

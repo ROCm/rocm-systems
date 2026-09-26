@@ -68,6 +68,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
@@ -206,7 +207,8 @@ const char* rcclGitHash = "microtest";
 // under test writes them and no test assigns them. Give one a seam the moment a
 // test starts scripting it, because an unrestored global that a test DOES write
 // is an order-dependent flake.
-int ncclCudaDriverVersionCache = 12000;       // src/misc/cudawrap.cc
+// ncclCudaDriverVersionCache is scripted (the RMA append path gates on >= 12050), so it is reset below.
+int ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;  // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
@@ -256,5 +258,6 @@ void ResetNcclStubs() {
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
   g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;
   ncclDevFuncNameToId.clear();
 }

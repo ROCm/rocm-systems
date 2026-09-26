@@ -29,10 +29,10 @@ template <policies::gpu_perf_counters::backend Backend>
 class device
 {
 public:
-    device(std::shared_ptr<Backend> backend, typename Backend::context_id_t context,
-           std::shared_ptr<rocprofsys::agent>    agent,
-           typename Backend::counter_config_id_t counter_config,
-           std::vector<counter_metadata>         counter_meta)
+    device(std::shared_ptr<Backend> backend, Backend::context_id_t context,
+           std::shared_ptr<rocprofsys::agent> agent,
+           Backend::counter_config_id_t       counter_config,
+           std::vector<counter_metadata>      counter_meta)
     : m_backend_api{ std::move(backend) }
     , m_context{ context }
     , m_agent{ std::move(agent) }
@@ -79,8 +79,14 @@ public:
         // tool_init runs before the application's hsa_init, so the first call may fail.
         // Retry here until it succeeds; once m_context_started is true this is a single
         // branch-predicted branch with no further work.
-        if(!m_context_started) start();
-        if(!m_context_started) return m_result_cache;
+        if(!m_context_started)
+        {
+            start();
+        }
+        if(!m_context_started)
+        {
+            return m_result_cache;
+        }
 
         auto rec_count = m_record_buffer.size();
 
@@ -116,7 +122,10 @@ public:
             const double raw    = record.counter_value;
             auto [it, inserted] = m_prev_values.try_emplace(id, raw);
             const double delta  = inserted ? raw : raw - it->second;
-            if(!inserted) it->second = raw;
+            if(!inserted)
+            {
+                it->second = raw;
+            }
             m_result_cache.push_back({ id, delta });
         }
 
@@ -125,7 +134,10 @@ public:
 
     void start()
     {
-        if(m_context_started) return;
+        if(m_context_started)
+        {
+            return;
+        }
 
         try
         {
@@ -160,9 +172,9 @@ private:
     static constexpr size_t k_record_buffer_min_size        = 256;
 
     std::shared_ptr<Backend>                        m_backend_api;
-    typename Backend::context_id_t                  m_context;
+    Backend::context_id_t                           m_context;
     std::shared_ptr<rocprofsys::agent>              m_agent;
-    typename Backend::counter_config_id_t           m_counter_config;
+    Backend::counter_config_id_t                    m_counter_config;
     std::vector<counter_metadata>                   m_counter_meta;
     std::vector<typename Backend::counter_record_t> m_record_buffer;
     metrics                                         m_result_cache;

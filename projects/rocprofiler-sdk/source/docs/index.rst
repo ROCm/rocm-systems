@@ -53,6 +53,7 @@ The documentation is structured as follows:
       * :ref:`using-pc-sampling`
       * :ref:`cdna3-cdna4-pc-sampling`
       * :ref:`using-thread-trace`
+      * :ref:`using-rocprofv3-on-wsl`
       * :ref:`using-spm`
       * :ref:`using-kernel-replay`
       * :ref:`using-kernel-replay-rocprofv3`

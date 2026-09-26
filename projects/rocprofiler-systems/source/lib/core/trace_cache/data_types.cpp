@@ -22,7 +22,10 @@ filter_formats(const std::vector<format_t>& src, Predicate&& pred)
     kept.reserve(src.size());
     for(const auto& fmt : src)
     {
-        if(fmt.enabled && pred(fmt)) kept.push_back(fmt);
+        if(fmt.enabled && pred(fmt))
+        {
+            kept.push_back(fmt);
+        }
     }
     return enabled_formats_t{ std::move(kept) };
 }
@@ -34,8 +37,14 @@ join_names(const std::vector<format_t>& formats, Predicate&& pred)
     std::string out;
     for(const auto& fmt : formats)
     {
-        if(!fmt.enabled || !pred(fmt)) continue;
-        if(!out.empty()) out += ", ";
+        if(!fmt.enabled || !pred(fmt))
+        {
+            continue;
+        }
+        if(!out.empty())
+        {
+            out += ", ";
+        }
         out += fmt.name;
     }
     return out;
@@ -62,19 +71,25 @@ enabled_formats_t::print() const
 {
     if(std::none_of(formats.begin(), formats.end(),
                     [](const auto& f) { return f.enabled; }))
+    {
         return;
+    }
 
     LOG_INFO("Generating [{}] format(s) with collected data from trace cache. "
              "This may take a while..",
              names().c_str());
 
     if(has_parallel_formats())
+    {
         LOG_INFO("  - Using parallel processing for: {}",
                  join_names(formats, parallel_pred));
+    }
 
     if(has_sequential_formats())
+    {
         LOG_INFO("  - Using sequential processing for: {}",
                  join_names(formats, sequential_pred));
+    }
 }
 
 bool

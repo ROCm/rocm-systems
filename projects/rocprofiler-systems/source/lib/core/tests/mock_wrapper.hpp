@@ -645,8 +645,8 @@ struct name_info
 {
     using value_type   = name_info_impl<EnumT, ValueT>;
     using enum_type    = EnumT;
-    using support_type = typename value_type::support_type;
-    using return_type  = typename value_type::return_type;
+    using support_type = value_type::support_type;
+    using return_type  = value_type::return_type;
     using item_type    = const value_type*;
     using item_array_t = std::vector<item_type>;
 
@@ -698,7 +698,10 @@ struct name_info
     // get_operations_impl can iterate an empty .items() without throwing.
     value_type& operator[](std::size_t idx)
     {
-        if(idx >= impl.size()) impl.resize(idx + 1);
+        if(idx >= impl.size())
+        {
+            impl.resize(idx + 1);
+        }
         return impl[idx];
     }
     const value_type& operator[](std::size_t idx) const

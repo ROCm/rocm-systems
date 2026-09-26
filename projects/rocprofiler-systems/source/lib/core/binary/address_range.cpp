@@ -6,9 +6,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 address_range::address_range(uintptr_t _v)
 : low{ _v }
@@ -83,7 +81,10 @@ address_range::contains(address_range _v) const
 bool
 address_range::overlaps(address_range _v) const
 {
-    if(contains(_v)) return false;
+    if(contains(_v))
+    {
+        return false;
+    }
     const std::int64_t _lhs_diff = (high - low);
     const std::int64_t _rhs_diff = (_v.high - _v.low);
     const std::int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
@@ -185,5 +186,4 @@ address_range::hash() const
     return (is_range()) ? tim::get_hash_id(hash_value_t{ low }, high)
                         : hash_value_t{ low };
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

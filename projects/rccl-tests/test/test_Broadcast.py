@@ -116,7 +116,7 @@ def test_BroadcastSingleProcess(
 # GIN-SDMA Broadcast multi-segment regression tests (parity with AllGather /
 # AllToAll in test_AllGather.py / test_AllToAll.py).
 #
-# These drive the real GinHybridBroadcastKernel (deviceImpl 3, NCCL_GIN_TYPE=6)
+# These drive the real GinHybridBroadcastKernel (deviceImpl 3, NCCL_GIN_TYPE=7)
 # at message sizes that cross the 128 MiB SDMA copy clamp in the Anvil-SDMA
 # backend Put. For Broadcast the root issues one gin.put() per peer with the
 # full message, so -b/-e is the broadcast payload size (not total/NP as in
@@ -125,12 +125,24 @@ def test_BroadcastSingleProcess(
 # default tier selection (ring at 2 GiB).
 #
 # Opt-in via RCCL_TESTS_GIN_SDMA_BCAST=1 on a GIN-SDMA-capable node. Config:
-#   RCCL_TESTS_BCAST_NP, RCCL_TESTS_MPI_LAUNCHER, RCCL_TESTS_MPI_OPTS,
-#   RCCL_TESTS_BCAST_XENV, RCCL_TESTS_BCAST_EXE, RCCL_TESTS_BCAST_CTAS,
-#   RCCL_TESTS_BCAST_TIMEOUT_S, RCCL_TESTS_BCAST_CONN_RETRIES,
-#   RCCL_TESTS_BCAST_GIN_TYPE   NCCL_GIN_TYPE (default: 6). The ANVIL_SDMA enum
-#     is 6 on develop but 5 on the NCCL 2.30.7 line, so this must be settable
-#     rather than baked in -- a wrong value silently loads no GIN plugin.
+# - RCCL_TESTS_BCAST_NP
+# - RCCL_TESTS_MPI_LAUNCHER
+# - RCCL_TESTS_MPI_OPTS
+# - RCCL_TESTS_BCAST_XENV
+# - RCCL_TESTS_BCAST_EXE
+# - RCCL_TESTS_BCAST_CTAS
+# - RCCL_TESTS_BCAST_TIMEOUT_S
+# - RCCL_TESTS_BCAST_CONN_RETRIES
+# - RCCL_TESTS_BCAST_GIN_TYPE
+#
+# RCCL_TESTS_BCAST_GIN_TYPE sets NCCL_GIN_TYPE (default: 7).
+# This must be settable rather than baked in, since the ANVIL_SDMA enumerator
+# has different values depending on the versions -- a wrong value will either
+# load the wrong GIN plugin or no GIN plugin at all.
+# The enumerator value for the ANVIL_SDMA GIN plugin on the develop branch is:
+# - 7 : #10785 (d0f7d1966a) [NCCL v2.31.2] to current HEAD
+# - 6 :  #9924 (131884a2ba) [NCCL v2.30.7] to #10785 (d0f7d1966a) [NCCL v2.31.2]
+# - 5 :  #7826 (bc6a304a9c) [SDMA support] to  #9924 (131884a2ba) [NCCL v2.30.7]
 
 MiB = 1024 * 1024
 GiB = 1024 * MiB
@@ -157,7 +169,7 @@ def _env_int(name, default):
 BCAST_NP = _env_int("RCCL_TESTS_BCAST_NP", 0) or ngpus
 BCAST_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 BCAST_CTAS = os.environ.get("RCCL_TESTS_BCAST_CTAS", "8")
-BCAST_GIN_TYPE = os.environ.get("RCCL_TESTS_BCAST_GIN_TYPE", "6")
+BCAST_GIN_TYPE = os.environ.get("RCCL_TESTS_BCAST_GIN_TYPE", "7")
 # Manual / SUT defaults. GIN CI (run-gin-ci.sh) overrides both so
 # HW_CASES * retries * TIMEOUT_S stays under GIN_PYTEST_TIMEOUT; otherwise
 # GNU timeout kills pytest and leaves the mpirun session (start_new_session)

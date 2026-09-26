@@ -33,9 +33,7 @@
 
 //======================================================================================//
 
-namespace tim
-{
-namespace cereal
+namespace tim::cereal
 {
 class SettingsTextArchive
 : public OutputArchive<SettingsTextArchive>
@@ -79,7 +77,10 @@ public:
     //! Sets the name for the next node created with startNode
     void setNextName(const char* name)
     {
-        if(exclude_stream.count(name) > 0) return;
+        if(exclude_stream.count(name) > 0)
+        {
+            return;
+        }
 
         if((current_entry != nullptr) && value_keys.count(name) > 0)
         {
@@ -281,7 +282,10 @@ template <typename T>
 inline void
 TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive& ar, const T& t)
 {
-    if(std::is_same<T, std::string>::value) ar.setNextType("string");
+    if(std::is_same<T, std::string>::value)
+    {
+        ar.setNextType("string");
+    }
     ar.saveValue(t);
 }
 
@@ -304,8 +308,7 @@ TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive&, const SizeTag<T>&)
     // nothing to do here, we don't explicitly save the size
 }
 
-}  // namespace cereal
-}  // namespace tim
+}  // namespace tim::cereal
 
 // register archives for polymorphic support
 TIMEMORY_CEREAL_REGISTER_ARCHIVE(SettingsTextArchive)

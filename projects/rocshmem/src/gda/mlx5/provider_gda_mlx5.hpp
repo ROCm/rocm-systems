@@ -116,11 +116,6 @@ union gda_mlx5_wqe_rma {
   __device__ static constexpr inline uint8_t inline_ds(uint32_t byte_count) {
     return (byte_count <= 12 ? 3 : 4);
   }
-
-  __device__ static constexpr inline bool can_inline(
-      uint8_t opcode, uint32_t byte_count, uint32_t inline_threshold) {
-    return (opcode == MLX5_OPCODE_RDMA_WRITE) && (byte_count <= inline_threshold);
-  }
 } __attribute__((__packed__)) __attribute__((__aligned__(16)));
 
 // AMO WQEs have a 16B atomic segment and an (optional?) indirect data segment for fetching atomics

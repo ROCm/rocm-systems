@@ -297,7 +297,9 @@ TEST(packet_framing_rewrite, fixed64_wire_advances_eight_bytes)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 1));
     for(int i = 0; i < 8; ++i)
+    {
         bytes.push_back(static_cast<char>(0xAA));
+    }
 
     std::vector<char> dst;
     ASSERT_TRUE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
@@ -311,7 +313,9 @@ TEST(packet_framing_rewrite, rejects_truncated_fixed64_field)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 1));
     for(int i = 0; i < 7; ++i)
+    {
         bytes.push_back(static_cast<char>(0xAA));
+    }
 
     std::vector<char> dst;
     EXPECT_FALSE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
@@ -323,7 +327,9 @@ TEST(packet_framing_rewrite, fixed32_wire_advances_four_bytes)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 5));
     for(int i = 0; i < 4; ++i)
+    {
         bytes.push_back(static_cast<char>(0xBB));
+    }
 
     std::vector<char> dst;
     EXPECT_TRUE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
@@ -334,7 +340,9 @@ TEST(packet_framing_rewrite, rejects_truncated_fixed32_field)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 5));
     for(int i = 0; i < 3; ++i)
+    {
         bytes.push_back(static_cast<char>(0xBB));
+    }
 
     std::vector<char> dst;
     EXPECT_FALSE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));

@@ -65,13 +65,34 @@ struct logger_settings_t
     {
         const auto lower = utility::string::to_lower(level);
 
-        if(lower == "trace") return spdlog::level::trace;
-        if(lower == "debug") return spdlog::level::debug;
-        if(lower == "info") return spdlog::level::info;
-        if(lower == "warn" || lower == "warning") return spdlog::level::warn;
-        if(lower == "error" || lower == "err") return spdlog::level::err;
-        if(lower == "critical") return spdlog::level::critical;
-        if(lower == "off") return spdlog::level::off;
+        if(lower == "trace")
+        {
+            return spdlog::level::trace;
+        }
+        if(lower == "debug")
+        {
+            return spdlog::level::debug;
+        }
+        if(lower == "info")
+        {
+            return spdlog::level::info;
+        }
+        if(lower == "warn" || lower == "warning")
+        {
+            return spdlog::level::warn;
+        }
+        if(lower == "error" || lower == "err")
+        {
+            return spdlog::level::err;
+        }
+        if(lower == "critical")
+        {
+            return spdlog::level::critical;
+        }
+        if(lower == "off")
+        {
+            return spdlog::level::off;
+        }
 
         return m_default_level;
     }
@@ -203,7 +224,9 @@ private:
         void sink_it_(const spdlog::details::log_msg& msg) override
         {
             while(m_log_lock.exchange(true, std::memory_order_acquire))
+            {
                 std::this_thread::yield();
+            }
             spdlog::logger::sink_it_(msg);
             m_log_lock.store(false, std::memory_order_release);
         }
@@ -211,7 +234,9 @@ private:
         void flush_() override
         {
             while(m_log_lock.exchange(true, std::memory_order_acquire))
+            {
                 std::this_thread::yield();
+            }
             spdlog::logger::flush_();
             m_log_lock.store(false, std::memory_order_release);
         }

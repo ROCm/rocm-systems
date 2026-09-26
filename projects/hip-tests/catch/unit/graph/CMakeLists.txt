@@ -91,6 +91,40 @@ hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
+# Collapse tests need scheduling flags set before HIP init.  They live in
+# their own binary built directly (bypassing hip_add_exe_to_target) so that
+# catch_discover_tests is NOT called — avoiding duplicate env-less entries
+# that would fail.  Env vars are wired via cmake -E env in add_test instead.
+set_source_files_properties(hipGraphCollapseSmallKernels.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(GraphsCollapseTest EXCLUDE_FROM_ALL
+  hipGraphCollapseSmallKernels.cc
+  $<TARGET_OBJECTS:Main_Object>
+  $<TARGET_OBJECTS:KERNELS>)
+set_target_properties(GraphsCollapseTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsCollapseTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+if(UNIX)
+  target_link_libraries(GraphsCollapseTest stdc++fs -ldl pthread rt)
+endif()
+add_dependencies(build_tests GraphsCollapseTest)
+add_dependencies(GraphsCollapseTest hip_tests_config)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsCollapseTest)
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_SingleStream
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_SingleStream")
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2")
+
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
   hipStreamEndCapture.cc

@@ -4,17 +4,18 @@
 /// @file wmma_simd_benchmark.cpp
 /// @brief A/B microbenchmark: SIMD vs forced-scalar execution of the shared
 /// WMMA/SWMMAC execute kernels (exec_wmma_f32 / exec_wmma_i32 / exec_wmma_f16 /
-/// exec_swmmac_*), covering the gfx1250 (RDNA4, wave32) matrix shapes that route
+/// exec_swmmac_*), covering the gfx1250 (CDNA5, wave32) matrix shapes that route
 /// through them.
 ///
 /// Both modes run in the same process; util::set_force_scalar_for_testing flips
 /// the kernel between its dense native-width matmul (SIMD) and the per-output
-/// scalar triple-loop. The benchmark drives the execute kernels directly (no
-/// decode) so it isolates the matmul body, then reports ns/op and speedup and
-/// checks SIMD-vs-scalar agreement:
+/// scalar triple-loop. Most cases drive the execute kernels directly to isolate
+/// the matmul body; the mixed BF16/F32 target also measures dispatch through a
+/// pre-decoded instruction. The benchmark reports ns/op and speedup and checks
+/// SIMD-vs-scalar agreement:
 ///   - i32 output: integer MAC is exact, bit-identical.
-///   - f32/f16/bf16 output: SIMD uses fused FMA (matching the hardware) while the
-///     scalar reference is non-fused, so results agree to a small tolerance.
+///   - most f32/f16/bf16 output paths retain a fused-vs-nonfused tolerance;
+///   - mixed BF16/F32 uses fused scalar and SIMD paths and compares raw output.
 
 #include "decode_test_util.h"
 #include "mma_test_util.h"
@@ -42,6 +43,7 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -195,7 +197,7 @@ void compare(const char *label, Cmp cmp, const std::vector<uint32_t> &sc,
   }
 }
 
-// Drive one WMMA kernel A/B: run scalar then SIMD, compare dst, then time both.
+// Drive one WMMA kernel A/B: compare dst, then time balanced scalar/SIMD blocks.
 void bench(const char *label, BenchFixture &fx, const std::function<void()> &run, double macs,
            Cmp cmp, uint32_t out_regs = OUT_REGS) {
   ASSERT_NE(fx.cu, nullptr);
@@ -209,20 +211,25 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
   auto result_simd = fx.snapshot_out(out_regs);
   compare(label, cmp, result_scalar, result_simd);
 
-  auto time_mode = [&](bool force_scalar) -> double {
+  auto time_block = [&](bool force_scalar, int iterations) -> Clock::duration::rep {
     util::set_force_scalar_for_testing(force_scalar);
-    for (int i = 0; i < 50; ++i)
+    for (int i = 0; i < 25; ++i)
       run();
     auto t0 = Clock::now();
-    for (int i = 0; i < ITERATIONS; ++i)
+    for (int i = 0; i < iterations; ++i)
       run();
     auto t1 = Clock::now();
     util::set_force_scalar_for_testing(false);
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() /
-           static_cast<double>(ITERATIONS);
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
   };
-  double sc = time_mode(true);
-  double sd = time_mode(false);
+  const int first_iterations = ITERATIONS / 2;
+  const int second_iterations = ITERATIONS - first_iterations;
+  const auto sc_first = time_block(true, first_iterations);
+  const auto sd_first = time_block(false, first_iterations);
+  const auto sd_second = time_block(false, second_iterations);
+  const auto sc_second = time_block(true, second_iterations);
+  const double sc = static_cast<double>(sc_first + sc_second) / ITERATIONS;
+  const double sd = static_cast<double>(sd_first + sd_second) / ITERATIONS;
   std::printf("\n  === %s (gfx1250, wave32) ===\n"
               "  MACs/op: %.0f   scalar: %9.1f ns   simd: %9.1f ns   speedup: %5.2fx\n",
               label, macs, sc, sd, (sd > 0) ? sc / sd : 0.0);
@@ -409,6 +416,57 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x32_bf16_Specialized) {
                                             fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_bf16_16x16x32_bf16 [specialized]", fx, run, double(M) * N * K, Cmp::Bf16Tol);
+}
+
+// Dense WMMA, f32 accumulator and packed bf16 output.  Keep the eight-register
+// f32 accumulator separate from the four-register destination so repeated
+// iterations do not reinterpret a prior packed result as the next accumulator.
+TEST(WmmaSimdBenchmark, Bf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(65));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(66));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(67));
+  auto run = [&] {
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                            fx.vbase + S1_OFF, fx.vbase + INDEX_OFF,
+                                            amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+  };
+  bench("v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact, /*out_regs=*/4);
+}
+
+// Full decoded/executed path for the same mixed-width instruction.  Decode is
+// intentionally outside the timed loop; dispatch and architectural register
+// routing remain inside it.
+TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(68));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(69));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(70));
+
+  const auto words = cdna5::build_vop3p(
+      cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+      {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 256 + INDEX_OFF});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_bf16f32_16x16x32_bf16");
+  ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+  bool execution_failed = false;
+  auto run = [&] {
+    execution_failed |= !fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
+  };
+  bench("decoded v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact,
+        /*out_regs=*/4);
+  ASSERT_FALSE(execution_failed);
 }
 
 // Dense WMMA, i32 output, iu8 input, K=64 — the real gfx1250 integer shape,

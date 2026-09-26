@@ -61,6 +61,7 @@ override the selected allocation; configs without a table use serial defaults.
 Clocked mode always uses serial dispatch. See the source
 [configuration guide](../../configuration.md)
 for table examples and `rocjitsu --thread-budget-table`.
+`rocjitsu --cpu-thread-budget N` replaces JSON `cpu_thread_budget` for that launch.
 
 `exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
 mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any

@@ -25,9 +25,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -204,7 +202,12 @@ inline const tool_agent*
 client_data::get_gpu_tool_agent(rocprofiler_agent_id_t id) const
 {
     for(const auto& itr : gpu_agents)
-        if(id.handle == itr.agent->handle) return &itr;
+    {
+        if(id.handle == itr.agent->handle)
+        {
+            return &itr;
+        }
+    }
     return nullptr;
 }
 
@@ -218,7 +221,6 @@ client_data::get_kernel_symbol_info(std::uint64_t _kernel_id) const
                 if(_kernel_id == itr.payload.kernel_id)
                 {
                     return &itr.payload;
-                    break;
                 }
             }
             return nullptr;
@@ -231,7 +233,10 @@ client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
 {
     for(const auto& itr : agent_counter_info.at(_agent_id))
     {
-        if(itr.id == _counter_id) return &itr;
+        if(itr.id == _counter_id)
+        {
+            return &itr;
+        }
     }
     return nullptr;
 }
@@ -247,7 +252,6 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
                 if(code_object_id == itr.payload.code_object_id)
                 {
                     return &itr.payload;
-                    break;
                 }
             }
             return nullptr;
@@ -259,8 +263,7 @@ as_client_data(void* _ptr)
 {
     return static_cast<client_data*>(_ptr);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 #if !defined(ROCPROFILER_CALL)
 #    define ROCPROFILER_CALL(result)                                                     \

@@ -369,9 +369,9 @@ protected:
     // reopening it for the spill loads. The anchor-mask restore that would sit
     // between them is what the policy omits, so the second match is the one under
     // test with no ambiguity about which is which.
-    ASSERT_EQ(std::count(sabotaged.begin(), sabotaged.end(), widen), 2);
-    auto it = std::find(sabotaged.begin(), sabotaged.end(), widen);
-    it = std::find(it + 1, sabotaged.end(), widen);
+    ASSERT_EQ(std::ranges::count(sabotaged, widen), 2);
+    auto it = std::ranges::find(sabotaged, widen);
+    it = std::ranges::find(it + 1, sabotaged.end(), widen);
     ASSERT_NE(it, sabotaged.end());
     *it = build_s_nop(0, a_.arch);
 
@@ -396,7 +396,7 @@ protected:
     const uint32_t widen =
         build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::find(sabotaged.begin(), sabotaged.end(), widen);
+    auto it = std::ranges::find(sabotaged, widen);
     ASSERT_NE(it, sabotaged.end()) << "full-mask widen not found in the patched text";
     *it = build_s_nop(0, a_.arch);
 

@@ -15,9 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 inline std::vector<env_config<>>
 get_environ(int _verbose, std::string _search_paths = {},
@@ -59,7 +57,8 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     auto _data =
         get_environ(_verbose, _search_paths, std::move(_omnilib), std::move(_omnilib_dl));
     for(const auto& itr : _data)
+    {
         itr();
+    }
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

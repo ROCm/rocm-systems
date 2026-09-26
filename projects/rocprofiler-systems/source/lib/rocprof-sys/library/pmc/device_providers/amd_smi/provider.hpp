@@ -23,7 +23,7 @@ namespace concepts
  */
 template <typename F>
 concept factory = ::rocprofsys::backends::concepts::backend_factory<F> &&
-                  requires(typename F::backend_t& sess) {
+                  requires(F::backend_t& sess) {
                       { sess.initialize() };
                       { sess.shutdown() };
                       { sess.get_lib_version() };
@@ -31,7 +31,7 @@ concept factory = ::rocprofsys::backends::concepts::backend_factory<F> &&
                   }
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
                   &&
-                  requires(typename F::backend_t& sess) {
+                  requires(F::backend_t& sess) {
                       { sess.enumerate_nic_handles() };
                   }
 #endif
@@ -78,7 +78,10 @@ public:
 
     ~provider() noexcept
     {
-        if(m_backend_api) m_backend_api->shutdown();
+        if(m_backend_api)
+        {
+            m_backend_api->shutdown();
+        }
     }
 
     // Non-copyable, movable
@@ -96,7 +99,10 @@ public:
     {
         if(this != &other)
         {
-            if(m_backend_api) m_backend_api->shutdown();
+            if(m_backend_api)
+            {
+                m_backend_api->shutdown();
+            }
             m_backend_api = std::move(other.m_backend_api);
             m_version     = std::move(other.m_version);
             other.m_backend_api.reset();

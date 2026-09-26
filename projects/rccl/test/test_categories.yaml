@@ -109,6 +109,7 @@ test_categories:
       - "Recorder.*"
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
+      - "GinPluginInitFail.*"
     exclude_windows:
       - "*"
     labels:

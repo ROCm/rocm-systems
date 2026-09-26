@@ -14,6 +14,12 @@
 
 namespace rocjitsu {
 
+enum class FloatDotAccumulation : uint8_t {
+  HostF32,
+  Gfx11,
+  Gfx12,
+};
+
 enum class WaveStateLayout : uint8_t {
   Legacy,
   Gfx12,
@@ -26,6 +32,7 @@ struct IsaProperties {
   bool descriptor_sgpr_count_encoded = true;
   bool uses_ttmp_workgroup_ids = false;
   bool uses_cluster_ttmp_workgroup_ids = false;
+  FloatDotAccumulation float_dot_accumulation = FloatDotAccumulation::HostF32;
   WaveStateLayout wave_state_layout = WaveStateLayout::Legacy;
   uint32_t compute_tmpring_wavesize_granule = 0;
   uint32_t compute_tmpring_wavesize_bits = 0;
@@ -47,6 +54,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 1024,
         .compute_tmpring_wavesize_bits = 13,
@@ -63,6 +71,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 1024,
         .compute_tmpring_wavesize_bits = 13,
@@ -79,6 +88,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 1024,
         .compute_tmpring_wavesize_bits = 13,
@@ -95,6 +105,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 1024,
         .compute_tmpring_wavesize_bits = 13,
@@ -111,6 +122,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 1024,
         .compute_tmpring_wavesize_bits = 13,
@@ -127,6 +139,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 1024,
         .compute_tmpring_wavesize_bits = 13,
@@ -143,6 +156,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::Gfx11,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 256,
         .compute_tmpring_wavesize_bits = 15,
@@ -159,6 +173,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::Gfx11,
         .wave_state_layout = WaveStateLayout::Legacy,
         .compute_tmpring_wavesize_granule = 256,
         .compute_tmpring_wavesize_bits = 15,
@@ -175,6 +190,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .float_dot_accumulation = FloatDotAccumulation::Gfx12,
         .wave_state_layout = WaveStateLayout::Gfx12,
         .compute_tmpring_wavesize_granule = 256,
         .compute_tmpring_wavesize_bits = 18,
@@ -191,6 +207,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = true,
+        .float_dot_accumulation = FloatDotAccumulation::HostF32,
         .wave_state_layout = WaveStateLayout::Gfx12_5,
         .compute_tmpring_wavesize_granule = 256,
         .compute_tmpring_wavesize_bits = 18,

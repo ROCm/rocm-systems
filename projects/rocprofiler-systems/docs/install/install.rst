@@ -105,7 +105,7 @@ This includes the ROCm profilers, dependencies, and base packages.
             source .venv/bin/activate
 
             # Install ROCm and the profilers from the AMD package repository.
-            python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
+            python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[profiler]"
 
          .. note::
 

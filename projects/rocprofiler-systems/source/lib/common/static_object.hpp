@@ -11,9 +11,7 @@
 #include <mutex>
 #include <stack>
 
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 using static_dtor_func_t = void (*)();
 
@@ -75,16 +73,16 @@ struct static_object
     static constexpr bool is_trivial_standard_layout();
 
 private:
-    static Tp*                                             m_object;
-    static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
+    static Tp* m_object;
+    alignas(Tp) static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
 };
 
 template <typename Tp, typename ContextT>
 Tp* static_object<Tp, ContextT>::m_object = nullptr;
 
 template <typename Tp, typename ContextT>
-std::array<std::byte, static_buffer_size<Tp>()>
-    static_object<Tp, ContextT>::m_buffer = {};
+alignas(Tp) std::array<std::byte, static_buffer_size<Tp>()> static_object<
+    Tp, ContextT>::m_buffer = {};
 
 template <typename Tp, typename ContextT>
 constexpr bool
@@ -163,7 +161,10 @@ destroy_static_objects()
         while(!_stack->empty())
         {
             auto& itr = _stack->top();
-            if(itr) itr();
+            if(itr)
+            {
+                itr();
+            }
             _stack->pop();
         }
 
@@ -184,5 +185,4 @@ register_static_dtor(static_dtor_func_t&& _func)
         _stack->push(_func);
     }
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

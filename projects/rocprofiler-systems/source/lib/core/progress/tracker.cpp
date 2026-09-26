@@ -16,7 +16,10 @@ tracker::tracker(factory_t make) noexcept
 progress_callback
 tracker::begin(std::string label, std::uint64_t total_bytes)
 {
-    if(!m_make) return {};
+    if(!m_make)
+    {
+        return {};
+    }
     return m_make(std::move(label), total_bytes);
 }
 

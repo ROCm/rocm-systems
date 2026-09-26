@@ -232,6 +232,10 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // Per-arch default for 2-shot (staging buffer): off on gfx1250 (ceNonRegMax[AR]=0;
         // gfx1250 uses registered CE instead) and off on gfx950. No env override.
         {"DefaultOff_2Shot_Gfx1250_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx1250"},
+        // RCCL_CE_ALLREDUCE=-1 (default) is auto-on for gfx1250; overriding
+        // RCCL_CE_AR_MAX_MSG_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
+        // returns true, confirming the default-on wiring.
+        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_MAX_MSG_BYTES", "1048576"}}, "gfx1250"},
         {"DefaultOff_Gfx950_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx950"},
         // Null archName (zero-initialised mock) also falls through to off.
         {"DisabledByDefault_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}},
@@ -260,12 +264,11 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                 [tc]()
                 {
                     CeAllReduceMockComm mock;
+                    mock.reset(tc.archName.empty() ? nullptr : tc.archName.c_str());
                     mock.comm.nRanks           = tc.nRanks;
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
-                    if (!tc.archName.empty())
-                        strncpy(mock.comm.archName, tc.archName.c_str(), sizeof(mock.comm.archName) - 1);
 
                     const bool result =
                         rcclUseCeAr2Shot(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);

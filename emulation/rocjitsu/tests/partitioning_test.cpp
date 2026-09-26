@@ -4,11 +4,13 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "scoped_temp.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/simulation.h"
@@ -385,6 +387,28 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   EXPECT_EQ(serial.cpu_dispatch_threads, 1u);
   EXPECT_EQ(serial.execution_threads.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(serial.execution_threads.helpers, 0u);
+}
+
+// The launch-time budget reaches the plan only through the config it rewrites, so
+// this pins the same JSON through both routes: one config asks for 32 and the other
+// is the launcher's copy asking for 4, and each gets the plan its own text implies.
+TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
+  std::string json = config_json_with_num_threads(CONFIG_PATH, 0);
+  json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
+  const std::string relaunched = config::json_with_cpu_thread_budget(json, 4);
+
+  const config::LoadedConfig loaded =
+      config::load_config_from_string(relaunched, rocjitsu::kEmbeddedSchema, 64);
+  EXPECT_EQ(loaded.cpu_thread_budget, 4u);
+  EXPECT_EQ(loaded.execution_threads.engines, 2u);
+  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{3}));
+  EXPECT_EQ(loaded.execution_threads.helpers, 0u);
+
+  const config::LoadedConfig untouched =
+      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
+  EXPECT_EQ(untouched.cpu_thread_budget, 32u);
+  EXPECT_EQ(untouched.execution_threads.engines, 8u);
+  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{25}));
 }
 
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
