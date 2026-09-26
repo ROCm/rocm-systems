@@ -197,8 +197,31 @@ public:
   /// @brief Disable the KFD runtime if Init() enabled it.
   hsa_status_t DisableRuntime();
 
+  /// @brief Whether this object describes claims taken by a process this one
+  /// forked from.
+  ///
+  /// @details A forked child inherits this driver - the open, the runtime
+  /// enable and the topology snapshot - while holding none of it. Nothing
+  /// fixes that up: the thunk's own child_fork_handler() only marks itself
+  /// forked and reinitializes its mutex, and nothing under core/ installs a
+  /// pthread_atfork handler. Recording the owning pid mirrors what the thunk
+  /// does with parent_pid, and for the same reason it avoids atfork - a
+  /// handler cannot be uninstalled, and a process can fork without going
+  /// through libc's fork().
+  ///
+  /// Each of DisableRuntime(), ReleaseTopologySnapshot() and Close() tests this
+  /// and gives up its own claim without calling the thunk, so each is correct
+  /// called directly or through ShutDown() and ShutDown() needs no special case
+  /// of its own. What an inherited claim would cost differs per stage; Close()
+  /// carries the worked example.
+  bool InheritedAcrossFork() const;
+
   mutable bool topology_snapshot_acquired_ = false;
   bool runtime_enabled_ = false;
+
+  /// @brief The process that opened this driver and took the claims above.
+  const int owner_pid_;
+
   mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.

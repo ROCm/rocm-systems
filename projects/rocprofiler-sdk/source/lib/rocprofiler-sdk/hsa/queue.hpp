@@ -148,7 +148,6 @@ public:
     void signal_async_handler(pooled_signal_t* _signal, hsa_signal_t raw_signal, void* data) const;
     static pooled_signal_t* create_signal(uint32_t attribute, hsa_signal_t* _signal, bool use_pool);
     static void             release_signal(pooled_signal_t* signal);
-    static void             destroy_signal(pooled_signal_t* signal);
 
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;

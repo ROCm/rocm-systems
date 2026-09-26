@@ -301,11 +301,10 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             });
 
         auto _should_destroy_signal = [&packet](auto _hsa_signal) {
-            // if there is a pooled signal, make sure we return value if the .handle matches.
-            // if there is not a pool signal, return true if the signal is not null
-            return (packet.pooled_signal) ? (_hsa_signal != null_hsa_signal &&
-                                             _hsa_signal != packet.pooled_signal->get().value)
-                                          : (_hsa_signal != null_hsa_signal);
+            // Queue arbitrates among the packet's handles; the pooled payload records the handle
+            // identity that must remain exempt after pool retirement.
+            return _hsa_signal != null_hsa_signal &&
+                   (!packet.pooled_signal || !packet.pooled_signal->get().matches(_hsa_signal));
         };
 
         // Signal that we have completed via the interrupt signal.
@@ -1450,18 +1449,6 @@ Queue::release_signal(pooled_signal_t* signal)
         ROCP_TRACE << fmt::format("released signal {}: hsa_signal_t{{.handle={}}}",
                                   signal->index(),
                                   signal->get().value.handle);
-    }
-}
-
-void
-Queue::destroy_signal(pooled_signal_t* signal)
-{
-    release_signal(signal);
-
-    if(signal && get_core_table() && get_core_table()->hsa_signal_destroy_fn)
-    {
-        get_core_table()->hsa_signal_destroy_fn(signal->get().value);
-        signal->get().value = null_hsa_signal;
     }
 }
 

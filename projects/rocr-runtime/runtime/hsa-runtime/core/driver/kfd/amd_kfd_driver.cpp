@@ -111,7 +111,8 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 } // namespace
 
 KfdDriver::KfdDriver(std::string devnode_name)
-    : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
+    : core::Driver(core::DriverType::KFD, std::move(devnode_name)),
+      owner_pid_(os::GetProcessId()) {}
 
 hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
   if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
@@ -129,6 +130,12 @@ hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
   if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
   topology_snapshot_acquired_ = false;
+  // Inherited across a fork: give up the claim without calling the thunk. Only
+  // the DXG hsaKmtReleaseSystemProperties() refuses a child on its own, and
+  // only until the child reopens; the KFD one would go on to destroy process
+  // apertures and doorbells this process never built.
+  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
+
   return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                                : HSA_STATUS_ERROR;
 }
@@ -137,10 +144,18 @@ hsa_status_t KfdDriver::DisableRuntime() {
   if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
 
   runtime_enabled_ = false;
+  // Inherited across a fork, as above. hsaKmtRuntimeDisable() has no fork
+  // check at all: it would issue AMDKFD_IOC_RUNTIME_ENABLE with the disable
+  // mask on a descriptor this process inherited rather than opened, against an
+  // enable the parent owns.
+  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
+
   const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
   return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
                                                                               : HSA_STATUS_ERROR;
 }
+
+bool KfdDriver::InheritedAcrossFork() const { return os::GetProcessId() != owner_pid_; }
 
 hsa_status_t KfdDriver::Init() {
   // Own one snapshot from before the debug probe through BuildTopology().
@@ -181,13 +196,26 @@ hsa_status_t KfdDriver::Init() {
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  const hsa_status_t disable_status = DisableRuntime();
-  const hsa_status_t release_status = ReleaseTopologySnapshot();
-  const hsa_status_t close_status = Close();
+  // Name the stage that failed. The caller usually discards this status and
+  // only the first error survives below, so without a diagnostic a failed
+  // release is indistinguishable from a clean shutdown.
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  auto record = [&status](const char* stage, hsa_status_t err) {
+    if (err == HSA_STATUS_SUCCESS) return;
 
-  if (disable_status != HSA_STATUS_SUCCESS) return disable_status;
-  if (release_status != HSA_STATUS_SUCCESS) return release_status;
-  return close_status;
+    debug_print("KfdDriver::ShutDown() failed to %s: 0x%x\n", stage, static_cast<unsigned>(err));
+    if (status == HSA_STATUS_SUCCESS) status = err;
+  };
+
+  // Every stage runs even if an earlier one fails: stopping at the first error
+  // would strand the references the remaining stages give back. Each stage
+  // tests InheritedAcrossFork() for itself, so a forked child runs the same
+  // three stages and this function needs no special case.
+  record("disable runtime", DisableRuntime());
+  record("release topology snapshot", ReleaseTopologySnapshot());
+  record("close KFD", Close());
+
+  return status;
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
@@ -215,7 +243,20 @@ hsa_status_t KfdDriver::Open() {
   return HSA_STATUS_ERROR;
 }
 
+// The inverse of Open(), not a teardown: core::Driver documents Close() as
+// closing a connection to an open driver, and a caller asking for that must
+// not also lose the runtime enable and the topology snapshot. ShutDown() is
+// the method that gives back everything.
 hsa_status_t KfdDriver::Close() {
+  // In a forked child the open reference belongs to the parent, so give up the
+  // claim without calling the thunk. Neither hsaKmtCloseKFD() tests for a fork
+  // of its own: the native one in libhsakmt/src/openclose.c decrements the
+  // count it inherited and runs the last-close teardown -
+  // hsakmt_fmm_clear_all_aperture() and the inherited fd - over process state
+  // this one never built, and the DXG one in libhsakmt/src/dxg/openclose.cpp
+  // shuts DXCore down under whichever session dxg_open_count currently names.
+  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
+
   return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                 : HSA_STATUS_ERROR;
 }
@@ -811,15 +852,11 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
-  // Require both thunks up front: importing without destroy would leak the
-  // handle. Missing either -> NOT_SUPPORTED, not a null call.
-  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
-  const bool loaded =
-      thunk_loader->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr &&
-      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
+  // Importing without a destroy half would leak the handle. ThunkLoader binds
+  // the two as a pair, so a thunk missing either reports NOT_SUPPORTED here
+  // instead of handing over a semaphore nothing could give back.
   HSAKMT_STATUS s =
-      loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
-             : HSAKMT_STATUS_NOT_SUPPORTED;
+      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
 
   // libhsakmt distinguishes invalid input (null handle, unknown type)
   // from "no node for this agent" and from generic KMD failures.
@@ -844,12 +881,13 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // No export -> not this driver's handle. INVALID_AGENT (base-class
-  // contract) lets handle_close keep polling other drivers.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-  if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  // NOT_SUPPORTED covers both no export (ThunkLoader's stub) and an export
+  // this platform does not implement, and neither can be holding the handle.
+  // INVALID_AGENT (base-class contract) lets handle_close keep polling other
+  // drivers instead of stopping at this one.
+  const HSAKMT_STATUS s = HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle));
+  if (s == HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (s != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -876,9 +914,6 @@ hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
                                                 hsa_amd_external_semaphore_t sem,
                                                 uint64_t value) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
-    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
   return MapQueueExtSemStatus(
       HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
 }
@@ -887,9 +922,6 @@ hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
                                               hsa_amd_external_semaphore_t sem,
                                               uint64_t value) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
-    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
   return MapQueueExtSemStatus(
       HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
 }
@@ -933,8 +965,15 @@ hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
 }
 
 hsa_status_t KfdDriver::SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const {
-  if (HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  // Optional thunk: against a libhsakmt that does not export the RAS-poison
+  // opt-in ThunkLoader binds a stub, so the missing export arrives here as
+  // NOT_SUPPORTED - the same status a libhsakmt that exports it without
+  // supporting it returns, and the same one the caller used to get from a null
+  // check. Anything else is a real failure of a supported call.
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms));
+  if (ret == HSAKMT_STATUS_NOT_SUPPORTED)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }

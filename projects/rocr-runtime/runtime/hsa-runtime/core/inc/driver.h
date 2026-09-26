@@ -122,6 +122,15 @@ public:
 
   /// @brief Release the driver's resources and close the kernel-mode
   /// driver.
+  ///
+  /// @details Gives back what Init() took and what Open() took, so it subsumes
+  /// Close() and every implementation ends with it. A caller that has called
+  /// this owes no Close(), and must not add one: a Close() after a successful
+  /// ShutDown() is a second release of the same reference.
+  ///
+  /// Must tolerate a driver whose Init() failed part way through, because
+  /// AMD::InitializeDriver() calls this on exactly that driver - so every stage
+  /// has to treat owning nothing as success rather than as an error.
   virtual hsa_status_t ShutDown() = 0;
 
   /// @brief Get driver version information.
