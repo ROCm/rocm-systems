@@ -2376,3 +2376,22 @@ This verifies the harness option, not a measured speedup or a replacement
 qualification for table cells whose matching clean/fault evidence uses the
 original cooldown. The long-running SGEMM and sparse FP8 ML jobs were left
 intact. The shared 40 GiB slice continues to report zero OOM events.
+
+
+### SGEMM SuperCollider full clean reached its terminal result
+
+The original `sc-remaining-full-clean/tensile-sk-sgemm-quick` run completed with
+return codes `[0,0,0,1,1,1]`. Each 127/128/129 shard passes all 650 numeric rows.
+The 511/512/513 shards hit their actual 3,600-second deadlines after 79/84/45
+numeric rows, respectively, with one of two required passing clients. Coverage
+also remains unqualified because each interrupted run lacks its final complete
+coverage verdict. The cell stays orange for incomplete clean qualification;
+the partial results cannot establish absence of a failure later in the sweep.
+
+The stopped old queue coordinator was retired only after its SGEMM child became
+terminal and no live child workload remained. Its replacement sparse FP8 ML
+campaign and the independent Default SGEMM campaign continue unchanged.
+Solution-index sharding was investigated in Tensile's `AllSolutionsIterator`;
+it was not introduced here. The existing clients already saturate this host
+(load around 72 on 32 logical CPUs, with dozens of threads per client), so
+launching additional partitions now would add CPU and memory contention.
