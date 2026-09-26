@@ -2079,3 +2079,20 @@ run explicitly uses the gfx1250 emulator. The retained hook is
 `report-cap1g-hook/librocjitsu_dbi_hooks.so`, SHA256
 `f101a84869f760bbe0d16545872c2e835ea7fd20ab15274f8d698b1f2f220600`.
 Existing sparse FP8 campaigns continue with their original immutable hook.
+
+### Sparse FP8 full high clean and current SuperCollider tensor coverage
+
+`sparse-complete-high-clean/tensile-spmm-f8-ml` passes all three full
+shards with complete coverage (183,108/183,108 accesses and 6,552/6,552
+barriers). Both retained matching clean replays pass; the eight-trial
+Default and high fault campaigns continue with the tensor-memory hook.
+
+The current-hook MXF8 explicit SuperCollider rerun in
+`sc-current-tensor-clean/tensile-sk-mxf8gemm-explicit` exits zero with
+passing numerical oracle, but analysis is incomplete: 78 discovered
+accesses, 70 supported/patched and eight unsupported tensor-DMA accesses.
+The classifier explicitly marks tensor value comparison unavailable;
+Default tensor-load observation support does not implement that mechanism
+for SuperCollider. Its previous clean-pass label predated this coverage
+accounting, so the cell is now orange. Other tensor rows are being checked
+with the same current immutable hook before updating their cells.
