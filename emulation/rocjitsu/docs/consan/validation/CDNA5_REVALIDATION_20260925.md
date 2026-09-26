@@ -2771,3 +2771,13 @@ pending. This reaches the detection count required for green, but does not yet
 finish the eight-trial campaign or qualify the three pending large clean shapes
 in each mode. The terminal trial-5 record under
 `sgemm-bank-fixed-untimed-high-fault` supplies this checkpoint.
+
+### Hook identity audit for qualified cells
+
+All 31 green cells have a matching complete clean result and eight-trial fault
+campaign recorded with the same hook SHA-256 (`status-hook-build-audit.json`).
+Every fault trial's before/after hook hashes agree. For grouped workload rows,
+each constituent clean run has matching hook evidence. This strengthens the
+settings-based table audit: qualification does not rely on combining clean and
+fault results from different detector builds. SGEMM remains excluded from this
+green-cell audit while its full clean sweeps are pending.
