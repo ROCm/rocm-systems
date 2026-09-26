@@ -54,18 +54,24 @@ inline constexpr uint8_t kMaxProbeArgVgprs = 16;
 /// @brief Where the trampoline gets an argument dword it hands the probe.
 ///
 /// @details Each source names one dword. The framework must be able to produce
-/// the value at the site (invariant 1), so this is a closed set, not an operand
-/// the caller can point anywhere.
+/// the value at the site, so this is a closed set, not an operand the caller
+/// can point anywhere.
 ///
 /// The EXEC sources read the anchor mask out of the dead SGPR pair the envelope
 /// saved it into, not out of `exec`: argument writes run under a forced full
 /// mask, so by then `exec` no longer holds the value the guest had. Passing one
 /// therefore requires a site that saves EXEC, which every argument-passing site
 /// already does.
+///
+/// The log-buffer sources read the framework's persistent entry-storage SGPR
+/// pair, which the kernel-entry prologue loaded out of the rocjitsu kernarg
+/// wrapper.
 enum class ProbeArgSource {
-  Immediate,    ///< A build-time constant carried in ProbeArgValue::immediate.
-  AnchorExecLo, ///< Low dword of the EXEC mask the guest had at the anchor.
-  AnchorExecHi, ///< High dword of that mask. Wave64 only.
+  Immediate,      ///< A build-time constant carried in ProbeArgValue::immediate.
+  AnchorExecLo,   ///< Low dword of the EXEC mask the guest had at the anchor.
+  AnchorExecHi,   ///< High dword of that mask. Wave64 only.
+  LogBufferPtrLo, ///< Low dword of the pointer in the entry-storage pair.
+  LogBufferPtrHi, ///< High dword of that pointer.
 };
 
 /// @brief One argument dword: where it comes from, and its value when that is a
@@ -90,6 +96,11 @@ struct ProbeArgValue {
   return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;
 }
 
+/// @brief Does @p source read the framework's persistent entry-storage pair?
+[[nodiscard]] inline constexpr bool reads_entry_storage(ProbeArgSource source) {
+  return source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi;
+}
+
 /// @brief Is @p source one of the values ProbeArgSource declares?
 ///
 /// @details A scoped enum still holds whatever a cast puts in it. The planner
@@ -102,6 +113,8 @@ struct ProbeArgValue {
   case ProbeArgSource::Immediate:
   case ProbeArgSource::AnchorExecLo:
   case ProbeArgSource::AnchorExecHi:
+  case ProbeArgSource::LogBufferPtrLo:
+  case ProbeArgSource::LogBufferPtrHi:
     return true;
   }
   return false;

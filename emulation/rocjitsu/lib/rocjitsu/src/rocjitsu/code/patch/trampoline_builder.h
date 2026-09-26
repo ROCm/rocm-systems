@@ -107,6 +107,14 @@ struct TrampolinePlan {
   /// same temp rather than `exec`, which the widen has already overwritten.
   std::vector<ProbeArgValue> probe_args;
 
+  /// Base of the framework's persistent entry-storage SGPR pair: the two
+  /// registers the kernel-entry prologue loaded the DBI payload pointer into.
+  /// Set on every site of a kernel that has an entry prologue, not only the ones
+  /// passing the pointer on: the pair has to survive from entry to every later
+  /// site, so the envelope's own temp selection avoids it either way. Unset when
+  /// the kernel has no prologue, which makes a LogBufferPtr* argument fail closed.
+  std::optional<uint16_t> entry_storage_base;
+
   /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
   /// opens a full-mask window for the spill stores and argument writes either
   /// way; this holds it open across the call rather than restoring the anchor
@@ -120,7 +128,7 @@ struct TrampolinePlan {
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
   uint16_t arg_vgpr_base = 0;    ///< First argument VGPR, derived from the probe ABI.
   uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
-  bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
+  bool preserve_scc = true;      ///< Preserve SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
 
   // Special-state preservation: set by the orchestrator when the probe body
@@ -193,6 +201,9 @@ public:
   ///   - SCC is preserved with one dead SGPR temp. The temp lives across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
+  ///   - `plan.entry_storage_base`, when set, is excluded from every dead-register
+  ///     choice below. It is the one reserved pair liveness cannot see: the
+  ///     prologue writes it in the cave, so it reads dead at every anchor.
   ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* flag is
   ///     set. The orchestrator sets preserve_exec/preserve_vcc unconditionally as a
   ///     conservative policy (the summary detects the special-state writes the
