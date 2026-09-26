@@ -85,6 +85,32 @@ def _write_json(test, payload):
     return _write_temp(test, ".json", lambda f: json.dump(payload, f))
 
 
+def assert_count_invariants(test, summary):
+    """Unique plus extras equals total, and the status buckets add up to both."""
+    test.assertEqual(
+        summary["unique"] + summary["duplicate_extra"],
+        summary["total"],
+    )
+    test.assertEqual(
+        summary["total_passed"]
+        + summary["total_failed"]
+        + summary["total_skipped"]
+        + summary["total_timeout"]
+        + summary["total_disabled"]
+        + summary["total_other"],
+        summary["total"],
+    )
+    test.assertEqual(
+        summary["unique_passed"]
+        + summary["unique_failed"]
+        + summary["unique_skipped"]
+        + summary["unique_timeout"]
+        + summary["unique_disabled"]
+        + summary["unique_other"],
+        summary["unique"],
+    )
+
+
 class TestInferFromOutput(unittest.TestCase):
     def test_filter_matched_nothing_is_skipped_not_passed(self):
         self.assertEqual(infer_gtest_result_from_output(FILTER_MATCHED_NOTHING, 0), "SKIPPED")
@@ -634,7 +660,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         self.assertEqual(summary["total_failed"], 2)
         self.assertEqual(summary["unique_passed"], 1)
         self.assertEqual(summary["unique_failed"], 2)
-        self._assert_count_invariants(summary)
+        assert_count_invariants(self, summary)
 
     def test_synthetic_detail_uses_gtest_filter_name(self):
         leaf = synthetic_case_detail(
@@ -671,31 +697,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         summary = summarize_case_uniqueness(entries)
         self.assertEqual(summary["total_failed"], summary["unique_failed"])
         self.assertEqual(summary["total_passed"], summary["unique_passed"])
-        self._assert_count_invariants(summary)
-
-    def _assert_count_invariants(self, summary):
-        self.assertEqual(
-            summary["unique"] + summary["duplicate_extra"],
-            summary["total"],
-        )
-        self.assertEqual(
-            summary["total_passed"]
-            + summary["total_failed"]
-            + summary["total_skipped"]
-            + summary["total_timeout"]
-            + summary["total_disabled"]
-            + summary["total_other"],
-            summary["total"],
-        )
-        self.assertEqual(
-            summary["unique_passed"]
-            + summary["unique_failed"]
-            + summary["unique_skipped"]
-            + summary["unique_timeout"]
-            + summary["unique_disabled"]
-            + summary["unique_other"],
-            summary["unique"],
-        )
+        assert_count_invariants(self, summary)
 
 
 class TestCountPytestCases(unittest.TestCase):
@@ -768,7 +770,7 @@ class TestDisabledConfigAccounting(unittest.TestCase):
         self.assertEqual(summary["total_passed"], 1)
         self.assertEqual(summary["total_disabled"], 2)
         self.assertEqual(summary["unique_disabled"], 2)
-        self._assert_count_invariants(summary)
+        assert_count_invariants(self, summary)
 
     def test_record_disabled_suite_counts_each_config_test(self):
         ex = self._executor()
@@ -789,7 +791,7 @@ class TestDisabledConfigAccounting(unittest.TestCase):
         self.assertEqual(summary["total"], 2)
         self.assertEqual(summary["unique"], 2)
         self.assertEqual(summary["total_disabled"], 2)
-        self._assert_count_invariants(summary)
+        assert_count_invariants(self, summary)
 
     def test_record_disabled_suite_honors_test_name_filter(self):
         ex = self._executor(test_name="InitA")
@@ -874,9 +876,6 @@ class TestDisabledConfigAccounting(unittest.TestCase):
         self.assertIn("\n  +- CE Tests\n", issue)
         self.assertIn("\n  `- Socket Tests\n", issue)
         self.assertNotIn("NET IB", issue)
-
-    def _assert_count_invariants(self, summary):
-        TestUniqueAndDuplicateCases()._assert_count_invariants(summary)
 
 
 class TestSuiteDisposition(unittest.TestCase):
