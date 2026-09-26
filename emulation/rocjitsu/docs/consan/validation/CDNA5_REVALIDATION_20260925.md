@@ -2196,3 +2196,15 @@ misses all eight faults despite numerical failures in all eight trials
 (`sgemm-smoke-wave15-v2-{clean,fault}`). This distinguishes successful timing
 perturbation from successful detection; numerical failure alone is not a
 SuperCollider detection.
+
+
+### Sparse FP8 ML Default qualification completed
+
+`sparse-complete-higher-clean` passes all three full clean shards at `higher`,
+with complete applicable coverage (183,108/183,108 access sites and
+6,552/6,552 barrier sites). Shard runtimes were approximately 1,455, 1,700,
+and 2,673 seconds. Combined with the matching targeted clean and 8/8 admitted,
+reached detections in `spmmml-targeted-higher-v2-fault`, this qualifies the
+Default cell green. The earlier `default` and `high` campaigns each accumulated
+three misses, ruling out 6/8 for those campaigns; their remaining trials were
+cancelled deliberately and are not reported as completed eight-trial results.
