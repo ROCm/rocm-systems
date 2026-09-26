@@ -2623,3 +2623,20 @@ rows and both clients accepted. Their independent `run-0.log` and `run-1.log`
 coverage summaries cover 34,012/34,012 access sites with complete static and
 dynamic analysis. Elapsed times are 358 and 355 seconds. Four shapes remain
 pending; this partial result does not resolve the orange cell.
+
+
+### Default SGEMM comparator exhausted its short budget
+
+The matching 127-shape comparator in `sgemm-bank-fixed-high-clean-retry`
+terminated at its real 1,800-second limit, after 577/650 numerical cases and
+one of two clients. Its oracle reports timeout and the missing second client
+pass, with no numerical failure. No fault batch was started for that incomplete
+comparator. The six-shard Default full clean continues under its original
+14,400-second per-shard budget.
+
+A fresh `sgemm-bank-fixed-untimed-high-qualification.py` campaign now uses the
+tested untimed/zero-cooldown controls and a 6,000-second per-run budget. It
+generates a new retained baseline manifest, requires a matching instrumented
+clean, and only then runs eight faults with health checks. It preserves all
+650 cases, the full allowlist, the repaired hook, high preset, and 1 GiB cap.
+The Default cell stays orange pending complete results.
