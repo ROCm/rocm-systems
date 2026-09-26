@@ -2812,3 +2812,12 @@ and replay-manifest SHA-256 values, and the matching clean log passes the
 updated diagnostics gate. The table now records `fault 8/8`. Both full clean
 sweeps still have three accepted small shapes and three large shapes running,
 so the row remains orange pending full-family clean evidence.
+
+### SuperCollider 512-shape full clean passes
+
+`sgemm-bank-fixed-untimed-sc-full-clean` completes shard 4 (512-by-512-by-512)
+in 12,507 seconds. All 650 numerical cases and both clients pass. The retained
+`run-4.log` passes the diagnostics gate with complete 34,012/34,012 access
+coverage and no incomplete analysis. SuperCollider now has four of six clean
+shards accepted; only the 511 and 513 shapes remain running. Default's three
+large clean shapes remain pending.
