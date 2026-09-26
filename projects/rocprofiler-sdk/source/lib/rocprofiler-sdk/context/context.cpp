@@ -359,6 +359,7 @@ start_context(rocprofiler_context_id_t context_id)
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
 #endif
+    if(cfg->device_spm) status = rocprofiler::SPM::spm_start_agent_ctx(cfg);
 
     return status;
 }
@@ -409,6 +410,10 @@ stop_context(rocprofiler_context_id_t idx)
                     rocprofiler::pc_sampling::stop_service(_expected);
                 }
 #endif
+                if(_expected->device_spm)
+                {
+                    rocprofiler::SPM::spm_stop_agent_ctx(const_cast<context*>(_expected));
+                }
 
                 return ROCPROFILER_STATUS_SUCCESS;
             }
