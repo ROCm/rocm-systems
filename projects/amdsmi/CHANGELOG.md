@@ -144,8 +144,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+
 - **Fixed v2.4 APU metrics reporting an unavailable `average_socket_power` or `average_gfx_power` as `65535` mW**.  
-  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.54 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
+  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.53 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
 
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.

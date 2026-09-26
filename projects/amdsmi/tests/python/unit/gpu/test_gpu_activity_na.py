@@ -31,10 +31,7 @@ class TestGpuActivityNa(unittest.TestCase):
     def test_uint16_max_is_na_for_older_libraries(self):
         self.assertEqual(_activity_with(0xFFFF), dict.fromkeys(_KEYS, "N/A"))
 
-    def test_valid_values_pass_through(self):
+    def test_non_na_values_pass_through(self):
         for value in (0, 50, 100):
             self.assertEqual(_activity_with(value), dict.fromkeys(_KEYS, value))
 
-
-if __name__ == "__main__":
-    unittest.main()
