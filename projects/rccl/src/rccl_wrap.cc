@@ -64,9 +64,19 @@ RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", -1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
-RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_MAX_MSG_BYTES",   -1);  // -1 = use ceArMax from arch table (2-shot)
+RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_2SHOT_MAX_BYTES",   -1);  // -1 = use ceArMax from arch table (2-shot)
 RCCL_PARAM(CeArStagingBytes,   "CE_AR_STAGING_BYTES",   -1);  // -1 = use NCCL_CE_AR_STAGING_BYTES default
 RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
+// -1 = use arch table. When set, overrides ceNonRegMax and ceRegMax for all
+// collectives except AllReduce (which has its own RCCL_CE_AR_*_MSG_BYTES knobs).
+// Applies regardless of registration mode (non-reg and reg paths both use this cap).
+RCCL_PARAM(CeCollMaxBytes, "CE_COLL_MAX_BYTES", -1);
+// -1 = use arch table. When set, overrides symMaxR2 and symMaxR2Graph for all
+// collectives. Applies regardless of graph-mode or registration mode.
+RCCL_PARAM(SymKMaxBytes, "SYM_K_MAX_BYTES", -1);
+RCCL_PARAM(CeArMinMsgBytes,  "CE_AR_2SHOT_MIN_BYTES",  -1);
+RCCL_PARAM(CeCollMinBytes,   "CE_COLL_MIN_BYTES",    -1);
+RCCL_PARAM(SymKMinBytes,     "SYM_K_MIN_BYTES",      -1);
 
 // Common DDA protocol-tier knobs, shared by every fabric collective (no
 // per-collective variants). For a given collective's size:
@@ -792,6 +802,8 @@ inline size_t funcThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 // symMaxR2. kThreshUnlimited (SIZE_MAX) means no suppression; non-zero literal = byte cap.
 // Table entries use kThreshUnlimited explicitly -- 0 is not used in these arrays.
 inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t func, bool graphMode) {
+  const int64_t param = rcclParamSymKMaxBytes();
+  if (param >= 0) return (size_t)param;
   if (table == nullptr) return SIZE_MAX;
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
   return funcThresholdFromTable(caps, func);
@@ -800,19 +812,23 @@ inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
 inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func) {
+  const int64_t param = rcclParamSymKMinBytes();
+  if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
   return funcThresholdFromTable(table->symMinR2, func);
 }
 } // namespace
 
 inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
-  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
+  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : rcclParamCeCollMaxBytes();
   if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
 
 inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
+  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArMaxMsgBytes() : rcclParamCeCollMaxBytes();
+  if (param >= 0) return (size_t)param;
   if (table == nullptr)
     return func == ncclFuncAllReduce ? NCCL_CE_AR_TMPBUF_DEFAULT_BYTES : 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
@@ -856,6 +872,8 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
 }
 
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
+  const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArMinMsgBytes() : rcclParamCeCollMinBytes();
+  if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
@@ -1659,14 +1677,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       }
       if (!query) INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ddaScratch=%p totalBytes=%zu ddaScratchBytes=%zu forceCe=%d agCeNonRegWindow=%d",
            (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes, (int)rcclParamForceCe(), (int)agCeNonRegWindow);
-      // Branch #3: CE via registered symmetric windows. Taken when symk is not
-      // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
-      // CE for every size.
+      // Branch #3: CE via registered symmetric windows. Requires CTAPolicy=ZERO,
+      // symk not eligible, and size within ceRegMax.
       const bool ceAvailable =
         !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
       if (ceAvailable && !hasSysmemSegment &&
-          ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
-           (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing)))) {
+          (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+          (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing))) {
         decision->algo = RCCL_CE_REGISTERED;
         return ncclSuccess;
       }

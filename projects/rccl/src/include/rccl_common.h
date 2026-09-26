@@ -251,6 +251,11 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
+RCCL_PARAM_DECLARE(CeCollMaxBytes);      // -1 = use arch table; overrides ceNonRegMax+ceRegMax for non-AR collectives
+RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMaxR2+symMaxR2Graph for all collectives
+RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
 // 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else
 // ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). A null table
 // (RCCL_IGNORE_ARCH_TABLE or unknown arch) restores the pre-table 256 MiB

@@ -406,10 +406,6 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
 // Shape/resource eligibility for the LL128 one-shot variant.
 bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                ncclDataType_t datatype, ncclRedOp_t op) {
-  if (rcclParamDdaLL() == 0) {
-    return false;
-  }
-
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLL128OneShotThreshold()) {
     return false;
   }
@@ -459,10 +455,6 @@ bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 // Shape/resource eligibility for the LL128 two-shot variant.
 bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                ncclDataType_t datatype, ncclRedOp_t op) {
-  if (rcclParamDdaLL() == 0) {
-    return false;
-  }
-
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLL128TwoShotThreshold()) {
     return false;
   }
