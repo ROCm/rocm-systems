@@ -1995,3 +1995,24 @@ The complete sparse TDM-all `higher` campaign finished at **4/8**, with
 eight admitted/reached trials, passing numerical oracles and healthy checks.
 It does not qualify. The same reviewed fault is now being tested at `max`,
 with an independent full clean sweep; neither trial count nor threshold changes.
+
+### SGEMM full clean rejection and sparse TDM-all capacity check
+
+`sgemm-complete-default-clean` completed all six shards with exit status 1.
+Each numeric oracle records one passing client rather than the required two.
+The second client's 8,595,048-byte code object is rejected with
+`outcome=unsupported`, zero transform errors and one warning (the warning
+requires verbose logging). This is not a deadline failure: shard durations
+were approximately 226–292 seconds. First-client coverage is complete,
+but does not qualify the rejected second client. The row remains orange
+for unsupported transformation. `sgemm-second-client-diagnostic.py` replays
+the second client with verbose logging and a separate results CSV.
+SGEMM fault inventory passed for both clients; retained export/replay is
+underway before fault admission.
+
+Sparse TDM-all's full `max` clean sweep passes all four shards with complete
+coverage (`sparse-all-complete-max-clean`), but the matching fault campaign
+finished at **2/8**, with all eight trials admitted/reached and numeric
+oracles passing. A separate `high` + 256 watchpoint bank campaign tests
+whether retaining more address histories improves the detection rate;
+the existing 6/8 threshold and eight-trial count remain unchanged.
