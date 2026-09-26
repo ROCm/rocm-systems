@@ -194,6 +194,12 @@ struct chained_siginfo
     std::optional<sigaction_t> action  = {};
 };
 
+struct child_t
+{
+    pid_t pid{};
+    int   status{};
+};
+
 auto&
 get_chained_signals()
 {
@@ -4359,44 +4365,26 @@ get_sigaction_function()
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
-// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
-int signal_abort_flush_timeout_sec =
-    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+// Bounds the blocking waits during signal finalization: the SIGABRT flush wait and the
+// child-reap poll. Read once here because getenv() is not async-signal-safe; <= 0 waits
+// indefinitely.
+int signal_finalize_wait_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS", 10);
 
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
-std::optional<int>
-wait_pid(pid_t _pid, int _opts = 0)
+// Returns the waitpid()
+//   result: >0 = child reaped (fills _status),
+//   result: =0 = still alive
+//   result: <0 = gone/unwaitable (e.g. ECHILD when the app reaped the child itself).
+child_t
+wait_pid(pid_t _pid, int _opts)
 {
-    auto this_pid  = getpid();
-    auto this_ppid = getppid();
-    auto this_tid  = common::get_tid();
-    auto this_func = std::string_view{__FUNCTION__};
-
-    ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for child {}",
-                             this_ppid,
-                             this_pid,
-                             this_tid,
-                             this_func,
-                             _pid);
-
-    int   _status = 0;
-    pid_t _pid_v  = -1;
-    _opts |= WUNTRACED;
-    do
-    {
-        if((_opts & WNOHANG) > 0)
-        {
-            std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
-        }
-        _pid_v = waitpid(_pid, &_status, _opts);
-    } while(_pid_v == 0);
-
-    if(_pid_v < 0) return std::nullopt;
-    return _status;
+    child_t ret{};
+    ret.pid = waitpid(_pid, &ret.status, _opts | WUNTRACED);
+    return ret;
 }
 
 extern "C" {
@@ -4520,6 +4508,9 @@ diagnose_status(pid_t _pid, int _status)
 void
 wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
 {
+    constexpr auto this_func = __FUNCTION__;
+    namespace chrono         = std::chrono;
+
     auto get_children = [&this_pid]() {
         auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
         auto ifs      = std::ifstream{fname};
@@ -4540,17 +4531,50 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
 
     auto _children = get_children();
     ROCP_WARNING << fmt::format(
-        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for children [{}] to exit",
         this_ppid,
         this_pid,
         this_tid,
         context,
-        _children.size());
+        fmt::join(_children, ", "));
 
-    for(auto itr : _children)
+    const auto _deadline =
+        (signal_finalize_wait_timeout_sec > 0)
+            ? chrono::steady_clock::now() + chrono::seconds{signal_finalize_wait_timeout_sec}
+            : chrono::steady_clock::time_point::max();
+
+    while(!_children.empty() && chrono::steady_clock::now() <= _deadline)
     {
-        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-        if(status) diagnose_status(itr, status.value());
+        for(size_t i = 0; i < _children.size(); ++i)
+        {
+            const auto [_rc, _status] = wait_pid(_children[i], WUNTRACED | WNOHANG);
+
+            if(_rc == 0) continue;                               // still alive: keep it
+            if(_rc > 0) diagnose_status(_children[i], _status);  // reaped: report status
+
+            // Reaped or gone (already reaped by the app): drop it by swapping the last element
+            // into this slot.
+            // NOTE: with ++i we skip re-checking that swapped-in element this pass, but
+            // the next pass handles it (bounded by _deadline). Updates to removal should
+            // keep the loop increment correct so nothing is examined twice or lost.
+            _children[i] = _children.back();
+            _children.pop_back();
+        }
+
+        if(!_children.empty()) std::this_thread::sleep_for(chrono::milliseconds{100});
+    }
+
+    if(!_children.empty())
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] gave up waiting for children [{}]: finalize wait "
+            "budget ({}s) exhausted",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            fmt::join(_children, ", "),
+            signal_finalize_wait_timeout_sec);
     }
 }
 
@@ -4654,9 +4678,16 @@ signal_finalization_worker()
     }
 
     // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
-    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
-    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
-    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    // that returns). We do NOT signal the children. That is the app's/OS's job. A child that
+    // received the signal finalizes via its own worker.
+    //
+    // signo == 0 is the normal-exit wake (finalize_rocprofv3 then join): no signal was
+    // delivered, so a child the app left running is the app's own business. Reaping it would
+    // block on a child that may never exit, so skip it.
+    if(sw.signo != 0)
+    {
+        wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    }
 
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
@@ -4720,7 +4751,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // So wait for the flush here, then return into abort(). Unlike the async signals, this can
     // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
     // paths, e.g. heap-corruption detection. Bound the wait with
-    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
     // beats a hung process. <= 0 waits forever.
     if(signo == SIGABRT)
     {
@@ -4728,12 +4759,12 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         {
             // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
             // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
-            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            const auto bounded  = (signal_finalize_wait_timeout_sec > 0);
             auto       deadline = timespec{};
             if(bounded)
             {
                 clock_gettime(CLOCK_MONOTONIC, &deadline);
-                deadline.tv_sec += signal_abort_flush_timeout_sec;
+                deadline.tv_sec += signal_finalize_wait_timeout_sec;
             }
 
             while(sw.finalize_done.load(std::memory_order_acquire) == 0)
