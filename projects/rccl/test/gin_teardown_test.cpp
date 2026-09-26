@@ -12,6 +12,7 @@
 
 #include DEV_RUNTIME_CC_PATH
 
+#include <cstdlib>
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -340,4 +341,54 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
   EXPECT_EQ(ncclDevrGetRmaWin(nullptr, 0), nullptr);
   EXPECT_EQ(ncclDevrGetRmaWin(&win, -1), nullptr);
   EXPECT_EQ(ncclDevrGetRmaWin(&win, NCCL_GIN_MAX_CONNECTIONS), nullptr);
+}
+
+// NCCL_PARAM caches the first read. Drive WindowRegisterInGroup in a child so
+// reverting CheckRegistrationSupport fails this test (a helper-direct call would not).
+TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
+  using RcclUnitTesting::ProcessIsolatedTestRunner;
+
+  auto registerWindow = []() -> ncclResult_t {
+    auto commStorage = std::make_unique<ncclComm>();
+    int lsaRank0 = 0;
+    ncclComm* comm = commStorage.get();
+    comm->nRanks = 1;
+    comm->rank = 0;
+    comm->cudaDev = 0;
+    comm->localRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    comm->symmetricSupport = 0;  // the non-sym host-VMM probe, not the symmetric walk
+    comm->globalRmaProxySupport = false;
+    comm->config.numRmaCtx = 0;
+    comm->devrState.lsaSelf = 0;
+    comm->devrState.lsaSize = 1;
+    comm->devrState.nLsaTeams = 1;
+    comm->devrState.lsaRankList = &lsaRank0;
+    comm->devrState.granularity = 4096;
+    comm->devrState.bigSize = 1 << 20;
+    comm->devrState.ginEnabled = false;
+
+    ncclWindow_t out = nullptr;
+    return ncclDevrWindowRegisterInGroup(comm, reinterpret_cast<void*>(0x100000), 4096, 0, &out);
+  };
+
+  auto deviceElasticOff = ProcessIsolatedTestRunner::TestConfig(
+                              "DeviceSegment_ElasticOff_NotRejectedAsHost",
+                              [&]() { EXPECT_NE(registerWindow(), ncclInvalidArgument); })
+                              .setVariable("NCCL_ELASTIC_BUFFER_REGISTER", "0")
+                              .setVariable("RCCL_TEST_VMM_LOCATION", "device")
+                              .setVariable("RCCL_TEST_VMM_SEGMENT_SIZE", "4096");
+
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+  RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig(
+          "HostSegment_ElasticOff_InvalidArgument",
+          [&]() { EXPECT_EQ(registerWindow(), ncclInvalidArgument); })
+          .setVariable("NCCL_ELASTIC_BUFFER_REGISTER", "0")
+          .setVariable("RCCL_TEST_VMM_LOCATION", "host")
+          .setVariable("RCCL_TEST_VMM_SEGMENT_SIZE", "4096"),
+      deviceElasticOff);
+#else
+  RUN_ISOLATED_TESTS(deviceElasticOff);
+#endif
 }

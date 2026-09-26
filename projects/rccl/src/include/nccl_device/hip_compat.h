@@ -60,7 +60,12 @@
 // provide the real API) untouched.
 ////////////////////////////////////////////////////////////////////////////////
 
-#if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
+// AMD: the 7.0.2.x backport provides hipMemLocationTypeHostNuma, so the shim
+// is also off on HIP_VERSION [70051831, 70060000), the same window as native
+// HIP >= 71260540. Spelled with HIP_VERSION; this header is included before
+// rocmwrap.h.
+#if defined(__HIP_PLATFORM_AMD__) && \
+    !((HIP_VERSION) >= 71260540 || ((HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000))
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
 #endif
 

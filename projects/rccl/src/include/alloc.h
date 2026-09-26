@@ -30,7 +30,9 @@ struct ncclComm;
 #include "cudawrap.h"
 #endif
 
-#if ROCM_VERSION >= 71200
+// Every AMD build defines this, including host-only. rocmwrap.h then provides
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED for the host-alloc gate below.
+#if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_runtime.h>
 #include "rocmwrap.h"
 #endif
@@ -287,7 +289,7 @@ struct ncclSideStreamScope {
   ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
 };
 
-#if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
+#if CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle* handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -297,19 +299,25 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUmemAccessDesc accessDesc = {};
   CUmemGenericAllocationHandle handle;
   int cudaDev;
+#if !defined(__HIP_PLATFORM_AMD__)
   int cpuNumaNodeId = -1;
+#else
+  int cpuNumaNodeId = 0;
+#endif
   CUmemAllocationHandleType type = ncclCuMemHandleType;
   bool handleCreated = false;
   bool addressReserved = false;
   bool mapped = false;
 
   CUDACHECK(cudaGetDevice(&cudaDev));
+#if !defined(__HIP_PLATFORM_AMD__)
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
   CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, currentDev));
   if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
+#endif
 #if defined(__HIP_PLATFORM_AMD__)
   // CLR rejects HostNuma; only Device or Host are accepted.
-  prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
+  prop.location.type = hipMemLocationTypeHost;
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.requestedHandleTypes = type; // So it can be exported
   // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
@@ -340,7 +348,7 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   /* Now allow RW access to the newly mapped memory from the CPU */
 #if defined(__HIP_PLATFORM_AMD__)
   // CLR rejects HostNuma here too; mirror the Host fallback used at allocation.
-  accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST;
+  accessDesc.location.type = hipMemLocationTypeHost;
   accessDesc.location.id = 0;
 #else
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
@@ -382,7 +390,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return result;
 }
 
-#else /* CUDART_VERSION >= 12020 */
+#else /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED */
 
 static inline ncclResult_t ncclCuMemHostAllocDebug(void** ptr, void* handlep, size_t size, const char* file, int line,
                                                    const char* callerFunc) {
@@ -403,7 +411,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return ncclInternalError;
 }
 
-#endif  /* CUDART_VERSION >= 12020 */
+#endif  /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED */
 
 template <typename T>
 ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line) {
@@ -846,10 +854,10 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
       CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)mappedPtrEnd));
       CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
 #if defined(__HIP_PLATFORM_AMD__)
-#if ROCM_VERSION >= 71200
-      // CLR rejects HostNuma; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST
-      // (host VMM alloc is only available on ROCm >= 7.12, matching ncclCuMemHostAlloc).
-      if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST) {
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+      // HIP rejects HostNuma. Host segments use hipMemLocationTypeHost on native
+      // ROCm 7.12 and the 7.0.2.x backport.
+      if (prop.location.type == hipMemLocationTypeHost) {
         *hasSysmemSegment = true;
       }
 #endif
