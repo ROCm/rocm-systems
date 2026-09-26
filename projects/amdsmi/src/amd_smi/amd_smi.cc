@@ -5089,9 +5089,12 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  info->gfx_activity = metrics.average_gfx_activity;
-  info->mm_activity = metrics.average_mm_activity;
-  info->umc_activity = metrics.average_umc_activity;
+  info->gfx_activity = translate_umax_or_assign_value<decltype(info->gfx_activity)>(
+      metrics.average_gfx_activity, metrics.average_gfx_activity);
+  info->mm_activity = translate_umax_or_assign_value<decltype(info->mm_activity)>(
+      metrics.average_mm_activity, metrics.average_mm_activity);
+  info->umc_activity = translate_umax_or_assign_value<decltype(info->umc_activity)>(
+      metrics.average_umc_activity, metrics.average_umc_activity);
 
   return AMDSMI_STATUS_SUCCESS;
 }

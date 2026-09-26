@@ -3192,8 +3192,9 @@ def amdsmi_get_gpu_activity(processor_handle: processor_handle_t) -> Dict[str, A
         "mm_activity": engine_usage.mm_activity,
     }
 
+    # Older libraries returned the uint16 N/A value in these uint32 fields.
     for key, value in activity_dict.items():
-        if value == 0xFFFF:
+        if value in (MaxUIntegerTypes.UINT16_T, MaxUIntegerTypes.UINT32_T):
             activity_dict[key] = "N/A"
 
     return activity_dict
