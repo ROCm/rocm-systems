@@ -1283,6 +1283,20 @@ typedef enum {
 } amdsmi_link_status_t;
 
 /**
+ * @brief Unified link topology information between two processors
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint64_t weight;                   //!< link weight
+  amdsmi_link_status_t link_status;  //!< link status; synthesized on baremetal (not live HW status)
+  amdsmi_link_type_t link_type;      //!< type of the link
+  uint8_t num_hops;                  //!< number of hops
+  uint8_t fb_sharing;                //!< 1 if P2P framebuffer access is available, 0 otherwise
+  uint32_t reserved[10];
+} amdsmi_link_topology_t;
+
+/**
  * @brief Link Metrics
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -6883,6 +6897,41 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type);
+
+/**
+ *  @brief Retrieve the unified link topology information between 2 GPUs
+ *
+ *  @ingroup tagHWTopology
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Returns weight, status, type, hops, and framebuffer sharing in
+ *  ::amdsmi_link_topology_t, matching the host interface.
+ *
+ *  @note Baremetal behavior:
+ *  - Self pair: INTERNAL, ENABLED, zero weight and hops, fb_sharing=1.
+ *  - Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+ *  - Current successful calls always report ::AMDSMI_LINK_STATUS_ENABLED.
+ *  - UNKNOWN-to-DISABLED is defensive, not a current success case.
+ *    INACTIVE and ERROR are not produced.
+ *  - Status provides host API parity, not link health or P2P access.
+ *    The topology CLI uses ::amdsmi_is_P2P_accessible, so its status can differ.
+ *  - num_hops is the abstracted count from ::amdsmi_topo_get_link_type,
+ *    not physical xGMI links; values above 255 are capped.
+ *  - fb_sharing is best-effort: 0 means no P2P access or a failed P2P query.
+ *  - Queries are sequential, so topology changes can affect field consistency.
+ *
+ *  @param[in] processor_handle_src the source processor handle
+ *
+ *  @param[in] processor_handle_dst the destination processor handle
+ *
+ *  @param[out] topology_info Receives the link topology.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info);
 
 /**
  *  @brief Retrieve the set of GPUs that are nearest to a given device

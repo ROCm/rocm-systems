@@ -3228,6 +3228,96 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info) {
+  AMDSMI_CHECK_INIT();
+
+  if (topology_info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Keep defaults intact if a later query fails.
+  *topology_info = {};
+  topology_info->link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+  topology_info->link_status = AMDSMI_LINK_STATUS_DISABLED;
+
+  amd::smi::AMDSmiGPUDevice* src_device = nullptr;
+  amd::smi::AMDSmiGPUDevice* dst_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle_src, &src_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  uint32_t src_id = src_device->get_gpu_id();
+  uint32_t dst_id = dst_device->get_gpu_id();
+
+#ifdef ENABLE_WSL_BACKEND
+  // WSL has no native sysfs topology; match amdsmi_topo_get_link_type.
+  if (src_device->backend() || dst_device->backend()) {
+    if (src_device == dst_device) {
+      topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+      topology_info->fb_sharing = 1;
+    } else {
+      topology_info->link_type = AMDSMI_LINK_TYPE_PCIE;
+      topology_info->num_hops = 1;
+    }
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+#endif
+
+  // Self pairs need no inter-device queries.
+  if (src_id == dst_id) {
+    topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    topology_info->fb_sharing = 1;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  uint64_t hops = 0;
+  RSMI_IO_LINK_TYPE rsmi_type = RSMI_IOLINK_TYPE_UNDEFINED;
+  amdsmi_status_t status =
+      amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_type(src_id, dst_id, &hops, &rsmi_type));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // Only PCIe and xGMI share enum values across the two APIs.
+  amdsmi_link_type_t link_type;
+  switch (rsmi_type) {
+    case RSMI_IOLINK_TYPE_PCIEXPRESS:
+      link_type = AMDSMI_LINK_TYPE_PCIE;
+      break;
+    case RSMI_IOLINK_TYPE_XGMI:
+      link_type = AMDSMI_LINK_TYPE_XGMI;
+      break;
+    default:
+      link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+      break;
+  }
+
+  uint64_t weight = 0;
+  status = amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_weight(src_id, dst_id, &weight));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // A failed P2P query leaves fb_sharing at 0.
+  uint8_t fb_sharing = 0;
+  bool accessible = false;
+  if (amd::smi::rsmi_to_amdsmi_status(rsmi_is_P2P_accessible(src_id, dst_id, &accessible)) ==
+      AMDSMI_STATUS_SUCCESS) {
+    fb_sharing = accessible ? 1 : 0;
+  }
+
+  topology_info->link_type = link_type;
+  topology_info->num_hops = hops > 255 ? 255 : static_cast<uint8_t>(hops);  // clamp to uint8_t
+  topology_info->weight = weight;
+  // Host API parity, not link health or P2P access.
+  topology_info->link_status = (link_type == AMDSMI_LINK_TYPE_UNKNOWN) ? AMDSMI_LINK_STATUS_DISABLED
+                                                                       : AMDSMI_LINK_STATUS_ENABLED;
+  topology_info->fb_sharing = fb_sharing;
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 // Compute Partition functions
 // This API is deprecated, use amdsmi_get_gpu_accelerator_partition_profile() instead
 amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,

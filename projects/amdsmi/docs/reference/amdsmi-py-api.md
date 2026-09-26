@@ -5542,6 +5542,76 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_link_topology
+
+Description: Return GPU link topology using the host API's fields.
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dst` the destination device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`weight` | The link weight
+`link_status` | Integer `AMDSMI_LINK_STATUS_*` value, retained for host API parity
+`link_type` | Integer `AMDSMI_LINK_TYPE_*` value
+`num_hops` | Abstracted topology steps, capped at 255, not physical xGMI links
+`fb_sharing` | 1 if P2P framebuffer access is available; 0 if unavailable or the query failed
+
+Baremetal notes:
+
+- Self pair: `INTERNAL`, `ENABLED`, zero weight and hops, `fb_sharing=1`.
+- Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+- Current successful calls always report `AMDSMI_LINK_STATUS_ENABLED` (0).
+- `UNKNOWN` to `DISABLED` (1) is defensive, not a current success case.
+- `INACTIVE` (2) and `ERROR` (3) are not produced.
+- Status is not link health or P2P access.
+- The topology CLI uses `amdsmi_is_P2P_accessible`; it can report `DISABLED` when this API reports `ENABLED`.
+- Queries are sequential, so topology changes can affect field consistency.
+
+Exceptions that can be thrown by `amdsmi_get_link_topology` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_INIT` - Library not initialized
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dst = devices[1]
+        topology = amdsmi.amdsmi_get_link_topology(processor_handle_src, processor_handle_dst)
+        print(topology['weight'])
+        print(topology['num_hops'])
+        print(topology['fb_sharing'])
+        print(topology['link_status'])
+        if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_topo_get_p2p_status
 
 Description: Retrieve the connection type and P2P capabilities between 2 GPUs

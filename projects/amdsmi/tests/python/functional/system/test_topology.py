@@ -30,6 +30,57 @@ class TestSystemTopology(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
+    def test_get_link_topology_self_pair(self) -> None:
+        self.common.print_func_name("")
+        if not self.common.processors:
+            self.skipTest("No GPUs available for a self-pair topology query")
+
+        gpu = self.common.processors[0]
+        try:
+            topology = amdsmi.amdsmi_get_link_topology(gpu, gpu)
+        except amdsmi.AmdSmiLibraryException as error:
+            if error.get_error_code() == amdsmi.AmdSmiStatus.NOT_SUPPORTED:
+                self.skipTest("Unified link topology is not supported")
+            raise
+
+        self.assertEqual(
+            topology,
+            {
+                "weight": 0,
+                "link_status": amdsmi.amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED,
+                "link_type": amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL,
+                "num_hops": 0,
+                "fb_sharing": 1,
+            },
+        )
+        for field, value in topology.items():
+            self.assertIs(type(value), int, field)
+
+    def test_get_link_topology_peer_pair(self) -> None:
+        self.common.print_func_name("")
+        if len(self.common.processors) < 2:
+            self.skipTest("At least two GPUs are required for a peer topology query")
+
+        src, dst = self.common.processors[:2]
+        try:
+            topology = amdsmi.amdsmi_get_link_topology(src, dst)
+        except amdsmi.AmdSmiLibraryException as error:
+            if error.get_error_code() == amdsmi.AmdSmiStatus.NOT_SUPPORTED:
+                self.skipTest("Unified link topology is not supported for this pair")
+            raise
+
+        self.assertEqual(
+            set(topology), {"weight", "link_status", "link_type", "num_hops", "fb_sharing"}
+        )
+        for field, value in topology.items():
+            self.assertIs(type(value), int, field)
+        link = amdsmi.amdsmi_topo_get_link_type(src, dst)
+        self.assertEqual(topology["link_type"], link["type"])
+        self.assertEqual(topology["num_hops"], min(link["hops"], 255))
+        self.assertEqual(topology["link_status"], amdsmi.amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED)
+        self.assertGreaterEqual(topology["weight"], 0)
+        self.assertIn(topology["fb_sharing"], (0, 1))
+
     def test_get_processor_handle_from_bdf(self):
         self.common.print_func_name("")
 
