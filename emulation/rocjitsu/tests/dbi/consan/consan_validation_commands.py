@@ -925,7 +925,7 @@ def _clean_environment(
     report_cap = os.environ.get("CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE")
     if profile == "default" and report_cap is not None:
         if (not report_cap.isascii() or not report_cap.isdecimal()
-                or not 0 < int(report_cap) <= 256 * 1024 * 1024):
+                or not 0 < int(report_cap) <= 1024 * 1024 * 1024):
             raise ValidationError("invalid CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE")
         environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"] = report_cap
     banks = os.environ.get("CONSAN_VALIDATION_WATCHPOINT_BANKS")

@@ -118,7 +118,7 @@ success cannot qualify the standard profile or erase its detection misses.
 
 For a Default report-capacity investigation, set
 `CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE` to a positive byte cap, up to
-268435456 (256 MiB). The runner forwards it as `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE`
+1073741824 (1 GiB). The runner forwards it as `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE`
 to both clean and fault children, and records it in their environments. The hook
 still validates the requested cap and allocates only the complete report's
 required bytes. Require matching clean/fault settings and label any raised cap

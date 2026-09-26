@@ -6687,7 +6687,7 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
 
     def test_report_cap_applies_to_default_clean_and_fault_only(self):
         with temporary_root() as root, mock.patch.dict(os.environ, {
-            "CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE": "268435456",
+            "CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE": "1073741824",
             "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE": "1",
         }, clear=True):
             workload = validation.WORKLOAD_BY_ID["d128-block"]
@@ -6697,12 +6697,12 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
                 "default", workload, root / "hook.so", "gfx1250",
                 {"environment": {}}, {}, {}, root)
             for environment in (clean, fault):
-                self.assertEqual(environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"], "268435456")
+                self.assertEqual(environment["RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"], "1073741824")
             for profile in (None, "supercollider"):
                 environment = validation_commands._clean_environment(
                     profile, workload, root / "hook.so", "gfx1250", root)
                 self.assertNotIn("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", environment)
-            for value in ("0", "-1", "268435457", "typo", ""):
+            for value in ("0", "-1", "1073741825", "typo", ""):
                 os.environ["CONSAN_VALIDATION_AUTO_REPORT_BUFFER_SIZE"] = value
                 with self.assertRaises(validation.ValidationError):
                     validation_commands._clean_environment(
