@@ -146,7 +146,7 @@ static void runUnsafeAtomicAddNonCoherentUnsafeFlagTest() {
   HIP_CHECK(hipHostFree(result));
 }
 
-TEST_CASE(Unit_unsafeAtomicAdd_NonCoherent) {
+HIP_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherent) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
