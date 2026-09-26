@@ -2478,3 +2478,17 @@ including gfx1250 VGPR bank state, is now under investigation. This is not
 resolved by assuming the full sweep merely needs more time. The cell remains
 orange pending diagnosis; these deliberately interrupted debugger runs are
 not clean qualification or fault-detection trials.
+
+
+### gfx1250 destination-bank mismatch at the stalled metadata load
+
+`sgemm-debug-registers/waves-1.json` captures the retrying wave with
+`vgpr_msb_mode_ = 64` (`0x40`). This selects destination VGPR bank one while
+source banks remain zero. The preceding metadata address arithmetic names
+v10/v11 as both destinations and sources, so it writes high-bank v266/v267
+while the subsequent flat load addresses through low-bank v10/v11. The
+retained backtraces show implausible addresses being retried. This establishes
+an instrumentation bank-state mismatch, rather than just a slow clean sweep;
+the Default cell is red pending a repair and fresh clean qualification.
+The scoped diagnostic has the same target kernel and high-preset instrumentation
+as the original full-allowlist failure. No repair is claimed yet.
