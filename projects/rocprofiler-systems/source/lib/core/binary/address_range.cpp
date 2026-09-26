@@ -49,9 +49,9 @@ address_range::as_hex() const
         return fmt::format("0x{:0{}x}", _v, _width);
     };
 
-    return (is_range()) ? fmt::format("{}-{}", _as_hex_util(low, c_width),
-                                      _as_hex_util(high, c_width))
-                        : _as_hex_util(low, c_width);
+    return is_range() ? fmt::format("{}-{}", _as_hex_util(low, c_width),
+                                    _as_hex_util(high, c_width))
+                      : _as_hex_util(low, c_width);
 }
 
 uintptr_t
@@ -69,7 +69,7 @@ address_range::is_valid() const
 bool
 address_range::contains(uintptr_t _v) const
 {
-    return (is_range()) ? (low <= _v && high > _v) : (_v == low);
+    return is_range() ? (low <= _v && high > _v) : (_v == low);
 }
 
 bool
@@ -115,7 +115,7 @@ address_range::operator<(address_range _v) const
     {
         return (low == _v.low) ? true : (low < _v.low);
     }
-    else if(!is_range() && _v.is_range())
+    if(!is_range() && _v.is_range())
     {
         return (low == _v.low) ? false : (low < _v.low);
     }
@@ -183,7 +183,6 @@ address_range::operator+=(address_range _v)
 hash_value_t
 address_range::hash() const
 {
-    return (is_range()) ? tim::get_hash_id(hash_value_t{ low }, high)
-                        : hash_value_t{ low };
+    return is_range() ? tim::get_hash_id(hash_value_t{ low }, high) : hash_value_t{ low };
 }
 }  // namespace rocprofsys::binary

@@ -6,6 +6,7 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
+#include <algorithm>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
@@ -86,7 +87,7 @@ get_name(procedure_t* _func)
     auto itr = _v.find(_func);
     if(itr == _v.end())
     {
-        _v.emplace(_func, (_func) ? _func->getDemangledName() : std::string{});
+        _v.emplace(_func, _func ? _func->getDemangledName() : std::string{});
     }
 
     return _v.at(_func);
@@ -243,11 +244,9 @@ get_func_file_line_info(module_t* module, procedure_t* func)
         return function_signature(_return_type, _func_name, _file_name, _param_types,
                                   { _row, 0 }, { 0, 0 }, false, true, false);
     }
-    else
-    {
-        return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                  { 0, 0 }, { 0, 0 }, false, false, false);
-    }
+
+    return function_signature(_return_type, _func_name, _file_name, _param_types,
+                              { 0, 0 }, { 0, 0 }, false, false, false);
 }
 
 //======================================================================================//
@@ -321,10 +320,7 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
             _col2 = std::max(_col2, itr.lineOffset());
         }
 
-        if(_col1 < 0)
-        {
-            _col1 = 0;
-        }
+        _col1 = std::max(_col1, 0);
 
         if(module->getSourceLines(_last_addr, _lines_end))
         {
@@ -333,24 +329,16 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                 _row2 = std::max(_row2, itr.lineNumber());
                 _col2 = std::max(_col2, itr.lineOffset());
             }
-            if(_col2 < 0)
-            {
-                _col2 = 0;
-            }
-            if(_row2 < _row1)
-            {
-                _row1 = _row2;  // Fix for wrong line numbers
-            }
+            _col2 = std::max(_col2, 0);
+            _row1 = std::min(_row2, _row1);  // Fix for wrong line numbers
 
             return function_signature(_return_type, _func_name, _file_name, _param_types,
                                       { _row1, _row2 }, { _col1, _col2 }, true, true,
                                       true);
         }
-        else
-        {
-            return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                      { _row1, 0 }, { _col1, 0 }, true, true, false);
-        }
+
+        return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                  { _row1, 0 }, { _col1, 0 }, true, true, false);
     }
     else
     {
@@ -826,7 +814,7 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
                 _next = _next->l_next;
             }
 
-            if(_noload == false)
+            if(!_noload)
             {
                 dlclose(_handle);
             }
@@ -835,7 +823,7 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     };
 
     auto _full_chain = _get_chain(_lib);
-    auto _excl_chain = (_exclude_linked_by.empty())
+    auto _excl_chain = _exclude_linked_by.empty()
                            ? std::vector<std::string>{}
                            : _get_chain(_exclude_linked_by.c_str());
     auto _fini_chain = std::vector<std::string>{};
@@ -893,7 +881,7 @@ rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
         {
             return rocprofsys::path::realpath(_link_map->l_name);
         }
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -935,7 +923,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
         {
             return rocprofsys::path::realpath(_buffer);
         }
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }

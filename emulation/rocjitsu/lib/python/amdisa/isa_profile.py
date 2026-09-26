@@ -882,6 +882,16 @@ class IsaProfile(ABC):
         return None
 
     @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        """Mnemonic prefixes whose encoded destination is also an input."""
+        return ()
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        """True def widths for tied destinations whose encoded read is wider."""
+        return {}
+
+    @property
     def waitcnt_decode(self) -> str:
         """Return C++ code block that decodes a WAITCNT immediate into
         vmcnt, expcnt, and lgkmcnt local variables.
@@ -3011,6 +3021,19 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def vop3_carry_mask_size_bits(self) -> int | None:
         return 32
+
+    @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        # SWMMAC is a two-address operation: its encoded VDST supplies C as
+        # well as naming D. Keep the tied read implicit so disassembly prints
+        # the operand only once.
+        return ('V_SWMMAC_',)
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        # The MRISA encodes the largest (F32 accumulator) view. The BF16F32
+        # form actually writes a packed-BF16 matrix using half as many VGPRs.
+        return {'V_SWMMAC_BF16F32_16X16X64_BF16': 128}
 
     @property
     def supports_wgp_mode(self) -> bool:

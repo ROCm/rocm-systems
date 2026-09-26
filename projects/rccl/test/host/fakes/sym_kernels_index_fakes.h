@@ -25,6 +25,10 @@ extern std::function<int()> g_symkLLKernelMask;
 // sym_kernels.cc's ncclSymkDynamicSmemKernelMask: default has no bits set (kernelDynSmem stays 0).
 extern std::function<int()> g_symkDynamicSmemKernelMask;
 
+// sym_kernels.cc's ncclSymkTmaKernelMask: default has no bits set, so the scheduler's tile-staging
+// LDS check never fires.
+extern std::function<int()> g_symkTmaKernelMask;
+
 // sym_kernels.cc's ncclSymkGetKernelIndex: default always selects index 0.
 extern std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_symkGetKernelIndex;
 

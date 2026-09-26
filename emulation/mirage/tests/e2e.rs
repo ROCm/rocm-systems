@@ -3211,3 +3211,52 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
     assert_eq!(config["async_helper_threads"], 0);
     assert_eq!(config["vm"]["gpu"]["num_gpus"], 2);
 }
+
+/// `--config` hands the backend a file verbatim, which is exactly why the budget
+/// override needs its own route through it -- upstream `rocjitsu` takes the two
+/// together, and the only way to honour both is a copy the run owns.
+#[test]
+fn the_budget_flag_reaches_a_supplied_config_and_leaves_the_file_alone() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("supplied-config");
+    let show_config = r#"cat "$(cat "$ROCJITSU_RUNTIME_DIR/config_path")""#;
+    let supplied = env.root().join("supplied.json");
+    std::fs::write(
+        &supplied,
+        env.ok(&[
+            "run",
+            "--profile",
+            "supplied-config",
+            "--in-process",
+            "--",
+            "sh",
+            "-c",
+            show_config,
+        ]),
+    )
+    .unwrap();
+    let before = std::fs::read_to_string(&supplied).unwrap();
+
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "supplied-config",
+        "--in-process",
+        "--config",
+        supplied.to_str().unwrap(),
+        "--cpu-thread-budget",
+        "4",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+
+    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(config["cpu_thread_budget"], 4);
+    assert_eq!(config["vm"]["gpu"]["num_gpus"], 1);
+    assert_eq!(std::fs::read_to_string(&supplied).unwrap(), before);
+}

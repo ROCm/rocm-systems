@@ -188,9 +188,9 @@ template <typename... Tp>
 void
 push(type_list<Tp...>)
 {
-    ((settings::push_serialize_map_callback<Tp, custom_setting_serializer>()), ...);
-    ((settings::push_serialize_data_callback<Tp, custom_setting_serializer>(
-         type_list<std::string>{})),
+    (settings::push_serialize_map_callback<Tp, custom_setting_serializer>(), ...);
+    (settings::push_serialize_data_callback<Tp, custom_setting_serializer>(
+         type_list<std::string>{}),
      ...);
 }
 
@@ -198,9 +198,9 @@ template <typename... Tp>
 void
 pop(type_list<Tp...>)
 {
-    ((settings::pop_serialize_map_callback<Tp, custom_setting_serializer>()), ...);
-    ((settings::pop_serialize_data_callback<Tp, custom_setting_serializer>(
-         type_list<std::string>{})),
+    (settings::pop_serialize_map_callback<Tp, custom_setting_serializer>(), ...);
+    (settings::pop_serialize_data_callback<Tp, custom_setting_serializer>(
+         type_list<std::string>{}),
      ...);
 }
 
@@ -226,9 +226,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     _dirs.pop_back();
 
     std::string _output_dir = ".";
-    if(!_dirs.empty() && !(_dirs.size() == 1 && _dirs.at(0) == "."))
+
+    if(!_dirs.empty() && (_dirs.size() != 1 || !(_dirs.at(0) == ".")))
     {
-        _output_dir = std::string{ (_absolute) ? "/" : "" } + _dirs.front();
+        _output_dir = std::string{ _absolute ? "/" : "" } + _dirs.front();
         _dirs.erase(_dirs.begin());
         for(const auto& dir : _dirs)
         {

@@ -11,6 +11,12 @@
              "description": "data for rocprofv3",
               "properties": {
 
+                    "att_resource_mode": {
+                      "type": "string",
+                      "enum": ["default", "hsa", "code-object"],
+                      "description": "When to allocate thread trace resources for each GPU"
+                    },
+
                     "pmc": {
                       "type" : "array",
                       "description": "list of counters to collect"

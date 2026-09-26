@@ -425,8 +425,8 @@ post_process_causal(std::int64_t _tid, const std::vector<causal_bundle_t>& _data
 std::set<int>
 get_signal_types(std::int64_t _tid)
 {
-    return (get_causal_sampler_signals()) ? get_causal_sampler_signals(_tid)
-                                          : std::set<int>{};
+    return get_causal_sampler_signals() ? get_causal_sampler_signals(_tid)
+                                        : std::set<int>{};
 }
 
 std::set<int>
@@ -656,7 +656,7 @@ post_process()
     {
         auto& _causal = get_causal_sampler(i);
         auto  _causal_data =
-            (_causal) ? _causal->get_data() : std::vector<sampling::causal_bundle_t>{};
+            _causal ? _causal->get_data() : std::vector<sampling::causal_bundle_t>{};
 
         if(!_causal_data.empty())
         {
