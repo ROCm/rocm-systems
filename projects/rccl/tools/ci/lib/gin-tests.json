@@ -59,7 +59,7 @@
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
       "env": ["NCCL_DEBUG=WARN"],
-      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:GinAnvilIpcDeviceTest.*"
+      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:*GinAnvilSdmaStandaloneSignalQuietTest.*:GinAnvilIpcDeviceTest.*"
     },
     {
       "name": "rccl-gin-rocshmem-sdma-internal",
