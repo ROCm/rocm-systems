@@ -836,15 +836,7 @@ inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t fun
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
 }
 
-inline size_t rcclCeAr2ShotMaxTab(const rcclArchThresholds* table) {
-  const int64_t param = rcclParamCeArMaxMsgBytes();
-  if (param >= 0) return (size_t)param;
-  if (table == nullptr) return NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
-  return table->ceNonRegMax[ncclFuncAllReduce];
-}
-size_t rcclCeAr2ShotMax(const ncclComm* comm) {
-  return rcclCeAr2ShotMaxTab(extAlgoArchTable(comm));
-}
+
 
 // CE AllReduce is only tuned on gfx1250, so it is default-on there and stays off
 // everywhere else. Without this gate the arch tables for gfx942/gfx950 (which set
@@ -1232,7 +1224,7 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
   // 2-shot selector cap (table/env). 0 means 2-shot is tuned off; registered CE
   // still uses the default ceARTmpBuf. Does not override the allocated buffer:
   // ncclCeInit grows ceArMaxBytes when this cap is larger than the default.
-  const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+  const size_t twoShotMax = rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
   if (twoShotMax == 0) return false;
   size_t msgBytes = count * ncclTypeSize(datatype);
   if (msgBytes > twoShotMax) {
@@ -1420,11 +1412,19 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceArArchDefault = rcclCeAllReduceArchDefault(comm);
   const bool force = rcclForceCeAllReduceEnabledDef(ceArArchDefault);
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
+  // 2-shot message-size window: [twoShotMin, twoShotMax], mirroring agCeNonRegWindow
+  // for AllGather. Computed here so the bounds are visible in selector-level logs
+  // alongside symMaxR2/symMinR2, rather than buried inside rcclUseCeAr2Shot.
+  const size_t arTwoShotMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllReduce);
+  const size_t arTwoShotMin = rcclCeNonRegMinTab(archTable, ncclFuncAllReduce);
+  const bool twoShotWindow = arTwoShotMax > 0 && msgBytes <= arTwoShotMax &&
+                             (arTwoShotMin == 0 || msgBytes >= arTwoShotMin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
-  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
+  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && twoShotWindow &&
                                   rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
-
+  INFO(NCCL_TUNING, "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d twoShotWindow=%d (force=%d or symReg=%d) rcclUseCeAr2Shot=%d comm->ceColl.ceARTmpBuf not null:%d", 
+    (int)(!symkRequested), (int)ceAllReduceAllowed, (int)twoShotWindow, (int)force, (int)symReg, (int)rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr), (int)(comm->ceColl.ceARTmpBuf != NULL));
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
     // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
@@ -2058,13 +2058,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // Probe real window registration on both paths so the reported decision and
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
-    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
+    const size_t a2aCeRegMax = rcclCeRegMaxTab(archTable, ncclFuncAlltoAll);
+    const bool a2aCeRegWindow = a2aCeRegMax > 0 && totalBytes <= a2aCeRegMax;
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem && a2aCeRegWindow &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-    if (!query) INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d hasSysmem=%d ceAvailable=%d",
-         (int)comm->config.CTAPolicy, (int)a2aHasSysmem,
+    if (!query) INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d hasSysmem=%d ceRegWindow=%d ceAvailable=%d",
+         (int)comm->config.CTAPolicy, (int)a2aHasSysmem, (int)a2aCeRegWindow,
          (int)ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin));
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.

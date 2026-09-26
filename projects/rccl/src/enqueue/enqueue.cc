@@ -4692,7 +4692,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
           // message must fit the 2-shot window and the allocated buffer.
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+          const size_t twoShotMax = rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
           if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;

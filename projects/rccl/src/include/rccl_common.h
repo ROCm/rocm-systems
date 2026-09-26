@@ -261,12 +261,7 @@ RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMax
 RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
-// 2-shot AllReduce size cap: env RCCL_CE_AR_MAX_MSG_BYTES if set, else
-// ceNonRegMax[AR] from the arch table (0 = 2-shot disabled). A null table
-// (RCCL_IGNORE_ARCH_TABLE or unknown arch) restores the pre-table 256 MiB
-// window. Does not size ceARTmpBuf; that stays at
-// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES unless this cap is larger.
-size_t rcclCeAr2ShotMax(const ncclComm* comm);
+
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();

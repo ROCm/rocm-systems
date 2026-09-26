@@ -237,9 +237,9 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // gfx1250 uses registered CE instead) and off on gfx950. No env override.
         {"DefaultOff_2Shot_Gfx1250_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx1250"},
         // RCCL_CE_ALLREDUCE=-1 (default) is auto-on for gfx1250; overriding
-        // RCCL_CE_AR_MAX_MSG_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
+        // RCCL_CE_AR_2SHOT_MAX_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
         // returns true, confirming the default-on wiring.
-        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_MAX_MSG_BYTES", "1048576"}}, "gfx1250"},
+        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_2SHOT_MAX_BYTES", "1048576"}}, "gfx1250"},
         {"DefaultOff_Gfx950_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx950"},
         // Null archName (zero-initialised mock) also falls through to off.
         {"DisabledByDefault_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}},
@@ -300,17 +300,17 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
 
 
 // ---------------------------------------------------------------------------
-// rcclCeAr2ShotMax / ncclCeInit staging-buffer growth.
+// rcclCeNonRegMaxTab(table, ncclFuncAllReduce) / ncclCeInit staging-buffer growth.
 //
 // ncclCeInit (ce_coll.cc:111-114) grows ceArMaxBytes past
-// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeAr2ShotMax returns a larger
+// NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeNonRegMaxTab returns a larger
 // value.  Two sources can produce that:
 //   (a) table->ceNonRegMax[ncclFuncAllReduce] > default, read via archThresholds
-//   (b) RCCL_CE_AR_MAX_MSG_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
+//   (b) RCCL_CE_AR_2SHOT_MAX_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
 //
 // The tests below verify that the chunk-layout functions
 // (ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) remain
-// correct when ceArMaxBytes is grown, and that rcclCeAr2ShotMax resolves each
+// correct when ceArMaxBytes is grown, and that rcclCeNonRegMaxTab resolves each
 // source correctly.
 
 static rcclArchThresholds MakeTableWithArMax(size_t arMax)
@@ -320,8 +320,8 @@ static rcclArchThresholds MakeTableWithArMax(size_t arMax)
     return t;
 }
 
-// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeAr2ShotMax must return 512 MiB.
-TEST(RcclCeAr2ShotMax, TablePathReturnsGrownValue)
+// Table path: ceNonRegMax[AR] = 512 MiB -> rcclCeNonRegMaxTab must return 512 MiB.
+TEST(RcclCeNonRegMaxTab, TablePathReturnsGrownValue)
 {
     constexpr size_t kGrownMax = 512ull * 1024 * 1024;
     rcclArchThresholds tbl = MakeTableWithArMax(kGrownMax);
@@ -329,27 +329,27 @@ TEST(RcclCeAr2ShotMax, TablePathReturnsGrownValue)
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = &tbl;
 
-    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), kGrownMax);
+    EXPECT_EQ(rcclCeNonRegMaxTab(extAlgoArchTable(mock.get()), ncclFuncAllReduce), kGrownMax);
 }
 
 // Table path at the default value: no spurious growth.
-TEST(RcclCeAr2ShotMax, TablePathAtDefaultNoGrowth)
+TEST(RcclCeNonRegMaxTab, TablePathAtDefaultNoGrowth)
 {
     rcclArchThresholds tbl = MakeTableWithArMax(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = &tbl;
 
-    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+    EXPECT_EQ(rcclCeNonRegMaxTab(extAlgoArchTable(mock.get()), ncclFuncAllReduce), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 }
 
 // Null table: falls back to NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
-TEST(RcclCeAr2ShotMax, NullTableFallsBackToDefault)
+TEST(RcclCeNonRegMaxTab, NullTableFallsBackToDefault)
 {
     CeAllReduceMockComm mock;
     mock.comm.archThresholds = nullptr;
 
-    EXPECT_EQ(rcclCeAr2ShotMax(mock.get()), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
+    EXPECT_EQ(rcclCeNonRegMaxTab(extAlgoArchTable(mock.get()), ncclFuncAllReduce), NCCL_CE_AR_TMPBUF_DEFAULT_BYTES);
 }
 
 // Slot-stride invariants must hold when ceArMaxBytes is grown to 512 MiB.

@@ -878,7 +878,7 @@ threshold table introduced for gfx1250.
     * - | ``RCCL_FORCE_CE_ALLREDUCE``
         | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement for
           CE AllReduce, allowing CE to run without symmetric window registration.
-          Does not override the staging buffer size cap (``RCCL_CE_AR_MAX_MSG_BYTES``
+          Does not override the staging buffer size cap (``RCCL_CE_AR_2SHOT_MAX_BYTES``
           or the arch table ``ceNonRegMax[AR]``); that cap is enforced regardless.
           When ``-1`` (auto), follows the same gfx1250-default logic as
           ``RCCL_CE_ALLREDUCE``.
@@ -886,7 +886,7 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
-    * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
+    * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
           null or unknown-arch table restores the pre-table 256 MiB default. This
@@ -909,7 +909,7 @@ threshold table introduced for gfx1250.
           compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
       - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
