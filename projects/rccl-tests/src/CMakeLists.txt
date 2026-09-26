@@ -184,12 +184,6 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
         target_link_options(${target} PRIVATE -fgpu-rdc --hip-link -rdynamic)
     endfunction()
 
-    # GIN-SDMA hybrid AllGather (all_gather_perf -D 3) needs ENABLE_DEVICE_API
-    # so the GinHybridAllGatherKernel is compiled into this binary.
-    if (ENABLE_DEVICE_API)
-      target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
-    endif()
-
     # Device-api CI builds one --rocshmem-gin librccl.so and runs the matrix
     # against it. Every launched binary must RDC-link rocSHMEM so GIN host
     # symbols resolve from the executable. all_reduce_perf is omitted: it
