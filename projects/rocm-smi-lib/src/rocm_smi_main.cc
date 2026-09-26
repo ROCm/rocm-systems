@@ -309,7 +309,13 @@ void RocmSMI::Initialize(uint64_t flags) {
   // internal data structures.
   ret = DiscoverAmdgpuDevices();
   if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverAmdgpuDevices() failed.");
+    if (ret == 2) {
+        // DiscoverAmdgpuDevices returns 2 when GetLargestNodeNumber failed with ENOENT
+        throw amd::smi::rsmi_exception(RSMI_STATUS_NOT_SUPPORTED,
+                                       "DiscoverAmdgpuDevices() did not detect a supported device.");
+    }
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                                   "DiscoverAmdgpuDevices() failed.");
   }
 
   ss << __PRETTY_FUNCTION__ << " | about to sort by BDF..." << std::endl;
@@ -343,6 +349,10 @@ void RocmSMI::Initialize(uint64_t flags) {
 
   std::map<uint64_t, std::shared_ptr<KFDNode>> tmp_map;
   i_ret = DiscoverKFDNodes(&tmp_map);
+  if (i_ret == ENOENT) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_NOT_SUPPORTED,
+                                   "Failed to initialize rocm_smi library (KFD node discovery).");
+  }
   if (i_ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
                                    "Failed to initialize rocm_smi library (KFD node discovery).");
@@ -812,12 +822,16 @@ uint32_t GetLargestNodeNumber(const std::string& path = "/sys/class/kfd/kfd/topo
   // Open the directory
   DIR* dir = opendir(path.c_str());
   if (!dir) {
+    int error = errno;
     // Return UINT32_MAX on error
-    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << errno
-       << " | error = " << strerror(errno);
+    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << error
+       << " | error = " << strerror(error);
     // std::cout << ss.str() << std::endl;
     LOG_ERROR(ss);
-    return UINT32_MAX;
+    if (error == ENOENT)
+      return UINT32_MAX-1;
+    else
+      return UINT32_MAX;
   }
 
   struct dirent* entry;
@@ -860,6 +874,12 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
      << " kfd nodes";
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
+  if (max_nodes == UINT32_MAX-1) {
+    ss << __PRETTY_FUNCTION__ << " | Failed to get kfd directory";
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
+    return 2;
+  }
   if (max_nodes == UINT32_MAX) {
     ss << __PRETTY_FUNCTION__ << " | Failed to get largest node number";
     // std::cout << ss.str() << std::endl;
