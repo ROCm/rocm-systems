@@ -12,6 +12,7 @@
 #include "nccl_net.h"
 #include "comm.h"
 #include "checks.h"
+#include "os.h"   // strcasecmp
 
 #define NCCL_UNDEF_DEV_COUNT -1
 
@@ -52,6 +53,23 @@ struct rcclIBNicInfo {
   int rate;
   int count;
 };
+
+/**
+ * @brief Map an NCCL_NET value to the plugin name it selects.
+ *
+ * Plugin selection only: ROCM-IB and IB-CAST load the same plugin but are not
+ * the same mode. The other ROCM-IB / IB-CAST comparisons (transport/net.cc,
+ * plugin/gin.cc, plugin/rma.cc) must keep matching their own literal spelling.
+ *
+ * NCCL_NET= (set but empty) is passed through, as upstream does.
+ *
+ * inline: the unit-test binaries compile init.cc without transport/net.cc.
+ */
+inline const char* rcclCanonicalNetName(const char* envNetName) {
+  if (envNetName == nullptr) return nullptr;
+  if (strcasecmp(envNetName, "ROCM-IB") == 0) return "IB-CAST";
+  return envNetName;
+}
 
 /**
  * @brief Get the primary NIC info
