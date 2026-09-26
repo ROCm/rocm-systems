@@ -1,0 +1,140 @@
+{
+  "note": "Hand-authored map of AMD SMI's artifacts and its four delivery channels. It is not derived from the specs -- it is an index INTO them: every node and edge names the capability that specifies it. If a claim here disagrees with the capability it cites, the capability wins and this file is wrong.",
+  "title": "Build and delivery",
+  "subtitle": "four channels, one tree",
+  "stages": [
+    {
+      "id": "source",
+      "label": "Source"
+    },
+    {
+      "id": "artifact",
+      "label": "Artifact"
+    },
+    {
+      "id": "channel",
+      "label": "Channel"
+    },
+    {
+      "id": "install",
+      "label": "Where it lands"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "sources",
+      "stage": "source",
+      "label": "projects/amdsmi",
+      "note": "C++ library, Python module, CLI, Go shim, Rust crate"
+    },
+    {
+      "id": "tree",
+      "stage": "artifact",
+      "label": "prefix-relative tree",
+      "spec": "amdsmi-install-layout",
+      "note": "bin -> libexec -> share -> lib, relocatable as a unit"
+    },
+    {
+      "id": "deb",
+      "stage": "channel",
+      "label": "amd-smi-lib deb/rpm",
+      "spec": "amdsmi-python-system-package",
+      "note": "AMD SMI's own CPack"
+    },
+    {
+      "id": "wheel",
+      "stage": "channel",
+      "label": "amdsmi PyPI wheel",
+      "spec": "amdsmi-python-wheel",
+      "note": "BUILD_PYTHON_WHEEL=ON only"
+    },
+    {
+      "id": "artifact_core",
+      "stage": "channel",
+      "label": "core-amdsmi artifact",
+      "spec": "amdsmi-therock-artifact",
+      "note": "built by TheRock as a subproject"
+    },
+    {
+      "id": "opt_rocm",
+      "stage": "install",
+      "label": "/opt/rocm",
+      "spec": "amdsmi-install-layout"
+    },
+    {
+      "id": "sitepkgs",
+      "stage": "install",
+      "label": "system site-packages",
+      "spec": "amdsmi-python-system-package",
+      "note": "the only channel that puts amdsmi on the default sys.path"
+    },
+    {
+      "id": "venv",
+      "stage": "install",
+      "label": "venv site-packages",
+      "spec": "amdsmi-python-loader",
+      "note": "bundled libamd_smi_python.so; system fallback disabled"
+    },
+    {
+      "id": "sdk",
+      "stage": "install",
+      "label": "rocm-sdk-core wheel",
+      "spec": "amdsmi-rocm-python-distribution",
+      "note": "share/amd_smi only; import amdsmi does not work out of the box"
+    },
+    {
+      "id": "native",
+      "stage": "install",
+      "label": "amdrocm-amdsmi + tarballs",
+      "spec": "amdsmi-rocm-os-packages",
+      "note": "/opt/rocm/core-X.Y, vendored rocm_sysdeps"
+    }
+  ],
+  "edges": [
+    {
+      "from": "sources",
+      "to": "tree"
+    },
+    {
+      "from": "tree",
+      "to": "deb",
+      "label": "CPack"
+    },
+    {
+      "from": "tree",
+      "to": "artifact_core",
+      "label": "TheRock stage",
+      "spec": "amdsmi-therock-subproject"
+    },
+    {
+      "from": "sources",
+      "to": "wheel",
+      "label": "staged copy",
+      "spec": "amdsmi-python-wheel"
+    },
+    {
+      "from": "deb",
+      "to": "opt_rocm"
+    },
+    {
+      "from": "deb",
+      "to": "sitepkgs",
+      "label": "DESTDIR only"
+    },
+    {
+      "from": "wheel",
+      "to": "venv",
+      "label": "pip install amdsmi"
+    },
+    {
+      "from": "artifact_core",
+      "to": "sdk",
+      "label": "rocm-sdk"
+    },
+    {
+      "from": "artifact_core",
+      "to": "native",
+      "label": "native packages"
+    }
+  ]
+}
