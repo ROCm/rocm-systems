@@ -1,8 +1,8 @@
 # ConSan validation on CDNA5 (gfx1250)
 
-This table starts the September 25, 2026 revalidation of external workloads in
-RocJITsu emulation. Empty cells mean **not yet revalidated**; historical results
-are retained in git history. Rows use the existing gfx1250 workload manifest:
+This table records the September 25–26, 2026 revalidation of external workloads
+in RocJITsu emulation. All rows have been assessed; orange cells retain measured
+clean-run execution limits. Historical results are retained in git history. Rows use the existing gfx1250 workload manifest:
 IREE/Sharktank, five hip-moi fixtures, the CDNA5 HipKittens BF16 kernel,
 Tensile configurations, and PyTorch/Triton operations including tensor descriptors
 and cluster synchronization. The unavailable gfx1250 Jakub fixture and broad
@@ -53,7 +53,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟩 high: all 6 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 6 clean shards pass with complete tensor-DMA comparison coverage; fault 0/8 |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟩 high + 192 MiB report cap: all 6 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 6 clean shards pass with complete tensor-DMA comparison coverage; fault 0/8 |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 sleep_wave=15: timed and untimed clean passes; detector 0/8 despite oracle failures 8/8 |
-| Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 high + 1 GiB cap: 3/6 full-clean shards pass; 511/512 time out at 14,400 s, 513 pending; untimed matching clean passes; fault 8/8 | 🟧 sleep_wave=15, untimed: matching clean passes; detector 0/8, oracle failures 8/8; full clean 5/6; 513 times out at 14,400 s |
+| Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 high + 1 GiB cap: 3/6 full-clean shards pass; 511/512/513 time out at 14,400 s; untimed matching clean passes; fault 8/8 | 🟧 sleep_wave=15, untimed: matching clean passes; detector 0/8, oracle failures 8/8; full clean 5/6; 513 times out at 14,400 s |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟩 high: all 9 clean shards pass; exact-artifact fault 8/8 | 🟨 sleep=15: all 9 clean shards pass with complete coverage; earlier-build fault 0/8 |
 | Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟩 high: all 6 clean shards pass; exact-artifact fault 6/8 | 🟨 sleep=15: all 6 clean shards pass with complete coverage; earlier-build fault 0/8 |
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟩 higher: all 3 clean shards pass with complete coverage; fault 8/8 | 🟨 sleep_wave=15: all 3 clean shards pass with complete coverage; detector 0/8 despite oracle failures 8/8 |

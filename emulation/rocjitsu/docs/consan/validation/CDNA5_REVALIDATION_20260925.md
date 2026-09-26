@@ -2852,3 +2852,37 @@ coverage is incomplete after termination, so the row remains orange despite
 the five accepted clean shapes. The matching targeted clean and healthy 0/8
 detector campaign (8/8 numerical oracle failures) remain separate valid
 evidence. Default's 513 shape is still running.
+
+### Final Default clean outcome and campaign assessment
+
+The last Default shard (513-by-513-by-513) reaches its actual 14,400-second
+execution limit after 107 numerical cases and one passing client. Its only
+oracle failure reasons are the budget and missing second client. All 216
+retained Default reports have zero diagnostic/conflict counts. The full sweep
+exits one with `[0, 0, 0, 1, 1, 1]`: three accepted small shapes and three
+large-shape timeouts. Its 8/8 fault campaign and matching untimed clean remain
+valid, but the family does not qualify green without a complete full clean.
+
+All 31 rows and 62 cells are now assessed: 31 green, 29 yellow, and two orange.
+The two oranges are the SGEMM full-clean execution limits above, with no
+remaining live qualification jobs. Yellow cells distinguish measured sampling
+misses from the explicitly reviewed no-cross-wave/global-only scope cases.
+F8GEMM/HGEMM SuperCollider retain explicitly labelled earlier-build fault
+results, each with its own matching clean comparator. No hardware-performance
+claim is made from emulator timings.
+
+The final evidence checks cover table counts/settings, matching hook identities
+for all green cells, clean-log diagnostic rejection, and the lower-preset
+search history. Sparse FP8 ML's deliberately stopped lower-preset campaigns
+each contain three terminal healthy misses, making 6/8 impossible; see
+`spmmml-lower-preset-final-audit.json`. Normal GCC regression evidence remains
+588/588 gfx1250 ConSan tests and 1,006 passing ConSan unit tests (two optional
+benchmark skips); the validation/replay Python suites pass 260 tests. The
+shared validation cgroup has no remaining processes and records zero OOM
+events under its 40 GiB limit. The status table reports the remaining clean
+qualification limits rather than treating partial runs as passes.
+
+`cdna5-completion-audit.json` records the final row/workload counts, shared
+legends, evidence checks, regression gates, memory limit, and empty validation
+process group. It distinguishes completed assessment from full qualification
+of the remaining orange and yellow cells.
