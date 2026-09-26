@@ -199,6 +199,12 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     );
 
     HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
+
+    // Without event age tracking, one notification releases one parked thread and may be
+    // consumed by another waiter. The async event monitor's interrupt-wait path doesn't
+    // apply the `prior != 0` demotion logic, so ask it to rescan.
+    if (!event_age && waiting_ > 1)
+      core::Runtime::runtime_singleton_->WakeAsyncSignalMonitor();
   }
 }
 
