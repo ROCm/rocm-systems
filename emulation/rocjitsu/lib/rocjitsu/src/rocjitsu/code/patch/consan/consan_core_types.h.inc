@@ -102,7 +102,7 @@ build_atomic_address_materialization(const AtomicAddressPlan &plan, uint16_t vcc
 /// Default per-buffer budget for automatic ConSan reports.
 inline constexpr uint64_t kDefaultAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
 /// Per-buffer safety bound, including explicit expert requests.
-inline constexpr uint64_t kOrdinaryAutoReportBufferCeilingBytes = 256u * 1024u * 1024u;
+inline constexpr uint64_t kOrdinaryAutoReportBufferCeilingBytes = 1024u * 1024u * 1024u;
 /// The hook reserves automatic report allocations against this process-wide
 /// ceiling under its registry lock. It bounds aggregate storage independently
 /// of the per-buffer limit.

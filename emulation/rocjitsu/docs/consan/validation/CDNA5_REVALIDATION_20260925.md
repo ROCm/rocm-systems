@@ -2058,3 +2058,24 @@ is complete but cannot stand in for the unfinished clients. The isolated
 rows and a clear marker. The newer evidence removes the observed mismatch
 from the status, leaving an orange timeout. Full eight-client completion
 is still required before claiming a clean row.
+
+### Complete 1 GiB report-cap support
+
+The first 1 GiB rerun correctly exposed the hook's independent 256 MiB
+limit (`sgemm-report1g-default-clean`); it was not a workload result. The
+shared report-planning constant now admits explicit caps up to 1 GiB in
+the hook parser, planner and allocator. The default stays 128 MiB, and
+the per-process aggregate stays 4 GiB. A regression models the observed
+879,844,152-byte requirement without allocation, verifies rejection under
+the smaller caps, and verifies unchanged capacity under the explicit
+1 GiB cap. Existing exact-boundary and overflow tests also pass.
+
+Normal GCC built the complete hook and unit test target. Report-planning
+tests pass (`report-cap1g-plan-tests.log`). An emulator D128 pressure smoke
+passes all four cases with the 1 GiB setting, complete 474/474 access and
+72/72 barrier coverage (`report-cap1g-emulated-smoke`). An earlier smoke
+invocation omitted the emulator launcher and is excluded; the corrected
+run explicitly uses the gfx1250 emulator. The retained hook is
+`report-cap1g-hook/librocjitsu_dbi_hooks.so`, SHA256
+`f101a84869f760bbe0d16545872c2e835ea7fd20ab15274f8d698b1f2f220600`.
+Existing sparse FP8 campaigns continue with their original immutable hook.

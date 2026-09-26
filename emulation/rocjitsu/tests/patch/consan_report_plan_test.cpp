@@ -108,6 +108,23 @@ TEST(AutoReportPlan, ExplicitLargerCapPreservesCompleteTensilePublicationInvento
             kOrdinaryAutoReportBufferCeilingBytes);
 }
 
+TEST(AutoReportPlan, LargeCodeObjectReportRequiresExplicitCap) {
+  // The gfx1250 SGEMM collection needs roughly 839 MiB of report storage.
+  // Model that size without allocating the buffer or weakening any capacity.
+  constexpr uint64_t required = 879844152u;
+  ASSERT_EQ((required - sizeof(ReportHeader)) % sizeof(uint64_t), 0u);
+  const AutoReportInventory inventory{
+      .watchpoint_count = (required - sizeof(ReportHeader)) / sizeof(uint64_t),
+  };
+  EXPECT_EQ(plan_auto_report(inventory).reason, AutoReportPlanReason::PerBufferCeiling);
+  EXPECT_EQ(plan_auto_report(inventory, 256u * 1024u * 1024u).reason,
+            AutoReportPlanReason::PerBufferCeiling);
+  const auto expanded = plan_auto_report(inventory, 1024u * 1024u * 1024u);
+  ASSERT_TRUE(expanded.complete());
+  EXPECT_EQ(expanded.required_bytes, required);
+  EXPECT_EQ(expanded.layout.watchpoint_capacity, inventory.watchpoint_count);
+}
+
 TEST(AutoReportPlan, AdaptiveBanksHonorExplicitCallerCap) {
   constexpr uint64_t kCallerCap = 1024u * 1024u;
   constexpr uint64_t kLogicalRanges = 4096u;
@@ -159,9 +176,9 @@ TEST(AutoReportPlan, RepresentableHugeCountsAreCapacityInsufficientNotOverflow) 
   EXPECT_FALSE(plan.layout.valid);
 }
 
-TEST(AutoReportPlan, FrozenSafetyCeilingsRemainDistinct) {
+TEST(AutoReportPlan, ReportCeilingsRemainDistinct) {
   EXPECT_EQ(kDefaultAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
-  EXPECT_EQ(kOrdinaryAutoReportBufferCeilingBytes, 256u * 1024u * 1024u);
+  EXPECT_EQ(kOrdinaryAutoReportBufferCeilingBytes, 1024u * 1024u * 1024u);
   EXPECT_EQ(kAutoReportProcessCeilingBytes, 4ull * 1024u * 1024u * 1024u);
   EXPECT_GT(kAutoReportProcessCeilingBytes, kOrdinaryAutoReportBufferCeilingBytes);
   EXPECT_EQ(auto_report_plan_reason_name(AutoReportPlanReason::PerBufferCeiling),
