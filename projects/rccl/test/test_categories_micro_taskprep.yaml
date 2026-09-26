@@ -10,6 +10,7 @@ test_categories:
       - "TaskPrepMicrotest.*"
       - "TaskClassifyMicrotest.*"
       - "TaskPreTuningMicrotest.*"
+      - "TaskPostTuningMicrotest.*"
     exclude_windows:
       - "*"
     labels:

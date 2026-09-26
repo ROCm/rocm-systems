@@ -61,6 +61,11 @@ T TaskPrep_Poisoned() {
   return value;
 }
 
+// Synthetic buffer addresses: a literal reinterpret_cast at every use site reads as a real allocation.
+inline void* TaskPrep_Addr(uintptr_t address) {
+  return reinterpret_cast<void*>(address);
+}
+
 // ncclComm carries channels[MAXCHANNELS] inline, so it lives on the heap; a stack instance overflows.
 class TaskPrepScene {
  public:
