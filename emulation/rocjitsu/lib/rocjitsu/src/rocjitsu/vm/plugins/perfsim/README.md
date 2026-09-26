@@ -61,12 +61,54 @@ For a larger trace, the budget can be raised explicitly:
 The 1 GiB value is only an example, not a recommended default. A larger budget
 trades host memory for trace coverage, and some known traces exceed even 1 GiB.
 
+To profile one kernel in a multi-dispatch application, set `dispatch_name` to
+the exact kernel name:
+
+```json
+"perfsim": {
+  "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
+  "dispatch_name": "_topk_topp_kernel"
+}
+```
+
+Nonmatching dispatches still execute normally in RocJITsu, including their
+functional memory effects. The adapter only suppresses their observer event
+staging and replay into Perfsim. Matching is exact; it is neither a prefix nor
+a regular-expression match. If `dispatch_name` is absent, every supported
+dispatch is forwarded exactly as before.
+
+For diagnostic runs, `max_observed_wgps` can additionally cap the number of
+distinct workgroups whose events are staged for each selected dispatch:
+
+```json
+"perfsim": {
+  "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
+  "dispatch_name": "_topk_topp_kernel",
+  "max_observed_wgps": 1
+}
+```
+
+The cap does not skip functional execution. It only limits observer events,
+and is disabled when omitted. A capped trace is incomplete and must not be
+treated as an exact full-grid result unless the backend explicitly reconstructs
+the full population from dispatch geometry and the workload satisfies that
+backend's scaling assumptions.
+
 Configure Perfsim through its own environment, then launch the workload:
 
 ```bash
 /absolute/path/to/install/bin/rocjitsu \
   --config /absolute/path/to/gfx1250-config.json -- ./application
 ```
+
+`GPUCSIM_INTERNAL_DETAILED_REPORT=1` is a diagnostic option implemented by
+recent `libgpucsim_ffm_plugin.so` builds, not by the RocJITsu adapter. It asks
+the backend to emit its internal detailed JSON schema, including fields such as
+`dispatch_id`. Leave it unset (or set it to `0`) for the stable public summary
+schema. The detailed schema is intended for backend qualification and tests,
+may change with the backend, and should not be treated as a customer-facing
+report contract. The real-backend parity test enables it itself because that
+test compares dispatches individually.
 
 ## Backend ABI
 
