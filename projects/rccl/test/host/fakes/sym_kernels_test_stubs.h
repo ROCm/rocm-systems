@@ -56,7 +56,28 @@
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f8e5m2) \
-  X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2)
+  X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2) \
+  RCCL_SYMK_TEST_TMA_KERNEL_IDS(X)
+
+// The DMA-staged kernels, emitted only when gfx1250 is in GPU_TARGETS. Listed unconditionally:
+// elsewhere they are simply unreferenced and --gc-sections drops them.
+#define RCCL_SYMK_TEST_TMA_KERNEL_IDS(X) \
+  X(ncclSymkDevKernel_AllGather_TmaST) \
+  X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32) \
+  X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f16) \
+  X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_bf16) \
+  X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f8e4m3) \
+  X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f16) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_sum_bf16) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f8e4m3) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f16) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_bf16) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e4m3) \
+  X(ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2)
 
 // One stub per kernel plus its _profile sibling: both arrays sym_kernels_host.cc defines need a real address.
 #define RCCL_SYMK_TEST_STUB(name) \
@@ -65,5 +86,6 @@
 RCCL_SYMK_TEST_KERNEL_IDS(RCCL_SYMK_TEST_STUB)
 #undef RCCL_SYMK_TEST_STUB
 #undef RCCL_SYMK_TEST_KERNEL_IDS
+#undef RCCL_SYMK_TEST_TMA_KERNEL_IDS
 
 #endif  // RCCL_TEST_HOST_FAKES_SYM_KERNELS_TEST_STUBS_H_

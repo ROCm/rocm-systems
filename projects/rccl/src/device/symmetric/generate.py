@@ -12,6 +12,11 @@ import shutil
 
 gensrc = sys.argv[1]
 
+# The second argument, when present, is CMake's GPU_TARGETS list. It selects the
+# arch-specific algos below; absent (e.g. a bare run of this script) nothing
+# arch-specific is emitted.
+gpu_targets = sys.argv[2] if len(sys.argv) > 2 else ""
+
 if os.path.exists(gensrc):
   for name in os.listdir(gensrc):
     path = os.path.join(gensrc, name)
@@ -90,17 +95,29 @@ ty_to_cxxtype = {
   "f8e5m2": "rccl_bfloat8"
 }
 
+# The Tma* algos stage their tiles through a DMA engine rather than per-lane vector
+# loads (see NCCL_SYMK_ASYNC_TILE in src/device/symmetric/primitives.cuh). On ROCm
+# that engine is the gfx1250 Tensor Data Mover, so on any other target these kernels
+# would compile down to a duplicate of their vector counterpart -- emit them only
+# when a capable arch is in GPU_TARGETS.
+have_tdm = "gfx1250" in gpu_targets
+
 def enumerate_kernels():
-  for algo in ["LL","ST"]:
+  ag_algos = ["LL","ST"] + (["TmaST"] if have_tdm else [])
+  # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
+  # equivalent for, so they stay out regardless of the target.
+  ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])
+  rs_algos = ["LL","LD"] + (["TmaLD"] if have_tdm else [])
+  for algo in ag_algos:
     yield Rec(coll="AllGather", algo=algo)
   for red in all_reds:
     for ty in all_tys:
-      for algo in ["AGxLL_R","RSxLD_AGxST"]:
+      for algo in ar_algos:
         # AllReduce implements sum only; skip avg (matches upstream).
         if red == "avg":
           continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
-      for algo in ["LL","LD"]:
+      for algo in rs_algos:
         # ReduceScatter emits sum and avg for every float type.
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
       # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
