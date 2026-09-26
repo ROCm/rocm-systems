@@ -12,13 +12,14 @@ sys.path.insert(
 from accl_report import parse_jsonl, fmt_size  # noqa: E402
 
 
-def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0):
+def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0,
+                 msg_size=1048576, coll="AllReduce"):
     return json.dumps({
         "header": {"rank": rank, "n_ranks": n_ranks},
         "coll_perf": {
-            "coll": "AllReduce",
+            "coll": coll,
             "coll_sn": sn,
-            "coll_msg_size_bytes": 1048576,
+            "coll_msg_size_bytes": msg_size,
             "coll_algo": "Ring",
             "coll_proto": "Simple",
             "coll_n_channels": 4,
@@ -67,6 +68,37 @@ def test_warmup_default_drops_first_five():
         records = parse_jsonl(path, warmup=5)
         assert len(records) == 6
         assert records[0].sn == 5
+    finally:
+        os.unlink(path)
+
+
+def test_warmup_is_applied_per_message_size():
+    lines = [
+        _make_record(sn=i, msg_size=1024)
+        for i in range(0, 4)
+    ] + [
+        _make_record(sn=i, msg_size=2048)
+        for i in range(4, 8)
+    ]
+    path = _write_jsonl(lines)
+    try:
+        records = parse_jsonl(path, warmup=2)
+        assert [(r.sn, r.msg_size) for r in records] == [
+            (2, 1024), (3, 1024), (6, 2048), (7, 2048),
+        ]
+    finally:
+        os.unlink(path)
+
+
+def test_warmup_is_applied_per_rank():
+    lines = []
+    for sn in range(0, 3):
+        lines.append(_make_record(sn=sn, rank=0))
+        lines.append(_make_record(sn=sn, rank=1))
+    path = _write_jsonl(lines)
+    try:
+        records = parse_jsonl(path, warmup=2)
+        assert [(r.rank, r.sn) for r in records] == [(0, 2), (1, 2)]
     finally:
         os.unlink(path)
 

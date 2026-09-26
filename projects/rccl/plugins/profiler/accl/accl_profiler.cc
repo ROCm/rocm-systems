@@ -560,11 +560,9 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     }
 
     struct acclCollInfo* coll = (struct acclCollInfo*)eDescr->parentObj;
+    // profiler v5 channelId is uint8_t, so its full 0..255 range fits the
+    // ACCL_MAX_CHANNELS (256) array.
     uint8_t chId = eDescr->kernelCh.channelId;
-    if (chId >= ACCL_MAX_CHANNELS) {
-      *eHandle = NULL;
-      return ncclSuccess;
-    }
 
     pthread_mutex_lock(&coll->mutex);
     struct acclKernelChInfo* kch = &coll->kernelCh[chId];
