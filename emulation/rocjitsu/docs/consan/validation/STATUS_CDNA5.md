@@ -20,8 +20,8 @@ preset at or above `default`; SuperCollider cells name the tested controls.
 Emulator results do not qualify physical hardware or measure its performance.
 Follow [VALIDATION.md](VALIDATION.md), beginning with allowlist discovery.
 This campaign uses rocprofv3 inside the gfx1250 emulator; see the
-[campaign setup and evidence](CDNA5_REVALIDATION_20260925.md) for profiler ordering
-and matching runtime requirements.
+[campaign setup and evidence](CDNA5_REVALIDATION_20260925.md) for profiler ordering,
+matching runtime requirements, and the hook builds used by each campaign.
 For the global-access scope limitation relevant to `pytorch-scatter-reduce`, see
 [SuperCollider for global memory](../SUPERCOLLIDER_GLOBAL_MEMORY.md).
 
@@ -34,16 +34,16 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 high: clean pass at 1200 s; fault 8/8 | 🟨 sleep=15: current-hook clean pass at 1200 s; fault 0/8 |
-| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher: filtered clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
-| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 higher: clean pass with complete coverage; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
-| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 higher: all 3 clean runs pass; prefill fault 8/8 | 🟨 sleep=15: all 3 current-hook clean runs pass; prefill fault 0/8 |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 high: clean pass at 1200 s; fault 8/8 | 🟨 sleep=15: clean pass at 1200 s; fault 0/8 |
+| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher: filtered clean pass; fault 8/8 | 🟨 sleep=15: clean pass; fault 0/8 |
+| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 higher: clean pass with complete coverage; fault 8/8 | 🟨 sleep=15: clean pass; fault 0/8 |
+| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 higher: all 3 clean runs pass; prefill fault 8/8 | 🟨 sleep=15: all 3 clean runs pass; prefill fault 0/8 |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep_wave=15: clean pass; fault 0/8 |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: clean pass; fault 8/8 with complete publication evidence | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep_wave=15: clean pass with complete tensor-DMA comparison coverage; detector 0/8 despite oracle failures 8/8 |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: clean pass with complete tensor-DMA comparison coverage; fault 0/8 |
@@ -59,9 +59,9 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟩 higher: all 3 clean shards pass with complete coverage; fault 8/8 | 🟨 sleep_wave=15: all 3 clean shards pass with complete coverage; detector 0/8 despite oracle failures 8/8 |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: clean pass with complete tensor-load/store coverage; barrier drop does not create a cross-wave race | 🟨 sleep_wave=15: clean pass with complete tensor-load/store coverage; barrier drop does not create a cross-wave race |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 higher: clean pass with complete coverage; fault 8/8 | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 higher: clean pass with complete coverage; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
-| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
-| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
-| PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) | 🟨 default: current-hook clean pass; same-lane LDS accesses, barrier drop does not create a race | 🟨 delay-zero: current-hook clean pass; same-lane LDS accesses, barrier drop does not create a race |
+| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
+| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
+| PyTorch | P1 | cluster synchronization (`pytorch-cluster-load-sync`) | 🟨 default: clean pass; same-lane LDS accesses, barrier drop does not create a race | 🟨 delay-zero: clean pass; same-lane LDS accesses, barrier drop does not create a race |
