@@ -193,6 +193,13 @@ reports when observed values differ. It does not identify an exact racing pair
 or establish a happens-before violation. Compare known-correct and suspect runs;
 a mismatch alone is not a causal race diagnosis. See [MODES.md](MODES.md).
 
+On gfx1250, SuperCollider also checks tensor-DMA loads into LDS. It samples
+source values before the transfer and compares them with the destination LDS
+after completion. Current workload qualification uses the emulator; see the
+[CDNA5 validation table](validation/STATUS_CDNA5.md). General global-access
+support is tracked separately in [the global-memory design](SUPERCOLLIDER_GLOBAL_MEMORY.md).
+
+
 ```sh
 env -u RJ_CONSAN_PRESET HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_MODE=supercollider RJ_CONSAN_POLICY=strict RJ_CONSAN_LOG=1 \
