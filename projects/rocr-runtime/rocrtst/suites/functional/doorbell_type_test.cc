@@ -8,10 +8,9 @@
  * Standalone unit tests for doorbell type validation logic.
  * Can be compiled and run without ROCm/HSA runtime installed.
  *
- * When built as part of rocrtst, these TESTs are auto-registered with gtest
- * and run from the rocrtst64 binary's main(). No main() is defined here so
- * that this file can be linked into rocrtst64 without a duplicate-symbol
- * clash against suites/test_common/main.cc.
+ * The rocrtst CMake build compiles this file into a dedicated CPU-only target
+ * and deliberately excludes it from the legacy rocrtst64 aggregate. No main()
+ * is defined here because the target links the bundled gtest_main library.
  *
  * For a standalone hardware-free build, link against the bundled gtest_main
  * (the `gtest-all.cpp` amalgamation in this tree is stale — it #includes .cc
@@ -21,6 +20,7 @@
  * From projects/rocr-runtime/rocrtst/suites/functional/:
  *
  * Build:  g++ -std=c++17 -I../../gtest/include -I../../gtest \
+ *           -I../../../runtime/hsa-runtime \
  *           -o doorbell_type_test doorbell_type_test.cc \
  *           ../../gtest/src/gtest.cpp \
  *           ../../gtest/src/gtest-port.cpp \
@@ -39,34 +39,15 @@
 #include <iostream>
 #include <sstream>
 #include "gtest/gtest.h"
+#include "core/util/doorbell_type.h"
 
-// Doorbell type values from kfd_sysfs.h
-static const unsigned int kDoorbellTypePre1_0 = 0;
-static const unsigned int kDoorbellType1_0    = 1;
-static const unsigned int kDoorbellType2_0    = 2;
-static const unsigned int kDoorbellTypeReserved = 3;
-
-// Extract DoorbellType (bits 12-13) from capability field.
-// The field is currently 2 bits wide, so valid values are 0-3.
-// If the field is widened in future kernels, this mask must be updated.
-static unsigned int ExtractDoorbellType(uint32_t capability) {
-  return (capability >> 12) & 0x3;
-}
-
-// Build a synthetic capability value with a given doorbell type.
-// DoorbellType occupies bits 12-13 of the capability field.
-// Values larger than 3 are masked to 2 bits (current field width).
-static uint32_t MakeCapabilityWithDoorbell(unsigned int doorbell_type) {
-  return (doorbell_type & 0x3) << 12;
-}
-
-// Check whether a doorbell type is supported by the HSA runtime.
-// Only DoorbellType 2 (HSA_CAP_DOORBELL_TYPE_2_0, Vega+) is supported.
-// This mirrors the logic in amd_gpu_agent.cpp — if the supported set changes
-// there, it must change here too.
-static bool IsDoorbellTypeSupported(unsigned int doorbell_type) {
-  return doorbell_type == kDoorbellType2_0;
-}
+using rocr::AMD::ExtractDoorbellType;
+using rocr::AMD::IsDoorbellTypeSupported;
+using rocr::AMD::kDoorbellType1_0;
+using rocr::AMD::kDoorbellType2_0;
+using rocr::AMD::kDoorbellTypePre1_0;
+using rocr::AMD::kDoorbellTypeReserved;
+using rocr::AMD::MakeCapabilityWithDoorbell;
 
 // --- Known doorbell types: verify correct classification ---
 
