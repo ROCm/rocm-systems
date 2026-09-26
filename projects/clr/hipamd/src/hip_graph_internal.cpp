@@ -903,7 +903,19 @@ hipError_t Graph::CreateSegmentsFromPaths(
   segments_.clear();
   node_to_segment_id_.clear();
 
-  // Create a segment for each execution path at this level
+  // Process child graphs first so their segment priorities are cached before
+  // parent segments read them.
+  for (size_t i = 0; i < exec_paths.child_graph_paths.size(); ++i) {
+    const auto& child_paths = exec_paths.child_graph_paths[i];
+    if (child_paths.graph_ptr != nullptr) {
+      hipError_t status = child_paths.graph_ptr->CreateSegmentsFromPaths(child_paths);
+      if (status != hipSuccess) {
+        return status;
+      }
+    }
+  }
+
+  // Create a segment for each execution path at this level.
   int segment_id = 0;
   for (size_t i = 0; i < exec_paths.paths.size(); ++i) {
     const auto& h_path = exec_paths.paths[i];
@@ -916,16 +928,42 @@ hipError_t Graph::CreateSegmentsFromPaths(
     segment.first_node = h_path.nodes.front();
     segment.last_node = h_path.nodes.back();
 
-    // Preserve child graph information from hierarchical path
+    // Preserve child graph information from hierarchical path.
     if (h_path.child_graph_node != nullptr && h_path.child_graph_paths_index >= 0) {
-      // Get direct pointer to child graph from the node
       auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(h_path.child_graph_node);
       segment.child_graph_ptr = childGraphNode->GetChildGraph();
     }
 
+    // Cache declared priority from kernel nodes and child graph segments.
+    // Accumulate from Low upward so all-Low segments stay Low; unset kernel
+    // nodes return Normal (0) which pulls the accumulator up via std::min.
+    // Non-kernel nodes (memcpy, event, …) are skipped — if no kernel or
+    // child-graph node is found the segment keeps its Normal default.
+    int seg_prio = hip::Stream::Priority::Low;
+    bool has_priority_node = false;
+    for (const auto& node : segment.nodes) {
+      if (node == nullptr) continue;
+      int node_priority;
+      if (node->GetType() == hipGraphNodeTypeKernel) {
+        node_priority = static_cast<const GraphKernelNode*>(node)->GetDeclaredPriority();
+      } else if (node->GetType() == hipGraphNodeTypeGraph) {
+        Graph* child = node->GetChildGraph();
+        if (child == nullptr || child->segments_.empty()) continue;
+        node_priority = hip::Stream::Priority::Low;
+        for (const auto& child_seg : child->segments_)
+          node_priority = std::min(node_priority, child_seg.declared_priority);
+      } else {
+        continue;
+      }
+      seg_prio = std::min(seg_prio, node_priority);
+      has_priority_node = true;
+    }
+    if (has_priority_node)
+      segment.declared_priority = seg_prio;
+
     segments_.push_back(segment);
 
-    // Map each node in this segment to the segment ID (local to this graph)
+    // Map each node in this segment to the segment ID (local to this graph).
     for (const auto& node : segment.nodes) {
       node_to_segment_id_[node] = segment_id;
       node->segment_id_ = segment_id;
@@ -934,18 +972,6 @@ hipError_t Graph::CreateSegmentsFromPaths(
     segment_id++;
   }
 
-  // Recursively process child graphs
-  for (size_t i = 0; i < exec_paths.child_graph_paths.size(); ++i) {
-    const auto& child_paths = exec_paths.child_graph_paths[i];
-
-    if (child_paths.graph_ptr != nullptr) {
-      // Let the child graph create its own segments
-      hipError_t status = child_paths.graph_ptr->CreateSegmentsFromPaths(child_paths);
-      if (status != hipSuccess) {
-        return status;
-      }
-    }
-  }
   return hipSuccess;
 }
 
@@ -1283,6 +1309,8 @@ hipError_t GraphExecSegmented::FindStreamsReqPerDevForSegments() {
   return hipSuccess;
 }
 
+
+
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
   // max_streams_dev_ represents the total stream-slot count uniformly per device;
@@ -1294,6 +1322,16 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
                ? static_cast<size_t>(it->second) : 1;
   };
 
+  // Sort segments by declared priority so high-priority segments get slot 0 (the launch stream).
+  // Only reorder when the caller opts in via hipGraphInstantiateFlagUseNodePriority; recorded
+  // priorities remain available for the flagged path regardless.
+  const bool priority_declared = (flags_ & hipGraphInstantiateFlagUseNodePriority) != 0;
+  auto priority_of = [&](int seg_id) -> int {
+    if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size()))
+      return segments_[seg_id].declared_priority;
+    return static_cast<int>(hip::Stream::Priority::Normal);
+  };
+
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto it = segments_per_level_.find(level);
     if (it == segments_per_level_.end()) continue;
@@ -1301,6 +1339,11 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     // Per-device round-robin counters, reset per level so parallel segments on
     // the same device spread evenly across that device's stream pool.
     std::unordered_map<int, size_t> dev_idx;
+
+    if (priority_declared) {
+      std::stable_sort(it->second.begin(), it->second.end(),
+                       [&](int lhs, int rhs) { return priority_of(lhs) < priority_of(rhs); });
+    }
 
     for (int seg_id : it->second) {
       if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
