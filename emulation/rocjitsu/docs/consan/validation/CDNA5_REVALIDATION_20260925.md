@@ -2579,3 +2579,22 @@ pairs and the stronger shared-helper publication contract. This includes
 tests, it clears the regression failures found during this repair.
 The full SGEMM family clean and matching fault campaign are still live;
 no green E2E cell is inferred from regression testing alone.
+
+
+### Optional untimed Tensile validation verified
+
+The new `--skip-timing-dispatches` option removes Tensile's separate timing
+enqueue while preserving the numerical validator's warmup dispatch. It is
+explicitly restricted to correctness runs with no duration floor and bound to
+the replay contract. Existing campaigns retain their original controls.
+
+`tensile-untimed-probe` generates a fresh retained smoke replay, then passes
+baseline, Default, and SuperCollider numerical validation. Default covers all
+320 access sites, 22 barriers, four atomics and four fences; SuperCollider
+covers all 320 applicable access sites. Both analyses are complete. Generated
+client inputs retain `num-elements-to-validate=-1`, with zero timing syncs and
+zero host cooldown. The oracle reports no device timing. All 259 Python
+validation/replay tests pass, including rejection of numerical failures,
+missing rows/client passes, nonzero exits, mismatched manifests, and attempts
+to use this option for timing measurements. This smoke test does not qualify
+the full SGEMM family or change its cells.
