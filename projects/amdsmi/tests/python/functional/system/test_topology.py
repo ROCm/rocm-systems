@@ -145,6 +145,8 @@ class TestSystemTopology(unittest.TestCase):
                         self.assertIsInstance(handle, amdsmi.amdsmi_wrapper.amdsmi_processor_handle)
                     if processor_name == "AMD_GPU":
                         gpu_handles_by_type.extend(handles)
+                    if processor_name in ("UNKNOWN", "NON_AMD_GPU", "NON_AMD_CPU", "AMD_APU"):
+                        self.assertEqual(count, 0)
                     self.common.check_ret("", "", self.common.PASS)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                     if self.common.check_ret(msg, e, processor_cond):

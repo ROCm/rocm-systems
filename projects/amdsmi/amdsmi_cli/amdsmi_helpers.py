@@ -1300,9 +1300,7 @@ class AMDSMIHelpers:
                 gpu_id = "unknown"
 
         try:
-            # Check ASIC info flags to see if it's an APU (AMDGPU_IDS_FLAGS_FUSION = 0x1)
-            asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(device_handle)
-            if "flags" in asic_info and (asic_info["flags"] & 0x1):
+            if amdsmi_interface.amdsmi_is_gpu_apu(device_handle):
                 # For APUs, compare VRAM and GTT totals and use the larger one
                 try:
                     vram_total_check = amdsmi_interface.amdsmi_get_gpu_memory_total(
@@ -1330,7 +1328,7 @@ class AMDSMIHelpers:
                     )
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug(
-                "Failed to get ASIC info for gpu %s, defaulting to VRAM | %s",
+                "Failed to identify APU for gpu %s, defaulting to VRAM | %s",
                 gpu_id,
                 e.get_error_info(),
             )

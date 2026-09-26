@@ -342,10 +342,8 @@ def build_type_lists():
 
     processor_types = []
     for member in amdsmi.AmdSmiProcessorType:
-        cond = PASS
-        if member.name in ["UNKNOWN"]:
-            cond = FAIL
-        processor_types.append((member.name, amdsmi.AmdSmiProcessorType(member.value), cond))
+        # Every declared type is accepted; one with no processors returns an empty list.
+        processor_types.append((member.name, amdsmi.AmdSmiProcessorType(member.value), PASS))
 
     dev_perf_levels = []
     for member in amdsmi.AmdSmiDevPerfLevel:

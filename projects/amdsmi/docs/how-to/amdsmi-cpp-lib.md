@@ -70,7 +70,9 @@ processes.
 The list of socket handles obtained from `amdsmi_get_socket_handles()` can
 also be used to query the CPUs in each socket by calling
 `amdsmi_get_processor_handles_by_type()`. This function can then be called again
-to query the cores within each CPU.
+to query the cores within each CPU. Pass the exact type you want: a type with no
+matching processors returns an empty list, and `AMDSMI_PROCESSOR_TYPE_UNKNOWN` is
+not a wildcard.
 
 (cpp_hello_amdsmi)=
 ## Hello AMD SMI
