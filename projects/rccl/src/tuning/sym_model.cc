@@ -375,6 +375,18 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
     peakBw = m.peakBw[c] * GBps;
     withinPeakFactor = m.withinPeakFactor[c][p];
     if (isLL) busBytes *= m.llBusFactor[c] / LL_BusFactor;
+    // Without these TDM ties its vector twin and loses.
+    if (isTma) {
+      double bwGain = 1.0;
+      baseLat += 4.0;
+      if (k == ncclSymkKernelId_AllGather_TmaST) {
+        bwGain = 700.0 / 600.0;
+        baseLat += 19.0;
+      }
+      if (k != ncclSymkKernelId_AllGather_TmaSTMC) bwGain *= 1.07;
+      smBw *= bwGain;
+      peakBw *= bwGain;
+    }
   }
 #else
   if (comm->cudaArch < 1000) {
