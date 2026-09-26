@@ -38,8 +38,8 @@ HIP_TEST_CASE(Unit_hipGraphDestroy_Positive_Basic) {
 /**
  * Test Description
  * ------------------------
- *    - Basic negative parameter test for hipGraphDestroy
- *        -# Expected hipErrorInvalidValue when graph is invalid
+ *    - Verifies that hipGraphDestroy returns hipErrorInvalidValue for null and previously
+ *      destroyed graph handles.
  * Test source
  * ------------------------
  *    - unit/graph/hipGraphDestroy.cc
@@ -48,7 +48,18 @@ HIP_TEST_CASE(Unit_hipGraphDestroy_Positive_Basic) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipGraphDestroy_Negative_Parameters) {
-  HIP_CHECK_ERROR(hipGraphDestroy(static_cast<hipGraph_t>(nullptr)), hipErrorInvalidValue);
+  SECTION("Null graph") {
+    HIP_CHECK_ERROR(hipGraphDestroy(static_cast<hipGraph_t>(nullptr)), hipErrorInvalidValue);
+  }
+
+  SECTION("Previously destroyed graph") {
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK_ERROR(hipGraphDestroy(graph), hipErrorInvalidValue);
+  }
+
+  (void)hipGetLastError();
 }
 
 /**
