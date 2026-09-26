@@ -186,14 +186,23 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     if (Properties().maxSize != 0 && (max_total_size_ + size) > Properties().maxSize) {
       return nullptr;
     }
-    amd::Context* context = device_->asContext();
+    // Managed pools must allocate fine-grain, host-backed SVM on the host
+    // context (same as ihipMallocManaged); other pools use the per-device
+    // context and coarse-grain device memory.
+    const bool managed = (Properties().allocType == hipMemAllocationTypeManaged);
+    amd::Context* context = managed ? hip::host_context : device_->asContext();
     const auto& dev_info = context->devices()[0]->info();
     if (dev_info.maxMemAllocSize_ < size) {
       return nullptr;
     }
     cl_svm_mem_flags flags = (state_.interprocess_) ? ROCCLR_MEM_INTERPROCESS : 0;
     flags |= (state_.phys_mem_) ? ROCCLR_MEM_PHYMEM : 0;
-    if (state_.use_vm_heap_) {
+    if (managed) {
+      flags |= CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
+    }
+    // The VM-heap path (Alloc) ignores flags and cannot produce fine-grain
+    // memory, so bypass it for managed allocations.
+    if (state_.use_vm_heap_ && !managed) {
       dev_ptr = Alloc(size);
     } else {
       dev_ptr = amd::SvmBuffer::malloc(*context, flags, size, dev_info.memBaseAddrAlign_, nullptr);
@@ -215,13 +224,17 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     // Saves the current device id so that it can be accessed later
     memory->getUserData().deviceId = device_->deviceId();
 
-    // Update access for the new allocation from other devices
-    for (const auto& it : access_map_) {
-      auto vdi_device = it.first->asContext()->devices()[0];
-      device::Memory* mem = memory->getDeviceMemory(*vdi_device);
-      if ((mem != nullptr) && (it.second != hipMemAccessFlagsProtNone)) {
-        vdi_device->allowPeerAccess(mem);
-        mem->setAllowedPeerAccess(true);
+    // Fine-grain managed allocations are already host/all-device coherent,
+    // so per-device peer (P2P) access programming is unnecessary.
+    if (!managed) {
+      // Update access for the new allocation from other devices
+      for (const auto& it : access_map_) {
+        auto vdi_device = it.first->asContext()->devices()[0];
+        device::Memory* mem = memory->getDeviceMemory(*vdi_device);
+        if ((mem != nullptr) && (it.second != hipMemAccessFlagsProtNone)) {
+          vdi_device->allowPeerAccess(mem);
+          mem->setAllowedPeerAccess(true);
+        }
       }
     }
   } else {
