@@ -114,6 +114,7 @@ struct ncclIbConnectionMetadata {
   int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
   uint16_t commId;              // QP sharing comm ID (0 = not shared)
   int      senderIbDevIdx;      // sender's IB device index
+  bool     optRecvCompletion;   // Optional recv completion enabled
 };
 
 // Initialize QP sharing fields to defaults (sharing disabled)

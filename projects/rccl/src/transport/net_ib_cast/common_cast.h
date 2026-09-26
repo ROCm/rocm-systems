@@ -520,6 +520,7 @@ struct alignas(32) ncclIbNetCommBase {
   int nRemDevs;
   bool remOooRq;
   bool localOooRq;
+  bool optRecvCompletion;
   int recvMatchingScheme;
   int nDataQps;
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
@@ -739,6 +740,7 @@ static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");
 
 ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
+void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload);
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
 

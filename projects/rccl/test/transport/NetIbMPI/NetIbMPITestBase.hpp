@@ -51,6 +51,10 @@
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
+inline bool IsRealRequest(void* request) {
+    return request != nullptr && request != (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
+}
+
 // Skip a Cast test when any required WRR scheduler env var is absent or wrong.
 // Must be called from the test body (not a helper), because GTEST_SKIP() only
 // interrupts execution when expanded inline in the test scope.
@@ -76,6 +80,25 @@ using namespace RCCLTestHelpers;
                                 "Missing or wrong: " << _v.name                         \
                              << " (expected: " << (_v.required ? _v.required : "<any>") \
                              << "). Use cast_* configs in net_ib_transport.json.";       \
+            }                                                                            \
+        }                                                                                \
+    } while (0)
+
+// Optional recv completion: control on, QP sched off. Distinct from CAST_ENV_CHECK_OR_SKIP
+// (that table requires the scheduler on). Same getenv/required-value loop.
+#define OPT_RECV_ENABLED_ENV_CHECK_OR_SKIP()                                             \
+    do {                                                                                 \
+        struct { const char* name; const char* required; } _vars[] = {                  \
+            { "RCCL_IB_OPT_RECV_COMPLETION", "1" },                                     \
+            { "RCCL_IB_QP_SCHED_ENABLE",     "0" },                                     \
+        };                                                                               \
+        for (auto& _v : _vars) {                                                         \
+            const char* _val = getenv(_v.name);                                          \
+            bool _missing = !_val || _val[0] == '\0';                                    \
+            bool _wrong   = _v.required && (!_val || strcmp(_val, _v.required) != 0);   \
+            if (_missing || _wrong) {                                                    \
+                GTEST_SKIP() << "Requires " << _v.name << "=" << _v.required            \
+                             << " (use cast_opt_recv in net_ib_transport.json)";         \
             }                                                                            \
         }                                                                                \
     } while (0)
@@ -310,15 +333,18 @@ protected:
         return net_->deregMr(comm, mhandle);
     }
 
-    // Helper: Post send operation
+    // Helper: Post send operation. When optRecvHint is true, seed *request with
+    // NCCL_NET_OPTIONAL_RECV_COMPLETION so the plugin may skip the remote CQ.
     ncclResult_t PostSend(void* sendComm, void* data, size_t size, int tag,
-                         void* mhandle, void** request) {
+                         void* mhandle, void** request, bool optRecvHint = false) {
+        if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->isend(sendComm, data, size, tag, mhandle, nullptr, request);
     }
 
-    // Helper: Post recv operation
+    // Helper: Post recv operation. See PostSend for optRecvHint.
     ncclResult_t PostRecv(void* recvComm, int n, void** data, size_t* sizes,
-                         int* tags, void** mhandles, void** request) {
+                         int* tags, void** mhandles, void** request, bool optRecvHint = false) {
+        if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->irecv(recvComm, n, data, sizes, tags, mhandles, nullptr, request);
     }
 
@@ -422,18 +448,19 @@ protected:
     }
 
     // Helper: Retry until the receiver's FIFO slot is ready.
+    // Re-seed the optional-recv hint on every attempt: a NULL return overwrites it.
     void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
-                           void* mhandle, void** request) {
+                           void* mhandle, void** request, bool optRecvHint = false) {
         int attempts = 0;
         do {
-            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request);
+            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request, optRecvHint);
             ASSERT_EQ(result, ncclSuccess);
-            if (*request != nullptr) break;
+            if (IsRealRequest(*request)) break;
             if (++attempts >= kMaxRetryAttempts) {
                 FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
             }
             usleep(kPollIntervalUs);
-        } while (*request == nullptr);
+        } while (!IsRealRequest(*request));
     }
 
     // Helper: Wait for request completion with timeout
@@ -510,13 +537,15 @@ protected:
 
     // Composite block: Post a single irecv. Wraps the 4-array boilerplate.
     void PostSingleRecv(void* recvComm, void* buf, size_t size, int tag,
-                        void* mhandle, void** request) {
+                        void* mhandle, void** request, bool optRecvHint = false) {
         void*  bufs[1]    = {buf};
         size_t sizes[1]   = {size};
         int    tags[1]    = {tag};
         void*  handles[1] = {mhandle};
-        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request), ncclSuccess);
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request, optRecvHint), ncclSuccess);
     }
+
+    void OptRecvCompletionRunMultiRecv(bool optRecvHint);
 
     static bool PortIsEthernet(const char* portsPath, const char* port) {
         char path[PATH_MAX];
