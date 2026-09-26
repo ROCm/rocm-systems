@@ -121,9 +121,8 @@ struct ncclDevRedOpFull {
   uint64_t scalarArg;
 };
 
-#ifdef __HIP_DEVICE_COMPILE__
-#include "rccl_ptr.h"
-#endif
+
+#include "nccl_device/rccl_ptr.h"
 
 union ncclLLFifoLine {
   /* Flags have to be *after* data, because otherwise, an incomplete receive
@@ -138,10 +137,11 @@ union ncclLLFifoLine {
   };
   uint64_t v[2];
   int4 i4;
-#if defined(__HIP_DEVICE_COMPILE__) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   v4u v4u; /* same layout as data1,flag1,data2,flag2 for b128 load/store */
-#endif
 };
+
+static_assert(sizeof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16 bytes");
+static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-byte aligned");
 
 #if __HIP_DEVICE_COMPILE__
 #if defined(__GFX9__)
