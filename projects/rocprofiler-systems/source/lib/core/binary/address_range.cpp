@@ -115,7 +115,7 @@ address_range::operator<(address_range _v) const
     {
         return (low == _v.low) ? true : (low < _v.low);
     }
-    else if(!is_range() && _v.is_range())
+    if(!is_range() && _v.is_range())
     {
         return (low == _v.low) ? false : (low < _v.low);
     }

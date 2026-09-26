@@ -243,11 +243,9 @@ get_func_file_line_info(module_t* module, procedure_t* func)
         return function_signature(_return_type, _func_name, _file_name, _param_types,
                                   { _row, 0 }, { 0, 0 }, false, true, false);
     }
-    else
-    {
-        return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                  { 0, 0 }, { 0, 0 }, false, false, false);
-    }
+
+    return function_signature(_return_type, _func_name, _file_name, _param_types,
+                              { 0, 0 }, { 0, 0 }, false, false, false);
 }
 
 //======================================================================================//
@@ -346,11 +344,9 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                                       { _row1, _row2 }, { _col1, _col2 }, true, true,
                                       true);
         }
-        else
-        {
-            return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                      { _row1, 0 }, { _col1, 0 }, true, true, false);
-        }
+
+        return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                  { _row1, 0 }, { _col1, 0 }, true, true, false);
     }
     else
     {

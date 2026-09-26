@@ -147,7 +147,7 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
     {
         return true;
     }
-    else if(_name_len_limit == 0)
+    if(_name_len_limit == 0)
     {
         return false;
     }
