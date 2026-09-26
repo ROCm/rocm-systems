@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -476,6 +477,16 @@ def run(cmd, description=""):
         sys.exit(1)
 
 
+def make_scratch_dir(output, prefix):
+    """Scratch beside the output object, not TMPDIR: a signal-killed build skips
+    the cleanup, so orphans land in the tree a clean build already removes.
+    Still mkdtemp: one source compiles for many arches.
+    """
+    out_dir = os.path.dirname(output) or '.'
+    os.makedirs(out_dir, exist_ok=True)
+    return tempfile.mkdtemp(prefix=prefix, dir=out_dir)
+
+
 # ---------------------------------------------------------------------------
 # Compile mode: .cpp -> .o + .resources.json
 # ---------------------------------------------------------------------------
@@ -497,16 +508,14 @@ def do_compile(args, forwarded_flags):
     out_dir = os.path.dirname(output) or '.'
     os.makedirs(out_dir, exist_ok=True)
 
-    # Determine temp directory: alongside output if --keep-temps, else truly temp
     if keep_temps:
+        tmpdir = None
         asm_file = base + '.full.s'
         ext_file = base + '.extracted.s'
-        cleanup = []
     else:
-        tmpdir = tempfile.mkdtemp(prefix='rccl-dc-')
+        tmpdir = make_scratch_dir(output, 'rccl-dc-')
         asm_file = os.path.join(tmpdir, 'full.s')
         ext_file = os.path.join(tmpdir, 'extracted.s')
-        cleanup = [asm_file, ext_file, tmpdir]
 
     try:
         # Step 1: Compile to assembly
@@ -551,15 +560,8 @@ def do_compile(args, forwarded_flags):
         run(assemble_cmd, f"assemble {os.path.basename(source)}")
 
     finally:
-        if not keep_temps:
-            for f in cleanup:
-                try:
-                    if os.path.isfile(f):
-                        os.unlink(f)
-                    elif os.path.isdir(f):
-                        os.rmdir(f)
-                except OSError:
-                    pass
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -644,20 +646,17 @@ def do_link(args, forwarded_flags):
 
     output_dir = os.path.dirname(output) or '.'
     if keep_temps:
+        tmpdir = None
         disp_asm = os.path.join(output_dir, f'dispatcher_{arch}.s')
         disp_patched = os.path.join(output_dir, f'dispatcher_{arch}_patched.s')
         disp_obj = os.path.join(output_dir, f'dispatcher_{arch}.o')
         rocshmem_obj = os.path.join(output_dir, f'rocshmem_device_{arch}.o') if rocshmem_bitcode else None
-        cleanup = []
     else:
-        tmpdir = tempfile.mkdtemp(prefix='rccl-dl-')
+        tmpdir = make_scratch_dir(output, 'rccl-dl-')
         disp_asm = os.path.join(tmpdir, 'dispatcher.s')
         disp_patched = os.path.join(tmpdir, 'dispatcher_patched.s')
         disp_obj = os.path.join(tmpdir, 'dispatcher.o')
         rocshmem_obj = os.path.join(tmpdir, 'rocshmem_device.o') if rocshmem_bitcode else None
-        cleanup = [disp_asm, disp_patched, disp_obj, tmpdir]
-        if rocshmem_obj:
-            cleanup.insert(-1, rocshmem_obj)  # remove before rmdir
 
     try:
         # Step 2: Compile dispatcher to assembly.
@@ -704,7 +703,7 @@ def do_link(args, forwarded_flags):
 
         # Step 6: Link all objects + dispatcher into device.elf
         # Use a response file for potentially long object lists
-        rsp_path = os.path.join(output_dir, f'link_{arch}.rsp')
+        rsp_path = os.path.join(tmpdir or output_dir, f'link_{arch}.rsp')
         with open(rsp_path, 'w') as f:
             f.write(disp_obj + '\n')
             for obj in objects:
@@ -720,22 +719,9 @@ def do_link(args, forwarded_flags):
         link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt)
         run(link_cmd, f"link device.elf for {arch}")
 
-        if not keep_temps:
-            try:
-                os.unlink(rsp_path)
-            except OSError:
-                pass
-
     finally:
-        if not keep_temps:
-            for f in cleanup:
-                try:
-                    if os.path.isfile(f):
-                        os.unlink(f)
-                    elif os.path.isdir(f):
-                        os.rmdir(f)
-                except OSError:
-                    pass
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
