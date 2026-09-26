@@ -226,9 +226,13 @@ class Flag {
     var = os::GetEnvVar("HSA_TOOLS_REPORT_REGISTER_FAILURE");
     report_tool_register_failures_ = (var == "1") ? true : false;
 
-    // Opt-in switch for the rocjitsu hotswap tool. Leave the tool disabled
-    // unless the user explicitly requests it with a truthy value.
+    // Explicit environment settings override the build-time hotswap default.
+#if defined(HSA_HOTSWAP_DEFAULT_ON) && HSA_HOTSWAP_DEFAULT_ON
+    hotswap_enable_ = !os::IsEnvVarSet("HSA_HOTSWAP_ENABLE") ||
+        IsEnvVarTruthy("HSA_HOTSWAP_ENABLE");
+#else
     hotswap_enable_ = IsEnvVarTruthy("HSA_HOTSWAP_ENABLE");
+#endif
 
     var = os::GetEnvVar("HSA_DISABLE_FRAGMENT_ALLOCATOR");
     disable_fragment_alloc_ = (var == "1") ? true : false;
