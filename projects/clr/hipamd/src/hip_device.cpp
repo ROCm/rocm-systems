@@ -767,7 +767,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Caching behavior
   deviceProps.globalL1CacheSupported = 1;
   deviceProps.localL1CacheSupported = 1;
-  deviceProps.persistingL2CacheMaxSize = info.l2CacheSize_;
+  deviceProps.persistingL2CacheMaxSize = deviceHandle->PersistingL2CacheSizeMax();
   deviceProps.reservedSharedMemPerBlock = 0;
   deviceProps.sharedMemPerBlockOptin = info.localMemSizePerCU_;
 

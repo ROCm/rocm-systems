@@ -3,6 +3,34 @@
 
 cmake_minimum_required(VERSION 3.20)
 
+# Set default ROCM_PATH if not provided
+if(NOT DEFINED ROCM_PATH)
+  if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH $ENV{ROCM_PATH})
+  elseif(EXISTS "/opt/rocm")
+    set(ROCM_PATH "/opt/rocm")
+  endif()
+endif()
+
+# If compilers are specified without full path, prepend ROCM_PATH
+if(DEFINED CMAKE_C_COMPILER AND NOT IS_ABSOLUTE ${CMAKE_C_COMPILER})
+  if(EXISTS "${ROCM_PATH}/llvm/bin/${CMAKE_C_COMPILER}")
+    set(CMAKE_C_COMPILER "${ROCM_PATH}/llvm/bin/${CMAKE_C_COMPILER}")
+  endif()
+endif()
+
+if(DEFINED CMAKE_CXX_COMPILER AND NOT IS_ABSOLUTE ${CMAKE_CXX_COMPILER})
+  if(EXISTS "${ROCM_PATH}/llvm/bin/${CMAKE_CXX_COMPILER}")
+    set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/${CMAKE_CXX_COMPILER}")
+  endif()
+endif()
+
+if(DEFINED CMAKE_HIP_COMPILER AND NOT IS_ABSOLUTE ${CMAKE_HIP_COMPILER})
+  if(EXISTS "${ROCM_PATH}/llvm/bin/${CMAKE_HIP_COMPILER}")
+    set(CMAKE_HIP_COMPILER "${ROCM_PATH}/llvm/bin/${CMAKE_HIP_COMPILER}")
+  endif()
+endif()
+
 if (HIP_PLATFORM MATCHES "nvidia")
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES 75)
