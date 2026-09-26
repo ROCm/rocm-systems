@@ -429,7 +429,6 @@ def find_tool(name, hints, required=True):
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     # Fall back to PATH
-    import shutil
     path = shutil.which(name)
     if path:
         return path
@@ -445,7 +444,6 @@ def discover_tools(clang_path):
     if clang_path:
         clang = clang_path
     else:
-        import shutil
         clang = shutil.which('amdclang++') or shutil.which('clang++')
         if not clang:
             raise FileNotFoundError("Cannot find amdclang++ or clang++ on PATH")
