@@ -603,6 +603,523 @@ TEST(ConSanTensor, SelectedAddressesMatchEnumeratedDenseGatherAndRepeatedTransfe
   }
 }
 
+TEST(ConSanTensor, CoordinateDivisionMatchesIntegerOracleAndPreservesGuestState) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  for (unsigned width : {1u, 2u}) {
+    SCOPED_TRACE(width);
+    amdgpu::GpuMemory memory("tensor_division_mem");
+    amdgpu::L2Cache l2("tensor_division_l2");
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 4;
+    auto cu = amdgpu::ComputeUnitCore::create("tensor_division", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+    ASSERT_NE(wave, nullptr);
+    const auto vb = wave->vgpr_alloc().base;
+    const auto sb = wave->sgpr_alloc().base;
+    for (uint32_t reg = 0; reg < 106; ++reg)
+      cu->write_sgpr(sb + reg, 0xabcd0000u + reg);
+    std::vector<uint32_t> words;
+    if (width == 1)
+      ASSERT_TRUE(detail::append_tensor_divmod_u32(words, 10, 12, 20, 22, 30, arch));
+    else
+      ASSERT_TRUE(detail::append_tensor_divmod_u64(words, 10, 12, 20, 22, 30, arch));
+    for (size_t i = 0; i < words.size(); ++i)
+      memory.write32(i * 4, words[i]);
+    // Tensor halfword and 48-bit stride limits, unsigned boundaries, zero,
+    // and reproducible random pairs. Host integer arithmetic is the oracle.
+    constexpr std::array<uint64_t, 18> boundary{0,
+                                                1,
+                                                2,
+                                                3,
+                                                7,
+                                                65534,
+                                                65535,
+                                                65536,
+                                                0x7fffffffu,
+                                                0x80000000u,
+                                                0xfffffffeu,
+                                                0xffffffffu,
+                                                0x100000000ull,
+                                                0xffffffffffffull,
+                                                0x7fffffffffffffffull,
+                                                0x8000000000000000ull,
+                                                UINT64_MAX - 1,
+                                                UINT64_MAX};
+    uint64_t random = 0x6a09e667f3bcc909ull;
+    const auto next = [&] {
+      random ^= random << 13;
+      random ^= random >> 7;
+      random ^= random << 17;
+      return random;
+    };
+    for (uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
+      for (size_t batch = 0; batch < 40; ++batch) {
+        std::array<uint64_t, 32> dividends{}, divisors{};
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          const size_t index = batch * 32 + lane;
+          dividends[lane] = index < boundary.size() * boundary.size()
+                                ? boundary[index / boundary.size()]
+                                : next();
+          divisors[lane] = index < boundary.size() * boundary.size()
+                               ? boundary[index % boundary.size()]
+                               : next();
+          if (width == 1) {
+            dividends[lane] &= UINT32_MAX;
+            divisors[lane] &= UINT32_MAX;
+          }
+          for (uint32_t reg = 0; reg < 64; ++reg)
+            cu->write_vgpr(vb + reg, lane, 0xabc00000u + reg * 64u + lane);
+          for (unsigned word = 0; word < width; ++word) {
+            cu->write_vgpr(vb + 10 + word, lane, dividends[lane] >> (word * 32));
+            cu->write_vgpr(vb + 12 + word, lane, divisors[lane] >> (word * 32));
+          }
+        }
+        wave->pc = 0;
+        wave->set_exec(exec);
+        wave->write_scc(batch % 2 != 0);
+        size_t steps = 0;
+        while (wave->pc < words.size() * 4) {
+          ASSERT_LT(steps++, words.size() * 100);
+          cu->step();
+        }
+        cu->flush_all();
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          const bool active = (exec >> lane) & 1u;
+          const uint64_t numerator = dividends[lane], denominator = divisors[lane];
+          const uint64_t quotient = denominator ? numerator / denominator : UINT64_MAX;
+          const uint64_t remainder = denominator ? numerator % denominator : numerator;
+          for (uint32_t reg = 0; reg < 64; ++reg) {
+            if (active && reg >= 30 && reg < 30 + width + 2)
+              continue;
+            uint32_t expected = 0xabc00000u + reg * 64u + lane;
+            if (reg >= 10 && reg < 10 + width)
+              expected = numerator >> ((reg - 10) * 32);
+            if (reg >= 12 && reg < 12 + width)
+              expected = denominator >> ((reg - 12) * 32);
+            if (active && reg >= 20 && reg < 20 + width)
+              expected = quotient >> ((reg - 20) * 32);
+            if (active && reg >= 22 && reg < 22 + width)
+              expected = remainder >> ((reg - 22) * 32);
+            EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected)
+                << "batch=" << batch << " lane=" << lane << " register=" << reg
+                << " numerator=" << numerator << " denominator=" << denominator;
+          }
+        }
+        EXPECT_EQ(wave->exec(), exec);
+        EXPECT_EQ(wave->read_scc(), batch % 2 != 0);
+        for (uint32_t reg = 0; reg < 106; ++reg)
+          EXPECT_EQ(cu->read_sgpr(sb + reg), 0xabcd0000u + reg);
+      }
+    }
+    wave->halt();
+  }
+}
+
+TEST(ConSanTensor, IterationOriginsMatchStorageOrderedDescriptorInverse) {
+  const auto make_case = [](std::array<uint32_t, 3> dims, uint64_t stride1, uint64_t stride2,
+                            bool rank_three) {
+    auto result = tile({2, 2, rank_three ? 2u : 0u, 0, 0});
+    result.d1[0] = 1u << 19;
+    const auto put = [](auto &words, unsigned offset, unsigned width, uint64_t value) {
+      for (unsigned bit = 0; bit < width; ++bit) {
+        const unsigned pos = offset + bit;
+        words[pos / 32] =
+            (words[pos / 32] & ~(1u << (pos % 32))) | (((value >> bit) & 1u) << (pos % 32));
+      }
+    };
+    put(result.d1, 48, 32, dims[0]);
+    put(result.d1, 80, 32, dims[1]);
+    put(result.d1, 160, 48, stride1);
+    put(result.d1, 208, 48, stride2);
+    result.d2[0] = dims[2];
+    result.d2[1] = 16;
+    result.d2[2] = 1;
+    result.d2[3] = 1u << 16;
+    return result;
+  };
+  const std::vector<TensorCase> cases{make_case({4, 3, 2}, 4, 32, true),
+                                      make_case({4, 3, 2}, 32, 4, true),
+                                      make_case({4, 1, 2}, 0xffffffffffffull, 4, true),
+                                      make_case({4, 3, 1}, 4, 0xffffffffffffull, true),
+                                      make_case({1, 3, 2}, 8, 64, true),
+                                      make_case({1, 1, 1}, 9, 3, true),
+                                      make_case({4, 3, 17}, 1ull << 40, 1, false),
+                                      make_case({4, 3, 2}, 1ull << 40, 1ull << 44, true)};
+  for (size_t case_index = 0; case_index < cases.size(); ++case_index) {
+    SCOPED_TRACE(case_index);
+    const auto &c = cases[case_index];
+    const auto desc = tdm::parse_descriptor(c.d0, c.d1, c.d2, c.d3);
+    const tdm::TensorDmaLayout layout(desc);
+    ASSERT_FALSE(layout.empty());
+    ASSERT_TRUE(layout.validate_iteration_inverse().succeeded());
+    amdgpu::GpuMemory memory("tensor_origin_mem");
+    amdgpu::L2Cache l2("tensor_origin_l2");
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 4;
+    auto cu = amdgpu::ComputeUnitCore::create("tensor_origin", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+    ASSERT_NE(wave, nullptr);
+    const auto vb = wave->vgpr_alloc().base, sb = wave->sgpr_alloc().base;
+    for (uint32_t reg = 0; reg < 106; ++reg)
+      cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
+    const auto write_group = [&](uint32_t base, const auto &values) {
+      for (size_t i = 0; i < values.size(); ++i)
+        cu->write_sgpr(sb + base + i, values[i]);
+    };
+    write_group(8, c.d0);
+    write_group(20, c.d1);
+    write_group(40, c.d2);
+    write_group(50, c.d3);
+    std::array<uint32_t, 106> scalar_before{};
+    for (uint32_t reg = 0; reg < 106; ++reg)
+      scalar_before[reg] = cu->read_sgpr(sb + reg);
+    ProgramSite site;
+    site.origin = AccessOrigin::TensorLds;
+    site.kind = LdsAccessKind::Write;
+    site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 20, 40, 50};
+    std::vector<uint32_t> words;
+    ASSERT_TRUE(detail::append_tensor_iteration_origin(words, site, 10, 20, 30, config.arch));
+    for (size_t i = 0; i < words.size(); ++i)
+      memory.write32(i * 4, words[i]);
+    for (uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
+      std::array<uint64_t, 32> offsets{};
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        offsets[lane] = lane < 2 ? lane : lane == 2 ? UINT64_MAX : lane * 0x9e3779b97f4a7c15ull;
+        for (uint32_t reg = 0; reg < 64; ++reg)
+          cu->write_vgpr(vb + reg, lane, 0xabc00000u + reg * 64u + lane);
+        cu->write_vgpr(vb + 10, lane, offsets[lane]);
+        cu->write_vgpr(vb + 11, lane, offsets[lane] >> 32);
+      }
+      wave->pc = 0;
+      wave->set_exec(exec);
+      wave->write_scc(true);
+      size_t steps = 0;
+      while (wave->pc < words.size() * 4) {
+        ASSERT_LT(steps++, words.size() * 100);
+        cu->step();
+      }
+      cu->flush_all();
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        const bool active = (exec >> lane) & 1u;
+        const auto origin = layout.origin_from_linear_offset(offsets[lane]);
+        for (uint32_t reg = 0; reg < 64; ++reg) {
+          if (active && reg >= 30 && reg < 48)
+            continue;
+          uint32_t expected = 0xabc00000u + reg * 64u + lane;
+          if (reg == 10)
+            expected = offsets[lane];
+          if (reg == 11)
+            expected = offsets[lane] >> 32;
+          if (active && reg >= 20 && reg < 26)
+            expected = origin[(reg - 20) / 2] >> (((reg - 20) % 2) * 32);
+          EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected)
+              << "lane=" << lane << " register=" << reg << " offset=" << offsets[lane];
+        }
+      }
+      EXPECT_EQ(wave->exec(), exec);
+      EXPECT_TRUE(wave->read_scc());
+      for (uint32_t reg = 0; reg < 106; ++reg)
+        EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]);
+    }
+    wave->halt();
+  }
+}
+
+TEST(ConSanTensor, IterationOriginsRejectAliasesAndInvalidDescriptorsWithoutEmission) {
+  ProgramSite site;
+  site.origin = AccessOrigin::TensorLds;
+  site.kind = LdsAccessKind::Write;
+  site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 20, 40, 50};
+  const std::vector<uint32_t> prefix{0xabcdef01u};
+  auto words = prefix;
+  for (const std::array<uint16_t, 3> regs : {std::array<uint16_t, 3>{10, 11, 30},
+                                             {10, 20, 25},
+                                             {29, 20, 30},
+                                             {255, 20, 30},
+                                             {10, 251, 30},
+                                             {10, 20, 239}}) {
+    EXPECT_FALSE(detail::append_tensor_iteration_origin(words, site, regs[0], regs[1], regs[2],
+                                                        ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_EQ(words, prefix);
+  }
+  site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 99, 40, 50};
+  EXPECT_FALSE(
+      detail::append_tensor_iteration_origin(words, site, 10, 20, 30, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(words, prefix);
+}
+
+TEST(ConSanTensor, GlobalSourcesMatchFinalDenseGatherAndRepeatedDmaWrites) {
+  const auto put = [](auto &words, unsigned offset, unsigned width, uint64_t value) {
+    for (unsigned bit = 0; bit < width; ++bit) {
+      const unsigned pos = offset + bit;
+      words[pos / 32] =
+          (words[pos / 32] & ~(1u << (pos % 32))) | (((value >> bit) & 1u) << (pos % 32));
+    }
+  };
+  const auto dense = [&](std::array<uint32_t, 5> tiles, std::array<uint32_t, 5> dims,
+                         std::array<uint64_t, 4> strides) {
+    auto c = tile(tiles);
+    c.d0[2] = 0xabcde000u;
+    c.d0[3] = 0xf1234567u; // Reserved upper bits must not become address bits.
+    put(c.d1, 48, 32, dims[0]);
+    put(c.d1, 80, 32, dims[1]);
+    put(c.d2, 0, 32, dims[2]);
+    put(c.d2, 32, 32, dims[3]);
+    put(c.d3, 48, 32, dims[4]);
+    put(c.d1, 160, 48, strides[0]);
+    put(c.d1, 208, 48, strides[1]);
+    put(c.d2, 64, 48, strides[2]);
+    put(c.d3, 0, 48, strides[3]);
+    return c;
+  };
+  std::vector<TensorCase> cases{
+      dense({9, 0, 0, 0, 0}, {7, 0, 0, 0, 0}, {}),
+      dense({3, 4, 0, 0, 0}, {2, 3, 0, 0, 0}, {7, 0, 0, 0}),
+      dense({2, 2, 2, 2, 2}, {2, 2, 1, 2, 2}, {4, 16, 64, 256}),
+      dense({3, 2, 2, 0, 0}, {3, 2, 2, 0, 0}, {1ull << 40, 1ull << 44, 0, 0}),
+      dense({3, 2, 0, 0, 0}, {0, 2, 0, 0, 0}, {3, 0, 0, 0}),
+      dense({3, 0, 2, 0, 0}, {3, 2, 2, 0, 0}, {4, 16, 0, 0}),
+      dense({}, {}, {})};
+  auto inactive = cases[0];
+  inactive.d0[0] = 0;
+  cases.push_back(inactive);
+  auto null_optional = cases[1];
+  null_optional.null2 = null_optional.null3 = true;
+  cases.push_back(null_optional);
+  for (bool wide_indices : {false, true}) {
+    auto c = dense({3, 4, 0, 0, 0}, {2, 3, 0, 0, 0}, {7, 0, 0, 0});
+    c.d0[0] |= (1u << 31) | (wide_indices ? 1u << 30 : 0u);
+    c.d1[0] |= 1u << 19; // Ignored for gather.
+    c.d2.fill(0xffffffffu);
+    c.d3.fill(0xffffffffu);
+    for (unsigned index = 0; index < 4; ++index)
+      put(c.d2, index * (wide_indices ? 32 : 16), wide_indices ? 32 : 16,
+          std::array<uint32_t, 4>{2, 5, 0, 1}[index]);
+    cases.push_back(c);
+    const unsigned index_count = wide_indices ? 8u : 16u;
+    put(c.d1, 128, 16, index_count);
+    for (unsigned index = 0; index < index_count; ++index) {
+      const unsigned per_group = index_count / 2;
+      auto &group = index < per_group ? c.d2 : c.d3;
+      put(group, (index % per_group) * (wide_indices ? 32 : 16), wide_indices ? 32 : 16,
+          index + 1 == index_count ? UINT32_MAX : index % 5);
+    }
+    cases.push_back(c);
+  }
+  for (uint32_t increment : {0u, 2u, 8u}) {
+    auto c = dense({3, 2, 0, 0, 0}, {8, 4, 0, 0, 0}, {8, 0, 0, 0});
+    c.d1[0] |= 1u << 19;
+    c.d2[1] = increment;
+    c.d2[2] = 6;
+    c.d2[3] = 2u << 16;
+    cases.push_back(c);
+    if (increment == 0) {
+      c.d2[2] = 20; // Final overlapping iteration is masked and must zero-fill.
+      cases.push_back(c);
+    }
+  }
+  auto reordered = dense({2, 2, 2, 0, 0}, {4, 3, 2, 0, 0}, {32, 4, 0, 0});
+  reordered.d1[0] |= 1u << 19;
+  reordered.d2[1] = 4;
+  reordered.d2[2] = 13;
+  reordered.d2[3] = 2u << 16;
+  cases.push_back(reordered);
+
+  for (size_t case_index = 0; case_index < cases.size(); ++case_index) {
+    for (unsigned size_log2 = 0; size_log2 < 4; ++size_log2) {
+      SCOPED_TRACE(case_index);
+      SCOPED_TRACE(size_log2);
+      auto c = cases[case_index];
+      put(c.d1, 16, 2, size_log2);
+      const auto desc =
+          tdm::parse_descriptor(c.d0, c.d1, c.null2 ? std::array<uint32_t, 4>{} : c.d2,
+                                c.null3 ? std::array<uint32_t, 4>{} : c.d3);
+      const tdm::TensorDmaLayout layout(desc);
+      struct Element {
+        uint64_t global;
+        uint64_t lds;
+        bool in_bounds;
+      };
+      std::vector<Element> reference;
+      if (desc.active())
+        tdm::for_each_tensor_element(desc, layout, [&](uint64_t global, uint64_t lds, bool bounds) {
+          reference.push_back({desc.global_base + (global << size_log2), lds, bounds});
+        });
+      const uint32_t iterations = desc.iterate ? desc.iteration_count : 1;
+      const uint32_t count = reference.size() / iterations;
+      amdgpu::GpuMemory memory("tensor_source_mem");
+      amdgpu::L2Cache l2("tensor_source_l2");
+      l2.set_backing_memory(&memory);
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 4;
+      auto cu = amdgpu::ComputeUnitCore::create("tensor_source", config, &memory, &l2);
+      ASSERT_NE(cu, nullptr);
+      auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+      ASSERT_NE(wave, nullptr);
+      const auto vb = wave->vgpr_alloc().base, sb = wave->sgpr_alloc().base;
+      for (uint32_t reg = 0; reg < 106; ++reg)
+        cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
+      const auto write_group = [&](uint32_t base, const auto &values) {
+        for (size_t i = 0; i < values.size(); ++i)
+          cu->write_sgpr(sb + base + i, values[i]);
+      };
+      write_group(8, c.d0);
+      write_group(20, c.d1);
+      write_group(40, c.d2);
+      write_group(50, c.d3);
+      std::array<uint32_t, 106> scalar_before{};
+      for (uint32_t reg = 0; reg < 106; ++reg)
+        scalar_before[reg] = cu->read_sgpr(sb + reg);
+      ProgramSite site;
+      site.origin = AccessOrigin::TensorLds;
+      site.kind = LdsAccessKind::Write;
+      site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{
+          8, 20, uint16_t(c.null2 ? 124 : 40), uint16_t(c.null3 ? 124 : 50)};
+      std::vector<uint32_t> words;
+      ASSERT_TRUE(
+          detail::append_select_tensor_load_element(words, site, 10, 11, 12, 13, 20, config.arch));
+      ASSERT_TRUE(detail::append_materialize_tensor_load_source(words, site, 12, 13, 14, 16, 32,
+                                                                config.arch));
+      for (size_t i = 0; i < words.size(); ++i)
+        memory.write32(i * 4, words[i]);
+      for (uint32_t exec : {0xffffffffu, 0x80010005u, 0u}) {
+        std::array<uint32_t, 32> hashes{}, iteration_hashes{};
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          hashes[lane] = lane == 31 ? UINT32_MAX : lane * 0x9e3779b9u;
+          iteration_hashes[lane] = lane % 2 ? UINT32_MAX : lane * 0x85ebca6bu;
+          for (uint32_t reg = 0; reg < 64; ++reg)
+            cu->write_vgpr(vb + reg, lane, 0xabc00000u + reg * 64u + lane);
+          cu->write_vgpr(vb + 10, lane, hashes[lane]);
+          cu->write_vgpr(vb + 11, lane, iteration_hashes[lane]);
+        }
+        wave->pc = 0;
+        wave->set_exec(exec);
+        wave->write_scc(case_index % 2 != 0);
+        size_t steps = 0;
+        while (wave->pc < words.size() * 4) {
+          ASSERT_LT(steps++, words.size() * 100);
+          cu->step();
+        }
+        cu->flush_all();
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          const bool active = (exec >> lane) & 1u;
+          for (uint32_t reg = 0; reg < 64; ++reg) {
+            if (active &&
+                ((reg >= 12 && reg <= 16) || (reg >= 20 && reg < 25) || (reg >= 32 && reg < 62)))
+              continue;
+            uint32_t expected = 0xabc00000u + reg * 64u + lane;
+            if (reg == 10)
+              expected = hashes[lane];
+            if (reg == 11)
+              expected = iteration_hashes[lane];
+            EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected);
+          }
+          if (!active)
+            continue;
+          EXPECT_EQ(cu->read_vgpr(vb + 13, lane), count);
+          if (!count) {
+            EXPECT_EQ(cu->read_vgpr(vb + 16, lane), 0u);
+            continue;
+          }
+          const size_t selected = (uint64_t{hashes[lane]} * count) >> 32;
+          const size_t iteration = (uint64_t{iteration_hashes[lane]} * iterations) >> 32;
+          const uint64_t lds = reference[iteration * count + selected].lds;
+          EXPECT_EQ(cu->read_vgpr(vb + 12, lane), lds);
+          auto last = std::find_if(reference.rbegin(), reference.rend(),
+                                   [&](const Element &element) { return element.lds == lds; });
+          ASSERT_NE(last, reference.rend());
+          EXPECT_EQ(cu->read_vgpr(vb + 16, lane), last->in_bounds ? 1u : 0u);
+          if (last->in_bounds) {
+            const uint64_t actual =
+                cu->read_vgpr(vb + 14, lane) | (uint64_t{cu->read_vgpr(vb + 15, lane)} << 32);
+            EXPECT_EQ(actual, last->global) << "lane=" << lane << " lds=" << lds;
+          }
+        }
+        EXPECT_EQ(wave->exec(), exec);
+        EXPECT_EQ(wave->read_scc(), case_index % 2 != 0);
+        for (uint32_t reg = 0; reg < 106; ++reg)
+          EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]);
+      }
+      wave->halt();
+    }
+  }
+}
+
+TEST(ConSanTensor, GlobalSourceRejectsAliasesWithoutEmission) {
+  ProgramSite site;
+  site.origin = AccessOrigin::TensorLds;
+  site.kind = LdsAccessKind::Write;
+  site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{8, 20, 40, 50};
+  const std::vector<uint32_t> prefix{0xabcdef01u};
+  auto words = prefix;
+  for (const std::array<uint16_t, 5> regs : {std::array<uint16_t, 5>{12, 12, 14, 16, 32},
+                                             {12, 13, 11, 16, 32},
+                                             {12, 13, 14, 15, 32},
+                                             {12, 13, 31, 16, 32},
+                                             {12, 13, 14, 32, 32},
+                                             {12, 13, 14, 16, 227},
+                                             {12, 13, 255, 16, 32}}) {
+    EXPECT_FALSE(detail::append_materialize_tensor_load_source(
+        words, site, regs[0], regs[1], regs[2], regs[3], regs[4], ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_EQ(words, prefix);
+  }
+}
+
+TEST(ConSanTensor, CoordinateDivisionRejectsRegisterAliasesWithoutEmission) {
+  const std::vector<uint32_t> prefix{0xabcdef01u};
+  auto words = prefix;
+  for (const std::array<uint16_t, 5> regs : {std::array<uint16_t, 5>{10, 11, 20, 20, 30},
+                                             {10, 10, 20, 21, 30},
+                                             {10, 11, 10, 21, 30},
+                                             {10, 11, 20, 11, 30},
+                                             {10, 11, 20, 21, 254},
+                                             {30, 11, 20, 21, 30},
+                                             {10, 11, 20, 32, 30},
+                                             {256, 11, 20, 21, 30}}) {
+    EXPECT_FALSE(detail::append_tensor_divmod_u32(words, regs[0], regs[1], regs[2], regs[3],
+                                                  regs[4], ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_EQ(words, prefix);
+  }
+  EXPECT_FALSE(
+      detail::append_tensor_divmod_u32(words, 10, 11, 20, 21, 30, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words, prefix);
+}
+
+TEST(ConSanTensor, CoordinateDivisionRejectsOverlappingPairsWithoutEmission) {
+  const std::vector<uint32_t> prefix{0xabcdef01u};
+  auto words = prefix;
+  for (const std::array<uint16_t, 5> regs : {std::array<uint16_t, 5>{10, 11, 20, 22, 30},
+                                             {10, 12, 11, 22, 30},
+                                             {10, 12, 20, 21, 30},
+                                             {10, 12, 20, 255, 30},
+                                             {10, 12, 20, 22, 254},
+                                             {29, 12, 20, 22, 30},
+                                             {10, 12, 20, 32, 30}}) {
+    EXPECT_FALSE(detail::append_tensor_divmod_u64(words, regs[0], regs[1], regs[2], regs[3],
+                                                  regs[4], ROCJITSU_CODE_ARCH_CDNA5));
+    EXPECT_EQ(words, prefix);
+  }
+  EXPECT_FALSE(
+      detail::append_tensor_divmod_u64(words, 10, 12, 20, 22, 30, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words, prefix);
+}
+
 TEST(ConSanTensor, RejectsDescriptorAndScratchAliasesBeforeEmission) {
   ProgramSite site;
   site.origin = AccessOrigin::TensorLds;
