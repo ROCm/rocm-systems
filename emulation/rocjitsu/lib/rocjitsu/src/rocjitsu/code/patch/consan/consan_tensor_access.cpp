@@ -606,7 +606,7 @@ bool append_materialize_tensor_global_address(std::vector<uint32_t> &words, cons
   return sequence.finish();
 }
 
-uint16_t tensor_load_compare_state_sgprs(const ProgramSite &site) {
+uint16_t tensor_compare_state_sgprs(const ProgramSite &site) {
   if (!site.operands.tensor_descriptor_sgprs)
     return 0;
   const auto &groups = *site.operands.tensor_descriptor_sgprs;
@@ -616,16 +616,16 @@ uint16_t tensor_load_compare_state_sgprs(const ProgramSite &site) {
   return 4;
 }
 
-bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite &site,
-                                std::span<const uint32_t> original, uint16_t scratch_vgpr,
-                                uint16_t state_sgpr, std::span<const uint32_t> delay_words,
-                                std::span<const uint32_t> mismatch_words,
-                                uint32_t &guest_word_offset, rj_code_arch_t arch) {
-  const uint16_t state_count = tensor_load_compare_state_sgprs(site);
+bool append_tensor_compare(std::vector<uint32_t> &words, const ProgramSite &site,
+                           std::span<const uint32_t> original, uint16_t scratch_vgpr,
+                           uint16_t state_sgpr, std::span<const uint32_t> delay_words,
+                           std::span<const uint32_t> mismatch_words, uint32_t &guest_word_offset,
+                           rj_code_arch_t arch) {
+  const uint16_t state_count = tensor_compare_state_sgprs(site);
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
-      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs ||
-      original.size() != 3 ||
-      static_cast<uint32_t>(scratch_vgpr) + kTensorLoadCompareScratchVgprs > 256u ||
+      (site.kind != LdsAccessKind::Write && site.kind != LdsAccessKind::Read) ||
+      !site.operands.tensor_descriptor_sgprs || original.size() != 3 ||
+      static_cast<uint32_t>(scratch_vgpr) + kTensorCompareScratchVgprs > 256u ||
       static_cast<uint32_t>(state_sgpr) + state_count > 106u || state_sgpr % 2u != 0)
     return false;
   const auto &groups = *site.operands.tensor_descriptor_sgprs;
@@ -638,6 +638,7 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
          groups[i] < state_sgpr + static_cast<uint32_t>(state_count)))
       return false;
   }
+  const bool store = site.kind == LdsAccessKind::Read;
   const uint16_t hash = scratch_vgpr;
   const uint16_t iteration_hash = scratch_vgpr + 1;
   const uint16_t element = scratch_vgpr + 2;
@@ -650,7 +651,7 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
   const uint16_t width = scratch_vgpr + 12;
   const uint16_t descriptor_archive = scratch_vgpr + 13;
   const uint16_t completion_address = scratch_vgpr + 14;
-  const uint16_t work = scratch_vgpr + kTensorLoadCompareWorkspaceOffset;
+  const uint16_t work = scratch_vgpr + kTensorCompareWorkspaceOffset;
   const auto zero = scalar_positive_inline_u32(0);
   const auto one = scalar_positive_inline_u32(1);
   const auto vr = [](uint16_t reg) { return vector_source_vgpr(reg); };
@@ -677,8 +678,9 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
       binary(cdna5::kVMulLoU32Vop3, iteration_hash, vr(hash), vr(work)));
   sequence.require(
       append_select_tensor_element(words, site, hash, iteration_hash, element, count, work, arch));
-  sequence.require(append_materialize_tensor_global_address(words, site, element, count, global,
-                                                            bounds, work, arch));
+  sequence.require(append_materialize_tensor_global_address(
+      words, site, element, count, global, bounds, work, arch,
+      store ? std::optional<uint16_t>{iteration_hash} : std::nullopt));
   sequence.require(append_materialize_tensor_lds_address(words, site, element, lds, work, arch));
   sequence.append(
       build_v_mov_b32_e32(descriptor_archive, groups[1], arch),
@@ -688,11 +690,11 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
   for (unsigned word = 0; word < 2; ++word)
     sequence.append(build_v_mov_b32_e32(expected + word, zero, arch),
                     build_v_mov_b32_e32(readback + word, zero, arch));
-  const auto append_load = [&](bool from_global) {
+  const auto append_load = [&](bool from_global, uint16_t destination) {
     const auto done = sequence.make_label();
-    sequence.append(
-        instrumentation::build_v_cmp_ne_u32_vcc(zero, from_global ? bounds : count, arch),
-        instrumentation::build_s_mov_b64(kAmdGpuExecLo, kAmdGpuVccLo, arch));
+    sequence.append(instrumentation::build_v_cmp_ne_u32_vcc(
+                        zero, (from_global || store) ? bounds : count, arch),
+                    instrumentation::build_s_mov_b64(kAmdGpuExecLo, kAmdGpuVccLo, arch));
     const std::array<uint16_t, 4> global_ops{cdna5::kFlatLoadU8Vflat, cdna5::kFlatLoadU16Vflat,
                                              cdna5::kFlatLoadB32Vflat, cdna5::kFlatLoadB64Vflat};
     const std::array<uint16_t, 4> lds_ops{cdna5::kDsLoadU8Vds, cdna5::kDsLoadU16Vds,
@@ -705,11 +707,12 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
       if (from_global)
         sequence.append(
             cdna5::build_vflat(global_ops[size], {.saddr = kGfx1250FlatNoSaddrEncoding,
-                                                  .vdst = static_cast<uint8_t>(expected),
+                                                  .vdst = static_cast<uint8_t>(destination),
                                                   .vaddr = static_cast<uint8_t>(global)}));
       else
-        sequence.append(cdna5::build_vds(lds_ops[size], {.addr = static_cast<uint8_t>(lds),
-                                                         .vdst = static_cast<uint8_t>(readback)}));
+        sequence.append(
+            cdna5::build_vds(lds_ops[size], {.addr = static_cast<uint8_t>(lds),
+                                             .vdst = static_cast<uint8_t>(destination)}));
       sequence.branch(done, InstructionSequence::BranchKind::Unconditional);
       sequence.bind_label(next);
     }
@@ -719,7 +722,9 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
                     : instrumentation::build_s_wait_lds0(arch),
         instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch));
   };
-  append_load(true);
+  // Stores sample the LDS source on both sides of the original transfer.
+  // Bounds masking is essential: a masked store never reads LDS.
+  append_load(!store, expected);
   // Delay publication until the comparison is complete. Otherwise a consumer
   // released by the DMA's barrier arrival may legally reuse this LDS tile.
   // D1[0] may also name a word of D0/D2/D3: modifying it in place would then
@@ -741,7 +746,7 @@ bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite 
     sequence.append(instrumentation::build_v_readlane_b32(groups[1], descriptor_archive, 0, arch),
                     instrumentation::build_valu_to_salu_dependency_wait(arch));
   sequence.append(delay_words);
-  append_load(false);
+  append_load(false, readback);
   for (unsigned word = 0; word < 2; ++word) {
     const auto matched = sequence.make_label();
     sequence.append(

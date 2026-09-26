@@ -215,7 +215,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     // rather than the smallest preexisting descriptor, defines the reusable
     // register set.
     constexpr uint16_t dead_vcc_selection_limit = REGISTER_SET_ALLOCATABLE_SGPRS;
-    const uint16_t vcc_save_sgpr_width = tensor ? detail::tensor_load_compare_state_sgprs(site)
+    const uint16_t vcc_save_sgpr_width = tensor ? detail::tensor_compare_state_sgprs(site)
                                                 : supercollider_vcc_save_sgpr_width(target);
     std::array<std::pair<uint16_t, uint16_t>, 4> forbidden_scalars{};
     if (tensor && site.operands.tensor_descriptor_sgprs) {
@@ -246,7 +246,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint32_t probe_scratch_vgprs = 0u;
     bool reuse_readback_for_report = false;
     if (tensor) {
-      probe_scratch_vgprs = detail::kTensorLoadCompareScratchVgprs;
+      probe_scratch_vgprs = detail::kTensorCompareScratchVgprs;
     } else if (site.origin == AccessOrigin::DirectToLds) {
       const auto direct_layout = direct_to_lds_scratch_layout(site, target, options, 0u);
       if (!direct_layout) {
@@ -583,7 +583,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         "ConSan LDS check/trap proof",
         site.origin == AccessOrigin::TensorLds
             ? std::optional<uint16_t>(candidate.scratch_vgpr +
-                                      detail::kTensorLoadCompareWorkspaceOffset)
+                                      detail::kTensorCompareWorkspaceOffset)
             : std::nullopt);
     if (!delay_words)
       return;
@@ -594,16 +594,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (site.origin == AccessOrigin::TensorLds) {
       std::array<uint32_t, 3> original{};
       const auto mismatch = build_mismatch_action_words(
-          options, target, candidate.scratch_vgpr + detail::kTensorLoadCompareWorkspaceOffset,
+          options, target, candidate.scratch_vgpr + detail::kTensorCompareWorkspaceOffset,
           result.errors, "ConSan tensor check/trap");
       uint32_t guest_offset = 0;
       words.emplace();
       if (!mismatch ||
           !read_words_at(original_bytes, site.decoded_file_offset(),
                          std::span<uint32_t>(original)) ||
-          !detail::append_tensor_load_compare(*words, site, original, candidate.scratch_vgpr,
-                                              candidate.vcc_save_sgpr, *delay_words, *mismatch,
-                                              guest_offset, arch)) {
+          !detail::append_tensor_compare(*words, site, original, candidate.scratch_vgpr,
+                                         candidate.vcc_save_sgpr, *delay_words, *mismatch,
+                                         guest_offset, arch)) {
         result.errors.emplace_back("ConSan tensor check/trap could not encode value comparison");
         return;
       }
@@ -793,7 +793,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.required_sgpr_count = static_cast<uint16_t>(
         candidate.vcc_save_sgpr + (site.origin == AccessOrigin::TensorLds
-                                       ? detail::tensor_load_compare_state_sgprs(site)
+                                       ? detail::tensor_compare_state_sgprs(site)
                                        : supercollider_vcc_save_sgpr_width(target)));
     if (const auto plan = private_spill_plans.find(&site);
         plan != private_spill_plans.end() && plan->second.uses_dynamic_stack_frame) {

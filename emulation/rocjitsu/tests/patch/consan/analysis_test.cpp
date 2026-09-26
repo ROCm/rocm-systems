@@ -309,13 +309,10 @@ TEST(ConSan, InventoriesGfx1250TensorDmaAsRuntimeDescriptorRanges) {
       EXPECT_EQ(site.lowering.form->range_count, 1u);
       EXPECT_EQ(site.lowering.form->address_vgpr_count, 0u);
       EXPECT_TRUE(site.lowering.replay_guest_access.available());
-      EXPECT_EQ(site.lowering.compare_observed_value.available(),
-                site.kind == LdsAccessKind::Write);
+      EXPECT_TRUE(site.lowering.compare_observed_value.available());
     }
-    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted),
-              mode == Mode::Default ? 2u : 1u);
-    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported),
-              mode == Mode::Default ? 0u : 1u);
+    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 2u);
+    EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Unsupported), 0u);
     EXPECT_EQ(applicable_access_decision_count(result), 2u);
   }
 }

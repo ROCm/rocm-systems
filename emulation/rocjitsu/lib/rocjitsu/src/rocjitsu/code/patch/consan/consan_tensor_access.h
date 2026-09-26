@@ -103,15 +103,17 @@ tensor_full_wave_scalar_spill(const SgprSpillSequence &spill, uint16_t auxiliary
     uint16_t count_vgpr, uint16_t address_vgpr, uint16_t in_bounds_vgpr, uint16_t scratch_vgpr,
     rj_code_arch_t arch, std::optional<uint16_t> iteration_hash_vgpr = std::nullopt);
 
-inline constexpr uint16_t kTensorLoadCompareScratchVgprs = 46;
-inline constexpr uint16_t kTensorLoadCompareWorkspaceOffset = 16;
+inline constexpr uint16_t kTensorCompareScratchVgprs = 46;
+inline constexpr uint16_t kTensorCompareWorkspaceOffset = 16;
 
 /// Four flag-save SGPRs, plus eight descriptor-copy SGPRs when D1[0] aliases
 /// another descriptor group. Zero means descriptor operands are unavailable.
-[[nodiscard]] uint16_t tensor_load_compare_state_sgprs(const ProgramSite &site);
+[[nodiscard]] uint16_t tensor_compare_state_sgprs(const ProgramSite &site);
 
-/// Emit a wave-wide tensor-load value check. Samples source values before the
-/// original DMA, executes it once, then compares sampled LDS values. Atomic
+/// Emit a wave-wide tensor-DMA value check. Loads compare sampled global
+/// source values with completed LDS writes; stores compare LDS source values
+/// before and after the original DMA, excluding masked destinations. The DMA
+/// executes exactly once; stores never replay global writes. Atomic
 /// completion is deferred until after comparison and performed exactly once
 /// through native LDS barrier-arrive. The caller preserves all 46 scratch VGPRs
 /// across all lanes and selects low VGPR banks; four dead, even-aligned ordinary
@@ -121,12 +123,11 @@ inline constexpr uint16_t kTensorLoadCompareWorkspaceOffset = 16;
 /// Delay/action words must preserve SGPRs, EXEC and SCC; an action may clobber
 /// VCC and the workspace, while delay must also preserve the saved payload and
 /// LDS address. Returns the word offset of the relocated original instruction.
-[[nodiscard]] bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite &site,
-                                              std::span<const uint32_t> original,
-                                              uint16_t scratch_vgpr, uint16_t state_sgpr,
-                                              std::span<const uint32_t> delay_words,
-                                              std::span<const uint32_t> mismatch_words,
-                                              uint32_t &guest_word_offset, rj_code_arch_t arch);
+[[nodiscard]] bool append_tensor_compare(std::vector<uint32_t> &words, const ProgramSite &site,
+                                         std::span<const uint32_t> original, uint16_t scratch_vgpr,
+                                         uint16_t state_sgpr, std::span<const uint32_t> delay_words,
+                                         std::span<const uint32_t> mismatch_words,
+                                         uint32_t &guest_word_offset, rj_code_arch_t arch);
 
 /// Select an element of a valid, LDS-fitting CDNA5 tensor descriptor.
 /// Two caller-provided 32-bit hashes select a position within the tile and an

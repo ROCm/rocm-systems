@@ -37,66 +37,70 @@ TensorCase tile(std::array<uint32_t, 5> dimensions) {
 
 TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
-  for (const auto [alias, bank] : {std::pair{false, 0u}, std::pair{true, 0u},
-                                   std::pair{false, 0x55u}, std::pair{true, 0x55u}}) {
-    SCOPED_TRACE(alias);
-    SCOPED_TRACE(bank);
-    const auto tensor = cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
-                                            {.vaddr4 = 124,
-                                             .vaddr0 = 0,
-                                             .vaddr1 = static_cast<uint8_t>(alias ? 1 : 12),
-                                             .vaddr2 = 124,
-                                             .vaddr3 = 124});
-    std::vector<uint32_t> guest;
-    if (bank != 0u) {
-      const auto select = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
-      ASSERT_TRUE(select);
-      guest.push_back(*select);
+  for (bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    for (const auto [alias, bank] : {std::pair{false, 0u}, std::pair{true, 0u},
+                                     std::pair{false, 0x55u}, std::pair{true, 0x55u}}) {
+      SCOPED_TRACE(alias);
+      SCOPED_TRACE(bank);
+      const auto tensor = cdna5::build_vimage(store ? cdna5::kTensorStoreFromLdsVimage
+                                                    : cdna5::kTensorLoadToLdsVimage,
+                                              {.vaddr4 = 124,
+                                               .vaddr0 = 0,
+                                               .vaddr1 = static_cast<uint8_t>(alias ? 1 : 12),
+                                               .vaddr2 = 124,
+                                               .vaddr3 = 124});
+      std::vector<uint32_t> guest;
+      if (bank != 0u) {
+        const auto select = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
+        ASSERT_TRUE(select);
+        guest.push_back(*select);
+      }
+      guest.insert(guest.end(), tensor.begin(), tensor.end());
+      guest.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+      TestOptions options = test_options();
+      options.mode = Mode::SuperCollider;
+      options.probe_lds_check_trap = true;
+      options.supercollider_report_buffer_address = 0x200000;
+      if (bank != 0u) {
+        options.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
+        options.supercollider_delay_nops = 15u;
+      }
+      const auto result =
+          test_lower_consan(make_gfx1250_code_object(guest, "tensor_compare"), options);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+      ASSERT_EQ(result.patches.size(), 1u);
+      const auto &patch = result.patches.front();
+      EXPECT_EQ(patch.kind, store ? PatchKind::LdsLoadCheckTrap : PatchKind::LdsStoreCheckTrap);
+      EXPECT_EQ(patch.spilled_vgpr_count, detail::kTensorCompareScratchVgprs);
+      EXPECT_GE(patch.required_private_segment_size, detail::kTensorCompareScratchVgprs * 4u);
+      EXPECT_GE(patch.required_sgpr_count, alias ? 12u : 4u);
+      ASSERT_TRUE(patch.relocated_guest_instruction_offset.has_value());
+      AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+      ASSERT_TRUE(patched.is_valid());
+      ASSERT_EQ(patched.text_sections().size(), 1u);
+      const auto *text = patched.text_sections().front();
+      const auto body = patched_words_at_file_offset(
+          result, text->sectionOffset() + patch.trampoline_offset, patch.trampoline_size);
+      ASSERT_FALSE(body.empty());
+      if (bank != 0u) {
+        const auto low = instrumentation::build_s_set_vgpr_msb_transition(bank, 0u, arch);
+        const auto restore = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
+        ASSERT_TRUE(low);
+        ASSERT_TRUE(restore);
+        EXPECT_EQ(body.front(), *low);
+        EXPECT_EQ(body.back(), *restore);
+      }
+      ASSERT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
+      const auto guest_index =
+          (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t);
+      ASSERT_LE(guest_index + tensor.size(), body.size());
+      EXPECT_EQ(body[guest_index], tensor[0]);
+      EXPECT_EQ(body[guest_index + 1u], tensor[1]);
+      // Aliases rewrite only the descriptor-copy operand of the original DMA.
+      EXPECT_EQ(body[guest_index + 2u] & ~0xff00u, tensor[2] & ~0xff00u);
     }
-    guest.insert(guest.end(), tensor.begin(), tensor.end());
-    guest.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
-    TestOptions options = test_options();
-    options.mode = Mode::SuperCollider;
-    options.probe_lds_check_trap = true;
-    options.supercollider_report_buffer_address = 0x200000;
-    if (bank != 0u) {
-      options.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
-      options.supercollider_delay_nops = 15u;
-    }
-    const auto result =
-        test_lower_consan(make_gfx1250_code_object(guest, "tensor_compare"), options);
-    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    ASSERT_EQ(result.patches.size(), 1u);
-    const auto &patch = result.patches.front();
-    EXPECT_EQ(patch.kind, PatchKind::LdsStoreCheckTrap);
-    EXPECT_EQ(patch.spilled_vgpr_count, detail::kTensorLoadCompareScratchVgprs);
-    EXPECT_GE(patch.required_private_segment_size, detail::kTensorLoadCompareScratchVgprs * 4u);
-    EXPECT_GE(patch.required_sgpr_count, alias ? 12u : 4u);
-    ASSERT_TRUE(patch.relocated_guest_instruction_offset.has_value());
-    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-    ASSERT_TRUE(patched.is_valid());
-    ASSERT_EQ(patched.text_sections().size(), 1u);
-    const auto *text = patched.text_sections().front();
-    const auto body = patched_words_at_file_offset(
-        result, text->sectionOffset() + patch.trampoline_offset, patch.trampoline_size);
-    ASSERT_FALSE(body.empty());
-    if (bank != 0u) {
-      const auto low = instrumentation::build_s_set_vgpr_msb_transition(bank, 0u, arch);
-      const auto restore = instrumentation::build_s_set_vgpr_msb_transition(0u, bank, arch);
-      ASSERT_TRUE(low);
-      ASSERT_TRUE(restore);
-      EXPECT_EQ(body.front(), *low);
-      EXPECT_EQ(body.back(), *restore);
-    }
-    ASSERT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
-    const auto guest_index =
-        (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t);
-    ASSERT_LE(guest_index + tensor.size(), body.size());
-    EXPECT_EQ(body[guest_index], tensor[0]);
-    EXPECT_EQ(body[guest_index + 1u], tensor[1]);
-    // Aliases rewrite only the descriptor-copy operand of the original DMA.
-    EXPECT_EQ(body[guest_index + 2u] & ~0xff00u, tensor[2] & ~0xff00u);
   }
 }
 
@@ -1204,182 +1208,197 @@ TEST(ConSanTensor, GlobalSourceRejectsAliasesWithoutEmission) {
 
 TEST(ConSanTensor, ValueComparisonPreservesStateAndDefersExactlyOneCompletionArrival) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
-  for (const auto [alias, wave_delay] : {std::pair{false, false}, std::pair{true, false},
-                                         std::pair{false, true}, std::pair{true, true}}) {
-    SCOPED_TRACE(alias);
-    SCOPED_TRACE(wave_delay);
-    constexpr uint16_t scratch = 8;
-    constexpr uint16_t state = 88;
-    const uint16_t spill_exec = alias ? 100 : 96;
-    const uint16_t d1 = alias ? 1 : 12;
-    constexpr uint16_t report_scratch = scratch + detail::kTensorLoadCompareWorkspaceOffset;
-    const auto tensor =
-        cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage, {.vaddr4 = 124,
-                                                            .vaddr0 = 0,
-                                                            .vaddr1 = static_cast<uint8_t>(d1),
-                                                            .vaddr2 = 124,
-                                                            .vaddr3 = 124});
-    ProgramSite site;
-    site.origin = AccessOrigin::TensorLds;
-    site.kind = LdsAccessKind::Write;
-    site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{0, d1, 124, 124};
-    SpillManager manager(0, 256);
-    const auto spill =
-        build_vgpr_spill_sequence(manager, scratch, detail::kTensorLoadCompareScratchVgprs, arch);
-    ASSERT_TRUE(spill);
-    const auto full_spill = detail::tensor_full_wave_spill(*spill, spill_exec, arch);
-    ASSERT_TRUE(full_spill);
-    std::vector<uint32_t> mismatch;
-    const auto append = [&](const auto &optional) {
-      if (!optional)
-        return false;
-      if constexpr (std::is_integral_v<typename std::decay_t<decltype(optional)>::value_type>)
-        mismatch.push_back(*optional);
-      else
-        mismatch.insert(mismatch.end(), optional->begin(), optional->end());
-      return true;
-    };
-    ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch, 0x200000, arch)));
-    ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch + 1, 0, arch)));
-    ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch + 2, 1, arch)));
-    ASSERT_TRUE(
-        append(instrumentation::build_flat_store_b32(report_scratch, report_scratch + 2, arch)));
-    ASSERT_TRUE(append(instrumentation::build_s_wait_global_store0(arch)));
-    auto words = full_spill->save_words;
-    uint32_t guest_offset = UINT32_MAX;
-    const auto target = std::ranges::find(kTargetProfiles, arch, &TargetProfile::arch);
-    ASSERT_NE(target, kTargetProfiles.end());
-    Request request;
-    request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
-    request.supercollider_delay_nops = wave_delay ? 15u : 0u;
-    std::vector<std::string> errors;
-    const auto delay = supercollider_build_delay_words(*target, request, state, site.kind, errors,
-                                                       "tensor test", report_scratch);
-    ASSERT_TRUE(delay) << testing::PrintToString(errors);
-    ASSERT_TRUE(detail::append_tensor_load_compare(words, site, tensor, scratch, state, *delay,
-                                                   mismatch, guest_offset, arch));
-    ASSERT_LE(guest_offset + tensor.size(), words.size());
-    if (!alias)
-      EXPECT_TRUE(std::equal(tensor.begin(), tensor.end(), words.begin() + guest_offset));
-    else {
-      EXPECT_EQ(words[guest_offset], tensor[0]);
-      EXPECT_EQ(words[guest_offset + 1], tensor[1]);
-      EXPECT_EQ(words[guest_offset + 2], (tensor[2] & ~0xff00u) | ((state + 4u) << 8));
-    }
-    words.insert(words.end(), full_spill->restore_words.begin(), full_spill->restore_words.end());
-    const uint64_t after_dma_wait_pc = (guest_offset + tensor.size() + 1) * 4;
-    for (unsigned size_log2 = 0; size_log2 < 4; ++size_log2) {
-      if (alias && size_log2 != 0)
-        continue;
-      for (bool active : {false, true}) {
-        for (bool in_bounds : {false, true}) {
-          for (bool atomic : {false, true}) {
-            for (bool corrupt : {false, true}) {
-              for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
-                SCOPED_TRACE(testing::Message() << "size=" << size_log2 << " active=" << active
-                                                << " bounds=" << in_bounds << " atomic=" << atomic
-                                                << " corrupt=" << corrupt << " exec=" << exec);
-                amdgpu::GpuMemory memory("tensor_compare_mem");
-                amdgpu::L2Cache l2("tensor_compare_l2");
-                l2.set_backing_memory(&memory);
-                amdgpu::ComputeUnitCore::Config config{};
-                config.arch = arch;
-                config.num_wf_slots = 1;
-                config.sgprs_per_wf = 106;
-                config.vgprs_per_wf = 64;
-                config.lds_size_kb = alias ? 320 : 4;
-                auto cu = amdgpu::ComputeUnitCore::create("tensor_compare", config, &memory, &l2);
-                ASSERT_NE(cu, nullptr);
-                auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
-                ASSERT_NE(wave, nullptr);
-                wave->set_lds_base(cu->allocate_lds(config.lds_size_kb * 1024));
-                ASSERT_NE(wave->lds_base(), UINT32_MAX);
-                wave->set_scratch_base(0x400000);
-                wave->set_scratch_lane_size(256);
-                const auto sb = wave->sgpr_alloc().base, vb = wave->vgpr_alloc().base;
-                for (uint32_t reg = 0; reg < 106; ++reg)
-                  cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
-                cu->write_sgpr(sb, active ? 1 : 0);
-                if (alias) {
-                  // D1[0] is also D0's LDS base. Clearing its completion bit in
-                  // place would redirect the DMA from byte262144 to byte0.
-                  cu->write_sgpr(sb + 1, atomic ? 1u << 18 : 0);
-                  cu->write_sgpr(sb + 2, (in_bounds ? 16u << 16 : 0) | (512u >> 3));
-                  cu->write_sgpr(sb + 3, 0);
-                  cu->write_sgpr(sb + 4, 16u << 16);
-                  for (uint32_t reg = 5; reg < 9; ++reg)
-                    cu->write_sgpr(sb + reg, 0);
-                } else {
-                  cu->write_sgpr(sb + 1, 0);
-                  cu->write_sgpr(sb + 2, 0x100000);
-                  cu->write_sgpr(sb + 3, 0x80000000u);
-                  cu->write_sgpr(sb + 12, (size_log2 << 16) | (atomic ? 1u << 18 : 0));
-                  cu->write_sgpr(sb + 13, (in_bounds ? 16u << 16 : 0) | (512u >> 3));
-                  cu->write_sgpr(sb + 14, 0);
-                  cu->write_sgpr(sb + 15, 16u << 16);
-                  for (uint32_t reg = 16; reg < 20; ++reg)
-                    cu->write_sgpr(sb + reg, 0);
-                }
-                const uint32_t source_base = cu->read_sgpr(sb + 2);
-                const uint32_t payload_base = wave->lds_base() + cu->read_sgpr(sb + 1);
-                std::array<uint32_t, 106> scalar_before{};
-                for (uint32_t reg = 0; reg < 106; ++reg)
-                  scalar_before[reg] = cu->read_sgpr(sb + reg);
-                const uint64_t barrier_before =
-                    0xabcd000000000000ull | amdgpu::lds_barrier_cell_init_state(corrupt ? 2 : 1);
-                cu->lds().write64(wave->lds_base() + 512, barrier_before);
-                for (uint32_t byte = 0; byte < (16u << size_log2); ++byte) {
-                  if (!alias || in_bounds)
-                    memory.write8(source_base + byte, static_cast<uint8_t>(byte + 1));
-                  cu->lds().write8(payload_base + byte, 0x5a);
-                }
-                memory.write32(0x200000, 0);
-                for (uint32_t reg = 0; reg < 64; ++reg)
-                  for (uint32_t lane = 0; lane < 32; ++lane)
-                    cu->write_vgpr(vb + reg, lane, 0xa5000000u + reg * 32 + lane);
-                for (size_t i = 0; i < words.size(); ++i)
-                  memory.write32(i * 4, words[i]);
-                wave->set_exec(exec);
-                wave->set_vcc(0x12345678);
-                wave->write_scc(in_bounds);
-                wave->pc = 0;
-                bool observed_dma = false;
-                size_t steps = 0;
-                while (wave->pc < words.size() * 4) {
-                  ASSERT_LT(steps++, words.size() * 100);
-                  if (!observed_dma && wave->pc == after_dma_wait_pc) {
-                    observed_dma = true;
-                    EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512), barrier_before);
-                    for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
-                      EXPECT_EQ(cu->lds().read8(payload_base + byte),
-                                active ? (in_bounds ? static_cast<uint8_t>(byte + 1) : uint8_t{0})
-                                       : uint8_t{0x5a});
-                    if (active && corrupt)
-                      cu->lds().write8(payload_base, 0xa5);
+  for (bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    for (const auto [alias, wave_delay] : {std::pair{false, false}, std::pair{true, false},
+                                           std::pair{false, true}, std::pair{true, true}}) {
+      SCOPED_TRACE(alias);
+      SCOPED_TRACE(wave_delay);
+      constexpr uint16_t scratch = 8;
+      constexpr uint16_t state = 88;
+      const uint16_t spill_exec = alias ? 100 : 96;
+      const uint16_t d1 = alias ? 1 : 12;
+      constexpr uint16_t report_scratch = scratch + detail::kTensorCompareWorkspaceOffset;
+      const auto tensor = cdna5::build_vimage(store ? cdna5::kTensorStoreFromLdsVimage
+                                                    : cdna5::kTensorLoadToLdsVimage,
+                                              {.vaddr4 = 124,
+                                               .vaddr0 = 0,
+                                               .vaddr1 = static_cast<uint8_t>(d1),
+                                               .vaddr2 = 124,
+                                               .vaddr3 = 124});
+      ProgramSite site;
+      site.origin = AccessOrigin::TensorLds;
+      site.kind = store ? LdsAccessKind::Read : LdsAccessKind::Write;
+      site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{0, d1, 124, 124};
+      SpillManager manager(0, 256);
+      const auto spill =
+          build_vgpr_spill_sequence(manager, scratch, detail::kTensorCompareScratchVgprs, arch);
+      ASSERT_TRUE(spill);
+      const auto full_spill = detail::tensor_full_wave_spill(*spill, spill_exec, arch);
+      ASSERT_TRUE(full_spill);
+      std::vector<uint32_t> mismatch;
+      const auto append = [&](const auto &optional) {
+        if (!optional)
+          return false;
+        if constexpr (std::is_integral_v<typename std::decay_t<decltype(optional)>::value_type>)
+          mismatch.push_back(*optional);
+        else
+          mismatch.insert(mismatch.end(), optional->begin(), optional->end());
+        return true;
+      };
+      ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch, 0x200000, arch)));
+      ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch + 1, 0, arch)));
+      ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch + 2, 1, arch)));
+      ASSERT_TRUE(
+          append(instrumentation::build_flat_store_b32(report_scratch, report_scratch + 2, arch)));
+      ASSERT_TRUE(append(instrumentation::build_s_wait_global_store0(arch)));
+      auto words = full_spill->save_words;
+      uint32_t guest_offset = UINT32_MAX;
+      const auto target = std::ranges::find(kTargetProfiles, arch, &TargetProfile::arch);
+      ASSERT_NE(target, kTargetProfiles.end());
+      Request request;
+      request.supercollider_delay_mode = SuperColliderDelayMode::SleepWave;
+      request.supercollider_delay_nops = wave_delay ? 15u : 0u;
+      std::vector<std::string> errors;
+      const auto delay = supercollider_build_delay_words(*target, request, state, site.kind, errors,
+                                                         "tensor test", report_scratch);
+      ASSERT_TRUE(delay) << testing::PrintToString(errors);
+      ASSERT_TRUE(detail::append_tensor_compare(words, site, tensor, scratch, state, *delay,
+                                                mismatch, guest_offset, arch));
+      ASSERT_LE(guest_offset + tensor.size(), words.size());
+      if (!alias)
+        EXPECT_TRUE(std::equal(tensor.begin(), tensor.end(), words.begin() + guest_offset));
+      else {
+        EXPECT_EQ(words[guest_offset], tensor[0]);
+        EXPECT_EQ(words[guest_offset + 1], tensor[1]);
+        EXPECT_EQ(words[guest_offset + 2], (tensor[2] & ~0xff00u) | ((state + 4u) << 8));
+      }
+      words.insert(words.end(), full_spill->restore_words.begin(), full_spill->restore_words.end());
+      const uint64_t after_dma_wait_pc = (guest_offset + tensor.size() + 1) * 4;
+      for (unsigned size_log2 = 0; size_log2 < 4; ++size_log2) {
+        if (alias && size_log2 != 0)
+          continue;
+        for (bool active : {false, true}) {
+          for (bool in_bounds : {false, true}) {
+            for (bool atomic : {false, true}) {
+              for (bool corrupt : {false, true}) {
+                for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+                  SCOPED_TRACE(testing::Message() << "size=" << size_log2 << " active=" << active
+                                                  << " bounds=" << in_bounds << " atomic=" << atomic
+                                                  << " corrupt=" << corrupt << " exec=" << exec);
+                  amdgpu::GpuMemory memory("tensor_compare_mem");
+                  amdgpu::L2Cache l2("tensor_compare_l2");
+                  l2.set_backing_memory(&memory);
+                  amdgpu::ComputeUnitCore::Config config{};
+                  config.arch = arch;
+                  config.num_wf_slots = 1;
+                  config.sgprs_per_wf = 106;
+                  config.vgprs_per_wf = 64;
+                  config.lds_size_kb = alias ? 320 : 4;
+                  auto cu = amdgpu::ComputeUnitCore::create("tensor_compare", config, &memory, &l2);
+                  ASSERT_NE(cu, nullptr);
+                  auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+                  ASSERT_NE(wave, nullptr);
+                  wave->set_lds_base(cu->allocate_lds(config.lds_size_kb * 1024));
+                  ASSERT_NE(wave->lds_base(), UINT32_MAX);
+                  wave->set_scratch_base(0x400000);
+                  wave->set_scratch_lane_size(256);
+                  const auto sb = wave->sgpr_alloc().base, vb = wave->vgpr_alloc().base;
+                  for (uint32_t reg = 0; reg < 106; ++reg)
+                    cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
+                  cu->write_sgpr(sb, active ? 1 : 0);
+                  if (alias) {
+                    // D1[0] is also D0's LDS base. Clearing its completion bit in
+                    // place would redirect the DMA from byte262144 to byte0.
+                    cu->write_sgpr(sb + 1, atomic ? 1u << 18 : 0);
+                    cu->write_sgpr(sb + 2, (in_bounds ? 16u << 16 : 0) | (512u >> 3));
+                    cu->write_sgpr(sb + 3, 0);
+                    cu->write_sgpr(sb + 4, 16u << 16);
+                    for (uint32_t reg = 5; reg < 9; ++reg)
+                      cu->write_sgpr(sb + reg, 0);
+                  } else {
+                    cu->write_sgpr(sb + 1, 0);
+                    cu->write_sgpr(sb + 2, 0x100000);
+                    cu->write_sgpr(sb + 3, 0x80000000u);
+                    cu->write_sgpr(sb + 12, (size_log2 << 16) | (atomic ? 1u << 18 : 0));
+                    cu->write_sgpr(sb + 13, (in_bounds ? 16u << 16 : 0) | (512u >> 3));
+                    cu->write_sgpr(sb + 14, 0);
+                    cu->write_sgpr(sb + 15, 16u << 16);
+                    for (uint32_t reg = 16; reg < 20; ++reg)
+                      cu->write_sgpr(sb + reg, 0);
                   }
-                  cu->step();
+                  const uint32_t source_base = cu->read_sgpr(sb + 2);
+                  const uint32_t payload_base = wave->lds_base() + cu->read_sgpr(sb + 1);
+                  std::array<uint32_t, 106> scalar_before{};
+                  for (uint32_t reg = 0; reg < 106; ++reg)
+                    scalar_before[reg] = cu->read_sgpr(sb + reg);
+                  const uint64_t barrier_before =
+                      0xabcd000000000000ull | amdgpu::lds_barrier_cell_init_state(corrupt ? 2 : 1);
+                  cu->lds().write64(wave->lds_base() + 512, barrier_before);
+                  for (uint32_t byte = 0; byte < (16u << size_log2); ++byte) {
+                    if (!alias || in_bounds)
+                      memory.write8(source_base + byte, static_cast<uint8_t>(byte + 1));
+                    cu->lds().write8(payload_base + byte, 0x5a);
+                  }
+                  memory.write32(0x200000, 0);
+                  for (uint32_t reg = 0; reg < 64; ++reg)
+                    for (uint32_t lane = 0; lane < 32; ++lane)
+                      cu->write_vgpr(vb + reg, lane, 0xa5000000u + reg * 32 + lane);
+                  for (size_t i = 0; i < words.size(); ++i)
+                    memory.write32(i * 4, words[i]);
+                  wave->set_exec(exec);
+                  wave->set_vcc(0x12345678);
+                  wave->write_scc(in_bounds);
+                  wave->pc = 0;
+                  bool observed_dma = false;
+                  size_t steps = 0;
+                  while (wave->pc < words.size() * 4) {
+                    ASSERT_LT(steps++, words.size() * 100);
+                    if (!observed_dma && wave->pc == after_dma_wait_pc) {
+                      observed_dma = true;
+                      EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512), barrier_before);
+                      for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
+                        EXPECT_EQ(cu->lds().read8(payload_base + byte),
+                                  (active && !store)
+                                      ? (in_bounds ? static_cast<uint8_t>(byte + 1) : uint8_t{0})
+                                      : uint8_t{0x5a});
+                      if (active && corrupt)
+                        cu->lds().write8(payload_base, 0xa5);
+                    }
+                    cu->step();
+                  }
+                  cu->flush_all();
+                  EXPECT_TRUE(observed_dma);
+                  if (store && (!alias || in_bounds)) {
+                    // The transfer captured the original payload once. The
+                    // post-transfer injected mutation must not be stored again.
+                    for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
+                      EXPECT_EQ(memory.read8(source_base + byte),
+                                active && in_bounds ? uint8_t{0x5a}
+                                                    : static_cast<uint8_t>(byte + 1));
+                  }
+                  EXPECT_EQ(memory.read32(0x200000),
+                            active && corrupt && (!store || in_bounds) ? 1u : 0u);
+                  EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512),
+                            active && atomic
+                                ? amdgpu::lds_barrier_cell_update_arrive(barrier_before)
+                                : barrier_before);
+                  EXPECT_TRUE(wave->wait_counters().empty());
+                  EXPECT_EQ(wave->exec(), exec);
+                  EXPECT_EQ(wave->vcc(), 0x12345678u);
+                  EXPECT_EQ(wave->read_scc(), in_bounds);
+                  for (uint32_t reg = 0; reg < 64; ++reg)
+                    for (uint32_t lane = 0; lane < 32; ++lane)
+                      EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5000000u + reg * 32 + lane);
+                  for (uint32_t reg = 0; reg < 106; ++reg) {
+                    if ((reg >= state && reg < static_cast<uint32_t>(state) +
+                                                   detail::tensor_compare_state_sgprs(site)) ||
+                        (reg >= spill_exec && reg < spill_exec + 2u))
+                      continue;
+                    EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]) << reg;
+                  }
+                  wave->halt();
                 }
-                cu->flush_all();
-                EXPECT_TRUE(observed_dma);
-                EXPECT_EQ(memory.read32(0x200000), active && corrupt ? 1u : 0u);
-                EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512),
-                          active && atomic ? amdgpu::lds_barrier_cell_update_arrive(barrier_before)
-                                           : barrier_before);
-                EXPECT_TRUE(wave->wait_counters().empty());
-                EXPECT_EQ(wave->exec(), exec);
-                EXPECT_EQ(wave->vcc(), 0x12345678u);
-                EXPECT_EQ(wave->read_scc(), in_bounds);
-                for (uint32_t reg = 0; reg < 64; ++reg)
-                  for (uint32_t lane = 0; lane < 32; ++lane)
-                    EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5000000u + reg * 32 + lane);
-                for (uint32_t reg = 0; reg < 106; ++reg) {
-                  if ((reg >= state && reg < static_cast<uint32_t>(state) +
-                                                 detail::tensor_load_compare_state_sgprs(site)) ||
-                      (reg >= spill_exec && reg < spill_exec + 2u))
-                    continue;
-                  EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]) << reg;
-                }
-                wave->halt();
               }
             }
           }
@@ -1402,13 +1421,13 @@ TEST(ConSanTensor, ValueComparisonRejectsDescriptorScalarOverlapWithoutEmission)
   auto words = prefix;
   uint32_t guest_offset = 77;
   for (uint16_t state : {0, 2, 10, 12, 18, 89, 104}) {
-    EXPECT_FALSE(detail::append_tensor_load_compare(words, site, tensor, 8, state, {}, {},
-                                                    guest_offset, arch));
+    EXPECT_FALSE(
+        detail::append_tensor_compare(words, site, tensor, 8, state, {}, {}, guest_offset, arch));
     EXPECT_EQ(words, prefix);
     EXPECT_EQ(guest_offset, 77u);
   }
   EXPECT_FALSE(
-      detail::append_tensor_load_compare(words, site, tensor, 211, 88, {}, {}, guest_offset, arch));
+      detail::append_tensor_compare(words, site, tensor, 211, 88, {}, {}, guest_offset, arch));
   EXPECT_EQ(words, prefix);
 }
 
