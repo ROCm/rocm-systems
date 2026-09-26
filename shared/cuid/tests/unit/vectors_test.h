@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+#ifndef CUID_TEST_UNIT_VECTORS_TEST_H_
+#define CUID_TEST_UNIT_VECTORS_TEST_H_
+
+#include "test_base.h"
+
+// Checks the library against tests/vectors/cuid_vectors.txt, the shared
+// cross-layer conformance vectors. See tests/vectors/cuid_vectors.py.
+class TestVectors : public TestBase {
+ public:
+  TestVectors();
+  void SetUp() override;
+  void Run() override;
+  void DisplayTestInfo() override;
+  void DisplayResults() const override;
+  void Close() override;
+};
+
+#endif  // CUID_TEST_UNIT_VECTORS_TEST_H_

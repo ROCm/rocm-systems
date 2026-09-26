@@ -40,6 +40,9 @@ class AMDSMILogger:
         self.store_memory_partition_json_output = []
         self.store_partition_profiles_json_output = []
         self.store_partition_resources_json_output = []
+        # Node-scoped fields, merged into the top level of the combined JSON
+        # document beside `gpu_data` rather than into a per-device record.
+        self.store_node_json_output = {}
 
     class LoggerFormat(Enum):
         """Enum for logger formats"""
@@ -762,6 +765,8 @@ class AMDSMILogger:
 
     def combine_arrays_to_json(self):
         combined_json = {}
+        if self.store_node_json_output:
+            combined_json.update(self.store_node_json_output)
         if self.store_cpu_json_output:
             combined_json["cpu_data"] = self.store_cpu_json_output
         if self.store_nic_json_output:

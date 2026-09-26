@@ -1501,6 +1501,19 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
+        cuid_help = (
+            "Component Unified ID: the derived CUID, its component type, whether it is an\n"
+            "auxiliary (synthesised) identifier, and which layer answered. The derivation\n"
+            "seed's state is reported once for the node, outside the per-GPU blocks.\n"
+            "Not part of the default `amd-smi static` output; ask for it.\n"
+            "The primary CUID is not shown by default either: its payload embeds the raw\n"
+            "serial number. Add --cuid-primary, as root, to include it."
+        )
+        cuid_primary_help = (
+            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
+            "privilege, and prints a value that embeds the device serial number. Do not\n"
+            "paste it into a bug report."
+        )
         profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
         clk_options.remove("PCIE")
@@ -1578,6 +1591,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             static_parser.add_argument(
                 "-r", "--ras", action="store_true", required=False, help=ras_help
+            )
+            static_parser.add_argument(
+                "-Y", "--cuid", action="store_true", required=False, help=cuid_help
+            )
+            static_parser.add_argument(
+                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
             )
             static_parser.add_argument(
                 "-C",
@@ -2424,6 +2443,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self.helpers.get_power_caps()
             )
             set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o 1300 ppt0`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
+            set_cuid_seed_help = (
+                "Provision the node-wide CUID derivation seed from FILE, which must hold\n"
+                "exactly 32 bytes. Use - to read it from standard input. The seed is never\n"
+                "accepted as an argument value: an argument is readable in /proc by every\n"
+                "user on the machine and is written to shell history.\n"
+                "This replaces every derived CUID on this node and leaves every primary CUID\n"
+                "unchanged, so it is an administrative invalidation, not a routine action.\n"
+                "Node-wide, so it cannot be combined with --gpu/-g, and it requires root."
+            )
             set_clk_limit_help = "Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk | fclk) (min | max) value\n\tFor mclk and fclk ONLY, a max value is rounded down to the nearest selectable DPM level; sclk is honored exactly."
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
@@ -2608,6 +2636,14 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar=("FRMT1,FRMT2"),
                 )
 
+            set_value_exclusive_group.add_argument(
+                "-u",
+                "--cuid-seed",
+                action="store",
+                required=False,
+                help=set_cuid_seed_help,
+                metavar=("FILE"),
+            )
             set_value_exclusive_group.add_argument(
                 "-L",
                 "--clk-limit",
