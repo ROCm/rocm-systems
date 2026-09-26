@@ -2662,3 +2662,20 @@ requires its own complete clean before eight fault trials. The profile uses
 health checks match the new Default campaign. The full six-shape clean
 remains a separate required gate; the old timed 0/8 result is not substituted
 for fresh untimed fault evidence. All campaigns share the 40 GiB cap.
+
+
+### Live progress observed without altering the qualification streams
+
+A bounded diagnostic uses Linux `tee(2)` to copy available client pipe buffers
+without consuming them. A separate pipe test verifies that the original reader
+still receives the copied bytes. `sgemm-live-output-observation.json` records
+the resulting partial, potentially duplicated observations; these are not
+qualification transcripts or substitutes for final oracles.
+
+During a 20-second observation, the Default 129-shape client advances through
+solutions 608–611 of the second client's zero-based 647 maximum, and the
+untimed Default comparator advances through 553–562, with passing numerical
+rows and complete epoch checkpoints. The two larger Default clients emit a
+passing solution 8 row and an epoch 19 checkpoint respectively. Thus those
+runs have progressed beyond the repaired initial stall; their remaining
+runtime is substantial, and full qualification is still pending.
