@@ -2617,3 +2617,9 @@ execution budget, with three shards concurrent under the shared 40 GiB cap.
 The previous timed results remain evidence of three large-shape timeouts;
 the SuperCollider cell stays orange until this full clean finishes.
 The existing Default jobs keep their original controls and continue running.
+
+The untimed sweep's 127 and 128 shapes now pass, each with all 650 numerical
+rows and both clients accepted. Their independent `run-0.log` and `run-1.log`
+coverage summaries cover 34,012/34,012 access sites with complete static and
+dynamic analysis. Elapsed times are 358 and 355 seconds. Four shapes remain
+pending; this partial result does not resolve the orange cell.
