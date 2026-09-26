@@ -2107,3 +2107,10 @@ Sparse TDM-all's current SuperCollider check also completes all four shards
 with passing numerical oracles and no mismatch markers. Analysis remains
 incomplete because tensor-DMA value comparison is unsupported
 (`sc-current-tensor-clean/tensile-spmm-tdm-all`); its cell is orange.
+
+Mixed MXF8/F4 TDM's current SuperCollider rerun completes all three shards
+under the 1200-second client deadline, with passing numerical oracles and
+no mismatch markers. The previous third-shard timeout is resolved.
+Unsupported tensor-DMA comparison still prevents complete analysis
+(`sc-current-tensor-clean/tensile-sk-mxf8f4gemm-tdm`), so its orange cell
+now names that remaining limitation.
