@@ -2722,3 +2722,10 @@ Trial 1 also completes successfully in 1,170 seconds: eight ConSan conflicts,
 and healthy checks before/after. Two of the eight planned trials have now
 completed with detections; trial 2 is running. Full qualification remains
 pending the remaining trials and three large clean shapes.
+
+Trial 2 completes in 1,178 seconds with 11 detected conflicts, all 650
+numerical cases passing, complete coverage, exactly one intended mutation,
+and healthy checks before/after. Three completed trials have detected the
+fault; five remain pending. A separate non-consuming live-output sample
+(`sgemm-live-output-observation-v3.json`) also confirms later epoch progress
+in the large clean sweeps, without substituting for their final verdicts.
