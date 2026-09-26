@@ -44,7 +44,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep_wave=15: clean pass; fault 0/8 |
-| Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
+| Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep_wave=15: clean pass with complete tensor-DMA comparison coverage; detector 0/8 despite oracle failures 8/8 |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: clean pass with complete tensor-DMA comparison coverage; fault 0/8 |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟩 high: all 4 clean objects pass with complete tensor-DMA coverage; fault 6/8 | 🟨 sleep=15: all 4 clean objects pass with complete tensor-DMA comparison coverage; fault 0/8 |
@@ -59,7 +59,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟩 higher: all 3 clean shards pass with complete coverage; fault 8/8 | 🟧 delay-zero: no mismatches in 6 completed clients per shard; 900 s deadline before all 8 finish |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: clean pass; wave-private LDS, barrier drop does not create a cross-wave race | 🟨 delay-zero: clean pass; wave-private LDS, barrier drop does not create a cross-wave race |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 high: prior clean pass and fault 4/8; lane-retention revalidation pending | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 high + 256 banks: repaired-hook clean pass; fault trials running | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
