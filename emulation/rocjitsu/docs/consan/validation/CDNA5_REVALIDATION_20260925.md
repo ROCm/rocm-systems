@@ -2456,3 +2456,25 @@ instrumentation paths including scratch spill loads/stores and LDS accesses.
 This snapshot does not establish a barrier deadlock or a repeated loop.
 A further bounded replay will compare snapshots farther apart. Original
 qualification jobs were not interrupted by either diagnostic.
+
+
+### Default SGEMM full sweep terminal; metadata-load retry isolated
+
+The 513 shard reached its 14,400-second execution deadline with two numerical
+rows and one passing client, matching the other large shards. The full sweep
+therefore has three passing small shards and three incomplete large shards.
+
+`sgemm-debug-progress` captures active spill-heavy execution initially, then
+memory-pipeline retries on implausible addresses two minutes later. Its second
+wave JSON is empty because that capture inspected only ComputeUnit/Wavefront
+frames; the retained full backtraces contain the pending memory operations.
+A fresh diagnostic, `sgemm-debug-address`, restricts the allowlist to the
+first selected kernel (all instrumentation within that kernel remains enabled)
+and also captures MemoryPipeline frames. Its second snapshot contains 17
+distinct waves, all in `VM_RETRY` at the same PC immediately after an
+instrumentation `flat_load_b32 v12, v[10:11]`. The following instructions check
+metadata words against one and zero. The instrumented report-address path,
+including gfx1250 VGPR bank state, is now under investigation. This is not
+resolved by assuming the full sweep merely needs more time. The cell remains
+orange pending diagnosis; these deliberately interrupted debugger runs are
+not clean qualification or fault-detection trials.
