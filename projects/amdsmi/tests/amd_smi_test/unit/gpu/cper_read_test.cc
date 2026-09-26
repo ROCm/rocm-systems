@@ -431,6 +431,13 @@ constexpr amdsmi_cper_guid_t kNonStandardGuid =  // AMD_GPU_NONSTANDARD_ERROR
     MakeGuid(0x32AC0C78, 0x2623, 0x48F6, 0x81, 0xA2, 0xAC, 0x69, 0x17, 0x80, 0x55, 0x1D);
 constexpr amdsmi_cper_guid_t kProcErrGuid =  // PROC_ERR_SECTION_TYPE
     MakeGuid(0xDC3EA0B0, 0xA144, 0x4797, 0xB9, 0x5B, 0x53, 0xFA, 0x24, 0x2B, 0x6E, 0x1D);
+constexpr amdsmi_cper_guid_t kBootNotifyGuid =  // BOOT_TYPE
+    MakeGuid(0x3D61A466, 0xAB40, 0x409A, 0xA6, 0x98, 0xF3, 0x62, 0xD4, 0x64, 0xB3, 0x8F);
+
+// Crashdump section lengths as amdgpu writes them: the dump union carries fatal_err
+// (32 bytes) in runtime records and boot_err (64 bytes) in boot records.
+constexpr uint32_t kAmdgpuFatalCrashdumpSecLen = 0xB0;
+constexpr uint32_t kAmdgpuBootCrashdumpSecLen = 0xD0;
 
 // Tracks the production static_assert that ties the reg_dump capacity to the
 // register count decode_afid accepts, so both stay on the same constant.
@@ -498,6 +505,27 @@ std::vector<char> MakeCrashdumpRecord(uint32_t record_length, size_t sec_pad = 0
   crashdump->data.reg_ctx_type = kAcaRegisterContext;
   static_assert(sizeof(kFatalRegisterPattern) == sizeof(crashdump->data.dump.fatal_err),
                 "Pattern must fill the whole fatal_err dump, otherwise part of it stays zero");
+  std::memcpy(&crashdump->data.dump.fatal_err, kFatalRegisterPattern,
+              sizeof(kFatalRegisterPattern));
+  return buf;
+}
+
+// [header][desc0][crashdump] with record_length ending sec_len bytes into the
+// section, the shape amdgpu emits. The buffer always holds the full struct so an
+// overread past record_length stays inside it; only the reported length varies.
+std::vector<char> MakeAmdgpuCrashdumpRecord(uint32_t sec_len, bool boot) {
+  const size_t sec_offset = (kDescTableOffset + sizeof(struct cper_sec_desc));
+  std::vector<char> buf(sec_offset + sizeof(struct cper_sec_crashdump), 0);
+  InitHeader(&buf, /*sec_cnt=*/1, static_cast<uint32_t>(sec_offset + sec_len));
+  if (boot) {
+    reinterpret_cast<amdsmi_cper_hdr_t*>(buf.data())->notify_type = kBootNotifyGuid;
+  }
+  struct cper_sec_desc* desc = DescAt(&buf, 0);
+  desc->sec_type = kCrashdumpGuid;
+  desc->sec_offset = static_cast<uint32_t>(sec_offset);
+  desc->sec_length = sec_len;
+  auto* crashdump = reinterpret_cast<struct cper_sec_crashdump*>(buf.data() + sec_offset);
+  crashdump->data.reg_ctx_type = kAcaRegisterContext;
   std::memcpy(&crashdump->data.dump.fatal_err, kFatalRegisterPattern,
               sizeof(kFatalRegisterPattern));
   return buf;
@@ -604,7 +632,7 @@ TEST(GpuUnit, CperDecodeSkipsSectionWithOutOfBoundsOffset) {
 TEST(GpuUnit, CperDecodeSkipsSectionThatStartsInsideButOverrunsTheRecord) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(buf.data());
-  // One byte of room at sec_offset, against a section that needs the full struct.
+  // One byte of room at sec_offset, against a section that needs at least fatal_err.
   hdr->record_length = static_cast<uint32_t>(kCrashdumpSecOffset + 1);
 
   // Forked for the same reason as the wild-offset case: unguarded, the section
@@ -615,6 +643,41 @@ TEST(GpuUnit, CperDecodeSkipsSectionThatStartsInsideButOverrunsTheRecord) {
         _exit(afids.empty() ? 0 : 1);
       },
       testing::ExitedWithCode(0), "");
+}
+
+// A runtime fatal crashdump ends after fatal_err, 32 bytes short of the dump
+// union's boot_err-sized footprint. Bounding it by sizeof(cper_sec_crashdump)
+// rejects every fatal record amdgpu writes.
+TEST(GpuUnit, CperDecodeDecodesFatalCrashdumpSizedAsAmdgpuWritesIt) {
+  std::vector<char> buf = MakeAmdgpuCrashdumpRecord(kAmdgpuFatalCrashdumpSecLen, /*boot=*/false);
+  const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
+
+  EXPECT_EQ(cper_decode(hdr, buf.size()).size(), 1u);
+}
+
+// One byte short of fatal_err is still an overrun.
+TEST(GpuUnit, CperDecodeSkipsFatalCrashdumpOneByteShortOfFatalErr) {
+  std::vector<char> buf =
+      MakeAmdgpuCrashdumpRecord(kAmdgpuFatalCrashdumpSecLen - 1, /*boot=*/false);
+  const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
+
+  EXPECT_TRUE(cper_decode(hdr, buf.size()).empty());
+}
+
+// Boot records are read through boot_err, so the fatal extent is not enough.
+TEST(GpuUnit, CperDecodeSkipsBootCrashdumpSizedOnlyForFatalErr) {
+  std::vector<char> buf = MakeAmdgpuCrashdumpRecord(kAmdgpuFatalCrashdumpSecLen, /*boot=*/true);
+  const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
+
+  EXPECT_TRUE(cper_decode(hdr, buf.size()).empty());
+}
+
+// Positive control for the boot reject above.
+TEST(GpuUnit, CperDecodeDecodesBootCrashdumpSizedAsAmdgpuWritesIt) {
+  std::vector<char> buf = MakeAmdgpuCrashdumpRecord(kAmdgpuBootCrashdumpSecLen, /*boot=*/true);
+  const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
+
+  EXPECT_EQ(cper_decode(hdr, buf.size()).size(), 1u);
 }
 
 // The same overrun on the non-standard path, which reaches the bound through an
