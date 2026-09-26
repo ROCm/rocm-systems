@@ -2149,4 +2149,18 @@ qualification. Matching baseline and clean checks explicitly require 650 rows.
 This reduces instrumentation of unrelated kernels during repeated fault trials.
 Full-workload clean qualification still requires the independent six-shard
 sweep using the original 84-kernel allowlist; a targeted clean pass cannot
-replace that requirement. The full sweep remains running.
+replace that requirement. The high-preset full sweep is running.
+
+
+The matching targeted SGEMM clean checks now pass at both presets, retaining all
+650 numerical rows. Three completed missed detections in the eight-trial
+`default` fault campaign cap its possible final result at 5/8. Its unfinished
+full clean sweep was therefore stopped deliberately, preserving two completed
+650-row clean shards and the other artifacts. The eight fault trials continue
+for the final statistic. `cancellation.json` records the decision and exact
+rows; this was not a timeout or a claimed complete clean result.
+
+The full `high` clean sweep uses the original 84-kernel allowlist and all six
+shards, with a 14400-second inner bound and a 14700-second outer bound per
+command. Artifacts: `sgemm-complete-report1g-high-clean`. It remains necessary
+before a green cell, even if targeted fault qualification passes.
