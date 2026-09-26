@@ -39,7 +39,6 @@ extern std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersi
 // External parameter accessors made settable so tests can drive their
 // respective guards independently.
 extern std::function<int64_t()> g_paramForceCe;
-extern std::function<int64_t()> g_paramSymCeThreshold;
 extern std::function<int64_t()> g_paramP2pDisable;
 
 // Deliberate reset opt-out: every mutable hook in this file is installed via

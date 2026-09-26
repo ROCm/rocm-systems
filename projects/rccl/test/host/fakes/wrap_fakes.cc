@@ -99,12 +99,6 @@ static int64_t DefaultParamForceCe() { return 1; }  // enqueue/enqueue.cc:4108
 std::function<int64_t()> g_paramForceCe = DefaultParamForceCe;
 int64_t rcclParamForceCe() { return g_paramForceCe(); }
 
-// enqueue.cc owns NCCL_PARAM(SymCeThreshold); rccl_wrap.cc consults it for the
-// AllGather CE fallback. Keep the production default (8 MiB).
-static int64_t DefaultParamSymCeThreshold() { return 8 * 1024 * 1024; }  // enqueue/enqueue.cc:90
-std::function<int64_t()> g_paramSymCeThreshold = DefaultParamSymCeThreshold;
-int64_t ncclParamSymCeThreshold() { return g_paramSymCeThreshold(); }
-
 // init.cc owns NCCL_PARAM(P2pDisable), but rccl_wrap.cc consults its accessor
 // while applying gfx120x protocol tuning. Keep the production default and let
 // the protocol test override it explicitly.
