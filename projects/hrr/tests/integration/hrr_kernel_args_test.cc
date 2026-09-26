@@ -96,6 +96,7 @@ namespace {
 // Capture the workload, keeping the child's stdout so the parent learns the
 // address it passed.
 inline uint64_t hrr_capture_direct_kargs(const fs::path& cap_path) {
+  hrr_skip_without_gpu();
   std::string out;
   { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());

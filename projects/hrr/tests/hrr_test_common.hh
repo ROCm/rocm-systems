@@ -61,6 +61,9 @@
 #define HRR_HIP_CHECK(expr)                                                     \
   do {                                                                          \
     hipError_t _hrr_err = (expr);                                              \
+    if (_hrr_err == hipErrorNoDevice) {                                        \
+      HRR_SKIP_CASE("no ROCm-capable device is detected");                     \
+    }                                                                          \
     INFO("HIP call failed: " #expr);                                           \
     INFO("hipError_t: " << static_cast<int>(_hrr_err));                        \
     INFO("hipGetErrorString: " << hipGetErrorString(_hrr_err));                \
@@ -86,6 +89,16 @@
 // a tier that could not run from being indistinguishable, in a JUnit report or
 // a --summary, from one that ran and passed.
 #define HRR_SKIP_CASE(message) SKIP(message)
+
+inline bool hrr_gpu_available() {
+  int count = 0;
+  return hipGetDeviceCount(&count) == hipSuccess && count > 0;
+}
+
+inline void hrr_skip_without_gpu() {
+  if (!hrr_gpu_available())
+    HRR_SKIP_CASE("no ROCm-capable device is detected");
+}
 
 // ---------------------------------------------------------------------------
 // Shared capture/replay helpers.
@@ -296,6 +309,43 @@ inline std::string hrr_test_exe() {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: run one hidden [.][hrr-direct] workload in a child of this same test
+// binary, with capture directed at `cap_path`, and REQUIRE a clean exit.
+//
+// The child is a whole Catch2 process. Left on the parent's stdout it prints
+// its own run banner -- "Filters: ...", "Randomness seeded to: ...", the
+// divider and the totals line -- once per spawn, and the suite spawns a
+// workload for each of its ~70 hidden cases. That, not the number of test
+// cases, is where the integration suite's wall of output came from; the unit
+// suite stays readable only because every spawn it makes is already captured.
+//
+// So capture the child's stdout and stderr and hand the transcript to INFO,
+// which Catch2 holds and prints only if an assertion in this scope fails. A
+// passing run says nothing at all; a failing one still carries the complete
+// child output next to the exit code, which is the diagnostic that matters.
+//
+// The merged stream is returned for the callers that parse a marker out of it.
+// ---------------------------------------------------------------------------
+inline std::string hrr_spawn_direct(const std::string& direct_case,
+                                    const fs::path& cap_path,
+                                    const char* what = "Capture") {
+  hrr_skip_without_gpu();
+  hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
+                            /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+  // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
+  // SpawnProc replaces PATH entirely, so we reconstruct the full value.
+  set_proc_search_path(proc);
+  const int ret = proc.run("\"" + direct_case + "\"");
+  std::string out = proc.getOutput();
+  INFO(what << " subprocess (" << direct_case << ") exit code: " << ret
+            << "\n--- child output ---\n"
+            << out << "--- end child output ---");
+  REQUIRE(ret == 0);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: shared roundtrip body — capture → verify archive → playback.
 //
 // min_events:  minimum number of events expected in events.bin.  Every workload
@@ -310,11 +360,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
                               const fs::path& cap_path,
                               size_t min_events = 5,
                               bool require_d2h = true) {
-  { hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  hrr_spawn_direct(direct_case, cap_path);
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -352,11 +398,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
                                size_t min_events = 5) {
-  { hrr::test::SpawnProc proc(hrr_test_exe());
-    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { set_proc_search_path(proc); }
-    int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  hrr_spawn_direct(direct_case, cap_path);
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));

@@ -294,9 +294,17 @@ TEST_CASE("Unit_HRR_Regions_MemcpyDirect", "[.][hrr-direct]") {
   }
   // Without this the copy faults at capture instead of being recorded, and the
   // test would then be measuring a broken workload rather than the replay.
-  REQUIRE(hsa_amd_agents_allow_access(
-              static_cast<uint32_t>(target.all_agents.size()),
-              target.all_agents.data(), nullptr, seg) == HSA_STATUS_SUCCESS);
+  // Some consumer iGPUs enumerate a pool they then refuse to grant access to;
+  // treat that the same as "no usable HSA segment" rather than failing the
+  // parent roundtrip.
+  if (hsa_amd_agents_allow_access(
+          static_cast<uint32_t>(target.all_agents.size()),
+          target.all_agents.data(), nullptr, seg) != HSA_STATUS_SUCCESS) {
+    (void)hsa_amd_memory_pool_free(seg);
+    printf("%s none 0\n", HRR_HSA_SEG_MARKER);
+    fflush(stdout);
+    return;
+  }
 
   printf("%s 0x%llx %zu\n", HRR_HSA_SEG_MARKER,
          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(seg)),
@@ -405,7 +413,7 @@ bool covered_by_recorded_alloc(const fs::path& archive_path, uint64_t addr) {
 // CPU-only: the sidecar framing
 // ===========================================================================
 
-TEST_CASE("Unit_HRR_Regions_StreamFraming", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_StreamFraming", "[hrr][cpu]") {
   ScopedDir dir(fs::temp_directory_path() / "hrr_region_framing");
   const fs::path archive = dir.path / "pid-1";
   const fs::path stream = archive / "regions" / "synthetic.hrrr";
@@ -710,6 +718,7 @@ namespace {
 // the child reports it and the parent reads it here.
 inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
     const std::string& direct_case, const fs::path& cap_path) {
+  hrr_skip_without_gpu();
   std::string out;
   { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
@@ -736,9 +745,7 @@ TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[hrr]") {
       hrr_capture_direct_hsa("Unit_HRR_Regions_MemcpyDirect", cap.path);
 
   if (hsa_base == 0 || hsa_size == 0) {
-    WARN("No HSA agent with a coarse-grained pool on this platform; "
-         "skipping the memcpy-first-touch assertions for this run");
-    return;
+    HRR_SKIP_CASE("No HSA agent with a coarse-grained pool on this platform");
   }
 
   const fs::path archive = hrr_single_process_archive(cap.path);
