@@ -63,7 +63,7 @@ std::vector<callchain::ts_entry_vec_t>
 callchain::get() const
 {
     std::vector<ts_entry_vec_t> _v = {};
-    if(size() == 0)
+    if(empty())
     {
         return _v;
     }

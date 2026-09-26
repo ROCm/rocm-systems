@@ -3106,11 +3106,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
 
-  // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
-  // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
-  // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
-  // device memory and pinned host memory, plus peer device-to-device copies.
-  // All other combinations are rejected up front.
+  // Swap and indirect operations require the SDMA batch path. Allow device-to-device
+  // and pinned host/device transfers; reject host-only and pageable-host copies.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
@@ -3132,10 +3129,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
       switch (type) {
         case hipCopyBuffer:
         case hipCopyBufferSDMA: {
-          // Narrow to H<->D for both swap and indirect.
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
+          if (sMem == nullptr || dMem == nullptr ||
+              (getMemoryType(sMem) == hipMemoryTypeHost &&
+               getMemoryType(dMem) == hipMemoryTypeHost)) {
             return hipErrorNotSupported;
           }
           break;

@@ -169,19 +169,17 @@ TEST_F(flush_worker_test, different_pid_start_stop)
 
         _exit(still_running ? 1 : (exit_finished ? 2 : 0));
     }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        const int child_exit_code = WEXITSTATUS(status);
 
-        EXPECT_EQ(child_exit_code, 0);
-        EXPECT_FALSE(worker_sync->exit_finished);
-        EXPECT_TRUE(worker_sync->is_running);
+    int status;
+    waitpid(child_pid, &status, 0);
+    const int child_exit_code = WEXITSTATUS(status);
 
-        worker.stop(parent_pid);
-        EXPECT_TRUE(worker_sync->exit_finished);
-        EXPECT_FALSE(worker_sync->is_running);
-        EXPECT_TRUE(worker_called);
-    }
+    EXPECT_EQ(child_exit_code, 0);
+    EXPECT_FALSE(worker_sync->exit_finished);
+    EXPECT_TRUE(worker_sync->is_running);
+
+    worker.stop(parent_pid);
+    EXPECT_TRUE(worker_sync->exit_finished);
+    EXPECT_FALSE(worker_sync->is_running);
+    EXPECT_TRUE(worker_called);
 }

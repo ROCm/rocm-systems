@@ -268,7 +268,7 @@ read_symlink(const std::string& path)
 {
     std::error_code error;
     auto            target = std::filesystem::read_symlink(path, error);
-    return (error) ? path : target.string();
+    return error ? path : target.string();
 }
 
 /**
@@ -320,7 +320,7 @@ realpath(const std::string& path)
 {
     std::error_code error;
     auto            canon = std::filesystem::canonical(path, error);
-    return (error) ? path : canon.string();
+    return error ? path : canon.string();
 }
 
 bool
@@ -422,7 +422,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
             next = next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -465,7 +465,7 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
             }
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }

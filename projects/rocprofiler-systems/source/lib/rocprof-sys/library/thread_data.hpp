@@ -47,7 +47,7 @@ struct base_thread_data
                 _v->reserve(_v->capacity() + 1);
                 _v->resize(_v->capacity());
             }
-            return (_v) ? _v->capacity() : 0;
+            return _v ? _v->capacity() : 0;
         };
         grow_functors().emplace_back(_func);
 
@@ -133,7 +133,7 @@ struct thread_data : base_thread_data<thread_data<Tp, Tag, MaxThreads>>
 
     static array_type* get()
     {
-        return (private_instance()) ? &private_instance()->m_data : nullptr;
+        return private_instance() ? &private_instance()->m_data : nullptr;
     }
 
 private:

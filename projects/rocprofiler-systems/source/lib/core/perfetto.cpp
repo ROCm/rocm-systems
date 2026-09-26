@@ -145,7 +145,7 @@ start()
     }
 
     LOG_DEBUG("Setup perfetto...");
-    const int _fd = (_tmp_file) ? _tmp_file->fd : -1;
+    const int _fd = _tmp_file ? _tmp_file->fd : -1;
     auto&     cfg = get_config();
     tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
         if(_err.code == ::perfetto::TracingError::kTracingFailed)
@@ -256,8 +256,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         perfetto_mpi_get_t{ get_perfetto_combined_traces(),
                             settings::node_count() }(_rank_data, _trace_data, _combine);
         for(auto& itr : _rank_data)
-            trace_data =
-                (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
+            trace_data = trace_data.empty() ? std::move(itr) : _combine(trace_data, itr);
     }
     else
     {

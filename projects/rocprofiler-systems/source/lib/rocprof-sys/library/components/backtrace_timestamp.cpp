@@ -19,7 +19,7 @@ bool
 backtrace_timestamp::is_valid() const
 {
     const auto& _info = thread_info::get(m_tid, SequentTID);
-    return (_info) ? _info->is_valid_time(m_real) : false;
+    return _info ? _info->is_valid_time(m_real) : false;
 }
 
 void

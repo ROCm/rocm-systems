@@ -604,7 +604,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             .value_or(false);
 
     {
-        auto _saved_experiments = (_causal_output_reset)
+        auto _saved_experiments = _causal_output_reset
                                       ? std::vector<experiment::record>{}
                                       : load_experiments(_fname_base, _cfg, false);
         _saved_experiments.emplace_back(current_record);

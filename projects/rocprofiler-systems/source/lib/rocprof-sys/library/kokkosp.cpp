@@ -147,7 +147,7 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
     {
         return true;
     }
-    else if(_name_len_limit == 0)
+    if(_name_len_limit == 0)
     {
         return false;
     }
@@ -341,8 +341,8 @@ extern "C"
             LOG_DEBUG("Initializing rocprof-sys (standalone)... ");
             auto _mode =
                 rocprofsys::get_env<std::string>(rocprofsys::env_vars::MODE, "trace");
-            auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
-                                                         : _initialize_arguments.at(0);
+            auto _arg0 = _initialize_arguments.empty() ? std::string{ "unknown" }
+                                                       : _initialize_arguments.at(0);
 
             _standalone_initialized = true;
             rocprofsys_set_mpi_hidden(false);
@@ -771,13 +771,12 @@ extern "C"
         {
             auto _name = tim::get_hash_identifier_fast(
                 tim::add_hash_id(fmt::format("{} {} [dual_view_sync][{}]", _kp_prefix,
-                                             label, (is_device) ? "device" : "host")));
+                                             label, is_device ? "device" : "host")));
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
 
         cache_kokkos_event(fmt::format("{} {}", _kp_prefix, label).c_str(),
-                           "[dual_view_sync]", (is_device) ? "device" : "host",
-                           timestamp);
+                           "[dual_view_sync]", is_device ? "device" : "host", timestamp);
     }
 
     void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
@@ -805,12 +804,12 @@ extern "C"
         {
             auto _name = tim::get_hash_identifier_fast(
                 tim::add_hash_id(fmt::format("{} {} [dual_view_modify][{}]", _kp_prefix,
-                                             label, (is_device) ? "device" : "host")));
+                                             label, is_device ? "device" : "host")));
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
 
         cache_kokkos_event(fmt::format("{} {}", _kp_prefix, label).c_str(),
-                           "[dual_view_modify]", (is_device) ? "device" : "host",
+                           "[dual_view_modify]", is_device ? "device" : "host",
                            timestamp);
     }
 

@@ -85,7 +85,7 @@ public:
         if((current_entry != nullptr) && value_keys.count(name) > 0)
         {
             current_entry->insert({ name, "" });
-            current_value = &((*current_entry)[name]);
+            current_value = &(*current_entry)[name];
             return;
         }
 
@@ -96,7 +96,7 @@ public:
 
         current_value = nullptr;
         output_stream->push_back(entry_type{});
-        current_entry = &(output_stream->back());
+        current_entry = &output_stream->back();
 
         current_entry->insert({ "identifier", name });
         std::string       func   = name;

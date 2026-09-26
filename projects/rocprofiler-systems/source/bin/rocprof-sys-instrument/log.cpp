@@ -104,7 +104,7 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
 
         if(!_condition || _condition(itr))
         {
-            auto _msg = ((_color_entries) ? itr.as_string() : itr.as_string("", "", ""));
+            auto _msg = (_color_entries ? itr.as_string() : itr.as_string("", "", ""));
             if(_msg != _last)
             {
                 if(_last_n > 0 && !_last.empty())
