@@ -28,3 +28,4 @@ printf:
   Unit_Printf_PrintfAltFormsTsts: *level_2
   Unit_Printf_HostcallLargeStaticTls_Positive: *level_2
   Unit_Printf_HostcallUndersizedStackRequest_Positive: *level_2
+  Unit_Printf_HostcallShutdown_Positive: *level_2
