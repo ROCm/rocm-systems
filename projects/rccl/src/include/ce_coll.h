@@ -25,7 +25,7 @@
 // Total payload capacity of one reusable CE AllReduce staging slot. Messages
 // larger than this are pipelined; sizing each slot to ceArStagingBytes per-rank
 // wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
-#define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
+#define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
 
 // Fallback 2-shot max cap for rcclCeAr2ShotMax() when no arch table is present.
 // Independent of NCCL_CE_AR_STAGING_BYTES (which governs buffer allocation).
