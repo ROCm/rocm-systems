@@ -61,24 +61,30 @@ For a larger trace, the budget can be raised explicitly:
 The 1 GiB value is only an example, not a recommended default. A larger budget
 trades host memory for trace coverage, and some known traces exceed even 1 GiB.
 
-To profile one kernel in a multi-dispatch application, set `dispatch_name` to
-the exact kernel name:
+For a launcher that issues setup or helper kernels, `dispatch_name` identifies
+an exact dispatch display name in the replay diagnostics. Copy the name quoted
+in RocJITsu's `dispatch #N d=ID "name"` log, not the raw ELF name shown as
+`symbol="..."`: the adapter compares `kernelNameOrUnknown()`, and those two
+names can differ. Every supported dispatch still follows the normal staging
+lifecycle and is forwarded to the backend, preserving the backend input stream.
+After replaying a matching dispatch, the adapter emits
+`[rocjitsu:perfsim] selected dispatch <id> replayed`; a report consumer can use
+that ID to distinguish the target report from helper reports. Omitting the field
+or setting it to an empty string disables the marker:
 
 ```json
 "perfsim": {
   "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
-  "dispatch_name": "_topk_topp_kernel"
+  "dispatch_name": "_fwd_kernel"
 }
 ```
 
-Nonmatching dispatches still execute normally in RocJITsu, including their
-functional memory effects. The adapter only suppresses their observer event
-staging and replay into Perfsim. Matching is exact; it is neither a prefix nor
-a regular-expression match. If `dispatch_name` is absent, every supported
-dispatch is forwarded exactly as before.
+Matching is exact; it is neither a prefix nor a regular-expression match.
+`dispatch_name` only controls the diagnostic marker and never filters observer
+events or backend replay.
 
 For diagnostic runs, `max_observed_wgps` can additionally cap the number of
-distinct workgroups whose events are staged for each selected dispatch:
+distinct workgroups whose events are staged for each dispatch:
 
 ```json
 "perfsim": {
@@ -93,7 +99,6 @@ and is disabled when omitted. A capped trace is incomplete and must not be
 treated as an exact full-grid result unless the backend explicitly reconstructs
 the full population from dispatch geometry and the workload satisfies that
 backend's scaling assumptions.
-
 Configure Perfsim through its own environment, then launch the workload:
 
 ```bash

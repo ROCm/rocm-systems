@@ -362,14 +362,14 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidStagingBudgets) {
   }
 }
 
-TEST(PerfsimPluginConfigTest, RejectsInvalidDispatchNames) {
-  const std::string prefix = std::string{"{\"library_path\":"} +
-                             json_string(PERFSIM_FAKE_BACKEND_PATH) + ",\"dispatch_name\":";
-  for (std::string_view value : {"\"\"", "7", "true", "[]"}) {
-    SCOPED_TRACE(value);
-    const std::string config = prefix + std::string(value) + "}";
-    EXPECT_THROW(PerfsimPlugin(config.c_str()), std::invalid_argument);
-  }
+TEST(PerfsimPluginConfigTest, RejectsNonStringDispatchNameAndAcceptsEmptyValue) {
+  const std::string empty = std::string{"{\"library_path\":"} +
+                            json_string(PERFSIM_FAKE_BACKEND_PATH) + ",\"dispatch_name\":\"\"}";
+  EXPECT_NO_THROW(PerfsimPlugin(empty.c_str()));
+
+  const std::string config = std::string{"{\"library_path\":"} +
+                             json_string(PERFSIM_FAKE_BACKEND_PATH) + ",\"dispatch_name\":42}";
+  EXPECT_THROW(PerfsimPlugin(config.c_str()), std::invalid_argument);
 }
 
 TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWgpCaps) {
@@ -560,51 +560,89 @@ TEST_F(PerfsimPluginTest, RejectsMalformedCompletionCallbacksForObservedDispatch
             std::string::npos);
 }
 
-TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatches) {
+TEST_F(PerfsimPluginTest, MarksSelectedDispatchWithoutFilteringReplay) {
   WaveFixture fixture;
-  const std::string config = plugin_config_with_dispatch_name("target_kernel");
+  const std::string config = plugin_config_with_dispatch_name("selected_kernel");
   testing::internal::CaptureStderr();
   {
     PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
-    KernelDispatchInfo setup = dispatch_info(40);
-    setup.kernel_name = "target_kernel_suffix";
-    plugin.onAmdgpuDispatchPacketProcessed(setup);
-    plugin.onAmdgpuDispatchExecutionBegin(setup.dispatch_id);
-    Wavefront &setup_wave = fixture.wave(setup.dispatch_id, 0, {0, 0, 0}, 0);
-    plugin.onAmdgpuWavefrontDispatched(setup_wave);
-    EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&setup_wave));
-    const std::array<uint32_t, 1> add_words{0x7E000200};
-    SyntheticInstruction add("v_add_f32", add_words);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x1000, add, setup_wave);
-    plugin.onAmdgpuWavefrontHalted(setup_wave);
-    plugin.onAmdgpuDispatchExecutionEnd(setup.dispatch_id);
+    KernelDispatchInfo near_match = dispatch_info(40);
+    near_match.kernel_name = "selected_kernel_suffix";
+    // The selector matches the display name, not the raw ELF symbol.
+    near_match.kernel_symbol = "selected_kernel";
+    plugin.onAmdgpuDispatchPacketProcessed(near_match);
+    plugin.onAmdgpuDispatchExecutionBegin(near_match.dispatch_id);
+    Wavefront &near_match_wave = fixture.wave(near_match.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(near_match_wave);
+    const std::array<uint32_t, 1> words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x7000, end, near_match_wave);
+    plugin.onAmdgpuWavefrontHalted(near_match_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(near_match.dispatch_id);
 
-    KernelDispatchInfo target = dispatch_info(41);
-    target.kernel_name = "target_kernel";
-    plugin.onAmdgpuDispatchPacketProcessed(target);
-    plugin.onAmdgpuDispatchExecutionBegin(target.dispatch_id);
-    Wavefront &target_wave = fixture.wave(target.dispatch_id, 1, {1, 0, 0}, 0);
-    plugin.onAmdgpuWavefrontDispatched(target_wave);
-    EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&target_wave));
-    const std::array<uint32_t, 1> end_words{0xBF810000};
-    SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, end, target_wave);
-    plugin.onAmdgpuWavefrontHalted(target_wave);
-    plugin.onAmdgpuDispatchExecutionEnd(target.dispatch_id);
+    KernelDispatchInfo selected = dispatch_info(41);
+    selected.kernel_name = "selected_kernel";
+    selected.kernel_symbol = "selected_kernel.kd";
+    plugin.onAmdgpuDispatchPacketProcessed(selected);
+    plugin.onAmdgpuDispatchExecutionBegin(selected.dispatch_id);
+    Wavefront &selected_wave = fixture.wave(selected.dispatch_id, 1, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(selected_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x8000, end, selected_wave);
+    plugin.onAmdgpuWavefrontHalted(selected_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(selected.dispatch_id);
     plugin.onShutdown();
   }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
+  EXPECT_EQ(diagnostic.find("selected dispatch 40 replayed"), std::string::npos);
+  EXPECT_NE(diagnostic.find("selected dispatch 41 replayed"), std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(line_with_prefix(trace, "begin 40 "), trace.size());
-  EXPECT_EQ(line_with_prefix(trace, "instruction 40 "), trace.size());
-  EXPECT_EQ(line_with_prefix(trace, "end 40 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "begin 40 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "instruction 40 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 40 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "begin 41 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "instruction 41 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "end 41 "), trace.size());
+}
+
+TEST_F(PerfsimPluginTest, EmptyDispatchNameReplaysAllDispatchesWithoutMarker) {
+  WaveFixture fixture;
+  const std::string config = plugin_config_with_dispatch_name("");
+  testing::internal::CaptureStderr();
+  {
+    PerfsimPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    const std::array<uint32_t, 1> words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
+    auto replay_dispatch = [&](uint32_t dispatch_id, uint32_t workgroup_id, uint64_t pc) {
+      const KernelDispatchInfo info = dispatch_info(dispatch_id);
+      plugin.onAmdgpuDispatchPacketProcessed(info);
+      plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+      Wavefront &wave = fixture.wave(info.dispatch_id, workgroup_id, {workgroup_id, 0, 0}, 0);
+      plugin.onAmdgpuWavefrontDispatched(wave);
+      plugin.onAmdgpuBeforeExecuteInstruction(pc, end, wave);
+      plugin.onAmdgpuWavefrontHalted(wave);
+      plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+    };
+
+    replay_dispatch(42, 0, 0x9000);
+    replay_dispatch(43, 1, 0xA000);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(diagnostic.find("selected dispatch "), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  for (uint32_t dispatch_id : {42, 43}) {
+    SCOPED_TRACE(dispatch_id);
+    const std::string id = std::to_string(dispatch_id) + " ";
+    EXPECT_NE(line_with_prefix(trace, "begin " + id), trace.size());
+    EXPECT_NE(line_with_prefix(trace, "instruction " + id), trace.size());
+    EXPECT_NE(line_with_prefix(trace, "end " + id), trace.size());
+  }
 }
 
 TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingReplay) {
