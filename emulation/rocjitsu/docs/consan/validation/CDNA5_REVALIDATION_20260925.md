@@ -2421,3 +2421,19 @@ instrumented dispatch verdict, so CPU activity alone cannot establish progress
 through this dispatch. This warrants dispatch-level investigation rather than
 assuming the full solution sweep merely needs a larger deadline. The 512 and
 513 shards remain live; no completed clean qualification is claimed.
+
+
+### Default SGEMM 512 shard and isolated dispatch investigation
+
+The 512 shard also reached its actual 14,400-second execution deadline.
+Its retained `tensile-sk-sgemm-quick-clean-10bw7q1t/oracle.json` reports
+only two numerical rows and one of two passing clients, matching the 511
+shard's incomplete result. The 513 shard remains running.
+
+The isolated first solution of the 511 shard's second client passes its
+uninstrumented numerical check in 4.18 seconds (`sgemm-dispatch-probe-v2`).
+The instrumented diagnostic explicitly checks all `RJ_` settings against the
+original live 512 client, including its 1 GiB report cap. It is still pending;
+no execution-stall diagnosis is established yet. An earlier diagnostic
+(`sgemm-dispatch-probe`) accidentally omitted that cap and exited during
+code loading; it is retained as an invalid comparison, not execution evidence.
