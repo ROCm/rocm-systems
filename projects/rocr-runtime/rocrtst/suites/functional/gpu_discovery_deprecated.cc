@@ -133,8 +133,19 @@ void GpuDiscoveryDeprecatedTest::SetUp() {
 
 void GpuDiscoveryDeprecatedTest::Run() {
   // Phase 1: Scan KFD topology to understand what hardware is present.
+  // This test reads host KFD sysfs directly. Under FFM model mode
+  // (HSA_MODEL_TOPOLOGY) topology comes from the model directory, not host
+  // sysfs, and the model exposes only supported (DoorbellType 2) GPUs -- so
+  // the deprecated-skip path can't be exercised. Skip rather than fail when
+  // there are no nodes to scan (FFM, or other restricted container env).
   int num_nodes = CountKfdNodes();
-  ASSERT_GT(num_nodes, 0) << "No KFD topology nodes found";
+  if (num_nodes == 0) {
+    // The gtest vendored under rocrtst/ predates GTEST_SKIP(); emit the standard
+    // [ SKIPPED ] marker and return instead.
+    std::cout << "[ SKIPPED ] GpuDiscoveryDeprecatedTest: No KFD topology nodes found "
+                 "(FFM model mode or restricted env)\n";
+    return;
+  }
 
   int total_gpu_nodes = 0;
   int supported_gpu_nodes = 0;   // DoorbellType == 2
