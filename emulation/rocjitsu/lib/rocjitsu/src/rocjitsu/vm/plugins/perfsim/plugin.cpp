@@ -118,6 +118,8 @@ private:
 struct AdapterConfig {
   std::string library_path;
   size_t max_staged_bytes = kDefaultMaxStagedBytes;
+  std::optional<std::string> dispatch_name;
+  std::optional<size_t> max_observed_wgps;
 };
 
 AdapterConfig parse_config(const char *config_json) {
@@ -141,6 +143,14 @@ AdapterConfig parse_config(const char *config_json) {
   if (!std::filesystem::path(result.library_path).is_absolute())
     throw std::invalid_argument("Perfsim plugin 'library_path' must be absolute");
 
+  const auto dispatch_name = config["dispatch_name"];
+  if (!dispatch_name.IsNull()) {
+    if (!dispatch_name.IsString() || dispatch_name.AsString().size() == 0) {
+      throw std::invalid_argument("Perfsim plugin 'dispatch_name' must be a non-empty string");
+    }
+    result.dispatch_name.emplace(dispatch_name.AsString().c_str(), dispatch_name.AsString().size());
+  }
+
   const auto max_staged_bytes = config["max_staged_bytes"];
   if (!max_staged_bytes.IsNull()) {
     if (!max_staged_bytes.IsIntOrUint() ||
@@ -153,6 +163,20 @@ AdapterConfig parse_config(const char *config_json) {
     if (value > std::numeric_limits<size_t>::max())
       throw std::invalid_argument("Perfsim plugin 'max_staged_bytes' is too large");
     result.max_staged_bytes = static_cast<size_t>(value);
+  }
+
+  const auto max_observed_wgps = config["max_observed_wgps"];
+  if (!max_observed_wgps.IsNull()) {
+    if (!max_observed_wgps.IsIntOrUint() ||
+        (max_observed_wgps.IsInt() && max_observed_wgps.AsInt64() <= 0)) {
+      throw std::invalid_argument("Perfsim plugin 'max_observed_wgps' must be a positive integer");
+    }
+    const uint64_t value = max_observed_wgps.AsUInt64();
+    if (value == 0)
+      throw std::invalid_argument("Perfsim plugin 'max_observed_wgps' must be a positive integer");
+    if (value > std::numeric_limits<size_t>::max())
+      throw std::invalid_argument("Perfsim plugin 'max_observed_wgps' is too large");
+    result.max_observed_wgps = static_cast<size_t>(value);
   }
   return result;
 }
@@ -333,7 +357,21 @@ size_t staged_dynamic_size(const OrderedEvent &event) {
   return 0;
 }
 
+struct DispatchState;
+
+struct StaticInstructionInfo {
+  uint64_t pc = 0;
+  std::array<uint32_t, 4> encoding{};
+  FfmInstructionCounters counters{};
+  FfmWaitInfo wait{FFM_WAIT_TYPE_NONE, FFM_WAIT_NAME_NONE};
+  uint8_t encoding_dwords = 0;
+  bool scratch_incompatible = false;
+  bool terminates = false;
+  bool valid = false;
+};
+
 struct PerfsimWavefrontState final : WavefrontState {
+  DispatchState *dispatch_state = nullptr;
   FfmWaveInfo wave_info{};
   uint32_t compute_unit_id = 0;
   uint32_t physical_wavefront_id = 0;
@@ -352,16 +390,75 @@ struct PerfsimWavefrontState final : WavefrontState {
   bool last_instruction_terminates = false;
 };
 
+/// Cache immutable instruction classification per callback thread.
+///
+/// A wave-local cache repeats the same mnemonic work once for every resident
+/// wave even though all waves execute the same code object. GPUCompilerSim v13
+/// invokes a wave from one callback thread at a time, so a thread-local cache
+/// shares those immutable results across waves without adding a lock to this
+/// hot path. The complete encoding remains part of the key: patched/self-
+/// modifying code at an existing PC is classified again rather than inheriting
+/// stale counters or wait semantics.
+class StaticInstructionCache {
+public:
+  const StaticInstructionInfo &classify(uint64_t pc, const Instruction &inst,
+                                        const std::array<uint32_t, 4> &encoding,
+                                        uint32_t encoding_dwords) {
+    StaticInstructionInfo &cached = entries_[index(pc, encoding, encoding_dwords)];
+    if (cached.valid && cached.pc == pc && cached.encoding_dwords == encoding_dwords &&
+        cached.encoding == encoding)
+      return cached;
+
+    cached.pc = pc;
+    cached.encoding = encoding;
+    cached.counters = instruction_counters(inst);
+    cached.wait = wait_info(inst);
+    cached.encoding_dwords = static_cast<uint8_t>(encoding_dwords);
+    cached.scratch_incompatible = inst.mnemonic().starts_with("scratch_");
+    cached.terminates = (inst.flags() & PROGRAM_TERMINATOR) != 0;
+    cached.valid = true;
+    return cached;
+  }
+
+private:
+  static constexpr size_t kEntries = 4096;
+  static_assert(std::has_single_bit(kEntries));
+
+  static size_t index(uint64_t pc, const std::array<uint32_t, 4> &encoding,
+                      uint32_t encoding_dwords) {
+    // Classification belongs to the instruction at a PC; the full encoding is
+    // validated above, so it need not be re-hashed on every hit. Fold code
+    // offsets one cache span apart to avoid mapping every 16 KiB page to the
+    // same slots while keeping the hit path to a few integer operations.
+    (void)encoding;
+    (void)encoding_dwords;
+    const uint64_t word_address = pc >> 2;
+    return static_cast<size_t>(word_address ^ (word_address >> 12)) & (kEntries - 1);
+  }
+
+  std::array<StaticInstructionInfo, kEntries> entries_{};
+};
+
+const StaticInstructionInfo &classify_instruction(uint64_t pc, const Instruction &inst,
+                                                  const std::array<uint32_t, 4> &encoding,
+                                                  uint32_t encoding_dwords) {
+  static thread_local StaticInstructionCache cache;
+  return cache.classify(pc, inst, encoding, encoding_dwords);
+}
+
 struct DispatchState {
   FfmDispatchMetadata metadata{};
   std::string dispatch_name;
   bool metadata_seen = false;
   bool begun = false;
   bool ended = false;
-  bool supported = true;
+  bool selected = true;
+  std::atomic<bool> supported{true};
+  std::mutex rejection_mutex;
   bool diagnostic_emitted = false;
   std::string rejection_reason;
   size_t live_waves = 0;
+  std::unordered_set<uint32_t> observed_workgroups;
 };
 
 std::optional<std::string> validate_dispatch(const KernelDispatchInfo &info) {
@@ -554,23 +651,63 @@ struct PerfsimPlugin::Impl {
     shutdown_called = true;
   }
 
+  static bool supported(const DispatchState &state) {
+    return state.supported.load(std::memory_order_acquire);
+  }
+
+  static bool mark_rejected(DispatchState &state, std::string reason) {
+    std::lock_guard lock(state.rejection_mutex);
+    if (!state.supported.load(std::memory_order_relaxed))
+      return false;
+    state.rejection_reason = std::move(reason);
+    state.supported.store(false, std::memory_order_release);
+    return true;
+  }
+
   void reject(uint32_t dispatch_id, std::string reason) {
     auto &state = dispatches[dispatch_id];
-    if (!state.supported)
+    if (!mark_rejected(state, std::move(reason)))
       return;
-    state.supported = false;
-    state.rejection_reason = std::move(reason);
     replay_blockers.erase(dispatch_id);
     purge_events(dispatch_id);
     drain_epoch(/*shutdown=*/false);
   }
 
+  void reject_wave(PerfsimWavefrontState *wave, uint32_t dispatch_id, std::string reason) {
+    (void)wave;
+    reject(dispatch_id, std::move(reason));
+  }
+
   DispatchState *active_dispatch(uint32_t dispatch_id) {
     auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !iter->second.supported || !iter->second.begun ||
-        iter->second.ended)
+    if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second) ||
+        !iter->second.begun || iter->second.ended)
       return nullptr;
     return &iter->second;
+  }
+
+  bool intentionally_unselected(uint32_t dispatch_id) const {
+    const auto iter = dispatches.find(dispatch_id);
+    return iter != dispatches.end() && iter->second.metadata_seen && !iter->second.selected;
+  }
+
+  bool observe_workgroup(DispatchState &dispatch, uint32_t workgroup_id) const {
+    if (!config.max_observed_wgps)
+      return true;
+    if (dispatch.observed_workgroups.contains(workgroup_id))
+      return true;
+    if (dispatch.observed_workgroups.size() >= *config.max_observed_wgps)
+      return false;
+    dispatch.observed_workgroups.insert(workgroup_id);
+    return true;
+  }
+
+  bool intentionally_unobserved(uint32_t dispatch_id, uint32_t workgroup_id) const {
+    if (!config.max_observed_wgps)
+      return false;
+    const auto iter = dispatches.find(dispatch_id);
+    return iter != dispatches.end() && iter->second.metadata_seen && iter->second.selected &&
+           !iter->second.observed_workgroups.contains(workgroup_id);
   }
 
   PerfsimWavefrontState *find_wave(uint32_t compute_unit_id, uint32_t wavefront_id) {
@@ -616,7 +753,7 @@ struct PerfsimPlugin::Impl {
 
   bool can_stage(uint32_t dispatch_id, size_t bytes) {
     const auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !iter->second.supported)
+    if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second))
       return false;
     if (bytes > config.max_staged_bytes || staged_bytes > config.max_staged_bytes - bytes) {
       reject(dispatch_id,
@@ -734,14 +871,15 @@ struct PerfsimPlugin::Impl {
         staged_bytes -= staged.dynamic_bytes;
         OrderedEvent &event = staged.event;
         const auto iter = dispatches.find(event.dispatch_id);
-        if (iter != dispatches.end() && iter->second.supported && iter->second.ended)
+        if (iter != dispatches.end() && iter->second.selected && supported(iter->second) &&
+            iter->second.ended)
           replay(event);
       }
     }
     assert(staged_bytes == 0);
 
     for (auto &[dispatch_id, state] : dispatches) {
-      if (!state.supported && !state.diagnostic_emitted) {
+      if (!supported(state) && !state.diagnostic_emitted) {
         write_sink(std::format("[rocjitsu:perfsim] skipped dispatch {}: {}\n", dispatch_id,
                                state.rejection_reason));
         state.diagnostic_emitted = true;
@@ -785,7 +923,8 @@ struct PerfsimPlugin::Impl {
       if ((lane_mask & (uint64_t{1} << lane)) == 0)
         continue;
       if (addresses[lane] < wave.lds_base) {
-        reject(access.dispatch_id, "LDS address precedes the workgroup allocation base");
+        reject_wave(&wave, access.dispatch_id,
+                    "LDS address precedes the workgroup allocation base");
         return false;
       }
       local_addresses[lane] = addresses[lane] - wave.lds_base;
@@ -794,7 +933,14 @@ struct PerfsimPlugin::Impl {
     return true;
   }
 
-  void memory_access(const amdgpu::MemoryAccessObservation &access) {
+  void memory_access(const amdgpu::MemoryAccessObservation &access,
+                     PerfsimWavefrontState *wave_hint = nullptr) {
+    if (!wave_hint) {
+      if (intentionally_unselected(access.dispatch_id))
+        return;
+      if (intentionally_unobserved(access.dispatch_id, access.workgroup_id))
+        return;
+    }
     // Current FFM does not emit ON_MEMORY_ACCESS for scalar memory.
     if (access.route == amdgpu::MemoryRoute::SCALAR)
       return;
@@ -804,30 +950,32 @@ struct PerfsimPlugin::Impl {
     if (ffm_omits_memory_access(access.mnemonic))
       return;
 
-    DispatchState *dispatch = active_dispatch(access.dispatch_id);
-    if (!dispatch) {
-      reject(access.dispatch_id, "memory callback arrived outside an active dispatch");
+    PerfsimWavefrontState *wave =
+        wave_hint ? wave_hint : find_wave(access.compute_unit_id, access.wavefront_id);
+    DispatchState *dispatch = wave ? wave->dispatch_state : active_dispatch(access.dispatch_id);
+    if (!dispatch || !supported(*dispatch)) {
+      if (!dispatch)
+        reject(access.dispatch_id, "memory callback arrived outside an active dispatch");
       return;
     }
-
-    PerfsimWavefrontState *wave = find_wave(access.compute_unit_id, access.wavefront_id);
     if (!wave ||
         wave->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id !=
             access.dispatch_id ||
         wave->rocjitsu_workgroup_id != access.workgroup_id || wave->queue_id != access.queue_id ||
         wave->process_id != access.process_id || !wave->has_current_instruction ||
         wave->current_pc != access.pc) {
-      reject(access.dispatch_id, "memory callback could not be matched to its issuing wave");
+      reject_wave(wave, access.dispatch_id,
+                  "memory callback could not be matched to its issuing wave");
       return;
     }
-
     if (access.decoded_space == amdgpu::DecodedMemorySpace::SCRATCH) {
-      reject(access.dispatch_id, "dedicated SCRATCH instruction addresses are not FFM-compatible");
+      reject_wave(wave, access.dispatch_id,
+                  "dedicated SCRATCH instruction addresses are not FFM-compatible");
       return;
     }
     if (access.route == amdgpu::MemoryRoute::UNKNOWN ||
         access.decoded_space == amdgpu::DecodedMemorySpace::UNKNOWN) {
-      reject(access.dispatch_id, "memory route or decoded address space is unknown");
+      reject_wave(wave, access.dispatch_id, "memory route or decoded address space is unknown");
       return;
     }
     if (access.wavefront_size != 32 || access.addresses.size() != access.wavefront_size ||
@@ -839,7 +987,8 @@ struct PerfsimPlugin::Impl {
          access.element_lane_masks.size() != access.elements_per_lane) ||
         access.element_size_bytes == 0 || access.elements_per_lane == 0 ||
         access.bytes_per_lane() > std::numeric_limits<uint32_t>::max()) {
-      reject(access.dispatch_id, "memory observation has malformed dimensions or addresses");
+      reject_wave(wave, access.dispatch_id,
+                  "memory observation has malformed dimensions or addresses");
       return;
     }
 
@@ -856,7 +1005,7 @@ struct PerfsimPlugin::Impl {
         (access.flat_local_lane_mask & access.scratch_lane_mask) != 0 ||
         (access.flat_dds_lane_mask & access.scratch_lane_mask) != 0 ||
         (access.flat_dds_lane_mask & access.flat_local_lane_mask) != 0) {
-      reject(access.dispatch_id, "memory observation has inconsistent lane masks");
+      reject_wave(wave, access.dispatch_id, "memory observation has inconsistent lane masks");
       return;
     }
     // FFM has no per-element validity field. Its native gfx1250 VBUFFER
@@ -867,7 +1016,8 @@ struct PerfsimPlugin::Impl {
     // preserve the direct-FFM callback contract.
     for (uint64_t element_mask : access.element_lane_masks) {
       if ((element_mask & ~access.valid_lane_mask) != 0) {
-        reject(access.dispatch_id, "memory observation has an invalid per-element lane mask");
+        reject_wave(wave, access.dispatch_id,
+                    "memory observation has an invalid per-element lane mask");
         return;
       }
     }
@@ -881,7 +1031,7 @@ struct PerfsimPlugin::Impl {
       if (access.route != amdgpu::MemoryRoute::LOCAL || access.normalized_to_local ||
           access.scratch_lane_mask != 0 || access.flat_local_lane_mask != 0 ||
           access.flat_dds_lane_mask != 0 || !access.pre_routing_addresses.empty()) {
-        reject(access.dispatch_id, "explicit LDS observation has inconsistent routing");
+        reject_wave(wave, access.dispatch_id, "explicit LDS observation has inconsistent routing");
         return;
       }
       {
@@ -889,8 +1039,8 @@ struct PerfsimPlugin::Impl {
         if (access.mnemonic == "ds_load_tr16_b128") {
           callback_requests = access.architectural_exec_lane_mask;
           if ((callback_requests & ~requests) != 0) {
-            reject(access.dispatch_id,
-                   "DS TR16 architectural EXEC is not a subset of requesting lanes");
+            reject_wave(wave, access.dispatch_id,
+                        "DS TR16 architectural EXEC is not a subset of requesting lanes");
             return;
           }
         }
@@ -907,7 +1057,8 @@ struct PerfsimPlugin::Impl {
           access.scratch_lane_mask != 0 || access.flat_local_lane_mask != 0 ||
           access.flat_dds_lane_mask != 0 || !access.pre_routing_addresses.empty() ||
           !access.secondary_addresses.empty()) {
-        reject(access.dispatch_id, "explicit global observation has inconsistent routing");
+        reject_wave(wave, access.dispatch_id,
+                    "explicit global observation has inconsistent routing");
         return;
       }
       record_memory(*wave, access, requests, FFM_RESOURCE_GLOBAL, access.addresses);
@@ -916,7 +1067,7 @@ struct PerfsimPlugin::Impl {
     case amdgpu::DecodedMemorySpace::FLAT:
       if (access.route != amdgpu::MemoryRoute::LOCAL &&
           access.route != amdgpu::MemoryRoute::GLOBAL) {
-        reject(access.dispatch_id, "FLAT observation has an unsupported route");
+        reject_wave(wave, access.dispatch_id, "FLAT observation has an unsupported route");
         return;
       }
       {
@@ -928,17 +1079,19 @@ struct PerfsimPlugin::Impl {
         if (access.route == amdgpu::MemoryRoute::LOCAL) {
           if (!access.normalized_to_local || !first_lane_is_shared ||
               access.pre_routing_addresses.size() != access.wavefront_size) {
-            reject(access.dispatch_id,
-                   "FLAT local route lacks consistent per-lane aperture metadata");
+            reject_wave(wave, access.dispatch_id,
+                        "FLAT local route lacks consistent per-lane aperture metadata");
             return;
           }
         } else if (access.normalized_to_local || first_lane_is_shared ||
                    !access.pre_routing_addresses.empty()) {
-          reject(access.dispatch_id, "FLAT global route has inconsistent aperture metadata");
+          reject_wave(wave, access.dispatch_id,
+                      "FLAT global route has inconsistent aperture metadata");
           return;
         }
         if (!access.secondary_addresses.empty()) {
-          reject(access.dispatch_id, "FLAT observation unexpectedly has secondary addresses");
+          reject_wave(wave, access.dispatch_id,
+                      "FLAT observation unexpectedly has secondary addresses");
           return;
         }
 
@@ -946,14 +1099,15 @@ struct PerfsimPlugin::Impl {
             access.pre_routing_addresses.empty() ? access.addresses : access.pre_routing_addresses;
         const uint64_t dds_requests = requests & access.flat_dds_lane_mask;
         if (dds_requests != 0 && (!access.is_load || access.atomic_op != amdgpu::AtomicOp::NONE)) {
-          reject(access.dispatch_id, "FLAT DDS store or atomic is not FFM-compatible");
+          reject_wave(wave, access.dispatch_id, "FLAT DDS store or atomic is not FFM-compatible");
           return;
         }
         const uint64_t local_requests = requests & flat_shared_lane_mask;
         const uint64_t scratch_requests = requests & access.scratch_lane_mask;
         const uint64_t global_requests = requests & ~(local_requests | scratch_requests);
         if (access.atomic_op != amdgpu::AtomicOp::NONE && scratch_requests != 0) {
-          reject(access.dispatch_id, "FLAT atomic resolving to scratch is not FFM-compatible");
+          reject_wave(wave, access.dispatch_id,
+                      "FLAT atomic resolving to scratch is not FFM-compatible");
           return;
         }
 
@@ -970,11 +1124,16 @@ struct PerfsimPlugin::Impl {
         add_record(global_requests, FFM_RESOURCE_GLOBAL);
         add_record(scratch_requests, FFM_RESOURCE_SCRATCH);
         add_record(local_requests, FFM_RESOURCE_LDS);
-        std::ranges::sort(records.begin(), records.begin() + record_count,
-                          [](const ResourceRecord &lhs, const ResourceRecord &rhs) {
-                            return std::countr_zero(lhs.lane_mask) <
-                                   std::countr_zero(rhs.lane_mask);
-                          });
+        const auto swap_if_out_of_order = [&](size_t lhs, size_t rhs) {
+          if (std::countr_zero(records[lhs].lane_mask) > std::countr_zero(records[rhs].lane_mask))
+            std::swap(records[lhs], records[rhs]);
+        };
+        if (record_count >= 2)
+          swap_if_out_of_order(0, 1);
+        if (record_count == 3) {
+          swap_if_out_of_order(1, 2);
+          swap_if_out_of_order(0, 1);
+        }
         for (size_t i = 0; i < record_count; ++i)
           record_memory(*wave, access, records[i].lane_mask, records[i].resource,
                         callback_addresses);
@@ -986,27 +1145,36 @@ struct PerfsimPlugin::Impl {
     case amdgpu::DecodedMemorySpace::UNKNOWN:
       break;
     }
-    reject(access.dispatch_id, "unsupported memory observation");
+    reject_wave(wave, access.dispatch_id, "unsupported memory observation");
   }
 
-  void tensor_dma_memory_access(const amdgpu::TensorDmaMemoryAccessObservation &access) {
-    DispatchState *dispatch = active_dispatch(access.dispatch_id);
-    if (!dispatch) {
-      reject(access.dispatch_id, "tensor-DMA callback arrived outside an active dispatch");
+  void tensor_dma_memory_access(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                PerfsimWavefrontState *wave_hint = nullptr) {
+    if (!wave_hint) {
+      if (intentionally_unselected(access.dispatch_id))
+        return;
+      if (intentionally_unobserved(access.dispatch_id, access.workgroup_id))
+        return;
+    }
+    PerfsimWavefrontState *wave =
+        wave_hint ? wave_hint : find_wave(access.compute_unit_id, access.wavefront_id);
+    DispatchState *dispatch = wave ? wave->dispatch_state : active_dispatch(access.dispatch_id);
+    if (!dispatch || !supported(*dispatch)) {
+      if (!dispatch)
+        reject(access.dispatch_id, "tensor-DMA callback arrived outside an active dispatch");
       return;
     }
 
-    PerfsimWavefrontState *wave = find_wave(access.compute_unit_id, access.wavefront_id);
     if (!wave ||
         wave->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id !=
             access.dispatch_id ||
         wave->rocjitsu_workgroup_id != access.workgroup_id || wave->queue_id != access.queue_id ||
         wave->process_id != access.process_id || !wave->has_current_instruction ||
         wave->current_pc != access.pc) {
-      reject(access.dispatch_id, "tensor-DMA callback could not be matched to its issuing wave");
+      reject_wave(wave, access.dispatch_id,
+                  "tensor-DMA callback could not be matched to its issuing wave");
       return;
     }
-
     const bool is_load = access.mnemonic == "tensor_load_to_lds";
     const bool is_store = access.mnemonic == "tensor_store_from_lds";
     if ((!is_load && !is_store) || access.is_load != is_load || access.addresses.empty() ||
@@ -1015,12 +1183,11 @@ struct PerfsimPlugin::Impl {
         access.element_size_bytes != (uint32_t{1} << access.data_size) || access.tile_dim0 == 0 ||
         access.tensor_dim0_stride < 0 || access.tensor_dim1_stride < 0 ||
         access.addresses.size() > std::numeric_limits<uint32_t>::max()) {
-      reject(access.dispatch_id, "tensor-DMA observation is malformed");
+      reject_wave(wave, access.dispatch_id, "tensor-DMA observation is malformed");
       return;
     }
     if (access.addresses.size() > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
-      reject(access.dispatch_id,
-             std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
+      reject_wave(wave, access.dispatch_id, "tensor-DMA address payload is too large");
       return;
     }
     if (!can_stage_event(access.dispatch_id, access.addresses.size() * sizeof(uint64_t))) {
@@ -1034,7 +1201,7 @@ struct PerfsimPlugin::Impl {
     event.addresses = std::make_unique_for_overwrite<uint64_t[]>(event.num_addresses);
     if (!access.addresses.copy_to(
             std::span<uint64_t>(event.addresses.get(), event.num_addresses))) {
-      reject(access.dispatch_id, "tensor-DMA observation is malformed");
+      reject_wave(wave, access.dispatch_id, "tensor-DMA observation is malformed");
       return;
     }
     event.data_size_bytes = access.element_size_bytes;
@@ -1075,6 +1242,12 @@ void PerfsimPlugin::onInit() { impl_->init(); }
 
 void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
 
+bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
+
+bool PerfsimPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
+  return wf != nullptr && wf->has_plugin_state(slot_index());
+}
+
 void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
   auto [iter, inserted] = impl_->dispatches.try_emplace(info.dispatch_id);
   DispatchState &state = iter->second;
@@ -1086,6 +1259,10 @@ void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &in
   state.dispatch_name = info.kernelNameOrUnknown();
   state.metadata.dispatch_name = state.dispatch_name.c_str();
   state.metadata_seen = true;
+  state.selected =
+      !impl_->config.dispatch_name || state.dispatch_name == *impl_->config.dispatch_name;
+  if (!state.selected)
+    return;
   if (const auto reason = validate_dispatch(info))
     impl_->reject(info.dispatch_id, *reason);
 }
@@ -1100,7 +1277,7 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   }
   state.begun = true;
   state.ended = false;
-  if (!state.supported)
+  if (!state.selected || !Impl::supported(state))
     return;
   impl_->replay_blockers.insert(dispatch_id);
   impl_->record_event({dispatch_id, BeginEvent{state.metadata}});
@@ -1117,16 +1294,53 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
     impl_->reject(dispatch_id, "dispatch ended more than once");
     return;
   }
-  if (state.live_waves != 0)
+  if (state.selected && state.live_waves != 0)
     impl_->reject(dispatch_id, "dispatch ended with live wavefronts");
   state.ended = true;
   impl_->replay_blockers.erase(dispatch_id);
-  if (state.supported)
+  if (state.selected && Impl::supported(state))
     impl_->record_event({dispatch_id, EndEvent{state.metadata}});
   impl_->drain_epoch(/*shutdown=*/false);
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
+  const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
+  const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
+
+  // Wavefront slots are reused and plugin state deliberately survives the
+  // generic Wavefront::reset(). A terminal dispatch fault resets the wave
+  // without a halt callback, so retire that incarnation while its state still
+  // owns the raw pointer recorded in physical_waves.
+  if (wf.has_plugin_state(slot_index())) {
+    auto *previous = static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()));
+    const uint32_t previous_dispatch = static_cast<uint32_t>(
+        previous->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
+    const auto existing = impl_->physical_waves.find(physical_key);
+    if (existing != impl_->physical_waves.end() && existing->second != previous) {
+      impl_->physical_waves.erase(existing);
+      wf.clear_plugin_state(slot_index());
+      impl_->reject(wf.dispatch_id(), "physical wavefront slot retained mismatched state");
+      return;
+    }
+    if (existing != impl_->physical_waves.end())
+      impl_->physical_waves.erase(existing);
+    if (const auto dispatch = impl_->dispatches.find(previous_dispatch);
+        dispatch != impl_->dispatches.end()) {
+      if (dispatch->second.live_waves != 0)
+        --dispatch->second.live_waves;
+      impl_->reject(previous_dispatch, "wavefront slot was reset without a halt callback");
+    }
+    wf.clear_plugin_state(slot_index());
+  } else if (const auto existing = impl_->physical_waves.find(physical_key);
+             existing != impl_->physical_waves.end()) {
+    // Never dereference a map entry after its owning Wavefront state has gone.
+    impl_->physical_waves.erase(existing);
+    impl_->reject(wf.dispatch_id(), "physical wavefront slot retained orphaned state");
+    return;
+  }
+
+  if (impl_->intentionally_unselected(wf.dispatch_id()))
+    return;
   DispatchState *dispatch = impl_->active_dispatch(wf.dispatch_id());
   if (!dispatch) {
     impl_->reject(wf.dispatch_id(), "wavefront dispatched outside an active dispatch");
@@ -1137,20 +1351,11 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
     return;
   }
 
-  const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
-  const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
-  if (const auto existing = impl_->physical_waves.find(physical_key);
-      existing != impl_->physical_waves.end()) {
-    const uint32_t old_dispatch = static_cast<uint32_t>(
-        existing->second->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id);
-    impl_->reject(old_dispatch, "physical wavefront slot was reused before halt");
-    impl_->reject(wf.dispatch_id(), "physical wavefront slot was reused before halt");
-    impl_->physical_waves.erase(existing);
-    return;
-  }
-
   auto state = std::make_unique<PerfsimWavefrontState>();
+  state->dispatch_state = dispatch;
   state->wave_info = make_wave_info(wf.dispatch_id(), wf.wg_coord(), wf.wave_in_group());
+  if (!impl_->observe_workgroup(*dispatch, wf.wg_id()))
+    return;
   state->compute_unit_id = compute_unit_id;
   state->physical_wavefront_id = wf.wf_id();
   state->rocjitsu_workgroup_id = wf.wg_id();
@@ -1165,6 +1370,10 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  if (impl_->intentionally_unselected(wf.dispatch_id()))
+    return;
+  if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
+    return;
   const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
   const auto wave_iter = impl_->physical_waves.find(physical_key);
@@ -1187,6 +1396,7 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
       --dispatch.live_waves;
   }
   impl_->physical_waves.erase(wave_iter);
+  wf.clear_plugin_state(slot_index());
 }
 
 void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
@@ -1202,33 +1412,39 @@ void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruct
 
 void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                        std::span<const uint32_t> fetch_window) {
-  const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
-  if (dispatch_iter != impl_->dispatches.end() && !dispatch_iter->second.supported)
+  PerfsimWavefrontState *wave =
+      wf.has_plugin_state(slot_index())
+          ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
+          : nullptr;
+  if (!wave) {
+    const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
+    if (dispatch_iter != impl_->dispatches.end() &&
+        (!dispatch_iter->second.selected || !Impl::supported(dispatch_iter->second)))
+      return;
+    if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
+      return;
+    const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
+    wave = impl_->find_wave(compute_unit_id, wf.wf_id());
+  }
+  if (wave && wave->dispatch_state && !Impl::supported(*wave->dispatch_state))
     return;
-
-  const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
-  PerfsimWavefrontState *wave = impl_->find_wave(compute_unit_id, wf.wf_id());
   if (!wave ||
       wave->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id != wf.dispatch_id() ||
       wave->rocjitsu_workgroup_id != wf.wg_id()) {
-    impl_->reject(wf.dispatch_id(), "instruction callback could not be matched to its wavefront");
+    impl_->reject_wave(wave, wf.dispatch_id(),
+                       "instruction callback could not be matched to its wavefront");
     return;
   }
-
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {
-    impl_->reject(wf.dispatch_id(),
-                  std::format("instruction encoding is not representable by FFM v{}",
-                              impl_->negotiated_api_version));
-    return;
-  }
-  if (inst.mnemonic().starts_with("scratch_")) {
-    impl_->reject(wf.dispatch_id(), "dedicated SCRATCH instructions are not FFM-compatible");
+    impl_->reject_wave(wave, wf.dispatch_id(),
+                       std::format("instruction encoding is not representable by FFM v{}",
+                                   impl_->negotiated_api_version));
     return;
   }
   if (!fetch_window.empty() && fetch_window.size() != 4) {
-    impl_->reject(wf.dispatch_id(), "instruction fetch window is not four dwords");
+    impl_->reject_wave(wave, wf.dispatch_id(), "instruction fetch window is not four dwords");
     return;
   }
 
@@ -1238,12 +1454,19 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   const uint32_t encoding_dwords = static_cast<uint32_t>(encoding_bytes / 4);
   std::array<uint32_t, 4> instruction_encoding{};
   std::ranges::copy_n(inst.raw_encoding(), encoding_dwords, instruction_encoding.begin());
+  const StaticInstructionInfo &static_info =
+      classify_instruction(pc, inst, instruction_encoding, encoding_dwords);
+  if (static_info.scratch_incompatible) {
+    impl_->reject_wave(wave, wf.dispatch_id(),
+                       "dedicated SCRATCH instructions are not FFM-compatible");
+    return;
+  }
   if (fetch_window.empty())
     event.raw_isa = instruction_encoding;
   else
     std::ranges::copy(fetch_window, event.raw_isa.begin());
-  event.counters = instruction_counters(inst);
-  event.wait = wait_info(inst);
+  event.counters = static_info.counters;
+  event.wait = static_info.wait;
 
   // FFM decrements its per-wave ordinal when a wait yields and reissues at the
   // same PC. RocJITsu's hook has no source ordinal, but a consecutive callback
@@ -1265,7 +1488,7 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   wave->current_wait = event.wait;
   wave->has_current_instruction = true;
   wave->saw_instruction = true;
-  wave->last_instruction_terminates = (inst.flags() & PROGRAM_TERMINATOR) != 0;
+  wave->last_instruction_terminates = static_info.terminates;
   impl_->record_event({wf.dispatch_id(), std::move(event)});
 }
 
@@ -1273,9 +1496,25 @@ void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObserva
   impl_->memory_access(access);
 }
 
+void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                               const amdgpu::Wavefront &wf) {
+  auto *state = wf.has_plugin_state(slot_index())
+                    ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
+                    : nullptr;
+  impl_->memory_access(access, state);
+}
+
 void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
     const amdgpu::TensorDmaMemoryAccessObservation &access) {
   impl_->tensor_dma_memory_access(access);
+}
+
+void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
+    const amdgpu::TensorDmaMemoryAccessObservation &access, const amdgpu::Wavefront &wf) {
+  auto *state = wf.has_plugin_state(slot_index())
+                    ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
+                    : nullptr;
+  impl_->tensor_dma_memory_access(access, state);
 }
 
 } // namespace rocjitsu::plugins::perfsim

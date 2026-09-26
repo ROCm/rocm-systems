@@ -23,7 +23,14 @@ public:
   PerfsimPlugin(const PerfsimPlugin &) = delete;
   PerfsimPlugin &operator=(const PerfsimPlugin &) = delete;
 
-  bool requires_serial_hot_hooks() const override { return true; }
+  bool requires_serial_hot_hooks() const override;
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
+  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_async_instruction_issued() const override { return false; }
+  bool observes_memory_instruction_routing() const override { return false; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_memory_access() const override { return true; }
   bool observes_sgpr_reads() const override { return false; }
@@ -40,8 +47,12 @@ public:
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                         std::span<const uint32_t> fetch_window) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override;
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const amdgpu::Wavefront &wf) override;
   void
   onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override;
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                     const amdgpu::Wavefront &wf) override;
 
 private:
   void record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
