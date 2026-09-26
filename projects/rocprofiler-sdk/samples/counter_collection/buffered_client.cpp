@@ -280,7 +280,7 @@ build_profile_for_agent(rocprofiler_agent_id_t       agent,
 }
 
 /**
- * Returns all GPU agents visible to rocprofiler on the system
+ * Returns GPU agents visible to both the HSA and HIP runtimes.
  */
 std::vector<rocprofiler_agent_v0_t>
 get_gpu_device_agents()
@@ -289,7 +289,7 @@ get_gpu_device_agents()
 
     // Callback used by rocprofiler_query_available_agents to return
     // agents on the device. This can include CPU agents as well. We
-    // select GPU agents only (i.e. type == ROCPROFILER_AGENT_TYPE_GPU)
+    // select GPU agents that are visible to the workload's runtimes.
     rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
                                                             const void**                agents_arr,
                                                             size_t                      num_agents,
@@ -300,7 +300,9 @@ get_gpu_device_agents()
         for(size_t i = 0; i < num_agents; ++i)
         {
             const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]);
-            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) agents_v->emplace_back(*agent);
+            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->runtime_visibility.hsa &&
+               agent->runtime_visibility.hip)
+                agents_v->emplace_back(*agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;
     };
@@ -335,7 +337,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                &get_buffer()),
                      "buffer creation failed");
 
-    // Get a vector of all GPU devices on the system.
+    // Get the GPU devices visible to the workload.
     auto agents = get_gpu_device_agents();
 
     if(agents.empty())

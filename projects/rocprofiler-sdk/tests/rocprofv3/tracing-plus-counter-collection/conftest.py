@@ -29,6 +29,7 @@ import json
 import pandas as pd
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
+from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
@@ -223,3 +224,14 @@ def pftrace_reader(request):
 @pytest.fixture
 def pftrace_data(pftrace_reader):
     return pftrace_reader.read()[0]
+
+
+@pytest.fixture
+def zero_counters_in_auto_mode(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+    entries = data["callback_records"]["counter_collection"]
+    values = [record["value"] for entry in entries for record in entry["records"]]
+    if not values or any(value != 0 for value in values):
+        return False
+    first_gpu = next((agent for agent in data["agents"] if agent["type"] == 2), None)
+    return first_gpu is not None and gpu_uses_auto_perf_level(first_gpu)

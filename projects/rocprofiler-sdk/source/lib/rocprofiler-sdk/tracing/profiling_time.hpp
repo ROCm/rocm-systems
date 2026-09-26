@@ -77,13 +77,16 @@ adjust_profiling_time(std::string_view _label,
                       profiling_time   _value,
                       profiling_time&& _bounds)
 {
-    static auto sysclock_period = hsa::get_hsa_timestamp_period();
-    static auto normalize_env   = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
-    static auto strict_ts_env   = common::get_env(
+    static auto normalize_env = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
+    static auto strict_ts_env = common::get_env(
         "ROCPROFILER_CI_STRICT_TIMESTAMPS", (ROCPROFILER_CI_STRICT_TIMESTAMPS > 0) ? true : false);
 
     // normalize
-    if(ROCPROFILER_UNLIKELY(normalize_env)) _value *= sysclock_period;
+    if(ROCPROFILER_UNLIKELY(normalize_env))
+    {
+        static auto sysclock_period = hsa::get_hsa_timestamp_period();
+        _value *= sysclock_period;
+    }
 
     if(strict_ts_env)
     {
@@ -134,6 +137,8 @@ adjust_profiling_time(std::string_view _label,
         std::swap(_value.start, _value.end);
     }
 
+    const auto original_value = _value;
+
     // below are hacks for clock skew issues:
     //
     // the timestamp of this handler will always be after when the profiling time ended
@@ -141,6 +146,30 @@ adjust_profiling_time(std::string_view _label,
 
     // the timestamp of the enqueue will always be before when the profiling time started
     if(_value.start < _bounds.start) _value += (_bounds.start - _value.start);
+
+    // Shifts cannot fit a duration longer than the CPU window. Correct it separately so
+    // completion remains within the CPU bounds (and before correlation retirement).
+    const auto duration        = original_value.end - original_value.start;
+    const auto bounds_duration = _bounds.end - _bounds.start;
+    if(duration > bounds_duration)
+    {
+        ROCP_WARNING << fmt::format(
+            "{} returned {} timestamps [{}, {}] with a duration longer than the CPU window "
+            "[{}, {}]. Clamping to the CPU bounds reduces the reported duration from {} to {}. "
+            "The adjusted timestamps do not preserve the measured duration. Set the environment "
+            "variable ROCPROFILER_CI_STRICT_TIMESTAMPS=1 to cause a failure instead",
+            _responsible,
+            _label,
+            original_value.start,
+            original_value.end,
+            _bounds.start,
+            _bounds.end,
+            duration,
+            bounds_duration);
+
+        _value.start = _bounds.start;
+        _value.end   = _bounds.end;
+    }
 
     return _value;
 }
