@@ -1384,7 +1384,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
                                   rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
-
+  INFO(NCCL_TUNING, "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d (force=%d or symReg=%d) rcclUseCeAr2Shot=%d comm->ceColl.ceARTmpBuf not null:%d", 
+    (int)(!symkRequested), (int)ceAllReduceAllowed, (int)force, (int)symReg, (int)rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr), (int)(comm->ceColl.ceARTmpBuf != NULL));
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
     // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
