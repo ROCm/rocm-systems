@@ -102,8 +102,8 @@ TEST_F(flush_worker_test, multiple_stop_calls_are_safe)
     const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
+    // Stop immediately while the new worker may still be entering its wait.
+    // This catches callback-lifetime races that a pre-stop sleep can hide.
     worker.stop(current_pid);
     worker.stop(current_pid);
     worker.stop(current_pid);
