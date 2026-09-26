@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "profiler-hub/reader_types.hpp"
-#include "profiler-hub/shared_types.hpp"
+#include "profiler-hub/cpp/reader_types.hpp"
+#include "profiler-hub/cpp/shared_types.hpp"
 
 #include <nlohmann/json_fwd.hpp>
 

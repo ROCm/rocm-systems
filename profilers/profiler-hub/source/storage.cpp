@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
-#include "profiler-hub/version.hpp"
+#include "profiler-hub/cpp/version.hpp"
 #include "storage_impl.hpp"
 
 #include <memory>

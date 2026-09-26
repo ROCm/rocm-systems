@@ -20,6 +20,15 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp`
+  to `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
+  `#include <profiler-hub/storage.hpp>` becomes
+  `#include <profiler-hub/cpp/storage.hpp>`). Groups the public C++ API
+  headers under their own subdirectory, mirroring the language-scoped
+  layout other public interfaces (e.g. a future C ABI) will use.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added
