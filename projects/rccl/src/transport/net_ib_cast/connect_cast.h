@@ -61,7 +61,7 @@ struct ncclIbQpCreateAttr {
   bool isQpSharingEnabled;
   int  cqDepthMultiplier;
   int  qpSharingGroupIdx;
-  int  qpIdx;               // QP index within group (for intra-group UDMA alternation)
+  int  qpIdx;               // Per-device QP ordinal (for intra-group UDMA alternation)
 };
 
 // Per-QP connection metatdata

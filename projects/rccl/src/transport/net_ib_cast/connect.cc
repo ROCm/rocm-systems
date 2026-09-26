@@ -868,7 +868,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = comm->base.isP2p;
-    qpCreateAttrs.qpIdx = qpIndex;
+    qpCreateAttrs.qpIdx = qpIndex / comm->base.vProps.ndevs;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1687,7 +1687,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = rComm->base.isP2p;
-    qpCreateAttrs.qpIdx = qpIndex;
+    qpCreateAttrs.qpIdx = qpIndex / rComm->base.vProps.ndevs;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
