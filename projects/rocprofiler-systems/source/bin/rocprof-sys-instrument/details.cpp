@@ -822,7 +822,7 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
                 _next = _next->l_next;
             }
 
-            if(_noload == false)
+            if(!_noload)
             {
                 dlclose(_handle);
             }
@@ -889,7 +889,7 @@ rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
         {
             return rocprofsys::path::realpath(_link_map->l_name);
         }
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -931,7 +931,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
         {
             return rocprofsys::path::realpath(_buffer);
         }
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }

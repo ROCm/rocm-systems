@@ -1225,7 +1225,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes)
             _next = _next->l_next;
         }
 
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
