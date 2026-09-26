@@ -2293,3 +2293,22 @@ cells and the two explicitly global-only scatter-reduce cells. No saved healthy
 fault campaign qualifies a lower Default preset than the table currently names.
 This audit checks recorded evidence; it does not replace the live SGEMM and
 queued SuperCollider full clean gates.
+
+
+### Full-clean scheduling handoff
+
+F8GEMM and HGEMM SuperCollider full clean runs now execute concurrently under
+`sc-parallel-full-clean`, using the same immutable wave-delay hook, full
+allowlists, delay settings, command manifests, and deadlines as the former
+queue. Sparse FP8 ML follows the first completed family. This keeps at most two
+additional families active, within the shared 40 GiB slice. The selected F8/H
+shards are small (up to 513-by-513 matrices), and the memory check before launch
+showed roughly 17 GiB of anonymous, shared-memory, and kernel allocation;
+most remaining charged memory was reclaimable file cache.
+
+Only the old Python queue coordinator was stopped, preventing duplicate future
+launches. Its active SGEMM child and the independent Default SGEMM run remain
+untouched. `sc-full-clean-handoff.json` records the process identities and the
+cleanup requirement; retire the stopped coordinator after its SGEMM child is
+terminal. `sc-parallel-full-clean-state.json` records each replacement job's
+PID, command, state, and eventual exit status.
