@@ -155,9 +155,18 @@ ncclResult_t ncclSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuc
 // ---------------------------------------------------------------------------
 void         ncclShadowPoolConstruct(struct ncclShadowPool*) {}
 ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*, hipStream_t) { return ncclSuccess; }
-ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t, void** outDevObj, void** outHostObj, hipStream_t) {
-  if (outDevObj) *outDevObj = nullptr;
-  if (outHostObj) *outHostObj = nullptr;
+ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t size, void** outDevObj, void** outHostObj, hipStream_t) {
+  // One buffer for both views, leaked like allocateSpilled. A null host header
+  // is what windowRegisterNonSym memsets; this binary does not link a real pool.
+  if (size == 0) {
+    if (outDevObj) *outDevObj = nullptr;
+    if (outHostObj) *outHostObj = nullptr;
+    return ncclSuccess;
+  }
+  void* p = calloc(1, size);
+  if (p == nullptr) return ncclSystemError;
+  if (outDevObj) *outDevObj = p;
+  if (outHostObj) *outHostObj = p;
   return ncclSuccess;
 }
 ncclResult_t ncclShadowPoolFree(struct ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; }
@@ -403,6 +412,12 @@ HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, 
 // throwaway streams for its teardown bookkeeping; none carry real work on the
 // host, so a non-null opaque handle and success returns are sufficient.
 // ---------------------------------------------------------------------------
+HIP_FAKE hipError_t hipMemcpyAsync(void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+  // The shadow stub uses one buffer for host and device, so this is a no-op
+  // copy. The real entry faults on the fake stream this binary creates.
+  if (dst != nullptr && src != nullptr && dst != src && size > 0) std::memcpy(dst, src, size);
+  return hipSuccess;
+}
 HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
   if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
   return hipSuccess;

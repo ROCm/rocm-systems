@@ -1109,14 +1109,13 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
   EXPECT_EQ(import.calls, 1);
 }
 
+// Off the host-VMM window ncclSymIsHostSegment is false for every AMD value,
+// so the reuse branch cannot fire. Same gate as MixedHostAndDeviceOwners.
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 // Branch: the second clause of reuseLocal -- remote rank, param on, CPU-backed
 // segment -- so the caller's handle is reused without an import.
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   messages[1 * kMaxSegments].type = kLocHost;
-#else
-  messages[1 * kMaxSegments].type = kLocHostNuma;
-#endif
   ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
@@ -1129,13 +1128,8 @@ TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles
 // A peer host segment past this rank's handle array must be imported. Reusing
 // memHandles[segment] there reads off the end of the local allocation.
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentPastLocalHandles_Imports) {
-#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   messages[1 * kMaxSegments].type = kLocHost;
   messages[1 * kMaxSegments + 1].type = kLocHost;
-#else
-  messages[1 * kMaxSegments].type = kLocHostNuma;
-  messages[1 * kMaxSegments + 1].type = kLocHostNuma;
-#endif
   ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
@@ -1148,6 +1142,7 @@ TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentPastLocalHandles_Imports) {
             ncclSuccess);
   EXPECT_EQ(import.calls, 1);
 }
+#endif
 
 // Branch: param on but the segment is device-backed, so reuse does not apply.
 TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImports) {
@@ -2043,6 +2038,9 @@ TEST_F(SymMemoryRegisterGinElasticTest, SingleHostSegment_RequiresDmabuf) {
   ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   ASSERT_EQ(needDmabuf.size(), 1u);
   EXPECT_TRUE(needDmabuf[0]);
+  // ptrType and needDmabuf are decided before this write. The put-fence
+  // compares memType to HOST_NUMA, so the recorded type is the contract.
+  EXPECT_EQ(mem.ginSegmentInfos[0].memType, static_cast<CUmemLocationType>(kLocHostNuma));
 }
 #endif
 
@@ -3596,6 +3594,27 @@ TEST_F(DevrWindowRegisterInGroupTest, NoSymmetricSupport_RoutesToNonSymHelper) {
   ASSERT_NE(out, nullptr);
   ASSERT_EQ(comm->devrState.winSortedCount, 1);
   EXPECT_EQ(comm->devrState.winSorted[0].win->memory, nullptr);
+}
+
+// Default ncclCuMemEnable is 0. The retain probe faults on ROCm 7.0.2.2, so
+// that guard has to keep g_hipMemRetainAllocationHandle from running. The
+// address-range hook only exists so a missing guard fails this assertion
+// instead of spinning on the zero-size default.
+TEST_F(DevrWindowRegisterInGroupTest, CuMemDisabled_SkipsRetainProbe) {
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+    return hipSuccess;
+  });
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+    if (pbase) *pbase = dptr;
+    if (psize) *psize = 4096;
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(retain.calls, 0);
+  EXPECT_EQ(range.calls, 0);
 }
 
 // The local registration handle is threaded through to the helper, which stores
