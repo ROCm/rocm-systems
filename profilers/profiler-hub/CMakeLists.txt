@@ -2,7 +2,30 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(profiler-hub VERSION 0.2.0)
+
+# Version lives in VERSION file.
+file(
+    READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+    FULL_VERSION_STRING
+    LIMIT_COUNT
+    1
+)
+string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
+string(
+    REGEX REPLACE
+    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    "\\1.\\2.\\3"
+    PROFILER_HUB_VERSION
+    "${FULL_VERSION_STRING}"
+)
+
+project(profiler-hub VERSION ${PROFILER_HUB_VERSION})
+
+message(
+    STATUS
+    "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
+)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 20)

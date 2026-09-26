@@ -144,6 +144,9 @@ set(ROCPD_SCHEMA_SDK_SUBDIR
 
 rocpd_clone_rocpd_schema_files(_ROCPD_SCHEMA_DIR)
 
+get_filename_component(_ROCPD_SCHEMA_VERSION "${ROCPD_SCHEMA_SDK_SUBDIR}" NAME)
+message(STATUS "[profiler-hub] rocpd schema version: ${_ROCPD_SCHEMA_VERSION}")
+
 rocpd_configure_rocpd_schema_files(
     ${_ROCPD_SCHEMA_DIR}
     ${SQL_SCHEMA_BINARY_DIR}
