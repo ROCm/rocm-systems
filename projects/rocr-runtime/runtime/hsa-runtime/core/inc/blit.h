@@ -119,6 +119,57 @@ class Blit {
 
   virtual void GangLeader(bool gang_leader) = 0;
   virtual bool GangLeader() const { return false; };
+
+  /// @brief Submit a swap copy command to exchange contents of two buffers.
+  /// After execution: buffer A contains original B, buffer B contains original A.
+  ///
+  /// @param addr_a First buffer address.
+  /// @param addr_b Second buffer address.
+  /// @param size Size of data to swap in bytes.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitSwapCopyCommand(
+      void* addr_a, void* addr_b, size_t size,
+      std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+      std::vector<core::Signal*>& gang_signals) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  /// @brief Submit a broadcast copy command (1-to-N copy).
+  /// Copies single source buffer to multiple destination buffers.
+  ///
+  /// @param src Source buffer address.
+  /// @param dst_list Array of destination buffer addresses.
+  /// @param num_destinations Number of destination buffers.
+  /// @param size Size of data to copy in bytes.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitBroadcastCopyCommand(
+      const void* src, void* const* dst_list, uint32_t num_destinations,
+      size_t size, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  /// @brief Submit an indirect copy command with pointer indirection.
+  /// Source and/or destination addresses are read from GPU-accessible pointers.
+  ///
+  /// @param src Source address (or pointer to source address if src_indirect).
+  /// @param dst Destination address (or pointer to dest address if dst_indirect).
+  /// @param size Size of data to copy in bytes.
+  /// @param src_indirect If true, src points to the actual source address.
+  /// @param dst_indirect If true, dst points to the actual destination address.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitIndirectCopyCommand(
+      const void* src, void* dst, size_t size, bool src_indirect,
+      bool dst_indirect, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 };
 }  // namespace core
 }  // namespace rocr
