@@ -345,6 +345,9 @@ from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
 # # Fabric (IFoE/UALoE) Information
 from .amdsmi_interface import amdsmi_get_fabric_telemetry_data
 from .amdsmi_interface import amdsmi_get_gpu_fabric_info
+from .amdsmi_interface import amdsmi_set_gpu_fabric_ppod_config
+from .amdsmi_interface import amdsmi_set_gpu_fabric_vpod_config
+from .amdsmi_interface import amdsmi_set_gpu_fabric_station_config
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException
