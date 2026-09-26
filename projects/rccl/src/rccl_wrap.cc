@@ -1377,10 +1377,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceUsable = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && ceUsable && (force || symReg);
 
-    // (3) Eager 2-shot once ceARTmpBuf exists. Skip until then so the first
-    // FORCE-unregistered call enqueues REGISTERED and initializes CE. Skip
-    // when symReg: those operands use CE-registered user windows, not staging.
-    if (!symkRequested && !symReg && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    // (3) Eager 2-shot once ceARTmpBuf exists. The first call, before init,
+    // falls through so enqueue can initialize CE. Gate on !symkRequested, not
+    // a local symReg bit: peers can disagree and only one rank would allgather.
+    if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
       return ncclSuccess;
@@ -1445,9 +1445,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       }
     }
 
-  // (5) Enqueue CE vs SYM vs kernel. ZERO (and FORCE) take registered CE when
-  // the message is inside ceRegMax. Unregistered FORCE
-  // that missed 2-shot (no staging yet) falls through to ceStagedUnregistered.
+  // (5) Enqueue CE vs SYM vs kernel. Registered CE needs ZERO or FORCE, the
+  // ceRegMax window, and !symEligible so the symmetric kernel still wins.
+  // Unregistered FORCE that missed 2-shot falls through to ceStagedUnregistered.
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
@@ -1461,7 +1461,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   // Registered CE requires its explicit CTA policy/force gate and tuning window.
   const bool ceZero = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
-  const bool ceRegisteredWindows = ceAvailable && ceRegInWindow && (ceZero || force);
+  const bool ceRegisteredWindows =
+      !symEligible && ceAvailable && ceRegInWindow && (ceZero || force);
   // First FORCE-unregistered call enqueues CE so ncclCeInit runs. Cap is ceUsable
   // (2-shot max), not the 32 MiB staging buffer.
   const bool ceStagedUnregistered =
