@@ -2194,7 +2194,7 @@ typedef struct {
  * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
  * the fields.
  *
- * **Sentinel Values:**
+ * **Unavailable Values:**
  * Fields not applicable to the current version are initialized to the maximum value
  * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
  * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields

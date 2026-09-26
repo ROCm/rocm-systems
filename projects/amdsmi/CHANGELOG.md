@@ -17,6 +17,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed v2.4 APU metrics reporting an unavailable `average_socket_power` or `average_gfx_power` as `65535` mW**.  
   - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.53 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
 
+- **Fixed v1.0 GPU metrics reporting an unavailable `energy_accumulator`, `pcie_link_width` or `pcie_link_speed` as a real value**.  
+  - v1.0 stores these narrower than `amdsmi_gpu_metrics_t` (`uint32_t` energy, `uint8_t` link width/speed), so the unavailable marker arrived as `0xFFFFFFFF` or `0xFF`. They now report `UINT64_MAX` and `UINT16_MAX`, as v1.1 and later already did.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

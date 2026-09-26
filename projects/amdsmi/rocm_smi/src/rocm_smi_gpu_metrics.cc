@@ -62,10 +62,11 @@ AMDGpuMetricsHeader_v1_t disjoin_metrics_version(uint16_t version) {
   return metrics_header;
 }
 
-// Copies a uint16 metric into a uint32 field, keeping the N/A (max) value as N/A.
-constexpr uint32_t widen_uint16_na(uint16_t value) {
-  return (value == std::numeric_limits<uint16_t>::max()) ? std::numeric_limits<uint32_t>::max()
-                                                         : value;
+// Copies a metric into a wider field, keeping the N/A (max) value as N/A.
+template <typename To, typename From>
+constexpr To widen_na(From value) {
+  return (value == std::numeric_limits<From>::max()) ? std::numeric_limits<To>::max()
+                                                     : static_cast<To>(value);
 }
 
 // APU metrics version detection helpers
@@ -2744,10 +2745,10 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                 apu.temperature_l3);
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
     apu.average_mm_activity = metrics.m_average_mm_activity;
-    apu.average_socket_power = widen_uint16_na(metrics.m_average_socket_power);
+    apu.average_socket_power = widen_na<uint32_t>(metrics.m_average_socket_power);
     apu.average_cpu_power = metrics.m_average_cpu_power;
     apu.average_soc_power = metrics.m_average_soc_power;
-    apu.average_gfx_power = widen_uint16_na(metrics.m_average_gfx_power);
+    apu.average_gfx_power = widen_na<uint32_t>(metrics.m_average_gfx_power);
     std::copy_n(std::begin(metrics.m_average_core_power),
                 std::min(static_cast<uint32_t>(RSMI_APU_V24_CORES),
                          static_cast<uint32_t>(std::size(apu.average_core_power))),
@@ -4855,7 +4856,8 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v10_t::copy_internal_to_external_m
 
     // Power/Energy
     metrics_public_init.average_socket_power = m_gpu_metrics_tbl.m_average_socket_power;
-    metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
+    metrics_public_init.energy_accumulator =
+        widen_na<uint64_t>(m_gpu_metrics_tbl.m_energy_accumulator);
 
     // Driver attached timestamp (in ns)
     metrics_public_init.system_clock_counter = m_gpu_metrics_tbl.m_system_clock_counter;
@@ -4885,8 +4887,8 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v10_t::copy_internal_to_external_m
     metrics_public_init.current_fan_speed = m_gpu_metrics_tbl.m_current_fan_speed;
 
     // Link width/speed
-    metrics_public_init.pcie_link_width = m_gpu_metrics_tbl.m_pcie_link_width;
-    metrics_public_init.pcie_link_speed = m_gpu_metrics_tbl.m_pcie_link_speed;
+    metrics_public_init.pcie_link_width = widen_na<uint16_t>(m_gpu_metrics_tbl.m_pcie_link_width);
+    metrics_public_init.pcie_link_speed = widen_na<uint16_t>(m_gpu_metrics_tbl.m_pcie_link_speed);
 
     //
     // Note:  Backwards compatibility -> Handling extra/exception cases
