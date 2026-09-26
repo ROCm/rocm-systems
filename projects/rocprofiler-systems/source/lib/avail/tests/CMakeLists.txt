@@ -5,6 +5,7 @@ add_library(
     avail-catalog-tests
     OBJECT
     test_catalog.cpp
+    test_cpu.cpp
     test_traces.cpp
     test_gpu_inventory.cpp
     test_gpu_metrics.cpp
@@ -17,6 +18,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems::rocprofiler-systems-avail-library
         rocprofiler-systems::rocprofiler-systems-amd-smi-backend
+        rocprofiler-systems::rocprofiler-systems-procfs-backend
 )
 
 target_include_directories(

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "backends/procfs/metric_tokens.hpp"
 #include "common/env_vars.hpp"
 #include "common/string_utility.hpp"
 #include "core/config.hpp"
@@ -267,23 +268,6 @@ private:
             return result;
         }
 
-        auto make_bits =
-            [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
-            std::uint32_t v = 0;
-            for(auto b : positions)
-                v |= (1u << b);
-            return v;
-        };
-
-        const std::unordered_map<std::string, std::uint32_t> mapper{
-            { "frequency", make_bits({ 0 }) },    { "load", make_bits({ 1 }) },
-            { "memory", make_bits({ 2, 3, 4 }) }, { "page_rss", make_bits({ 2 }) },
-            { "virt_mem", make_bits({ 3 }) },     { "peak_rss", make_bits({ 4 }) },
-            { "ctx_switches", make_bits({ 5 }) }, { "page_faults", make_bits({ 6 }) },
-            { "cpu_time", make_bits({ 7, 8 }) },  { "user_time", make_bits({ 7 }) },
-            { "kernel_time", make_bits({ 8 }) },
-        };
-
         cpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
 
@@ -293,8 +277,15 @@ private:
 
         for(; it != end; ++it)
         {
-            const auto found = mapper.find(it->str());
-            if(found != mapper.end()) metrics.value |= found->second;
+            const auto name  = it->str();
+            const auto found = std::ranges::find_if(
+                backends::procfs::cpu::k_metric_tokens,
+                [&name](const auto& token) { return token.name == name; });
+            if(found != backends::procfs::cpu::k_metric_tokens.end())
+            {
+                metrics.value |=
+                    backends::procfs::cpu::metric_selection_mask(found->kind);
+            }
         }
 
         if(metrics.value == DISABLE_ALL_METRICS)
