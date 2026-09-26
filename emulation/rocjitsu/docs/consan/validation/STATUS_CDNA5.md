@@ -42,8 +42,8 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep=15: filtered clean pass; fault 0/8 |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; fault 0/8 |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep_wave=15: clean pass; fault 0/8 |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep_wave=15: clean pass with complete tensor-DMA comparison coverage; detector 0/8 despite oracle failures 8/8 |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: clean pass with complete tensor-DMA comparison coverage; fault 0/8 |
