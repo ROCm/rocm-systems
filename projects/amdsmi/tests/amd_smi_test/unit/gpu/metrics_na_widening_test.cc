@@ -42,7 +42,43 @@ void CopyApuV24(uint16_t socket_power, uint16_t gfx_power, rsmi_apu_metrics_t* o
   *out = *pub.apu_metrics;
 }
 
+void CopyGpuV10(uint32_t energy, uint8_t link_width, uint8_t link_speed, rsmi_gpu_metrics_t* out) {
+  constexpr auto kV10 = amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricV10;
+  auto metrics = amd::smi::amdgpu_metrics_factory(kV10, false, "");
+  ASSERT_NE(metrics, nullptr);
+  ASSERT_EQ(metrics->get_gpu_metrics_version_used(), kV10);
+  auto* tbl = static_cast<amd::smi::AMDGpuMetrics_v10_t*>(metrics->get_metrics_table().get());
+  ASSERT_NE(tbl, nullptr);
+  *tbl = amd::smi::AMDGpuMetrics_v10_t{};
+  tbl->m_energy_accumulator = energy;
+  tbl->m_pcie_link_width = link_width;
+  tbl->m_pcie_link_speed = link_speed;
+
+  auto [status, pub] = metrics->copy_internal_to_external_metrics();
+  ASSERT_EQ(status, RSMI_STATUS_SUCCESS);
+  *out = pub;
+}
+
 }  // namespace
+
+// v1.0 stores these narrower than the public fields, so the N/A value must widen.
+TEST(GpuUnit, GpuV10NaWidensToPublicMax) {
+  PRINT_VERBOSITY();
+  rsmi_gpu_metrics_t gpu{};
+  ASSERT_NO_FATAL_FAILURE(CopyGpuV10(kU32Max, UINT8_MAX, UINT8_MAX, &gpu));
+  EXPECT_EQ(gpu.energy_accumulator, UINT64_MAX);
+  EXPECT_EQ(gpu.pcie_link_width, kU16Max);
+  EXPECT_EQ(gpu.pcie_link_speed, kU16Max);
+}
+
+TEST(GpuUnit, GpuV10ValidValuesPassThrough) {
+  PRINT_VERBOSITY();
+  rsmi_gpu_metrics_t gpu{};
+  ASSERT_NO_FATAL_FAILURE(CopyGpuV10(kU32Max - 1, 16, UINT8_MAX - 1, &gpu));
+  EXPECT_EQ(gpu.energy_accumulator, kU32Max - 1);
+  EXPECT_EQ(gpu.pcie_link_width, 16);
+  EXPECT_EQ(gpu.pcie_link_speed, UINT8_MAX - 1);
+}
 
 // v2.4 stores these as uint16 but the public fields are uint32, so the N/A value must widen.
 TEST(GpuUnit, ApuV24PowerNaWidensToUint32Max) {
