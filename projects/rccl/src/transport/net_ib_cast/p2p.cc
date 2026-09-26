@@ -1335,10 +1335,10 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           // (send, CTS/RDMA_WRITE, flush/RDMA_READ) carry commId in wr_id[63:48]
           // and are routed here.
           if (wc->opcode != IBV_WC_RECV_RDMA_WITH_IMM) {
-            struct ncclIbNetCommBase* routed = IbCastRouteCommFromWrId(wc->wr_id);
+            struct ncclIbNetCommBase* routed = IbCastRouteCommFromWrId(r->base, wc->wr_id);
             if (routed) targetBase = routed;
           } else {
-            struct ncclIbNetCommBase* routed = IbCastRouteCommFromImmData(be32toh(wc->imm_data));
+            struct ncclIbNetCommBase* routed = IbCastRouteCommFromImmData(r->base, be32toh(wc->imm_data));
             if (routed && !routed->isSend && (routed->recvMatchingScheme == BY_ID)) targetBase = routed;
           }
 

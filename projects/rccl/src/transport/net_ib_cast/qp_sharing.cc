@@ -169,7 +169,11 @@ void IbCastFreeCommIdLocked(uint16_t commId) {
     }
 }
 
-struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
+struct ncclIbNetCommBase* IbCastRouteCommFromWrId(const struct ncclIbNetCommBase* originBase, uint64_t wr_id) {
+  // Only attempt the decode when the originating comm is itself sharing.
+  // Fallback (non-sharing) comms may carry multi-receive slot bytes in
+  // wr_id[63:48] that can accidentally form a valid active commId.
+  if (!IbCastCommIsSharing(originBase)) return NULL;
   uint16_t commId = (wr_id & WR_ID_RX_COMM_ID_MASK) >> WR_ID_RX_COMM_ID_BIT_POS;
   if (commId == 0 || commId >= IBCAST_MAX_COMMS || !g_IbCastCommTable[commId].used) return NULL;
   return g_IbCastCommTable[commId].isSend
@@ -177,14 +181,14 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
     : &((struct ncclIbRecvComm*)g_IbCastCommTable[commId].comm)->base;
 }
 
-struct ncclIbNetCommBase* IbCastRouteCommFromImmData(uint32_t immDataHost) {
-  if (IbCastQpSharingEnabled()) {
-    uint16_t immCommId = (immDataHost & WR_IMM_BYID_COMM_ID_MASK) >> WR_IMM_BYID_COMM_ID_BIT_POS;
-    if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
-      return g_IbCastCommTable[immCommId].isSend
-        ? &((struct ncclIbSendComm*)g_IbCastCommTable[immCommId].comm)->base
-        : &((struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm)->base;
-    }
+struct ncclIbNetCommBase* IbCastRouteCommFromImmData(const struct ncclIbNetCommBase* originBase, uint32_t immDataHost) {
+  // Same guard: only decode when the originating comm is sharing-enabled.
+  if (!IbCastCommIsSharing(originBase)) return NULL;
+  uint16_t immCommId = (immDataHost & WR_IMM_BYID_COMM_ID_MASK) >> WR_IMM_BYID_COMM_ID_BIT_POS;
+  if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
+    return g_IbCastCommTable[immCommId].isSend
+      ? &((struct ncclIbSendComm*)g_IbCastCommTable[immCommId].comm)->base
+      : &((struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm)->base;
   }
   return NULL;
 }
