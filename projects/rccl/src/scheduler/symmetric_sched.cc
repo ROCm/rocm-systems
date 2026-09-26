@@ -13,11 +13,9 @@
 #include "scheduler.h"
 #include "tuning.h"
 #include "enqueue.h"
-#include "bootstrap.h"
 #include "config/algorithm_registry.h"
 #include "profiler.h"
 #include <cuda_fp16.h>
-#include <vector>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
 #include <cuda_fp8.h>
 #endif
@@ -116,10 +114,6 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
       NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
       NCCLCHECK(ncclGetSymRegType(task->sendWin, task->recvWin, &task->winRegType));
-      // Partial registration (NCCL_CHECK_MODE default accepts it) cannot run a
-      // symmetric kernel. Require both windows; peers then allgather so a mix of
-      // SYM and RING does not hang.
-      if (task->winRegType != ncclSymSendRegRecvReg) wantSym = false;
 #ifndef GENERATE_SYM_KERNELS
     // without GENERATE_SYM_KERNELS, ncclSymkGetKernelPtr()
     // returns nullptr for AllReduce, which causes a 'invalid device function'
@@ -130,20 +124,6 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       if (task->func == ncclFuncAllReduce) wantSym = false;
 #endif
     }
-    // Local windows can disagree across ranks (NCCL_CHECK_MODE default does not
-    // reject that). Mixing SYM and RING hangs; fall back unless every rank wants SYM.
-    if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
-      std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
-      flags[(size_t)comm->rank] = wantSym ? 1 : 0;
-      NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (flags[(size_t)r] == 0) {
-          wantSym = false;
-          break;
-        }
-      }
-    }
-
     if (wantSym) {
       index =
         (((int)task->func * ncclNumDevRedOps + symkOp) * ncclNumTypes + (int)task->datatype) * ncclNumSymRegTypes +

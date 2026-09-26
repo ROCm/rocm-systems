@@ -34,6 +34,11 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
 
+// Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% at the sizes where it removes an
+// epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
+// host allocates; the kernels take their slot stride from blockDim.
+constexpr int ncclSymkGfx950LLThreads = 512;
+
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
 }
@@ -173,6 +178,16 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                       size_t nElts, bool symAligned16B = true);
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+bool ncclSymkIsGfx950(struct ncclComm* comm);
+#endif
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Block width the gfx950 reduce kernels launch at, split out of the symmetric tuning model so the
+// size bands can be unit tested. Returns ncclSymkMaxThreads for any collective that is not tuned.
+int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes);
+#endif
+
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
 bool ncclSymkTmaAvailable(struct ncclComm* comm);
 // NCCL_SYM_TMA_ENABLE=2: take the DMA-staged kernel regardless of predicted time or message size.
@@ -197,6 +212,7 @@ int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();
 int ncclSymkTmaKernelMask();
 int ncclSymkGinKernelMask();
+int ncclSymkLsaKernelMask();
 int ncclSymkAGKernelMask();
 int ncclSymkARKernelMask();
 int ncclSymkRSKernelMask();

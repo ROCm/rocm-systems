@@ -507,4 +507,213 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
     }
 }
 
+// ===========================================================================
+// Test group 3: gfx950 LD tuning, chunk floor and pack tier selection. Both use
+// position-dependent data, since a constant fill hides a mispartitioned range.
+// ===========================================================================
+
+namespace
+{
+
+// Value a rank writes at a global index, small enough to be exact in float.
+inline float ldPatternValue(int rank, size_t globalIdx)
+{
+    return static_cast<float>(rank + 1) + static_cast<float>(globalIdx % 1024);
+}
+
+// Sum of ldPatternValue over all ranks at one global index.
+inline float ldPatternSum(int nRanks, size_t globalIdx)
+{
+    return static_cast<float>(nRanks * (nRanks + 1)) / 2.0f
+           + static_cast<float>(nRanks) * static_cast<float>(globalIdx % 1024);
+}
+
+} // namespace
+
+// gfx950 gates the deep path on a floor instead of trimming to a whole wave.
+// The large counts are not multiples of the chunk size, so the last wave is partial, while the
+// small ones stay on the LL kernels, where a stride disagreeing with the launch width would alias
+// one rank's slots onto another's.
+TEST_F(SymmetricKernelCorruptionTest, CountSweep_PartitioningAndSlots)
+{
+    if(!validateTestPrerequisites(2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    // The first three land on the LL kernels: ReduceScatter runs wide at all of its LL sizes, and
+    // AllReduce runs narrow below 64 KB of message bytes and wide at 16K floats. The rest have an
+    // odd chunk count (count / 1024), which nRanks * nBlocks cannot divide for any block count the
+    // cost model picks, so the trim gfx950 drops would always have removed a partial wave.
+    const std::vector<size_t> counts = {2 * 1024,
+                                        8 * 1024,
+                                        16 * 1024,
+                                        129 * 1024 + 1,
+                                        257 * 1024 + 7,
+                                        513 * 1024 + 129,
+                                        1025 * 1024 + 1023};
+
+    // Allocate once at the largest count. Registering a window per iteration
+    // exhausts the symmetric pool well before the buffer bytes matter.
+    const size_t maxCount = counts.back();
+
+    SymBuf rsSend, rsRecv, arSend, arRecv;
+    if(!tryAllocSymBuf(maxCount * nRanks * sizeof(float), rsSend) ||
+       !tryAllocSymBuf(maxCount * sizeof(float), rsRecv) ||
+       !tryAllocSymBuf(maxCount * sizeof(float), arSend) ||
+       !tryAllocSymBuf(maxCount * sizeof(float), arRecv))
+    {
+        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+    }
+
+    // The pattern is a function of the global index alone, so one fill serves every count.
+    ASSERT_EQ(hipSuccess,
+              initializeBufferWithPattern<float>(
+                  rsSend.ptr, maxCount * nRanks,
+                  [rank](size_t i) { return ldPatternValue(rank, i); }));
+    ASSERT_EQ(hipSuccess,
+              initializeBufferWithPattern<float>(
+                  arSend.ptr, maxCount,
+                  [rank](size_t i) { return ldPatternValue(rank, i); }));
+
+    for(size_t count : counts)
+    {
+        // --- ReduceScatter: count is the per-rank output size ---
+        {
+            ASSERT_EQ(hipSuccess, zeroInitializeBuffer<float>(rsRecv.ptr, count));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclReduceScatter(rsSend.ptr, rsRecv.ptr, count, ncclFloat,
+                                        ncclSum, getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            // Output element j on this rank comes from global index rank*count + j.
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            ASSERT_TRUE(verifyBufferData<float>(
+                rsRecv.ptr, count,
+                [nRanks, rank, count](size_t j) {
+                    return ldPatternSum(nRanks, static_cast<size_t>(rank) * count + j);
+                },
+                0, 1e-3, &errIdx, &expVal, &actVal))
+                << "ReduceScatter mismatch at count=" << count
+                << " index=" << errIdx
+                << " expected=" << expVal << " got=" << actVal;
+        }
+
+        // --- AllReduce: count is the full message size ---
+        {
+            ASSERT_EQ(hipSuccess, zeroInitializeBuffer<float>(arRecv.ptr, count));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllReduce(arSend.ptr, arRecv.ptr, count, ncclFloat,
+                                    ncclSum, getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            ASSERT_TRUE(verifyBufferData<float>(
+                arRecv.ptr, count,
+                [nRanks](size_t i) { return ldPatternSum(nRanks, i); },
+                0, 1e-3, &errIdx, &expVal, &actVal))
+                << "AllReduce mismatch at count=" << count
+                << " index=" << errIdx
+                << " expected=" << expVal << " got=" << actVal;
+        }
+    }
+}
+
+// Skewing the input by one float makes the relative offset non 16-byte aligned,
+// which skips the 16-byte tier and reaches the 4-byte tier gfx950 widens.
+TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
+{
+    if(!validateTestPrerequisites(2))
+        GTEST_SKIP() << "Need >= 2 MPI ranks";
+
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const std::vector<size_t> counts = {128 * 1024, 512 * 1024 + 4, 1024 * 1024 + 8};
+
+    // One float of headroom so the input can start 4 bytes into its window.
+    constexpr size_t kSkewElts = 1;
+
+    const size_t maxCount = counts.back();
+
+    SymBuf rsSend, rsRecv, arSend, arRecv;
+    if(!tryAllocSymBuf((maxCount * nRanks + kSkewElts) * sizeof(float), rsSend) ||
+       !tryAllocSymBuf(maxCount * sizeof(float), rsRecv) ||
+       !tryAllocSymBuf((maxCount + kSkewElts) * sizeof(float), arSend) ||
+       !tryAllocSymBuf(maxCount * sizeof(float), arRecv))
+    {
+        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+    }
+
+    float* rsSendSkewed = static_cast<float*>(rsSend.ptr) + kSkewElts;
+    float* arSendSkewed = static_cast<float*>(arSend.ptr) + kSkewElts;
+
+    ASSERT_EQ(hipSuccess,
+              initializeBufferWithPattern<float>(
+                  rsSendSkewed, maxCount * nRanks,
+                  [rank](size_t i) { return ldPatternValue(rank, i); }));
+    ASSERT_EQ(hipSuccess,
+              initializeBufferWithPattern<float>(
+                  arSendSkewed, maxCount,
+                  [rank](size_t i) { return ldPatternValue(rank, i); }));
+
+    for(size_t count : counts)
+    {
+        ASSERT_EQ(0u, count % 4) << "count must keep the per-rank stride 16-byte aligned";
+
+        // --- ReduceScatter ---
+        {
+            ASSERT_EQ(hipSuccess, zeroInitializeBuffer<float>(rsRecv.ptr, count));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclReduceScatter(rsSendSkewed, rsRecv.ptr, count, ncclFloat,
+                                        ncclSum, getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            ASSERT_TRUE(verifyBufferData<float>(
+                rsRecv.ptr, count,
+                [nRanks, rank, count](size_t j) {
+                    return ldPatternSum(nRanks, static_cast<size_t>(rank) * count + j);
+                },
+                0, 1e-3, &errIdx, &expVal, &actVal))
+                << "ReduceScatter misaligned mismatch at count=" << count
+                << " index=" << errIdx
+                << " expected=" << expVal << " got=" << actVal;
+        }
+
+        // --- AllReduce ---
+        {
+            ASSERT_EQ(hipSuccess, zeroInitializeBuffer<float>(arRecv.ptr, count));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllReduce(arSendSkewed, arRecv.ptr, count, ncclFloat,
+                                    ncclSum, getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            size_t errIdx{};
+            float  expVal{}, actVal{};
+            ASSERT_TRUE(verifyBufferData<float>(
+                arRecv.ptr, count,
+                [nRanks](size_t i) { return ldPatternSum(nRanks, i); },
+                0, 1e-3, &errIdx, &expVal, &actVal))
+                << "AllReduce misaligned mismatch at count=" << count
+                << " index=" << errIdx
+                << " expected=" << expVal << " got=" << actVal;
+        }
+    }
+}
+
 #endif // MPI_TESTS_ENABLED

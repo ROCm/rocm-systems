@@ -272,9 +272,17 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
                               ncclLsaBarrierSession<ncclCoopCta>& bar, Red red, ncclSymPtr<T> input,
                               ncclSymPtr<T> output, size_t nElts) {
   int const& nRanks = handler.comm.nRanks;
+
+#if defined(__gfx950__)
+  // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
+  // the per-element tail. The floor still keeps iterations per warp worth reduceDeep's prologue.
+  uint32_t const chunkFloor = uint32_t(nRanks * nBlocks);
+#else
   int const& nRanks_rcp32 = handler.nRanks_rcp32;
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
+  uint32_t const chunkFloor = 1;
+#endif
 
   // True only where the deep loop really stages through a TDM engine.
   constexpr bool AsyncTile = ncclSymkAsyncTile && EnableTma;
@@ -287,16 +295,24 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   uintptr_t cursor = nPreBytes;
 
   if (alignment % 16 == 0) {
+#if defined(__gfx950__)
+    // Dropping to one pack cuts BytePerChunk to a quarter, which brings 16 MB within this tier's
+    // floor instead of falling through to 4-byte packs, and doubles iterations per warp at 32 MB.
+    constexpr int UnrollPacksPlain = 1, UnrollPeers = 8;
+#else
+    constexpr int UnrollPacksPlain = ncclSymkUnrollPacks, UnrollPeers = 2;
+#endif
     constexpr int BytePerPack = ncclSymkBytePerPack,
-                  UnrollPacks = AsyncTile ? ncclSymkDeepUnrollPacks(sizeof(T)) : ncclSymkUnrollPacks,
-                  UnrollPeers = 2;
+                  UnrollPacks = AsyncTile ? ncclSymkDeepUnrollPacks(sizeof(T)) : UnrollPacksPlain;
 
     // Derived from UnrollPacks so the two cannot disagree: a chunk wider than what reduceDeep()
     // reduces would leave the difference unreduced.
     constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       reduceDeep<BytePerPack, UnrollPacks, UnrollPeers, T, EnableTma>(handler, tn, t, waitNeeded, bar, red,
                                                                       (ncclSymPtr<char>)input + cursor,
@@ -308,11 +324,19 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   }
 
   if (sizeof(T) == 4 || (sizeof(T) < 4 && alignment % 4 == 0)) {
-    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+#if defined(__gfx950__)
+    // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
+    constexpr int UnrollPeers = 8;
+#else
+    constexpr int UnrollPeers = 4;
+#endif
+    constexpr int BytePerPack = 4, UnrollPacks = 4;
     constexpr int BytePerChunk = ncclSymkMinWarpsPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       reduceDeep<(sizeof(T) <= BytePerPack ? BytePerPack : 0), UnrollPacks, UnrollPeers, T, false>(
         handler, tn, t, waitNeeded, bar, red, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor,
@@ -462,7 +486,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(
   int const& nRanks = handler.comm.nRanks;
   int const& rank = handler.comm.rank;
   int t = threadIdx.x;
-  constexpr int tn = ncclSymkMaxThreads;
+  int tn = blockDim.x;
   ncclCoopCta cta;
   // LL fuses the peer sync into the first epoch, so AFTER_OPEN is stamped once, at the
   // first endEpoch below (see ncclDevProfilerPhases in device.h); BEGIN marks the start.
