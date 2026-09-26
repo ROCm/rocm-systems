@@ -11,21 +11,28 @@ label. ``static.py`` special-cases the ``__MAX`` value and must translate it to
 ``LPDDR5``; it was previously mislabelled ``GDDR7``, which surfaced on gfx117x
 APUs whose unified memory reports as LPDDR5.
 
-``static.py`` is loaded from the source tree so the test exercises the code
-under development rather than a possibly-stale installed copy.
+``static.py`` is loaded through cli_search_order, so a plain checkout
+exercises the code under development; an explicit AMDSMI_PATH pins that install.
 """
 
 import argparse
 import copy
-import importlib.util
 import os
-import sys
-import types
 import unittest
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
+
+# Locate the CLI dir; cli_search_order() decides whether the install or this
+# checkout wins. None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 # Mirrors amdsmi_wrapper.amdsmi_vram_type_t__enumvalues: LPDDR5 and __MAX share
 # value 31, and the later duplicate key (__MAX) wins in the dict literal, so a
@@ -54,52 +61,47 @@ class _FakeLibraryException(Exception):
         return str(self)
 
 
-def _install_fake_modules(holder):
-    """Register a stub ``amdsmi`` package plus the sibling CLI modules.
+def _fake_modules(holder):
+    """Build a stub ``amdsmi`` package plus the sibling CLI modules.
 
+    Returns the name -> module mapping for ``common.stub_modules``.
     ``holder["info"]`` is the vram payload returned to ``static.py`` so each
     test can swap the reported ``vram_type`` without reloading the module.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
 
     def _get_vram_info(_handle):
         return copy.deepcopy(holder["info"])
 
-    interface.amdsmi_get_gpu_vram_info = _get_vram_info
-
-    wrapper = types.ModuleType("amdsmi.amdsmi_interface.amdsmi_wrapper")
-    wrapper.AMDSMI_VRAM_TYPE__MAX = _VRAM_TYPE__MAX
-    wrapper.amdsmi_vram_type_t__enumvalues = dict(_ENUMVALUES)
-    interface.amdsmi_wrapper = wrapper
-
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
+    wrapper = fake_module(
+        "amdsmi.amdsmi_interface.amdsmi_wrapper",
+        AMDSMI_VRAM_TYPE__MAX=_VRAM_TYPE__MAX,
+        amdsmi_vram_type_t__enumvalues=dict(_ENUMVALUES),
+    )
+    interface = fake_module(
+        "amdsmi.amdsmi_interface", amdsmi_get_gpu_vram_info=_get_vram_info, amdsmi_wrapper=wrapper
+    )
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
     # ``static.py`` imports these sibling names at load time; the vram path
     # never instantiates them (the test injects a fake helpers object).
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = object
-    sys.modules["amdsmi_helpers"] = helpers_mod
-
-    exceptions_mod = types.ModuleType("amdsmi_cli_exceptions")
-    exceptions_mod.AmdSmiInvalidParameterException = type(
-        "AmdSmiInvalidParameterException", (Exception,), {}
+    helpers_mod = fake_module("amdsmi_helpers", AMDSMIHelpers=object)
+    exceptions_mod = fake_module(
+        "amdsmi_cli_exceptions",
+        AmdSmiInvalidParameterException=type("AmdSmiInvalidParameterException", (Exception,), {}),
     )
-    sys.modules["amdsmi_cli_exceptions"] = exceptions_mod
+
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        "amdsmi_helpers": helpers_mod,
+        "amdsmi_cli_exceptions": exceptions_mod,
+    }
 
 
 def _load_static_module():
-    spec = importlib.util.spec_from_file_location("static_under_test", STATIC_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("static_under_test", STATIC_PATH)
 
 
 class _FakeLogger:
@@ -178,32 +180,15 @@ def _build_args():
 
 
 class TestCliVramTypeLpddr5(unittest.TestCase):
-    _SAVED_MODULE_NAMES = (
-        "amdsmi",
-        "amdsmi.amdsmi_interface",
-        "amdsmi.amdsmi_exception",
-        "amdsmi_helpers",
-        "amdsmi_cli_exceptions",
-    )
-
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
-        # Snapshot any real amdsmi already loaded so the stub does not leak into
-        # sibling suites sharing the interpreter; restored in tearDownClass.
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
+        if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         cls.holder = {"info": copy.deepcopy(_BASE_VRAM_INFO)}
-        _install_fake_modules(cls.holder)
+        stub_modules(cls, _fake_modules(cls.holder))
         cls.static_module = _load_static_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _run_vram(self, vram_type_value, fmt="human"):
         info = copy.deepcopy(_BASE_VRAM_INFO)
@@ -238,7 +223,3 @@ class TestCliVramTypeLpddr5(unittest.TestCase):
 
     def test_non_max_type_unaffected(self):
         self.assertEqual(self._run_vram(22, "human"), "GDDR6")
-
-
-if __name__ == "__main__":
-    unittest.main()
