@@ -1437,9 +1437,13 @@ public:
     std::unordered_set<uint32_t> contexts;
     bool vmid_reserved = false;
     std::mutex submission_mutex;
-    std::unordered_map<uint64_t, uint64_t>
-        pm4_queue_keys;           ///< Context/ring queues until context or file release.
-    uint64_t next_submission = 1; ///< Next file-local CS sequence number.
+    /// Submission identity and retained fences for one context/engine/ring namespace.
+    struct Pm4Queue {
+      uint64_t key = 0;           ///< SimulatedKfd queue identity, retained until release.
+      uint64_t next_sequence = 1; ///< CS sequence local to this namespace.
+      std::map<uint64_t, std::shared_ptr<SyncobjFence>> fences; ///< Bounded WAIT_CS history.
+    };
+    std::unordered_map<uint64_t, Pm4Queue> pm4_queues; ///< Context/engine/ring namespaces.
   };
 
   using DrmFileToken = std::shared_ptr<DrmFileState>;
@@ -1468,7 +1472,7 @@ public:
   struct DrmFinalRelease {
     std::optional<uint64_t> file_id;
     DrmBackendLease lease;
-    std::unordered_map<uint64_t, uint64_t> queue_keys;
+    std::unordered_map<uint64_t, DrmFileState::Pm4Queue> queues;
   };
 
   /// @brief Drop one fd or reservation reference while fd_mutex_ is held.
@@ -1483,7 +1487,7 @@ public:
     --state->open_fds;
     if (state->open_fds != 0)
       return {};
-    return {state->id, std::move(state->backend_lease), std::move(state->pm4_queue_keys)};
+    return {state->id, std::move(state->backend_lease), std::move(state->pm4_queues)};
   }
 
   struct DrmUntrackResult {
@@ -1495,8 +1499,8 @@ public:
   /// @details Must run with NO interposer lock held.
   void complete_drm_release(DrmFinalRelease release) {
     if (auto *driver = dynamic_cast<SimulatedKfd *>(release.lease.local().get()))
-      for (const auto &[context_ring, key] : release.queue_keys)
-        driver->retire_pm4_queue(key);
+      for (const auto &[context_ring, queue] : release.queues)
+        driver->retire_pm4_queue(queue.key);
     if (release.file_id)
       reap_gem_for_drm_file(*release.file_id);
     // release.lease destructs here, dropping the open reference. For a local
@@ -1719,10 +1723,10 @@ public:
         std::lock_guard lock(fd_mutex_);
         if (!file->contexts.erase(request.ctx_id))
           return -EINVAL;
-        std::erase_if(file->pm4_queue_keys, [&](const auto &entry) {
+        std::erase_if(file->pm4_queues, [&](const auto &entry) {
           if ((entry.first >> 32) != request.ctx_id)
             return false;
-          retired.push_back(entry.second);
+          retired.push_back(entry.second.key);
           return true;
         });
       }
@@ -1863,20 +1867,40 @@ public:
     entry.has_fence = true;
   }
 
-  int transfer_syncobj(const DrmFileToken &file, const drm_syncobj_transfer &request) {
+  int transfer_syncobj(const DrmFileToken &file, const drm_syncobj_transfer request) {
     if (!file)
       return -EBADF;
-    if (request.flags || request.pad)
+    if ((request.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) || request.pad)
       return -EINVAL;
     {
-      std::lock_guard lock(fd_mutex_);
+      std::unique_lock lock(fd_mutex_);
       auto source = lookup_syncobj_locked(file, request.src_handle);
       auto target = lookup_syncobj_locked(file, request.dst_handle);
       if (!source || !target)
         return -ENOENT;
-      auto fence = syncobj_fence_locked(*source, request.src_point);
-      if (!fence)
-        return -EINVAL;
+      // Linux bounds WAIT_FOR_SUBMIT transfer waits to five seconds. Wait for
+      // the payload to exist, not for its GPU work to finish; retain the source
+      // and destination objects across handle deletion and replacement.
+      timespec deadline{};
+      if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
+        return -errno;
+      deadline.tv_sec += 5;
+      std::shared_ptr<SyncobjFence> fence;
+      while (true) {
+        const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
+        fence = syncobj_fence_locked(*source, request.src_point);
+        if (fence)
+          break;
+        if (!(request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+          return -EINVAL;
+        lock.unlock();
+        const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+        const int wait_errno = errno;
+        lock.lock();
+        if (rc == 0 || wait_errno == EAGAIN)
+          continue;
+        return wait_errno == ETIMEDOUT ? -ETIME : -wait_errno;
+      }
       if (request.dst_point) {
         append_timeline_fence_locked(*target, request.dst_point, std::move(fence));
       } else {
@@ -2616,11 +2640,22 @@ public:
         }
         const uint64_t key = (uint64_t{request.ctx_id} << 32) | (engine << 16) | ring;
         static std::atomic<uint64_t> next_queue_key{1};
-        auto [it, inserted] = file->pm4_queue_keys.try_emplace(key, 0);
+        auto [it, inserted] = file->pm4_queues.try_emplace(key);
+        auto &queue = it->second;
         if (inserted)
-          it->second = next_queue_key.fetch_add(1, std::memory_order_relaxed);
-        queue_key = it->second;
-        sequence = file->next_submission++;
+          queue.key = next_queue_key.fetch_add(1, std::memory_order_relaxed);
+        queue_key = queue.key;
+        sequence = queue.next_sequence++;
+        queue.fences.emplace(sequence, finished);
+        // Keep recent fence errors queryable without retaining every completed
+        // submission forever. Older retired sequences are already complete,
+        // as with the kernel's bounded per-entity fence history.
+        while (queue.fences.size() > 64) {
+          const auto &oldest = queue.fences.begin()->second;
+          if (!oldest->is_signaled() && !oldest->is_failed())
+            break;
+          queue.fences.erase(queue.fences.begin());
+        }
       }
       submission.ready = [this, dependencies = std::move(dependencies)]() mutable {
         std::lock_guard lock(fd_mutex_);
@@ -2665,6 +2700,59 @@ public:
       }
       util::Logger::warn("DRM submission failed: ", error.what());
       return dynamic_cast<const std::bad_alloc *>(&error) ? -ENOMEM : -EINVAL;
+    }
+  }
+
+  /// @brief Query a context/engine/ring submission fence using an absolute deadline.
+  int wait_drm_cs(const DrmFileToken &file, drm_amdgpu_wait_cs *argument) {
+    if (!file || !argument)
+      return -EINVAL;
+    const auto request = argument->in;
+    if ((request.ip_type != AMDGPU_HW_IP_GFX && request.ip_type != AMDGPU_HW_IP_COMPUTE) ||
+        request.ip_instance || request.ring >= (request.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u))
+      return -EINVAL;
+    std::unique_lock lock(fd_mutex_);
+    if (!file->contexts.count(request.ctx_id))
+      return -EINVAL;
+    const uint64_t key = (uint64_t{request.ctx_id} << 32) | (request.ip_type << 16) | request.ring;
+    const auto queue = file->pm4_queues.find(key);
+    const uint64_t next = queue == file->pm4_queues.end() ? 1 : queue->second.next_sequence;
+    const uint64_t sequence = request.handle == UINT64_MAX ? next - 1 : request.handle;
+    if (sequence >= next)
+      return -EINVAL;
+    std::shared_ptr<SyncobjFence> fence;
+    if (sequence && queue != file->pm4_queues.end()) {
+      const auto it = queue->second.fences.find(sequence);
+      if (it != queue->second.fences.end())
+        fence = it->second;
+    }
+    const auto finish = [&](bool busy) {
+      std::memset(argument, 0, sizeof(*argument));
+      argument->out.status = busy;
+      return 0;
+    };
+    while (true) {
+      const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
+      if (fence && fence->is_failed())
+        return -EIO;
+      if (!fence || fence->is_signaled())
+        return finish(false);
+      timespec now{};
+      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return -errno;
+      const uint64_t now_ns = static_cast<uint64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
+      if (request.timeout <= now_ns)
+        return finish(true);
+      const timespec deadline{static_cast<time_t>(request.timeout / 1'000'000'000),
+                              static_cast<long>(request.timeout % 1'000'000'000)};
+      lock.unlock();
+      const long rc = futex_wait_until(file->syncobj_generation, generation,
+                                       request.timeout == UINT64_MAX ? nullptr : &deadline);
+      const int wait_errno = errno;
+      lock.lock();
+      if (rc == 0 || wait_errno == EAGAIN || wait_errno == ETIMEDOUT)
+        continue;
+      return -wait_errno;
     }
   }
 
@@ -4146,6 +4234,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CS && arg)
       return kfd_ioctl_ret(
           InterposerContext::ctx.submit_drm_cs(drm_file, static_cast<drm_amdgpu_cs *>(arg)));
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_WAIT_CS && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.wait_drm_cs(drm_file, static_cast<drm_amdgpu_wait_cs *>(arg)));
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_GET_CAP) && arg) {
       auto *cap = static_cast<drm_get_cap *>(arg);
       cap->value = 0;
@@ -5462,19 +5553,31 @@ static int finish_drm_node_stat(const char *path, int result, mode_t *mode, dev_
     return result;
   std::string_view view(path);
   if (!view.starts_with("/dev/dri/renderD") &&
-      view.find("/dev_dri/renderD") == std::string_view::npos)
+      view.find("/dev_dri/renderD") == std::string_view::npos &&
+      view.find("/dev_dri/card") == std::string_view::npos)
     return result;
   std::string drm_base;
   if (auto driver = InterposerContext::ctx.driver())
     drm_base = driver->drm_path();
   else
     drm_base = InterposerContext::ctx.remote_drm_path();
-  uint32_t render_minor = 0;
-  if (!drm_base.empty() && render_minor_from_drm_node_path(path, drm_base.c_str(), &render_minor) &&
-      interposer_gpu_info(render_minor)) {
-    // libdrm enumerates nodes by path as well as by fd. Both must describe the
-    // same character device even though the synthetic tree uses regular files.
-    *device = makedev(226, render_minor);
+  if (drm_base.empty())
+    return result;
+
+  uint32_t node_minor = 0;
+  bool synthetic_node = render_minor_from_drm_node_path(path, drm_base.c_str(), &node_minor) &&
+                        interposer_gpu_info(node_minor).has_value();
+  const std::string primary_prefix = drm_base + "/dev_dri/card";
+  if (view.starts_with(primary_prefix)) {
+    // The existing file belongs to the generated tree. Its primary index is
+    // independent of the configured render minor (card0 may pair with renderD129).
+    synthetic_node = parse_render_minor_suffix(view.data() + primary_prefix.size(),
+                                               view.data() + view.size(), &node_minor);
+  }
+  if (synthetic_node) {
+    // libdrm groups primary/render nodes using their character-device metadata.
+    // Backing files are regular files, but their public identities follow DRM.
+    *device = makedev(226, node_minor);
     *mode = (*mode & ~S_IFMT) | S_IFCHR;
   }
   return result;
@@ -5639,6 +5742,47 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
   }
   return rc;
+}
+
+// libc canonicalization uses internal filesystem calls that bypass the ordinary
+// stat/readlink wrappers. Redirect the input before resolving symlinks so libdrm
+// cannot escape from a simulated node to the host GPU's PCI sysfs directory.
+static std::string redirect_canonical_path(const char *path) {
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
+  return redirected;
+}
+
+RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
+  auto &real = InterposerContext::real();
+  if (!real.ready()) {
+    auto fn = util::lookup_symbol<char *(*)(const char *, char *)>(RTLD_NEXT, "realpath");
+    return fn ? fn(path, resolved_path) : nullptr;
+  }
+  if (!rj_owns_interposer_state() || InterposerContext::in_construction)
+    return real.realpath_fn(path, resolved_path);
+  auto redirected = redirect_canonical_path(path);
+  return real.realpath_fn(redirected.empty() ? path : redirected.c_str(), resolved_path);
+}
+
+RJ_INTERPOSER_EXPORT char *__realpath_chk(const char *path, char *resolved_path, size_t size) {
+  auto &real = InterposerContext::real();
+  if (!real.ready()) {
+    auto fn =
+        util::lookup_symbol<char *(*)(const char *, char *, size_t)>(RTLD_NEXT, "__realpath_chk");
+    return fn ? fn(path, resolved_path, size) : nullptr;
+  }
+  if (!real.realpath_chk_fn) {
+    errno = ENOSYS;
+    return nullptr;
+  }
+  if (!rj_owns_interposer_state() || InterposerContext::in_construction)
+    return real.realpath_chk_fn(path, resolved_path, size);
+  auto redirected = redirect_canonical_path(path);
+  return real.realpath_chk_fn(redirected.empty() ? path : redirected.c_str(), resolved_path, size);
 }
 
 // -- readlink interposition (redirect /sys/dev/char/) --

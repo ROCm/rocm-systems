@@ -4,7 +4,9 @@
 #pragma once
 
 /// @file
-/// @brief Compute PM4 packets, register offsets and submission lifetime state.
+/// @brief PM4 packets, shader registers and submission lifetime state.
+
+#include "rocjitsu/vm/amdgpu/gs_registers.h"
 
 #include <array>
 #include <atomic>
@@ -32,11 +34,13 @@ inline constexpr uint32_t kPm4ComputePgmRsrc2 = 0x213;
 inline constexpr uint32_t kPm4ComputeTmpringSize = 0x218;
 inline constexpr uint32_t kPm4ComputeUserData0 = 0x240;
 
-/// @brief Type-3 packet opcodes accepted by the compute command processor.
+/// @brief Type-3 packet opcodes accepted by the command processor.
 enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
   SetBase = 0x11,
   ClearState = 0x12,
+  SetPredication = 0x20,
+  CondExec = 0x22,
   ContextControl = 0x28,
   PfpSyncMe = 0x42,
   SetContextReg = 0x69,
@@ -44,17 +48,29 @@ enum class Pm4Opcode : uint32_t {
   SetContextRegPairsPacked = 0xb9,
   DispatchDirect = 0x15,
   DispatchIndirect = 0x16,
+  DispatchDirectInterleaved = 0xa7,
+  DispatchIndirectInterleaved = 0xa8,
+  AtomicMem = 0x1e,
   WriteData = 0x37,
   WaitRegMem = 0x3c,
   IndirectBuffer = 0x3f,
   CopyData = 0x40,
   EventWrite = 0x46,
+  StreamoutStatsQuery = 0xc3,
   ReleaseMem = 0x49,
   DmaData = 0x50,
+  ContextRegRmw = 0x51,
   AcquireMem = 0x58,
+  PrimeUtcl2 = 0x5d,
+  LoadUconfigReg = 0x5e,
+  LoadShReg = 0x5f,
+  LoadContextReg = 0x61,
   LoadShRegIndex = 0x63,
+  LoadContextRegIndex = 0x9f,
   SetShReg = 0x76,
+  SetShRegIndex = 0x9b,
   SetUconfigReg = 0x79,
+  SetUconfigRegIndex = 0x7a,
   SetShRegPairs = 0xba,
   SetUconfigRegPairs = 0xbe,
 };
@@ -125,10 +141,18 @@ struct Pm4Submission {
   std::function<void(bool)> complete;
 };
 
-/// @brief Compute register file and ordered DRM submissions for one CP queue.
+/// @brief Shader and graphics register files and ordered submissions for one CP queue.
 struct Pm4QueueState {
+  using ContextRegisters = std::array<uint32_t, 0x2000>;
+
   uint64_t indirect_base = 0;
+  bool predicate_pass = true;
+  std::shared_ptr<GsRegisters> gs_registers = std::make_shared<GsRegisters>();
   std::array<uint32_t, 0x400> sh_registers{};
+  ContextRegisters context_registers{};
+  std::array<uint32_t, 0x4000> uconfig_registers{};
+  /// One saved context bank; nested CLEAR_STATE pushes are unsupported.
+  std::unique_ptr<ContextRegisters> saved_context_registers;
   std::deque<Pm4Submission> submissions;
 };
 
