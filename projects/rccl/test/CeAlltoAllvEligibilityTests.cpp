@@ -390,16 +390,12 @@ TEST_F(CeAlltoAllEligibilityTest, MultiNodeHierAvailable_DoesNotYieldDda)
                                     ncclFuncAlltoAll,
                                     ncclDevSum,
                                     ncclFloat32,
-                                    ncclSymSendRegRecvReg,
-                                    /*sendWin=*/nullptr,
-                                    /*recvWin=*/nullptr));
+                                    ncclSymSendRegRecvReg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAlltoAll,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg,
-                                 /*sendWin=*/nullptr,
-                                 /*recvWin=*/nullptr));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
                                         ncclFloat32,
                                         ncclSymSendRegRecvReg,
