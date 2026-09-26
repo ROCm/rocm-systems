@@ -811,6 +811,9 @@ set_tests_properties(intercept_queue_logic_test PROPERTIES
   LABELS "quick;standard;pr;pre-commit"
   TIMEOUT 60)
 
+add_subdirectory(${ROCRTST_ROOT}/suites/functional/code_object
+                 ${PROJECT_BINARY_DIR}/code_object)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -819,7 +822,7 @@ add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 
 # CMake automatically sets RPATH for linked libraries when CMAKE_INSTALL_RPATH_USE_LINK_PATH is TRUE
 # This works for SHARED IMPORTED targets (numa, hwloc) found via pkg-config
-set_target_properties(${ROCRTST} PROPERTIES
+set_target_properties(${ROCRTST} code_object_isa_test PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
   INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
   BUILD_RPATH "$ORIGIN/../../dist/lib/rocm_sysdeps/lib;$ORIGIN/../lib/rocrtst/lib"
@@ -830,7 +833,7 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS intercept_queue_logic_test
+install(TARGETS intercept_queue_logic_test code_object_isa_test
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -885,6 +888,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "\n"
         "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
         "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
+        "add_test(code_object_isa_test \"../code_object_isa_test\")\n"
+        "set_tests_properties(code_object_isa_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )
 
     install(
