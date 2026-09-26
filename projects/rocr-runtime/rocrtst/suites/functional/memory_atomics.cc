@@ -265,12 +265,9 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
-  // Allocate the kernel argument buffer from the kernarg_pool.
+  // The kernarg buffer is allocated further down, once the code object has
+  // been loaded and the kernel's kernarg segment size is known.
   args *kernArguments = NULL;
-  err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
-                                     reinterpret_cast<void **>(&kernArguments));
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
 
   memset(oldValues, 0, kMemoryAllocSize);
   memset(expecteddata, 0, kMemoryAllocSize);
@@ -345,20 +342,6 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, oldrefdata);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-  err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArguments);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-  kernArguments->a = refSysdata;
-  if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
-    kernArguments->b = gpuRefData;
-  } else {
-    kernArguments->b = g_gpuRefData;
-  }
-  kernArguments->c = oldValues;
-
-  if (testtype_ != INC && testtype_ != DEC) {
-    kernArguments->d = kValue;
-  }
 
   // Create the executable, get symbol by name and load the code object
   set_kernel_file_name("atomicOperations_kernels.hsaco");
@@ -431,6 +414,34 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
 
   err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // Allocate the kernel argument buffer from the kernarg_pool.  This is done
+  // after the code object is loaded so that the kernel's kernarg segment size
+  // is known.  That segment is larger than the explicit arguments: it also
+  // holds the hidden arguments (global offsets, printf buffer, ...).
+  // Allocate the full segment and zero it, so the hidden arguments are not
+  // read back as stale kernarg pool contents.
+  const size_t kernarg_buf_size =
+      std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
+  err = hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
+                                     reinterpret_cast<void **>(&kernArguments));
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  memset(kernArguments, 0, kernarg_buf_size);
+
+  err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArguments);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  kernArguments->a = refSysdata;
+  if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
+    kernArguments->b = gpuRefData;
+  } else {
+    kernArguments->b = g_gpuRefData;
+  }
+  kernArguments->c = oldValues;
+
+  if (testtype_ != INC && testtype_ != DEC) {
+    kernArguments->d = kValue;
+  }
 
   // Fill up the kernel packet except header
   err = rocrtst::InitializeAQLPacket(this, &aql());
