@@ -808,6 +808,7 @@ class AmdSmiEventReader:
             )
         )
 
+        receipt_time = int(time())
         ret = []
         for i in range(c_count.value):
             unique_event_values = set(event.value for event in AmdSmiEvtNotificationType)
@@ -818,6 +819,7 @@ class AmdSmiEventReader:
                     )
                     ret.append(
                         {
+                            "timestamp": receipt_time,
                             "processor_handle": processor_handle,
                             "event": AmdSmiEvtNotificationType(event_info[i].event).name,
                             "message": event_info[i].message.decode("utf-8"),

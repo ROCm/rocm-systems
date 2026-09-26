@@ -94,6 +94,7 @@ class EventCommands:
             try:
                 events = listener.read(2000)
                 for event in events:
+                    values_dict["timestamp"] = event["timestamp"]
                     values_dict["event"] = event["event"]
                     # parse message as it's own dictionary
                     message_list = event["message"].split("  ")
@@ -104,7 +105,7 @@ class EventCommands:
                             message_dict.update({item_list[0]: item_list[1]})
                     values_dict["message"] = message_dict
                     commands.logger.store_output(event["processor_handle"], "values", values_dict)
-                    commands.logger.print_output()
+                    commands.logger.print_event_output()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
                     print(e)
