@@ -36,6 +36,9 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
                                      void** kernelParams, void** extra, int deviceId,
                                      uint32_t params);
 
+hipError_t ihipResolveGraphClusterDimensions(hipFunction_t f, int deviceId, dim3 gridDim,
+                                             dim3* clusterDim);
+
 hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
                                size_t sizeBytes, size_t offset);
 
