@@ -836,7 +836,7 @@ endif()
 rj_add_gtest_tests(
     rocjitsu_tests
     TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*"
+        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
 
 # RequestExitWakesAllPartitions may require several runs to show regression
@@ -1333,6 +1333,30 @@ get_filename_component(
     NAME
 )
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
+
+rj_add_test(
+    NAME "EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    COMMAND
+        ${RJ_CLI}
+        --config
+        ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
+        --cpu-thread-budget
+        4
+        --
+        $<TARGET_FILE:rocjitsu_tests>
+        --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+    INSTALL_COMMAND
+        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        "--config"
+        "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
+        "--cpu-thread-budget"
+        "4"
+        "--"
+        "bin/rocjitsu_tests"
+        "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
 
 function(rj_detect_kfd_gfx_target_versions out_var)
     set(_versions)

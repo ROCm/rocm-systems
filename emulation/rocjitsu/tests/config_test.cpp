@@ -1204,6 +1204,20 @@ TEST(EffectiveConfigTest, AcceptsTheCommentsAndBareKeysTheConfigParserAccepts) {
             "{\n  // ceiling\n  cpu_thread_budget: 2\n}");
 }
 
+TEST(EffectiveConfigTest, PreservesCommentsAdjacentToScalarValues) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"cpu_thread_budget":32/*,}*/})", 4),
+            R"({"cpu_thread_budget":4/*,}*/})");
+  EXPECT_EQ(config::json_with_cpu_thread_budget("{\"cpu_thread_budget\":32// ceiling\n}", 4),
+            "{\"cpu_thread_budget\":4// ceiling\n}");
+}
+
+TEST(EffectiveConfigTest, MatchesSingleQuotedAndEscapedQuotedFieldNames) {
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({'cpu_thread_budget':32})", 4),
+            R"({'cpu_thread_budget':4})");
+  EXPECT_EQ(config::json_with_cpu_thread_budget(R"({"cpu_thread_budge\u0074":32})", 4),
+            R"({"cpu_thread_budge\u0074":4})");
+}
+
 TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
   EXPECT_THROW((void)config::json_with_cpu_thread_budget("[1]", 1), std::runtime_error);
 }
@@ -1231,6 +1245,34 @@ TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
   EXPECT_THROW(
       (void)config::write_effective_config(test::config_path("gfx942_cdna3.json"), 12, getpid()),
       std::runtime_error);
+}
+
+// This case is registered as a native CLI test because it expects the launcher
+// to have created the invocation handoff before this child process starts.
+TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
+  const char *invocation_dir = std::getenv(rocjitsu::kRpcInvocationDirEnv);
+  ASSERT_NE(invocation_dir, nullptr);
+  ASSERT_NE(*invocation_dir, '\0');
+
+  const std::filesystem::path invocation_path(invocation_dir);
+  std::ifstream handoff(invocation_path / "config_path");
+  ASSERT_TRUE(handoff.is_open());
+
+  std::string effective_path;
+  ASSERT_TRUE(std::getline(handoff, effective_path));
+  ASSERT_FALSE(effective_path.empty());
+
+  EXPECT_EQ(std::filesystem::absolute(effective_path).lexically_normal(),
+            (invocation_path / config::kEffectiveConfigName).lexically_normal());
+  ASSERT_TRUE(std::filesystem::exists(effective_path));
+
+  const std::string source_path = test::config_path("gfx942_cdna3.json");
+  const std::string source_before = config::read_config_file(source_path);
+  const auto settings =
+      config::load_execution_thread_settings(effective_path, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(settings.request.budget, 4u);
+  EXPECT_EQ(config::read_config_file(source_path), source_before);
 }
 
 TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
