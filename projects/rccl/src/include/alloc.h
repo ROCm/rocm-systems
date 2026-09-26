@@ -30,10 +30,9 @@ struct ncclComm;
 #include "cudawrap.h"
 #endif
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#include <hip/hip_runtime.h>
-#include "rocmwrap.h"
-#elif defined(ROCM_VERSION) && ROCM_VERSION >= 71200
+// Every AMD build defines this, including host-only. rocmwrap.h then provides
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED for the host-alloc gate below.
+#if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_runtime.h>
 #include "rocmwrap.h"
 #endif
@@ -391,7 +390,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return result;
 }
 
-#else /* CUDART_VERSION >= 12020 */
+#else /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED */
 
 static inline ncclResult_t ncclCuMemHostAllocDebug(void** ptr, void* handlep, size_t size, const char* file, int line,
                                                    const char* callerFunc) {
@@ -412,7 +411,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   return ncclInternalError;
 }
 
-#endif  /* CUDART_VERSION >= 12020 */
+#endif  /* CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED */
 
 template <typename T>
 ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line) {
