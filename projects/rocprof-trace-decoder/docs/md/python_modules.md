@@ -159,7 +159,7 @@ trace records. It has two related responsibilities.
 First, it provides ISA text to the decoder. A `CodeIndex` is normally produced
 by `generate_code_artifacts()` from explicit code objects, or loaded from an
 existing RCV `code.json` with `CodeIndex.from_code_json(path)`. It maps
-`Pc(code_object_id, address)` to instruction text, source text, line number,
+`Pc(address, code_object_id)` to instruction text, source text, line number,
 and estimated instruction size. Because `CodeIndex` implements `isa_for_pc`, it
 can be passed directly to `Decoder.parse_file(..., isa=code_index)`.
 

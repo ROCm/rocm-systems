@@ -102,6 +102,21 @@ DL::DL(const char* libpath)
     att_status_fn =
         reinterpret_cast<StatusFn*>(dlsym(handle, "rocprof_trace_decoder_get_status_string"));
 
+    // Analyses need the handle-based API, which is absent on decoders older than 0.2.3.
+    // Decoding itself still works through parse_data, so bind these optionally.
+    att_create_handle_fn =
+        reinterpret_cast<CreateHandleFn*>(dlsym(handle, "rocprof_trace_decoder_create_handle"));
+    att_destroy_handle_fn =
+        reinterpret_cast<DestroyHandleFn*>(dlsym(handle, "rocprof_trace_decoder_destroy_handle"));
+    att_set_isa_callback_fn = reinterpret_cast<SetIsaCallbackFn*>(
+        dlsym(handle, "rocprof_trace_decoder_set_isa_callback"));
+    att_set_se_data_callback_fn = reinterpret_cast<SetSeDataCallbackFn*>(
+        dlsym(handle, "rocprof_trace_decoder_set_se_data_callback"));
+    att_set_analysis_fn =
+        reinterpret_cast<SetAnalysisFn*>(dlsym(handle, "rocprof_trace_decoder_set_analysis"));
+    att_handle_parse_fn =
+        reinterpret_cast<HandleParseFn*>(dlsym(handle, "rocprof_trace_decoder_parse"));
+
     // Occupancy data is unaffected by an old decoder, so warn rather than fail.
     if(!decoder_supports_event_records(handle))
         ROCP_WARNING << loaded_path
