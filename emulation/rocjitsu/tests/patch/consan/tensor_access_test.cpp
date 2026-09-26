@@ -807,7 +807,10 @@ TEST(ConSanTensor, IterationOriginsMatchStorageOrderedDescriptorInverse) {
                             bool rank_three) {
     auto result = tile({2, 2, rank_three ? 2u : 0u, 0, 0});
     result.d1[0] = 1u << 19;
-    const auto put = [](auto &words, unsigned offset, unsigned width, uint64_t value) {
+    const auto put = [](std::span<uint32_t> words, unsigned offset, unsigned width,
+                        uint64_t value) {
+      ASSERT_LE(width, 64u);
+      ASSERT_LE(static_cast<uint64_t>(offset) + width, words.size() * 32u);
       for (unsigned bit = 0; bit < width; ++bit) {
         const unsigned pos = offset + bit;
         words[pos / 32] =
@@ -942,7 +945,9 @@ TEST(ConSanTensor, IterationOriginsRejectAliasesAndInvalidDescriptorsWithoutEmis
 }
 
 TEST(ConSanTensor, GlobalSourcesMatchFinalDenseGatherAndRepeatedDmaWrites) {
-  const auto put = [](auto &words, unsigned offset, unsigned width, uint64_t value) {
+  const auto put = [](std::span<uint32_t> words, unsigned offset, unsigned width, uint64_t value) {
+    ASSERT_LE(width, 64u);
+    ASSERT_LE(static_cast<uint64_t>(offset) + width, words.size() * 32u);
     for (unsigned bit = 0; bit < width; ++bit) {
       const unsigned pos = offset + bit;
       words[pos / 32] =
