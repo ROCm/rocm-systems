@@ -5,6 +5,13 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
+add_library(rocprofiler-sdk-registration-attach-fixture SHARED
+            registration_attach_fixture.cpp)
+target_link_libraries(
+    rocprofiler-sdk-registration-attach-fixture
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-build-flags)
+
 # -------------------------------------------------------------------------------------- #
 #
 # Link to static rocprofiler library
@@ -75,6 +82,13 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library
             GTest::gtest
             GTest::gtest_main)
+target_compile_definitions(
+    rocprofiler-sdk-lib-tests-shared
+    PRIVATE
+        "ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE=\"$<TARGET_FILE:rocprofiler-sdk-registration-attach-fixture>\""
+    )
+add_dependencies(rocprofiler-sdk-lib-tests-shared
+                 rocprofiler-sdk-registration-attach-fixture)
 set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 

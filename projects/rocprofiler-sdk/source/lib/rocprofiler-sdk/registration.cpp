@@ -59,6 +59,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/registration/attach.hpp"
 #include "lib/rocprofiler-sdk/registration/iterate.hpp"
 #include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
@@ -411,6 +412,8 @@ emplace_client(Tp&                                 data,
                rocprofiler_configure_func_t        _cfg_func,
                rocprofiler_configure_attach_func_t _attach_func)
 {
+    _attach_func = resolve_attach_for_configure(_cfg_func, _attach_func);
+
     constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
     uint32_t       _prio          = get_client_offset() + data.size();
     auto           _client_v      = client_library{std::string{_name},
