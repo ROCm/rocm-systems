@@ -54,6 +54,7 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchCopyRectMemoryCommand;
 class BatchWriteMemoryCommand;
 class BatchReadMemoryCommand;
 class MapMemoryCommand;
@@ -743,7 +744,8 @@ class Settings {
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 8;
+      uint batch_copy_rect_supported_ : 1;    //!< Backend implements submitBatchCopyRectMemory
+      uint reserved_ : 7;
     };
     uint value_;
   };
@@ -1325,6 +1327,10 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  //! Batched rect copy.  Not pure: implemented only by backends that set
+  //! Settings::batch_copy_rect_supported_, which is also what gates construction of the
+  //! command, so other backends never reach the base implementation.
+  virtual void submitBatchCopyRectMemory(amd::BatchCopyRectMemoryCommand& cmd);
   virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
   virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;

@@ -12,6 +12,7 @@
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace amd::roc {
@@ -253,7 +254,9 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
     const hsa_agent_t dstAgent =
         (dstMemory.isHostMemDirectAccess()) ? dev().getCpuAgent() : dev().getBackendDevice();
 
-    bool isSubwindowRectCopy = true;
+    // hsa_dim3_t has uint32_t axes. Oversized ranges use the size_t-based linear copies below
+    // instead of silently narrowing a dimension for the rect API.
+    bool isSubwindowRectCopy = amd::NDRange32::CanSafelyNarrow(size[0], size[1], size[2]);
     hsa_amd_copy_direction_t direction = hsaHostToHost;
 
     hsa_agent_t agent = dev().getBackendDevice();
@@ -271,11 +274,6 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
 
     hsa_pitched_ptr_t dstMem = {(reinterpret_cast<address>(dst) + dstRect.offset(0, 0, 0)),
                                 dstRect.rowPitch_, dstRect.slicePitch_};
-
-    hsa_dim3_t dim = {static_cast<uint32_t>(size[0]), static_cast<uint32_t>(size[1]),
-                      static_cast<uint32_t>(size[2])};
-    hsa_dim3_t offset = {0, 0, 0};
-
 
     if ((srcRect.rowPitch_ % 4 != 0) || (srcRect.slicePitch_ % 4 != 0) ||
         (dstRect.rowPitch_ % 4 != 0) || (dstRect.slicePitch_ % 4 != 0)) {
@@ -303,6 +301,10 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
     auto wait_events = gpu().Barriers().WaitingSignal(engine);
 
     if (isSubwindowRectCopy) {
+      hsa_dim3_t dim = {static_cast<uint32_t>(size[0]), static_cast<uint32_t>(size[1]),
+                        static_cast<uint32_t>(size[2])};
+      hsa_dim3_t offset = {0, 0, 0};
+
       hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
       // Copy memory line by line
@@ -346,6 +348,158 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
         }
       }
     }
+  }
+
+  // The ROCR copy api guarantees coherency after the copy
+  gpu().setFenceDirty(false);
+  return true;
+}
+
+// ================================================================================================
+bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& srcMemories,
+                                         const std::vector<device::Memory*>& dstMemories,
+                                         const std::vector<amd::BatchCopyRectOp>& copyOps) const {
+  if (copyOps.empty()) {
+    return true;
+  }
+
+  // One LINEAR_RECT op carries agent lists with one common pair and one completion signal, so
+  // the whole batch has to be same-direction host<->device DWORD-aligned rects.  Anything else
+  // (D2D/P2P, which the kernel blit handles, unaligned pitches, or a mixed batch) drops
+  // back to issuing the operands one at a time.
+  hsa_amd_copy_direction_t direction = hsaHostToHost;
+  // Match the existing single-copy policy: host<->device SDMA requires PCIe atomics.
+  bool fusable = dev().info().pcie_atomics_ && !setup_.disableCopyBufferRect_;
+
+  for (size_t i = 0; i < copyOps.size() && fusable; ++i) {
+    const amd::BatchCopyRectOp& op = copyOps[i];
+    const bool srcHost = srcMemories[i]->isHostMemDirectAccess();
+    const bool dstHost = dstMemories[i]->isHostMemDirectAccess();
+
+    hsa_amd_copy_direction_t opDir;
+    if (srcHost && !dstHost) {
+      opDir = hsaHostToDevice;
+    } else if (!srcHost && dstHost) {
+      opDir = hsaDeviceToHost;
+    } else {
+      fusable = false;
+      break;
+    }
+
+    if (direction == hsaHostToHost) {
+      direction = opDir;
+    } else if (direction != opDir) {
+      fusable = false;
+      break;
+    }
+
+    if (!amd::NDRange32::CanSafelyNarrow(op.size[0], op.size[1], op.size[2])) {
+      fusable = false;
+      break;
+    }
+
+    if ((op.srcRect.rowPitch_ % 4 != 0) || (op.srcRect.slicePitch_ % 4 != 0) ||
+        (op.dstRect.rowPitch_ % 4 != 0) || (op.dstRect.slicePitch_ % 4 != 0)) {
+      fusable = false;
+    }
+  }
+
+  // copyBufferRect is virtual and this object is a KernelBlitManager, so every operand
+  // issued here keeps the full single-copy path: SDMA rect, per-row SDMA, or the shader
+  // rect kernel.
+  auto copyPerOp = [&]() {
+    for (size_t i = 0; i < copyOps.size(); ++i) {
+      const amd::BatchCopyRectOp& op = copyOps[i];
+      if (!copyBufferRect(*srcMemories[i], *dstMemories[i], op.srcRect, op.dstRect, op.size, false,
+                          op.metadata)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  if (!fusable) {
+    return copyPerOp();
+  }
+
+  // num_entries is a uint16_t.  A narrowing conversion here must not silently describe
+  // only a prefix of the batch; preserve correctness by using the existing per-op path.
+  if (copyOps.size() > std::numeric_limits<uint16_t>::max()) {
+    return copyPerOp();
+  }
+
+  gpu().releaseGpuMemoryFence(kSkipCpuWait);
+
+  // Allocate descriptor storage up front so pointers in entries remain valid until
+  // hsa_amd_memory_async_batch_copy returns.
+  struct RectEntryStorage {
+    hsa_pitched_ptr_t dst{};
+    hsa_dim3_t dst_offset{};
+    hsa_pitched_ptr_t src{};
+    hsa_dim3_t src_offset{};
+    hsa_dim3_t range{};
+  };
+  std::vector<RectEntryStorage> entryStorage(copyOps.size());
+  std::vector<hsa_amd_memory_copy_rect_entry_t> entries(copyOps.size());
+  for (size_t i = 0; i < copyOps.size(); ++i) {
+    const amd::BatchCopyRectOp& op = copyOps[i];
+    address src = reinterpret_cast<address>(gpuMem(*srcMemories[i]).getDeviceMemory());
+    address dst = reinterpret_cast<address>(gpuMem(*dstMemories[i]).getDeviceMemory());
+
+    RectEntryStorage& storage = entryStorage[i];
+    storage.src = {src + op.srcRect.offset(0, 0, 0), op.srcRect.rowPitch_,
+                   op.srcRect.slicePitch_};
+    storage.dst = {dst + op.dstRect.offset(0, 0, 0), op.dstRect.rowPitch_,
+                   op.dstRect.slicePitch_};
+    storage.src_offset = {0, 0, 0};
+    storage.dst_offset = {0, 0, 0};
+    storage.range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
+                     static_cast<uint32_t>(op.size[2])};
+    entries[i] = {&storage.dst, &storage.dst_offset, &storage.src, &storage.src_offset,
+                  &storage.range};
+  }
+
+  const hsa_agent_t srcAgent =
+      (direction == hsaHostToDevice) ? dev().getCpuAgent() : dev().getBackendDevice();
+  const hsa_agent_t dstAgent =
+      (direction == hsaHostToDevice) ? dev().getBackendDevice() : dev().getCpuAgent();
+  std::vector<hsa_agent_t> srcAgents(entries.size(), srcAgent);
+  std::vector<hsa_agent_t> dstAgents(entries.size(), dstAgent);
+
+  const HwQueueEngine engine =
+      (direction == hsaHostToDevice) ? HwQueueEngine::SdmaH2D : HwQueueEngine::SdmaD2H;
+  auto wait_events = gpu().Barriers().WaitingSignal(engine);
+  hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
+
+  // One op with one signal: ROCR fuses the entries into a single submission and decrements
+  // the signal once, after the last entry retires.
+  hsa_amd_memory_copy_op_t rectOp = {};
+  rectOp.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+  rectOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT;
+  rectOp.num_entries = static_cast<uint16_t>(entries.size());
+  rectOp.completion_signal = active;
+  rectOp.rect_list = entries.data();
+  rectOp.src_agent_list = srcAgents.data();
+  rectOp.dst_agent_list = dstAgents.data();
+
+  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+          "HSA BatchCopy Rect entries=%zu, engineOp=%s, wait_event=0x%zx, "
+          "completion_signal=0x%zx",
+          entries.size(), EngineOpName(engine),
+          (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
+
+  hsa_status_t status =
+      Hsa::memory_async_batch_copy(&rectOp, 1, wait_events.size(), wait_events.data());
+  if (status != HSA_STATUS_SUCCESS) {
+    // ROCR rejects the fused submission whenever SDMA is not usable for the direction
+    // (HSA_ENABLE_SDMA=0, engines exhausted), and a ROCR that predates LINEAR_RECT rejects
+    // the op type outright, both before anything is submitted. Either way the batch must be
+    // reissued one operand at a time instead of being dropped. Same recovery as a failed
+    // single rect copy.
+    gpu().Barriers().ResetCurrentSignal();
+    LogPrintfError("DMA batch rect copy failed with code %d, falling back to per-op copies",
+                   status);
+    return copyPerOp();
   }
 
   // The ROCR copy api guarantees coherency after the copy
@@ -1999,8 +2153,15 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
       ((dstRectIn.rowPitch_ % 4) == 0) && ((dstRectIn.slicePitch_ % 4) == 0);
   const bool hostDeviceRect =
       srcMemory.isHostMemDirectAccess() != dstMemory.isHostMemDirectAccess();
+  // When the existing SDMA path is available, do not bypass it solely to avoid row serialization
+  // for a range that cannot be represented by the shader's uint32_t dispatch grid; the linear
+  // fallback retains size_t dimensions.
+  const bool rangeFitsHsaDim3 =
+      amd::NDRange32::CanSafelyNarrow(sizeIn[0], sizeIn[1], sizeIn[2]);
   const bool sdmaRectWouldSerialize =
-      !dwordAlignedRect && hostDeviceRect && ((sizeIn[1] * sizeIn[2]) > kSdmaRectRowSerializeLimit);
+      rangeFitsHsaDim3 && !dwordAlignedRect && hostDeviceRect &&
+      (sizeIn[1] > kSdmaRectRowSerializeLimit || sizeIn[2] > kSdmaRectRowSerializeLimit ||
+       sizeIn[1] * sizeIn[2] > kSdmaRectRowSerializeLimit);
 
   // Fall into the ROC path for rejected transfers
   if (dev().info().pcie_atomics_ && !sdmaRectWouldSerialize &&

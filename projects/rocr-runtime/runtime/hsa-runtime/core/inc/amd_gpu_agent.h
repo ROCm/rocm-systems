@@ -852,6 +852,15 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // Rect copy: the op's num_entries rect regions are lowered into one command
+  // buffer and issued as a single SDMA submission, so the batch costs one ring
+  // reservation, one fence and one decrement of the op's completion signal.
+  // The engine is picked from the common pair in the op's agent lists rather
+  // than from an explicit direction.
+  hsa_status_t DmaCopyRectBatch(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyBatch,
   // swap and indirect operations.  Submits prologue, per-entry bodies
   // (selected by @p op), and epilogue with one signal.

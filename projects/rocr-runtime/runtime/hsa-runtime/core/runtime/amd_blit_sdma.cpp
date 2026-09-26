@@ -1857,46 +1857,146 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyMulticastCommand(
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR, bool scopeFields>
-hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
-    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
-    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
-    core::Signal& out_signal) {
-  // Hardware requires DWORD alignment for base address, pitches
-  // Also confirm that we have a geometric rect (copied block does not wrap an edge).
-  if (((uintptr_t)dst->base) % 4 != 0 || ((uintptr_t)src->base) % 4 != 0)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                             "Copy rect base address not aligned.");
-  if (((uintptr_t)dst->pitch) % 4 != 0 || ((uintptr_t)src->pitch) % 4 != 0)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect pitch not aligned.");
-  if (((uintptr_t)dst->slice) % 4 != 0 || ((uintptr_t)src->slice) % 4 != 0)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice not aligned.");
-  if (uint64_t(src_offset->x) + range->x > src->pitch ||
-      uint64_t(dst_offset->x) + range->x > dst->pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect width out of range.");
-  if ((src->slice != 0) && (uint64_t(src_offset->y) + range->y) > src->slice / src->pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect height out of range.");
-  if ((dst->slice != 0) && (uint64_t(dst_offset->y) + range->y) > dst->slice / dst->pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect height out of range.");
-  if (range->z > 1 && (src->slice == 0 || dst->slice == 0))
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect slice needed.");
+hsa_status_t BlitSdmaBase::ValidateCopyRect(const hsa_pitched_ptr_t* dst,
+                                            const hsa_dim3_t* dst_offset,
+                                            const hsa_pitched_ptr_t* src,
+                                            const hsa_dim3_t* src_offset,
+                                            const hsa_dim3_t* range,
+                                            bool is_gfx12_plus,
+                                            const char** error_message) noexcept {
+  auto invalid = [error_message](const char* message) {
+    if (error_message != nullptr) *error_message = message;
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  };
+  if (error_message != nullptr) *error_message = nullptr;
 
+  if (dst == nullptr || dst_offset == nullptr || src == nullptr || src_offset == nullptr ||
+      range == nullptr) {
+    return invalid("Copy rect descriptor is null.");
+  }
+
+  if (range->x == 0 || range->y == 0 || range->z == 0) {
+    return invalid("Copy rect range is empty.");
+  }
+
+  // Hardware requires DWORD alignment for base address, pitches and slices.
+  // Also confirm that the copied block does not wrap a geometric edge.
+  if (reinterpret_cast<uintptr_t>(dst->base) % 4 != 0 ||
+      reinterpret_cast<uintptr_t>(src->base) % 4 != 0) {
+    return invalid("Copy rect base address not aligned.");
+  }
+  if (dst->pitch % 4 != 0 || src->pitch % 4 != 0) {
+    return invalid("Copy rect pitch not aligned.");
+  }
+  if (dst->slice % 4 != 0 || src->slice % 4 != 0) {
+    return invalid("Copy rect slice not aligned.");
+  }
+  if (uint64_t(src_offset->x) + range->x > src->pitch ||
+      uint64_t(dst_offset->x) + range->x > dst->pitch) {
+    return invalid("Copy rect width out of range.");
+  }
+  if ((src->slice != 0) &&
+      (uint64_t(src_offset->y) + range->y) > src->slice / src->pitch) {
+    return invalid("Copy rect height out of range.");
+  }
+  if ((dst->slice != 0) &&
+      (uint64_t(dst_offset->y) + range->y) > dst->slice / dst->pitch) {
+    return invalid("Copy rect height out of range.");
+  }
+  if (range->z > 1 && (src->slice == 0 || dst->slice == 0)) {
+    return invalid("Copy rect slice needed.");
+  }
+
+  hsa_pitched_ptr_t normalized_src = *src;
+  hsa_pitched_ptr_t normalized_dst = *dst;
+  hsa_dim3_t normalized_src_offset = *src_offset;
+  hsa_dim3_t normalized_dst_offset = *dst_offset;
+  hsa_dim3_t normalized_range = *range;
+  const uint32_t max_pitch =
+      1U << (is_gfx12_plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits
+                           : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);
+  const uint64_t max_slice =
+      1ULL << (is_gfx12_plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::slice_bits
+                             : SDMA_PKT_COPY_LINEAR_RECT::slice_bits);
+
+  // Wide-pitch 2D copies are encoded along X-Z so that the larger slice field
+  // carries the row stride.
+  if (normalized_range.z == 1 &&
+      (normalized_src.pitch > max_pitch || normalized_dst.pitch > max_pitch)) {
+    normalized_src_offset.y = normalized_src_offset.z = 0;
+    normalized_dst_offset.y = normalized_dst_offset.z = 0;
+    normalized_src.slice = normalized_src.pitch;
+    normalized_src.pitch = 0;
+    normalized_dst.slice = normalized_dst.pitch;
+    normalized_dst.pitch = 0;
+    normalized_range.z = normalized_range.y;
+    normalized_range.y = 1;
+  }
+
+  auto max_aligned_element = [](size_t width) { return rocr::os::Ctz(width | 16); };
+  auto max_element = Min(max_aligned_element(normalized_src.pitch),
+                         max_aligned_element(normalized_dst.pitch));
+  if (normalized_range.z != 1) {
+    max_element = Min(max_element, max_aligned_element(normalized_src.slice),
+                      max_aligned_element(normalized_dst.slice));
+  }
+
+  /*
+  Find the minimum element size that will be needed for any tile.
+
+  No subdivision of a range admits a larger element size for the smallest element in any subdivision
+  than the element size that covers the whole range, though some can be worse (this is easily model
+  checked).  Subdividing with any element larger than the covering element won't change the covering
+  element of the remainder
+  ( Range%Element = (Range-N*LargerElement)%Element since LargerElement%Element=0 ).
+    Ex. normalized_range.x=71, assume max range is 16 elements:  We can break at 64 giving tiles:
+    [0,63], [64-70] (width 64 & 7).  64 is covered by element 4 (16B) and 7 is covered by element 0
+    (1B).  Exactly covering 71 requires using element 0.
+
+  Base addresses in each tile must be DWORD aligned, if not then the offset from an aligned address
+  must be represented in elements.  This may reduce the size of the element, but since elements are
+  integer multiples of each other this is harmless.
+
+  src and dst base has already been checked for DWORD alignment so we only need to consider the
+  normalized offset here.
+  */
+  const auto min_element =
+      Min(max_element, max_aligned_element(normalized_range.x),
+          max_aligned_element(normalized_src_offset.x % 4),
+          max_aligned_element(normalized_dst_offset.x % 4));
+
+  if ((normalized_src.pitch >> min_element) > max_pitch ||
+      (normalized_dst.pitch >> min_element) > max_pitch) {
+    return invalid("Copy rect pitch out of limits.\n");
+  }
+  if (normalized_range.z != 1 &&
+      ((normalized_src.slice >> min_element) > max_slice ||
+       (normalized_dst.slice >> min_element) > max_slice)) {
+    return invalid("Copy rect slice out of limits.\n");
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::ValidateAndBuildCopyRect(
+    const std::function<void*(size_t)>& append, const hsa_pitched_ptr_t* dst,
+    const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
+    const hsa_dim3_t* range) {
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
   const bool isGFX12Plus =
                         (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
+  const char* error_message = nullptr;
+  const hsa_status_t status = BlitSdmaBase::ValidateCopyRect(
+      dst, dst_offset, src, src_offset, range, isGFX12Plus, &error_message);
+  if (status != HSA_STATUS_SUCCESS) {
+    throw AMD::hsa_exception(status, error_message);
+  }
 
   // Common and GFX12 packet must match in size to use same code for vector/append.
   static_assert(sizeof(SDMA_PKT_COPY_LINEAR_RECT) == sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX12), "");
 
   const uint max_pitch = 1 << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);
-
-  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
-  std::vector<uint64_t> bytes_moved;
-  auto append = [&](size_t size) {
-    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
-    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
-    return &pkts.back();
-  };
 
   // Do wide pitch 2D copies along X-Z
   if (range->z == 1 && (src->pitch > max_pitch || dst->pitch > max_pitch)) {
@@ -1923,8 +2023,53 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
   } else {
     BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
   }
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
+    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
+    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
+  auto append = [&](size_t size) {
+    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
+    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
+    return &pkts.back();
+  };
+
+  ValidateAndBuildCopyRect(append, dst, dst_offset, src, src_offset, range);
 
   uint64_t size = static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
+
+  std::vector<core::Signal*> gang_signals(0);
+
+  return SubmitCommand(&pkts[0], pkts.size() * sizeof(SDMA_PKT_COPY_LINEAR_RECT), size, dep_signals,
+                       out_signal, gang_signals);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBatchCopyRectCommand(
+    const hsa_amd_memory_copy_rect_entry_t* entries, size_t num_entries,
+    std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
+  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
+  // Most entries lower to a single packet; oversized ones grow the vector further.
+  pkts.reserve(num_entries);
+  auto append = [&](size_t size) {
+    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
+    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
+    return &pkts.back();
+  };
+
+  uint64_t size = 0;
+  for (size_t i = 0; i < num_entries; ++i) {
+    const hsa_amd_memory_copy_rect_entry_t& entry = entries[i];
+    // Validate and lower every entry before SubmitCommand, so this LINEAR_RECT operation
+    // writes nothing to the ring if one of its entries is rejected.
+    ValidateAndBuildCopyRect(append, entry.dst, entry.dst_offset, entry.src, entry.src_offset,
+                             entry.range);
+    size += static_cast<uint64_t>(entry.range->x) * static_cast<uint64_t>(entry.range->y) *
+            entry.range->z;
+  }
 
   std::vector<core::Signal*> gang_signals(0);
 
@@ -2469,8 +2614,6 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
                       (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
 
   // Limits in terms of element count
-  const uint32_t max_pitch = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits   : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);
-  const uint64_t max_slice = 1ULL << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::slice_bits   : SDMA_PKT_COPY_LINEAR_RECT::slice_bits);
   const uint32_t max_x     = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::rect_xy_bits : SDMA_PKT_COPY_LINEAR_RECT::rect_xy_bits);
   const uint32_t max_y     = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::rect_xy_bits : SDMA_PKT_COPY_LINEAR_RECT::rect_xy_bits);
   const uint32_t max_z     = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::rect_z_bits  : SDMA_PKT_COPY_LINEAR_RECT::rect_z_bits);
@@ -2481,37 +2624,6 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
   auto max_ele = Min(maxAlignedElement(src->pitch), maxAlignedElement(dst->pitch));
   if (range->z != 1)  // Only need to consider slice if HW will copy along Z.
     max_ele = Min(max_ele, maxAlignedElement(src->slice), maxAlignedElement(dst->slice));
-
-  /*
-  Find the minimum element size that will be needed for any tile.
-
-  No subdivision of a range admits a larger element size for the smallest element in any subdivision
-  than the element size that covers the whole range, though some can be worse (this is easily model
-  checked).  Subdividing with any element larger than the covering element won't change the covering
-  element of the remainder
-  ( Range%Element = (Range-N*LargerElement)%Element since LargerElement%Element=0 ).
-    Ex. range->x=71, assume max range is 16 elements:  We can break at 64 giving tiles:
-    [0,63], [64-70] (width 64 & 7).  64 is covered by element 4 (16B) and 7 is covered by element 0
-    (1B).  Exactly covering 71 requires using element 0.
-
-  Base addresses in each tile must be DWORD aligned, if not then the offset from an aligned address
-  must be represented in elements.  This may reduce the size of the element, but since elements are
-  integer multiples of each other this is harmless.
-
-  src and dst base has already been checked for DWORD alignment so we only need to consider the
-  offset here.
-  */
-  auto min_ele = Min(max_ele, maxAlignedElement(range->x), maxAlignedElement(src_offset->x % 4),
-                     maxAlignedElement(dst_offset->x % 4));
-
-  // Check that pitch and slice can be represented in the tile with the smallest element
-  if ((src->pitch >> min_ele) > max_pitch || (dst->pitch >> min_ele) > max_pitch)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "Copy rect pitch out of limits.\n");
-  if (range->z != 1) {  // Only need to consider slice if HW will copy along Z.
-    if ((src->slice >> min_ele) > max_slice || (dst->slice >> min_ele) > max_slice)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT,
-                               "Copy rect slice out of limits.\n");
-  }
 
   // Break copy into tiles
   for (uint32_t z = 0; z < range->z; z += max_z) {
