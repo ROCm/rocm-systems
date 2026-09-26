@@ -83,7 +83,9 @@ TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) 
       EXPECT_EQ(body.front(), *low);
       EXPECT_EQ(body.back(), *restore);
     }
-    const auto guest_index = *patch.relocated_guest_instruction_offset / sizeof(uint32_t);
+    ASSERT_GE(*patch.relocated_guest_instruction_offset, patch.trampoline_offset);
+    const auto guest_index =
+        (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t);
     ASSERT_LE(guest_index + tensor.size(), body.size());
     EXPECT_EQ(body[guest_index], tensor[0]);
     EXPECT_EQ(body[guest_index + 1u], tensor[1]);

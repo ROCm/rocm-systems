@@ -190,6 +190,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     // not yet provide an all-lane preservation contract.
     if (tensor && site_context.owners.any_dynamic_stack) {
       ++dynamic_stack_private_spill_rejection_count;
+      (void)publish_supercollider_access_rejection(
+          result.coverage_ledger, result.errors, site.physical_id,
+          LoweringOutcomeKind::ResourceRejected,
+          "SuperCollider tensor comparison requires a fixed full-wave private spill");
       continue;
     }
     auto required_vgprs = tensor ? std::optional<uint16_t>(2u) : access_dword_count(site);
@@ -388,6 +392,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (tensor && scratch_selected && (scratch_vgpr & 1u) != 0u) {
       ++invalid_scratch_allocation_site_count;
+      (void)publish_supercollider_access_rejection(
+          result.coverage_ledger, result.errors, site.physical_id,
+          LoweringOutcomeKind::ResourceRejected,
+          "SuperCollider tensor comparison requires an even scratch VGPR base");
       continue;
     }
     if (tensor && scratch_selected && !private_spill_plans.contains(&site)) {
