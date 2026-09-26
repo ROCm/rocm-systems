@@ -59,7 +59,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟩 higher: all 3 clean shards pass with complete coverage; fault 8/8 | 🟧 sleep_wave=15: targeted clean pass; detector 0/8 despite oracle failures 8/8; full clean queued |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: clean pass; wave-private LDS, barrier drop does not create a cross-wave race | 🟨 delay-zero: clean pass; wave-private LDS, barrier drop does not create a cross-wave race |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 higher: qualification running after lower configurations missed the threshold | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟨 higher: clean pass with complete coverage; fault trials running | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep_wave=15: current-hook clean pass; fault 0/8 |
