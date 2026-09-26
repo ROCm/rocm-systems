@@ -13,9 +13,9 @@
 #ifndef NET_IB_CAST_QP_SHARING_H_
 #define NET_IB_CAST_QP_SHARING_H_
 
+#include <mutex>
 #include "common_cast.h"
 #include "param.h"
-#include <mutex>
 
 // QP sharing configuration parameters
 // Master switch: RCCL_IB_QP_SHARING_ENABLE
@@ -47,26 +47,26 @@ static inline bool IbCastQpSharingEnabled(void) {
 // Returns true when this comm is actively sharing QPs (sharing enabled AND
 // commId was successfully allocated; commId==0 means fallback to non-sharing).
 static inline bool IbCastCommIsSharing(const struct ncclIbNetCommBase* base) {
-  return IbCastQpSharingEnabled() && base->commId != 0;
+  return IbCastQpSharingEnabled() && base->qpSharing.netIbCommId != 0;
 }
 
 // Returns true when this comm is the primary (owner) of shared QPs in its group.
 static inline bool IbCastCommIsPrimary(const struct ncclIbNetCommBase* base) {
-  return base->commId != 0 && base->isSharedQpPrimary;
+  return base->qpSharing.netIbCommId != 0 && base->qpSharing.isPrimary;
 }
 
 // Returns true when this comm is a secondary (reuses QPs owned by a primary).
 static inline bool IbCastCommIsSecondary(const struct ncclIbNetCommBase* base) {
-  return base->commId != 0 && !base->isSharedQpPrimary;
+  return base->qpSharing.netIbCommId != 0 && !base->qpSharing.isPrimary;
 }
 
 // Initialize QP sharing fields on a comm base to defaults (sharing disabled).
 static inline void IbCastCommInitSharingFields(struct ncclIbNetCommBase* base) {
-  base->commId = 0;
-  base->isSharedQpPrimary = false;
-  base->sharedGroupIdx = -1;
-  base->remIbDevIdx = -1;
-  base->sharedPrimaryNqps = 0;
+  base->qpSharing.netIbCommId = 0;
+  base->qpSharing.isPrimary = false;
+  base->qpSharing.groupIdx = -1;
+  base->qpSharing.remIbDevIdx = -1;
+  base->qpSharing.groupNqps = 0;
   // peerProcTag is intentionally not reset: it is peer identity captured on the
   // dev-list receive, and the accept path can re-enter this call afterwards.
 }
@@ -131,7 +131,7 @@ extern struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
 extern uint16_t                    g_IbCastNextCommId;
 extern uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
 extern int                         g_IbCastCommIdFreeTop;
-extern std::mutex                  g_IbCastSharedQpMutex;
+extern std::mutex                  g_IbCastQpSharingGlobalMutex;
 
 // Strip port from socket address for peer matching
 void IbCastStripPort(union ncclSocketAddress* addr);
@@ -168,10 +168,10 @@ int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peer
 // Allocate a commId and register in the global comm table (mutex-protected)
 uint16_t IbCastAllocCommId(void* comm, bool isSend);
 
-// Free a commId (self-locking; for callers NOT holding g_IbCastSharedQpMutex)
+// Free a commId (self-locking; for callers NOT holding g_IbCastQpSharingGlobalMutex)
 void IbCastFreeCommId(uint16_t commId);
 
-// Free a commId; caller MUST already hold g_IbCastSharedQpMutex (teardown paths)
+// Free a commId; caller MUST already hold g_IbCastQpSharingGlobalMutex (teardown paths)
 void IbCastFreeCommIdLocked(uint16_t commId);
 
 // Destroy all CQs for a group when cqRefcount reaches 0
@@ -183,23 +183,26 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);
 extern int64_t rcclParamIbCastQpSharingValidatePool();
 void IbCastValidateSharedQpPool(void);
 
-// Encode commId into wr_id[63:48]. When commId==0 (sharing disabled or
-// fallback) this is a no-op (OR with zero).
+// Encode commId into wr_id[63:48]. Clears the target bits first so that
+// slot-request bytes packed into the same range (nreqs >= 7) do not
+// corrupt the commId. The cleared slot bytes are never read on the
+// completion path — only byte 0 is used to recover the request slot.
 static inline uint64_t IbCastEncodeCommId(uint64_t wr_id, uint16_t commId) {
-  return wr_id | ((uint64_t)commId << WR_ID_RX_COMM_ID_SHIFT);
+  return (wr_id & ~WR_ID_RX_COMM_ID_MASK) |
+         (((uint64_t)commId << WR_ID_RX_COMM_ID_BIT_POS) & WR_ID_RX_COMM_ID_MASK);
 }
 
 // Encode receiver commId into immData for BY_ID matching scheme:
 //   bits[7:0]  = reqId,  bits[23:8] = remCommId.
 static inline uint32_t IbCastEncodeCommIdImmData(uint32_t reqId, uint16_t remCommId) {
-  return (reqId & WR_IMM_BYID_REQ_ID_MASK) |
-         (((uint32_t)remCommId & WR_IMM_BYID_COMM_ID_MASK) << WR_IMM_BYID_COMM_ID_SHIFT);
+  return ((reqId << WR_IMM_BYID_REQ_ID_BIT_POS) & WR_IMM_BYID_REQ_ID_MASK) |
+         (((uint32_t)remCommId << WR_IMM_BYID_COMM_ID_BIT_POS) & WR_IMM_BYID_COMM_ID_MASK);
 }
 
 // Strip the commId from wr_id[63:48], recovering the original index. Safe when
 // sharing is disabled (commId==0, so the mask is a no-op).
 static inline uint64_t IbCastStripCommId(uint64_t wr_id) {
-  return wr_id & ~((uint64_t)WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT);
+  return wr_id & ~WR_ID_RX_COMM_ID_MASK;
 }
 
 // Look up the target comm from the commId encoded in wr_id[63:48]. Returns NULL
@@ -209,7 +212,6 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id);
 // Look up the target comm from the commId encoded in immData.
 // Returns target base based on commId in immData if sharing is enabled or
 // returns NULL if sharing is disabled or commId is invalid.
-struct ncclIbNetCommBase* IbCastRouteCommFromImmData(
-    struct ncclIbNetCommBase* base, uint32_t immDataHost);
+struct ncclIbNetCommBase* IbCastRouteCommFromImmData(uint32_t immDataHost);
 
 #endif // NET_IB_CAST_QP_SHARING_H_

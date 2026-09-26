@@ -118,7 +118,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     wr_id += (uint64_t)(slot & 0xff) << (r * 8);
     // QP Sharing: encode commId in upper 16 bits of wr_id for completion routing
     if (IbCastCommIsSharing(&comm->base)) {
-      wr->wr_id = IbCastEncodeCommId(wr_id, comm->base.commId);
+      wr->wr_id = IbCastEncodeCommId(wr_id, comm->base.qpSharing.netIbCommId);
     } else {
       wr->wr_id = wr_id;
     }
@@ -157,7 +157,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     } else {
       uint32_t rxReqIdx = (uint32_t)ctsFifoRxReqIndex(slots, 0);
-      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
+      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_BIT_POS) & WR_IMM_RX_REQ_IDX_MASK;
       if (nqps > 1) {
         immData |= WR_IMM_SPLIT_DATA_FLAG;
       }
@@ -182,7 +182,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   // route the send completion to the right comm on a shared QP. The scheduler
   // (BY_INDEX) is disabled under sharing, so wr_id is not remapped here.
   if (IbCastCommIsSharing(&comm->base)) {
-    lastWr->wr_id = IbCastEncodeCommId(wr_id, comm->base.commId);
+    lastWr->wr_id = IbCastEncodeCommId(wr_id, comm->base.qpSharing.netIbCommId);
   } else {
     lastWr->wr_id = wr_id;
   }
@@ -601,7 +601,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
     // QP Sharing: encode commId in upper bits of CTS wr_id
     if (IbCastCommIsSharing(&comm->base)) {
-      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.commId);
+      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.qpSharing.netIbCommId);
     }
     IbCastAddEventCTS(req, ctsQp->devIndex);
   }
@@ -774,8 +774,8 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
   struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[last];
 
   INFO(NCCL_NET, "NET/IB: %s: flush commId=%u group=%d isPrimary=%d ndevs=%d",
-       __func__, comm->base.commId, comm->base.sharedGroupIdx,
-       comm->base.isSharedQpPrimary, comm->base.vProps.ndevs);
+       __func__, comm->base.qpSharing.netIbCommId, comm->base.qpSharing.groupIdx,
+       comm->base.qpSharing.isPrimary, comm->base.vProps.ndevs);
 
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
@@ -788,7 +788,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
     if (IbCastCommIsSharing(&comm->base)) {
-      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.commId);
+      wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.qpSharing.netIbCommId);
     }
 
     if (useGpuFlushMem) {
@@ -865,7 +865,7 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     uint32_t immDataHost = be32toh(wc->imm_data);
     if (IbCastQpSharingEnabled()) {
-      uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
+      uint8_t reqSlot = (immDataHost & WR_IMM_BYID_REQ_ID_MASK) >> WR_IMM_BYID_REQ_ID_BIT_POS;
       *req = recvComm->recvReqs[reqSlot % NET_IB_MAX_REQUESTS];
     } else {
       *req = recvComm->recvReqs[immDataHost % NET_IB_MAX_REQUESTS];
@@ -873,7 +873,7 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
   } else if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_INDEX) {
     // BY_INDEX (non-sharing CAST default): rxReqIndex is echoed in imm_data[31:24].
     uint32_t immDataHost = be32toh(wc->imm_data);
-    uint8_t reqIdx = (immDataHost >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK;
+    uint8_t reqIdx = (immDataHost & WR_IMM_RX_REQ_IDX_MASK) >> WR_IMM_RX_REQ_IDX_BIT_POS;
     *req = &base->reqs[reqIdx];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     // wr_id[63:48] may carry a commId for completion routing (zero if sharing is
@@ -1338,7 +1338,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
             struct ncclIbNetCommBase* routed = IbCastRouteCommFromWrId(wc->wr_id);
             if (routed) targetBase = routed;
           } else {
-            struct ncclIbNetCommBase* routed = IbCastRouteCommFromImmData((struct ncclIbNetCommBase*)r->base, be32toh(wc->imm_data));
+            struct ncclIbNetCommBase* routed = IbCastRouteCommFromImmData(be32toh(wc->imm_data));
             if (routed && !routed->isSend && (routed->recvMatchingScheme == BY_ID)) targetBase = routed;
           }
 

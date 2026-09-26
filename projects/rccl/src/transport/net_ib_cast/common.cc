@@ -23,8 +23,6 @@ ncclProfilerCallback_t IbCastProfilerFunction;
 NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
-extern int ncclParamIbCastOooRq();
-extern int ncclParamIbCastResiliencyPortFailover();
 
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
