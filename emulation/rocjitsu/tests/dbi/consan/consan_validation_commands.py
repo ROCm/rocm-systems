@@ -1270,6 +1270,13 @@ def _workload_command(
             raise ValidationError("invalid CONSAN_VALIDATION_TENSILE_DISABLE_BENCHMARK_SLEEP")
         if disable_sleep == "1":
             command.append("--disable-benchmark-sleep")
+        skip_timing = os.environ.get("CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES")
+        if skip_timing not in (None, "0", "1"):
+            raise ValidationError("invalid CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES")
+        if skip_timing == "1":
+            if overhead or minimum_timed_ms != 0:
+                raise ValidationError("cannot skip Tensile timing dispatches for a timing measurement")
+            command.append("--skip-timing-dispatches")
         inner_timeout = workload.tensile_inner_timeout_seconds
         timeout_override = os.environ.get("CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS")
         if timeout_override is not None:

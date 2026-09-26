@@ -115,6 +115,17 @@ cooldown setting. Use the same choice for clean and fault comparators. The
 override is recorded in the oracle and replay contract; generate a matching
 replay manifest instead of reusing one collected with different controls.
 
+For correctness-only Tensile runs with a zero duration floor, the additional
+`CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES=1` option passes
+`--skip-timing-dispatches` and sets `SyncsPerBenchmark=0`. Tensile's numerical
+validator still requests its validation dispatch for every selected solution;
+the separate timing dispatch is omitted. Numerical results, client exits, code
+objects, and ConSan coverage remain required. The oracle records this choice
+and reports no device timing (`timed_aggregate_ms: null`); printed NaN timing
+fields are expected in this mode. The runner rejects this option for overhead
+measurements or positive duration floors. Generate a fresh replay manifest and
+use matching baseline, clean, and fault controls when changing this option.
+
 ## Explicit sampling configurations
 
 For a separate Default-engine sampling investigation, set

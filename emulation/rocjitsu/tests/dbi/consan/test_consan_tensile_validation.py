@@ -557,6 +557,56 @@ class TensileValidationTest(unittest.TestCase):
                 self.assertEqual(result["detail"]["numeric_rows"], 1)
                 self.assertEqual(result["detail"]["benchmark_sleep_percent_override"], 0 if disabled else None)
 
+    def test_untimed_validation_preserves_oracle_gates_and_binds_replay(self) -> None:
+        for verdict, rows, clients, exitcode, expected in (
+            ("PASSED", 1, 1, 0, 0),
+            ("FAILED", 1, 1, 0, 1),
+            ("PASSED", 0, 1, 0, 1),
+            ("PASSED", 1, 0, 0, 1),
+            ("PASSED", 1, 1, 1, 1),
+        ):
+            with self.subTest(verdict=verdict, rows=rows, clients=clients, exitcode=exitcode), temporary_root() as root:
+                paths = self._make_fake_paths(root)
+                (root / "case.yaml").write_text("case\n")
+                forwarded = root / "row.json"
+                argv = self._main_argv(root) + [
+                    "--skip-timing-dispatches", "--expect-client-passes", "1",
+                    "--export-replay-manifest", str(root / "replay.json"),
+                ]
+                argv[argv.index("--minimum-timed-ms") + 1] = "0"
+                output = "run,problem,solution,validation,time-us\n"
+                if rows:
+                    output += f"0,problem,kernel_SK3_shape,{verdict},-nan\n"
+                if clients:
+                    output += "clientExit=0 (PASS) for ['case.yaml']\n"
+                with (
+                    mock.patch.object(tensile_validation, "resolve_tensile_validation_paths", return_value=paths),
+                    mock.patch.object(tensile_validation, "_code_object_errors", return_value=([root / "kernel.hsaco"], [])),
+                    mock.patch.object(tensile_validation, "_run_command", return_value=(exitcode, output, False)) as run,
+                    mock.patch.object(tensile_validation.replay, "freeze", return_value={}) as freeze,
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch.dict(os.environ, {"CONSAN_ROW_RESULT_PATH": str(forwarded)}, clear=True),
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+                ):
+                    self.assertEqual(tensile_validation.main(), expected)
+                self.assertIn("SyncsPerBenchmark=0", run.call_args.args[0])
+                result = json.loads(forwarded.read_text())
+                self.assertEqual(result["oracle"], "pass" if expected == 0 else "fail")
+                self.assertIsNone(result["detail"]["timed_aggregate_ms"])
+                self.assertTrue(result["detail"]["skip_timing_dispatches"])
+                if expected == 0:
+                    self.assertTrue(freeze.call_args.args[2]["skip_timing_dispatches"])
+                else:
+                    freeze.assert_not_called()
+
+    def test_untimed_validation_rejects_duration_floor(self) -> None:
+        with temporary_root() as root, mock.patch.object(
+            sys, "argv", self._main_argv(root) + ["--skip-timing-dispatches"]
+        ), redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                tensile_validation.main()
+            self.assertEqual(error.exception.code, 2)
+
     def test_main_rejects_device_timing_below_required_minimum(self) -> None:
         with temporary_root() as root:
             paths = self._make_fake_paths(root)

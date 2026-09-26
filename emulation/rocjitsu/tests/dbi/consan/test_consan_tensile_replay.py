@@ -63,7 +63,8 @@ class ReplayTest(unittest.TestCase):
 
     def test_reject_changed_target_or_shape(self):
         for changed in [{'target': 'gfx950'}, {'shape': [128]},
-                        {'benchmark_sleep_percent_override': 0}]:
+                        {'benchmark_sleep_percent_override': 0},
+                        {'skip_timing_dispatches': True}]:
             with self.assertRaises(ValueError):
                 replay.verify(self.manifest, {**self.contract, **changed})
 

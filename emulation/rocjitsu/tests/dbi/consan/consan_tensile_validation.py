@@ -668,6 +668,10 @@ def main() -> int:
         "--disable-benchmark-sleep", action="store_true",
         help="Disable host cooldown between cases; retain every validation and timing enqueue",
     )
+    parser.add_argument(
+        "--skip-timing-dispatches", action="store_true",
+        help="Run numerical validation without separate timing dispatches (requires zero duration floor)",
+    )
     parser.add_argument("--label", required=True)
     parser.add_argument("--export-replay-manifest", type=Path)
     parser.add_argument("--replay-manifest", type=Path,
@@ -699,6 +703,8 @@ def main() -> int:
         type=_problem_size_blocks_json,
     )
     args = parser.parse_args()
+    if args.skip_timing_dispatches and args.minimum_timed_ms != 0:
+        parser.error("--skip-timing-dispatches requires --minimum-timed-ms=0")
 
     expected_source_forms = sum(
         value is not None
@@ -791,7 +797,7 @@ def main() -> int:
         "--global-parameters",
         f"CpuThreads={args.cpu_threads}",
         "NumBenchmarks=1",
-        "SyncsPerBenchmark=1",
+        f"SyncsPerBenchmark={0 if args.skip_timing_dispatches else 1}",
         "EnqueuesPerSync=1",
         "NumWarmups=0",
     ]
@@ -813,6 +819,10 @@ def main() -> int:
         # Old manifests retain their original contract. Opting out of cooldown
         # requires a matching manifest, so replay cannot silently change controls.
         contract["benchmark_sleep_percent_override"] = 0
+    if args.skip_timing_dispatches:
+        # ReferenceValidator still requests a validation warmup. Only the
+        # separate timing loop is skipped; old timed manifests cannot be reused.
+        contract["skip_timing_dispatches"] = True
     replay_manifest = None
     replay_snapshot = work_dir / "replay-manifest.snapshot.json"
     artifact_dir = work_dir
@@ -845,7 +855,9 @@ def main() -> int:
     client_pass_count, client_errors = _client_validation_errors(
         output, args.expect_client_passes
     )
-    timed_aggregate_ms, timing_errors = _timed_aggregate_ms(output)
+    timed_aggregate_ms, timing_errors = (
+        (None, []) if args.skip_timing_dispatches else _timed_aggregate_ms(output)
+    )
     if (
         timed_aggregate_ms is not None
         and timed_aggregate_ms < args.minimum_timed_ms
@@ -890,6 +902,7 @@ def main() -> int:
         "label": args.label,
         "minimum_timed_ms": args.minimum_timed_ms,
         "benchmark_sleep_percent_override": 0 if args.disable_benchmark_sleep else None,
+        "skip_timing_dispatches": args.skip_timing_dispatches,
         "numeric_rows": result_count,
         "passing_clients": client_pass_count,
         "rocjitsu_config": str(paths.rocjitsu_config),

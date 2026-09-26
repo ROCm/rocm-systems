@@ -3358,6 +3358,29 @@ class ConSanValidationTest(unittest.TestCase):
                         Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
                     )
 
+    def test_tensile_untimed_override_preserves_shards_and_rejects_overhead(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8f4gemm-tdm"]
+        name = "CONSAN_VALIDATION_TENSILE_SKIP_TIMING_DISPATCHES"
+        for value in ("0", "1"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {name: value}):
+                commands = validation._workload_commands(
+                    Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                )
+                self.assertEqual(len(commands), 3)
+                for command in commands:
+                    self.assertEqual("--skip-timing-dispatches" in command, value == "1")
+        with mock.patch.dict(os.environ, {name: "1"}):
+            with self.assertRaisesRegex(validation.ValidationError, "timing measurement"):
+                validation._workload_command(
+                    Path("/workspace"), "gfx1250", workload, "overhead", Path("/out/result.json")
+                )
+        for value in ("", "true", "2"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {name: value}):
+                with self.assertRaisesRegex(validation.ValidationError, name):
+                    validation._workload_commands(
+                        Path("/workspace"), "gfx1250", workload, "clean", Path("/out/result.json")
+                    )
+
     def test_tensile_client_timeout_override_applies_to_every_shard(self) -> None:
         workload = validation.WORKLOAD_BY_ID["tensile-sk-mxf8f4gemm-tdm"]
         name = "CONSAN_VALIDATION_TENSILE_INNER_TIMEOUT_SECONDS"
