@@ -25,6 +25,7 @@
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
@@ -150,60 +151,37 @@ start_context(const context::context* ctx)
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
     auto* controller = hsa::get_queue_controller();
+    auto& service    = *ctx->dispatch_counter_collection;
 
-    bool already_enabled = true;
-    CHECK_NOTNULL(controller)->enable_serialization();
-    ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
+    // Serialization is acquired before enabled is set, because queue_cb instruments a dispatch as
+    // soon as it reads enabled == true and that dispatch must already be serialized. The acquire
+    // is reference counted and stop_context() releases once per enabled -> disabled transition,
+    // so only the call that makes the disabled -> enabled transition may keep it.
+    bool already_enabled = false;
+    service.enabled.rlock([&](const auto& enabled) { already_enabled = enabled; });
+    if(already_enabled) return;
+
+    // Scope serialization to the agents this context collects on. An empty set still means
+    // every agent, so an unrestricted context serializes the whole machine as before.
+    CHECK_NOTNULL(controller)->enable_serialization(service.agents);
+
+    bool transitioned = false;
+    service.enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
+        enabled      = true;
+        transitioned = true;
     });
 
-    if(!already_enabled)
+    if(!transitioned)
     {
-        callback_thread_start();
-
-        for(auto& cb : ctx->dispatch_counter_collection->callbacks)
-        {
-            using external_corr_id_map_t = tracing::external_correlation_id_map_t;
-
-            // Insert our callbacks into HSA Interceptor. This
-            // turns on counter instrumentation.
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                hsa::queue_callbacks_t{.batch_packets = []() { return false; },
-                                       .write_interceptor =
-                                           [=](const hsa::Queue&              q,
-                                               const hsa::rocprofiler_packet& kern_pkt,
-                                               rocprofiler_kernel_id_t        kernel_id,
-                                               rocprofiler_dispatch_id_t      dispatch_id,
-                                               rocprofiler_user_data_t*       user_data,
-                                               const external_corr_id_map_t&  extern_corr_ids,
-                                               const context::correlation_id* correlation_id) {
-                                               return queue_cb(ctx,
-                                                               cb,
-                                                               q,
-                                                               kern_pkt,
-                                                               kernel_id,
-                                                               dispatch_id,
-                                                               user_data,
-                                                               extern_corr_ids,
-                                                               correlation_id);
-                                           },
-                                       // Completion CB
-                                       .signal_completion =
-                                           [=](const hsa::Queue& /*queue*/,
-                                               hsa::rocprofiler_packet /*kern_pkt*/,
-                                               std::shared_ptr<hsa::queue_info_session_t>& session,
-                                               hsa::packet_data_t&                         packet,
-                                               inst_pkt_t&                                 aql,
-                                               kernel_dispatch::profiling_time dispatch_time) {
-                                               completed_cb(
-                                                   ctx, cb, session, packet, aql, dispatch_time);
-                                           }});
-        }
+        controller->disable_serialization(service.agents);
+        return;
     }
+
+    // Counter collection no longer registers a per-queue callback with the queue
+    // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
+    // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
+    callback_thread_start();
 }
 
 void
@@ -211,35 +189,95 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
-    auto* controller = hsa::get_queue_controller();
+    auto* controller  = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        was_enabled = true;
+        enabled     = false;
     });
+
+    // Only the call that makes the enabled -> disabled transition releases what start_context()
+    // acquired. callback_thread_stop()'s floor at zero stops the count going negative, but an
+    // unmatched call would still drop a reference that another context holds.
+    if(!was_enabled) return;
 
     if(controller)
     {
-        controller->disable_serialization();
-
-        // In attach mode, remove counter callbacks when stopping the context so
-        // new dispatches during detach drain can pass through without incrementing
-        // _active_kernels. In normal profiling, keep callbacks registered to avoid
-        // dropping counter data for in-flight dispatches.
-        if(registration::is_attached())
+        // Drain in-flight dispatches before anything else is torn down. The review of #8891
+        // accepted provenance-based completion routing on the condition that the callback thread
+        // and the counter_callback_info objects stay alive until in-flight dispatches drain.
+        //
+        // The drain is BOUNDED -- Queue::sync() gives up after one slice -- so it can return
+        // without having drained, and teardown below must stay correct for a completion that
+        // arrives afterwards rather than assuming none can. It does: the context and its
+        // counter_callback_info objects stay registered, the exit hook routes by packet
+        // provenance rather than by activeness, and disable_serialization() leaves a transition
+        // barrier for work that is still serialized. So a straggler is delivered late, not
+        // dropped or mishandled.
+        //
+        // context::stop_context calls this function while the context is still in the active list,
+        // which is what keeps the service visible for the duration of the drain: the enter hook
+        // still reaches queue_cb, and queue_cb's disabled path returns serialize=true so the
+        // serialized->unserialized transition stays coordinated until disable_serialization() runs
+        // below. That ordering is why no separate "draining" flag is needed -- but it only works
+        // because the drain happens here, before the slot is cleared.
+        if(!hsa::queue_controller_sync())
         {
-            for(auto& cb : ctx->dispatch_counter_collection->callbacks)
-            {
-                if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
-                {
-                    controller->remove_callback(cb->queue_id);
-                    cb->queue_id = rocprofiler::hsa::ClientID{-1};
-                }
-            }
+            ROCP_WARNING << fmt::format(
+                "counter collection: queue drain timed out while stopping context {}; in-flight "
+                "dispatches will be delivered late and serialization is released before they "
+                "finish",
+                ctx->context_idx);
         }
+        controller->disable_serialization(ctx->dispatch_counter_collection->agents);
+        // No per-queue callback to remove; counters::kernel_dispatch_phase_enter_hook no-ops once
+        // dispatch_counter_collection is disabled above.
     }
 
+    // After the drain. consumer_thread_t::exit() also waits until its queue is empty before
+    // joining, and add() consumes inline once the thread is gone, so a late completion is still
+    // processed -- but that is a backstop, not the guarantee the review asked for.
     callback_thread_stop();
+}
+
+rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents)
+{
+    if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
+    context::wait_for_stopping_contexts(_lk);
+
+    auto* ctx_p = context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+    if(!ctx_p->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    // The agent set is read without a lock on the dispatch path and is what scopes
+    // serialization at start, so it may only change while the context is stopped.
+
+    for(const auto* itr : context::get_active_contexts())
+    {
+        if(itr && itr->context_idx == ctx_p->context_idx)
+            return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
+
+    auto selected = std::unordered_set<rocprofiler_agent_id_t>{};
+    selected.reserve(num_agents);
+    for(size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = rocprofiler::agent::get_agent(agents[i]);
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        selected.emplace(agents[i]);
+    }
+
+    ctx_p->dispatch_counter_collection->agents = std::move(selected);
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
