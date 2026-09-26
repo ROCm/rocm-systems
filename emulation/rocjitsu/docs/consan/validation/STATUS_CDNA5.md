@@ -55,7 +55,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; detector 0/8 despite oracle failures 8/8 |
 | Tensile | P2 | `000_sk_sgemm_quick` (`tensile-sk-sgemm-quick`) | 🟧 high + 1 GiB cap: targeted clean pass and fault 8/8; full clean running | 🟧 sleep_wave=15: targeted clean pass and fault 0/8; full clean running |
 | Tensile | P2 | `005_sk_f8gemm_quick` (`tensile-sk-f8gemm-quick`) | 🟩 high: all 9 clean shards pass; exact-artifact fault 8/8 | 🟧 sleep=15: matching fault-shard clean pass and fault 0/8; full delayed clean queued |
-| Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟩 high: all 6 clean shards pass; exact-artifact fault 6/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| Tensile | P2 | `006_sk_hgemm_quick` (`tensile-sk-hgemm-quick`) | 🟩 high: all 6 clean shards pass; exact-artifact fault 6/8 | 🟧 sleep=15: matching fault-shard clean pass and fault 0/8; full delayed clean queued |
 | Tensile | P3 | `015_spmm_f8_ml` (`tensile-spmm-f8-ml`) | 🟩 higher: all 3 clean shards pass with complete coverage; fault 8/8 | 🟧 sleep_wave=15: targeted clean pass; detector 0/8 despite oracle failures 8/8; full clean queued |
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟧 default: numerical pass; tensor-store LDS reads unsupported | 🟧 delay-zero: numerical pass; tensor-store LDS reads unsupported |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟩 sleep_wave=15: clean pass; fault 8/8 |
