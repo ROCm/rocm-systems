@@ -60,7 +60,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | PyTorch | P0 | tensor-descriptor add (`pytorch-tdm-descriptor-add`) | 🟨 default: clean pass; wave-private LDS, barrier drop does not create a cross-wave race | 🟨 delay-zero: clean pass; wave-private LDS, barrier drop does not create a cross-wave race |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
-| PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
+| PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | PyTorch | P1 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟨 numerical pass; global-only workload outside LDS detector scope | 🟨 numerical pass; global accesses outside SuperCollider scope |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 delay-zero: filtered clean pass; fault trials pending |
 | PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
