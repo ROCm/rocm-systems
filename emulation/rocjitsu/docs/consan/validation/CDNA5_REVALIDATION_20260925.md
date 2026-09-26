@@ -2129,3 +2129,24 @@ comparison is unsupported (`sc-current-tensor-clean/tensile-sk-mxf4gemm-tdm`).
 All seven tensor-family SuperCollider cells now reflect current applicable
 coverage. Development of tensor comparison is isolated in the local
 `consan/cdna5-sc-tdm` worktree while Default campaigns retain their hooks.
+
+
+### SGEMM report-cap reruns and fault-kernel allowlist
+
+The current hook accepts the explicit 1 GiB report cap. The retained SGEMM
+clean reruns then reached the 1800-second execution limit after 457 numerical
+rows at `default` and 376 at `high`, out of the retained 650-row workload.
+Each completed the first client; the second did not finish. These are incomplete
+clean results, not fault trials or green qualification. Artifacts are
+`sgemm-quick-report1g-{default,high}-clean-retry` in the campaign directory.
+
+For subsequent fault trials, `sgemm-fault-allowlists/gfx1250/` contains the exact
+kernel named by the reviewed `barrier-drop-tile-publication` fault identity.
+That kernel is a member of the original 84-kernel profiler allowlist. The new
+`sgemm-quick-targeted-{default,high}` campaigns preserve the retained manifest,
+both clients, all 650 numerical cases, the reviewed mutation, and eight-trial
+qualification. Matching baseline and clean checks explicitly require 650 rows.
+This reduces instrumentation of unrelated kernels during repeated fault trials.
+Full-workload clean qualification still requires the independent six-shard
+sweep using the original 84-kernel allowlist; a targeted clean pass cannot
+replace that requirement. The full sweep remains running.
