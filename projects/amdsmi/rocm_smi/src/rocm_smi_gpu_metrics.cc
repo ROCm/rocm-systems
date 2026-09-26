@@ -62,6 +62,12 @@ AMDGpuMetricsHeader_v1_t disjoin_metrics_version(uint16_t version) {
   return metrics_header;
 }
 
+// Copies a uint16 metric into a uint32 field, keeping the N/A (max) value as N/A.
+constexpr uint32_t widen_uint16_na(uint16_t value) {
+  return (value == std::numeric_limits<uint16_t>::max()) ? std::numeric_limits<uint32_t>::max()
+                                                         : value;
+}
+
 // APU metrics version detection helpers
 constexpr bool is_apu_metrics_v24(uint8_t format_rev, uint8_t content_rev) {
   return format_rev == 2 && content_rev == 4;
@@ -2725,11 +2731,6 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     const auto& metrics = m_apu_metrics_v24_tbl;
     auto& apu = m_apu_metrics_tbl;
     set_common_header(metrics.m_common_header);
-    // v2.4 power fields are uint16 but the public fields are uint32, so widen the N/A value too.
-    auto widen_unavailable = [](uint16_t value) -> uint32_t {
-      return (value == std::numeric_limits<uint16_t>::max()) ? std::numeric_limits<uint32_t>::max()
-                                                             : value;
-    };
 
     apu.temperature_gfx = metrics.m_temperature_gfx;
     apu.temperature_soc = metrics.m_temperature_soc;
@@ -2743,10 +2744,10 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                 apu.temperature_l3);
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
     apu.average_mm_activity = metrics.m_average_mm_activity;
-    apu.average_socket_power = widen_unavailable(metrics.m_average_socket_power);
+    apu.average_socket_power = widen_uint16_na(metrics.m_average_socket_power);
     apu.average_cpu_power = metrics.m_average_cpu_power;
     apu.average_soc_power = metrics.m_average_soc_power;
-    apu.average_gfx_power = widen_unavailable(metrics.m_average_gfx_power);
+    apu.average_gfx_power = widen_uint16_na(metrics.m_average_gfx_power);
     std::copy_n(std::begin(metrics.m_average_core_power),
                 std::min(static_cast<uint32_t>(RSMI_APU_V24_CORES),
                          static_cast<uint32_t>(std::size(apu.average_core_power))),
