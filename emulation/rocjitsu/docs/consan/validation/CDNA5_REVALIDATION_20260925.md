@@ -2030,3 +2030,18 @@ SGEMM verbose replay identifies the rejected transformation precisely:
 134,217,728-byte cap (`sgemm-second-client-diagnostic.log`). The next step
 is sufficient report capacity, followed by complete clean qualification;
 this result does not establish an unsupported instruction or correctness bug.
+
+### Retained SGEMM publication fault
+
+`sgemm-quick-retained-v1-replay-results.json` records passing export and
+replay for both clients. The selected first-block MT16x32x64 SK3 object
+retains fingerprint `50a1a3cc20d4df86`; all 7,250 instruction addresses
+and encodings match the reviewed inventory object. The two-wave kernel
+has thread 0 writing byte 0 and wave 1 lane 0 reading it. Its first
+publication pair is `.text+0x17d4/0x17d8`, occurrences 2/3. The 127-cubed
+input, alpha=1, and StreamK partition covering the first full DU64 iteration
+establish reach. The fault preserves the pre-store barrier and LDS wait.
+The spec binds the exact retained site/sequence; 209 runner tests pass
+(`sgemm-quick-retained-v1-spec-tests.log`). Matching clean and fault runs
+use the explicit 1 GiB report cap; the full six-shard Default clean rerun
+is `sgemm-report1g-default-clean`.
