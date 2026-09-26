@@ -93,11 +93,14 @@ void TestFrequenciesReadWrite::Run(void) {
           return false;
         }
 
-        // special driver issue, shouldn't normally occur
+        // Special driver issue that shouldn't normally occur: the clock file exists
+        // but reads back empty. Skip the write like an unsupported clock instead of
+        // asserting on the read status.
         if (ret == AMDSMI_STATUS_UNEXPECTED_DATA) {
           std::cerr << "WARN: Clock file [" << FreqEnumToStr(amdsmi_clk) << "] exists on device ["
                     << dv_ind << "] but empty!" << std::endl;
           std::cerr << "      Likely a driver issue!" << std::endl;
+          return false;
         }
 
         // CHK_ERR_ASRT(ret)
