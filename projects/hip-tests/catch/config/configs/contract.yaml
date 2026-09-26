@@ -311,19 +311,19 @@ contract:
     tags: [stream_cu_mask, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_ManagedOnCreatedStream_Succeeds:
     <<: *level_0
-    tags: [stream_attach, P0]
+    tags: [stream_attach, P0, managed_memory]
   Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachGlobal_Succeeds:
     <<: *level_0
-    tags: [stream_attach, P0]
+    tags: [stream_attach, P0, managed_memory]
   Contract_StreamAttach_HipStreamAttachMemAsync_NonZeroLengthAttachSingle_Succeeds:
     <<: *level_0
-    tags: [stream_attach, P0]
+    tags: [stream_attach, P0, managed_memory]
   Contract_StreamAttach_HipStreamAttachMemAsync_NullDevPtr_IsRejected:
     <<: *level_0
     tags: [stream_attach, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachSingle_IsRejected:
     <<: *level_0
-    tags: [stream_attach, P0]
+    tags: [stream_attach, P0, managed_memory]
   Contract_AsyncTransfer_HipMemcpyAsync_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
     tags: [async_transfer, P0]
@@ -359,16 +359,16 @@ contract:
     tags: [mem_batch_copy_3d, P0]
   Contract_MemBatchDiscard_HipMemDiscardBatchAsync_DiscardBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard, P0]
+    tags: [mem_batch_discard, P0, managed_memory]
   Contract_MemBatchDiscard_HipMemDiscardAndPrefetchBatchAsync_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard, P0]
+    tags: [mem_batch_discard, P0, managed_memory]
   Contract_MemBatchDiscard_HipDrvMemDiscardBatchAsync_DrvDiscardBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard, P0]
+    tags: [mem_batch_discard, P0, managed_memory]
   Contract_MemBatchDiscard_HipDrvMemDiscardAndPrefetchBatchAsync_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard, P0]
+    tags: [mem_batch_discard, P0, managed_memory]
   Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRejectedOrUnsupported:
     <<: *level_0
     tags: [mem_batch_discard, P0]
@@ -377,7 +377,7 @@ contract:
     tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard, P0]
+    tags: [mem_batch_discard, P0, managed_memory]
   Contract_Memset_HipMemset_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
     tags: [memset, P0]
@@ -1163,31 +1163,31 @@ contract:
     tags: [managed_memory, P0]
   Contract_MemAdvise_HipMemAdvise_SetReadMostly_RangeAttributeReflectsAdvice:
     <<: *level_0
-    tags: [mem_advise, P0]
+    tags: [mem_advise, P0, managed_memory]
   Contract_MemAdvise_HipMemAdvise_SetPreferredLocation_RangeAttributeReturnsDevice:
     <<: *level_0
-    tags: [mem_advise, P0]
+    tags: [mem_advise, P0, managed_memory]
   Contract_MemAdvise_HipMemAdvise_SetAccessedBy_RangeAttributeReflectsDevice:
     <<: *level_0
-    tags: [mem_advise, P0]
+    tags: [mem_advise, P0, managed_memory]
   Contract_MemAdvise_HipMemRangeGetAttributes_MultipleAttributes_Succeed:
     <<: *level_0
-    tags: [mem_advise, P0]
+    tags: [mem_advise, P0, managed_memory]
   Contract_MemAdvise_HipMemAdvise_NullPointer_IsRejected:
     <<: *level_0
     tags: [mem_advise, P0]
   Contract_MemAdvise_HipMemRangeGetAttribute_NullData_IsRejected:
     <<: *level_0
-    tags: [mem_advise, P0]
+    tags: [mem_advise, P0, managed_memory]
   Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_advise_v2, P0]
+    tags: [mem_advise_v2, P0, managed_memory]
   Contract_MemAdviseV2_HipMemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_advise_v2, P0]
+    tags: [mem_advise_v2, P0, managed_memory]
   Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_advise_v2, P0]
+    tags: [mem_advise_v2, P0, managed_memory]
   Contract_MemAdviseV2_HipMemAdviseV2_NullPointer_IsRejected:
     <<: *level_0
     tags: [mem_advise_v2, P0]
@@ -1199,7 +1199,7 @@ contract:
     tags: [pointer_info, P0]
   Contract_PointerInfo_HipPointerGetAttributes_ManagedAllocation_ReportsManagedOrUnified:
     <<: *level_0
-    tags: [pointer_info, P0]
+    tags: [pointer_info, P0, managed_memory]
   Contract_PointerInfo_HipPointerGetAttribute_MemoryType_MatchesGetAttributes:
     <<: *level_0
     tags: [pointer_info, P0]
