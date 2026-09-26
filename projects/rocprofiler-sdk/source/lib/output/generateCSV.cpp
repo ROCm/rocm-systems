@@ -297,7 +297,8 @@ generate_csv(const output_config&                                               
                                                              cfg.kernel_rename,
                                                              record.correlation_id.external.value);
             auto lds_block_size_v =
-                (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
+                (record.dispatch_info.group_segment_size + (lds_block_size - 1)) &
+                ~(lds_block_size - 1);
 
             rocprofiler::tool::csv::kernel_trace_with_stream_csv_encoder::write_row(
                 row_ss,
@@ -632,7 +633,8 @@ generate_csv(const output_config&                    cfg,
             const auto& correlation_id = record.dispatch_data.correlation_id;
             const auto* kernel_info    = tool_metadata.get_kernel_symbol(kernel_id);
             auto        lds_block_size_v =
-                (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
+                (record.dispatch_data.dispatch_info.group_segment_size + (lds_block_size - 1)) &
+                ~(lds_block_size - 1);
 
             auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
             auto row_ss    = std::stringstream{};
