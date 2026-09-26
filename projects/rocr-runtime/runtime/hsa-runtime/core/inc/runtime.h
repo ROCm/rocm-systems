@@ -1053,7 +1053,11 @@ class Runtime {
 
   // IPC DMA buf socket server for dmabuf FD passing
   os::IPCSocket ipc_sock_server_fd_;
-  std::map<uint64_t, size_t> ipc_sock_server_conns_;
+  struct IPCExportEntry {
+    size_t len;
+    int dmabuf_fd;  // held open to keep BO alive for importers
+  };
+  std::map<uint64_t, IPCExportEntry> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
   bool ipc_sock_server_shutdown_in_progress_;
@@ -1174,12 +1178,13 @@ class Runtime {
   bool ipc_dmabuf_supported_;
   int IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                       HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
-                      bool isdmabufSysmem, uint32_t shared_handle);
-
+                      bool isdmabufSysmem, uint32_t shared_handle,
+                      int* out_dmabuf_fd = nullptr);
   /// @brief Release the buffer objects of an IPC import: the exporting device's handle and one
   /// per peer device.
   static void ReleaseImportHandles(HsaMemoryObjectHandle owner,
                                    const std::vector<AllocationRegion::PeerImport>& peers);
+
 };
 
 }  // namespace core
