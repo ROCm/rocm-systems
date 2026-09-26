@@ -665,10 +665,12 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
     simd_correctness/swmmac_k64_simd_exact_test.cpp
+    simd_correctness/smfmac_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
