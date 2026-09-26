@@ -19,8 +19,8 @@ namespace {
 
     std::mutex &taskPublicationMutex()
     {
-        static std::mutex mutex;
-        return mutex;
+        static auto *mutex = new std::mutex{};
+        return *mutex;
     }
 
     class TaskflowTaskGroup final : public ITaskGroup {
