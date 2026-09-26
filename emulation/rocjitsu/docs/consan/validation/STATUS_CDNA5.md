@@ -37,7 +37,7 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 high: clean pass at 1200 s; fault 8/8 | 🟨 sleep=15: current-hook clean pass at 1200 s; fault 0/8 |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 higher: filtered clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 high + 256 banks: repaired lane retention; clean pass; fault 8/8 | 🟨 sleep=15: current-hook clean pass; fault 0/8 |
-| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 higher: all 3 clean runs pass; prefill fault 8/8 | 🟨 sleep=15: all 3 current-hook clean runs pass; prefill fault trials running |
+| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 higher: all 3 clean runs pass; prefill fault 8/8 | 🟨 sleep=15: all 3 current-hook clean runs pass; prefill fault 0/8 |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 high: current-hook clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
@@ -45,11 +45,11 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 high: current-hook clean pass; fault 8/8 with complete publication evidence | 🟨 sleep=15: filtered clean pass; fault 0/8 |
 | Test corpus | P0 | HipKittens CDNA5 naive BF16 (`hipkittens-bf16fp32-cdna5-naive`) | 🟩 high: filtered clean pass; fault 8/8 | 🟨 sleep=15: filtered clean pass; fault 0/8 |
-| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: clean pass with complete tensor-DMA comparison coverage; fault 0/8 |
+| Tensile | P0 | `002_sk_mxf8gemm_explicit` (`tensile-sk-mxf8gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep_wave=15: clean pass with complete tensor-DMA comparison coverage; detector 0/8 despite oracle failures 8/8 |
 | Tensile | P0 | `003_sk_mxf4gemm_explicit` (`tensile-sk-mxf4gemm-explicit`) | 🟩 high: complete clean pass with tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: clean pass with complete tensor-DMA comparison coverage; fault 0/8 |
 | Tensile | P1 | `037_spmm_tdm_f16_transposes` (`tensile-spmm-tdm-f16-transposes`) | 🟩 high: all 4 clean objects pass with complete tensor-DMA coverage; fault 6/8 | 🟨 sleep=15: all 4 clean objects pass with complete tensor-DMA comparison coverage; fault 0/8 |
 | Tensile | P1 | `016_spmm_tdm_all` (`tensile-spmm-tdm-all`) | 🟩 higher + 256 banks: all 4 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 4 clean shards pass with complete tensor-DMA comparison coverage; fault 0/8 |
-| Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟩 high: all 3 clean shards pass at 1200 s with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 3 clean shards pass with complete tensor-DMA comparison coverage; fault qualification running |
+| Tensile | P1 | `001_sk_mxf8f4gemm_tdm` (`tensile-sk-mxf8f4gemm-tdm`) | 🟩 high: all 3 clean shards pass at 1200 s with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 3 clean shards pass with complete tensor-DMA comparison coverage; fault 0/8 |
 | Tensile | P1 | `004_sk_mxf8gemm_tdm` (`tensile-sk-mxf8gemm-tdm`) | 🟩 high: all 6 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 6 clean shards pass with complete tensor-DMA comparison coverage; fault trials pending |
 | Tensile | P1 | `007_sk_mxf4gemm_tdm` (`tensile-sk-mxf4gemm-tdm`) | 🟩 high + 192 MiB report cap: all 6 clean shards pass with complete tensor-DMA coverage; fault 8/8 | 🟨 sleep=15: all 6 clean shards pass with complete tensor-DMA comparison coverage; fault trials pending |
 | Tensile | P1 | bounded Stream-K smoke (`tensile-sk-sgemm-runtime-smoke`) | 🟩 high: complete clean pass; fault 8/8 | 🟨 sleep_wave=15: clean pass; detector 0/8 despite oracle failures 8/8 |
