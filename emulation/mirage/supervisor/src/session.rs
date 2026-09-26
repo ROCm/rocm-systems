@@ -255,6 +255,19 @@ impl Session {
         let runtime_dir = mirage_core::paths::session_runtime_dir(&def.id);
         std::fs::create_dir_all(&runtime_dir)
             .map_err(|e| MirageError::io(runtime_dir.clone(), e))?;
+        // Every by-name reference followed once, here, and the backend
+        // given its chance to correct the agent — so the profile this
+        // session holds describes the machine it is about to stand up,
+        // and keeps describing it for as long as the session lives. An
+        // edit to the stored topology, agent or drop-in config after this
+        // point reaches nothing: the documents have already been read.
+        let mut profile = profile;
+        profile.emulator.resolve_refs()?;
+        if let Some(backend) =
+            mirage_core::emulator::get_emulator_backend(&profile.emulator.emulator)
+        {
+            backend.reconcile_profile(&mut profile, &runtime_dir)?;
+        }
         let node_count = resolve_node_count(&profile)?;
         let ctx = SessionContext {
             id: def.id.clone(),
@@ -459,7 +472,8 @@ impl Session {
         alive
     }
 
-    /// Record the emulator injection to apply to every workload.
+    /// Record the emulator injection and the session metadata derived
+    /// while that exact injection was materialised.
     pub fn set_injection(&self, injection: InjectionDef) {
         self.lock().injection = injection;
     }
@@ -841,10 +855,11 @@ impl Session {
     /// remapped onto the in-container mounts here, once, rather than at
     /// every call site.
     ///
-    /// Every call describes the same session: the shape is the one fixed
-    /// at creation, and the rendezvous port is picked once and kept, so a
-    /// `mirage exec` in another terminal joins the job rather than
-    /// starting a differently-shaped one beside it.
+    /// Every call describes the same session: the shape is fixed at
+    /// creation, the profile is resolved once with it, and the rendezvous
+    /// port is picked once and kept.
+    /// A `mirage exec` in another terminal therefore joins the job rather
+    /// than starting a differently-shaped one beside it.
     ///
     /// # Errors
     ///
@@ -914,9 +929,13 @@ impl Session {
             }
             None => (injection.env.clone(), injection.ld_preload.clone()),
         };
-
         Ok(SessionDescription {
             session: self.def.id.clone(),
+            // The snapshot taken at creation, references already
+            // followed: a client that wants to know what device this
+            // session emulates asks the agent in here, rather than being
+            // handed a second copy of the answer.
+            profile: Some(self.ctx.profile.clone()),
             node_count,
             nproc_per_node: job_nproc,
             workdir: self.def.workdir.clone(),
@@ -1884,6 +1903,18 @@ mod tests {
         session
     }
 
+    /// The MI350X agent these stubs describe, inline rather than by name.
+    ///
+    /// Bring-up follows agent references now, and a test root has no
+    /// agent store unless the test writes one — which is the subject of
+    /// exactly one test here, not a fixture cost every other one should
+    /// pay.
+    fn agent_mi350x() -> mirage_core::agent::AgentDef {
+        let mut agent = mirage_core::agent::AgentDef::default();
+        agent.vm.gpu.device.gfx_target_version = 90500;
+        agent
+    }
+
     fn profile(num_nodes: u32, gpus_per_node: u32) -> ProfileDef {
         ProfileDef {
             name: "p".to_string(),
@@ -1896,7 +1927,7 @@ mod tests {
                 topology: MaybeRef::Owned(TopologyDef {
                     num_nodes,
                     gpus_per_node,
-                    agent: MaybeRef::Ref("MI350X".to_string()),
+                    agent: MaybeRef::Owned(agent_mi350x()),
                 }),
             },
             containerize: None,
@@ -1990,7 +2021,7 @@ mod tests {
         let mut topology = TopologyDef {
             num_nodes: 1,
             gpus_per_node: 1,
-            agent: MaybeRef::Ref("MI350X".to_string()),
+            agent: MaybeRef::Owned(agent_mi350x()),
         };
         mirage_core::topology::store::put("shared", &topology).unwrap();
 
@@ -2018,6 +2049,126 @@ mod tests {
             after, 1,
             "editing a topology reshaped a session that was already running"
         );
+    }
+
+    /// The device a live session reports is the one its profile named at
+    /// bring-up, not whatever the agent store says later.
+    ///
+    /// The same guarantee as the topology test above, for the field the
+    /// ROCr preflight reads: a `mirage exec` half an hour into a session
+    /// has to be warned about the GPU that session is emulating. Bring-up
+    /// follows the agent reference once and keeps the document, so an
+    /// edit afterwards reaches nothing.
+    #[test]
+    fn a_live_sessions_device_is_the_one_resolved_at_bring_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = mirage_core::paths::test_env_lock();
+        mirage_core::paths::set_test_root(dir.path());
+
+        let mut agent = mirage_core::agent::AgentDef::default();
+        agent.vm.gpu.device.gfx_target_version = 90500;
+        mirage_core::agent::store::put("shared-agent", &agent).unwrap();
+
+        let mut p = profile(1, 1);
+        p.emulator.topology = MaybeRef::Owned(TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Ref("shared-agent".to_string()),
+        });
+        let def = make_def(
+            SessionId::new("device").unwrap(),
+            MaybeRef::Owned(p.clone()),
+            "/".to_string(),
+            false,
+        );
+        let session = Session::new(def, p).unwrap();
+        session.set_phase(true, state::READY, None);
+
+        let described = |session: &Arc<Session>| -> Option<String> {
+            let profile = session.describe().unwrap().profile?;
+            Some(profile.agent()?.gfx_target()?.to_string())
+        };
+        let before = described(&session);
+
+        // The user retargets the shared agent for their next run.
+        agent.vm.gpu.device.gfx_target_version = 120500;
+        mirage_core::agent::store::put("shared-agent", &agent).unwrap();
+        let after = described(&session);
+
+        mirage_core::paths::clear_test_root();
+
+        assert_eq!(before.as_deref(), Some("gfx950"));
+        assert_eq!(
+            after, before,
+            "editing an agent retargeted a session that was already running"
+        );
+    }
+
+    /// A drop-in `--config` rewritten after session creation changes
+    /// neither what the session reports nor what it injects.
+    ///
+    /// Session creation reads the config's device into the agent, and
+    /// injection hands the interposer a config. When those were two
+    /// readings of the user's file, a rewrite between them left the
+    /// session reporting gfx942 while injecting gfx1250, and the preflight
+    /// warned about a device that was not the one running.
+    #[test]
+    fn a_supplied_configs_reported_device_is_the_one_injected() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = mirage_core::paths::test_env_lock();
+        mirage_core::paths::set_test_root(dir.path());
+
+        let config = dir.path().join("cfg.json");
+        let write_target = |version: u32| {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({
+                    "vm": {"gpu": {"device": {"gfx_target_version": version}}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write_target(90402);
+
+        let mut p = profile(1, 1);
+        p.emulator.options.insert(
+            "config".to_string(),
+            mirage_core::common::SimpleValue::String(config.display().to_string()),
+        );
+        let def = make_def(
+            SessionId::new("supplied").unwrap(),
+            MaybeRef::Owned(p.clone()),
+            "/".to_string(),
+            false,
+        );
+        let session = Session::new(def, p).unwrap();
+        session.set_phase(true, state::READY, None);
+
+        write_target(120500);
+        let interposer = dir.path().join("librocjitsu.so");
+        std::fs::write(&interposer, b"").unwrap();
+        let injection = mirage_rocjitsu::Rocjitsu
+            .injection_def_with(&session.ctx, Some(interposer))
+            .unwrap();
+        mirage_core::paths::clear_test_root();
+
+        let discovery = PathBuf::from(&injection.env["ROCJITSU_RUNTIME_DIR"])
+            .join(mirage_rocjitsu::CONFIG_PATH_NAME);
+        let injected: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(std::fs::read_to_string(discovery).unwrap().trim()).unwrap(),
+        )
+        .unwrap();
+        let reported = session
+            .describe()
+            .unwrap()
+            .profile
+            .and_then(|profile| Some(profile.agent()?.vm.gpu.device.gfx_target_version));
+        assert_eq!(
+            injected.pointer("/vm/gpu/device/gfx_target_version"),
+            Some(&serde_json::json!(90402))
+        );
+        assert_eq!(reported, Some(90402));
     }
 
     #[tokio::test]

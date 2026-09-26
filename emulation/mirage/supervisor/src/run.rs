@@ -738,6 +738,15 @@ mod tests {
     /// Nothing brings a session on it up by accident, which is what
     /// [`stalled_run`] needs — and when one *is* brought up, bring-up
     /// fails at its first step with a message worth asserting on.
+    /// The MI350X agent the stub describes, inline rather than by name:
+    /// bring-up follows agent references, and these test roots have no
+    /// agent store.
+    fn agent_mi350x() -> mirage_core::agent::AgentDef {
+        let mut agent = mirage_core::agent::AgentDef::default();
+        agent.vm.gpu.device.gfx_target_version = 90500;
+        agent
+    }
+
     fn stub_profile() -> ProfileDef {
         ProfileDef {
             name: "p".to_string(),
@@ -750,7 +759,7 @@ mod tests {
                 topology: MaybeRef::Owned(TopologyDef {
                     num_nodes: 1,
                     gpus_per_node: 1,
-                    agent: MaybeRef::Ref("MI350X".to_string()),
+                    agent: MaybeRef::Owned(agent_mi350x()),
                 }),
             },
             containerize: None,

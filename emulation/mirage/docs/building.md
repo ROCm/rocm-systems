@@ -285,6 +285,33 @@ test suite.
 - **`no mirage run is serving session <id>`** — the run that owned the
   session has exited. A session exists exactly as long as its `mirage
   run` does; start one in another terminal and `mirage exec` into that.
+- **The workload sees no GPU, and exits 0 anyway** — `rocminfo` reports
+  only the CPU agent, the session came up normally and nothing failed.
+  Almost always this is a ROCm that predates the GPU the session
+  emulates: `libhsa-runtime64.so` enumerates agents by looking their ISA
+  up in the table it was compiled with, and one it does not recognise is
+  skipped without a word. Before each host workload starts, mirage
+  statically checks the command's unambiguous direct `DT_RUNPATH`
+  resolution and warns —
+
+  > `mirage: the ROCm runtime this workload will load does not support
+  > gfx1250, which is the GPU this session emulates. …`
+
+  — naming the resolved runtime and the ROCm version beside it. Run the
+  workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
+  is the usual way), or emulate a GPU this ROCm supports: a session's
+  target comes from its profile, or from the device a drop-in `--config`
+  describes. A `--config` with a DBT guest enabled names no target, because
+  the session presents the host's devices and the guest together. The
+  check is deliberately conservative — it warns only for a
+  trusted system executable that links ROCr directly through a modern
+  absolute or `$ORIGIN`-based `RUNPATH`, with no loader override or
+  hardware-capability alternative in the way. Everything else stays
+  silent: user-built executables, anything that loads ROCr later with
+  `dlopen` (Python included), transitive dependencies, legacy `RPATH`,
+  cache-only resolution, preloads including a system-wide
+  `/etc/ld.so.preload`, HSA overrides, and set-ID or file-capability
+  executables. Its silence therefore does not rule this cause out.
 - **A backend reported as not installed** — run `mirage emulators -l`
   first. It prints every path that was searched for that backend's
   library and the environment variables that would resolve it, which is
