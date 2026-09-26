@@ -906,9 +906,11 @@ def _clean_environment(
             if delay_mode not in {"nop", "sleep", "sleep_var", "sleep_wave"}:
                 raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY_MODE")
             if delay_mode == "sleep_wave" and int(delay or "0") != 0:
-                if target != "gfx1201" or int(delay) not in {1, 3, 7, 15, 31, 63, 127}:
+                if target not in {"gfx1201", "gfx1250"} or int(delay) not in {
+                    1, 3, 7, 15, 31, 63, 127
+                }:
                     raise ValidationError(
-                        "nonzero sleep_wave requires gfx1201 and maximum "
+                        "nonzero sleep_wave requires gfx1201/gfx1250 and maximum "
                         "1/3/7/15/31/63/127"
                     )
             environment["RJ_CONSAN_SC_DELAY_MODE"] = delay_mode

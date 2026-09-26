@@ -6765,13 +6765,20 @@ class SuperColliderDelayEnvironmentTest(unittest.TestCase):
             with self.assertRaisesRegex(validation.ValidationError, "requires gfx1201"):
                 validation_commands._clean_environment(
                     "supercollider", workload, root / "hook.so", "gfx950", root)
-            environment = validation_commands._clean_environment(
-                "supercollider", workload, root / "hook.so", "gfx1201", root)
-            self.assertEqual(environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep_wave")
-            with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "16"}):
-                with self.assertRaisesRegex(validation.ValidationError, "maximum"):
-                    validation_commands._clean_environment(
-                        "supercollider", workload, root / "hook.so", "gfx1201", root)
+            for target in ("gfx1201", "gfx1250"):
+                with self.subTest(target=target):
+                    clean = validation_commands._clean_environment(
+                        "supercollider", workload, root / "hook.so", target, root)
+                    fault = validation_faults._fault_trial_environment(
+                        "supercollider", workload, root / "hook.so", target,
+                        {"environment": {}}, {}, {}, root)
+                    for environment in (clean, fault):
+                        self.assertEqual(environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep_wave")
+                        self.assertEqual(environment["RJ_CONSAN_SC_DELAY"], "15")
+                    with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "16"}):
+                        with self.assertRaisesRegex(validation.ValidationError, "maximum"):
+                            validation_commands._clean_environment(
+                                "supercollider", workload, root / "hook.so", target, root)
             # A disabled delay does not emit the architecture-specific sequence.
             with mock.patch.dict(os.environ, {"CONSAN_VALIDATION_SC_DELAY": "0"}):
                 validation_commands._clean_environment(
