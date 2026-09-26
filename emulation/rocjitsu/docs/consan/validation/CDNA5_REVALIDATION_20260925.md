@@ -2208,3 +2208,12 @@ reached detections in `spmmml-targeted-higher-v2-fault`, this qualifies the
 Default cell green. The earlier `default` and `high` campaigns each accumulated
 three misses, ruling out 6/8 for those campaigns; their remaining trials were
 cancelled deliberately and are not reported as completed eight-trial results.
+
+
+A follow-up Stream-K smoke probe used `sleep_wave=127` with
+`RJ_CONSAN_SC_DELAY_READS_ONLY=1`. Clean qualification passed, but all eight
+admitted and reached fault trials again escaped detection; their numerical
+oracles also passed (`sgemm-smoke-wave127-reads-{clean,fault}`). This wider
+read-only delay did not improve qualification. The table retains the
+`sleep_wave=15` result, which exposed numerical failures without detector
+reports, rather than treating a longer delay as stronger evidence by itself.
