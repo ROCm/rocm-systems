@@ -1622,10 +1622,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
          (int)symkRequested, (int)ceAllReduceAllowed, (int)twoShotWindow,
          arTwoShotMin, arTwoShotMax, (int)force, (int)ctaZero,
          (int)ceAr2ShotEligible, (int)(comm->ceColl.ceARTmpBuf != NULL));
-    // Skip until ceARTmpBuf exists so the first forced call still initializes CE.
-    // Registered windows take CE-registered instead of this staging arm.
-    const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
-    if (!symkRequested && !symReg && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    // First call, before ceARTmpBuf exists, falls through so enqueue can init CE.
+    // Gate on !symkRequested, not a local symReg bit: peers can disagree.
+    if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
       return ncclSuccess;
