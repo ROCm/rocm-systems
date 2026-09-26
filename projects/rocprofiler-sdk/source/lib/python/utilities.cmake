@@ -168,6 +168,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     set(rocpd_PYTHON_SOURCES
         csv.py
         features.py
+        database.py
         importer.py
         __init__.py
         __main__.py
