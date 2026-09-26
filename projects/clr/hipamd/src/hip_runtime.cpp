@@ -10,6 +10,7 @@
 
 #include "thread/thread.hpp"
 #include "hip_platform.hpp"
+#include "trace/hip_trace_init.hpp"
 
 namespace hip {
 void ihipDestroyDevice();
@@ -41,6 +42,8 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {
       if (GPU_ENABLE_PAL != 0) {
         hip::ihipDestroyDevice();
       }
+      // Required so that a FreeLibrary does not leave a stale ETW callback behind.
+      hip::trace::finalize();
       break;
     case DLL_THREAD_DETACH:
       break;
