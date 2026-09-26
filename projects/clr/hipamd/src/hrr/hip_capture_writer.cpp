@@ -82,6 +82,7 @@ static inline uint64_t current_parent_process_id() {
 #  include <unistd.h>
 #  include <fcntl.h>
 #  include <sys/stat.h>
+#  include <sys/statvfs.h>
 #  include <sys/syscall.h>
 #  include <pthread.h>
 #  define HRR_OPEN(p)        ::open((p), O_WRONLY | O_CREAT | O_TRUNC, 0644)
@@ -606,11 +607,105 @@ static void update_root_manifest() {
 }
 
 // ---------------------------------------------------------------------------
+// Disk space
+//
+// Capture stops rather than fill the file system it writes to. It keeps free
+// the smaller of 15% of that file system and 4 GiB, the default systemd-journald
+// uses for SystemKeepFree. Free space is read when the archive opens, before any
+// write of at least g_space_check_bytes and after every g_space_check_bytes
+// written. The interval is at most a quarter of the reserve, which bounds how
+// far a capture can go into it.
+// ---------------------------------------------------------------------------
+
+static constexpr uint64_t kKeepFreeMax   = 4ull << 30;
+static constexpr uint64_t kSpaceCheckMax = 64ull << 20;
+// Set by open(); g_keep_free stays 0 when free space cannot be read at all.
+static uint64_t              g_keep_free = 0;
+static uint64_t              g_space_check_bytes = kSpaceCheckMax;
+static std::atomic<uint64_t> g_bytes_since_space_check{0};
+// Bytes already accepted by reserve_space and not yet finished writing. Concurrent
+// blob writers all count against the free-space check until they release.
+static std::atomic<uint64_t> g_bytes_reserved{0};
+static std::atomic<bool>     g_out_of_space{false};
+
+static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total) {
+#ifdef _WIN32
+  ULARGE_INTEGER a{}, t{}, f{};
+  if (!GetDiskFreeSpaceExA(dir.c_str(), &a, &t, &f)) return false;
+  *avail = a.QuadPart;
+  *total = t.QuadPart;
+#else
+  struct statvfs sv{};
+  if (::statvfs(dir.c_str(), &sv) != 0) return false;
+  *avail = static_cast<uint64_t>(sv.f_bavail) * sv.f_frsize;
+  *total = static_cast<uint64_t>(sv.f_blocks) * sv.f_frsize;
+#endif
+  return true;
+}
+
+// Flush what is buffered, close events.bin and mark the archive incomplete.
+// Every write path already treats a closed events fd as "capture off".
+static void stop_for_space(uint64_t keep_free) {
+  if (g_out_of_space.exchange(true)) return;
+  char reason[160];
+  snprintf(reason, sizeof(reason),
+           "stopped writing: less than %llu MiB would stay free on the file system "
+           "holding the archive",
+           static_cast<unsigned long long>(keep_free >> 20));
+  mark_incomplete(reason);
+  BufWriteGuard lk;
+  if (g_events_fd >= 0) {
+    flush_buffer_locked();
+    HRR_FSYNC(g_events_fd);
+    HRR_CLOSE(g_events_fd);
+    g_events_fd = -1;
+  }
+}
+
+// Size the reserve for the archive's file system. False when less than the
+// reserve is free to begin with.
+static bool init_space_reserve() {
+  g_keep_free = 0;
+  g_bytes_since_space_check.store(0, std::memory_order_relaxed);
+  g_bytes_reserved.store(0, std::memory_order_relaxed);
+  uint64_t avail = 0, total = 0;
+  if (!fs_space(g_output_dir, &avail, &total)) return true;
+  g_keep_free = std::min<uint64_t>(total / 100 * 15, kKeepFreeMax);
+  g_space_check_bytes = std::max<uint64_t>(std::min<uint64_t>(kSpaceCheckMax, g_keep_free / 4), 1);
+  return avail >= g_keep_free;
+}
+
+// Account for `len` bytes of archive data and return false, having stopped the
+// capture, if writing them would eat into the reserve. Must not be called with
+// g_file_mu held. On success the bytes stay reserved until release_space(len).
+static bool reserve_space(uint64_t len) {
+  if (g_out_of_space.load(std::memory_order_relaxed)) return false;
+  if (g_keep_free == 0) return true;
+  const uint64_t reserved =
+      g_bytes_reserved.fetch_add(len, std::memory_order_acq_rel) + len;
+  const uint64_t since = g_bytes_since_space_check.fetch_add(len, std::memory_order_relaxed) + len;
+  if (len < g_space_check_bytes && since < g_space_check_bytes) return true;
+  g_bytes_since_space_check.store(0, std::memory_order_relaxed);
+  uint64_t avail = 0, total = 0;
+  if (!fs_space(g_output_dir, &avail, &total)) return true;
+  if (avail >= g_keep_free && avail - g_keep_free >= reserved) return true;
+  g_bytes_reserved.fetch_sub(len, std::memory_order_acq_rel);
+  stop_for_space(g_keep_free);
+  return false;
+}
+
+static void release_space(uint64_t len) {
+  if (g_keep_free == 0 || len == 0) return;
+  g_bytes_reserved.fetch_sub(len, std::memory_order_acq_rel);
+}
+
+// ---------------------------------------------------------------------------
 // open / close / flush / checkpoint
 // ---------------------------------------------------------------------------
 
 bool open(const char* output_dir) {
   if (g_events_fd >= 0) return true;  // already open — guard against double-invocation
+  if (g_out_of_space.load(std::memory_order_relaxed)) return false;  // e.g. a child after fork
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
@@ -632,6 +727,15 @@ bool open(const char* output_dir) {
   ensure_dir(g_output_dir);
   ensure_dir(g_output_dir + "/blobs");
   ensure_dir(g_output_dir + "/code_objects");
+
+  if (!init_space_reserve()) {
+    LogPrintfError("[HRR capture] Less than %llu MiB free on the file system holding %s",
+                   static_cast<unsigned long long>(g_keep_free >> 20), g_output_dir.c_str());
+    fprintf(stderr, "[HRR capture] Capture disabled: less than %llu MiB free on the file "
+            "system holding %s.\n", static_cast<unsigned long long>(g_keep_free >> 20),
+            g_output_dir.c_str());
+    return false;
+  }
 
   std::string events_path = g_output_dir + "/events.bin";
   std::string manifest_path = g_output_dir + "/manifest.json";
@@ -915,6 +1019,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
       g_events_since_ckpt = 0;
     }
   }
+  if (reserve_space(payload_len)) release_space(payload_len);
 }
 
 // ---------------------------------------------------------------------------
@@ -966,6 +1071,7 @@ Hash128 write_blob(const void* data, size_t len) {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     if (!g_written_blobs.insert(key).second) return h;  // already written
   }
+  if (!reserve_space(len)) return {};
 
   // blobs/<2-char-prefix>/<fullhash>.blob
   std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
@@ -980,6 +1086,7 @@ Hash128 write_blob(const void* data, size_t len) {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
   }
+  release_space(len);
   return h;
 }
 
@@ -1002,6 +1109,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     if (!g_written_blobs.insert(key).second) return h;  // already written
   }
+  if (!reserve_space(image_size)) return {};
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
   if (atomic_write_file(path, image, image_size)) {
@@ -1011,6 +1119,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
   }
+  release_space(image_size);
   return h;
 }
 
