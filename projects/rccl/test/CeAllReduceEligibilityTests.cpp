@@ -283,9 +283,12 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                 .withNumGpus(0);
         // Isolated children inherit the parent env. A case that does not set the
         // cap must not see a suite or shell override, or gfx1250's table default
-        // (off) becomes on.
+        // (off) becomes on. RCCL_CE_ALLREDUCE is env-first, so an inherited 0
+        // fails DefaultOn, which expects the gfx1250 default (unset).
         if (env.find("RCCL_CE_AR_MAX_MSG_BYTES") == env.end())
             cfg.clearVariable("RCCL_CE_AR_MAX_MSG_BYTES");
+        if (env.find("RCCL_CE_ALLREDUCE") == env.end())
+            cfg.clearVariable("RCCL_CE_ALLREDUCE");
         ProcessIsolatedTestRunner::registerTest(cfg);
     }
 

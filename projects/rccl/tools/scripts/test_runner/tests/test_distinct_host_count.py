@@ -21,7 +21,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from lib.test_executor import _distinct_host_count
+from lib.test_executor import (
+    _UNRESOLVED_ALLOCATION_ENV,
+    _distinct_host_count,
+    _rank0_is_local,
+)
 
 
 class TestDistinctHostCount(unittest.TestCase):
@@ -37,17 +41,21 @@ class TestDistinctHostCount(unittest.TestCase):
         num_nodes = 2
         self.assertTrue(avail > 0 and avail < num_nodes)
 
-    def test_other_allocators_without_hosts_stay_unknown(self):
-        """PBS/LSF/Flux/Cobalt with no parsed host list must not look like one local host."""
-        for key in ("PBS_JOBID", "LSB_JOBID", "FLUX_JOB_ID", "COBALT_JOBID"):
+    def test_allocators_without_hosts_stay_unknown(self):
+        """An active batch job with no parsed host list must not look like one local host."""
+        for key in _UNRESOLVED_ALLOCATION_ENV:
             with self.subTest(key=key):
                 with patch.dict(os.environ, {key: "99"}, clear=True):
                     self.assertEqual(_distinct_host_count({}), 0)
 
-    def test_slurm_allocation_without_detected_hosts_is_unknown(self):
-        """Do not collapse an active allocation to the local host."""
-        with patch.dict(os.environ, {"SLURM_JOB_ID": "12345"}, clear=True):
-            self.assertEqual(_distinct_host_count({}), 0)
+    def test_rank0_without_a_host_list_is_local(self):
+        self.assertTrue(_rank0_is_local({}))
+        self.assertTrue(_rank0_is_local(None))
+
+    def test_rank0_follows_the_first_scheduled_host(self):
+        local = os.uname().nodename.split(".")[0]
+        self.assertTrue(_rank0_is_local({"host_list": f"{local},other"}))
+        self.assertFalse(_rank0_is_local({"host_list": "not-this-host,other"}))
 
     def test_slurm_host_list_counts_distinct_entries(self):
         self.assertEqual(_distinct_host_count({"host_list": "node-a,node-b,node-c"}), 3)

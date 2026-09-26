@@ -802,6 +802,19 @@ class TestDisabledConfigAccounting(unittest.TestCase):
         })
         self.assertEqual(ex.test_names, ["InitA"])
 
+    def test_record_disabled_suite_drops_mpi_when_mpi_check_is_skipped(self):
+        ex = self._executor()
+        ex.args.skip_mpi_check = True
+        ex.record_disabled_suite({
+            "suite_details": {"name": "NET IB"},
+            "num_ranks": 2,
+            "tests": [
+                {"name": "Multi", "test_filter": "NetIbMPITest.Multi"},
+                {"name": "Local", "test_filter": "NetIbMPITest.Local", "num_ranks": 1},
+            ],
+        })
+        self.assertEqual(ex.test_names, ["Local"])
+
     def test_record_disabled_suite_emit_duration_is_float(self):
         ex = self._executor()
         ex.emit_enabled = True

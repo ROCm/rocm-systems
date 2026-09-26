@@ -4472,15 +4472,15 @@
     },
     {
       "name": "NET IB - CAST GRH on RoCE QP",
-      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv",
+      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "cast_grh",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "NET IB - CAST Subnet-Aware Routing (same subnet)",
-      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv",
+      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "cast_subnet_routing",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "NET IB - CAST Four QPs (QPS=4)",
@@ -4598,9 +4598,9 @@
     },
     {
       "name": "NET IB - Data Transfer (ib-cast, BY_ORDER, CTS offload off)",
-      "description": "ib-cast SimpleSendRecv / multiple sizes / large / outstanding transfers with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0",
+      "description": "ib-cast SimpleSendRecv / multiple sizes / large / outstanding transfers with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_transfer_cast_by_order_no_cts",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "NET IB - Coverage Env (ib-cast)",
@@ -4616,9 +4616,9 @@
     },
     {
       "name": "NET IB - MultiRecv (ib-cast, BY_ORDER, CTS offload off)",
-      "description": "ib-cast MultiRecv under software BY_ORDER with CTS offload disabled",
+      "description": "ib-cast MultiRecv under software BY_ORDER with CTS offload disabled. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_multirecv_cast_by_order_no_cts",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "NET IB - CTS Depth Stress (ib-cast)",
@@ -4658,9 +4658,9 @@
     },
     {
       "name": "NET IB - Stress Multi-QP NoSplit (ib-cast, BY_ORDER, CTS offload off)",
-      "description": "ib-cast multi-QP no-split stress with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0",
+      "description": "ib-cast multi-QP no-split stress with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "NET IB - Stress Multi-QP Fan-In (ib-cast)",

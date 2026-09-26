@@ -15,6 +15,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,9 @@ def wrap_mpi_program(program, gtest_json_path=None):
     truncates that path at start-up, so N ranks racing on it leave an empty or
     corrupt report even when the test passed (Grow_ConfigInheritance).
     Rank 0 alone sets GTEST_OUTPUT; other ranks exec the same binary without it.
+    Rank 0 is the first host in the SLURM list or hostfile, which is not
+    necessarily the process that reads the file. The path has to be one that
+    host can write and this process can read; a node-local /tmp file is not.
     """
     preamble = "ulimit -l unlimited 2>/dev/null; set -f; "
     if gtest_json_path:
@@ -360,7 +364,8 @@ def synthetic_case_detail(test_name, test_filter=None, status="FAILED"):
     }
 
 
-def merge_process_failure_details(details, test_name, test_filter=None):
+def merge_process_failure_details(details, test_name, test_filter=None,
+                                  reason="process exited non-zero"):
     """Add a process-level failure missing from rank 0's gtest report.
 
     MPI gtest JSON is intentionally written by rank 0 only. If another rank
@@ -371,7 +376,7 @@ def merge_process_failure_details(details, test_name, test_filter=None):
     if any(item.get("status") == "FAILED" for item in details or []):
         return details
     merged = list(details or [])
-    label = f"{test_name or '(test)'} (process exited non-zero)"
+    label = f"{test_name or '(test)'} ({reason})"
     merged.append({
         "suite": test_name or "(test)",
         "case": label,
@@ -591,29 +596,23 @@ def format_status_tree(entries, title, statuses=None, status_width=7):
             for item in issues:
                 by_gtest.setdefault(item.get("suite") or name, []).append(item)
             show_inner = len(by_gtest) > 1
+            def _append_leaves(prefix, items):
+                for ci, item in enumerate(items):
+                    c_branch = "`- " if ci == len(items) - 1 else "+- "
+                    label = item.get("label") or item.get("case") or item.get("full_name")
+                    lines.append(
+                        f"{prefix}{c_branch}{item['status']:<{status_width}} {label}"
+                    )
+
             if show_inner:
                 inner_items = list(by_gtest.items())
                 for gi, (gtest_suite, cases) in enumerate(inner_items):
                     last_g = gi == len(inner_items) - 1
                     g_branch, g_pipe = ("`- ", "   ") if last_g else ("+- ", "|  ")
                     lines.append(f"  {s_pipe}{e_pipe}{g_branch}{gtest_suite}")
-                    for ci, item in enumerate(cases):
-                        last_c = ci == len(cases) - 1
-                        c_branch = "`- " if last_c else "+- "
-                        label = item.get("label") or item.get("case")
-                        lines.append(
-                            f"  {s_pipe}{e_pipe}{g_pipe}{c_branch}"
-                            f"{item['status']:<{status_width}} {label}"
-                        )
+                    _append_leaves(f"  {s_pipe}{e_pipe}{g_pipe}", cases)
             else:
-                for ci, item in enumerate(issues):
-                    last_c = ci == len(issues) - 1
-                    c_branch = "`- " if last_c else "+- "
-                    label = item.get("label") or item.get("full_name")
-                    lines.append(
-                        f"  {s_pipe}{e_pipe}{c_branch}"
-                        f"{item['status']:<{status_width}} {label}"
-                    )
+                _append_leaves(f"  {s_pipe}{e_pipe}", issues)
     return "\n".join(lines)
 
 
@@ -876,37 +875,42 @@ def infer_gtest_result_from_json_file(json_path: str, returncode: int, details=N
     if details is None:
         details = collect_gtest_case_details_from_file(json_path)
     if details is None:
+        # The runner does not capture stdout, so the "0 tests" banner in
+        # infer_gtest_result_from_output cannot match on this path. A present
+        # report with no leaves is SKIPPED via _result_from_gtest_details.
+        # A missing report stays on the exit code.
         return infer_gtest_result_from_output("", returncode)
     return _result_from_gtest_details(details)
 
 
-def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
+def infer_pytest_result_from_junit(junit_path: str, returncode: int, details=None) -> str:
     """Map a pytest run (JUnit XML + exit code) to a TestResult, preferring the
-    report so a fully-skipped harness reports SKIPPED rather than PASSED."""
+    report so a fully-skipped harness reports SKIPPED rather than PASSED.
+
+    Pass *details* from collect_pytest_case_details_from_junit to avoid a
+    second parse of the same report.
+    """
     if returncode == ExitCode.EXIT_TIMEOUT:
         return TestResult.RESULT_TIMEOUT.value
     # pytest exit 5 = no tests collected.
     if returncode == 5:
         return TestResult.RESULT_SKIPPED.value
-    if not junit_path or not os.path.isfile(junit_path):
-        return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
-                else TestResult.RESULT_FAILED.value)
-    try:
-        root = ET.parse(junit_path).getroot()
-    except (OSError, ET.ParseError):
+    if details is None:
+        details = collect_pytest_case_details_from_junit(junit_path)
+    if details is None:
         return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
                 else TestResult.RESULT_FAILED.value)
 
-    total = passed = skipped = failed = 0
-    for tc in root.iter("testcase"):
-        total += 1
-        kinds = {child.tag for child in tc}
-        if kinds & {"failure", "error"}:
+    passed = skipped = failed = 0
+    for item in details:
+        status = item.get("status")
+        if status == "FAILED":
             failed += 1
-        elif "skipped" in kinds:
+        elif status == "SKIPPED":
             skipped += 1
         else:
             passed += 1
+    total = passed + skipped + failed
 
     if failed:
         return TestResult.RESULT_FAILED.value
@@ -927,6 +931,58 @@ _UNRESOLVED_ALLOCATION_ENV = (
     "FLUX_JOB_ID",
     "COBALT_JOBID",
 )
+
+
+def _first_scheduled_host(mpi_hosts):
+    """Host that receives MPI rank 0, or None when that host cannot be named.
+
+    Open MPI gives rank 0 to the first SLURM host or the first hostfile entry.
+    An empty dict means mpirun keeps every rank on this machine.
+    """
+    if not mpi_hosts:
+        return None
+    if "host_list" in mpi_hosts:
+        for part in str(mpi_hosts["host_list"]).split(","):
+            host = part.strip().split(":")[0].strip()
+            if host:
+                return host
+        return None
+    if "hostfile" in mpi_hosts:
+        try:
+            with open(mpi_hosts["hostfile"], encoding="utf-8", errors="replace") as hf:
+                for line in hf:
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+                    host = line.split()[0].strip()
+                    if host:
+                        return host
+        except OSError:
+            return None
+    return None
+
+
+def _rank0_is_local(mpi_hosts):
+    """True when rank 0 runs on this machine.
+
+    No host list means every rank is local. A declared host source that cannot
+    be read is not treated as local: the report must not assume /tmp is shared.
+    """
+    if not mpi_hosts:
+        return True
+    host = _first_scheduled_host(mpi_hosts)
+    if not host:
+        return False
+    local = socket.gethostname().split(".")[0]
+    return host.split(".")[0] == local
+
+
+def _test_needs_mpi(test, suite_config):
+    """True for an entry --skip-mpi-check drops (auto ranks, or more than one)."""
+    test_ranks = test.get("num_ranks", (suite_config or {}).get("num_ranks", 1))
+    if isinstance(test_ranks, str):
+        return test_ranks.strip().lower() == "auto"
+    return test_ranks > 1
 
 
 def _distinct_host_count(mpi_hosts: dict) -> int:
@@ -2104,8 +2160,14 @@ class TestExecutor:
         gtest_json_path = None
         gtest_out_arg = ""
         if is_gtest:
+            # Rank 0 writes this file. When that rank is another host, /tmp on
+            # this process stays empty and an exit 0 would be scored PASSED.
+            report_dir = tempfile.gettempdir()
+            if num_ranks > 1 and not _rank0_is_local(getattr(self, "mpi_hosts", None)):
+                report_dir = getattr(self, "workspace_dir", None) or report_dir
+                os.makedirs(report_dir, exist_ok=True)
             fd, gtest_json_path = tempfile.mkstemp(
-                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
+                prefix="rccl_gtest_", suffix=".json", dir=report_dir
             )
             os.close(fd)
             gtest_out_arg = f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
@@ -2355,10 +2417,28 @@ class TestExecutor:
             case_details = None
             if is_gtest:
                 rc = returncode if returncode is not None else -1
-                case_details = collect_gtest_case_details_from_file(gtest_json_path or "")
-                test_result = infer_gtest_result_from_json_file(
-                    gtest_json_path or "", rc, details=case_details
+                report_missing = (
+                    num_ranks > 1
+                    and not _rank0_is_local(getattr(self, "mpi_hosts", None))
+                    and (
+                        not gtest_json_path
+                        or not os.path.isfile(gtest_json_path)
+                        or os.path.getsize(gtest_json_path) == 0
+                    )
                 )
+                if report_missing and rc == ExitCode.EXIT_SUCCESS:
+                    # The workspace path was not visible to rank 0. Do not
+                    # score the empty local file as a pass.
+                    test_result = TestResult.RESULT_FAILED.value
+                    case_details = merge_process_failure_details(
+                        None, test_name, test_filter,
+                        reason="rank 0 gtest report was not visible on this host",
+                    )
+                else:
+                    case_details = collect_gtest_case_details_from_file(gtest_json_path or "")
+                    test_result = infer_gtest_result_from_json_file(
+                        gtest_json_path or "", rc, details=case_details
+                    )
                 # MPI abort / JSON races leave no report; still count the entry.
                 if case_details is None and test_result == TestResult.RESULT_PASSED.value:
                     case_details = [
@@ -2617,14 +2697,22 @@ class TestExecutor:
 
         duration = time.time() - start_time
         rc = result.returncode if result.returncode is not None else -1
-        test_result = infer_pytest_result_from_junit(junit_path, rc)
         case_details = collect_pytest_case_details_from_junit(junit_path)
+        test_result = infer_pytest_result_from_junit(junit_path, rc, details=case_details)
         if case_details is None and test_result in (
             TestResult.RESULT_PASSED.value,
             TestResult.RESULT_FAILED.value,
             TestResult.RESULT_TIMEOUT.value,
         ):
             case_details = [synthetic_case_detail(test_name, test_filter, test_result)]
+        elif test_result == TestResult.RESULT_FAILED.value:
+            case_details = merge_process_failure_details(
+                case_details, test_name, test_filter
+            )
+        elif test_result == TestResult.RESULT_TIMEOUT.value:
+            case_details = merge_timeout_details(
+                case_details, test_name, test_filter, timeout
+            )
         case_counts = _counts_from_details(case_details) if case_details is not None else None
         print_case_result(
             test_result,
@@ -2687,8 +2775,7 @@ class TestExecutor:
 
             # Skip MPI tests when --skip-mpi-check is set ("auto" implies multi-rank)
             test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
-            is_auto_ranks = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
-            is_mpi_test = is_auto_ranks or (not isinstance(test_ranks, str) and test_ranks > 1)
+            is_mpi_test = _test_needs_mpi(test, suite_config)
             if self.args.skip_mpi_check and is_mpi_test:
                 skipped_count += 1
                 if self.args.verbose:
@@ -2795,6 +2882,12 @@ class TestExecutor:
             test_name = test.get("name") or "(test)"
             if self.args.test_name and not glob_filter_matches(
                 test_name, self.args.test_name
+            ):
+                continue
+            # Same drop as run_test_suite: a disabled multi-rank entry must not
+            # emit DISABLED rows when --skip-mpi-check drops the enabled twin.
+            if getattr(self.args, "skip_mpi_check", False) and _test_needs_mpi(
+                test, suite_config
             ):
                 continue
             test_filter = test.get("test_filter", "*")
@@ -3595,6 +3688,7 @@ class TestExecutor:
             "cases_skipped": uniqueness["total_skipped"],
             "cases_timeout": uniqueness["total_timeout"],
             "cases_disabled": uniqueness["total_disabled"],
+            "cases_other": uniqueness["total_other"],
         }
         emitter.finalize_summary(summary)
 
