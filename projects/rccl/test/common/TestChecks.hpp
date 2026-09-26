@@ -302,8 +302,9 @@ inline std::string mpiCoordinatedSkipReason(bool localSkip, const char* localRea
  * @brief Coordinated skip when the communicator cannot satisfy a GIN connection type.
  *
  * Expand after createTestCommunicator() on every rank. The skip is an
- * MPI_Allreduce; a rank that does not reach it will hang. GTEST_SKIP() in a
- * helper only returns from the helper, so this must expand in the test body.
+ * MPI_Allreduce; a rank that does not reach it will hang. GTEST_SKIP() only
+ * returns from the enclosing function, so expand it in the test body or in a
+ * helper whose call is the last statement of that body.
  *
  * NCCL_GIN_CONNECTION_FULL skips unless globalGinSupport is FULL. RAIL-only
  * communicators make ncclDevCommCreate(FULL) return ncclInvalidArgument.

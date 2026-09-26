@@ -8,6 +8,7 @@ Handles test execution, build processes, and result tracking
 """
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -415,19 +416,6 @@ def collect_gtest_case_details_from_file(json_path):
     return collect_gtest_case_details(data)
 
 
-def count_gtest_cases_from_json(obj):
-    """Count leaf gtest cases. Wildcard ``test_filter`` values expand here."""
-    return _counts_from_details(collect_gtest_case_details(obj))
-
-
-def count_gtest_cases_from_json_file(json_path):
-    """Return leaf-case counts from a gtest JSON report, or None if unreadable."""
-    details = collect_gtest_case_details_from_file(json_path)
-    if details is None:
-        return None
-    return _counts_from_details(details)
-
-
 def collect_pytest_case_details_from_junit(junit_path):
     """Return leaf-case details from a pytest JUnit XML report, or None."""
     if not junit_path or not os.path.isfile(junit_path):
@@ -454,14 +442,6 @@ def collect_pytest_case_details_from_junit(junit_path):
             "status": status,
         })
     return details
-
-
-def count_pytest_cases_from_junit(junit_path):
-    """Return per-testcase counts from a pytest JUnit XML report, or None."""
-    details = collect_pytest_case_details_from_junit(junit_path)
-    if details is None:
-        return None
-    return _counts_from_details(details)
 
 
 _ISSUE_STATUSES = ("FAILED", "SKIPPED", "TIMEOUT")
@@ -493,6 +473,9 @@ def make_run_identity_key(
     JSON-merged test env is used (not the full process environment).
     LD_LIBRARY_PATH / LLVM_PROFILE_FILE / RCCL_BUILD are omitted because the
     runner always rewrites those. ``extra`` holds mpi_args or pytest test_dir.
+
+    The returned value is a hash of that payload. The same inputs still match,
+    and tests.jsonl does not store the env plaintext.
     """
     env_norm = {
         str(k): str(v)
@@ -512,7 +495,32 @@ def make_run_identity_key(
         "nodes": int(num_nodes or 0),
         "ranks": int(num_ranks or 0),
     }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def relocate_rma_reload_counter(env, workspace_dir):
+    """Replace RCCL_RMA_RELOAD_COUNTER_FILE with a file in a private directory.
+
+    A fixed path under /tmp can be pre-created as a symlink by another user on
+    the node. The directory is mode 0700 under the run workspace, and the file
+    is created with O_EXCL so the test does not follow a planted link. Call
+    this after make_run_identity_key so duplicate detection still sees the
+    configured env.
+    """
+    key = "RCCL_RMA_RELOAD_COUNTER_FILE"
+    if not env or key not in env:
+        return
+    base = workspace_dir or os.getcwd()
+    parent = os.path.join(base, "rma_reload_counters")
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
+    counter_dir = tempfile.mkdtemp(prefix="counter-", dir=parent)
+    os.chmod(counter_dir, 0o700)
+    path = os.path.join(counter_dir, "counter.txt")
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    env[key] = path
 
 
 def stamp_run_identity(details, identity):
@@ -623,16 +631,6 @@ def format_issue_tree(entries):
         rebuilt,
         "Failed/skipped/timeout cases:",
         statuses=_ISSUE_STATUSES,
-        status_width=7,
-    )
-
-
-def format_unique_tree(entries, title=None):
-    """ASCII tree of unique executed leaves (first occurrence of each identity)."""
-    return format_status_tree(
-        entries,
-        title or "Unique test cases:",
-        statuses=None,
         status_width=7,
     )
 
@@ -780,7 +778,6 @@ def summarize_case_uniqueness(entries):
         "unique_disabled": 0,
         "unique_other": 0,
     }
-    unique_loc = {}
     duplicate_loc = {}
 
     for key in order:
@@ -795,15 +792,6 @@ def summarize_case_uniqueness(entries):
             unique_counts["duplicate_cases"] += 1
         worst = _worst_case_status([r.get("status") for r in records])
         _tally_status(unique_counts, "unique_", worst)
-
-        first = records[0]
-        loc = (first["config_suite"], first["config_entry"])
-        unique_loc.setdefault(loc, []).append({
-            "suite": first["suite"],
-            "case": first["case"],
-            "full_name": first["full_name"],
-            "status": first["status"],
-        })
 
         if extra:
             suffix = _duplicate_run_suffix(records)
@@ -822,7 +810,6 @@ def summarize_case_uniqueness(entries):
                     "status": "DUPLICATE",
                 })
 
-    unique_counts["unique_entries"] = _entries_from_location_map(unique_loc, entries)
     unique_counts["duplicate_entries"] = _entries_from_location_map(duplicate_loc, entries)
     return unique_counts
 
@@ -846,20 +833,6 @@ def format_case_counts(counts):
     if details:
         return f"{cases} cases ({', '.join(details)})"
     return f"{cases} cases"
-
-
-def _sum_case_counts(list_of_counts):
-    """Sum case_counts dicts; ignore None/missing (timeouts, pre-launch skips)."""
-    total = {
-        "cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0,
-        "disabled": 0,
-    }
-    for counts in list_of_counts or []:
-        if not counts:
-            continue
-        for key in total:
-            total[key] += int(counts.get(key, 0) or 0)
-    return total
 
 
 def infer_gtest_result_from_json_file(json_path: str, returncode: int, details=None) -> str:
@@ -1921,6 +1894,10 @@ class TestExecutor:
         # is left untouched.
         if test_config.get("is_pytest", False):
             return self._run_pytest_test(test_config, merged_env)
+
+        # Identity was hashed from the configured env. The live counter file is
+        # a private path so a fixed /tmp name is not what the test opens.
+        relocate_rma_reload_counter(merged_env, getattr(self, "workspace_dir", None))
 
         if self.args.verbose:
             if description:

@@ -3978,9 +3978,9 @@
         "NCCL_WIN_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
         "RCCL_RMA_USE_DMABUF": "1",
-        "RCCL_RMA_RELOAD_COUNTER_FILE": "/tmp/rccl_rma_reload_put_signal_counter.txt"
+        "RCCL_RMA_RELOAD_COUNTER_FILE": "private"
       },
-      "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
+      "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path. RCCL_RMA_RELOAD_COUNTER_FILE is a marker; the runner replaces it with a file in a 0700 directory under the workspace.",
       "tests": [
         {
           "name": "Rma_ExternalPluginIssuesPutSignalToStub",

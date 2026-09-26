@@ -137,12 +137,9 @@ namespace RcclUnitTesting
         {
           std::string kernel = TokenAfter(line, "Kernel ");
           std::string proto;
-          if (kernel.find("LL128") != std::string::npos)
-            proto = "LL128";
-          else if (kernel.find("LL") != std::string::npos)
-            proto = "LL";
-          else if (!kernel.empty())
-            proto = "SIMPLE";
+          if (kernel.find("LL128") != std::string::npos) proto = "LL128";
+          else if (kernel.find("LL") != std::string::npos) proto = "LL";
+          else if (!kernel.empty()) proto = "SIMPLE";
           addon = {true, "SYM", !proto.empty(), proto, false, 0};
         }
 

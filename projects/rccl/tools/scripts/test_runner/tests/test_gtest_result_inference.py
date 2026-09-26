@@ -18,6 +18,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -25,26 +26,24 @@ from unittest.mock import patch
 
 from lib.test_executor import (
     TestExecutor,
+    _counts_from_details,
     collect_gtest_case_details,
     collect_gtest_case_details_from_file,
-    count_gtest_cases_from_json,
-    count_gtest_cases_from_json_file,
-    count_pytest_cases_from_junit,
+    collect_pytest_case_details_from_junit,
     format_case_counts,
     format_duplicate_tree,
     format_issue_tree,
-    format_unique_tree,
     infer_gtest_result_from_json_file,
     infer_gtest_result_from_output,
     make_run_identity_key,
     merge_process_failure_details,
     merge_timeout_details,
+    relocate_rma_reload_counter,
     stamp_run_identity,
     suite_disposition,
     summarize_case_uniqueness,
     synthetic_case_detail,
     wrap_mpi_program,
-    _sum_case_counts,
 )
 
 FILTER_MATCHED_NOTHING = (
@@ -285,21 +284,21 @@ WILDCARD_SUITE_JSON = {
 
 class TestCountGtestCases(unittest.TestCase):
     def test_wildcard_suite_expands_to_leaf_cases(self):
-        counts = count_gtest_cases_from_json(WILDCARD_SUITE_JSON)
+        counts = _counts_from_details(collect_gtest_case_details(WILDCARD_SUITE_JSON))
         self.assertEqual(counts, {
             "cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0,
             "disabled": 0,
         })
 
     def test_empty_report_is_zero_cases(self):
-        counts = count_gtest_cases_from_json({"tests": 0, "testsuites": []})
+        counts = _counts_from_details(collect_gtest_case_details({"tests": 0, "testsuites": []}))
         self.assertEqual(counts["cases"], 0)
 
     def test_file_helper_reads_the_same_counts(self):
         path = _write_json(WILDCARD_SUITE_JSON)
         try:
             self.assertEqual(
-                count_gtest_cases_from_json_file(path),
+                _counts_from_details(collect_gtest_case_details_from_file(path)),
                 {"cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0,
                  "disabled": 0},
             )
@@ -308,7 +307,7 @@ class TestCountGtestCases(unittest.TestCase):
 
     def test_missing_file_is_unknown(self):
         missing = os.path.join(tempfile.gettempdir(), "rccl-no-such-gtest-report.json")
-        self.assertIsNone(count_gtest_cases_from_json_file(missing))
+        self.assertIsNone(collect_gtest_case_details_from_file(missing))
 
     def test_format_and_sum(self):
         self.assertEqual(
@@ -319,15 +318,6 @@ class TestCountGtestCases(unittest.TestCase):
             format_case_counts({"cases": 1, "passed": 0, "failed": 0, "skipped": 0, "timeout": 1}),
             "1 cases (1 timed out)",
         )
-        total = _sum_case_counts([
-            {"cases": 4, "passed": 2, "failed": 1, "skipped": 1},
-            None,
-            {"cases": 1, "passed": 1, "failed": 0, "skipped": 0},
-        ])
-        self.assertEqual(total, {
-            "cases": 5, "passed": 3, "failed": 1, "skipped": 1, "timeout": 0,
-            "disabled": 0,
-        })
         self.assertEqual(
             format_case_counts({
                 "cases": 2, "passed": 0, "failed": 0, "skipped": 0,
@@ -474,11 +464,31 @@ class TestRunIdentity(unittest.TestCase):
             env_vars={"NCCL_NET": "IBVerbs", "LD_LIBRARY_PATH": "/tmp/b"},
         )
         self.assertEqual(a, b)
+        self.assertNotIn("IBVerbs", a)
+        self.assertNotIn("LD_LIBRARY_PATH", a)
 
     def test_different_env_is_different_identity(self):
         a = make_run_identity_key(binary="rccl-UnitTestsMPI", env_vars={"NCCL_ALGO": "Ring"})
         b = make_run_identity_key(binary="rccl-UnitTestsMPI", env_vars={"NCCL_ALGO": "Tree"})
         self.assertNotEqual(a, b)
+        self.assertNotIn("Ring", a)
+        self.assertNotIn("Tree", b)
+
+    def test_reload_counter_leaves_tmp(self):
+        workspace = tempfile.mkdtemp(prefix="rccl-identity-")
+        try:
+            configured = "/tmp/rccl_rma_reload_put_signal_counter.txt"
+            env = {"RCCL_RMA_RELOAD_COUNTER_FILE": configured}
+            relocate_rma_reload_counter(env, workspace)
+            path = env["RCCL_RMA_RELOAD_COUNTER_FILE"]
+            parent = os.path.join(workspace, "rma_reload_counters")
+            self.assertTrue(path.startswith(parent + os.sep))
+            self.assertNotEqual(path, configured)
+            self.assertTrue(os.path.isfile(path))
+            self.assertEqual(os.stat(parent).st_mode & 0o777, 0o700)
+            self.assertEqual(os.stat(os.path.dirname(path)).st_mode & 0o777, 0o700)
+        finally:
+            shutil.rmtree(workspace)
 
 
 class TestUniqueAndDuplicateCases(unittest.TestCase):
@@ -509,17 +519,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         self.assertEqual(summary["duplicate_cases"], 1)
         self.assertEqual(summary["duplicate_extra"], 1)
         self.assertEqual(summary["unique_skipped"], 2)
-
-        unique_tree = format_unique_tree(summary["unique_entries"])
-        expected_unique = "\n".join([
-            "Unique test cases:",
-            "  `- P2P Tests - Complete Suite",
-            "     +- P2P_SendRecvRegistration",
-            "     |  `- SKIPPED P2pMPITest.P2pSendRecvRegistrationTest",
-            "     `- P2P_AllTests",
-            "        `- SKIPPED P2pMPITest.IpcGraphRegisterBufferTest",
-        ])
-        self.assertEqual(unique_tree, expected_unique)
+        self.assertNotIn("unique_entries", summary)
 
         dup_tree = format_duplicate_tree(summary["duplicate_entries"])
         expected_dup = "\n".join([
@@ -609,7 +609,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
             [(d["full_name"], d["status"]) for d in details],
             [("MemManagerRealMem.Track_Something", "PASSED")],
         )
-        counts = count_gtest_cases_from_json(payload)
+        counts = _counts_from_details(details)
         self.assertEqual(counts, {
             "cases": 1, "passed": 1, "failed": 0, "skipped": 0, "timeout": 0,
             "disabled": 0,
@@ -736,7 +736,7 @@ class TestCountPytestCases(unittest.TestCase):
             f.write(xml)
         try:
             self.assertEqual(
-                count_pytest_cases_from_junit(path),
+                _counts_from_details(collect_pytest_case_details_from_junit(path)),
                 {"cases": 3, "passed": 1, "failed": 1, "skipped": 1, "timeout": 0,
                  "disabled": 0},
             )
