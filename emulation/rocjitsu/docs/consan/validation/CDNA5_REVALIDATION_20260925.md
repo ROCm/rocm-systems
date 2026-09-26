@@ -2716,3 +2716,9 @@ coverage and exactly one intended mutation applied. Health and smoke checks
 pass before and after the run. Trial 1 is running; seven planned trials remain
 unqualified, so this first detection does not establish the eight-trial gate.
 The three large full-clean shapes also remain pending.
+
+Trial 1 also completes successfully in 1,170 seconds: eight ConSan conflicts,
+650 passing numerical cases, complete coverage, exactly one intended mutation,
+and healthy checks before/after. Two of the eight planned trials have now
+completed with detections; trial 2 is running. Full qualification remains
+pending the remaining trials and three large clean shapes.
