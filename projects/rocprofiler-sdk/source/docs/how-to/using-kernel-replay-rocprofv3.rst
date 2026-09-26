@@ -69,6 +69,10 @@ Collecting counters with kernel replay
 counter groups (one pass per group). There is no separate pass-count flag. ``rocprofv3`` uses
 callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
 
+``--kernel-replay-beta-enabled`` only acknowledges the beta; it does not select kernel replay.
+Passing it without ``--replay-mode kernel`` is rejected rather than ignored, so a command line that
+asks only for the acknowledgement cannot quietly fall back to application replay.
+
 .. code-block:: bash
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
