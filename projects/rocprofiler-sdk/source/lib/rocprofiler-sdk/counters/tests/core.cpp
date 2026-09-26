@@ -560,17 +560,10 @@ TEST(core, start_stop_buffered_ctx)
     ASSERT_TRUE(ctx.dispatch_counter_collection->callbacks.at(0)->buffer);
     EXPECT_EQ(*ctx.dispatch_counter_collection->callbacks.at(0)->buffer, opt_buff_id);
 
+    // Counter collection no longer registers a per-queue callback; activeness is observable via
+    // the context enabled flag (and counters::is_any_active()).
     bool found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
-    EXPECT_TRUE(found);
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
     EXPECT_TRUE(found);
 
     /**
@@ -627,17 +620,10 @@ TEST(core, start_stop_callback_ctx)
               (void*) 0x54321);
     EXPECT_EQ(ctx.dispatch_counter_collection->callbacks.at(0)->context, get_client_ctx());
 
+    // Counter collection no longer registers a per-queue callback; activeness is observable via
+    // the context enabled flag (and counters::is_any_active()).
     bool found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
-    EXPECT_TRUE(found);
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
     EXPECT_TRUE(found);
 
     /**
