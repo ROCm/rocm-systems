@@ -2312,3 +2312,14 @@ untouched. `sc-full-clean-handoff.json` records the process identities and the
 cleanup requirement; retire the stopped coordinator after its SGEMM child is
 terminal. `sc-parallel-full-clean-state.json` records each replacement job's
 PID, command, state, and eventual exit status.
+
+
+### HGEMM SuperCollider full clean completed
+
+`sc-parallel-full-clean/tensile-sk-hgemm-quick/clean/supercollider/result.json`
+accepts all six commands with zero exit codes, numeric oracles passing, and
+complete static/dynamic 350/350 access coverage. Controls are `sleep=15`, with
+the original immutable wave-delay hook and full allowlist. Combined with the
+healthy admitted/reached 0/8 targeted fault campaign in `hgemm-sc-v1-fault`,
+this moves the SuperCollider cell from orange to yellow. Sparse FP8 ML started
+in the freed family slot; F8GEMM and both original SGEMM runs remain active.
