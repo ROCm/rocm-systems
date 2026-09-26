@@ -220,9 +220,10 @@ VmAccessOutcome L2Cache::access_outcome(simdojo::MessageStatus status) {
 bool L2Cache::can_fetch_range(uint64_t addr, uint32_t size, uint32_t vmid) const {
   if (vmid == 0 || gpu_vm_ == nullptr)
     return true;
-  const std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-  return vm_access &&
-         vm_access->query_access(addr, size, VmAccessKind::Read) == VmAccessOutcome::Complete;
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+    return vm_access &&
+           vm_access->query_access(addr, size, VmAccessKind::Read) == VmAccessOutcome::Complete;
+  });
 }
 
 VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
@@ -246,14 +247,13 @@ VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t siz
     }
     if (gpu_vm_ == nullptr)
       return VmAccessOutcome::Unavailable;
-    std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-    if (!vm_access)
-      return VmAccessOutcome::Faulted;
-    const VmAccessOutcome outcome =
-        op == simdojo::MessageOp::WRITE
-            ? vm_access->write(addr, std::as_bytes(std::span<const uint8_t>(data, size)))
-            : vm_access->read(addr, std::as_writable_bytes(std::span<uint8_t>(data, size)));
-    return outcome;
+    return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+      if (!vm_access)
+        return VmAccessOutcome::Faulted;
+      return op == simdojo::MessageOp::WRITE
+                 ? vm_access->write(addr, std::as_bytes(std::span<const uint8_t>(data, size)))
+                 : vm_access->read(addr, std::as_writable_bytes(std::span<uint8_t>(data, size)));
+    });
   }
   assert(req_port_ != nullptr && "L2Cache: req_port_ not set");
   if (req_port_->link() == nullptr ||

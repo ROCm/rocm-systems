@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory_resource>
@@ -55,5 +56,48 @@ public:
 };
 
 using LegacyPageTable = std::pmr::unordered_map<uint64_t, LegacyPageTableEntry>;
+
+/// @brief Lifetime-safe admission state for lock-free copied legacy PTEs.
+///
+/// @details A reader joins only while the generation it cached is current.
+/// Mutations advance the generation first, then wait for already-admitted
+/// readers before changing page-table storage. The shared state may safely
+/// outlive the process and address-space objects retained by thread-local
+/// caches.
+class LegacyPageTableCacheState {
+public:
+  [[nodiscard]] uint64_t generation() const { return generation_.load(std::memory_order_seq_cst); }
+
+  [[nodiscard]] bool try_acquire(uint64_t expected_generation) const {
+    if (generation_.load(std::memory_order_seq_cst) != expected_generation)
+      return false;
+    active_readers_.fetch_add(1, std::memory_order_seq_cst);
+    if (generation_.load(std::memory_order_seq_cst) == expected_generation)
+      return true;
+    release();
+    return false;
+  }
+
+  void release() const {
+    if (active_readers_.fetch_sub(1, std::memory_order_seq_cst) == 1)
+      active_readers_.notify_all();
+  }
+
+  /// @brief Exclude new cached readers and drain the previous generation.
+  /// @pre The caller owns the mutation-side serialization for the page table
+  /// or address-space registration it is about to change.
+  void invalidate_and_wait() {
+    generation_.fetch_add(1, std::memory_order_seq_cst);
+    uint64_t active = active_readers_.load(std::memory_order_seq_cst);
+    while (active != 0) {
+      active_readers_.wait(active, std::memory_order_seq_cst);
+      active = active_readers_.load(std::memory_order_seq_cst);
+    }
+  }
+
+private:
+  mutable std::atomic<uint64_t> generation_{1};
+  mutable std::atomic<uint64_t> active_readers_{0};
+};
 
 } // namespace rocjitsu::amdgpu

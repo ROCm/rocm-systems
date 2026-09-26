@@ -150,6 +150,7 @@ public:
   const uint64_t *page_table_generation = nullptr;
   std::shared_ptr<util::DistributedSharedMutex> request_mutex;
   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state{};
   pid_t client_pid = 0;
   int client_mem_fd = -1;
   bool passthrough = false;
@@ -188,6 +189,68 @@ public:
   static constexpr uint64_t PAGE_SHIFT = simdojo::SparseMemory::PAGE_SHIFT;
   static constexpr uint64_t PAGE_SIZE = simdojo::SparseMemory::PAGE_SIZE;
   static constexpr uint64_t PAGE_MASK = PAGE_SIZE - 1;
+
+  /// @brief Retain copied-PTE reader admission for one functional CU quantum.
+  ///
+  /// @details A PTE mutation revokes its generation and drains admitted readers
+  /// before changing storage. Keeping one admission for this bounded execution
+  /// interval therefore preserves the existing mapping lifetime while avoiding
+  /// a pair of shared-lock operations around every emulated memory access.
+  class AccessBatchGuard {
+  public:
+    AccessBatchGuard() { ++depth_; }
+
+    ~AccessBatchGuard() {
+      assert(depth_ != 0);
+      if (--depth_ == 0)
+        release_all();
+    }
+
+    AccessBatchGuard(const AccessBatchGuard &) = delete;
+    AccessBatchGuard &operator=(const AccessBatchGuard &) = delete;
+    AccessBatchGuard(AccessBatchGuard &&) = delete;
+    AccessBatchGuard &operator=(AccessBatchGuard &&) = delete;
+
+  private:
+    friend class LegacyAddressSpace;
+
+    struct Admission {
+      std::shared_ptr<LegacyPageTableCacheState> state;
+      uint64_t generation = 0;
+    };
+
+    [[nodiscard]] static bool active() { return depth_ != 0; }
+
+    [[nodiscard]] static bool contains(const LegacyPageTableCacheState *state,
+                                       uint64_t generation) {
+      return std::ranges::any_of(admissions_, [&](const Admission &admission) {
+        return admission.state.get() == state && admission.generation == generation;
+      });
+    }
+
+    static void release_all() {
+      for (auto &admission : admissions_)
+        admission.state->release();
+      admissions_.clear();
+    }
+
+    [[nodiscard]] static bool try_admit(const std::shared_ptr<LegacyPageTableCacheState> &state,
+                                        uint64_t generation) {
+      assert(active());
+      if (!state || !state->try_acquire(generation))
+        return false;
+      try {
+        admissions_.push_back({state, generation});
+      } catch (...) {
+        state->release();
+        throw;
+      }
+      return true;
+    }
+
+    inline static thread_local uint32_t depth_ = 0;
+    inline static thread_local std::vector<Admission> admissions_;
+  };
 
   class PageTableRequestGuard {
   public:
@@ -249,7 +312,8 @@ public:
   ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
   void register_process(uint32_t pid, LegacyPageTable *pt, util::DistributedSharedMutex *mu,
                         const uint64_t *generation = nullptr,
-                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {}) {
+                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
+                        std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state = {}) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     update_vmid_registration(pid, [&](auto) {
@@ -260,6 +324,7 @@ public:
           .client_mem_fd = {},
           .generation = generation,
           .request_mutex = std::move(request_mutex),
+          .page_table_cache_state = std::move(page_table_cache_state),
           .passthrough = false,
           .fault_reporter = nullptr,
       };
@@ -486,7 +551,7 @@ public:
     return for_each_page_chunk_until(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
       return with_page_mapping(ea, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
         const size_t page_offset = ea & PAGE_MASK;
-        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+        auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
         if (pte) {
           struct Span {
             size_t value_offset = 0;
@@ -615,7 +680,7 @@ public:
       const auto first = reinterpret_cast<uintptr_t>(host);
       if (size > PAGE_SIZE - (first & PAGE_MASK))
         return false;
-      const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+      auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
       if (addressable_prefix(host, size) != size)
         return false;
       std::array<uint8_t, kMaxBytes> staging;
@@ -921,7 +986,7 @@ public:
         with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
           const size_t page_offset = addr & PAGE_MASK;
           // Taken before either branch validates, and held through the load.
-          const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+          auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
           uint8_t *target = nullptr;
           if (pte) {
             const auto *extent = host_extent_at(*pte, page_offset);
@@ -1458,7 +1523,8 @@ private:
     if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
       return false;
     register_process(vmid, registration.page_table, registration.page_table_mutex,
-                     registration.page_table_generation, std::move(registration.request_mutex));
+                     registration.page_table_generation, std::move(registration.request_mutex),
+                     std::move(registration.page_table_cache_state));
     set_process_client_pid(vmid, registration.client_pid);
     set_process_mem_fd(vmid, registration.client_mem_fd);
     set_process_passthrough(vmid, registration.passthrough);
@@ -1593,7 +1659,7 @@ private:
       // around the application's mapping calls. A raw mapping syscall that
       // bypasses the interposer is handled by the host-access guard around the
       // atomic itself.
-      auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
+      auto mapping_lock = rocjitsu::lock_host_mapping_for_access();
       if (addressable_prefix(target, size) != size) {
         const PageWritability writability = host_range_writability(target, size);
         mapping_lock.unlock();
@@ -1686,7 +1752,7 @@ private:
   AtomicPageOutcome atomic_rmw_mapped_page(const LegacyPageTableEntry &pte, size_t page_offset,
                                            size_t size, F &fn, D &discarded, uint64_t addr,
                                            uint32_t vmid) const {
-    auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
+    auto mapping_lock = rocjitsu::lock_host_mapping_for_access();
     const auto *extent = host_extent_at(pte, page_offset);
     if (extent && size <= extent->host_backed_bytes - (page_offset - extent->gpu_page_offset)) {
       auto *target = extent->host_ptr + (page_offset - extent->gpu_page_offset);
@@ -1797,7 +1863,7 @@ private:
       if (target == nullptr)
         return CopyOutcome::Unavailable;
 
-      auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
+      auto mapping_lock = rocjitsu::lock_host_mapping_for_access();
       if (addressable_prefix(target, size) != size) {
         const PageWritability writability = host_range_writability(target, size);
         mapping_lock.unlock();
@@ -1939,7 +2005,7 @@ private:
         return false;
       }
       auto *target = page_ + offset;
-      const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+      auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
       const PageWritability writability = host_range_writability(target, len);
       if (writability != PageWritability::Writable || addressable_prefix(target, len) != len) {
         cause = fault_cause_for(writability);
@@ -1993,7 +2059,7 @@ private:
         return false;
       if (addressable_prefix(page_ + offset, len) != len)
         return false; // Sanitized builds still veto poisoned bytes.
-      const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+      auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
       const bool moved = rocjitsu::with_host_access_guard([&] {
         if (to_page) {
 #if defined(RJ_GPU_MEMORY_WITH_TSAN)
@@ -2369,6 +2435,7 @@ private:
     util::UniqueHandle client_mem_fd;
     const uint64_t *generation = nullptr;
     std::shared_ptr<util::DistributedSharedMutex> request_mutex;
+    std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state;
     bool passthrough = false;
     MemoryFaultReporter *fault_reporter = nullptr;
   };
@@ -2399,6 +2466,8 @@ private:
       if (current_request_mutex != request_mutex)
         continue;
 
+      if (it != vmid_table_.end() && it->second.page_table_cache_state)
+        it->second.page_table_cache_state->invalidate_and_wait();
       if (update(it))
         ++vmid_registry_generation_;
       return;
@@ -2418,6 +2487,15 @@ private:
     LegacyPageTable *page_table = nullptr;
     util::DistributedSharedMutex *mutex = nullptr;
     const uint64_t *generation_ptr = nullptr;
+    std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state;
+    uint64_t page_table_cache_generation = 0;
+  };
+
+  class PteCacheSet {
+  public:
+    static constexpr size_t kEntryCount = 64;
+    static_assert((kEntryCount & (kEntryCount - 1)) == 0);
+    std::array<PteCache, kEntryCount> entries;
   };
 
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
@@ -2562,6 +2640,33 @@ private:
   auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
                    F &&fn) const -> std::invoke_result_t<F, const LegacyPageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
+
+    // Cached PTEs are immutable copies. A two-check admission against the
+    // retained process state lets a hit avoid both page-table reader locks;
+    // mutation advances the generation before draining admitted readers.
+    if (cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
+        cache.page_key == page_key && cache.found && cache.page_table_cache_state) {
+      auto *state = cache.page_table_cache_state.get();
+      if (AccessBatchGuard::active()) {
+        if (AccessBatchGuard::contains(state, cache.page_table_cache_generation))
+          return fn(&cache.pte);
+        if (AccessBatchGuard::try_admit(cache.page_table_cache_state,
+                                        cache.page_table_cache_generation))
+          return fn(&cache.pte);
+      } else if (state->try_acquire(cache.page_table_cache_generation)) {
+        struct ReaderGuard {
+          LegacyPageTableCacheState *state;
+          ~ReaderGuard() { state->release(); }
+        } reader_guard{state};
+        return fn(&cache.pte);
+      }
+    }
+
+    // A writer can own the page-table lock while waiting for an older cached
+    // generation. Drop every retained admission before entering the locked
+    // refill path so that ordering cannot form a reader/writer cycle.
+    if (AccessBatchGuard::active())
+      AccessBatchGuard::release_all();
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
     size_t metadata_retries = 0;
 #endif
@@ -2575,6 +2680,8 @@ private:
       LegacyPageTable *page_table = cache.page_table;
       util::DistributedSharedMutex *page_table_mutex = cache.mutex;
       const uint64_t *generation_ptr = cache.generation_ptr;
+      std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state =
+          cache.page_table_cache_state;
       if (!cached_table) {
         auto vmid_entry = vmid_table_.find(vmid);
         if (vmid_entry == vmid_table_.end()) {
@@ -2585,6 +2692,7 @@ private:
         page_table = vmid_entry->second.page_table;
         page_table_mutex = vmid_entry->second.mutex;
         generation_ptr = vmid_entry->second.generation;
+        page_table_cache_state = vmid_entry->second.page_table_cache_state;
       }
 
       std::shared_lock page_table_lock(*page_table_mutex);
@@ -2602,6 +2710,9 @@ private:
             .page_table = page_table,
             .mutex = page_table_mutex,
             .generation_ptr = generation_ptr,
+            .page_table_cache_state = page_table_cache_state,
+            .page_table_cache_generation =
+                page_table_cache_state ? page_table_cache_state->generation() : 0,
         };
       };
       const bool cached_page = allow_cache_hit && cached_table && generation_ptr &&
@@ -2728,7 +2839,11 @@ private:
       return fn(nullptr, IdentityPage(page));
     }
 
-    static thread_local PteCache cache;
+    static thread_local PteCacheSet caches;
+    const uint64_t page = addr >> PAGE_SHIFT;
+    const uint64_t cache_key =
+        page ^ (page >> 6) ^ (page >> 12) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL);
+    PteCache &cache = caches.entries[cache_key & (PteCacheSet::kEntryCount - 1)];
     return cached_walk(addr, vmid, cache, [&](const LegacyPageTableEntry *pte) {
       if (pte) {
         if (pte->host_extents.empty())
@@ -2757,7 +2872,7 @@ private:
         // copy_mapped_span() holds it: a USERPTR-backed extent belongs to
         // the application, which can revoke it, and the interposer takes
         // this exclusively around the syscalls that do.
-        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+        auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
         size_t mapped_bytes = 0;
         // Attempted rather than pre-checked: an extent may describe USERPTR
         // memory the application can unmap or protect at any moment, and
@@ -2800,7 +2915,7 @@ private:
         // copy_mapped_span() holds it: a USERPTR-backed extent belongs to
         // the application, which can revoke it, and the interposer takes
         // this exclusively around the syscalls that do.
-        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+        auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
         size_t mapped_bytes = 0;
         if (!rocjitsu::with_host_access_guard([&] {
               mapped_bytes = for_each_mapped_span(
@@ -2852,7 +2967,7 @@ private:
           const LegacyHostExtent *extent = nullptr;
         };
         std::vector<Span> spans;
-        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+        auto mapping_lease = rocjitsu::lock_host_mapping_for_access();
         const size_t mapped_bytes =
             for_each_mapped_span(*pte, page_offset, size,
                                  [&](size_t value_offset, uint8_t *host_ptr, size_t span_size,
