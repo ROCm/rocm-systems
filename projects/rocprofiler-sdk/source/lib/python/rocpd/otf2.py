@@ -832,7 +832,7 @@ def main(argv=None):
     out_cfg_args = process_out_config_args(input, args)
     generic_out_cfg_args = process_generic_args(input, args)
     otf2_args = process_otf2_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {**out_cfg_args, **otf2_args, **generic_out_cfg_args}
 

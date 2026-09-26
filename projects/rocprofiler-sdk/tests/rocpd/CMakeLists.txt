@@ -11,9 +11,12 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(rocpd-env
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+set(rocpd-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+set(rocpd-site-packages
+    "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
+set(rocpd-env "ROCPD_SCHEMA_PATH=${rocpd-schema-path}"
+              "PYTHONPATH=${rocpd-site-packages}")
 
 #########################################################################################
 #
@@ -44,3 +47,14 @@ foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
+
+rocprofiler_add_integration_validate_test(
+    rocpd-time-window
+    TEST_PATHS test_time_window.py
+    CONFIG pytest.ini
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "ROCPD_SCHEMA_PATH=${rocpd-schema-path}"
+    PYTHON_PATH "${rocpd-site-packages}" LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
+    DEPENDS rocprofiler-sdk::rocprofv3)
