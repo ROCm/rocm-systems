@@ -357,7 +357,7 @@ TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
     comm->cudaDev = 0;
     comm->localRanks = 1;
     comm->bootstrap = reinterpret_cast<void*>(0x1);
-    comm->symmetricSupport = 1;
+    comm->symmetricSupport = 0;  // the non-sym host-VMM probe, not the symmetric walk
     comm->globalRmaProxySupport = false;
     comm->config.numRmaCtx = 0;
     comm->devrState.lsaSelf = 0;

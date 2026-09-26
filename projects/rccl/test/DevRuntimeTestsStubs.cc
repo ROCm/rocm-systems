@@ -340,7 +340,11 @@ HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp
     prop->location.type = hipMemLocationTypeDevice;
     const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
     if (loc != nullptr && std::strcmp(loc, "host") == 0) {
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
       prop->location.type = hipMemLocationTypeHost;
+#else
+      prop->location.type = static_cast<hipMemLocationType>(2);
+#endif
     }
   }
   return hipSuccess;
@@ -367,6 +371,21 @@ HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipS
 HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   return hipSuccess;
+}
+HIP_FAKE hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hipDeviceptr_t) {
+  if (data == nullptr) return hipErrorInvalidValue;
+  if (attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+    hipMemoryType memType = hipMemoryTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) memType = hipMemoryTypeHost;
+    *static_cast<hipMemoryType*>(data) = memType;
+    return hipSuccess;
+  }
+  if (attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+    *static_cast<int*>(data) = 1;
+    return hipSuccess;
+  }
+  return hipErrorInvalidValue;
 }
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;

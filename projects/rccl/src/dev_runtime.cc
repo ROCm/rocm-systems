@@ -426,14 +426,22 @@ fail:
 
 static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, int r, symLsaMessage* messages,
                                                          int maxSegments, int numSegments,
-                                                         CUmemGenericAllocationHandle* memHandles, size_t bigOffset) {
+                                                         CUmemGenericAllocationHandle* memHandles, int nLocalHandles,
+                                                         size_t bigOffset) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
   uintptr_t addr = base + r * devr->bigSize + bigOffset;
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + r * maxSegments + segment;
-    bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    // memHandles is this rank's array. A peer can own a later host segment.
+    bool reuseLocal = r == devr->lsaSelf ||
+                      (segment < nLocalHandles && ncclParamSymReuseSysmemHandles() &&
+                       ncclSymIsHostSegment(msg->type));
+    if (reuseLocal && segment >= nLocalHandles) {
+      ret = ncclInternalError;
+      goto fail;
+    }
     if (r != devr->lsaSelf && reuseLocal) {
       INFO(NCCL_REG, "Symmetric window reusing system-memory handle rank %d segment %d", r, segment);
     }
@@ -502,7 +510,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
 
   for (int r = 0; r < devr->lsaSize; r++) {
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, r, messages, maxSegments, segmentCounts[r],
-                                                       mem->memHandles, mem->bigOffset),
+                                                       mem->memHandles, mem->numSegments, mem->bigOffset),
                   ret, fail);
   }
   // Ensure everyone has imported my mem handles.
@@ -1440,37 +1448,63 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
     if (ncclCuMemEnable()) {
       // Classify the pointer before ncclCuMemGetAddressRange. hipMalloc is not
       // cuMem; retaining it WARNs on every registration and can fault on HIP 7.0.
+      // A failed probe must still allgather: returning here hangs peers in it.
       ncclResult_t probeRet = ncclSuccess;
       CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
-      CUCHECKGOTO(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)userPtr), ret,
-                  fail_locReg);
-      if (memType == CU_MEMORYTYPE_HOST) {
+      struct ncclDevrState* devr = &comm->devrState;
+      int* kinds = nullptr;
+      if (devr->lsaSize > 1) {
+        NCCLCHECKGOTO(ncclCalloc(&kinds, devr->lsaSize), ret, fail_locReg);
+      }
+      auto noteProbeFailure = [&](hipError_t err) {
+        if (err == hipSuccess || probeRet != ncclSuccess) return;
+        WARN("HIP failure '%s' while classifying window %p", hipGetErrorString(err), userPtr);
+        (void)hipGetLastError();
+        probeRet = ncclUnhandledCudaError;
+      };
+      noteProbeFailure(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)userPtr));
+      if (probeRet == ncclSuccess && memType == CU_MEMORYTYPE_HOST) {
         hasSysmemSegment = true;
-      } else {
-#if HIP_VERSION >= 71260540
+      } else if (probeRet == ncclSuccess) {
+#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
         int legacyIpcCap = 0;
         CUdeviceptr base = 0;
         size_t baseSize = 0;
-        CUCHECKGOTO(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)userPtr), ret, fail_locReg);
-        CUCHECKGOTO(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
-                                          (CUdeviceptr)base),
-                    ret, fail_locReg);
-        if (!legacyIpcCap) {
+        noteProbeFailure(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)userPtr));
+        if (probeRet == ncclSuccess) {
+          noteProbeFailure(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
+                                                 (CUdeviceptr)base));
+        }
+        if (probeRet == ncclSuccess && !legacyIpcCap) {
           probeRet = ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize,
                                               &numSegments, &hasSysmemSegment);
         }
 #else
-        if (memType != CU_MEMORYTYPE_DEVICE) hasSysmemSegment = true;
+        // 7.0.2.x cannot retain the allocation. Walk every mapping: a device
+        // first page must not hide a later host page.
+        uintptr_t cursor = reinterpret_cast<uintptr_t>(userPtr);
+        uintptr_t end = cursor + userSize;
+        while (probeRet == ncclSuccess && !hasSysmemSegment && cursor < end) {
+          CUdeviceptr base = 0;
+          size_t baseSize = 0;
+          noteProbeFailure(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)cursor));
+          if (probeRet != ncclSuccess || baseSize == 0) break;
+          CUmemorytype segType = CU_MEMORYTYPE_DEVICE;
+          uintptr_t attrAt = base != 0 ? (uintptr_t)base : cursor;
+          noteProbeFailure(cuPointerGetAttribute(&segType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)attrAt));
+          if (probeRet != ncclSuccess) break;
+          if (segType != CU_MEMORYTYPE_DEVICE) hasSysmemSegment = true;
+          uintptr_t next = attrAt + baseSize;
+          if (next <= cursor) break;
+          cursor = next;
+        }
 #endif
       }
       // Host VMM cannot cudaIpcGetMemHandle. Allgather the classify result so a
       // host rank cannot return while a device peer still enters the IPC exchange.
-      struct ncclDevrState* devr = &comm->devrState;
       if (devr->lsaSize > 1) {
-        int* kinds = nullptr;
         // 0 = device, 1 = host, 2 = probe failed.
         int localKind = (probeRet != ncclSuccess) ? 2 : (hasSysmemSegment ? 1 : 0);
-        NCCLCHECKGOTO(ncclCalloc(&kinds, devr->lsaSize), ret, fail_locReg);
         kinds[devr->lsaSelf] = localKind;
         ncclResult_t agRet = bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf,
                                                          devr->lsaSize, kinds, sizeof(int));
