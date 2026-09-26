@@ -1954,8 +1954,13 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
 
 template <bool useGCR, bool scopeFields>
 char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index) {
+  // Reserve the caller's packets plus the native-SDMA FENCE/TRAP epilogue that
+  // libhsakmt appends on the doorbell (0 on non-native paths), so this producer's
+  // write index stays in step with the submitted wptr and the free-space check
+  // below accounts for those bytes.
+  const uint32_t reserve_size = cmd_size + queue_resource_.SdmaHwQueueEpilogueBytes;
   // Ring is full when all but one byte is written.
-  if (cmd_size >= kQueueSize) {
+  if (reserve_size >= kQueueSize) {
     return nullptr;
   }
 
@@ -1965,14 +1970,14 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
     // Check whether a linear region of the requested size is available.
     // If == cmd_size: region is at beginning of ring.
     // If < cmd_size: region intersects end of ring, pad with no-ops and retry.
-    if (WrapIntoRing(curr_index + cmd_size) < cmd_size) {
+    if (WrapIntoRing(curr_index + reserve_size) < reserve_size) {
       PadRingToEnd(curr_index);
       curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
       continue;
     }
 
     // Check whether the engine has finished using this region.
-    const uint64_t new_index = curr_index + cmd_size;
+    const uint64_t new_index = curr_index + reserve_size;
 
     if (CanWriteUpto(new_index) == false) {
       // Wait for read index to move and try again.
@@ -2049,12 +2054,16 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size) {
-  if (cmd_size > kQueueSize) {
+  // Advance by the caller's packets plus the reserved native-SDMA epilogue so the
+  // doorbell wptr matches what AcquireWriteAddress reserved; libhsakmt fills the
+  // reserved [end-epilogue, end) region with FENCE+TRAP.
+  const uint32_t reserve_size = cmd_size + queue_resource_.SdmaHwQueueEpilogueBytes;
+  if (reserve_size > kQueueSize) {
     assert(false && "cmd_addr is outside the queue buffer range");
     return;
   }
 
-  UpdateWriteAndDoorbellRegister(curr_index, curr_index + cmd_size);
+  UpdateWriteAndDoorbellRegister(curr_index, curr_index + reserve_size);
 }
 
 template <bool useGCR, bool scopeFields>
@@ -2135,7 +2144,7 @@ void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, 
     packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
     packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
 
-    packet_addr->DATA_UNION.data = fence_value;\
+    packet_addr->DATA_UNION.data = fence_value;
   }
 }
 

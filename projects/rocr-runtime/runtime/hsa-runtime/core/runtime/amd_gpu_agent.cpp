@@ -879,7 +879,13 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
     case 11:
     case 12:
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
+        // DXG wraps SDMA packets in GCR itself, so useGCR=false for both. But gfx12
+        // requires explicit SDMA_MEMORY_SCOPE_SYS on writes to system memory (e.g. the
+        // completion-signal atomic) to be visible to the host CPU; without it the host
+        // poll never observes the decrement. gfx11 does not need the scope field.
+        sdma = (supported_isas()[0]->GetMajorVersion() >= 12)
+                   ? static_cast<BlitSdmaBase*>(new BlitSdmaV6())
+                   : static_cast<BlitSdmaBase*>(new BlitSdmaV4());
       } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
       } else {

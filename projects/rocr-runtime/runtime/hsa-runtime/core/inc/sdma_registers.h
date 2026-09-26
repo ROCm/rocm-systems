@@ -1929,7 +1929,6 @@ typedef struct SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_TAG_GFX1250 {
   static const size_t kMaxSize_ = 0x3fffffe0;
   static const size_t kAlignment_ = 32;
 } SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250;
-
 // clang-format on
 
 }  // namespace amd
