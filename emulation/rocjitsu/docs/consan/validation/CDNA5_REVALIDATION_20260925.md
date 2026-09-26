@@ -2509,3 +2509,26 @@ Normal GCC ConSan unit tests pass: 1,006 passed, two existing optional
 artifact-dependent benchmark tests skipped (`sgemm-bank-fix-unit-tests.log`).
 The fresh immutable-hook replay `sgemm-bank-fix-probe-v1` is still pending;
 the red table cell has not been promoted on unit-test evidence alone.
+
+
+### Repaired SGEMM solution passes; full qualification restarted
+
+`sgemm-bank-fix-probe-v1/default/result.json` records a normal exit after
+118.09 seconds. The exact 511 solution that previously retried indefinitely
+passes its numerical oracle and both instrumented dispatches, with complete
+512/512 access, 22/22 barrier, 4/4 atomic and 4/4 fence coverage, no diagnostics,
+and two completed report epochs. Its one-kernel allowlist is diagnostic scope;
+it does not substitute for the six-shard family qualification.
+
+A fresh full-allowlist six-shard Default clean is running under
+`sgemm-bank-fixed-full-clean`, using the immutable repaired hook and the
+original 14,400-second per-shard budget. The cell moves from red to orange
+for pending full qualification. The matching targeted clean/fault replay is
+prepared as `sgemm-bank-fixed-high-qualification.py`.
+
+The initial 28-test `ConSanGfx1250Sim` group has 27 passes and one evidence
+check failure in `Atomic` (the numerical check passes). The same failure
+reproduces with both preserved pre-fix hooks, `tensor-store-default-hook-v1`
+and `report-cap1g-hook`: publication records are incomplete and the expected
+`visible_sync` evidence is absent. This is being tracked separately from the
+bank repair. The wider gfx1250 ConSan test selection is running.
