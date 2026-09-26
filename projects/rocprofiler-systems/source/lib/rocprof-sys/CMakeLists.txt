@@ -68,6 +68,17 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-binary
 )
 
+# The PMC objects are consumed via $<TARGET_OBJECTS>, so the backend target has to be
+# attached to the final libraries as well to carry hipFile's headers and compile
+# definitions. It contributes no link-time dependency on libhipfile; the wrapper
+# dlopen's it at first sample.
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    target_link_libraries(
+        rocprofiler-systems-static-library
+        PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend
+    )
+endif()
+
 set_target_properties(
     rocprofiler-systems-static-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}
@@ -106,6 +117,13 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-binary
 )
+
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    target_link_libraries(
+        rocprofiler-systems-shared-library
+        PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend
+    )
+endif()
 
 target_link_options(
     rocprofiler-systems-shared-library
