@@ -1,3 +1,4 @@
+import argparse
 import tempfile
 import unittest
 import unittest.mock
@@ -54,6 +55,38 @@ class ScratchDirTest(unittest.TestCase):
         second = driver.make_scratch_dir(obj, "rccl-dc-")
 
         self.assertNotEqual(first, second)
+        # Pin the parent too, so the case fails rather than passing on
+        # mkdtemp's own uniqueness if the scratch dir escapes the build tree.
+        for scratch in (first, second):
+            self.assertEqual(Path(scratch).parent, Path(self._build.name))
+
+    def test_do_compile_removes_a_scratch_dir_that_is_not_empty(self):
+        """rmtree rather than rmdir: a step that leaves an extra file behind
+        used to leak the whole directory into the build tree."""
+        def fake_run(cmd, description=""):
+            asm = cmd[cmd.index('-o') + 1]
+            Path(asm).write_text("")
+            # An unexpected leftover, e.g. a crash dump or a .d the driver
+            # does not know to name. rmdir would refuse to remove the parent.
+            Path(asm).with_name("leftover.tmp").write_text("")
+
+        out_dir = Path(self._build.name)
+        args = argparse.Namespace(
+            clang="clang", arch="gfx942", source="kernel.cpp",
+            keep_temps=False, output=str(out_dir / "kernel.o"))
+
+        saved = (driver.discover_tools, driver.run,
+                 driver.extract_device_function)
+        driver.discover_tools = lambda _: ("clang", "ld.lld")
+        driver.run = fake_run
+        driver.extract_device_function = lambda lines: ([], {})
+        try:
+            driver.do_compile(args, [])
+        finally:
+            (driver.discover_tools, driver.run,
+             driver.extract_device_function) = saved
+
+        self.assertEqual(list(out_dir.glob("rccl-dc-*")), [])
 
 
 class DropLocalNoDeadStripTest(unittest.TestCase):
