@@ -2754,3 +2754,11 @@ fault; four remain pending. Both full clean sweeps still have three accepted
 small shapes and three pending large shapes. Evidence is the terminal trial-3
 record under `sgemm-bank-fixed-untimed-high-fault`; the table remains orange
 until full clean qualification completes.
+
+Trial 4 completes in 1,158 seconds with
+8 ConSan conflicts, all 650 numerical cases passing,
+complete applicable coverage, exactly one intended mutation, and healthy checks
+before and after. Five completed trials have detected the fault; three remain
+pending. Both full clean sweeps remain at three accepted small shapes, with
+three large shapes still running. The terminal trial-4 record under
+`sgemm-bank-fixed-untimed-high-fault` supplies this checkpoint.
