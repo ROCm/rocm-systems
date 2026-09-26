@@ -33,6 +33,57 @@ TensorCase tile(std::array<uint32_t, 5> dimensions) {
   return result;
 }
 
+TEST(ConSanTensor, SuperColliderPlansFullWaveSpillAndDescriptorSafeScalarState) {
+  for (const bool alias : {false, true}) {
+    SCOPED_TRACE(alias);
+    const auto tensor = cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                                            {.vaddr4 = 124,
+                                             .vaddr0 = 0,
+                                             .vaddr1 = static_cast<uint8_t>(alias ? 1 : 12),
+                                             .vaddr2 = 124,
+                                             .vaddr3 = 124});
+    std::vector<uint32_t> guest(tensor.begin(), tensor.end());
+    guest.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+    TestOptions options = test_options();
+    options.mode = Mode::SuperCollider;
+    options.probe_lds_check_trap = true;
+    options.supercollider_report_buffer_address = 0x200000;
+    const auto result =
+        test_lower_consan(make_gfx1250_code_object(guest, "tensor_compare"), options);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.patches.size(), 1u);
+    const auto &patch = result.patches.front();
+    EXPECT_EQ(patch.kind, PatchKind::LdsStoreCheckTrap);
+    EXPECT_EQ(patch.spilled_vgpr_count, detail::kTensorLoadCompareScratchVgprs);
+    EXPECT_GE(patch.required_private_segment_size, detail::kTensorLoadCompareScratchVgprs * 4u);
+    EXPECT_GE(patch.required_sgpr_count, alias ? 12u : 4u);
+    EXPECT_TRUE(patch.relocated_guest_instruction_offset.has_value());
+  }
+}
+
+TEST(ConSanTensor, SuperColliderRejectsUnsafeSpillOrMisalignedExplicitScratch) {
+  const auto tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 12, .vaddr2 = 124, .vaddr3 = 124});
+  std::vector<uint32_t> guest(tensor.begin(), tensor.end());
+  guest.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+  for (const bool dynamic_stack : {false, true}) {
+    SCOPED_TRACE(dynamic_stack);
+    TestOptions options = test_options();
+    options.mode = Mode::SuperCollider;
+    options.probe_lds_check_trap = true;
+    if (!dynamic_stack)
+      options.scratch_vgpr = 1u;
+    const auto result = test_lower_consan(
+        make_gfx1250_code_object(guest, "tensor_unavailable_resources", 15u, true, dynamic_stack),
+        options);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+    EXPECT_FALSE(result.modified());
+    EXPECT_EQ(access_lowering_count(result, LoweringOutcomeKind::ResourceRejected), 1u);
+  }
+}
+
 TEST(ConSanTensor, DefaultProbeExecutesDmaAndPublishesRuntimeWidthWithGuestStatePreserved) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   const auto tensor =
