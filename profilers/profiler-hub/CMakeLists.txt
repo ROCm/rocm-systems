@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 project(profiler-hub VERSION 0.2.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -18,9 +18,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # ------------------------------------------------------------ #
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
-option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PROFILER_HUB_FETCH_DEPENDENCIES
+    "Download missing or unsuitable dependencies at configure time"
+    OFF
+)
 
 if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
@@ -196,10 +201,9 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
-target_link_options(
-    profiler-hub
-    PRIVATE -Wl,--exclude-libs,$<TARGET_FILE_NAME:profiler-hub-sqlite3-static>
-)
+if(TARGET profiler-hub-sqlite3-shared)
+    set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
 
 # Embed semantic version + ABI version on the shared library so that
 # libprofiler-hub.so.<MAJOR> is the SONAME and libprofiler-hub.so.<MAJOR>.<MINOR>.<PATCH>
@@ -247,9 +251,10 @@ endforeach()
 # target_link_libraries() above (that only supplies the $<BUILD_INTERFACE:>
 # object library), so consumers of the *installed* static package would
 # otherwise get no transitive link requirements at all. Explicitly restore
-# the ones that are genuinely resolvable by real consumers; queries,
-# sqlite3, and profiler-hub-objects itself are always in-tree-only and
-# never belong here. nlohmann_json is deliberately excluded too: it is a
+# the ones that are genuinely resolvable by real consumers; queries and
+# profiler-hub-objects itself are always in-tree-only and never belong here.
+# sqlite3 is omitted, as it has always been: listing it would change the
+# installed static contract. nlohmann_json is deliberately excluded too: it is a
 # PRIVATE, header-only dependency of profiler-hub-objects that never appears
 # in the installed public headers, so it carries no link symbols a static
 # consumer needs. profiler-hub (SHARED) needs no such list: its dependencies
