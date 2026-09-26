@@ -2114,3 +2114,11 @@ no mismatch markers. The previous third-shard timeout is resolved.
 Unsupported tensor-DMA comparison still prevents complete analysis
 (`sc-current-tensor-clean/tensile-sk-mxf8f4gemm-tdm`), so its orange cell
 now names that remaining limitation.
+
+MXF8 TDM also completes all six current SuperCollider clean shards, with
+passing numerical oracles and no mismatch markers. Tensor-DMA comparison
+is unsupported and analysis remains incomplete
+(`sc-current-tensor-clean/tensile-sk-mxf8gemm-tdm`); its cell is orange.
+The resumed `topk-current-sc-clean` passes with sleep=15 and the current
+hook; its predeclared fault campaign is running with independent health
+and smoke checks.
