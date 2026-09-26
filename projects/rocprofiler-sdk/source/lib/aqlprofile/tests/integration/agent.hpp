@@ -40,11 +40,16 @@
 #include "lib/aqlprofile/aqlprofile.hpp"
 
 #define CHECK_HSA(x)                                                                               \
-    if((x) != HSA_STATUS_SUCCESS)                                                                  \
-    {                                                                                              \
-        std::cerr << __FILE__ << " error at " << __LINE__ << std::endl;                            \
-        exit(-1);                                                                                  \
-    }
+    [&]() {                                                                                        \
+        auto _status = (x);                                                                        \
+        if(_status != HSA_STATUS_SUCCESS)                                                          \
+        {                                                                                          \
+            std::cerr << __FILE__ << ':' << __LINE__ << ": HSA call failed with error code "       \
+                      << _status << std::endl;                                                     \
+            exit(-1);                                                                              \
+        }                                                                                          \
+        return _status;                                                                            \
+    }()
 
 inline bool
 operator==(const aqlprofile_pmc_event_t& a, const aqlprofile_pmc_event_t& b)

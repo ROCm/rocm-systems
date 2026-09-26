@@ -21,14 +21,8 @@
 // SOFTWARE.
 
 #include "agent.hpp"
+#include <chrono>
 #include <cstring>
-
-#define CHECK_HSA(x)                                                                               \
-    if((x) != HSA_STATUS_SUCCESS)                                                                  \
-    {                                                                                              \
-        std::cerr << __FILE__ << " error at " << __LINE__ << std::endl;                            \
-        exit(-1);                                                                                  \
-    }
 
 std::vector<std::shared_ptr<AgentInfo>> AgentInfo::gpu_agents{};
 hsa_agent_t                             AgentInfo::cpu_agent{0};
@@ -233,6 +227,11 @@ AgentInfo::iterate_agents()
 bool
 Queue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet) const
 {
+    using namespace std::chrono_literals;
+    hsa_signal_t signal{};
+    CHECK_HSA(hsa_signal_create(1, 0, nullptr, &signal));
+    packet->completion_signal = signal;
+
     const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
 
     size_t index      = (write_idx % queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
@@ -247,17 +246,18 @@ Queue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet) const
     header->store(slot_data[0], std::memory_order_release);
     hsa_signal_store_screlease(queue->doorbell_signal, write_idx);
 
-    int loops = 0;
-    while(hsa_queue_load_read_index_relaxed(queue) <= write_idx)
+    if(hsa_signal_wait_scacquire(signal,
+                                 HSA_SIGNAL_CONDITION_LT,
+                                 1,
+                                 std::chrono::nanoseconds{10s}.count(),
+                                 HSA_WAIT_STATE_BLOCKED) != 0)
     {
-        loops++;
-        usleep(1);
-        if(loops > 10000)
-        {
-            std::cerr << "Codeobj packet submission failed!" << std::endl;
-            return false;
-        }
+        std::cerr << "PM4 packet completion signal timeout!" << std::endl;
+        CHECK_HSA(hsa_signal_destroy(signal));
+        return false;
     }
+
+    CHECK_HSA(hsa_signal_destroy(signal));
     return true;
 }
 
