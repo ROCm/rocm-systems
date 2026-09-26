@@ -2828,3 +2828,15 @@ SuperCollider shard 3 (511-by-511-by-511) also passes in 13,209 seconds:
 The full sweep now has five accepted shards; only the 513 shape remains running.
 The Default full sweep still has three accepted small shapes and three large
 shapes pending.
+
+### Default large-shape clean execution limits
+
+The 511 and 512 shapes in `sgemm-bank-fixed-full-clean` reach their actual
+14,400-second per-shard execution limits. Their terminal oracles record 155
+and 159 numerical cases, respectively, and one of two passing clients. The
+only oracle failure reasons are the execution budget and missing second client.
+Retained `run-3.log` and `run-4.log` contain 312 and 320 Default reports with
+zero reported diagnostics/conflicts. Coverage is incomplete after termination,
+so neither shard qualifies as clean. The cell remains orange and now explicitly
+records both timeouts. The 513 shape remains running; the completed 8/8 fault
+campaign and its accepted untimed matching clean remain valid separate evidence.
