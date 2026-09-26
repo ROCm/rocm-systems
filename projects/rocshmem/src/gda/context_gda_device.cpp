@@ -131,6 +131,30 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
   qps[qp_index].get_nbi(dest, source, nelems, wf_info);
 }
 
+__device__ void GDAContext::putmem_scalar(void *dest, const void *source,
+                                          size_t nelems, int pe) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    memcpy_lane_scalar<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems);
+    return;
+  }
+  putmem_nbi(dest, source, nelems, pe);
+}
+
+__device__ void GDAContext::getmem_scalar(void *dest, const void *source,
+                                          size_t nelems, int pe) {
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    memcpy_lane_scalar<MemcpyKind::Get>(dest, remote, nelems);
+    return;
+  }
+  LOGD_ERROR_ABORT("gda::g not implemented");
+}
+
 __device__ void GDAContext::fence() {
   /**
    * Operations issued by this context may use two backends: RDMA QPs
