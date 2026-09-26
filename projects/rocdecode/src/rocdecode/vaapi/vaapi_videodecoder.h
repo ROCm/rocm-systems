@@ -99,6 +99,7 @@ typedef struct {
     int drm_fd;
 #else
     LUID adapter_luid;
+    int active_decoder_count; // when this drops to zero, the probe va_display can be terminated
 #endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
@@ -145,6 +146,7 @@ private:
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
 #ifdef _WIN32
+    uint32_t va_ctx_id_;
     // All D3D12 device/resource/staging state lives in this helper (see d3d12_interop.h).
     std::unique_ptr<D3D12Interop> d3d12_interop_;
 #endif
@@ -180,6 +182,7 @@ public:
     rocDecStatus CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap);
 #ifdef _WIN32
     rocDecStatus GetAdapterLuid(int device_id, LUID *adapter_luid);
+    void ReleaseProbeDisplay(uint32_t va_ctx_id);
 #endif
 
 private:

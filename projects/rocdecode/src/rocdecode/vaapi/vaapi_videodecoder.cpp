@@ -77,6 +77,7 @@ VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) 
     pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
     slice_data_buf_id_{0} {
 #ifdef _WIN32
+    va_ctx_id_ = 0;
     d3d12_interop_ = std::make_unique<D3D12Interop>();
 #endif
 };
@@ -112,6 +113,12 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
         if (vaTerminate(va_display_) != VA_STATUS_SUCCESS) {
             CriticalLog(g_rocdec_logger, "Failed to terminate VA");
         }
+#ifdef _WIN32
+        // Terminate the VaContext probe display early (before DLL_PROCESS_DETACH).
+        // During DLL unload, the D3D12 video interface becomes non-responsive,
+        // causing vaTerminate to hang indefinitely on the probe display.
+        VaContext::GetInstance().ReleaseProbeDisplay(va_ctx_id_);
+#endif
     }
 }
 
@@ -201,6 +208,9 @@ rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#ifdef _WIN32
+    va_ctx_id_ = va_ctx_id;
+#endif
     rocdec_status = CreateDecoderConfig();
     if (rocdec_status != ROCDEC_SUCCESS) {
         CriticalLog(g_rocdec_logger, "Failed to create a VAAPI decoder configuration.");
@@ -794,9 +804,16 @@ VaContext::~VaContext() {
         }
 #endif
         if (va_contexts_[i].va_display) {
+#ifdef _WIN32
+            // On Windows, the probe display should have been terminated by the last
+            // ReleaseProbeDisplay during normal decoder destruction. If we reach here
+            // with a non-null display, skip vaTerminate — during DLL_PROCESS_DETACH
+            // the D3D12 video interface is non-responsive and vaTerminate would hang.
+#else
             if (vaTerminate(va_contexts_[i].va_display) != VA_STATUS_SUCCESS) {
                 CriticalLog(g_rocdec_logger, "Failed to terminate VA");
             }
+#endif
         }
     }
 #ifdef ROCDECODE_USE_DLOPEN_VA
@@ -862,6 +879,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         va_contexts_[va_ctx_idx].drm_fd = -1;
 #else
         memcpy(&va_contexts_[va_ctx_idx].adapter_luid, hip_dev_prop.luid, sizeof(LUID));
+        va_contexts_[va_ctx_idx].active_decoder_count = 0;
 #endif
         va_contexts_[va_ctx_idx].va_display = 0;
         va_contexts_[va_ctx_idx].num_dec_engines = 1;
@@ -1016,6 +1034,9 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
             InfoLog(g_rocdec_logger, va_driver_path);
         }
         *va_display = new_va_display;
+#ifdef _WIN32
+        va_contexts_[va_ctx_id].active_decoder_count++;
+#endif
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_SUCCESS;
     }
@@ -1039,6 +1060,21 @@ rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
     CriticalLog(g_rocdec_logger, "No VA context found for device_id=" + ROCDEC_TOSTR(device_id));
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_INVALID_PARAMETER;
+}
+
+void VaContext::ReleaseProbeDisplay(uint32_t va_ctx_id) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (va_ctx_id >= va_contexts_.size()) return;
+    auto& ctx = va_contexts_[va_ctx_id];
+    if (ctx.active_decoder_count > 0) {
+        ctx.active_decoder_count--;
+    }
+    if (ctx.active_decoder_count == 0 && ctx.va_display) {
+        if (vaTerminate(ctx.va_display) != VA_STATUS_SUCCESS) {
+            CriticalLog(g_rocdec_logger, "Failed to terminate VA probe display");
+        }
+        ctx.va_display = 0;
+    }
 }
 #endif
 
