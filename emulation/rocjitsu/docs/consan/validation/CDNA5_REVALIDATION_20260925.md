@@ -2679,3 +2679,15 @@ rows and complete epoch checkpoints. The two larger Default clients emit a
 passing solution 8 row and an epoch 19 checkpoint respectively. Thus those
 runs have progressed beyond the repaired initial stall; their remaining
 runtime is substantial, and full qualification is still pending.
+
+
+### Matching untimed SuperCollider faults complete
+
+`sgemm-bank-fixed-untimed-sc-clean-retry/supercollider/result.json` accepts
+all 650 numerical cases and complete 34,012-site access coverage in 489 seconds.
+The subsequent fault summary records eight admitted, reached, healthy trials:
+the independent numerical oracle fails in all eight, while SuperCollider
+detects none. The campaign's nonzero exit is the expected rejection of its
+0/8 detector score, not an infrastructure failure. This reproduces the earlier
+timed sampling miss under matching untimed controls. Three large full-clean
+shapes remain running, so the cell stays orange for that outstanding gate.
