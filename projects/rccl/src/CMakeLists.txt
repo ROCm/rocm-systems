@@ -225,6 +225,7 @@ set(SRC_FILES
   include/ionic/ionicdvcore.h
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
+  include/xtp_wrap.h
   algorithms/dda/ipc/ipc_gpu_barrier.h
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
@@ -441,6 +442,7 @@ set(SRC_FILES
   misc/ibvwrap.cc
   misc/ionicdvsymbols.cc
   misc/ionicdvwrap.cc
+  misc/xtp_wrap.cc
   misc/kernel_config.cc
   misc/latency_profiler/CollTrace.cc
   misc/latency_profiler/CollTraceEvent.cc

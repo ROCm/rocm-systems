@@ -25,10 +25,12 @@ THE SOFTWARE.
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
+#include "xtp_wrap.h"
 #include "include/graph.h"
 #include "register.h"
 #include "info.h"
@@ -2104,6 +2106,24 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
 
+  // An XTP profile replaces the rank threshold below, but never an explicit
+  // NCCL_PXN_DISABLE. This sits ahead of the arch gate deliberately: the gate
+  // scopes the *built-in*, so consulting after it would make a profile
+  // unable to say anything about an arch the built-in never learned.
+  const char* pxnProfile = nullptr;
+  if (inputStr == nullptr && rcclXtpClassAStr(comm, "PXN", &pxnProfile)) {
+    const bool pxnOn = strcmp(pxnProfile, "on") == 0;
+    if (!pxnOn && strcmp(pxnProfile, "off") != 0) {
+      WARN("XTP: PXN is \"%s\", expected \"on\" or \"off\"; using built-in value", pxnProfile);
+    } else {
+      // The profile states whether PXN is on; RCCL caches whether it is disabled.
+      INFO(NCCL_INIT, "RCCL PXN set as %s by XTP (nRanks=%d)", pxnOn ? "enabled" : "disabled", comm->nRanks);
+      comm->enableCustColl = pxnOn;
+      rcclPxnDisable = comm->pxnDisable = pxnOn ? 0 : 1;
+      return;
+    }
+  }
+
   if ((!archGfx942 && !archGfx950) || inputStr) {
     rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
     return;
@@ -2124,6 +2144,22 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   const char* inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
   const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+
+  // As in rcclSetPxn: a profile outranks the built-in ladder but not
+  // NCCL_P2P_NET_CHUNKSIZE, and is consulted ahead of the arch gate so it can
+  // cover arches the ladder below does not.
+  int64_t chunkProfile = 0;
+  if (inputStr == nullptr && rcclXtpClassAInt(comm, "P2P_NET_CHUNKSIZE", &chunkProfile)) {
+    if (chunkProfile <= 0 || chunkProfile > INT_MAX) {
+      WARN("XTP: P2P_NET_CHUNKSIZE is %ld, which is out of range; using built-in value", (long)chunkProfile);
+    } else {
+      INFO(NCCL_INIT, "RCCL P2P net chunk size set to %ld by XTP (nRanks=%d)", (long)chunkProfile,
+           comm->nRanks);
+      rcclP2pNetChunkSize = comm->p2pNetChunkSize = (int)chunkProfile;
+      return;
+    }
+  }
+
   if ((!archGfx942 && !archGfx950) || inputStr) {
     rcclP2pNetChunkSize = comm->p2pNetChunkSize = RCCL_VALUE_INVALID;
     return;
