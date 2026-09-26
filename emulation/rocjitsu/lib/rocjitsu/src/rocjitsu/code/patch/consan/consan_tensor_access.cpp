@@ -3,6 +3,7 @@
 #include "rocjitsu/code/patch/consan/consan_tensor_access.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_dispatch_identity_source.h"
 #include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_native_abi.h"
@@ -586,6 +587,181 @@ bool append_materialize_tensor_load_source(std::vector<uint32_t> &words, const P
       instrumentation::build_v_and_b32_literal(temporary + 1, (1u << 25) - 1u, temporary + 1, arch),
       binary(cdna5::kVAddNcU64Vop3, address_vgpr, vr(address_vgpr), vr(temporary)));
   return sequence.finish();
+}
+
+uint16_t tensor_load_compare_state_sgprs(const ProgramSite &site) {
+  if (!site.operands.tensor_descriptor_sgprs)
+    return 0;
+  const auto &groups = *site.operands.tensor_descriptor_sgprs;
+  for (size_t group : {0u, 2u, 3u})
+    if (groups[group] != 124u && groups[1] >= groups[group] && groups[1] < groups[group] + 4u)
+      return 12;
+  return 4;
+}
+
+bool append_tensor_load_compare(std::vector<uint32_t> &words, const ProgramSite &site,
+                                std::span<const uint32_t> original, uint16_t scratch_vgpr,
+                                uint16_t state_sgpr, std::span<const uint32_t> delay_words,
+                                std::span<const uint32_t> mismatch_words,
+                                uint32_t &guest_word_offset, rj_code_arch_t arch) {
+  const uint16_t state_count = tensor_load_compare_state_sgprs(site);
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || site.origin != AccessOrigin::TensorLds ||
+      site.kind != LdsAccessKind::Write || !site.operands.tensor_descriptor_sgprs ||
+      original.size() != 3 ||
+      static_cast<uint32_t>(scratch_vgpr) + kTensorLoadCompareScratchVgprs > 256u ||
+      static_cast<uint32_t>(state_sgpr) + state_count > 106u || state_sgpr % 2u != 0)
+    return false;
+  const auto &groups = *site.operands.tensor_descriptor_sgprs;
+  const std::array<unsigned, 4> sizes{4, 8, 4, 4};
+  for (size_t i = 0; i < groups.size(); ++i) {
+    if (i >= 2 && groups[i] == 124u)
+      continue;
+    if (groups[i] + sizes[i] > 106u ||
+        (state_sgpr < groups[i] + sizes[i] &&
+         groups[i] < state_sgpr + static_cast<uint32_t>(state_count)))
+      return false;
+  }
+  const uint16_t hash = scratch_vgpr;
+  const uint16_t iteration_hash = scratch_vgpr + 1;
+  const uint16_t element = scratch_vgpr + 2;
+  const uint16_t count = scratch_vgpr + 3;
+  const uint16_t global = scratch_vgpr + 4;
+  const uint16_t bounds = scratch_vgpr + 6;
+  const uint16_t lds = scratch_vgpr + 7;
+  const uint16_t expected = scratch_vgpr + 8;
+  const uint16_t readback = scratch_vgpr + 10;
+  const uint16_t width = scratch_vgpr + 12;
+  const uint16_t descriptor_archive = scratch_vgpr + 13;
+  const uint16_t completion_address = scratch_vgpr + 14;
+  const uint16_t work = scratch_vgpr + kTensorLoadCompareWorkspaceOffset;
+  const auto zero = scalar_positive_inline_u32(0);
+  const auto one = scalar_positive_inline_u32(1);
+  const auto vr = [](uint16_t reg) { return vector_source_vgpr(reg); };
+  const auto binary = [&](uint16_t opcode, uint16_t dst, uint16_t lhs, uint16_t rhs) {
+    return cdna5::build_vop3(opcode, {.vdst = static_cast<uint8_t>(dst), .src0 = lhs, .src1 = rhs});
+  };
+  const auto select = [&](uint16_t dst, uint16_t when_false, uint16_t when_true) {
+    return cdna5::build_vop3(cdna5::kVCndmaskB32Vop3, {.vdst = static_cast<uint8_t>(dst),
+                                                       .src0 = when_false,
+                                                       .src1 = when_true,
+                                                       .src2 = kAmdGpuVccLo});
+  };
+  InstructionSequence sequence(words);
+  sequence.append(
+      instrumentation::build_s_mov_b64(state_sgpr, kAmdGpuVccLo, arch),
+      instrumentation::build_s_mov_b64(state_sgpr + 2, kAmdGpuExecLo, arch),
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch),
+      instrumentation::build_v_mbcnt_lo_u32_b32(hash, kScalarInlineNegativeOneOperand, zero, arch),
+      instrumentation::build_v_mov_b32_literal(work, 0x9e3779b9u, arch),
+      binary(cdna5::kVMulLoU32Vop3, hash, vr(hash), vr(work)),
+      instrumentation::build_v_xor_b32(hash, groups[0] + 1, hash, arch),
+      instrumentation::build_v_xor_b32(hash, groups[0] + 2, hash, arch),
+      instrumentation::build_v_mov_b32_literal(work, 0x85ebca6bu, arch),
+      binary(cdna5::kVMulLoU32Vop3, iteration_hash, vr(hash), vr(work)));
+  sequence.require(append_select_tensor_load_element(words, site, hash, iteration_hash, element,
+                                                     count, work, arch));
+  sequence.require(append_materialize_tensor_load_source(words, site, element, count, global,
+                                                         bounds, work, arch));
+  sequence.require(
+      append_materialize_tensor_load_lds_address(words, site, element, lds, work, arch));
+  sequence.append(
+      build_v_mov_b32_e32(descriptor_archive, groups[1], arch),
+      instrumentation::build_v_lshrrev_b32(width, scalar_positive_inline_u32(16),
+                                           descriptor_archive, arch),
+      instrumentation::build_v_and_b32(width, scalar_positive_inline_u32(3), width, arch));
+  for (unsigned word = 0; word < 2; ++word)
+    sequence.append(build_v_mov_b32_e32(expected + word, zero, arch),
+                    build_v_mov_b32_e32(readback + word, zero, arch));
+  const auto append_load = [&](bool from_global) {
+    const auto done = sequence.make_label();
+    sequence.append(
+        instrumentation::build_v_cmp_ne_u32_vcc(zero, from_global ? bounds : count, arch),
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, kAmdGpuVccLo, arch));
+    const std::array<uint16_t, 4> global_ops{cdna5::kFlatLoadU8Vflat, cdna5::kFlatLoadU16Vflat,
+                                             cdna5::kFlatLoadB32Vflat, cdna5::kFlatLoadB64Vflat};
+    const std::array<uint16_t, 4> lds_ops{cdna5::kDsLoadU8Vds, cdna5::kDsLoadU16Vds,
+                                          cdna5::kDsLoadB32Vds, cdna5::kDsLoadB64Vds};
+    for (unsigned size = 0; size < 4; ++size) {
+      const auto next = sequence.make_label();
+      sequence.append(
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(size), width, arch));
+      sequence.branch(next, InstructionSequence::BranchKind::VccZero);
+      if (from_global)
+        sequence.append(
+            cdna5::build_vflat(global_ops[size], {.saddr = kGfx1250FlatNoSaddrEncoding,
+                                                  .vdst = static_cast<uint8_t>(expected),
+                                                  .vaddr = static_cast<uint8_t>(global)}));
+      else
+        sequence.append(cdna5::build_vds(lds_ops[size], {.addr = static_cast<uint8_t>(lds),
+                                                         .vdst = static_cast<uint8_t>(readback)}));
+      sequence.branch(done, InstructionSequence::BranchKind::Unconditional);
+      sequence.bind_label(next);
+    }
+    sequence.bind_label(done);
+    sequence.append(
+        from_global ? instrumentation::build_s_wait_global_load0(arch)
+                    : instrumentation::build_s_wait_lds0(arch),
+        instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch));
+  };
+  append_load(true);
+  // Delay publication until the comparison is complete. Otherwise a consumer
+  // released by the DMA's barrier arrival may legally reuse this LDS tile.
+  // D1[0] may also name a word of D0/D2/D3: modifying it in place would then
+  // change that second operand. Such sites use a private scalar D1 copy.
+  const uint16_t dma_descriptor = state_count == 12 ? state_sgpr + 4 : groups[1];
+  std::array<uint32_t, 3> dma{original[0], original[1], original[2]};
+  if (state_count == 12) {
+    for (unsigned word = 0; word < 8; ++word)
+      sequence.append(build_s_mov_b32(dma_descriptor + word, groups[1] + word, arch));
+    dma[2] = (dma[2] & ~0xff00u) | (static_cast<uint32_t>(dma_descriptor) << 8);
+  }
+  sequence.append(
+      instrumentation::build_v_and_b32_literal(work, ~(1u << 18), descriptor_archive, arch),
+      instrumentation::build_v_readlane_b32(dma_descriptor, work, 0, arch),
+      instrumentation::build_valu_to_salu_dependency_wait(arch));
+  const auto original_offset = static_cast<uint32_t>(words.size());
+  sequence.append(dma, build_sopp_encoding(arch, cdna5::kSWaitTensorcntSopp, 0));
+  if (state_count == 4)
+    sequence.append(instrumentation::build_v_readlane_b32(groups[1], descriptor_archive, 0, arch),
+                    instrumentation::build_valu_to_salu_dependency_wait(arch));
+  sequence.append(delay_words);
+  append_load(false);
+  for (unsigned word = 0; word < 2; ++word) {
+    const auto matched = sequence.make_label();
+    sequence.append(
+        instrumentation::build_v_cmp_ne_u32_vcc(vr(expected + word), readback + word, arch));
+    sequence.branch(matched, InstructionSequence::BranchKind::VccZero);
+    sequence.append(mismatch_words);
+    sequence.bind_label(matched);
+  }
+  // The native arrival operates per active lane. Exactly one arrival is due
+  // for an active wave-wide DMA, independently of the original guest EXEC.
+  const auto no_arrival = sequence.make_label();
+  sequence.append(
+      build_v_mov_b32_e32(work, groups[1], arch),
+      instrumentation::build_v_lshrrev_b32(work, scalar_positive_inline_u32(18), work, arch),
+      instrumentation::build_v_and_b32(work, one, work, arch),
+      build_v_mov_b32_e32(work + 1, groups[0], arch),
+      instrumentation::build_v_and_b32(work + 1, scalar_positive_inline_u32(3), work + 1, arch),
+      instrumentation::build_v_cmp_eq_u32_vcc(one, work + 1, arch), select(work, zero, vr(work)),
+      instrumentation::build_v_cmp_ne_u32_vcc(zero, work, arch));
+  sequence.branch(no_arrival, InstructionSequence::BranchKind::VccZero);
+  sequence.append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, one, arch),
+                  build_v_mov_b32_e32(completion_address, groups[1] + 1, arch),
+                  instrumentation::build_v_and_b32_literal(completion_address, 0xffffu,
+                                                           completion_address, arch),
+                  instrumentation::build_v_lshlrev_b32(
+                      completion_address, scalar_positive_inline_u32(3), completion_address, arch),
+                  cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds,
+                                   {.addr = static_cast<uint8_t>(completion_address)}),
+                  build_sopp_encoding(arch, cdna5::kSWaitAsynccntSopp, 0));
+  sequence.bind_label(no_arrival);
+  sequence.append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, state_sgpr + 2, arch),
+                  instrumentation::build_s_mov_b64(kAmdGpuVccLo, state_sgpr, arch));
+  if (!sequence.finish(arch))
+    return false;
+  guest_word_offset = original_offset;
+  return true;
 }
 
 bool append_select_tensor_load_element(std::vector<uint32_t> &words, const ProgramSite &site,

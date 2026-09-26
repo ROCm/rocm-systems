@@ -1081,6 +1081,205 @@ TEST(ConSanTensor, GlobalSourceRejectsAliasesWithoutEmission) {
   }
 }
 
+TEST(ConSanTensor, ValueComparisonPreservesStateAndDefersExactlyOneCompletionArrival) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  for (bool alias : {false, true}) {
+    SCOPED_TRACE(alias);
+    constexpr uint16_t scratch = 8;
+    constexpr uint16_t state = 88;
+    const uint16_t spill_exec = alias ? 100 : 96;
+    const uint16_t d1 = alias ? 1 : 12;
+    constexpr uint16_t report_scratch = scratch + detail::kTensorLoadCompareWorkspaceOffset;
+    const auto tensor =
+        cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage, {.vaddr4 = 124,
+                                                            .vaddr0 = 0,
+                                                            .vaddr1 = static_cast<uint8_t>(d1),
+                                                            .vaddr2 = 124,
+                                                            .vaddr3 = 124});
+    ProgramSite site;
+    site.origin = AccessOrigin::TensorLds;
+    site.kind = LdsAccessKind::Write;
+    site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{0, d1, 124, 124};
+    SpillManager manager(0, 256);
+    const auto spill =
+        build_vgpr_spill_sequence(manager, scratch, detail::kTensorLoadCompareScratchVgprs, arch);
+    ASSERT_TRUE(spill);
+    const auto full_spill = detail::tensor_full_wave_spill(*spill, spill_exec, arch);
+    ASSERT_TRUE(full_spill);
+    std::vector<uint32_t> mismatch;
+    const auto append = [&](const auto &optional) {
+      if (!optional)
+        return false;
+      if constexpr (std::is_integral_v<typename std::decay_t<decltype(optional)>::value_type>)
+        mismatch.push_back(*optional);
+      else
+        mismatch.insert(mismatch.end(), optional->begin(), optional->end());
+      return true;
+    };
+    ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch, 0x200000, arch)));
+    ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch + 1, 0, arch)));
+    ASSERT_TRUE(append(instrumentation::build_v_mov_b32_literal(report_scratch + 2, 1, arch)));
+    ASSERT_TRUE(
+        append(instrumentation::build_flat_store_b32(report_scratch, report_scratch + 2, arch)));
+    ASSERT_TRUE(append(instrumentation::build_s_wait_global_store0(arch)));
+    auto words = full_spill->save_words;
+    uint32_t guest_offset = UINT32_MAX;
+    ASSERT_TRUE(detail::append_tensor_load_compare(words, site, tensor, scratch, state, {},
+                                                   mismatch, guest_offset, arch));
+    ASSERT_LE(guest_offset + tensor.size(), words.size());
+    if (!alias)
+      EXPECT_TRUE(std::equal(tensor.begin(), tensor.end(), words.begin() + guest_offset));
+    else {
+      EXPECT_EQ(words[guest_offset], tensor[0]);
+      EXPECT_EQ(words[guest_offset + 1], tensor[1]);
+      EXPECT_EQ(words[guest_offset + 2], (tensor[2] & ~0xff00u) | ((state + 4u) << 8));
+    }
+    words.insert(words.end(), full_spill->restore_words.begin(), full_spill->restore_words.end());
+    const uint64_t after_dma_wait_pc = (guest_offset + tensor.size() + 1) * 4;
+    for (unsigned size_log2 = 0; size_log2 < 4; ++size_log2) {
+      if (alias && size_log2 != 0)
+        continue;
+      for (bool active : {false, true}) {
+        for (bool in_bounds : {false, true}) {
+          for (bool atomic : {false, true}) {
+            for (bool corrupt : {false, true}) {
+              for (uint32_t exec : {0xffffffffu, 0x80000001u, 0u}) {
+                SCOPED_TRACE(testing::Message() << "size=" << size_log2 << " active=" << active
+                                                << " bounds=" << in_bounds << " atomic=" << atomic
+                                                << " corrupt=" << corrupt << " exec=" << exec);
+                amdgpu::GpuMemory memory("tensor_compare_mem");
+                amdgpu::L2Cache l2("tensor_compare_l2");
+                l2.set_backing_memory(&memory);
+                amdgpu::ComputeUnitCore::Config config{};
+                config.arch = arch;
+                config.num_wf_slots = 1;
+                config.sgprs_per_wf = 106;
+                config.vgprs_per_wf = 64;
+                config.lds_size_kb = alias ? 320 : 4;
+                auto cu = amdgpu::ComputeUnitCore::create("tensor_compare", config, &memory, &l2);
+                ASSERT_NE(cu, nullptr);
+                auto *wave = cu->dispatch_wf(0, 0, 106, 64, 32);
+                ASSERT_NE(wave, nullptr);
+                wave->set_lds_base(cu->allocate_lds(config.lds_size_kb * 1024));
+                ASSERT_NE(wave->lds_base(), UINT32_MAX);
+                wave->set_scratch_base(0x400000);
+                wave->set_scratch_lane_size(256);
+                const auto sb = wave->sgpr_alloc().base, vb = wave->vgpr_alloc().base;
+                for (uint32_t reg = 0; reg < 106; ++reg)
+                  cu->write_sgpr(sb + reg, 0xbeef0000u + reg);
+                cu->write_sgpr(sb, active ? 1 : 0);
+                if (alias) {
+                  // D1[0] is also D0's LDS base. Clearing its completion bit in
+                  // place would redirect the DMA from byte262144 to byte0.
+                  cu->write_sgpr(sb + 1, atomic ? 1u << 18 : 0);
+                  cu->write_sgpr(sb + 2, (in_bounds ? 16u << 16 : 0) | (512u >> 3));
+                  cu->write_sgpr(sb + 3, 0);
+                  cu->write_sgpr(sb + 4, 16u << 16);
+                  for (uint32_t reg = 5; reg < 9; ++reg)
+                    cu->write_sgpr(sb + reg, 0);
+                } else {
+                  cu->write_sgpr(sb + 1, 0);
+                  cu->write_sgpr(sb + 2, 0x100000);
+                  cu->write_sgpr(sb + 3, 0x80000000u);
+                  cu->write_sgpr(sb + 12, (size_log2 << 16) | (atomic ? 1u << 18 : 0));
+                  cu->write_sgpr(sb + 13, (in_bounds ? 16u << 16 : 0) | (512u >> 3));
+                  cu->write_sgpr(sb + 14, 0);
+                  cu->write_sgpr(sb + 15, 16u << 16);
+                  for (uint32_t reg = 16; reg < 20; ++reg)
+                    cu->write_sgpr(sb + reg, 0);
+                }
+                const uint32_t source_base = cu->read_sgpr(sb + 2);
+                const uint32_t payload_base = wave->lds_base() + cu->read_sgpr(sb + 1);
+                std::array<uint32_t, 106> scalar_before{};
+                for (uint32_t reg = 0; reg < 106; ++reg)
+                  scalar_before[reg] = cu->read_sgpr(sb + reg);
+                const uint64_t barrier_before =
+                    0xabcd000000000000ull | amdgpu::lds_barrier_cell_init_state(corrupt ? 2 : 1);
+                cu->lds().write64(wave->lds_base() + 512, barrier_before);
+                for (uint32_t byte = 0; byte < (16u << size_log2); ++byte) {
+                  if (!alias || in_bounds)
+                    memory.write8(source_base + byte, static_cast<uint8_t>(byte + 1));
+                  cu->lds().write8(payload_base + byte, 0x5a);
+                }
+                memory.write32(0x200000, 0);
+                for (uint32_t reg = 0; reg < 64; ++reg)
+                  for (uint32_t lane = 0; lane < 32; ++lane)
+                    cu->write_vgpr(vb + reg, lane, 0xa5000000u + reg * 32 + lane);
+                for (size_t i = 0; i < words.size(); ++i)
+                  memory.write32(i * 4, words[i]);
+                wave->set_exec(exec);
+                wave->set_vcc(0x12345678);
+                wave->write_scc(in_bounds);
+                wave->pc = 0;
+                bool observed_dma = false;
+                size_t steps = 0;
+                while (wave->pc < words.size() * 4) {
+                  ASSERT_LT(steps++, words.size() * 100);
+                  if (!observed_dma && wave->pc == after_dma_wait_pc) {
+                    observed_dma = true;
+                    EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512), barrier_before);
+                    for (uint32_t byte = 0; byte < (16u << size_log2); ++byte)
+                      EXPECT_EQ(cu->lds().read8(payload_base + byte),
+                                active ? (in_bounds ? static_cast<uint8_t>(byte + 1) : uint8_t{0})
+                                       : uint8_t{0x5a});
+                    if (active && corrupt)
+                      cu->lds().write8(payload_base, 0xa5);
+                  }
+                  cu->step();
+                }
+                cu->flush_all();
+                EXPECT_TRUE(observed_dma);
+                EXPECT_EQ(memory.read32(0x200000), active && corrupt ? 1u : 0u);
+                EXPECT_EQ(cu->lds().read64(wave->lds_base() + 512),
+                          active && atomic ? amdgpu::lds_barrier_cell_update_arrive(barrier_before)
+                                           : barrier_before);
+                EXPECT_TRUE(wave->wait_counters().empty());
+                EXPECT_EQ(wave->exec(), exec);
+                EXPECT_EQ(wave->vcc(), 0x12345678u);
+                EXPECT_EQ(wave->read_scc(), in_bounds);
+                for (uint32_t reg = 0; reg < 64; ++reg)
+                  for (uint32_t lane = 0; lane < 32; ++lane)
+                    EXPECT_EQ(cu->read_vgpr(vb + reg, lane), 0xa5000000u + reg * 32 + lane);
+                for (uint32_t reg = 0; reg < 106; ++reg) {
+                  if ((reg >= state && reg < static_cast<uint32_t>(state) +
+                                                 detail::tensor_load_compare_state_sgprs(site)) ||
+                      (reg >= spill_exec && reg < spill_exec + 2u))
+                    continue;
+                  EXPECT_EQ(cu->read_sgpr(sb + reg), scalar_before[reg]) << reg;
+                }
+                wave->halt();
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ConSanTensor, ValueComparisonRejectsDescriptorScalarOverlapWithoutEmission) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  ProgramSite site;
+  site.origin = AccessOrigin::TensorLds;
+  site.kind = LdsAccessKind::Write;
+  site.operands.tensor_descriptor_sgprs = std::array<uint16_t, 4>{0, 12, 124, 124};
+  const auto tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 0, .vaddr1 = 12, .vaddr2 = 124, .vaddr3 = 124});
+  const std::vector<uint32_t> prefix{0xabcdef01u};
+  auto words = prefix;
+  uint32_t guest_offset = 77;
+  for (uint16_t state : {0, 2, 10, 12, 18, 89, 104}) {
+    EXPECT_FALSE(detail::append_tensor_load_compare(words, site, tensor, 8, state, {}, {},
+                                                    guest_offset, arch));
+    EXPECT_EQ(words, prefix);
+    EXPECT_EQ(guest_offset, 77u);
+  }
+  EXPECT_FALSE(
+      detail::append_tensor_load_compare(words, site, tensor, 211, 88, {}, {}, guest_offset, arch));
+  EXPECT_EQ(words, prefix);
+}
+
 TEST(ConSanTensor, CoordinateDivisionRejectsRegisterAliasesWithoutEmission) {
   const std::vector<uint32_t> prefix{0xabcdef01u};
   auto words = prefix;
