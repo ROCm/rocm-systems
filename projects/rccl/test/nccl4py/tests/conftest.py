@@ -217,8 +217,10 @@ def _uv_env_python(wheel: str) -> str:
     env_log = os.path.join(LOGDIR, "nccl4py_uv_env.log")
     open(env_log, "w").close()
 
+    # The venv is disposable scratch, but uv refuses to reuse an existing one,
+    # so without --clear a second run on the same tree fails during setup.
     proc = _run_logged(
-        [UV, "venv", "--python", UV_PYTHON, NCCL4PY_VENV],
+        [UV, "venv", "--clear", "--python", UV_PYTHON, NCCL4PY_VENV],
         env_log,
         cwd=WORKDIR,
         header="### uv venv",

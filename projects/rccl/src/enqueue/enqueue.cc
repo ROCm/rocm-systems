@@ -1515,7 +1515,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
         void* regAddr = NULL;
-        if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
+        // CE/memcpy connections stage through proxy buffers and do not provide
+        // the pointer-exchange slot required by the direct registered path.
+        if ((conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) && conn->conn.ptrExchange != nullptr) {
           // We require users registering buffers on both sides
           NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
                                                  &plan->cleanupQueue),
@@ -4654,10 +4656,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // RCCL: a collective must not be issued on a suspended communicator. The queues cover a suspend or resume still
   // pending in this group, which the group drains before launching.
   if (info->comm->memManager) {
-    bool commIsSuspended = ncclIntruQueueEmpty(&info->comm->resumeTaskQueue) &&
-                           (!ncclIntruQueueEmpty(&info->comm->suspendTaskQueue) ||
-                            __atomic_load_n(&info->comm->memManager->released, __ATOMIC_ACQUIRE));
-    if (commIsSuspended) {
+    if (ncclCommIsSuspended(info->comm)) {
       WARN("%s: communicator %p is suspended; call ncclCommResume before issuing collectives", info->opName,
            info->comm);
       ret = ncclInvalidUsage;

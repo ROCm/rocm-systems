@@ -65,9 +65,11 @@
 // net types that gin_v13.h also pulls in.
 
 #include <cstdint>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "nccl_net.h"     // ncclNet_v12_t + v12 net ABI, NCCL_NET_DEVICE_*
 #include "gin/gin_v13.h"  // ncclGin_v13_t, ncclGinConfig_v13_t
 
@@ -86,10 +88,17 @@ enum PluginTestMode {
 
 static void recordLine(const char* envVar) {
   const char* path = getenv(envVar);
-  if (path == nullptr) return;
+  if (path == nullptr || path[0] == '\0') return;
 
-  FILE* f = fopen(path, "a");
-  if (f == nullptr) return;
+  // O_NOFOLLOW: a pre-created symlink at a shared path must not redirect the
+  // counter into another file.
+  int fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+  if (fd < 0) return;
+  FILE* f = fdopen(fd, "a");
+  if (f == nullptr) {
+    close(fd);
+    return;
+  }
 
   fputs("1\n", f);
   fclose(f);

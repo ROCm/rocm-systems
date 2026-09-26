@@ -224,8 +224,12 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         std::string                                  archName;
     };
 
+    // The 2-shot cap is part of the opt-in env, not the suite. gfx1250's table
+    // leaves ceNonRegMax[AllReduce] at 0, so a suite-wide RCCL_CE_AR_MAX_MSG_BYTES
+    // would make DefaultOff_2Shot_Gfx1250 look enabled.
     const std::unordered_map<std::string, std::string> baseEnv = {
         {"RCCL_CE_ALLREDUCE", "1"},
+        {"RCCL_CE_AR_MAX_MSG_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
     };
 
     const std::vector<UseCeArCase> cases = {
@@ -258,7 +262,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
     for(const auto& tc : cases)
     {
         auto env = tc.extraEnv;
-        ProcessIsolatedTestRunner::registerTest(
+        auto cfg =
             ProcessIsolatedTestRunner::TestConfig(
                 tc.name,
                 [tc]()
@@ -276,7 +280,13 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                 })
                 .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(30))
-                .withNumGpus(0));
+                .withNumGpus(0);
+        // Isolated children inherit the parent env. A case that does not set the
+        // cap must not see a suite or shell override, or gfx1250's table default
+        // (off) becomes on.
+        if (env.find("RCCL_CE_AR_MAX_MSG_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_MAX_MSG_BYTES");
+        ProcessIsolatedTestRunner::registerTest(cfg);
     }
 
     ProcessIsolatedTestRunner::ExecutionOptions options;

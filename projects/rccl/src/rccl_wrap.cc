@@ -1689,6 +1689,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         }
         return ncclSuccess;
       }
+      // taskAppend's SYM_CE_THRESHOLD fallback is gated on !allGatherDecided.
+      // User AllGather always sets decisionValid before enqueue, so that arm
+      // never runs. Copying it here would take a symk-eligible AllGather and
+      // would ignore ceRegMax. Branch #3 above is the CE decision.
     }
 
     // (4) Symmetric kernel. Live path dispatches symk via the downstream extraction.

@@ -32,7 +32,6 @@ test_categories:
       - "DdaFabricMaxBlocksTest.*"
       - "DdaFabricScratchSizingTest.*"
       - "RcclDdaTierThresholds.*"
-      - "RcclAllReduceDdaDecision.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
       - "RcclAllGatherCeRegisteredWindow.*"
