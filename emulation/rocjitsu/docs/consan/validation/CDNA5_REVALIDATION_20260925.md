@@ -2801,3 +2801,14 @@ before and after. Seven completed trials have detected the fault; the eighth
 trial is running. The three large clean shapes in each mode remain pending.
 The terminal trial-6 record under `sgemm-bank-fixed-untimed-high-fault` supplies
 this checkpoint.
+
+### Untimed Default SGEMM fault qualification completes
+
+Trial 7 completes in 1,173 seconds with nine ConSan conflicts, 650 passing
+numerical cases, complete coverage, one intended mutation, and healthy checks.
+The campaign exits zero; its final summary accepts all eight admitted/reached
+trials with eight detections. All trials retain the matching clean run's hook
+and replay-manifest SHA-256 values, and the matching clean log passes the
+updated diagnostics gate. The table now records `fault 8/8`. Both full clean
+sweeps still have three accepted small shapes and three large shapes running,
+so the row remains orange pending full-family clean evidence.
