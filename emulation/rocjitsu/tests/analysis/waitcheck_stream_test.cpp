@@ -126,6 +126,7 @@ TEST(WaitcheckStream, ConcreteTargetsUseTheirArchitectureOptions) {
 
 TEST(WaitcheckStream, UnknownAndUnsupportedConcreteTargetsFail) {
   for (auto target : {ROCJITSU_CODE_TARGET_INVALID, ROCJITSU_CODE_TARGET_GFX90A}) {
+    SCOPED_TRACE(target);
     util::StringDiagnostic error;
     EXPECT_TRUE(
         analyze_waitcheck_stream({}, default_isa_target_registry(), target, {}, error.emitter())
@@ -516,7 +517,11 @@ TEST(WaitcheckStream, InvalidOptionsAndTruncatedInputFail) {
   EXPECT_TRUE(analyze_waitcheck_stream({}, ROCJITSU_CODE_ARCH_CDNA3, {.wave_size = 32}).failed());
   EXPECT_TRUE(
       analyze_waitcheck_stream({}, ROCJITSU_CODE_ARCH_RDNA3, {.expert_scheduling = true}).failed());
-  EXPECT_TRUE(analyze_waitcheck_stream({}, ROCJITSU_CODE_ARCH_CDNA1, {.wave_size = 64}).failed());
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    EXPECT_TRUE(analyze_waitcheck_stream({}, arch, {.wave_size = 64}).failed());
+  }
   for (const auto &words : {Program{0xee050000u}, Program{0xee050000u, 0}, Program{0xffffffffu}}) {
     util::StringDiagnostic error;
     EXPECT_TRUE(analyze_waitcheck_stream(words, ROCJITSU_CODE_ARCH_RDNA4, {.wave_size = 64},

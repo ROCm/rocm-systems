@@ -361,6 +361,55 @@ set_tests_properties(
             "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
 )
 
+# --cpu-thread-budget has to reach the allocation plan through the config copy the
+# launcher writes. gfx942_cdna3.json asks for 32, so a configured row of 1 can only
+# come from the flag -- once per accepted spelling, since wrappers forwarding a
+# single opaque token cannot split a flag from its value.
+set(_rj_cdna3_config "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json")
+add_test(
+    NAME RocjitsuCpuThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget 1 --thread-budget-table
+)
+add_test(
+    NAME RocjitsuCpuThreadBudgetAssigned
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget=1 --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudget
+    RocjitsuCpuThreadBudgetAssigned
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 1 \\| 1 \\| 0 \\| 1"
+)
+
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsNonNumeric
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
+        --cpu-thread-budget four --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudgetRejectsNonNumeric
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "--cpu-thread-budget requires an unsigned integer"
+)
+
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsAttach
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config} --attach
+        --cpu-thread-budget 1 -- true
+)
+set_tests_properties(
+    RocjitsuCpuThreadBudgetRejectsAttach
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "--cpu-thread-budget cannot be combined with --attach"
+)
+
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
@@ -586,6 +635,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
@@ -616,7 +666,9 @@ add_executable(
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    swmmac_k64_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
+    simd_correctness/swmmac_k64_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -1607,6 +1659,18 @@ rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_dependencies(hsa_hooks_unit_test rocjitsu_hooks)
+    add_test(
+        NAME HsaHooksAbi.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DHOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks>
+            -DTEST_HOOK_LIBRARY=$<TARGET_FILE:rocjitsu_hooks_testing> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_hsa_hooks_symbols.cmake
+    )
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(
         hsa_hotswap_rocjitsu_unit_test
         dbt/hsa_hotswap_rocjitsu_unit_test.cpp
@@ -1719,6 +1783,29 @@ target_compile_definitions(
 )
 
 # --- Interposer loader initialization regression tests ---
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Keep inline register accessors in a separate DSO without linking core
+    # objects into it, so missing exports cannot be hidden by static linkage.
+    add_library(register_observer_probe MODULE register_observer_probe.cpp)
+    target_link_libraries(register_observer_probe PRIVATE util simdojo_headers)
+    rj_configure_target(register_observer_probe LIB)
+
+    add_executable(register_observer_abi_test register_observer_abi_test.cpp)
+    target_link_libraries(register_observer_abi_test PRIVATE ${CMAKE_DL_LIBS})
+    rj_configure_target(register_observer_abi_test TEST)
+    add_dependencies(
+        register_observer_abi_test
+        register_observer_probe
+        rocjitsu_shared
+    )
+    add_test(
+        NAME ExecutionPluginAbi.RegisterAccessModuleLoads
+        COMMAND
+            register_observer_abi_test $<TARGET_FILE:rocjitsu_shared>
+            $<TARGET_FILE:register_observer_probe>
+    )
+endif()
 
 add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
 rj_configure_target(early_mmap_preload TEST)

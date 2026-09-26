@@ -52,7 +52,7 @@ mirage run [--profile NAME] [--emulator NAME]
            [--image IMAGE] [--mount SPEC]... [--port SPEC]...
            [--container-provider PROV] [--hack HACK]...
            [--exec-mode functional|clocked] [-o|--option KEY=VALUE]...
-           [--plugin NAME]... [--config PATH]
+           [--plugin NAME]... [--config PATH] [--cpu-thread-budget N]
            [--daemon | --in-process] [--clear-env-vars]
            -- <cmd> [args...]
 ```
@@ -212,6 +212,17 @@ which is the better of the two failures for a checkpoint request.
   in the config file instead. `--num-nodes` is not among them — it shapes
   the process grid mirage builds, not the emulator's configuration, so
   the two compose.
+* `--cpu-thread-budget N` replaces the emulator config's execution-thread
+  ceiling for this run (the upstream `rocjitsu --cpu-thread-budget`), with
+  `0` selecting automatic sizing. It is shorthand for
+  `-o cpu_thread_budget=N` and beats that spelling when both are given.
+
+  Unlike `-o`, it composes with `--config`, because upstream `rocjitsu`
+  takes the two together. Your file is left untouched: the run gets a copy
+  in its session directory with the budget applied, and that copy is what
+  the backend loads. A supplied config that is not plain JSON, or that
+  names a `dbt_guest.simulator_config`, cannot be copied this way and is
+  refused — set `cpu_thread_budget` in the file instead.
 * `--daemon` runs the emulator out-of-process. This is the default; the
   flag exists for explicitness and for the rocjitsu drop-in alias.
   `--in-process` selects the opposite. In-process mode cannot share GPU

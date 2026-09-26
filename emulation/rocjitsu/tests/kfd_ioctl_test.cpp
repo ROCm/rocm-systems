@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
@@ -59,6 +60,7 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <optional>
 #include <ostream>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -7242,6 +7244,134 @@ TEST_F(KfdIoctlCdna5Test, ScratchScoreboardSlotsRestartOnEachShaderEngine) {
   EXPECT_EQ(se1_first_wave->shader_engine_id() * kScratchSlotsPerShaderEngine +
                 se1_first_wave->scratch_scoreboard_id(),
             kScratchSlotsPerShaderEngine);
+}
+
+TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches) {
+  using namespace rocjitsu;
+  using namespace rocr::llvm::amdhsa;
+  constexpr uint64_t kCodeAddress = 0x10000;
+  constexpr uint64_t kScratchPool = 0x1'0000'0000ULL;
+  constexpr uint32_t kSentinel = 0x12345678;
+  constexpr uint32_t kWaveSize = 32;
+  const uint32_t process_id = driver_->local_process_id();
+  auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  alignas(4096) std::array<uint8_t, 3 * 4096> code{};
+  for (uint32_t i = 0; i < 3; ++i) {
+    kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.private_segment_fixed_size = 32u << i;
+    std::memcpy(code.data() + i * 4096, &kd, sizeof(kd));
+    const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    std::memcpy(code.data() + i * 4096 + sizeof(kd), &endpgm, sizeof(endpgm));
+  }
+  process->map_pages(kCodeAddress, code.data(), code.size());
+
+  // Use the real KFD scratch callbacks, with one queue on the last XCD and
+  // another on XCD zero. Both queues share the process's scratch VA.
+  std::array<amdgpu::CommandProcessor *, 2> cps{
+      soc_->xcd(soc_->num_xcds() - 1)->command_processor(), soc_->xcd(0)->command_processor()};
+  alignas(4096) std::array<std::array<hsa_kernel_dispatch_packet_t, 64>, 2> rings{};
+  alignas(64) std::array<std::array<uint64_t, 3>, 2> pointers{};
+  std::array<uint64_t, 2> registrations{};
+  for (uint32_t i = 0; i < cps.size(); ++i) {
+    amdgpu::AqlQueueConfig queue{};
+    queue.address_space = process->gpu(0).address_space;
+    queue.process_id = process_id;
+    queue.queue_id = i + 1;
+    queue.ring_base_va = reinterpret_cast<uint64_t>(rings[i].data());
+    queue.ring_size = sizeof(rings[i]);
+    queue.read_ptr_va = reinterpret_cast<uint64_t>(&pointers[i][0]);
+    queue.write_ptr_va = reinterpret_cast<uint64_t>(&pointers[i][1]);
+    queue.doorbell_va = reinterpret_cast<uint64_t>(&pointers[i][2]);
+    queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
+    process->map_pages(queue.ring_base_va, rings[i].data(), sizeof(rings[i]));
+    process->map_pages(queue.read_ptr_va, pointers[i].data(), sizeof(pointers[i]));
+    registrations[i] = cps[i]->register_queue(std::move(queue));
+    ASSERT_NE(registrations[i], 0u);
+  }
+
+  class HoldSpillPlugin final : public ExecutionPlugin {
+  public:
+    explicit HoldSpillPlugin(std::function<void(amdgpu::Wavefront &)> spill)
+        : ExecutionPlugin("hold-scratch-spills"), spill_(std::move(spill)) {}
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+      spill_(wf);
+      wf.set_debug_halted(true);
+    }
+
+  private:
+    std::function<void(amdgpu::Wavefront &)> spill_;
+  };
+  std::vector<amdgpu::Wavefront *> waves;
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<HoldSpillPlugin>([&](amdgpu::Wavefront &wf) {
+    EXPECT_EQ(vm_write32(wf.scratch_base(), kSentinel + waves.size(), process_id),
+              amdgpu::VmAccessOutcome::Complete);
+    waves.push_back(&wf);
+  })));
+  soc_->set_plugin_group(group);
+
+  const auto mapped_page = [&](uint64_t address) {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page = process->page_table_.find(address >> KfdProcess::kPageShift);
+    return page == process->page_table_.end() || page->second.host_extents.empty()
+               ? nullptr
+               : page->second.host_extents.front().host_ptr;
+  };
+  std::vector<uint8_t *> spill_pages;
+  const auto allocation_bytes = [&]() {
+    uint64_t size = 0;
+    std::lock_guard lock(process->alloc_mutex_);
+    for (const auto &[handle, allocation] : process->allocations_)
+      size += allocation.size;
+    return size;
+  };
+  size_t scratch_slots = 0;
+  for (auto *cu : soc_->all_cus())
+    scratch_slots += cu->scratch_slots_per_cu();
+  // Grow twice, then repeat the last size while all earlier spills stay live.
+  for (uint32_t dispatch = 0; dispatch < 4; ++dispatch) {
+    const uint32_t kernel_index = std::min(dispatch, 2u);
+    const uint32_t wave_bytes = 1024u << kernel_index;
+    const uint32_t queue = dispatch == 0 ? 0 : 1;
+    const uint32_t slot = dispatch == 0 ? 0 : dispatch - 1;
+    auto &packet = rings[queue][slot];
+    packet.setup = 1;
+    packet.workgroup_size_x = packet.grid_size_x = kWaveSize;
+    packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.grid_size_y = packet.grid_size_z = 1;
+    packet.kernel_object = kCodeAddress + kernel_index * 4096;
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH; // Allow overlapping dispatches.
+    pointers[queue][1] = pointers[queue][2] = slot + 1;
+    engine_->schedule_event_now(cps[queue]->doorbell_event());
+    for (unsigned step = 0; step < 1000 && waves.size() <= dispatch; ++step)
+      (void)engine_->step();
+    ASSERT_EQ(waves.size(), dispatch + 1);
+    spill_pages.push_back(mapped_page(waves.back()->scratch_base()));
+    ASSERT_NE(spill_pages.back(), nullptr);
+    if (dispatch > 0) {
+      EXPECT_LT(waves.back()->scratch_base() + wave_bytes, waves.front()->scratch_base());
+    }
+    for (uint32_t i = 0; i < waves.size(); ++i) {
+      EXPECT_TRUE(waves[i]->debug_halted());
+      EXPECT_EQ(mapped_page(waves[i]->scratch_base()), spill_pages[i]);
+      EXPECT_EQ(vm_read32(waves[i]->scratch_base(), process_id), kSentinel + i)
+          << "dispatch " << dispatch << " replaced the live spill from dispatch " << i;
+    }
+    const size_t pool_bytes = scratch_slots * wave_bytes;
+    EXPECT_EQ(allocation_bytes(), pool_bytes) << "growth should allocate only the missing tail";
+    const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+    ASSERT_TRUE(access);
+    EXPECT_EQ(access->query_access(kScratchPool, pool_bytes, amdgpu::VmAccessKind::Atomic),
+              amdgpu::VmAccessOutcome::Complete);
+  }
+
+  for (uint32_t i = 0; i < cps.size(); ++i)
+    EXPECT_TRUE(cps[i]->unregister_queue_registration(registrations[i]));
+  soc_->set_plugin_group(nullptr);
+  process->unmap_pages(kCodeAddress, code.size());
 }
 
 TEST_F(KfdIoctlCdna5Test, DbgTrapPublishesAndRestoresSecondQueueAcrossActiveXccAreas) {

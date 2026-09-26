@@ -20,7 +20,10 @@ auto
 get_color_regex(std::string _v)
 {
     auto _p = _v.find("[");
-    if(_p != std::string::npos) _v.insert(_p, 1, '\\');
+    if(_p != std::string::npos)
+    {
+        _v.insert(_p, 1, '\\');
+    }
     return fmt::format("\\{}", _v);
 }
 
@@ -37,7 +40,10 @@ log_entry::log_entry(std::string _msg)
 : m_message{ std::move(_msg) }
 , m_backtrace{ tim::get_unw_stack<4, 1>() }
 {
-    if(log_ofs) *log_ofs << as_string("", "", "") << "\n";
+    if(log_ofs)
+    {
+        *log_ofs << as_string("", "", "") << "\n";
+    }
 }
 
 log_entry::log_entry(source_location _loc, std::string _msg)
@@ -45,7 +51,10 @@ log_entry::log_entry(source_location _loc, std::string _msg)
 , m_message{ std::move(_msg) }
 , m_backtrace{ tim::get_unw_stack<4, 1>() }
 {
-    if(log_ofs) *log_ofs << as_string("", "", "") << "\n";
+    if(log_ofs)
+    {
+        *log_ofs << as_string("", "", "") << "\n";
+    }
 }
 
 std::string

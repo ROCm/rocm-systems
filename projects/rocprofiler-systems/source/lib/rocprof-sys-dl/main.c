@@ -96,7 +96,10 @@ rocprofsys_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** 
 
     // prevent re-entry
     static int _reentry = 0;
-    if(_reentry > 0) return -1;
+    if(_reentry > 0)
+    {
+        return -1;
+    }
     _reentry = 1;
 
     // get the address of this function

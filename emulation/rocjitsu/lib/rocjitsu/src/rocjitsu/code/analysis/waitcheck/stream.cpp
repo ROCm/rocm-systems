@@ -387,8 +387,19 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
                                                       rj_code_arch_t arch, Decoder &decoder,
                                                       WaitcheckStreamOptions options,
                                                       const util::DiagnosticEmitter &emit_error) {
-  if (waitcheck_detail::waitcnt_model(arch).failed())
+  // Runtime diagnostics share the counter model but also support older GPUs.
+  // Keep stream analysis limited to its independently qualified architectures.
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    break;
+  default:
     return emit_error.emit() << "unsupported waitcheck architecture";
+  }
   if ((options.wave_size != 32 && options.wave_size != 64) ||
       (has_committed_generations(arch) && options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
