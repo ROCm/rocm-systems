@@ -283,9 +283,12 @@ if(ENABLE_SPIRV)
 elseif(DEFINED OFFLOAD_ARCH_STR)
   string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 elseif(DEFINED GPU_TARGETS)
-  foreach(_hip_gpu_arch ${GPU_TARGETS})
+  set(_hip_gpu_arch_list ${GPU_TARGETS})
+  list(REMOVE_DUPLICATES _hip_gpu_arch_list)
+  foreach(_hip_gpu_arch ${_hip_gpu_arch_list})
     set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
   endforeach()
+  unset(_hip_gpu_arch_list)
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
