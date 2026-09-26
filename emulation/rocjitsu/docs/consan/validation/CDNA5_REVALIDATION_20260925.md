@@ -2247,3 +2247,24 @@ and Default, with 12/12 accesses, 24/24 barriers, and complete static/dynamic
 coverage. The row is yellow because its reviewed barrier-drop fault does not
 produce a cross-wave race; it is no longer blocked on Default access support.
 SuperCollider store coverage remains a separate pending fix.
+
+
+### Descriptor-add: SuperCollider tensor-store coverage repaired
+
+SuperCollider now compares sampled LDS source values before and after a tensor
+store, excluding out-of-bounds destinations. It executes the transfer once and
+defers completion signaling until after comparison, preventing legitimate
+buffer reuse from producing a mismatch. Tests inject LDS corruption after the
+transfer and verify detection without repeating its global writes, alongside
+masked descriptors, all element widths, empty/partial EXEC, descriptor aliases,
+register preservation, and exactly one completion arrival.
+
+Normal GCC: 1,047 ConSan/tensor tests passed with two expected artifact-dependent
+skips (`tensor-store-sc-tests-v2.log`). Isolated source 4a45bc99b72 is committed
+on the shared branch as d4896cd9e58. Immutable hook `tensor-store-sc-hook-v1`
+has SHA256 `c7b9525016035104874279ca3127a058189bf03f29f6ec0ad598d16c96237558`.
+`tensor-store-sc-v1-clean/pytorch-tdm-descriptor-add` passes baseline, Default,
+and SuperCollider (`sleep_wave=15`). Both detector modes have complete 12/12
+access coverage; Default also has complete 24/24 barrier coverage. Both cells
+are now yellow only because the existing barrier-drop fault does not create a
+cross-wave race, rather than because of missing tensor-store support.
