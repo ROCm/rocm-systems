@@ -235,3 +235,63 @@ TEST(range_replay_state, foreign_dispatch_declines_an_open_range_on_that_agent)
     ASSERT_TRUE(range_replay::take_range(taken));
     EXPECT_EQ(taken.record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
 }
+
+TEST(range_replay_state, kernels_from_code_objects_loaded_before_the_range_are_admitted)
+{
+    auto record = range_replay::range_record_t{1};
+    ASSERT_TRUE(record.bind(queue_a, agent_a));
+    record.set_code_object_watermark(5);
+
+    EXPECT_TRUE(record.admit_code_object(1));
+    EXPECT_TRUE(record.admit_code_object(5)) << "the newest code object at bind time is covered";
+    EXPECT_TRUE(record.eligible());
+}
+
+TEST(range_replay_state, kernel_from_a_code_object_loaded_inside_the_range_declines)
+{
+    auto record = range_replay::range_record_t{1};
+    ASSERT_TRUE(record.bind(queue_a, agent_a));
+    record.set_code_object_watermark(5);
+    ASSERT_TRUE(record.add_dispatch(make_dispatch(1)));
+
+    // Code object 6 was loaded after the entry snapshot (a lazily loaded module, a JIT-compiled
+    // kernel), so its module variables are not in the snapshot.
+    EXPECT_FALSE(record.admit_code_object(6));
+    EXPECT_EQ(record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+    EXPECT_EQ(record.dispatch_count(), 0U) << "the recording is released on decline";
+
+    record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
+    EXPECT_EQ(record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+}
+
+TEST(range_replay_state, code_object_check_needs_a_watermark_and_an_eligible_range)
+{
+    auto unset = range_replay::range_record_t{1};
+    EXPECT_TRUE(unset.admit_code_object(99)) << "no watermark was taken, so nothing is compared";
+
+    auto declined = range_replay::range_record_t{2};
+    declined.set_code_object_watermark(5);
+    declined.decline(ROCPROFILER_RANGE_REPLAY_STATUS_GRAPH_LAUNCH);
+    EXPECT_FALSE(declined.admit_code_object(1));
+    EXPECT_EQ(declined.status(), ROCPROFILER_RANGE_REPLAY_STATUS_GRAPH_LAUNCH);
+}
+
+TEST(range_replay_state, code_object_unload_leaves_an_unbound_range_eligible)
+{
+    ASSERT_TRUE(range_replay::open_range(1));
+
+    // Nothing has been recorded, so no packet of this range can point at the unloaded code. A bound
+    // range is declined instead; binding needs a queue, so that half is covered on hardware.
+    range_replay::note_code_object_unload();
+
+    auto taken = range_replay::range_context_t{};
+    ASSERT_TRUE(range_replay::take_range(taken));
+    EXPECT_TRUE(taken.record.eligible());
+}
+
+TEST(range_replay_state, code_object_unload_with_no_range_open_is_harmless)
+{
+    ASSERT_FALSE(range_replay::any_range_open());
+    range_replay::note_code_object_unload();
+    EXPECT_FALSE(range_replay::any_range_open());
+}

@@ -36,6 +36,7 @@
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <memory>
@@ -81,20 +82,39 @@ registry()
 thread_local std::unique_ptr<range_context_t> tl_range     = {};
 thread_local bool                             tl_replaying = false;
 
-// kernel_object -> (kernarg segment size, alignment), memoized. Resolving it means walking the
-// loaded code objects' symbols, which is far too slow to repeat per recorded dispatch.
+// kernel_object -> (kernarg segment size, alignment, parent code object), memoized. Resolving it
+// means walking the loaded code objects' symbols, which is far too slow to repeat per recorded
+// dispatch.
 struct kernarg_layout_t
 {
-    uint32_t size      = 0;
-    uint32_t alignment = 0;
+    uint32_t size           = 0;
+    uint32_t alignment      = 0;
+    uint64_t code_object_id = 0;
 };
 
 using kernarg_cache_t = std::unordered_map<uint64_t, kernarg_layout_t>;
 
+common::Synchronized<kernarg_cache_t>*
+kernarg_cache()
+{
+    static auto*& cache = common::static_object<common::Synchronized<kernarg_cache_t>>::construct();
+    return cache;
+}
+
+uint64_t
+newest_loaded_code_object_id()
+{
+    auto newest = uint64_t{0};
+    code_object::iterate_loaded_code_objects([&](const code_object::hsa::code_object& co) {
+        newest = std::max(newest, co.rocp_data.code_object_id);
+    });
+    return newest;
+}
+
 std::optional<kernarg_layout_t>
 kernarg_layout(uint64_t kernel_object)
 {
-    static auto*& cache = common::static_object<common::Synchronized<kernarg_cache_t>>::construct();
+    auto* cache = kernarg_cache();
     if(cache == nullptr) return std::nullopt;
 
     auto hit = cache->rlock([&](const kernarg_cache_t& map) -> std::optional<kernarg_layout_t> {
@@ -112,7 +132,8 @@ kernarg_layout(uint64_t kernel_object)
             if(!symbol) continue;
             const auto& data = symbol->rocp_data;
             if(data.kernel_object != kernel_object) continue;
-            found = kernarg_layout_t{data.kernarg_segment_size, data.kernarg_segment_alignment};
+            found = kernarg_layout_t{
+                data.kernarg_segment_size, data.kernarg_segment_alignment, data.code_object_id};
             break;
         }
     });
@@ -212,6 +233,24 @@ range_record_t::add_dispatch(recorded_dispatch_t&& dispatch)
     }
 
     m_dispatches.emplace_back(std::move(dispatch));
+    return true;
+}
+
+void
+range_record_t::set_code_object_watermark(uint64_t newest_code_object_id)
+{
+    m_code_object_watermark = newest_code_object_id;
+}
+
+bool
+range_record_t::admit_code_object(uint64_t code_object_id)
+{
+    if(!eligible()) return false;
+    if(m_code_object_watermark != 0 && code_object_id > m_code_object_watermark)
+    {
+        decline(ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+        return false;
+    }
     return true;
 }
 
@@ -330,6 +369,10 @@ note_submission(const hsa::Queue&              queue,
         ctx->hsa_agent = queue.get_agent().get_hsa_agent();
         ctx->agent_id  = rocp_agent->id;
 
+        // Taken before the entry snapshot, which runs right after this submission is recorded, so
+        // every code object at or below the watermark has its module variables in the snapshot.
+        ctx->record.set_code_object_watermark(newest_loaded_code_object_id());
+
         // Publish the agent so a foreign dispatch or a device-writing copy on it can find us.
         const auto* self = ctx;
         registry().wlock([&](registry_t& entries) {
@@ -355,6 +398,7 @@ note_submission(const hsa::Queue&              queue,
             ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_UNKNOWN_KERNARG_SIZE);
             return;
         }
+        if(!ctx->record.admit_code_object(layout->code_object_id)) return;
 
         // The application's completion signal must never be re-fired: it has already been consumed
         // (and may have been reused or destroyed) by the time the range closes. Replayed passes get
@@ -409,6 +453,25 @@ note_device_write(uint64_t agent_key)
             if(entry.external)
                 publish_external_decline(*entry.external,
                                          ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
+        }
+    });
+}
+
+void
+note_code_object_unload()
+{
+    if(auto* cache = kernarg_cache(); cache != nullptr)
+        cache->wlock([](kernarg_cache_t& map) { map.clear(); });
+
+    if(!any_range_open()) return;
+
+    registry().rlock([](const registry_t& entries) {
+        for(const auto& entry : entries)
+        {
+            // An unbound range has recorded nothing, so no packet of it can point at this code.
+            if(entry.agent_key == 0 || !entry.external) continue;
+            publish_external_decline(*entry.external,
+                                     ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
         }
     });
 }

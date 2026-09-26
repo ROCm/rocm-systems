@@ -49,6 +49,8 @@ status_name(rocprofiler_range_replay_status_t status)
             return "ALLOCATION_CHANGED_IN_RANGE";
         case ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH:
             return "UNSUPPORTED_QUEUE_PATH";
+        case ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE:
+            return "CODE_OBJECT_CHANGED_IN_RANGE";
         case ROCPROFILER_RANGE_REPLAY_STATUS_LAST: break;
     }
     return "<unknown>";

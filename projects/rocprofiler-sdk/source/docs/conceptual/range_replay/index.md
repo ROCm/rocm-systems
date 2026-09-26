@@ -109,6 +109,8 @@ Range replay v1 is scoped to what the existing snapshot can restore correctly.
 | Unified / managed memory, host memory, fine-grained memory, VM-mapped allocations | not restored between passes; not detected — see the divergence check |
 | Host state | never rewound; a range whose kernels consume values the host recomputed inside it is not a replay candidate |
 | HIP graph launches inside a range | declined (`GRAPH_LAUNCH`) |
+| Code objects loaded or unloaded inside a range (lazy module loading, JIT, `hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); run a range once before measuring it |
+| Kernels that call `printf` | replayed output is printed again (hostcall `printf`, HIP's default) or lost (`-mprintf-kind=buffered`); see [Soundness and declining](range_replay_soundness.md) |
 | Concurrency within a pass | passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ from pass 0 |
 
 ## Multi-GPU and collectives
