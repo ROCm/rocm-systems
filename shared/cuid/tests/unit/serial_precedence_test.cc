@@ -101,7 +101,8 @@ TEST(cuidtstUnprivileged, GpuUniqueIdZeroIsAbsentNotAnIdentity) {
 // so the walk runs off the end of the list and must say so.
 TEST(cuidtstUnprivileged, GpuConfigSpaceSerialReportsAbsenceNotZero) {
   uint64_t fingerprint = 0xdeadbeef;
-  const amdcuid_status_t status = CuidGpu::read_config_space_serial("0000:ff:1f.7", fingerprint);
+  const amdcuid_status_t status =
+      CuidGpu::read_config_space_serial("0000:ff:1f.7", 0x1002, fingerprint);
   EXPECT_NE(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_EQ(fingerprint, 0u);
 }

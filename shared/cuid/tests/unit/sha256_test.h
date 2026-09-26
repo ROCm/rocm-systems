@@ -37,7 +37,7 @@ class TestSha256Kat : public TestBase {
 };
 
 // Known-answer tests for HMAC-SHA-256 (RFC 4231), the keyed derivation the
-// secondary/derived CUID is built from.
+// derived CUID is built from.
 class TestHmacSha256Kat : public TestBase {
  public:
   TestHmacSha256Kat();

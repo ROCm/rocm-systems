@@ -1,6 +1,3 @@
-Ordering matters only between group 1 and the rest: everything else consumes the
-struct that group 1 defines.
-
 ## 1. Public API
 
 - [x] 1.1 Add `amdsmi_cuid_info_t` with the primary string, the derived string,
@@ -22,18 +19,9 @@ struct that group 1 defines.
       the primary, the derived value, the device type and the temporary flag.
 - [x] 2.2 Return an empty primary rather than failing when the primary query
       reports a permission error.
-- [ ] 2.3 Determine the source: driver where the device's sysfs CUID attribute
-      exists, store where the record file answered, library otherwise. **Only
-      the driver half is implemented.** The store and library stages are not
-      observable from `amd-smi`: `libamdcuid` writes a value it computed back
-      into the store it consults, so an entry for a device says only that
-      something has looked it up before. The code guessed it from
-      `access("/tmp/cuid", R_OK)`, one global file for every device, and so
-      reported `STORE` for every GPU on any machine where that file existed,
-      including one whose value it had just computed. (The store has since moved
-      to `/var/lib/amdcuid/cuid`.) `cuid_source_for()` now reports `DRIVER` or
-      `UNKNOWN` and nothing else. Completing this needs a `libamdcuid` query that
-      reports the stage that answered.
+- [x] 2.3 Report the stage that answered via `AMDCUID_QUERY_SOURCE`. Record the
+      source during derivation; a later lookup could observe different state.
+      Retain the sysfs-existence fallback for older libraries without the query.
 - [x] 2.4 Rewrite `amdsmi_get_gpu_device_cuid()` as a wrapper over 2.1.
 - [x] 2.5 Implement `amdsmi_set_cuid_seed()` over `amdcuid_set_hash_key()`,
       propagating the store failure.
@@ -45,18 +33,24 @@ struct that group 1 defines.
 
 ## 3. Build
 
-- [x] 3.1 Default `BUILD_CUID` to on when `find_package(amdcuid CONFIG)` locates
-      the exported package, off when it does not, and keep the explicit override.
-      Not `cmake_dependent_option`: when its condition is false it sets a
-      *normal* variable to the force value, shadowing the cache entry the user
-      set, so `-DBUILD_CUID=ON` on a tree with no `libamdcuid` silently produced
-      a CUID-less build. A plain `option()` defaulted from `amdcuid_FOUND` keeps
-      the request visible and puts `BUILD_CUID` in the cache as a `BOOL`, which
-      is what lets `tests/amd_smi_test` see it for 5.8.
+- [x] 3.1 Support `BUILD_CUID=AUTO`, `ON` and `OFF`. Prefer the installed
+      package, then the sibling `shared/cuid` source. Recompute availability on
+      configure instead of caching the first result. If neither is available,
+      `ON` fails and `AUTO` warns and disables CUID. Preserve legacy boolean
+      spellings for explicit requests.
 - [x] 3.2 Confirm the static library links with no new external dependency, and
       that the exported target does not reference the uninstalled `rocm-sha256`
       (A7).
 - [x] 3.3 Confirm a tree with no `libamdcuid` still builds and links.
+- [x] 3.4 Search `${ROCM_DIR}/core` for the `amdcuid` package through the
+      overridable `AMDCUID_HINT_DIR`. CMake's default config search does not
+      traverse the extra `core` prefix.
+- [x] 3.5 Call `find_dependency(amdcuid)` from the installed
+      `amd_smi-config.cmake`, gated on the build having linked it.
+      `amd_smi_static` links `amdcuid::amdcuid` PRIVATE, and a private link
+      dependency of a static library remains in its exported link interface.
+      Resolve `Threads::Threads` there too. The in-tree build absorbs CUID
+      objects instead and needs no external amdcuid package.
 
 ## 4. CLI and Python
 
@@ -74,19 +68,15 @@ struct that group 1 defines.
 
 ## 5. Tests
 
-_`tests/amd_smi_test/unit/gpu/cuid_info_test.cc`, ten cases, and
-`tests/python/unit/gpu/test_cli_cuid_seed.py`, nine. Run against two W6800s with
-the CUID driver loaded, in a build with `libamdcuid` and in one without, and
-under both an ordinary user and root. Everything that needs hardware, the CUID
-driver, or a particular identity skips rather than fails._
-
-_Nothing here provisions a seed. A real provisioning re-keys every derived CUID
-on the node and needs root; a test that did it would be destructive._
+Cases live in `tests/amd_smi_test/unit/gpu/cuid_info_test.cc` and
+`tests/python/unit/gpu/test_cli_cuid_seed.py`. Current release counts and
+hardware limitations are in `shared/cuid/tests/QA_PLAN.md`. CLI provisioning
+tests stub the library call; real privileged CUID tests require seed restoration.
 
 - [x] 5.1 Snapshot call against a fake sysfs root: a driver-published value is
       returned verbatim and reported as driver-sourced
       (`CuidSourceIsDriverWhenTheAttributeIsPublished`). The driver-sourced half
-      fabricates `cuid_secondary` for each GPU's BDF under a temporary root and
+      fabricates `cuid_derived` for each GPU's BDF under a temporary root and
       points `AMDSMI_CUID_SYSFS_ROOT` at it, and also asserts the negative. That
       override is compiled out unless the build sets
       `-DAMDSMI_CUID_TEST_SYSFS_OVERRIDE=ON`, because a variable that relocates
@@ -100,7 +90,7 @@ on the node and needs root; a test that did it would be destructive._
       unprivileged process the serial-bearing primary.
 - [x] 5.3 Auxiliary flag agrees with payload bit 117 of the returned derived
       CUID (`CuidSnapshotIsSelfConsistent`), and the decoder is pinned against
-      all thirteen published conformance vectors
+      the decoder's thirteen embedded vectors
       (`CuidAuxiliaryBitDecoderMatchesConformanceVectors`). The assertion read
       bit 7 of rendered octet 14, a VendorID bit, where the framing puts payload
       bit 117 in bit 7 of rendered octet **15**; against the vectors the old

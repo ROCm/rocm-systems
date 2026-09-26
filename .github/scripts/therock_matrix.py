@@ -9,8 +9,8 @@ subtree_to_project_map = {
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/hrr": "hrr",
-
-    "projects/cuid": "rdc",
+    # amd-smi compiles shared/cuid in-tree when no installed amdcuid is found.
+    "shared/cuid": "amdsmi",
     "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
     "projects/hip-tests": "runtimes",

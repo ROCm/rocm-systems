@@ -39,21 +39,33 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
+#include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "rocm/sha2/sha256.h"
+#include "src/cuid_nic.h"
 #include "src/cuid_util.h"
 #include "src/hmac.h"
+#include "src/pci_util.h"
 
 namespace {
 
+// TEST_KEY_1 of vectors D-1 and AD-2: 0xA5 ^ n for n in 0..31.
+constexpr uint8_t kTestKey1Bytes[key_length] = {
+    0xa5, 0xa4, 0xa7, 0xa6, 0xa1, 0xa0, 0xa3, 0xa2, 0xad, 0xac, 0xaf, 0xae, 0xa9, 0xa8, 0xab, 0xaa,
+    0xb5, 0xb4, 0xb7, 0xb6, 0xb1, 0xb0, 0xb3, 0xb2, 0xbd, 0xbc, 0xbf, 0xbe, 0xb9, 0xb8, 0xbb, 0xba};
+const char* const kTestKey1 = reinterpret_cast<const char*>(kTestKey1Bytes);
+
 struct Vector {
-  std::string kind;     // primary | derived | aux-input
+  std::string kind;     // primary | derived | aux-input | serial | adopted | unit-id
   std::string name;     // P-1, D-2, A-1, ...
   std::string payload;  // hex
-  std::string hmac;     // hex, empty for primaries
-  std::string uuid;     // rendered, empty for aux-input
+  std::string hmac;     // digest or serial hex, empty for primary/adopted
+  std::string uuid;     // rendered, empty for aux-input/serial
 };
 
 std::string to_hex(const uint8_t* data, size_t len) {
@@ -70,7 +82,7 @@ std::string to_hex(const uint8_t* data, size_t len) {
 // Rows the file must contain. Asserted exactly, not as a lower bound: a
 // truncated file would otherwise pass by not containing the row that fails.
 // Bump this when a vector is added to tests/vectors/cuid_vectors.py.
-constexpr size_t kExpectedVectorCount = 14;
+constexpr size_t kExpectedVectorCount = 39;
 
 // Where cuid_vectors.txt is. $AMDCUID_VECTORS_PATH wins; then the copy
 // install() puts beside the binary, which is the only one an installed test
@@ -145,7 +157,7 @@ bool load_vectors(std::vector<Vector>& out, std::string& why) {
     if (line.empty() || line[0] == '#') continue;
 
     const std::vector<std::string> fields = split_tabs(line);
-    // aux-input has no uuid and stops at four columns; everything else has five.
+    // aux-input, serial and unit-id have no uuid and stop at four columns.
     if (fields.size() < 4 || fields.size() > 5) {
       why = path + ":" + std::to_string(lineno) + ": expected 4 or 5 tab-separated fields, got " +
             std::to_string(fields.size());
@@ -159,9 +171,9 @@ bool load_vectors(std::vector<Vector>& out, std::string& why) {
     v.hmac = fields[3];
     v.uuid = (fields.size() == 5) ? fields[4] : std::string();
 
-    // An unrecognised kind used to be read into the list and then never
-    // matched, so a misspelled kind removed a vector's coverage silently.
-    if (v.kind != "primary" && v.kind != "derived" && v.kind != "aux-input") {
+    // A misspelled kind would otherwise drop a vector's coverage silently.
+    if (v.kind != "primary" && v.kind != "derived" && v.kind != "aux-input" && v.kind != "serial" &&
+        v.kind != "adopted" && v.kind != "unit-id") {
       why = path + ":" + std::to_string(lineno) + ": unknown vector kind '" + v.kind + "'";
       return false;
     }
@@ -169,13 +181,27 @@ bool load_vectors(std::vector<Vector>& out, std::string& why) {
       why = path + ":" + std::to_string(lineno) + ": empty name or payload";
       return false;
     }
-    if (v.kind == "aux-input") {
+    if (v.kind == "aux-input" || v.kind == "serial" || v.kind == "unit-id") {
+      // None renders to a UUID: an aux-input is an input structure, a serial
+      // row is the octets hardware presents and the value they mean, and a
+      // UnitID is only one field of a primary.
       if (!v.uuid.empty()) {
-        why = path + ":" + std::to_string(lineno) + ": aux-input carries no uuid";
+        why = path + ":" + std::to_string(lineno) + ": " + v.kind + " carries no uuid";
         return false;
       }
     } else if (v.uuid.empty()) {
       why = path + ":" + std::to_string(lineno) + ": " + v.kind + " has no uuid";
+      return false;
+    }
+
+    for (const auto& previous : out) {
+      if (previous.kind == v.kind && previous.name == v.name) {
+        why = path + ":" + std::to_string(lineno) + ": duplicate vector " + v.kind + "/" + v.name;
+        return false;
+      }
+    }
+    if ((v.kind == "primary" || v.kind == "adopted") ? !v.hmac.empty() : v.hmac.empty()) {
+      why = path + ":" + std::to_string(lineno) + ": unexpected or missing digest/serial";
       return false;
     }
 
@@ -224,10 +250,21 @@ const Vector* find(const std::vector<Vector>& v, const std::string& kind, const 
   return nullptr;
 }
 
+void check_digest(const Vector& v, const amdcuid_primary_id& primary, cuid_hmac& hmac) {
+  uint8_t digest[hash_length] = {};
+  size_t size = 0;
+  ASSERT_EQ(hmac.generate_hmac_sha256(primary.raw_bits, sizeof(primary.raw_bits), digest, &size),
+            AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(size, sizeof(digest));
+  EXPECT_EQ(to_hex(digest, size), v.hmac) << v.name << " full HMAC";
+}
+
 // Every primary and derived vector must render to its stated UUID and survive
 // the round-trip back to its stated payload.
 void check_framing(const std::vector<Vector>& vectors) {
   for (const auto& v : vectors) {
+    // An adopted primary is not framed: it is a firmware UUID carried
+    // verbatim, and de-framing it would drop six bits and shift the rest.
     if (v.kind != "primary" && v.kind != "derived") continue;
     ASSERT_EQ(v.payload.size(), 32u) << v.name;
 
@@ -307,6 +344,8 @@ void TestVectors::Run() {
   std::vector<Vector> vectors;
   std::string why;
   ASSERT_TRUE(load_vectors(vectors, why)) << why;
+  ::testing::Test::RecordProperty("conformance_vectors", static_cast<int>(vectors.size()));
+  std::set<std::pair<std::string, std::string>> consumed;
 
   check_framing(vectors);
   check_framing_drops_only_padding();
@@ -332,6 +371,11 @@ void TestVectors::Run() {
       {"P-1", 0x06C5349BD3AAABD4ULL, 0, 0x00, 0x73A3, 0x1002, AMDCUID_DEVICE_TYPE_GPU, false},
       {"P-2", 0x8E8C71777252EBFFULL, 0, 0x00, 0x73A3, 0x1002, AMDCUID_DEVICE_TYPE_GPU, false},
       {"U-1", 0x06C5349BD3AAABD4ULL, 0x0123, 0x00, 0x73A3, 0x1002, AMDCUID_DEVICE_TYPE_GPU, false},
+      // The top of the 13-bit field. Five of its bits sit at payload 112:116,
+      // next to the Auxiliary Value Identifier at 117; a producer giving UnitID
+      // six bits would mark a maximal UnitID as auxiliary.
+      {"U-MAX", 0x06C5349BD3AAABD4ULL, 0x1FFF, 0x00, 0x73A3, 0x1002, AMDCUID_DEVICE_TYPE_GPU,
+       false},
       {"T-PLATFORM", 0x06C5349BD3AAABD4ULL, 0, 0x00, 0x73A3, 0x1002, AMDCUID_DEVICE_TYPE_PLATFORM,
        false},
       {"T-CPU", 0x06C5349BD3AAABD4ULL, 0, 0x00, 0x73A3, 0x1002, AMDCUID_DEVICE_TYPE_CPU, false},
@@ -352,6 +396,7 @@ void TestVectors::Run() {
     EXPECT_EQ(to_hex(id.raw_bits, sizeof(id.raw_bits)), v->payload) << "payload: " << c.name;
     EXPECT_EQ(CuidUtilities::get_cuid_as_string(&id.UUIDv8_representation), v->uuid)
         << "uuid: " << c.name;
+    consumed.emplace(v->kind, v->name);
   }
 
   // Adding a vector and forgetting the case above must fail rather than pass
@@ -364,7 +409,7 @@ void TestVectors::Run() {
     }
     // A-1 is the auxiliary primary and is built from an auxiliary serial, not
     // from a fixed one; it is asserted in the auxiliary block below.
-    if (v.name == "A-1") covered = true;
+    if (v.name == "A-1" || v.name == "A-CPU" || v.name == "A-NIC") covered = true;
     EXPECT_TRUE(covered) << "primary vector " << v.name << " is in the file but not asserted";
   }
 
@@ -379,8 +424,18 @@ void TestVectors::Run() {
     EXPECT_EQ(p_1->uuid, t_gpu->uuid);
   }
 
-  // An NPU must not render identically to a Platform. It did, for as long as
-  // payload bits 120:121 were written to 126:127 and then discarded.
+  // A maximal UnitID is not an auxiliary identifier.
+  {
+    const Vector* u_max = find(vectors, "primary", "U-MAX");
+    ASSERT_NE(u_max, nullptr);
+    std::vector<uint8_t> raw;
+    ASSERT_TRUE(from_hex(u_max->payload, raw));
+    ASSERT_EQ(raw.size(), 16u);
+    EXPECT_EQ(raw[14] & 0x1F, 0x1F) << "U-MAX: payload 112:116 are not all set";
+    EXPECT_EQ(raw[14] & 0x20, 0) << "U-MAX: a maximal UnitID set the auxiliary bit";
+  }
+
+  // An NPU must not render identically to a Platform.
   {
     const Vector* npu = find(vectors, "primary", "T-NPU");
     const Vector* platform = find(vectors, "primary", "T-PLATFORM");
@@ -415,17 +470,18 @@ void TestVectors::Run() {
             AMDCUID_STATUS_SUCCESS);
 
   {
-    // D-1: the canonical fallback seed. Its exact bytes are what make an
-    // unprovisioned machine agree with the kernel.
+    // D-1: a fixed test key.
     const Vector* v = find(vectors, "derived", "D-1");
     ASSERT_NE(v, nullptr);
-    cuid_hmac h(kDefaultSeed, kDefaultSeedLen);
+    cuid_hmac h(kTestKey1, key_length);
     ASSERT_TRUE(h.is_valid());
     amdcuid_derived_id derived = {};
     ASSERT_EQ(CuidUtilities::generate_derived_cuid(&primary, &derived, &h), AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(to_hex(derived.raw_bits, sizeof(derived.raw_bits)), v->payload) << "D-1 payload";
     EXPECT_EQ(CuidUtilities::get_cuid_as_string(&derived.UUIDv8_representation), v->uuid)
         << "D-1 uuid";
+    check_digest(*v, primary, h);
+    consumed.emplace(v->kind, v->name);
   }
 
   {
@@ -445,77 +501,280 @@ void TestVectors::Run() {
     // Payload octet 14 is digest octet 13 masked to five bits: the derived slot
     // is 45 bits, not 46, because bit 117 belongs to the auxiliary marker.
     EXPECT_EQ(derived.raw_bits[14], 0x1A);
+    check_digest(*v, primary, h);
+    consumed.emplace(v->kind, v->name);
   }
 
   // ---- auxiliary -------------------------------------------------------
-  {
-    const Vector* input = find(vectors, "aux-input", "A-1");
-    const Vector* aux_primary = find(vectors, "primary", "A-1");
-    const Vector* aux_derived = find(vectors, "derived", "A-2");
+  //
+  // A-CPU pins the CPU Format value and the Routing ID of socket 0, which is
+  // zero: a CPU's Routing ID is its physical package ID. A-NIC checks that the
+  // Component Type survives the auxiliary structure as well as the primary; the
+  // two are in different places.
+  struct AuxiliaryCase {
+    const char* name;
+    uint16_t format;
+    const char* bdf;  // A CPU has no PCI routing.
+    uint8_t revision_id;
+    uint16_t device_id;
+    uint16_t vendor_id;
+    amdcuid_device_type_t type;
+  };
+  static const AuxiliaryCase kAuxiliaries[] = {
+      {"A-1", CuidUtilities::kAuxFormatPcie, "0000:63:00.0", 0x00, 0x73A3, 0x1002,
+       AMDCUID_DEVICE_TYPE_GPU},
+      {"A-CPU", CuidUtilities::kAuxFormatCpu, nullptr, 0x02, 0x1480, 0x1022,
+       AMDCUID_DEVICE_TYPE_CPU},
+      {"A-NIC", CuidUtilities::kAuxFormatPcie, "0000:41:00.1", 0x01, 0x1458, 0x14E4,
+       AMDCUID_DEVICE_TYPE_NIC},
+  };
+  std::vector<std::string> aux_uuids;
+  for (const auto& c : kAuxiliaries) {
+    SCOPED_TRACE(c.name);
+    const Vector* input = find(vectors, "aux-input", c.name);
+    const Vector* aux_primary = find(vectors, "primary", c.name);
     ASSERT_NE(input, nullptr);
     ASSERT_NE(aux_primary, nullptr);
-    ASSERT_NE(aux_derived, nullptr);
 
-    // The 32-octet auxiliary input structure, built by the implementation and
-    // compared against the file, not read out of the file and fed back in. The
-    // kernel has no auxiliary path, so no KAT pins these field offsets.
-    //
-    // The machine identity is injected: read_machine_id() reads the host's,
-    // and the vector needs the generator's fixed value on every host.
+    // Build the input rather than feeding the vector's expected bytes back in.
     static const uint8_t kVectorMachineId[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
                                                  0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
     CuidUtilities::AuxiliaryInput aux_input;
-    aux_input.format = CuidUtilities::kAuxFormatPcie;
-    aux_input.routing_id = CuidUtilities::routing_id_from_bdf("0000:63:00.0");
-    aux_input.revision_id = 0x00;
-    aux_input.device_id = 0x73A3;
-    aux_input.vendor_id = 0x1002;
-    aux_input.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_GPU);
+    aux_input.format = c.format;
+    aux_input.routing_id = c.bdf ? CuidUtilities::routing_id_from_bdf(c.bdf) : 0;
+    aux_input.revision_id = c.revision_id;
+    aux_input.device_id = c.device_id;
+    aux_input.vendor_id = c.vendor_id;
+    aux_input.component_type = static_cast<uint8_t>(c.type);
 
     uint8_t structure[32] = {0};
-    CuidUtilities::pack_auxiliary_input(aux_input, kVectorMachineId, structure);
-    EXPECT_EQ(to_hex(structure, sizeof(structure)), input->payload)
-        << "A-1 auxiliary input structure";
-
-    // ... and the digest of it, so the serial below is the implementation's own
-    // answer rather than a number copied out of the file.
-    ASSERT_EQ(input->hmac.size(), 64u);
+    CuidUtilities::pack_auxiliary_input(aux_input, structure);
+    EXPECT_EQ(to_hex(structure, sizeof(structure)), input->payload) << "auxiliary input";
+    uint8_t k_app[32] = {0};
+    CuidUtilities::temporary_key(kVectorMachineId, k_app);
+    uint8_t digest[32] = {0};
+    rocm::sha2::hmac_sha256(k_app, sizeof(k_app), structure, sizeof(structure), digest);
+    EXPECT_EQ(to_hex(digest, sizeof(digest)), input->hmac) << "full HMAC under K_app";
     uint64_t serial = 0;
     ASSERT_EQ(CuidUtilities::make_fallback_fingerprint(aux_input, kVectorMachineId, serial),
               AMDCUID_STATUS_SUCCESS);
-
-    std::vector<uint8_t> digest;
-    ASSERT_TRUE(from_hex(input->hmac, digest));
-    ASSERT_EQ(digest.size(), 32u);
-    uint64_t expected_serial = 0;
-    for (size_t i = 0; i < 8; ++i) {
-      expected_serial |= static_cast<uint64_t>(digest[i]) << (8 * i);
-    }
-    EXPECT_EQ(serial, expected_serial) << "A-1 auxiliary serial";
+    EXPECT_EQ(serial, PciUtil::load_le64(digest)) << "auxiliary serial";
 
     amdcuid_primary_id aux = {};
-    ASSERT_EQ(CuidUtilities::generate_primary_cuid(serial, 0, 0x00, 0x73A3, 0x1002,
-                                                   AMDCUID_DEVICE_TYPE_GPU, &aux, true),
+    ASSERT_EQ(CuidUtilities::generate_primary_cuid(serial, 0, c.revision_id, c.device_id,
+                                                   c.vendor_id, c.type, &aux, true),
               AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(to_hex(aux.raw_bits, sizeof(aux.raw_bits)), aux_primary->payload) << "A-1 payload";
+    EXPECT_EQ(to_hex(aux.raw_bits, sizeof(aux.raw_bits)), aux_primary->payload) << "payload";
     EXPECT_EQ(CuidUtilities::get_cuid_as_string(&aux.UUIDv8_representation), aux_primary->uuid)
-        << "A-1 uuid";
-    EXPECT_NE(aux.raw_bits[14] & 0x20, 0) << "A-1 auxiliary bit not set";
+        << "uuid";
+    EXPECT_NE(aux.raw_bits[14] & 0x20, 0) << "auxiliary bit not set";
+    aux_uuids.emplace_back(aux_primary->uuid);
+    consumed.emplace(input->kind, input->name);
+    consumed.emplace(aux_primary->kind, aux_primary->name);
 
-    cuid_hmac h(kTemporaryKey, kTemporaryKeyLen);
+    if (std::strcmp(c.name, "A-1") == 0) {
+      const Vector* aux_derived = find(vectors, "derived", "A-2");
+      ASSERT_NE(aux_derived, nullptr);
+      cuid_hmac h(k_app);
+      ASSERT_TRUE(h.is_valid());
+      amdcuid_derived_id derived = {};
+      ASSERT_EQ(CuidUtilities::generate_derived_cuid(&aux, &derived, &h), AMDCUID_STATUS_SUCCESS);
+      EXPECT_EQ(to_hex(derived.raw_bits, sizeof(derived.raw_bits)), aux_derived->payload)
+          << "A-2 payload";
+      EXPECT_EQ(CuidUtilities::get_cuid_as_string(&derived.UUIDv8_representation),
+                aux_derived->uuid)
+          << "A-2 uuid";
+      EXPECT_NE(derived.raw_bits[14] & 0x20, 0) << "A-2 auxiliary bit not carried";
+      check_digest(*aux_derived, aux, h);
+      consumed.emplace(aux_derived->kind, aux_derived->name);
+    }
+  }
+
+  // A-CPU is socket 0, whose Routing ID field is zero.
+  {
+    const Vector* cpu_input = find(vectors, "aux-input", "A-CPU");
+    ASSERT_NE(cpu_input, nullptr);
+    std::vector<uint8_t> structure;
+    ASSERT_TRUE(from_hex(cpu_input->payload, structure));
+    ASSERT_EQ(structure.size(), 32u);
+    // Routing ID is payload bits 144:175, i.e. octets 18:21.
+    for (size_t i = 18; i < 22; ++i) {
+      EXPECT_EQ(structure[i], 0) << "A-CPU: octet " << i << " of the Routing ID is not zero";
+    }
+  }
+
+  // Auxiliary components sharing one machine identity must still differ.
+  for (size_t i = 0; i < aux_uuids.size(); ++i) {
+    for (size_t j = i + 1; j < aux_uuids.size(); ++j) {
+      EXPECT_NE(aux_uuids[i], aux_uuids[j])
+          << "two auxiliary components on one machine share an identifier";
+    }
+  }
+
+  // The machine-id keys K_app rather than entering the structure, so only K_app
+  // separates two hosts with the same part in the same slot.
+  {
+    static const uint8_t kHostA[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                                       0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
+    static const uint8_t kHostB[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                                       0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xee};
+    CuidUtilities::AuxiliaryInput in;
+    in.format = CuidUtilities::kAuxFormatPcie;
+    in.routing_id = CuidUtilities::routing_id_from_bdf("0000:63:00.0");
+    in.device_id = 0x73A3;
+    in.vendor_id = 0x1002;
+    in.component_type = AMDCUID_DEVICE_TYPE_GPU;
+    uint64_t serial_a = 0, serial_b = 0;
+    ASSERT_EQ(CuidUtilities::make_fallback_fingerprint(in, kHostA, serial_a),
+              AMDCUID_STATUS_SUCCESS);
+    ASSERT_EQ(CuidUtilities::make_fallback_fingerprint(in, kHostB, serial_b),
+              AMDCUID_STATUS_SUCCESS);
+    EXPECT_NE(serial_a, serial_b) << "auxiliary serial does not depend on the machine-id";
+  }
+
+  // ---- hardware serial octets ------------------------------------------
+  //
+  // A reversed octet order yields a well-formed identifier that names a
+  // different card.
+  for (const auto& v : vectors) {
+    if (v.kind != "serial") continue;
+    SCOPED_TRACE(v.name);
+    std::vector<uint8_t> bytes;
+    ASSERT_TRUE(from_hex(v.payload, bytes));
+    uint64_t serial = 0;
+    if (v.name == "S-DSN") {
+      ASSERT_EQ(bytes.size(), 8u);
+      serial = PciUtil::load_le64(bytes.data());
+      EXPECT_EQ(CuidUtilities::validate_fingerprint(serial), AMDCUID_STATUS_SUCCESS);
+    } else if (v.name == "S-MAC" || v.name == "S-MAC-ZERO") {
+      ASSERT_EQ(bytes.size(), 6u);
+      std::string mac;
+      for (size_t i = 0; i < bytes.size(); ++i) {
+        if (i) mac += ':';
+        mac += to_hex(&bytes[i], 1);
+      }
+      const auto expected_status =
+          v.name == "S-MAC-ZERO" ? AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND : AMDCUID_STATUS_SUCCESS;
+      EXPECT_EQ(CuidNic::fingerprint_from_mac(mac, serial), expected_status);
+    } else {
+      FAIL() << "unhandled serial vector " << v.name;
+    }
+    std::ostringstream rendered;
+    rendered << std::hex << std::setw(16) << std::setfill('0') << serial;
+    EXPECT_EQ(rendered.str(), v.hmac) << "64-bit serial";
+    consumed.emplace(v.kind, v.name);
+  }
+
+  // S-DSN is P-1's serial.
+  {
+    const Vector* dsn = find(vectors, "serial", "S-DSN");
+    ASSERT_NE(dsn, nullptr);
+    EXPECT_EQ(dsn->hmac, "06c5349bd3aaabd4")
+        << "S-DSN no longer yields the serial P-1 is built from";
+  }
+
+  // An all-zero MAC is an unconfigured interface, not an identity. Without this
+  // rule every such NIC on every machine shares one CUID.
+  {
+    const Vector* zero = find(vectors, "serial", "S-MAC-ZERO");
+    ASSERT_NE(zero, nullptr);
+    EXPECT_EQ(zero->hmac, "0000000000000000");
+    std::vector<uint8_t> zero_octets;
+    ASSERT_TRUE(from_hex(zero->payload, zero_octets));
+    uint64_t zero_value = 0;
+    for (size_t i = 0; i < zero_octets.size(); ++i) {
+      zero_value |= static_cast<uint64_t>(zero_octets[i]) << (8 * i);
+    }
+    EXPECT_EQ(CuidUtilities::validate_fingerprint(zero_value),
+              AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND)
+        << "an all-zero MAC was accepted as a serial";
+  }
+
+  // ---- partition UnitID -----------------------------------------------
+  // UnitID = (XCC count << 6) | first logical XCC. The driver computes it; the
+  // library only has to carry every value into a GPU primary.
+  for (const auto& v : vectors) {
+    if (v.kind != "unit-id") continue;
+    SCOPED_TRACE(v.name);
+    std::vector<uint8_t> mask_bytes, uid_bytes;
+    ASSERT_TRUE(from_hex(v.payload, mask_bytes));
+    ASSERT_TRUE(from_hex(v.hmac, uid_bytes));
+    ASSERT_EQ(mask_bytes.size(), 4u);
+    ASSERT_EQ(uid_bytes.size(), 2u);
+    uint32_t mask = 0;
+    for (const uint8_t b : mask_bytes) mask = (mask << 8) | b;
+    const unsigned unit_id = (static_cast<unsigned>(uid_bytes[0]) << 8) | uid_bytes[1];
+    ASSERT_NE(mask, 0u);
+    const unsigned first = static_cast<unsigned>(__builtin_ctz(mask));
+    const uint32_t shifted = mask >> first;
+    EXPECT_EQ(shifted & (shifted + 1), 0u) << "mask is not contiguous";
+    EXPECT_EQ(unit_id, (static_cast<unsigned>(__builtin_popcount(mask)) << 6) | first);
+    amdcuid_primary_id id = {};
+    EXPECT_EQ(CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL, unit_id, 0, 0x73A3,
+                                                   0x1002, AMDCUID_DEVICE_TYPE_GPU, &id, false),
+              AMDCUID_STATUS_SUCCESS);
+    consumed.emplace(v.kind, v.name);
+  }
+
+  // ---- adopted firmware UUID -------------------------------------------
+  //
+  // The HMAC message for an adopted primary is the sixteen firmware octets
+  // verbatim, version and variant bits included. Re-framing them drops six
+  // bits, so platforms differing only in those bits would share a derived CUID.
+  {
+    const Vector* adopted = find(vectors, "adopted", "AD-1");
+    const Vector* expected = find(vectors, "derived", "AD-2");
+    ASSERT_NE(adopted, nullptr);
+    ASSERT_NE(expected, nullptr);
+    amdcuid_primary_id id = {};
+    ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(adopted->uuid, id.UUIDv8_representation.bytes),
+              AMDCUID_STATUS_SUCCESS);
+    ASSERT_FALSE(CuidUtilities::is_constructed(&id.UUIDv8_representation))
+        << "AD-1 must not look constructed, or it is not testing the adopted path";
+    EXPECT_EQ(CuidUtilities::get_cuid_as_string(&id.UUIDv8_representation), adopted->uuid);
+    std::memcpy(id.raw_bits, id.UUIDv8_representation.bytes, sizeof(id.raw_bits));
+    EXPECT_EQ(to_hex(id.raw_bits, sizeof(id.raw_bits)), adopted->payload);
+    cuid_hmac h(kTestKey1, key_length);
     ASSERT_TRUE(h.is_valid());
     amdcuid_derived_id derived = {};
-    ASSERT_EQ(CuidUtilities::generate_derived_cuid(&aux, &derived, &h), AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(to_hex(derived.raw_bits, sizeof(derived.raw_bits)), aux_derived->payload)
-        << "A-2 payload";
-    EXPECT_EQ(CuidUtilities::get_cuid_as_string(&derived.UUIDv8_representation), aux_derived->uuid)
-        << "A-2 uuid";
-    // The marker must survive derivation, or an auxiliary value cannot be
-    // recognised as one without its primary.
-    EXPECT_NE(derived.raw_bits[14] & 0x20, 0) << "A-2 auxiliary bit not carried";
+    ASSERT_EQ(CuidUtilities::generate_derived_cuid(&id, &derived, &h), AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(to_hex(derived.raw_bits, sizeof(derived.raw_bits)), expected->payload);
+    EXPECT_EQ(CuidUtilities::get_cuid_as_string(&derived.UUIDv8_representation), expected->uuid);
+    // Bit 117 is the Auxiliary Value Identifier in a packed payload but opaque
+    // firmware data in an adopted one. AD-1 has it set.
+    EXPECT_NE(id.raw_bits[14] & 0x20, 0) << "AD-1 no longer exercises the bit-117 case";
+    EXPECT_EQ(derived.raw_bits[14] & 0x20, 0)
+        << "an adopted primary's octet 14 was read as an auxiliary marker";
+    check_digest(*expected, id, h);
+    consumed.emplace(adopted->kind, adopted->name);
+    consumed.emplace(expected->kind, expected->name);
   }
+
+  // A new, renamed or duplicated row must never silently lose coverage.
+  for (const auto& v : vectors) {
+    EXPECT_EQ(consumed.count({v.kind, v.name}), 1u)
+        << "unasserted vector " << v.kind << '/' << v.name;
+  }
+  EXPECT_EQ(consumed.size(), kExpectedVectorCount);
 }
 
 void TestVectors::DisplayTestInfo() { TestBase::DisplayTestInfo(); }
 void TestVectors::DisplayResults() const { TestBase::DisplayResults(); }
 void TestVectors::Close() {}
+
+TEST(cuidtstUnprivileged, PrimaryRejectsOutOfRangeUnitId) {
+  // Cover every unrepresentable uint16_t, not just the three known aliases.
+  for (unsigned unit_id = 0x2000; unit_id <= 0xFFFF; ++unit_id) {
+    for (const bool auxiliary : {false, true}) {
+      amdcuid_primary_id id;
+      std::memset(&id, 0xA5, sizeof(id));
+      const amdcuid_primary_id original = id;
+      ASSERT_EQ(
+          CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL, unit_id, 0, 0x73A3, 0x1002,
+                                               AMDCUID_DEVICE_TYPE_GPU, &id, auxiliary),
+          AMDCUID_STATUS_INVALID_ARGUMENT)
+          << "unit=" << unit_id << " auxiliary=" << auxiliary;
+      ASSERT_EQ(std::memcmp(&id, &original, sizeof(id)), 0) << "unit=" << unit_id;
+    }
+  }
+}

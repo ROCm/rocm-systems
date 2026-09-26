@@ -101,6 +101,17 @@ EOF
   return 0
 }
 
+# efivarfs exposes the AmdCuidKey variable world-readable until the tmpfiles.d
+# rule restricts it, which otherwise happens only at the next boot.
+do_apply_cuid_tmpfiles() {
+  local conf="@AMDCUID_TMPFILES_DIR@/amdcuid.conf"
+
+  if [ -e "${conf}" ] && command -v systemd-tmpfiles &>/dev/null; then
+    systemd-tmpfiles --create "${conf}" || true
+  fi
+  return 0
+}
+
 do_activate_argcomplete() {
   # python3-argcomplete is recommended but optional; activate global bash
   # completion when its helper is present, otherwise continue gracefully.
@@ -123,5 +134,6 @@ if [ "$1" -ge 1 ]; then
   do_ldconfig
   do_warn_shadowed_python_module
   do_activate_argcomplete
+  do_apply_cuid_tmpfiles
   do_configureLogrotate || exit 0
 fi

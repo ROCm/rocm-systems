@@ -23,6 +23,8 @@ class CuidNic : public CuidDevice {
   CuidNic(const amdcuid_nic_info& i);
   amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_NIC; }
   amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
+  bool key_gated_identity() const override { return true; }
+  amdcuid_status_t get_auxiliary_primary_cuid(amdcuid_primary_id& id) const override;
   amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
   static amdcuid_status_t discover(std::vector<DevicePtr>& nics);
   static amdcuid_status_t discover_single(amdcuid_nic_info* nic_info,
@@ -38,6 +40,10 @@ class CuidNic : public CuidDevice {
 
   // MAC address accessor
   amdcuid_status_t get_mac_address(std::string& mac_address) const;
+
+  // Decode a MAC into the hardware fingerprint; exposed for conformance tests.
+  static amdcuid_status_t fingerprint_from_mac(const std::string& mac_address,
+                                               uint64_t& fingerprint);
 
   const amdcuid_nic_info& get_info() const;
 

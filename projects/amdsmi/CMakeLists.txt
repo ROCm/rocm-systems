@@ -543,7 +543,8 @@ install(
 # directory and its parents -- co-owning system directories, with the default
 # group-writable (0775) mode. Exclude the sitelib and its ancestors from the
 # auto filelist so the RPM owns only its own <sitelib>/amdsmi subtree, not the
-# shared /usr python directories.
+# shared /usr python directories. The same holds for the systemd tmpfiles.d
+# directory an in-tree CUID build installs amdcuid.conf into.
 set(_amdsmi_sitelib_excludes "")
 if(AMDSMI_SYSTEM_PYTHON_SITELIB)
     set(_amdsmi_walk "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
@@ -556,6 +557,7 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "${CPACK_PACKAGING_INSTALL_PREFIX}"
     "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
     ${_amdsmi_sitelib_excludes}
+    ${AMDCUID_TMPFILES_DIR}
 )
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)

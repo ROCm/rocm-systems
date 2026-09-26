@@ -45,12 +45,11 @@ Checks:
 #                   dcl21-cpp (postfix operator return types) and err58-cpp
 #                   (throwing static initializers, which are gtest fixtures).
 #   +concurrency-*  CuidDeviceManager is a shared, mutex-guarded singleton
-#                   reached from the public C API, and the daemon serves
-#                   multiple clients.
+#                   reached from the public C API by multithreaded callers.
 #   +misc-use-*     libamdcuid is a static library, so a file-scope helper
 #                   without internal linkage is exported to everything that
 #                   links it. Unnamed namespace is the idiom, per SF.22.
 #
 # WarningsAsErrors is clean today; everything else is advisory.
-HeaderFilterRegex: 'shared/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
+HeaderFilterRegex: 'shared/cuid/(lib|cli)/.*\.(h|hpp)$'
 WarningsAsErrors: 'bugprone-*,cert-*,concurrency-*,clang-analyzer-*,misc-use-internal-linkage,misc-use-anonymous-namespace'

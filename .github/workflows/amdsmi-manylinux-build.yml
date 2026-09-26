@@ -18,6 +18,11 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - '!shared/cuid/docs/**'
+      - '!shared/cuid/openspec/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   push:
     branches: [develop]
@@ -26,6 +31,11 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamd_smi compiles shared/cuid and shared/sha256 in-tree.
+      - 'shared/cuid/**'
+      - '!shared/cuid/docs/**'
+      - '!shared/cuid/openspec/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   workflow_dispatch:
 

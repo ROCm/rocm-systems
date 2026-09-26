@@ -114,7 +114,7 @@ These land as one commit. Any subset is wrong.
 
 ## 9. Specification edits
 
-_Superseded. These are edits to Confluence pages, now specified in full, with
+_Superseded. These are edits to the published specification, now specified in full, with
 replacement text, in `amend-published-cuid-spec`. The entries below stay as the
 pointer; do not work them from this file._
 
@@ -137,7 +137,7 @@ pointer; do not work them from this file._
 
 _Done, against the two W6800s at `0000:03:00.0` and `0000:63:00.0` with the CUID
 driver loaded. `cuid_primary` reads `d4abaad3-9b34-8c50-9800-028dcc084200` and
-`ffeb5272-7771-88c8-b800-028dcc084200` (P-1, P-2); `cuid_secondary` reads
+`ffeb5272-7771-88c8-b800-028dcc084200` (P-1, P-2); `cuid_derived` reads
 `61ffe99a-b3e0-8e16-a802-4b1d515d5438` (D-1), which
 `cuidtstUnprivileged.ConformanceVectors` computes independently from the P-1
 inputs. Writing the 32-octet key `00..1f` to `cuid_seed` produced

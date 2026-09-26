@@ -2,16 +2,13 @@ defaults:
   numbered: false
 root: index
 subtrees:
-- entries:
-  - file: conceptual/what_is_cuid
-
 - caption: Install
   entries:
   - file: install/install
 
 - caption: How to
   entries:
-  - file: how-to/cuid-cli-tool
+  - file: how-to/manage-node-key
   - url: https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid/example/main.cc
     title: Sample program using CUID API
 
@@ -28,7 +25,7 @@ subtrees:
 
 - caption: Conceptual
   entries:
-  - file: conceptual/cuid_file
+  - file: conceptual/what_is_cuid
 
 - caption: About
   entries:

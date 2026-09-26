@@ -2,6 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import hashlib
 import json
 import logging
 import math
@@ -1921,7 +1922,7 @@ class SetValueCommands:
             return
 
     def _set_cuid_seed(self, source):
-        """Provision the node-wide CUID derivation seed.
+        """Set the node key that derived CUIDs are keyed with.
 
         `source` is a path, or "-" for standard input. The seed is never taken
         from a command-line argument: an argument is visible in
@@ -1953,6 +1954,24 @@ class SetValueCommands:
             # named rather than left as a raw library status.
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                raise ValueError(
+                    f"CUID seed from {source} refused: its bytes are all equal or it is a "
+                    "published constant"
+                ) from e
+            # The key may have been stored before the refresh failed. Say so
+            # rather than let the error read as "nothing changed".
+            seed_info = self._stored_cuid_seed_info(seed)
+            if seed_info is None:
+                raise
+            self.logger.output["seed_provisioned"] = seed_info["provisioned"]
+            self.logger.output["seed_fingerprint"] = seed_info["fingerprint"]
+            self.logger.output["seed_publication"] = (
+                f"FAILED [{e.get_error_info(detailed=False)}]: the node key was stored, "
+                "but derived CUIDs were not refreshed; "
+                "rerun this command once the cause is fixed"
+            )
+            self.logger.print_output()
             raise
 
         seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
@@ -1960,6 +1979,19 @@ class SetValueCommands:
         self.logger.output["seed_provisioned"] = seed_info["provisioned"]
         self.logger.output["seed_fingerprint"] = seed_info["fingerprint"]
         self.logger.print_output()
+
+    @staticmethod
+    def _stored_cuid_seed_info(seed):
+        """Seed info if the node key is now `seed`, else None."""
+        try:
+            seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
+        except amdsmi_exception.AmdSmiLibraryException:
+            return None
+        size = amdsmi_interface.AMDSMI_CUID_SEED_FINGERPRINT_SIZE
+        fingerprint = hashlib.sha256(seed).digest()[:size].hex()
+        if seed_info["provisioned"] and seed_info["fingerprint"] == fingerprint:
+            return seed_info
+        return None
 
     def set_value(
         self,
@@ -2097,7 +2129,7 @@ class SetValueCommands:
                 return
 
         # Check if a GPU argument has been set
-        # The CUID derivation seed is node-scoped, so it is handled ahead of the
+        # The node key is node-scoped, so it is handled ahead of the
         # GPU/CPU/CORE dispatch, which exists to pick a device.
         if getattr(args, "cuid_seed", None):
             if getattr(args, "gpu", None) is not None:
@@ -2105,7 +2137,7 @@ class SetValueCommands:
                 # node while appearing to target one device.
                 print(
                     "amd-smi set: error: argument --cuid-seed: not allowed with argument "
-                    "--gpu/-g (the CUID seed is node-wide, not per-GPU)",
+                    "--gpu/-g (the node key is node-wide, not per-GPU)",
                     file=sys.stderr,
                 )
                 sys.exit(2)

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // HMAC-SHA-256 over the in-tree SHA-256 (sha256.h). One code path on every
-// platform; only the CSPRNG below is platform-specific.
+// platform; only the CSPRNG and the key-source scan below are
+// platform-specific.
 
 #include "hmac.h"
 
@@ -14,7 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <iostream>
+#include <mutex>
 
 #include "cuid_util.h"
 #include "rocm/sha2/log.h"
@@ -25,8 +26,8 @@
 #include <windows.h>
 // bcrypt.h must follow windows.h.
 #include <bcrypt.h>
-#include <direct.h>
 #else
+#include <dirent.h>
 #include <unistd.h>
 // getrandom(2) needs glibc >= 2.25 (or musl); where it is missing, and where
 // the syscall itself is missing (pre-3.17 kernels, some containers/seccomp
@@ -40,10 +41,6 @@
 #if AMDCUID_HAVE_GETRANDOM
 #include <sys/random.h>
 #endif
-#endif
-
-#ifndef AMDCUID_CONFIG_DIR
-#error "AMDCUID_CONFIG_DIR must be defined via CMake"
 #endif
 
 namespace {
@@ -71,28 +68,6 @@ bool is_sha256_name(const char* name) {
          std::strcmp(name, "sha256") == 0 || std::strcmp(name, "sha-256") == 0;
 }
 
-// Directory portion of a path, or "." when there is none.
-std::string parent_dir(const std::string& path) {
-  const size_t slash = path.find_last_of('/');
-  if (slash == std::string::npos) return ".";
-  if (slash == 0) return "/";
-  return path.substr(0, slash);
-}
-
-// Create the key directory (0755, as the packaging script does) so the API
-// works on a machine where the post-install script never ran.
-bool ensure_parent_dir(const std::string& path) {
-  const std::string dir = parent_dir(path);
-  struct stat st;
-  if (stat(dir.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
-#if defined(_WIN32)
-  return _mkdir(dir.c_str()) == 0 || errno == EEXIST;
-#else
-  return mkdir(dir.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0 ||
-         errno == EEXIST;
-#endif
-}
-
 // Fill buf with cryptographically secure random bytes.
 bool fill_random(uint8_t* buf, size_t len) {
 #if defined(_WIN32)
@@ -118,93 +93,144 @@ bool fill_random(uint8_t* buf, size_t len) {
 #endif
 }
 
-}  // namespace
-
-struct cuid_hmac::Impl {
-  std::string digest_name;
-};
-
-cuid_hmac::cuid_hmac()
-    : impl_(nullptr),
-      key(nullptr),
-      key_len(key_length),
-      valid(false),
-      using_default_key(false),
-      key_store_status_(AMDCUID_STATUS_SUCCESS) {
-  init_sha2_logging();
-  // getenv races only against setenv, which this library never calls.
-  // NOLINTNEXTLINE(concurrency-mt-unsafe)
-  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
-  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
-  impl_ = new Impl();
-  impl_->digest_name = "SHA256";
-
-  std::ifstream key_file_stream(key_file_path, std::ios::binary);
-  if (!key_file_stream.is_open()) {
-    // Absence and inaccessibility are not the same answer: the key file is 0600
-    // root-owned, so conflating them makes amdcuid_get_key_info() report a
-    // provisioned node as unprovisioned, with the fallback seed's fingerprint,
-    // to every unprivileged caller. Record which it was. The default seed is
-    // adopted either way, as the kernel's is, so derivation keeps working.
-    struct stat st;
-    if (stat(key_file_path.c_str(), &st) == 0) {
-      key_store_status_ = AMDCUID_STATUS_PERMISSION_DENIED;
+#if !defined(_WIN32)
+// Read up to `len` bytes of `path`. Returns the number of bytes read, -2 when
+// the file does not exist, or -1 on any other error, including a file longer
+// than `len`.
+ssize_t read_whole_file(const std::string& path, uint8_t* buf, size_t len) {
+  const int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) return errno == ENOENT ? -2 : -1;
+  size_t got = 0;
+  while (got < len) {
+    const ssize_t n = read(fd, buf + got, len - got);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      close(fd);
+      return -1;
     }
-    use_default_key();
-    return;
+    if (n == 0) break;
+    got += static_cast<size_t>(n);
   }
-
-  key_file_stream.seekg(0, std::ios::end);
-  const size_t file_len = static_cast<size_t>(key_file_stream.tellg());
-  if (file_len != key_length) {
-    // Wrong size is corruption, not absence: refuse rather than silently
-    // changing every CUID on the machine.
-    std::cerr << "Invalid key length in " << key_file_path << " (" << file_len
-              << " bytes, expected " << key_length << ")" << std::endl;
-    key_file_stream.close();
-    key_store_status_ = AMDCUID_STATUS_KEY_ERROR;
-    return;
-  }
-  key_file_stream.seekg(0, std::ios::beg);
-
-  key = new uint8_t[key_length];
-  key_file_stream.read(reinterpret_cast<char*>(key), key_length);
-  if (key_file_stream.gcount() != static_cast<std::streamsize>(key_length)) {
-    // The size check above passed, so a short read means the file changed
-    // underneath us or the read failed outright. Either way it is not a key.
-    std::cerr << "Failed to read " << key_file_path << " (" << key_file_stream.gcount()
-              << " bytes, expected " << key_length << ")" << std::endl;
-    delete[] key;
-    key = nullptr;
-    key_file_stream.close();
-    key_store_status_ = AMDCUID_STATUS_KEY_ERROR;
-    return;
-  }
-  key_file_stream.close();
-
-  valid = true;
+  uint8_t probe;
+  const ssize_t extra = read(fd, &probe, 1);
+  close(fd);
+  if (extra != 0) return -1;
+  return static_cast<ssize_t>(got);
 }
 
-void cuid_hmac::use_default_key() {
-  delete[] key;
-  key = new uint8_t[kDefaultSeedLen];
-  std::memcpy(key, kDefaultSeed, kDefaultSeedLen);
-  key_len = kDefaultSeedLen;
-  using_default_key = true;
-  valid = true;
+// A device this process cannot read is skipped, not taken as "no key".
+bool scan_cuid_seed_devices(uint8_t out_key[key_length], bool& out_provisioned) {
+  constexpr char kDevicesDir[] = "/sys/bus/pci/devices";
+  DIR* dir = opendir(kDevicesDir);
+  if (!dir) return false;
+
+  bool found = false;
+  struct dirent* entry;
+  // This call site owns its DIR*, which is all POSIX requires; readdir_r is
+  // deprecated and must not be adopted.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  while (!found && (entry = readdir(dir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;
+    const std::string base = std::string(kDevicesDir) + "/" + entry->d_name;
+    uint8_t bytes[key_length];
+    const ssize_t got = read_whole_file(base + "/cuid_seed", bytes, sizeof(bytes));
+    if (got != static_cast<ssize_t>(key_length)) {
+      rocm::sha2::secure_zero(bytes, sizeof(bytes));
+      continue;
+    }
+
+    std::memcpy(out_key, bytes, key_length);
+    rocm::sha2::secure_zero(bytes, sizeof(bytes));
+    out_provisioned = CuidUtilities::read_sysfs_file(base + "/cuid_seed_state") == "provisioned";
+    found = true;
+  }
+  closedir(dir);
+  return found;
+}
+
+// FILE_NOT_FOUND when there is no variable, KEY_ERROR when it is malformed.
+// Nobody overwrites a malformed variable automatically.
+amdcuid_status_t read_efivar_key(uint8_t out_key[key_length], bool& out_provisioned) {
+  uint8_t buf[4 + kKeyVariablePayloadLen];
+  const ssize_t got = read_whole_file(kKeyVariablePath, buf, sizeof(buf));
+  if (got == -2) return AMDCUID_STATUS_FILE_NOT_FOUND;
+  const amdcuid_status_t status =
+      got < 0 ? AMDCUID_STATUS_KEY_ERROR
+              : CuidUtilities::parse_key_variable(buf, static_cast<size_t>(got), out_key,
+                                                  out_provisioned);
+  rocm::sha2::secure_zero(buf, sizeof(buf));
+  if (status != AMDCUID_STATUS_SUCCESS)
+    LOG(WARN, "amdcuid: " << kKeyVariablePath << " is malformed; ignoring it");
+  return status;
+}
+#endif  // !_WIN32
+
+}  // namespace
+
+std::recursive_mutex& cuid_operation_mutex() {
+  static std::recursive_mutex mutex;
+  return mutex;
+}
+
+cuid_hmac::cuid_hmac()
+    : key(nullptr),
+      key_len(key_length),
+      valid(false),
+      provisioned_(false),
+      key_store_status_(AMDCUID_STATUS_SUCCESS) {
+  init_sha2_logging();
+}
+
+amdcuid_status_t cuid_hmac::reload_key() {
+  std::lock_guard<std::mutex> lock(key_mutex_);
+  if (key) {
+    rocm::sha2::secure_zero(key, key_len);
+    delete[] key;
+    key = nullptr;
+  }
+  valid = false;
+  provisioned_ = false;
+  key_len = key_length;
+  key_store_status_ = AMDCUID_STATUS_SUCCESS;
+
+#if defined(_WIN32)
+  return key_store_status_;
+#else
+  if (geteuid() != 0) return key_store_status_;
+
+  uint8_t candidate[key_length];
+  bool candidate_provisioned = false;
+  if (scan_cuid_seed_devices(candidate, candidate_provisioned)) {
+    key = new uint8_t[key_length];
+    std::memcpy(key, candidate, key_length);
+    rocm::sha2::secure_zero(candidate, sizeof(candidate));
+    valid = true;
+    provisioned_ = candidate_provisioned;
+    return key_store_status_;
+  }
+
+  const amdcuid_status_t efi_status = read_efivar_key(candidate, candidate_provisioned);
+  if (efi_status == AMDCUID_STATUS_SUCCESS) {
+    key = new uint8_t[key_length];
+    std::memcpy(key, candidate, key_length);
+    rocm::sha2::secure_zero(candidate, sizeof(candidate));
+    valid = true;
+    provisioned_ = candidate_provisioned;
+    return key_store_status_;
+  }
+  rocm::sha2::secure_zero(candidate, sizeof(candidate));
+  if (efi_status != AMDCUID_STATUS_FILE_NOT_FOUND) key_store_status_ = efi_status;
+  return key_store_status_;
+#endif
 }
 
 cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
-    : impl_(nullptr),
-      key(nullptr),
+    : key(nullptr),
       key_len(key_length),
       valid(false),
-      using_default_key(false),
+      provisioned_(false),
       key_store_status_(AMDCUID_STATUS_SUCCESS) {
   init_sha2_logging();
-  impl_ = new Impl();
-  impl_->digest_name = "SHA256";
-
   key = new uint8_t[key_length];
   std::memcpy(key, key_data, key_length);
 
@@ -212,15 +238,12 @@ cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
 }
 
 cuid_hmac::cuid_hmac(const char* key_data, size_t len)
-    : impl_(nullptr),
-      key(nullptr),
+    : key(nullptr),
       key_len(len),
       valid(false),
-      using_default_key(false),
+      provisioned_(false),
       key_store_status_(AMDCUID_STATUS_SUCCESS) {
-  impl_ = new Impl();
-  impl_->digest_name = "SHA256";
-
+  init_sha2_logging();
   if (!key_data || len == 0) {
     key_len = key_length;
     return;  // leaves valid == false
@@ -233,7 +256,6 @@ cuid_hmac::cuid_hmac(const char* key_data, size_t len)
 }
 
 cuid_hmac::~cuid_hmac() {
-  delete impl_;
   if (key) {
     rocm::sha2::secure_zero(key, key_len);
     delete[] key;
@@ -242,14 +264,11 @@ cuid_hmac::~cuid_hmac() {
 
 amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t data_len,
                                                  uint8_t* out_hash, size_t* out_len) {
-  if (!impl_ || !out_hash) {
-    std::cerr << "HMAC context is not initialized" << std::endl;
-    return AMDCUID_STATUS_HMAC_ERROR;
-  }
+  if (!out_hash) return AMDCUID_STATUS_HMAC_ERROR;
 
   std::lock_guard<std::mutex> lock(key_mutex_);
   if (!key) {
-    std::cerr << "No HMAC key is set" << std::endl;
+    LOG(ERROR, "No HMAC key is set");
     return AMDCUID_STATUS_KEY_ERROR;
   }
 
@@ -259,40 +278,22 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t dat
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::key_fingerprint(uint8_t out[8]) const {
-  if (!out) return AMDCUID_STATUS_INVALID_ARGUMENT;
-
-  // This hashes key[0..key_len), which set_hmac_key() zeroes, frees and
-  // reallocates under the same mutex; key_mutex_ is mutable so this const
-  // method can take it. Without it, amdcuid_get_key_info() racing
-  // amdcuid_set_hash_key() is a use-after-free on key material.
-  std::lock_guard<std::mutex> lock(key_mutex_);
-  if (!key || !valid) return AMDCUID_STATUS_KEY_ERROR;
-
-  uint8_t digest[32];
-  const amdcuid_status_t status = CuidUtilities::sha256_unkeyed(key, key_len, digest);
-  if (status != AMDCUID_STATUS_SUCCESS) return status;
-
-  std::memcpy(out, digest, 8);
-  rocm::sha2::secure_zero(digest, sizeof(digest));
-  return AMDCUID_STATUS_SUCCESS;
-}
-
 amdcuid_status_t cuid_hmac::get_key_info(amdcuid_key_info_t* info) const {
   if (!info) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
-  // One lock_guard for the whole read, so a concurrent set_hmac_key() can't
-  // land mid-read and mix status from one key with a fingerprint from
-  // another; the key is copied out so hashing runs outside the lock.
+  // One lock_guard for the whole read, so a concurrent reload_key()/
+  // set_hmac_key() can't land mid-read and mix status from one key with a
+  // fingerprint from another; the key is copied out so hashing runs outside
+  // the lock.
   uint8_t key_copy[key_length];
   size_t key_copy_len;
   {
     std::lock_guard<std::mutex> lock(key_mutex_);
     if (key_store_status_ != AMDCUID_STATUS_SUCCESS) return key_store_status_;
-    if (!key || !valid) return AMDCUID_STATUS_KEY_ERROR;
+    if (!key || !valid || key_len > sizeof(key_copy)) return AMDCUID_STATUS_KEY_ERROR;
     key_copy_len = key_len;
     std::memcpy(key_copy, key, key_copy_len);
-    info->provisioned = using_default_key ? 0 : 1;
+    info->provisioned = provisioned_ ? 1 : 0;
   }
 
   uint8_t digest[32];
@@ -306,18 +307,10 @@ amdcuid_status_t cuid_hmac::get_key_info(amdcuid_key_info_t* info) const {
 }
 
 amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char* digest_name) {
-  if (!impl_) {
-    std::cerr << "HMAC context is not initialized" << std::endl;
-    return AMDCUID_STATUS_HMAC_ERROR;
-  }
-
   if (!is_sha256_name(digest_name)) {
-    std::cerr << "Unsupported digest: " << digest_name << " (only SHA-256 is supported)"
-              << std::endl;
+    LOG(ERROR, "Unsupported digest: " << digest_name << " (only SHA-256 is supported)");
     return AMDCUID_STATUS_HMAC_ERROR;
   }
-
-  impl_->digest_name = "SHA256";
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -333,115 +326,15 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   key_len = key_length;
   std::memcpy(key, key_data, key_length);
   valid = true;
-  using_default_key = false;
 
   return AMDCUID_STATUS_SUCCESS;
-}
-
-amdcuid_status_t cuid_hmac::store_key(const uint8_t key_data[key_length]) {
-  if (!key_data) return AMDCUID_STATUS_INVALID_ARGUMENT;
-
-  // Write a sibling temp file and rename over the target: atomic, so a reader
-  // never sees a truncated key and a failed write cannot destroy the old one.
-  if (!ensure_parent_dir(key_file_path)) {
-    std::cerr << "Cannot create directory for " << key_file_path << std::endl;
-    return AMDCUID_STATUS_KEY_ERROR;
-  }
-
-#if defined(_WIN32)
-  const std::string tmp_path = key_file_path + ".new";
-  {
-    std::ofstream tmp(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
-    if (!tmp) return AMDCUID_STATUS_KEY_ERROR;
-    tmp.write(reinterpret_cast<const char*>(key_data), key_length);
-    tmp.flush();
-    if (!tmp) {
-      tmp.close();
-      std::remove(tmp_path.c_str());
-      return AMDCUID_STATUS_KEY_ERROR;
-    }
-  }
-  // rename() refuses to clobber an existing file on Windows.
-  if (!MoveFileExA(tmp_path.c_str(), key_file_path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-    std::remove(tmp_path.c_str());
-    return AMDCUID_STATUS_KEY_ERROR;
-  }
-  // Whatever was wrong with the store (absent, unreadable, not a key) has been
-  // replaced by a key this process wrote and can read. Under key_mutex_, which
-  // guards it: key_store_status() reads it concurrently.
-  {
-    std::lock_guard<std::mutex> lock(key_mutex_);
-    key_store_status_ = AMDCUID_STATUS_SUCCESS;
-  }
-  return AMDCUID_STATUS_SUCCESS;
-#else
-  // Unique per-call name (mkstemp) so concurrent callers can never collide on
-  // a shared ".new" path; fchmod enforces 0600 regardless of libc/umask.
-  std::string tmp_path = key_file_path + ".XXXXXX";
-  int fd = mkstemp(&tmp_path[0]);
-  if (fd < 0) {
-    return (errno == EACCES || errno == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
-                                               : AMDCUID_STATUS_KEY_ERROR;
-  }
-  if (fchmod(fd, S_IRUSR | S_IWUSR) != 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
-    close(fd);
-    unlink(tmp_path.c_str());
-    return AMDCUID_STATUS_KEY_ERROR;
-  }
-
-  auto fail = [&]() {
-    close(fd);
-    unlink(tmp_path.c_str());
-    return AMDCUID_STATUS_KEY_ERROR;
-  };
-
-  size_t written = 0;
-  while (written < key_length) {
-    ssize_t n = write(fd, key_data + written, key_length - written);
-    if (n < 0) {
-      if (errno == EINTR) continue;
-      return fail();
-    }
-    written += static_cast<size_t>(n);
-  }
-
-  // Durable before the rename, or a crash can leave the file present but empty.
-  if (fsync(fd) != 0) return fail();
-  if (close(fd) != 0) {
-    unlink(tmp_path.c_str());
-    return AMDCUID_STATUS_KEY_ERROR;
-  }
-
-  if (rename(tmp_path.c_str(), key_file_path.c_str()) != 0) {
-    unlink(tmp_path.c_str());
-    return AMDCUID_STATUS_KEY_ERROR;
-  }
-
-  // Persist the directory entry so the rename survives power loss.
-  const size_t slash = key_file_path.find_last_of('/');
-  const std::string dir = (slash == std::string::npos) ? "." : key_file_path.substr(0, slash);
-  int dir_fd = open(dir.empty() ? "/" : dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (dir_fd >= 0) {
-    (void)fsync(dir_fd);
-    close(dir_fd);
-  }
-
-  // Whatever was wrong with the store (absent, unreadable, not a key) has been
-  // replaced by a key this process wrote and can read. Under key_mutex_, which
-  // guards it: key_store_status() reads it concurrently.
-  {
-    std::lock_guard<std::mutex> lock(key_mutex_);
-    key_store_status_ = AMDCUID_STATUS_SUCCESS;
-  }
-  return AMDCUID_STATUS_SUCCESS;
-#endif
 }
 
 amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
   if (!out_key) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   if (!fill_random(out_key, key_length)) {
-    std::cerr << "Error generating random bytes for HMAC key" << std::endl;
+    LOG(ERROR, "Error generating random bytes for HMAC key");
     return AMDCUID_STATUS_KEY_ERROR;
   }
 
@@ -453,4 +346,49 @@ amdcuid_status_t CuidUtilities::sha256_unkeyed(const uint8_t* data, size_t data_
   if (!out || (!data && data_len > 0)) return AMDCUID_STATUS_INVALID_ARGUMENT;
   rocm::sha2::sha256_digest(data, data_len, out);
   return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidUtilities::parse_key_variable(const uint8_t* data, size_t len,
+                                                   uint8_t key[key_length], bool& provisioned) {
+  if (!data || !key || len != 4 + kKeyVariablePayloadLen) return AMDCUID_STATUS_KEY_ERROR;
+  const uint8_t* payload = data + 4;
+  if (payload[0] != kKeyVariableVersion || (payload[1] & ~kKeyVariableProvisioned) != 0 ||
+      payload[2] != 0 || payload[3] != 0)
+    return AMDCUID_STATUS_KEY_ERROR;
+  std::memcpy(key, payload + 4, key_length);
+  provisioned = (payload[1] & kKeyVariableProvisioned) != 0;
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+void CuidUtilities::build_key_variable(const uint8_t key[key_length],
+                                       uint8_t out[4 + kKeyVariablePayloadLen]) {
+  for (int i = 0; i < 4; ++i) out[i] = static_cast<uint8_t>(kKeyVariableAttributes >> (8 * i));
+  out[4] = kKeyVariableVersion;
+  out[5] = kKeyVariableProvisioned;
+  out[6] = 0;
+  out[7] = 0;
+  std::memcpy(out + 8, key, key_length);
+}
+
+bool CuidUtilities::is_rejected_key(const uint8_t key[key_length]) {
+  bool all_equal = true;
+  for (size_t i = 1; i < key_length; ++i) all_equal = all_equal && key[i] == key[0];
+  if (all_equal) return true;
+
+  const auto padded_equals = [key](const char* text) {
+    uint8_t padded[key_length] = {};
+    std::memcpy(padded, text, std::strlen(text));
+    return std::memcmp(key, padded, key_length) == 0;
+  };
+  if (padded_equals("AMD-CUID-DEFAULT-SEED-v1") || padded_equals("AMD-CUID-TEMP-KEY-v1"))
+    return true;
+
+  // The two conformance-vector keys: 00..1f and 0xa5 ^ n.
+  uint8_t counting[key_length];
+  uint8_t xored[key_length];
+  for (size_t i = 0; i < key_length; ++i) {
+    counting[i] = static_cast<uint8_t>(i);
+    xored[i] = static_cast<uint8_t>(0xA5 ^ i);
+  }
+  return std::memcmp(key, counting, key_length) == 0 || std::memcmp(key, xored, key_length) == 0;
 }

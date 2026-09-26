@@ -15,7 +15,7 @@ group on the component's device node. For a PCI component the attributes appear
 under `/sys/bus/pci/devices/<dev>/`.
 
 The group SHALL consist of exactly three attributes: `cuid_primary`,
-`cuid_secondary` and `cuid_seed`. It SHALL be created as a group so that all
+`cuid_derived` and `cuid_seed`. It SHALL be created as a group so that all
 three appear atomically, and removed in full when the device is unbound.
 
 A driver SHALL NOT expose a temporary or auxiliary CUID attribute. Auxiliary
@@ -24,7 +24,7 @@ identifiers are user-mode only.
 #### Scenario: Attributes present after bind
 
 - **WHEN** the driver binds to a supported device
-- **THEN** `cuid_primary`, `cuid_secondary` and `cuid_seed` exist under that
+- **THEN** `cuid_primary`, `cuid_derived` and `cuid_seed` exist under that
   device's sysfs directory
 
 #### Scenario: Attributes removed on unbind
@@ -71,9 +71,9 @@ relaxed-permission path.*
   written
 - **THEN** the value is identical every time
 
-### Requirement: cuid_secondary attribute
+### Requirement: cuid_derived attribute
 
-`cuid_secondary` SHALL be read-only with mode `0444` and SHALL emit the derived
+`cuid_derived` SHALL be read-only with mode `0444` and SHALL emit the derived
 CUID as a lower-case, hyphenated UUID string followed by a newline.
 
 The value discloses neither the serial number nor the seed, so it is the value
@@ -85,18 +85,18 @@ value.
 
 #### Scenario: Unprivileged read succeeds
 
-- **WHEN** any process reads `cuid_secondary`
+- **WHEN** any process reads `cuid_derived`
 - **THEN** it receives the derived CUID with no privilege check
 
 #### Scenario: Value changes when the seed changes
 
 - **WHEN** a new seed is written to `cuid_seed`
-- **THEN** a subsequent read of `cuid_secondary` returns the value derived from
+- **THEN** a subsequent read of `cuid_derived` returns the value derived from
   the new seed
 
 #### Scenario: Concurrent read during a seed write
 
-- **WHEN** `cuid_secondary` is read concurrently with a write to `cuid_seed`
+- **WHEN** `cuid_derived` is read concurrently with a write to `cuid_seed`
 - **THEN** the read returns a complete, well-formed UUID derived from one seed
   or the other
 
@@ -124,7 +124,7 @@ before the write returns.
 
 - **WHEN** a privileged administrator writes a 32-byte secret to `cuid_seed`
 - **THEN** the write succeeds and reports the full byte count consumed
-- **AND** `cuid_secondary` immediately reflects the new seed
+- **AND** `cuid_derived` immediately reflects the new seed
 
 #### Scenario: Round-trip
 
@@ -157,7 +157,7 @@ requires a store that is not world-readable, which is a separate decision.*
 ### Requirement: Default seed
 
 Until a secret is provisioned, the derived CUID SHALL be computed from a
-documented, public default seed, so that `cuid_secondary` is always readable and
+documented, public default seed, so that `cuid_derived` is always readable and
 well-formed.
 
 Because the default is public, the resulting value is stable but not
@@ -166,13 +166,13 @@ and that real deployments must provision a secret.
 
 #### Scenario: Reading before provisioning
 
-- **WHEN** `cuid_secondary` is read on a freshly loaded driver
+- **WHEN** `cuid_derived` is read on a freshly loaded driver
 - **THEN** it returns a valid UUIDv8 derived from the default seed
 
 #### Scenario: Two nodes without provisioning
 
 - **WHEN** two nodes both use the default seed
-- **THEN** the same physical component yields the same secondary CUID on both,
+- **THEN** the same physical component yields the same derived CUID on both,
   but the value provides no fleet-level secrecy
 
 ### Requirement: Association record
@@ -181,7 +181,7 @@ Whenever the derived CUID is computed or recomputed, the driver SHALL record the
 association between the primary and the derived identifier in the kernel log, at
 device-info level, including both values.
 
-Re-keying invalidates every secondary CUID handed out so far, so the record
+Re-keying invalidates every derived CUID handed out so far, so the record
 exists to let an operator later determine which physical component a previously
 issued derived CUID named.
 
@@ -189,12 +189,12 @@ issued derived CUID named.
 
 - **WHEN** the driver binds and computes the initial derived CUID
 - **THEN** the kernel log contains one entry for that device naming both the
-  primary and the secondary CUID
+  primary and the derived CUID
 
 #### Scenario: Association logged on re-key
 
 - **WHEN** a new seed is written
-- **THEN** a further log entry records the primary and the new secondary CUID
+- **THEN** a further log entry records the primary and the new derived CUID
 
 ### Requirement: Secret handling
 

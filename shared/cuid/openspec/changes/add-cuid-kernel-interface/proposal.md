@@ -15,13 +15,13 @@ interface, scoped to the parts of the specification that are settled.
 
 - Add a driver-independent CUID core (`cuid_ident` in, `struct cuid` embedded by
   the caller) that packs the 122-bit primary payload, frames it as UUIDv8 and
-  derives the secondary value by HMAC-SHA256.
+  computes the derived value by HMAC-SHA256.
 - Add three sysfs attributes on the PCI device: `cuid_primary` (0400 +
-  `CAP_SYS_ADMIN`), `cuid_secondary` (0444) and `cuid_seed` (0600 +
+  `CAP_SYS_ADMIN`), `cuid_derived` (0444) and `cuid_seed` (0600 +
   `CAP_SYS_ADMIN`).
 - Register the group from `amdgpu` with component type GPU, and document all of
   it in `Documentation/ABI/testing/sysfs-driver-amdgpu-cuid`.
-- Log the primary-to-secondary association with `dev_info()` on every seed
+- Log the primary-to-derived association with `dev_info()` on every seed
   change, satisfying S1's requirement that the association is tracked "with a
   timestamp in a log".
 - **BREAKING (pre-upstream, against the current out-of-tree branch)** Remove
@@ -43,7 +43,7 @@ interface, scoped to the parts of the specification that are settled.
 
 - `cuid/identifier-format`: the wire format. The 122-bit primary payload layout,
   component type numbering, RFC 9562 UUIDv8 framing and octet order, and the
-  HMAC-SHA256 derivation of the secondary payload. This is a frozen ABI shared
+  HMAC-SHA256 derivation of the derived payload. This is a frozen ABI shared
   with the userspace CUID library.
 - `cuid/sysfs-interface`: the kernel-side contract. Attribute names, values,
   permissions and privilege gating, seed provisioning and lifecycle, the
@@ -79,7 +79,7 @@ shape the library expects to consume, recorded in `lib/src/cuid_util.h`.
   built into `amdgpu`; it must be resolved before the core is split into a
   standalone `amd_cuid.ko` that AINIC and NPU also register with.
 - **Userspace**: the ROCm CUID library (`shared/cuid`) is the consumer.
-  `CuidDevice` reads `cuid_primary` and `cuid_secondary` as stage 1 of its lookup
+  `CuidDevice` reads `cuid_primary` and `cuid_derived` as stage 1 of its lookup
   for every component with a PCI routing ID, and stops recomputing where the
   driver answers.
 - **Placeholder constants**: `CUID_DEFAULT_SEED` ships as
@@ -96,7 +96,7 @@ shape the library expects to consume, recorded in `lib/src/cuid_util.h`.
   reload in a UEFI variable (T5). The GUID, name and attributes must be agreed
   with AINIC and NPU first, and a world-readable efivar is not an acceptable
   store for a secret.
-- `AMDGPU_INFO_PRIMARY_CUID` / `AMDGPU_INFO_SECONDARY_CUID` IOCTLs (T7). UAPI
+- `AMDGPU_INFO_PRIMARY_CUID` / `AMDGPU_INFO_DERIVED_CUID` IOCTLs (T7). UAPI
   attracts far more scrutiny than sysfs; bundling risks holding up both.
 - Per-partition / XCP `unit_id`, and the SMBIOS/ACPI short-circuit for the
   Platform and CPU component types.

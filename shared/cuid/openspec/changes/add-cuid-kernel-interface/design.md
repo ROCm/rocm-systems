@@ -93,7 +93,7 @@ probe path where failure can be reported. Enabled by the synchronous
 ### D6: mutex around the seed, and only the seed
 
 `seed_lock` guards the seed bytes, its length, and the cached derived UUID.
-Primary is immutable after init. The secondary show handler takes the lock,
+Primary is immutable after init. The derived show handler takes the lock,
 copies 16 bytes out, drops it, and formats outside, so a reader concurrent with a
 re-key sees the old or the new value, never a torn one.
 
@@ -138,7 +138,7 @@ re-key.
 - **The seed is lost on module reload.** Documented in the ABI file as a
   requirement to re-provision. A world-readable efivar is not an acceptable store
   for a secret.
-- **Cross-instance correlation under virtualisation.** `cuid_secondary` is `0444`
+- **Cross-instance correlation under virtualisation.** `cuid_derived` is `0444`
   in a guest, so two guests on the same hardware can determine they share a
   component. Answered by the `cuid` module parameter; see tasks 8.1.
 

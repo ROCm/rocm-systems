@@ -166,9 +166,9 @@ Derived CUID
 
 For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) using a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks.
 
-To protect the serial number consisting sensitive information, the tool users must provide the 256-bit key required for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. The secure storage of the key might require additional management overhead.
+The key is the node key, a 256-bit HMAC key as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). amdgpu creates a random node key on its first load and stores it in the ``AmdCuidKey`` UEFI variable; see :ref:`manage-node-key`. Anyone holding the key can confirm a guessed serial number, so it must be random, unique per deployment, and readable only by root.
 
-The key should be accessible only to privileged users or the privileged service, which can then use the key, along with the primary CUID, in the HMAC-SHA2-256 function to generate the derived CUID. Note that if the key changes due to key rotation, the derived CUID will also change. However, because the primary CUIDs always remain the same, these can always be used to trace the derived CUIDs back to their respective devices.
+If the node key changes, every derived CUID computed with it changes. Primary CUIDs do not change, so they still trace each derived CUID back to its device.
 
 The key is the HMAC key and the 16 packed primary payload octets are the HMAC message. The 256-bit digest is folded into the derived payload as follows:
 
@@ -196,11 +196,48 @@ The key is the HMAC key and the 16 packed primary payload octets are the HMAC me
 
 The derived payload is then rendered as a UUIDv8 by the same rule as the primary. The digest slot is 45 bits rather than 46 because bit 117 is reserved for the Auxiliary Value Identifier in both layouts.
 
-Auxiliary CUIDs
+.. _temporary-cuid:
+
+Temporary CUIDs
 ================
 
-Where no genuine hardware serial number is reachable, user-mode software can construct an auxiliary CUID from non-privileged information. An auxiliary CUID uses the same 122-bit payload layout, the same Component Type numbering, the same UUIDv8 framing and the same derivation as any other CUID. It is distinguished solely by payload bit 117 being set.
+Where no genuine hardware serial number is reachable, or the caller has no node key, the library constructs a temporary CUID from non-privileged information. The payload marks a temporary CUID with the Auxiliary Value Identifier (bit 117), and amd-smi reports it as ``auxiliary`` (``AUXILIARY: True``). A temporary CUID uses the same 122-bit payload layout, the same Component Type numbering, the same UUIDv8 framing and the same derivation as any other CUID; bit 117 is the only difference.
 
-The UUID version nibble is always ``8``, for auxiliary and canonical values alike. A consumer determines whether a value is auxiliary by testing bit 117, not by branching on the UUID version. Whether a serial number was reachable is a property of the environment rather than of the device, and it must not surface as a change of UUID type.
+The UUID version nibble is always ``8``, for temporary and permanent values alike. A consumer determines whether a value is temporary by testing bit 117, not by branching on the UUID version. Whether a serial number was reachable is a property of the environment rather than of the device, and it must not surface as a change of UUID type.
 
-An auxiliary CUID is ambiguous by construction: it is stable only while the operating system installation and the device topology are unchanged, and it is not guaranteed to be unique across nodes.
+A temporary CUID is ambiguous by construction: it is stable only while the operating system installation and the device topology are unchanged, and it is not guaranteed to be unique across nodes.
+
+Temporary CUIDs are keyed with the host's machine-id rather than the node key: ``K_app = HMAC-SHA256(key = machine-id as 16 octets, msg = "AMD-CUID-TEMP-v2")``, the auxiliary serial is the first 8 octets of ``HMAC-SHA256(K_app, S)`` where ``S`` is the 32-octet auxiliary input with its Machine ID field zero, and the derived value is ``HMAC-SHA256(K_app, primary)``. A temporary CUID is therefore node-local: it names a device only on the installation whose machine-id produced it, and it does not change when the node key does.
+
+.. _cuid-machine-id:
+
+Machine identity and containers
+-------------------------------
+
+The library reads the machine-id from ``/etc/machine-id``, then ``/var/lib/dbus/machine-id``. When a component has no serial number and the host has no machine-id, the library reports an **error** for that component rather than a placeholder: without a machine-id the auxiliary input reduces to properties of the hardware model and its slot, so two identically configured hosts would report the same temporary CUID for different physical parts. Every container started from an image that bakes in a machine-id reports the same temporary CUIDs for the same device in the same slot, on every host. Inside containers, use the driver's CUID passed through sysfs.
+
+NIC component aliases
+=====================
+
+A NIC CUID identifies a physical component, not a network port. NIC primaries
+use UnitID 0, so several PCI functions on one card can share a primary and
+derived CUID. Such duplicates are accepted as aliases only when both routes
+are NICs with a permanent whole-component identity, UnitID 0, BDFs sharing
+domain/bus/device, and (when root can compare them) byte-identical primaries
+with matching vendor/device/revision metadata. The same primary in different
+PCI slots, different component types, or a temporary identity are collisions,
+not aliases, and fail discovery.
+
+GPU route resolution
+====================
+
+For a whole PCI GPU, the BDF, ``/dev/dri/renderD*``, DRM class render/card
+paths, PCI bus paths and their ``/sys/devices`` paths resolve to the same
+component when live sysfs topology confirms they are the same device. The
+render node is preferred, then the card node, then the PCI directory for a
+display-class device without DRM nodes.
+
+Partition zero is selected through its ``device/xcp`` node; other XCP DRM
+nodes resolve to their own ``xcp`` node. A parent BDF never stands in for a
+partition, and a partition CUID requires live driver publication; there is no
+library-side reconstruction for one.
