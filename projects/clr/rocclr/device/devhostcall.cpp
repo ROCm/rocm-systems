@@ -24,10 +24,8 @@
 #include <new>
 #include <set>
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/devsanitizer.hpp"
-#endif
 #endif
 
 namespace amd {
@@ -198,14 +196,12 @@ ProcessResult HostcallBuffer::processPackets(MessageHandler& messages) {
     auto service = header->service_;
     auto activemask = header->activemask_;
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
     if (service == SERVICE_SANITIZER) {
       handleSanitizerService(payload, activemask, device_, uri_locator);
       // activemask zeroed to avoid subsequent handling for each work-item.
       activemask = 0;
     }
-#endif
 #endif
     while (activemask) {
       auto wi = amd::leastBitSet(activemask);
@@ -249,15 +245,14 @@ void HostcallBuffer::processPackets(MessageHandler& messages) {
     auto payload = getPayload(iter);
     auto activemask = header->activemask_;
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
     if (service == SERVICE_SANITIZER) {
       handleSanitizerService(payload, activemask, device_, uri_locator);
       // activemask zeroed to avoid subsequent handling for each work-item.
       activemask = 0;
     }
 #endif
-#endif
+
     while (activemask) {
       auto wi = amd::leastBitSet(activemask);
       activemask ^= static_cast<decltype(activemask)>(1) << wi;
@@ -327,10 +322,8 @@ class HostcallListener {
   MessageHandler messages_;
   // Keep track of devices for which signal creation have already been done
   std::set<const amd::Device*> devices_;
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   device::UriLocator* urilocator = nullptr;
-#endif
 #endif
   class Thread : public amd::Thread {
    public:
@@ -496,10 +489,8 @@ void HostcallListener::terminate() {
     }
   }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   delete urilocator;
-#endif
 #endif
   delete doorbell_;
   devices_.clear();
@@ -508,10 +499,8 @@ void HostcallListener::terminate() {
 void HostcallListener::addBuffer(HostcallBuffer* buffer) {
   assert(buffers_.count(buffer) == 0 && "buffer already present");
   buffer->setDoorbell(doorbell_->getHandle());
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   buffer->setUriLocator(urilocator);
-#endif
 #endif
   buffers_.insert(buffer);
 }
@@ -533,10 +522,8 @@ bool HostcallListener::initSignal(const amd::Device& dev) {
 #else  // !USE_NEW_HOSTCALL_IMPL
   initDevice(dev);
 #endif  // USE_NEW_HOSTCALL_IMPL
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   urilocator = dev.createUriLocator();
-#endif
 #endif
   // If the listener thread was not successfully initialized, clean
   // everything up and bail out.
@@ -546,13 +533,11 @@ bool HostcallListener::initSignal(const amd::Device& dev) {
     doorbell_ = nullptr;
 #endif  // USE_NEW_HOSTCALL_IMPL
     devices_.clear();
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
     delete urilocator;
 #ifdef USE_NEW_HOSTCALL_IMPL
     urilocator = nullptr;
 #endif  // USE_NEW_HOSTCALL_IMPL
-#endif
 #endif
     return false;
   }

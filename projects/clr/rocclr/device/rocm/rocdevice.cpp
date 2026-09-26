@@ -35,10 +35,8 @@
 #include "platform/interop_d3d11.hpp"
 #endif
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/rocm/rocurilocator.hpp"
-#endif
 #endif
 
 #if defined(__linux__)
@@ -4531,10 +4529,8 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 }
 
 // ================================================================================================
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
-#endif
 #endif
 
 // ================================================================================================

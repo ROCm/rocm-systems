@@ -144,8 +144,8 @@ HIP_TEST_CASE(Unit_hipDynamicShared) {
     testExternShared<double>(65536, 64);
   }
 
-  // We can not allocate all of the LDS with ASAN
-#if !defined(ENABLE_ADDRESS_SANITIZER)
+  // We can not allocate all of the LDS when device code is instrumented
+#if !defined(ENABLE_DEVICE_ADDRESS_SANITIZER)
   SECTION("test case with float for max LDS size") {
     int maxLDS = 0;
     HIP_CHECK(hipDeviceGetAttribute(&maxLDS, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));

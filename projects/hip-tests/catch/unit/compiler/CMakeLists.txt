@@ -34,10 +34,10 @@ if(HIP_PLATFORM MATCHES "amd")
     --offload-arch=gfx12-5-generic)
 
   # ASAN is only supported on xnack+ offload archs; clang skips it on the other
-  # generic targets and emits an -Woption-ignored warning. Suppress it under ASAN
-  # so -Werror does not fail the build.
+  # generic targets and emits an -Woption-ignored warning. Suppress it under device
+  # ASAN so -Werror does not fail the build.
   set(ASAN_GENERIC_TARGET_FLAGS)
-  if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  if(ENABLE_SANITIZER STREQUAL "ASAN")
     set(ASAN_GENERIC_TARGET_FLAGS -Wno-option-ignored)
   endif()
 

@@ -29,10 +29,8 @@
 #include <atomic>
 #include <unordered_set>
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/devurilocator.hpp"
-#endif
 #endif
 /*! \addtogroup PAL
  *  @{
@@ -166,10 +164,8 @@ class NullDevice : public amd::Device {
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
     return true;
   }
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const { return nullptr; }
-#endif
 #endif
  protected:
   static Util::GenericAllocator allocator_;  //!< Generic memory allocator in PAL
@@ -686,10 +682,8 @@ class Device : public NullDevice {
                                   amd::ExternalSemaphoreHandleType sem_handle_type) override;
 
   virtual void DestroyExtSemaphore(void* extSemaphore);
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUrilocator() const { return nullptr; }
-#endif
 #endif
   //! Allocates hidden heap for device memory allocations
   void HiddenHeapAlloc(const VirtualGPU& gpu);
