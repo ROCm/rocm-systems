@@ -2437,3 +2437,22 @@ original live 512 client, including its 1 GiB report cap. It is still pending;
 no execution-stall diagnosis is established yet. An earlier diagnostic
 (`sgemm-dispatch-probe`) accidentally omitted that cap and exited during
 code loading; it is retained as an invalid comparison, not execution evidence.
+
+
+### Isolated Default SGEMM reaches execution
+
+The corrected `sgemm-dispatch-probe-v2` diagnostic times out at its 360-second
+bound after Kernel #20 begins: this is the first selected GEMM dispatch,
+with 128 workgroups, two waves per workgroup, 128 SGPRs, and 336 VGPRs.
+The uninstrumented matching solution passes in 4.18 seconds. The diagnostic
+uses the original high preset, full allowlist, immutable hook, and 1 GiB
+report cap; the logging plugin and single-solution selection make this
+investigation evidence rather than full table qualification.
+
+A separate debugger-launched replay (`sgemm-debug-snapshot`) was deliberately
+interrupted 15 seconds after that dispatch began. It captured 31 distinct
+active waves, typically around 22,000 instructions into execution, in varied
+instrumentation paths including scratch spill loads/stores and LDS accesses.
+This snapshot does not establish a barrier deadlock or a repeated loop.
+A further bounded replay will compare snapshots farther apart. Original
+qualification jobs were not interrupted by either diagnostic.
