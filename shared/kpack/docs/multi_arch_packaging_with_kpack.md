@@ -1171,9 +1171,11 @@ hipError_t StatCO::digestFatBinary(const void* data, FatBinaryInfo*& programs) {
 const char* getGenericArch(const char* specific_arch) {
     // Map specific targets to generic fallbacks
     // gfx1100, gfx1101, gfx1102 → gfx11-generic
+    // gfx1170, gfx1171 → gfx11-7-generic
     // gfx900, gfx906, gfx908, gfx90a → gfx9-generic
-
-    if (strncmp(specific_arch, "gfx11", 5) == 0) {
+    if (strncmp(specific_arch, "gfx117", 6) == 0) {
+        return "gfx11-7-generic";
+    } else if (strncmp(specific_arch, "gfx11", 5) == 0) {
         return "gfx11-generic";
     } else if (strncmp(specific_arch, "gfx10", 5) == 0) {
         return "gfx10-generic";
