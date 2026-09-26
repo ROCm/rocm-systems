@@ -166,10 +166,7 @@ if(BUILD_TESTS)
   # in rocSHMEM's sdma device headers.
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicro PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-    # Not linking rccl, so the GDA header copy has to be ordered explicitly.
-    if(TARGET copy_rocshmem_headers)
-      add_dependencies(rccl-UnitTestsMicro copy_rocshmem_headers)
-    endif()
+    rccl_order_rocshmem_headers(rccl-UnitTestsMicro)
   endif()
 
   # Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
@@ -340,10 +337,7 @@ if(BUILD_TESTS)
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-    # Not linking rccl, so the GDA header copy has to be ordered explicitly.
-    if(TARGET copy_rocshmem_headers)
-      add_dependencies(rccl-UnitTestsMicroWarpSpeed copy_rocshmem_headers)
-    endif()
+    rccl_order_rocshmem_headers(rccl-UnitTestsMicroWarpSpeed)
   endif()
 
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
@@ -481,10 +475,7 @@ if(BUILD_TESTS)
       INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
     if(ENABLE_ROCSHMEM_GIN)
       target_compile_definitions(${_init_tgt} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-      # Not linking rccl, so the GDA header copy has to be ordered explicitly.
-      if(TARGET copy_rocshmem_headers)
-        add_dependencies(${_init_tgt} copy_rocshmem_headers)
-      endif()
+      rccl_order_rocshmem_headers(${_init_tgt})
     endif()
     if(_variant STREQUAL "-uncached")
       target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
@@ -633,10 +624,7 @@ if(BUILD_TESTS)
   # in rocSHMEM's sdma device headers.
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-    # Not linking rccl, so the GDA header copy has to be ordered explicitly.
-    if(TARGET copy_rocshmem_headers)
-      add_dependencies(rccl-UnitTestsMicroEnqueue copy_rocshmem_headers)
-    endif()
+    rccl_order_rocshmem_headers(rccl-UnitTestsMicroEnqueue)
   endif()
 
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
@@ -735,10 +723,7 @@ if(BUILD_TESTS)
       SYM_KERNELS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/sym_kernels.cc")
     if(ENABLE_ROCSHMEM_GIN)
       target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-      # Not linking rccl, so the GDA header copy has to be ordered explicitly.
-      if(TARGET copy_rocshmem_headers)
-        add_dependencies(rccl-UnitTestsMicroSymKernels copy_rocshmem_headers)
-      endif()
+      rccl_order_rocshmem_headers(rccl-UnitTestsMicroSymKernels)
     endif()
     foreach(_hip_tgt hip::host hip::device)
       if(TARGET ${_hip_tgt})
@@ -860,10 +845,7 @@ if(BUILD_TESTS)
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicroTaskPrep PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
-    # Not linking rccl, so the GDA header copy has to be ordered explicitly.
-    if(TARGET copy_rocshmem_headers)
-      add_dependencies(rccl-UnitTestsMicroTaskPrep copy_rocshmem_headers)
-    endif()
+    rccl_order_rocshmem_headers(rccl-UnitTestsMicroTaskPrep)
   endif()
 
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
