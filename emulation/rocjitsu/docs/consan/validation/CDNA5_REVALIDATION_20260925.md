@@ -2102,3 +2102,8 @@ transposes in `sc-current-tensor-clean`: both numerical oracles pass,
 no mismatch markers occur, and unsupported tensor-DMA accesses make
 analysis incomplete. Those two SuperCollider cells are also orange.
 These are coverage failures, not numerical or instrumentation failures.
+
+Sparse TDM-all's current SuperCollider check also completes all four shards
+with passing numerical oracles and no mismatch markers. Analysis remains
+incomplete because tensor-DMA value comparison is unsupported
+(`sc-current-tensor-clean/tensile-spmm-tdm-all`); its cell is orange.
