@@ -2726,7 +2726,7 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     auto& apu = m_apu_metrics_tbl;
     set_common_header(metrics.m_common_header);
     // v2.4 power fields are uint16 but the public fields are uint32, so widen the N/A value too.
-    auto widen_u16 = [](uint16_t value) -> uint32_t {
+    auto widen_unavailable = [](uint16_t value) -> uint32_t {
       return (value == std::numeric_limits<uint16_t>::max()) ? std::numeric_limits<uint32_t>::max()
                                                              : value;
     };
@@ -2743,10 +2743,10 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                 apu.temperature_l3);
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
     apu.average_mm_activity = metrics.m_average_mm_activity;
-    apu.average_socket_power = widen_u16(metrics.m_average_socket_power);
+    apu.average_socket_power = widen_unavailable(metrics.m_average_socket_power);
     apu.average_cpu_power = metrics.m_average_cpu_power;
     apu.average_soc_power = metrics.m_average_soc_power;
-    apu.average_gfx_power = widen_u16(metrics.m_average_gfx_power);
+    apu.average_gfx_power = widen_unavailable(metrics.m_average_gfx_power);
     std::copy_n(std::begin(metrics.m_average_core_power),
                 std::min(static_cast<uint32_t>(RSMI_APU_V24_CORES),
                          static_cast<uint32_t>(std::size(apu.average_core_power))),

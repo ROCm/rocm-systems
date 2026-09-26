@@ -2558,8 +2558,8 @@ typedef struct {
    * **Field Validity:**
    * Not all fields are valid for all versions. Fields not populated for the current
    * version contain the max value of their type (e.g. 0xFFFF for uint16_t,
-   * 0xFFFFFFFF for uint32_t). Refer to inline comments in ::amdsmi_apu_metrics_t for
-   * per-field version availability.
+   * 0xFFFFFFFF for uint32_t, UINT64_MAX for uint64_t). Refer to inline comments
+   * in ::amdsmi_apu_metrics_t for per-field version availability.
    */
   amdsmi_apu_metrics_t* apu_metrics;
 
