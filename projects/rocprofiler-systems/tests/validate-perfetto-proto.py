@@ -281,6 +281,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Verify each counter track has paired start/end entries (even count, last value is 0)",
     )
+    parser.add_argument(
+        "--counter-names-presence-only",
+        action="store_true",
+        help=(
+            "When set, --counter-names checks only that matching counter tracks exist "
+            "in the trace; it does NOT require their values to be non-zero. "
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -429,22 +437,39 @@ if __name__ == "__main__":
             if not track_rows:
                 print(f"  No counter tracks matching '%{counter_name}%' found in trace")
 
-        sum_counter_values = tp.query(
-            f"""SELECT SUM(counter.value) AS total_value FROM counter_track JOIN counter ON
-              counter.track_id = counter_track.id WHERE counter_track.name LIKE
-              '%{counter_name}%'"""
-        )
-        total_value = 0
+        if args.counter_names_presence_only:
+            track_count_result = tp.query(
+                f"""SELECT COUNT(DISTINCT counter_track.id) AS track_count
+                  FROM counter_track
+                  WHERE counter_track.name LIKE '%{counter_name}%'"""
+            )
+            track_count = 0
+            for row in track_count_result:
+                track_count = row.track_count if row.track_count is not None else 0
+            if args.print:
+                print(f"Tracks matching '{counter_name}': {track_count}")
+            if track_count == 0:
+                print(
+                    f"Fail: No counter tracks matching '{counter_name}' found in the traces"
+                )
+                ret = 1
+        else:
+            sum_counter_values = tp.query(
+                f"""SELECT SUM(counter.value) AS total_value FROM counter_track JOIN counter ON
+                  counter.track_id = counter_track.id WHERE counter_track.name LIKE
+                  '%{counter_name}%'"""
+            )
+            total_value = 0
 
-        for row in sum_counter_values:
-            total_value = row.total_value if row.total_value is not None else -1
+            for row in sum_counter_values:
+                total_value = row.total_value if row.total_value is not None else -1
 
-        if args.print:
-            print(f"Total value of {counter_name} is {total_value}")
+            if args.print:
+                print(f"Total value of {counter_name} is {total_value}")
 
-        if total_value <= 0:
-            print(f"Fail: Counter {counter_name} is not found in the traces")
-            ret = 1
+            if total_value <= 0:
+                print(f"Fail: Counter {counter_name} is not found in the traces")
+                ret = 1
 
     if args.check_counter_pairing and args.counter_names:
         for counter_name in args.counter_names:
