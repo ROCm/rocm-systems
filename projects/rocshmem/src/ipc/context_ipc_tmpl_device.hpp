@@ -1020,6 +1020,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1037,6 +1038,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1056,6 +1058,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1077,6 +1080,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1094,6 +1098,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1113,6 +1118,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1414,7 +1420,7 @@ __device__ inline int IPCContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim <= 0) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
     LOGD_WARN("Invalid tile reduce arguments for IPC backend");
     return ROCSHMEM_ERROR;
   }

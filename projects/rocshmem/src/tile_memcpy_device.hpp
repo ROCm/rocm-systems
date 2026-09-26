@@ -48,13 +48,11 @@ __device__ __forceinline__ void tile_scope_workers(int* worker_id,
 template <MemcpyKind Kind, TileScope Scope>
 __device__ __forceinline__ void tile_memcpy_contig(char* dst, char* src,
                                                    size_t bytes,
-                                                   int worker_id) {
+                                                   [[maybe_unused]] int worker_id) {
   if constexpr (Scope == TileScope::Wave) {
     memcpy_wave<Kind>(dst, src, bytes);
   } else if constexpr (Scope == TileScope::Wg) {
-    if (worker_id == 0) {
-      memcpy_lane<Kind>(dst, src, bytes);
-    }
+    memcpy_wg<Kind>(dst, src, bytes);
   } else {
     memcpy_lane<Kind>(dst, src, bytes);
   }
