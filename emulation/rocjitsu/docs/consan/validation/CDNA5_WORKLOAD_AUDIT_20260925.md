@@ -4,8 +4,8 @@ The initial ledger reset relied too heavily on the old manifest. This follow-up
 checks the available projects, architecture-specific implementations, inputs,
 runtime linkage, and actual uninstrumented execution. It establishes how to run
 each row in [STATUS_CDNA5.md](STATUS_CDNA5.md). It does **not** qualify either
-ConSan engine; those cells remain empty pending clean instrumentation and fresh,
-reviewed fault trials.
+ConSan engine. Instrumented clean results and reviewed fault trials are tracked
+in the status table and the [subsequent revalidation campaign](CDNA5_REVALIDATION_20260925.md).
 
 ## Checked workspace and runtime
 
@@ -68,11 +68,12 @@ python3 "$validation" --target gfx1250 explain \
   --workload d128-block --profile all --json
 ```
 
-For subsequent instrumented clean qualification, first resolve allowlist
-prerequisites as described in [VALIDATION.md](VALIDATION.md). This host has no
-physical gfx1250 for native rocprofv3 discovery. The baseline probes below run
-without ConSan and do not claim to resolve that prerequisite. Do not substitute
-a gfx1201 native trace for the gfx1250 executed-kernel inventory.
+For instrumented clean qualification, first generate the allowlists described
+in [VALIDATION.md](VALIDATION.md). The subsequent campaign established rocprofv3
+discovery inside the gfx1250 emulator; use its
+[profiler setup and ordering](CDNA5_REVALIDATION_20260925.md). This selection audit's
+baseline probes alone do not establish an executed-kernel inventory. Do not
+substitute a gfx1201 native trace for the gfx1250 inventory.
 
 After selecting the campaign's allowlist policy, use this command for each
 non-Tensile ID, with a new artifact root per configuration:
