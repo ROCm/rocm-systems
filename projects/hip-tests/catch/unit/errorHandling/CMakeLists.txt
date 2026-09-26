@@ -11,6 +11,7 @@ set(TEST_SRC
     hipDrvGetErrorString.cc
     hipGetLastError.cc
     hipPeekAtLastError.cc
+    hipPageFault.cc
 )
 
 if(UNIX)
