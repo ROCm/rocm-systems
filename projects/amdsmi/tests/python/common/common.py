@@ -1342,6 +1342,46 @@ class Common:
             raise raise_exception
         return
 
+    def _Test_API_Per_Handles(self, handles, **kwargs):
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator)
+        del params[func_name]
+
+        raise_exception = None
+        for i in range(len(handles) + 1):
+            cond = self.PASS
+            if i < len(handles):
+                handle = handles[i]
+                self.print_device_header(i)
+            else:
+                handle = self.bad_gpu
+                i = "invalid"
+                cond = self.FAIL
+
+            msg = self._build_call_msg(func_name, i, None, params)
+            try:
+                data = func(handle, *[value for value in params.values()])
+                self.print(msg, data)
+                self.check_ret("", "", cond)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.check_ret(msg, e, cond):
+                    raise_exception = e
+            self.print("")
+        if raise_exception:
+            raise raise_exception
+        return
+
+    def Test_API_Per_CPU(self, **kwargs):
+        """Tests an API against every CPU socket handle and one invalid handle."""
+        cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        return self._Test_API_Per_Handles(cpu_handles, **kwargs)
+
+    def Test_API_Per_CPU_Core(self, **kwargs):
+        """Tests an API against every CPU-core handle and one invalid handle."""
+        core_handles = amdsmi.amdsmi_get_cpucore_handles()
+        return self._Test_API_Per_Handles(core_handles, **kwargs)
+
     def Test_Per_GPU_With_One_Enum(self, **kwargs):
         """
         Tests API per GPU per Enum with zero or more arguments
