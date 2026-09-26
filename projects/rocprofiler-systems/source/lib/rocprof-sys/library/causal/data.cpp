@@ -126,12 +126,12 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER,
                                   "lib(rocprof-sys[-\\.]|dyninst|"
-                                  "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+                                  "gotcha\\.|unwind\\.so\\.99)" });
     }
 
-    // in function mode, it generally doesn't help to experiment on main function since
-    // telling the user to "make the main function" faster is literally useless since it
-    // contains everything that could be made faster
+    // in function mode, it generally doesn't help to experiment on main function
+    // since telling the user to "make the main function" faster is literally useless
+    // since it contains everything that could be made faster
     if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
@@ -583,9 +583,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                     return;
                 }
 
-                LOG_DEBUG(
-                    "[causal] experiment failed to start. Number of PC candidates: {}",
-                    eligible_pc_candidates.load());
+                LOG_DEBUG("[causal] experiment failed to start. Number of PC "
+                          "candidates: {}",
+                          eligible_pc_candidates.load());
 
                 auto _memory   = std::stringstream{};
                 auto _binary   = std::stringstream{};
@@ -674,8 +674,8 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                     LOG_WARNING("binary pcs: {} maps: {}", _binary.str(), _memory.str());
                 }
 
-                // if launched via rocprof-sys-causal, allow end-to-end runs that do not
-                // start experiments
+                // if launched via rocprof-sys-causal, allow end-to-end runs that do
+                // not start experiments
                 auto _omni_causal_launcher =
                     get_env<std::string>(env_vars::LAUNCHER, "") == "rocprof-sys-causal";
 

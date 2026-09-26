@@ -313,19 +313,10 @@ get_internal_basic_libs_impl()
                                            LIBTHREAD_DB_SO,    LIBUTIL_SO };
 
     // shared libraries used by or provided by dyninst
-    const auto _dyn_libs = strview_init_t{ "libdyninstAPI_RT.so",
-                                           "libcommon.so",
-                                           "libbfd.so",
-                                           "libelf.so",
-                                           "libdwarf.so",
-                                           "libdw.so",
-                                           "libtbb.so",
-                                           "libtbbmalloc.so",
-                                           "libtbbmalloc_proxy.so",
-                                           "libz.so",
-                                           "libzstd.so",
-                                           "libbz2.so",
-                                           "liblzma.so" };
+    const auto dyn_libs =
+        strview_init_t{ "libdyninstAPI_RT.so", "libcommon.so", "libbfd.so", "libelf.so",
+                        "libdwarf.so",         "libdw.so",     "libz.so",   "libzstd.so",
+                        "libbz2.so",           "liblzma.so" };
 
     // shared libraries used by rocprof-sys
     const auto _rocprof_sys_libs = strview_init_t{ "libstdc++.so.6",
@@ -362,7 +353,7 @@ get_internal_basic_libs_impl()
         "libtcmalloc_minimal_debug.so",
     };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
+    for(const auto& gitr : { _gnu_libs, dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
     {
         for(auto itr : gitr)
         {
