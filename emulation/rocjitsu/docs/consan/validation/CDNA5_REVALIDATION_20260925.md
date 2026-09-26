@@ -1959,3 +1959,11 @@ successful traces; the allowlist converter passed. Clean qualification
 can proceed using the regenerated allowlist. Sparse FP8 ML retained export
 and replay also passed (`spmmml-retained-v2-replay-results.json`); its reviewed
 fault still needs binding to that retained object before qualification.
+
+The sparse FP8 ML tail fault now binds retained ELF `a1b907d44aafab32`.
+All 15,425 instruction addresses and encodings in the selected kernel
+(`0x31100` through `0x46bfc`) match the reviewed original. Both exact
+site and paired sequence identities occur in the retained inventory log.
+Runner/spec regression tests pass: 209 tests
+(`spmmml-retained-v2-bound-spec-tests.log`). Matching Default and high
+clean replays precede the eight-trial fault campaigns.
