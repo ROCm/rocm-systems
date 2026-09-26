@@ -284,12 +284,11 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
+    aql_device_ring_buf_ = DEBUG_CLR_AQL_DEV_QUEUE > 0;
   }
 
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-
-  aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
 }
 }  // namespace amd::roc
