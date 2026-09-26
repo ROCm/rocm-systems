@@ -1,0 +1,7 @@
+-r requirements-test.txt
+black
+clang-format>=11.0.0,<12.0.0
+clang-tidy>=15.0.0,<20.0.0
+cmake-format
+flake8
+ruamel.yaml
