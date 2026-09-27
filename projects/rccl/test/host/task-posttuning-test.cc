@@ -4962,11 +4962,16 @@ TEST_F(TaskPostTuningMicrotest, SymTasks_TunedEntry_ResolvesBothWindowsAndTheirR
   EXPECT_EQ(2u, hooks.lookups().size());
 }
 
+// Only the sendbuff lookup fails, so a dropped NCCLCHECK on it would let the recvbuff lookup below it
+// paper over the failure and report ncclSuccess instead.
 TEST_F(TaskPostTuningMicrotest, SymTasks_WindowLookupFails_PropagatesWithoutEnqueueingTheTask) {
   TaskPostTuning_SymDrive drive;
   TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
-  ScopedHook devr(g_devrFindWindow,
-                  [](struct ncclComm*, void const*, struct ncclDevrWindow**) { return ncclInvalidUsage; });
+  ScopedHook devr(g_devrFindWindow, [&drive](struct ncclComm*, void const* ptr, struct ncclDevrWindow** out) {
+    if (ptr == drive.sendbuff()) return ncclInvalidUsage;
+    *out = TaskPostTuning_SymHooks::RecvWindow();
+    return ncclSuccess;
+  });
   drive.Add(kSymKernelId);
 
   EXPECT_EQ(ncclInvalidUsage, drive.Run());

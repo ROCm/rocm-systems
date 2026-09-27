@@ -1080,16 +1080,19 @@ TEST_F(TaskPreTuningMicrotest,
 
 TEST_F(TaskPreTuningMicrotest,
        UnreachableMerge_InitAllGatherVRaw_AnyRankCount_GivesEveryRankASliceEntryNoLaterAllocationOverlaps) {
-  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
-  for (int root = 0; root < kRanks; root++) {
+  constexpr int kOtherRankCount = kRanks + 2;
+  TaskPrepScene scene(kOtherRankCount);
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene);
+  for (int root = 0; root < kOtherRankCount; root++) {
     agv->recvbuff[root] = TaskPrep_Addr(kBcastRecvAddr + root);
     agv->counts[root] = kSmallSliceCount + root;
   }
 
-  size_t* later = ncclMemoryStackAlloc<size_t>(&scene_.comm()->memScoped, kRanks);
-  std::memset(later, kPoison, kRanks * sizeof(size_t));
+  size_t* later = ncclMemoryStackAlloc<size_t>(&scene.comm()->memScoped, kOtherRankCount);
+  std::memset(later, kPoison, kOtherRankCount * sizeof(size_t));
 
-  for (int root = 0; root < kRanks; root++) {
+  EXPECT_EQ(kOtherRankCount, agv->nRanks);
+  for (int root = 0; root < kOtherRankCount; root++) {
     EXPECT_EQ(TaskPrep_Addr(kBcastRecvAddr + root), agv->recvbuff[root]) << "root = " << root;
     EXPECT_EQ(kSmallSliceCount + root, agv->counts[root]) << "root = " << root;
   }
@@ -1155,6 +1158,19 @@ TEST_F(TaskPreTuningMicrotest,
     EXPECT_EQ(kPresetMaxCount, agv->maxCount) << "root = " << root;
     EXPECT_EQ(nullptr, agv->sendbuff) << "root = " << root;
   }
+}
+
+// The reject test above only covers root < 0 and root >= nRanks; root == 0 is the untested boundary in between.
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_AddBcastToAllGatherV_RootAtTheBottomOfTheRange_IsAccepted) {
+  constexpr int kRootAtTheBottom = 0;
+  TaskPrepScene scene(kRanks, kOwnRoot);
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene);
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene, kRootAtTheBottom, kSmallSliceCount);
+
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene.comm(), agv, bcast));
+
+  EXPECT_EQ(TaskPrep_Addr(kBcastRecvAddr + kRootAtTheBottom), agv->recvbuff[kRootAtTheBottom]);
+  EXPECT_EQ(kSmallSliceCount * kDoubleSize, agv->counts[kRootAtTheBottom]);
 }
 
 TEST_F(TaskPreTuningMicrotest, UnreachableMerge_AddBcastToAllGatherV_RootIsThisRank_TakesTheBroadcastSourceBuffer) {
