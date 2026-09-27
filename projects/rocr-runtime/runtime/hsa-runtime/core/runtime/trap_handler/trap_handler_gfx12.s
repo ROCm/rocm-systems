@@ -265,6 +265,16 @@
 // Entry: ttmp[2:3] = buffer base address
 // Exit: ttmp[14:15] = per-XCC buffer address, branches to .profile_trap_handlers
 .calc_xcc_offset:
+  // A valid TMA2 can still carry a null base for either method, because the
+  // runtime installs TMA2 while only one sampling method has buffers and leaves
+  // the other method's pointer at zero. Exit cleanly in that case rather than
+  // walking on to the sample-slot atomic through a null pointer, which would
+  // fault only after the exec mask and the user's first two VGPRs have already
+  // been moved out. Both entries reach here with the base in ttmp[2:3], so one
+  // test covers host-trap and stochastic alike.
+  s_cmp_eq_u64      ttmp[2:3], 0
+  s_cbranch_scc1    .exit_trap
+
   // Load per_xcc_size from TMA2 (consolidated here to avoid duplication)
   s_load_b32        ttmp4, ttmp[14:15], 0x10, scope:SCOPE_CU     // ttmp4 = per_xcc_size (32-bit)
   s_wait_kmcnt      0
