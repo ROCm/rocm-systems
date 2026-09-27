@@ -106,6 +106,14 @@ if(${ROCM_MAJOR_VERSION} LESS 7)
   list(APPEND BITCODE_COMPILE_FLAGS_BASE -DHIP_ENABLE_WARP_SYNC_BUILTINS=1)
 endif()
 
+# This path invokes clang directly, so it inherits none of the ASAN flags the
+# rest of the build gets from CMAKE_CXX_FLAGS. Without this the bitcode rccl's
+# device linker injects for ENABLE_ROCSHMEM is uninstrumented device code
+# inside an ASAN build -- the case the -DASAN=ON propagation exists to close.
+if(ASAN)
+  list(APPEND BITCODE_COMPILE_FLAGS_BASE -fsanitize=address)
+endif()
+
 # Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
 # when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.
 if(MPI_CXX_FOUND)
