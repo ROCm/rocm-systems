@@ -3791,22 +3791,13 @@ class TaskPostTuning_LegacyDrive {
   ncclResult_t Run() { return postTuneLegacyTasks(comm(), &queue_); }
   const TaskPostTuning_PreconnectLog& preconnect() const { return preconnect_; }
 
-  std::vector<int> TaskAlgorithms() {
-    std::vector<int> algorithms;
+  std::vector<struct ncclTaskColl*> Tasks() {
+    std::vector<struct ncclTaskColl*> tasks;
     for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm()->planner.collTaskQueue); task != nullptr;
          task = task->next) {
-      algorithms.push_back(task->algorithm);
+      tasks.push_back(task);
     }
-    return algorithms;
-  }
-
-  std::vector<uint32_t> TaskDevFuncIds() {
-    std::vector<uint32_t> ids;
-    for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm()->planner.collTaskQueue); task != nullptr;
-         task = task->next) {
-      ids.push_back(task->devFuncId);
-    }
-    return ids;
+    return tasks;
   }
 
   std::vector<struct ncclWorkList*> WorkNodes() {
@@ -3870,7 +3861,7 @@ TEST_F(TaskPostTuningMicrotest, LegacyTasks_EmptyQueue_ConnectsNothingAndMateria
   EXPECT_EQ(0, hooks.collCalls());
   EXPECT_EQ(0, hooks.nvlsCalls());
   EXPECT_EQ(0, drive.comm()->planner.nTasksColl);
-  EXPECT_TRUE(drive.TaskAlgorithms().empty());
+  EXPECT_TRUE(drive.Tasks().empty());
   EXPECT_TRUE(drive.WorkNodes().empty());
 }
 
@@ -3885,11 +3876,14 @@ TEST_F(TaskPostTuningMicrotest, LegacyTasks_MixedAlgorithms_MaterializeEveryNvls
   ASSERT_EQ(ncclSuccess, drive.Run());
 
   const std::vector<int> expected = {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE, NCCL_ALGO_RING, NCCL_ALGO_TREE};
-  EXPECT_EQ(expected, drive.TaskAlgorithms());
+  const std::vector<struct ncclTaskColl*> tasks = drive.Tasks();
+  std::vector<int> algorithms;
+  for (const struct ncclTaskColl* task : tasks) algorithms.push_back(task->algorithm);
+  EXPECT_EQ(expected, algorithms);
   EXPECT_EQ(4u, drive.WorkNodes().size());
   EXPECT_EQ(4, drive.comm()->planner.nTasksColl);
-  for (uint32_t devFuncId : drive.TaskDevFuncIds()) {
-    EXPECT_EQ(kStampedDevFuncId, devFuncId);
+  for (const struct ncclTaskColl* task : tasks) {
+    EXPECT_EQ(kStampedDevFuncId, task->devFuncId);
   }
 }
 
@@ -3903,6 +3897,19 @@ TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsEntries_RegisterThroughTheNvlsRe
 
   EXPECT_EQ(2, hooks.nvlsCalls());
   EXPECT_EQ(0, hooks.collCalls());
+}
+
+// The NVLS pass alone reaches the preconnect gate; no plain entry is queued to mask a dropped needConnect.
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsEntries_ConnectTheNvlsAlgorithmsTheyNeeded) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  drive.Add(NCCL_ALGO_NVLS);
+  drive.Add(NCCL_ALGO_NVLS_TREE);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1, drive.preconnect().calls);
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(drive.preconnect().requested, {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE}));
 }
 
 TEST_F(TaskPostTuningMicrotest, LegacyTasks_PlainEntries_RegisterThroughTheCollRegistrarOnly) {
@@ -4033,9 +4040,8 @@ TEST_F(TaskPostTuningMicrotest, LegacyTasks_PlainEntryConfigIsRejected_Propagate
 TEST_F(TaskPostTuningMicrotest, LegacyTasks_PlainRegistrationFails_PropagatesWithoutEnqueueingItsWork) {
   TaskPostTuning_LegacyDrive drive;
   TaskPostTuning_CollRegistrationLog collLog;
-  ScopedHook<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, void**, void**, ncclCommCallbackQueue*, bool*)>
-    coll(g_ncclRegisterCollBuffers,
-        TaskPostTuning_RecordCollRegistration(&collLog, kRegistrationNeedsConnect, ncclInvalidUsage));
+  ScopedHook coll(g_ncclRegisterCollBuffers,
+                  TaskPostTuning_RecordCollRegistration(&collLog, kRegistrationNeedsConnect, ncclInvalidUsage));
   drive.Add(NCCL_ALGO_RING);
 
   EXPECT_EQ(ncclInvalidUsage, drive.Run());
