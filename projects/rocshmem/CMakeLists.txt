@@ -254,49 +254,74 @@ endif()
 # normalise to gfx1250 would otherwise fail validation and be dropped before
 # the policy ever saw it. Normalising first also means SUPPORTED_GPUS, and so
 # both GPU_TARGETS and GPU_TARGETS_FULL below, are already correct.
-function(rocshmem_asan_adjust_gpu_targets OUT_VAR)
-  set(_always_on gfx1250 gfx1250-strict)
-  set(_kept "")
+#
+# Variable names deliberately mirror the rccl copy so the two can be diffed.
+set(_ROCSHMEM_ASAN_XNACK_ALWAYS_ON gfx1250 gfx1250-strict)
 
-  foreach(_target ${ARGN})
+function(rocshmem_asan_adjust_gpu_targets OUT_VAR)
+  set(_result "")
+  set(_dropped "")
+
+  foreach(_target IN LISTS ARGN)
     if(_target STREQUAL "")
       continue()
     endif()
+
     # A requested suffix says what the caller wants, not what the part
     # supports, so classify on the bare name.
     string(REGEX REPLACE ":.*" "" _base "${_target}")
-    list(FIND _always_on "${_base}" _is_always_on)
-    # Other feature terms (e.g. sramecc+) are part of what was asked for and
-    # are kept; xnack sorts last, so re-appending it stays canonical.
-    string(REGEX REPLACE ":xnack[+-]" "" _stripped "${_target}")
+    list(FIND _ROCSHMEM_ASAN_XNACK_ALWAYS_ON "${_base}" _always_on)
+
+    # Drop any xnack term the caller wrote before deciding what to do with it:
+    # it may be ":xnack-", which contradicts the build. Other feature terms
+    # (e.g. ":sramecc+") are part of the requested target and are kept; xnack
+    # sorts last, so re-appending it keeps the target ID canonical.
+    string(REGEX REPLACE ":xnack[+-]" "" _without_xnack "${_target}")
 
     if(_base MATCHES "^gfx9")
-      set(_fixed "${_stripped}:xnack+")
-    elseif(NOT _is_always_on EQUAL -1)
-      set(_fixed "${_stripped}")
+      list(APPEND _result "${_without_xnack}:xnack+")
+    elseif(NOT _always_on EQUAL -1)
+      # Always on here, so naming xnack at all is an invalid target ID.
+      list(APPEND _result "${_without_xnack}")
     else()
-      message(STATUS "ASAN: dropping GPU target '${_target}' - no xnack support")
-      continue()
+      list(APPEND _dropped "${_target}")
     endif()
-
-    if(NOT _fixed STREQUAL _target)
-      message(STATUS "ASAN: GPU target '${_target}' -> '${_fixed}'")
-    endif()
-    list(APPEND _kept "${_fixed}")
   endforeach()
 
   # Both xnack spellings of one arch normalise to the same string.
-  if(_kept)
-    list(REMOVE_DUPLICATES _kept)
-  endif()
-  if(NOT _kept)
-    message(FATAL_ERROR "ASAN requires a GPU target that supports xnack (gfx9* with :xnack+, "
-      "or gfx1250 where it is always on). "
-      "None of the requested/default GPU_TARGETS do: ${ARGN}")
+  if(_result)
+    list(REMOVE_DUPLICATES _result)
   endif()
 
-  set(${OUT_VAR} "${_kept}" PARENT_SCOPE)
+  if(_dropped)
+    message(STATUS
+      "ASAN: dropping GPU target(s) with no xnack support: ${_dropped}")
+  endif()
+  if(NOT _result)
+    message(FATAL_ERROR
+      "ASAN requires a GPU target that supports xnack (gfx9* with :xnack+, "
+      "or gfx1250 where it is always on). None of the requested GPU targets "
+      "do: ${ARGN}")
+  endif()
+
+  message(STATUS "ASAN: GPU targets = ${_result}")
+  set(${OUT_VAR} "${_result}" PARENT_SCOPE)
 endfunction()
+
+# GPU_TARGETS is FORCE-written from SUPPORTED_GPUS below, so whatever the
+# policy produces is what the next configure of this build directory reads back
+# as its input. Applying the policy to its own previous output makes it stick:
+# a later -DASAN=OFF would keep the :xnack+ and would never bring back the
+# families ASAN dropped. Remember the request as it arrived and re-derive from
+# that every time. GPU_TARGETS matching the value we wrote last time means no
+# one has touched it since, so the remembered request still stands; anything
+# else is a user edit and becomes the new request.
+if(DEFINED ROCSHMEM_GPU_TARGETS_DERIVED AND GPU_TARGETS STREQUAL ROCSHMEM_GPU_TARGETS_DERIVED)
+  set(GPU_TARGETS "${ROCSHMEM_GPU_TARGETS_REQUESTED}")
+else()
+  set(ROCSHMEM_GPU_TARGETS_REQUESTED "${GPU_TARGETS}" CACHE INTERNAL
+      "GPU_TARGETS as requested, before ASAN normalisation and validation")
+endif()
 
 if(ASAN)
   if(GPU_TARGETS)
@@ -342,6 +367,8 @@ else()
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
+set(ROCSHMEM_GPU_TARGETS_DERIVED "${GPU_TARGETS}" CACHE INTERNAL
+    "Last value written to GPU_TARGETS above, so the next configure can tell a user edit from this project's own output")
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
@@ -419,9 +446,14 @@ if (NOT BUILD_TESTS_ONLY)
   # GPU_TARGETS_FULL, also without FORCE, so it goes stale the same way: a
   # build directory first configured without ASAN keeps the bare gfx942 and the
   # bitcode compile loses the :xnack+ this policy just added. Same treatment.
+  # The else arm mirrors the unset above: without it a suffixed value from an
+  # earlier configure outlives the configure that resolved to bare archs, and
+  # the bitcode metadata stops matching the targets being built.
   if(GPU_TARGETS_FULL)
     set(BITCODE_GPU_ARCHS_FULL "${GPU_TARGETS_FULL}" CACHE STRING
       "Full GPU arch strings with feature suffixes for device bitcode" FORCE)
+  else()
+    unset(BITCODE_GPU_ARCHS_FULL CACHE)
   endif()
 
   find_package(hip REQUIRED)

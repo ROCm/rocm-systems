@@ -39,8 +39,10 @@ class AsanGpuTargetsTest(unittest.TestCase):
             if completed.returncode != 0:
                 raise AssertionError(completed.stderr.strip())
             result = out_file.read_text()
-        # message(STATUS) goes to stdout under cmake -P, FATAL_ERROR to stderr.
-        return ([t for t in result.split(";") if t], completed.stdout)
+        # cmake -P sends STATUS to stdout and WARNING/FATAL_ERROR to stderr.
+        # Both, so the tests below do not pin the policy to a message level.
+        return ([t for t in result.split(";") if t],
+                completed.stdout + completed.stderr)
 
     def test_gfx9_gets_xnack_plus_requested(self):
         """A bare gfx9 name compiles with the sanitizer ignored."""
@@ -76,6 +78,14 @@ class AsanGpuTargetsTest(unittest.TestCase):
         result, _ = self.adjust(["gfx1250"])
 
         self.assertEqual(result, ["gfx1250"])
+
+    def test_gfx1250_strict_is_kept_untouched(self):
+        """The other entry in _RCCL_ASAN_XNACK_ALWAYS_ON, and the one no other
+        case reaches: drop it from that list and every test here stays green
+        while the target silently moves to the drop arm."""
+        result, _ = self.adjust(["gfx1250-strict", "gfx1250-strict:xnack+"])
+
+        self.assertEqual(result, ["gfx1250-strict"])
 
     def test_gfx1250_loses_an_explicitly_requested_xnack(self):
         """clang rejects 'gfx1250:xnack+' outright: xnack is not selectable there."""

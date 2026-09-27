@@ -97,6 +97,16 @@ function(add_rocshmem_targets)
         endif()
         find_package(rocshmem_static)
         if(rocshmem_static_FOUND)
+            # This path returns before the -DASAN=ON propagation below, so an
+            # ASAN rccl links whatever the pre-built tree happens to contain.
+            if(BUILD_ADDRESS_SANITIZER)
+                message(WARNING
+                    "ASAN build using pre-built rocSHMEM at ${ROCSHMEM_INSTALL_DIR}. "
+                    "It is linked into librccl.so as-is; if it was not itself built "
+                    "with -DASAN=ON, rccl gets an uninstrumented rocSHMEM inside an "
+                    "instrumented library. Unset ROCSHMEM_INSTALL_DIR to build it "
+                    "from source with ASAN propagated.")
+            endif()
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
             set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   CACHE INTERNAL "rocSHMEM source directory")
@@ -150,6 +160,18 @@ function(add_rocshmem_targets)
                 && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
             INSTALL_COMMAND ""
         )
+
+        # ExternalProject stamps its build step on completion, not on the text
+        # of BUILD_COMMAND, so flipping ASAN over an existing tree leaves the
+        # step up to date and keeps the previous, uninstrumented
+        # librocshmem.a. Record the options in a file and hang the build step
+        # off it: file(GENERATE) rewrites only when the content differs, so the
+        # sub-build re-runs exactly when its options change, without the
+        # every-invocation cost of BUILD_ALWAYS.
+        set(_rocshmem_opts_stamp "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_ext_options.txt")
+        file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
+             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
+        ExternalProject_Add_StepDependencies(rocshmem_ext build "${_rocshmem_opts_stamp}")
 
         set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
         set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include"  PARENT_SCOPE)
