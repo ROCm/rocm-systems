@@ -925,6 +925,7 @@ Before adding or modifying tests, read the existing test modules to understand t
 - Prefer `monkeypatch` (pytest fixture) over `unittest.mock.Mock` / `MagicMock` — `monkeypatch` integrates with pytest's fixture lifecycle and is the dominant pattern in this project. Reserve `Mock` / `MagicMock` for cases that genuinely need call tracking or attribute auto-creation.
 - Use `types.SimpleNamespace` or `argparse.Namespace` for plain attribute bags instead of mock objects.
 - Define module-level helpers, constants, and fixtures at the top of a test module, above the first test. Do not interleave them between test functions, even when a helper serves only one section.
+- Test behavior that exists. When code is removed, delete its tests instead of inverting them into assertions that the old behavior no longer happens. A test named for a feature the codebase no longer has misleads the next reader into thinking the feature is still there.
 
 ## Key Principles Summary
 
