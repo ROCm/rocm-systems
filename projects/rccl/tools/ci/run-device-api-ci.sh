@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run the RCCL device-API benchmark suite (symmetric memory / LSA device
-# kernels / GIN proxy) against a freshly built rccl-tests tree. Mirrors the
-# legacy rocJenkins "device-api" testCommand.
+# Run the RCCL device-API benchmark suite (symmetric memory / GIN proxy)
+# against a freshly built rccl-tests tree. Mirrors the legacy rocJenkins
+# "device-api" testCommand. LSA all_reduce_perf (-D 1/-D 2) is not launched.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), ROCSHMEM_INSTALL_DIR
 # (rocshmem.env), and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR,
@@ -12,8 +12,8 @@
 # projects/rccl/build/release. RCCL_TESTS_BIN_DIR defaults to rccl-tests/build.
 #
 # device-api.sbatch invokes this twice:
-#   1. CONFIG=device-api-lsa-tests.json against the install.sh ENABLE_DEVICE_API
-#      build (symmetric + LSA), with RCCL_CI_SKIP_DEVTIME=1
+#   1. CONFIG=device-api-nongin-tests.json against the install.sh ENABLE_DEVICE_API
+#      build (symmetric only; no LSA), with RCCL_CI_SKIP_DEVTIME=1
 #   2. CONFIG=device-api-tests.json against the cmake ENABLE_ROCSHMEM_GIN build
 #      (GIN suites + AllToAllDevtime smoke)
 #
@@ -57,7 +57,7 @@ CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 # Prefer the build stages' env fragments over ambient build paths.
 # rccl.env is written by device-api.sbatch (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR).
 # Keep an already-exported RCCL_TESTS_BIN_DIR: device-api.sbatch sets it per
-# matrix (install.sh LSA build vs cmake GIN build) and rccl.env would clobber it.
+# matrix (install.sh non-GIN build vs cmake GIN build) and rccl.env would clobber it.
 _saved_tests_bin_dir="${RCCL_TESTS_BIN_DIR-}"
 for frag in rocm ompi rocshmem rccl; do
   env_file="${WORKDIR}/.ci-out/${frag}.env"
@@ -103,14 +103,14 @@ export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
 export LD_LIBRARY_PATH="${RCCL_LIB_DIR}${ROCSHMEM_INSTALL_DIR:+:${ROCSHMEM_INSTALL_DIR}/lib}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 
 PERF_DIR="${RCCL_TESTS_BIN_DIR:-${RCCL_TESTS_DIR}/build}"
-# Prefer alltoall_perf (always built for both matrices). Fall back to
-# all_reduce_perf for a pure LSA/install.sh tree that somehow omitted it.
+# alltoall_perf is built for both matrices. Fall back to broadcast_perf, which
+# the non-GIN symmetric matrix always launches.
 if [[ ! -d "${PERF_DIR}" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
   ls -la "${RCCL_TESTS_DIR}" 2>/dev/null || true
   exit 1
 fi
-if [[ ! -x "${PERF_DIR}/alltoall_perf" && ! -x "${PERF_DIR}/all_reduce_perf" ]]; then
+if [[ ! -x "${PERF_DIR}/alltoall_perf" && ! -x "${PERF_DIR}/broadcast_perf" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
   ls -la "${PERF_DIR}" 2>/dev/null || true
   exit 1

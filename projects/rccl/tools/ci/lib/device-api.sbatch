@@ -18,10 +18,10 @@
 #   3. lib/build-rocshmem.sh   build rocSHMEM -> rocshmem.env
 #   4. projects/rccl/install.sh   build RCCL (in-tree, release, --rocshmem-gin)
 #   5. rccl-tests (install.sh)    ENABLE_DEVICE_API=1, no ENABLE_ROCSHMEM_GIN
-#                                  (symmetric + LSA all_reduce_perf coverage)
+#                                  (symmetric matrix; LSA all_reduce is not run)
 #   6. rccl-tests (cmake)         ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN
 #                                  (GIN -D 3/-D 4 + allgather Anvil SDMA)
-#   7. run-device-api-ci.sh       LSA matrix, then GIN matrix
+#   7. run-device-api-ci.sh       non-GIN matrix, then GIN matrix
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -151,12 +151,11 @@ rccl_cmake_dir="$(dirname "${rccl_cfg}")"
 echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 5) rccl-tests via install.sh with ENABLE_DEVICE_API only. This is the
-# device-API-without-rocSHMEM build: all_reduce_perf and the LSA kernels need
-# it, and it was previously the only CI path that exercised that configure.
-# install.sh always writes into projects/rccl-tests/build.
+# device-API-without-rocSHMEM build. LSA all_reduce_perf (-D 1/-D 2) is not
+# part of this job. install.sh always writes into projects/rccl-tests/build.
 echo "==> [5/7] build rccl-tests (ENABLE_DEVICE_API via install.sh)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
-rccl_tests_lsa_build="${rccl_tests_src}/build"
+rccl_tests_nongin_build="${rccl_tests_src}/build"
 (
   cd "${rccl_tests_src}" \
   && ./install.sh --mpi --enable-device-api \
@@ -164,15 +163,14 @@ rccl_tests_lsa_build="${rccl_tests_src}/build"
        --rocm_home="${ROCM_PATH}" \
        --gpu_targets="${amdgpu_targets}"
 )
-# Symmetric + LSA suites in device-api-lsa-tests.json.
-required_lsa_bins=(
-  all_reduce_perf broadcast_perf reduce_perf
-  sendrecv_perf scatter_perf gather_perf
+# Symmetric suites in device-api-nongin-tests.json. all_reduce_perf is not required.
+required_nongin_bins=(
+  broadcast_perf reduce_perf sendrecv_perf scatter_perf gather_perf
 )
-for perf_bin in "${required_lsa_bins[@]}"; do
-  if [[ ! -x "${rccl_tests_lsa_build}/${perf_bin}" ]]; then
-    echo "ERROR: ${perf_bin} not built under ${rccl_tests_lsa_build}" >&2
-    ls -la "${rccl_tests_lsa_build}" 2>/dev/null >&2 || true
+for perf_bin in "${required_nongin_bins[@]}"; do
+  if [[ ! -x "${rccl_tests_nongin_build}/${perf_bin}" ]]; then
+    echo "ERROR: ${perf_bin} not built under ${rccl_tests_nongin_build}" >&2
+    ls -la "${rccl_tests_nongin_build}" 2>/dev/null >&2 || true
     exit 1
   fi
 done
@@ -220,7 +218,7 @@ done
 {
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
-  printf 'export RCCL_TESTS_LSA_BIN_DIR=%q\n' "${rccl_tests_lsa_build}"
+  printf 'export RCCL_TESTS_NONGIN_BIN_DIR=%q\n' "${rccl_tests_nongin_build}"
   printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
 } > "${workdir}/.ci-out/rccl.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
@@ -249,16 +247,16 @@ set +a
 
 test_rc=0
 {
-# 7) Benchmarks: LSA/symmetric against the install.sh build, then GIN against
+# 7) Benchmarks: symmetric against the install.sh build, then GIN against
 # the cmake ENABLE_ROCSHMEM_GIN build. Skip the GIN AllToAllDevtime smoke on the
-# LSA pass; the GIN pass runs it.
+# non-GIN pass; the GIN pass runs it. LSA all_reduce (-D 1/-D 2) is not run.
 echo "==> [7/7] run benchmarks"
 ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
 echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
 
-echo "==> LSA / symmetric matrix (install.sh ENABLE_DEVICE_API build)"
-CONFIG="${ci_dir}/lib/device-api-lsa-tests.json" \
-RCCL_TESTS_BIN_DIR="${RCCL_TESTS_LSA_BIN_DIR}" \
+echo "==> non-GIN symmetric matrix (install.sh ENABLE_DEVICE_API build)"
+CONFIG="${ci_dir}/lib/device-api-nongin-tests.json" \
+RCCL_TESTS_BIN_DIR="${RCCL_TESTS_NONGIN_BIN_DIR}" \
 RCCL_CI_SKIP_DEVTIME=1 \
   "${ci_dir}/run-device-api-ci.sh"
 
