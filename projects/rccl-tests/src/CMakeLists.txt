@@ -75,6 +75,8 @@ set(COMMON_FILES
   common.cu
   gin_sdma_allgather_policy.h
   gin_sdma_broadcast_policy.h
+  gin_sdma_reducescatter_policy.h
+  gin_sdma_reduce.h
   gin_sdma_devtime.h
   gin_sdma_devtime_host.h
   nccl1_compat.h
@@ -198,6 +200,17 @@ endif()
 add_rccl_test(gather)
 add_rccl_test(hypercube)
 add_rccl_test(reduce_scatter)
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+    # GIN Anvil-SDMA ReduceScatter (reduce_scatter_perf -D 3): same device-RDC
+    # link as broadcast_perf so GinReduceScatterKernel resolves the GIN device
+    # backend. ENABLE_DEVICE_API is already a global definition when that option
+    # is ON.
+    target_compile_definitions(reduce_scatter_perf PRIVATE ENABLE_ROCSHMEM_GIN)
+    target_compile_options(reduce_scatter_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    target_link_libraries(reduce_scatter_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(reduce_scatter_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+endif()
 add_rccl_test(reduce)
 add_rccl_test(scatter)
 add_rccl_test(sendrecv)

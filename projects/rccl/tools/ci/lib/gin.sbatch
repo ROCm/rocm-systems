@@ -16,8 +16,10 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
 #   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build only
-#      rccl-UnitTestsFixtures and rccl-UnitTestsGinSdmaBroadcastPolicy
-#      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
+#      rccl-UnitTestsFixtures, rccl-UnitTestsGinSdmaBroadcastPolicy,
+#      rccl-UnitTestsGinSdmaReduceScatterPolicy, and
+#      rccl-UnitTestsGinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)
+#      -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
 #   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
 #   7. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
@@ -119,6 +121,7 @@ rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
 rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_rs_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaReduceScatterPolicy"
 rm -rf "${rccl_prefix}"
 (
   cd "${rccl_src}"
@@ -134,14 +137,15 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
-echo "==> [4/7] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy + GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build rccl-UnitTestsFixtures + GinSdma{Broadcast,ReduceScatter}Policy + GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy rccl-UnitTestsGinAnvilSdmaFactory
+  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy \
+    rccl-UnitTestsGinSdmaReduceScatterPolicy rccl-UnitTestsGinAnvilSdmaFactory
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -153,8 +157,14 @@ if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_rs_policy_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinSdmaReduceScatterPolicy not built at ${rccl_rs_policy_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_rs_policy_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsGinSdmaReduceScatterPolicy: ${rccl_rs_policy_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
