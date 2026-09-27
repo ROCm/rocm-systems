@@ -3164,6 +3164,11 @@ constexpr uintptr_t kLegacyRegRecvBase = 0xF8000;
 constexpr uintptr_t kLegacyAccBase = 0x1A2000;
 constexpr uint64_t kLegacyOpCount = 0x424242ull;
 constexpr int kLegacyUseOneSlice = 1;
+constexpr size_t kLegacyDrsCount = 0x5050;
+constexpr int kLegacyDrsRank = 2;
+constexpr uintptr_t kLegacyDrsTempBuffBase = 0x2B3000;
+// rccl_wrap_fakes.cc:204's default; the scene's nNodes == 1 skips every node-count clamp below it.
+constexpr uint32_t kLegacyDrsLimitBytes = 8388608u;
 constexpr int kKernelChannelActivation = ncclProfileKernelCh;
 constexpr int kOtherEventActivation = ~ncclProfileKernelCh;
 constexpr bool kRegistrationNeedsConnect = true;
@@ -3413,6 +3418,46 @@ TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_UnregisteredTask_
   EXPECT_EQ(TaskPrep_Addr(kLegacyAccBase), devWork->acc);
   EXPECT_EQ(kFlagSet, devWork->rcclUseOneSlice);
   EXPECT_EQ(kLegacyOpCount, devWork->opCount);
+}
+
+// enqueue.cc:519-538 also marshals the Direct ReduceScatter group when comm->enableDirectReduceScatter is
+// set; task_posttuning.cc has no equivalent, so these fields stay at devWork's zero-initialized defaults.
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_DirectReduceScatterEnabled_CurrentlyDropsEveryField) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.task()->func = ncclFuncReduceScatter;
+  work.task()->count = kLegacyDrsCount;
+  work.comm()->enableDirectReduceScatter = true;
+  work.comm()->rank = kLegacyDrsRank;
+  work.comm()->tempBuff = TaskPrep_Addr(kLegacyDrsTempBuffBase);
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  const struct ncclDevWorkColl* devWork = work.OnlyColl();
+  EXPECT_EQ(kFlagClear, devWork->enableDirectReduceScatter);
+  EXPECT_EQ(0u, devWork->directReduceScatterLimitBytes);
+  EXPECT_EQ(nullptr, devWork->tempBuff);
+  EXPECT_EQ(0, devWork->currentRank);
+  EXPECT_EQ(0u, devWork->count);
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_DirectReduceScatterEnabled_MarshalsEveryField) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.task()->func = ncclFuncReduceScatter;
+  work.task()->count = kLegacyDrsCount;
+  work.comm()->enableDirectReduceScatter = true;
+  work.comm()->rank = kLegacyDrsRank;
+  work.comm()->tempBuff = TaskPrep_Addr(kLegacyDrsTempBuffBase);
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  const struct ncclDevWorkColl* devWork = work.OnlyColl();
+  EXPECT_TRUE(devWork->enableDirectReduceScatter);
+  EXPECT_EQ(kLegacyDrsLimitBytes, devWork->directReduceScatterLimitBytes);
+  EXPECT_EQ(TaskPrep_Addr(kLegacyDrsTempBuffBase), devWork->tempBuff);
+  EXPECT_EQ(kLegacyDrsRank, devWork->currentRank);
+  EXPECT_EQ(kLegacyDrsCount, devWork->count);
 }
 
 TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_SingleNodeComm_MarksTheWorkSingleNode) {
