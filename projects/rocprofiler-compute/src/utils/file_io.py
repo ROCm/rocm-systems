@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import io
 import json
 import re
 from collections import OrderedDict
@@ -11,7 +12,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import csv_compression, schema, utils_analysis
+from utils import csv_compression, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -352,30 +353,65 @@ def create_df_pmc(
     verbose: int,
 ) -> pd.DataFrame:
     """
-    Load all raw pmc counters and join into one df.
+    Read all raw pmc counters into one analysis df.
+
+    Counter data is read straight from the rocpd result artifacts. Bad profiling
+    output stops the run instead of producing a partial frame.
     """
-    pmc_perf_path = csv_compression.compressed_name(
-        Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    result_files = sorted(
+        Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
     )
-    if not pmc_perf_path.is_file():
+    if not result_files:
         return pd.DataFrame()
 
-    df = pd.read_csv(pmc_perf_path)
-
-    # The rocpd counter CSV is long: one row per counter per dispatch. Anything
-    # else was written by a removed backend and is no longer supported.
-    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
-        console_error(
-            "analysis",
-            f"{pmc_perf_path} is not in the supported rocpd format. "
-            "Please re-profile this workload with a current release.",
-        )
-    df = utils_analysis.process_rocpd_csv(df)
+    frames = [_read_counter_results(result_file) for result_file in result_files]
+    df = utils_analysis.process_rocpd_csv(pd.concat(frames, ignore_index=True))
 
     utils_analysis.add_unit_counter(df)
 
     if verbose >= 2:
-        console_debug(f"pmc_raw_data final_single_df {df.info}")
+        frame_info = io.StringIO()
+        df.info(buf=frame_info)
+        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+    return df
+
+
+def _read_counter_results(result_file: Path) -> pd.DataFrame:
+    """Read one rocpd result artifact and check it carries counter rows."""
+    try:
+        df = pd.read_csv(result_file)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {result_file}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+        return pd.DataFrame()
+    except csv_compression.CORRUPT_CSV_ERRORS as error:
+        console_error(
+            "profiling",
+            f"{result_file} is truncated or corrupt: {error}\n"
+            "A profile run killed mid-write leaves this behind; "
+            "re-run 'rocprof-compute profile' to regenerate the "
+            "workload.",
+        )
+        return pd.DataFrame()
+
+    if df.empty:
+        console_error(
+            "profiling",
+            f"No counter data in {result_file}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+
+    # The rocpd counter CSV is long: one row per counter per dispatch.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{result_file} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+
     return df
 
 
