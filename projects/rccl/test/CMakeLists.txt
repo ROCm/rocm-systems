@@ -29,6 +29,7 @@ if(BUILD_TESTS)
     COMMAND "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
   )
+  set_tests_properties(rccl-generate-device-table PROPERTIES LABELS "host")
 
   # CPU-only generator unit test: guards src/device/ce_reduce/generate.py's
   # per-instantiation TU splitting (ce_reduce_impl.h.in / ce_reduce_launcher.cpp.in
@@ -38,6 +39,7 @@ if(BUILD_TESTS)
     COMMAND "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
+  set_tests_properties(rccl-generate-ce-reduce PROPERTIES LABELS "host")
 
   # The kernel-count leak guards and the __hip_atomic_* poison probe
   # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
@@ -57,6 +59,7 @@ if(BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/include)
   target_link_libraries(rccl-UnitTestsNetTelemetry PRIVATE Threads::Threads)
   add_test(NAME rccl-UnitTestsNetTelemetry COMMAND rccl-UnitTestsNetTelemetry)
+  set_tests_properties(rccl-UnitTestsNetTelemetry PROPERTIES LABELS "host")
   rocm_install(TARGETS rccl-UnitTestsNetTelemetry COMPONENT tests)
 
   if (ENABLE_CODE_COVERAGE)
@@ -550,7 +553,7 @@ if(BUILD_TESTS)
   set_target_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
-  set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+  set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit;host")
 
   # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
   # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
@@ -570,7 +573,7 @@ if(BUILD_TESTS)
     set_target_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
     add_test(NAME rccl-UnitTestsGinSdmaAllGatherPolicy COMMAND rccl-UnitTestsGinSdmaAllGatherPolicy)
-    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES LABELS "unit")
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES LABELS "unit;host")
 
     # GIN-SDMA AllGather ON-GPU correctness test. AllGather has no reduction, so
     # this validates the LSA<->SDMA tier predicate device-vs-host and the
@@ -620,7 +623,7 @@ if(BUILD_TESTS)
     set_target_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
     add_test(NAME rccl-UnitTestsGinSdmaBroadcastPolicy COMMAND rccl-UnitTestsGinSdmaBroadcastPolicy)
-    set_tests_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES LABELS "unit")
+    set_tests_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES LABELS "unit;host")
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into

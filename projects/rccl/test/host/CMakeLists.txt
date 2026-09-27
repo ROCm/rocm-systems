@@ -886,6 +886,187 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # rccl-HostUnitTests: RCCL's primary CPU-only test binary. Unlike the Micro*
+  # binaries above (pure macro/link substitution), this one links real GTest
+  # doubles + link stubs for a handful of production .cc files via the
+  # rccl-source-wrappers helper lib below. This mirrors the standalone target
+  # of the same name further down in this file (the one run_host_tests.sh
+  # builds directly) -- kept in sync by hand since the standalone project()
+  # context can't be add_subdirectory()-shared with this one.
+  set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+  set(ACCL_PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/accl")
+  set(RCCL_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
+  # HIP_FABRIC_API_FUNC/HIP_FABRIC_HANDLE_TYPE are already probed by the
+  # top-level projects/rccl/CMakeLists.txt (check_symbol_exists /
+  # check_cxx_source_compiles); combine them the same way src/CMakeLists.txt's
+  # own HIP_FABRIC_API compile definition for the real rccl target does,
+  # rather than re-running the probes here. AMDSMI_FABRIC_API and
+  # AMDSMI_HEADER_HAS_FABRIC_TELEMETRY are likewise already set by that same
+  # parent configure and referenced directly below.
+  if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+    set(HIP_FABRIC_API ON)
+  else()
+    set(HIP_FABRIC_API OFF)
+  endif()
+
+  # --- Wrapper library for production .cc files that need link stubs ---
+  add_library(rccl-source-wrappers STATIC
+    mem_manager_src_wrapper.cc
+    mem_manager_wrapper_test.cc
+    bootstrap_wrapper.cc
+    init_stubs.cpp
+    wrapper_link_stubs.cpp
+    hip_prop_r0600_stub.cpp
+    accl_profiler_wrapper.cc
+  )
+  target_include_directories(rccl-source-wrappers PRIVATE
+    ${ACCL_PROFILER_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS}
+    ${PROJECT_BINARY_DIR}/hipify/src/include/plugin/tuner
+    ${PROJECT_BINARY_DIR}/hipify/src/graph
+    ${RCCL_TEST_DIR}
+    ${RCCL_TEST_DIR}/common
+  )
+  # Several of these wrappers #include a hipified production .cc/.h by relative
+  # path (e.g. "bootstrap.cc", "mem_manager.cc", "comm.h") via the include dirs
+  # above, so -- like rccl-HostUnitTests below -- this needs hipify to have run
+  # first, even though it links no hipified .cc as a direct source itself.
+  add_dependencies(rccl-source-wrappers hipify_all copy_nccl_device_headers)
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-source-wrappers PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-source-wrappers PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+    endif()
+  endforeach()
+  # accl_profiler_wrapper.cc needs the non-hipified profiler headers; scope the
+  # extra include to just that file to avoid os.h/rocmwrap.h conflicts with the
+  # hipified sources used by other wrappers.
+  set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
+    COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
+  )
+  target_compile_definitions(rccl-source-wrappers PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+    ROCM_VERSION=70000
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+  )
+  target_compile_options(rccl-source-wrappers PRIVATE --offload-host-only)
+  target_link_libraries(rccl-source-wrappers PRIVATE ${MICRO_TEST_LINK_LIBS})
+
+  # --- Main test executable ---
+  add_executable(rccl-HostUnitTests
+    main.cpp
+    ${RCCL_TEST_DIR}/BitOpsTests.cpp
+    ${RCCL_TEST_DIR}/IommuPassthrough_test.cpp
+    ${RCCL_TEST_DIR}/VersionInfoTests.cpp
+    ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
+    ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
+    RomeTopoConsensusLogTests.cpp
+    ${RCCL_TEST_DIR}/MiscTests.cpp
+    ${RCCL_TEST_DIR}/VersionGateTests.cpp
+    ${RCCL_TEST_DIR}/TimeoutTests.cpp
+    ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
+    ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
+    ${RCCL_TEST_DIR}/AltRsmiTests.cpp
+    ${RCCL_TEST_DIR}/AcclProfilerTests.cpp
+    ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/kernel_config.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/alt_rsmi.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/graph/rome_topo_consensus.cc
+  )
+  # Make sure the hipify step has run before trying to compile these.
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/kernel_config.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/alt_rsmi.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/graph/rome_topo_consensus.cc
+    PROPERTIES GENERATED TRUE)
+  add_dependencies(rccl-HostUnitTests hipify_all copy_nccl_device_headers)
+
+  target_include_directories(rccl-HostUnitTests PRIVATE
+    ${ACCL_PROFILER_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS}
+    ${PROJECT_BINARY_DIR}/hipify/src/include/plugin/tuner
+    ${PROJECT_BINARY_DIR}/hipify/src/graph
+    ${RCCL_TEST_DIR}
+    ${RCCL_TEST_DIR}/common
+  )
+  set_source_files_properties(${RCCL_TEST_DIR}/AcclProfilerTests.cpp PROPERTIES
+    COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
+  )
+  target_compile_definitions(rccl-HostUnitTests PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+    ROCM_VERSION=70000
+    RCCL_EXPOSE_STATIC
+    ARSMI_TEST_BUILD
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+  )
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-HostUnitTests PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-HostUnitTests PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(rccl-HostUnitTests PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  # Host-only, like the Micro* binaries above (see the rationale on
+  # rccl-UnitTestsMicro): --offload-host-only keeps llvm coverage
+  # instrumentation out of the (nonexistent) device pass.
+  target_compile_options(rccl-HostUnitTests PRIVATE
+    --offload-host-only
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-HostUnitTests PRIVATE
+    -no-hip-rt -no-pie
+    -fprofile-instr-generate -fcoverage-mapping)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(rccl-HostUnitTests PRIVATE -fsanitize=address)
+    target_link_options(rccl-HostUnitTests PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(rccl-HostUnitTests PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+  target_link_libraries(rccl-HostUnitTests PRIVATE
+    ${MICRO_TEST_LINK_LIBS}
+    -Wl,--whole-archive
+    rccl-source-wrappers
+    -Wl,--no-whole-archive
+  )
+  rocm_install(TARGETS rccl-HostUnitTests COMPONENT tests)
+
+  # Bare add_test(), not apply_test_category_labels(): this binary predates
+  # (and is unrelated to) RCCL's yaml-driven category mechanism used by the
+  # Micro* binaries above. TIMEOUT set explicitly -- a bare add_test()
+  # otherwise inherits CTest's 1500s default, and this is meant to run inside
+  # a merge-blocking gate (see the "host" label block below).
+  add_test(NAME rccl-HostUnitTests COMMAND rccl-HostUnitTests)
+  set_tests_properties(rccl-HostUnitTests PROPERTIES TIMEOUT 300)
+
+  # Label every test this directory registered as "host" so TheRock's
+  # build-test gate can select them with `ctest -L '^host$'`. Reads CMake's
+  # own TESTS directory property rather than a hand-maintained list, so a
+  # binary added above -- via either add_test() directly (like
+  # rccl-HostUnitTests) or apply_test_category_labels() (like the Micro*
+  # binaries) -- is picked up with no further edits anywhere. Non-quick tiers
+  # are skipped: they share the quick tier's test_patterns (see
+  # test_categories_micro*.yaml), so labeling all four would run every suite
+  # 4x with an identical filter for zero added coverage.
+  get_property(_rccl_host_tests DIRECTORY PROPERTY TESTS)
+  foreach(_t IN LISTS _rccl_host_tests)
+    get_property(_labels TEST "${_t}" PROPERTY LABELS)
+    if(NOT "${_labels}" MATCHES "standard|comprehensive|full")
+      set_property(TEST "${_t}" APPEND PROPERTY LABELS "host")
+    endif()
+  endforeach()
+
   return()
 endif()
 
