@@ -245,11 +245,15 @@ source "${workdir}/.ci-out/rocshmem.env"
 source "${workdir}/.ci-out/rccl.env"
 set +a
 
-test_rc=0
+nongin_rc=0
+gin_rc=0
 {
 # 7) Benchmarks: symmetric against the install.sh build, then GIN against
 # the cmake ENABLE_ROCSHMEM_GIN build. Skip the GIN AllToAllDevtime smoke on the
 # non-GIN pass; the GIN pass runs it. LSA all_reduce (-D 1/-D 2) is not run.
+# Capture each matrix with its own || rc=$?: set -e is ignored on the left of ||
+# inside a compound command, so a single trailing || on the brace group would
+# keep only the second matrix's status.
 echo "==> [7/7] run benchmarks"
 ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
 echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
@@ -258,17 +262,20 @@ echo "==> non-GIN symmetric matrix (install.sh ENABLE_DEVICE_API build)"
 CONFIG="${ci_dir}/lib/device-api-nongin-tests.json" \
 RCCL_TESTS_BIN_DIR="${RCCL_TESTS_NONGIN_BIN_DIR}" \
 RCCL_CI_SKIP_DEVTIME=1 \
-  "${ci_dir}/run-device-api-ci.sh"
+  "${ci_dir}/run-device-api-ci.sh" || nongin_rc=$?
 
 echo "==> GIN matrix (cmake ENABLE_ROCSHMEM_GIN build)"
 CONFIG="${ci_dir}/lib/device-api-tests.json" \
 RCCL_TESTS_BIN_DIR="${RCCL_TESTS_BIN_DIR}" \
-  "${ci_dir}/run-device-api-ci.sh"
-} > "${test_out}" 2> "${test_err}" || test_rc=$?
+  "${ci_dir}/run-device-api-ci.sh" || gin_rc=$?
+} > "${test_out}" 2> "${test_err}"
 echo "==> test phase logs: ${test_out} / ${test_err}"
-if [[ "${test_rc}" -ne 0 ]]; then
-  echo "ERROR: device-api tests failed (rc=${test_rc})" >&2
+if [[ "${nongin_rc}" -ne 0 || "${gin_rc}" -ne 0 ]]; then
+  echo "ERROR: device-api tests failed (nongin_rc=${nongin_rc} gin_rc=${gin_rc})" >&2
   echo "----- last 60 lines of ${test_err} -----" >&2
   tail -n 60 "${test_err}" >&2 || true
-  exit "${test_rc}"
+  if [[ "${nongin_rc}" -ne 0 ]]; then
+    exit "${nongin_rc}"
+  fi
+  exit "${gin_rc}"
 fi
