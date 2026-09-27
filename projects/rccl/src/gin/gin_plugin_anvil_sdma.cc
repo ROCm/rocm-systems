@@ -457,6 +457,19 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     WARN("GIN anvil-sdma: conn-check supports at most %d ranks (got %d)", kMaxConnCheckRanks, nRanks);
     return ncclSystemError;
   }
+  // Conn-check collectives must use the LSA team (lsaRankList/lsaSelf/lsaSize),
+  // not the GIN team's ctx->rank/nRanks on comm->bootstrap. Under
+  // NCCL_GIN_CONNECTION_RAIL those spaces differ: bootstrapAllGather writes
+  // comm->nRanks entries and bootstrapBarrier addresses world ranks 0..nRanks-1.
+  // An invalid team cannot be folded into setupState: that fold is itself an
+  // allgather over this team. lsaSize/lsaSelf are derived identically on every
+  // rank by ncclDevrInit, so this bails on all ranks together.
+  if (lsaTeamSize < 1 || lsaTeamSize > kMaxConnCheckRanks || devr->lsaRankList == nullptr || devr->lsaSelf < 0 ||
+      devr->lsaSelf >= lsaTeamSize) {
+    WARN("GIN anvil-sdma: conn-check setup has invalid LSA team (rank %d, lsaSelf=%d, lsaSize=%d, lsaRankList=%p)",
+         rank, devr->lsaSelf, lsaTeamSize, (void*)devr->lsaRankList);
+    return ncclSystemError;
+  }
   ncclResult_t ret = ncclSuccess;
   bool markedComm = false;
   hipStream_t connStream = nullptr;
@@ -500,17 +513,6 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       hipMalloc(&missingDev, sizeof(int) * (size_t)nRanks) != hipSuccess) {
     WARN("GIN anvil-sdma: conn-check hipMalloc failed (rank %d)", rank);
     setupState = kSetupFailed;
-  }
-  // Conn-check collectives must use the LSA team (lsaRankList/lsaSelf/lsaSize),
-  // not the GIN team's ctx->rank/nRanks on comm->bootstrap. Under
-  // NCCL_GIN_CONNECTION_RAIL those spaces differ: bootstrapAllGather writes
-  // comm->nRanks entries and bootstrapBarrier addresses world ranks 0..nRanks-1.
-  if (lsaTeamSize < 1 || lsaTeamSize > kMaxConnCheckRanks || devr->lsaRankList == nullptr || devr->lsaSelf < 0 ||
-      devr->lsaSelf >= lsaTeamSize) {
-    WARN("GIN anvil-sdma: conn-check setup has invalid LSA team (rank %d, lsaSelf=%d, lsaSize=%d, lsaRankList=%p)",
-         rank, devr->lsaSelf, lsaTeamSize, (void*)devr->lsaRankList);
-    ret = ncclSystemError;
-    goto cleanup;
   }
 
   {
