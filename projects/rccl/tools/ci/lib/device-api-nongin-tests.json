@@ -1,8 +1,8 @@
 {
   "_comment": [
     "Non-GIN device-API matrix for run-device-api-ci.sh.",
-    "Built with ENABLE_DEVICE_API=1 ./install.sh (no ENABLE_ROCSHMEM_GIN), so",
-    "all_reduce_perf and the LSA kernels (-D 1/-D 2) are available.",
+    "Built with ENABLE_DEVICE_API=1 ./install.sh (no ENABLE_ROCSHMEM_GIN).",
+    "LSA all_reduce_perf (-D 1/-D 2) is not part of this job.",
     "device-api.sbatch runs this matrix first, then device-api-tests.json against",
     "the cmake ENABLE_ROCSHMEM_GIN build. Launch path is ${RCCL_TESTS_BIN_DIR}/<bin>",
     "(absolute; default rccl-tests/build for this matrix).",
@@ -24,16 +24,6 @@
       "name": "symmetric",
       "bins": ["broadcast_perf", "reduce_perf", "sendrecv_perf", "scatter_perf", "gather_perf"],
       "args": "-R 2"
-    },
-    {
-      "name": "lsa-d1",
-      "bins": ["all_reduce_perf"],
-      "args": "-R 2 -D 1"
-    },
-    {
-      "name": "lsa-d2",
-      "bins": ["all_reduce_perf"],
-      "args": "-R 2 -D 2"
     }
   ]
 }
