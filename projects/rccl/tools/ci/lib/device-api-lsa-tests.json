@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Non-GIN device-API matrix for run-device-api-ci.sh.",
+    "Built with ENABLE_DEVICE_API=1 ./install.sh (no ENABLE_ROCSHMEM_GIN), so",
+    "all_reduce_perf and the LSA kernels (-D 1/-D 2) are available.",
+    "device-api.sbatch runs this matrix first, then device-api-tests.json against",
+    "the cmake ENABLE_ROCSHMEM_GIN build. Launch path is ${RCCL_TESTS_BIN_DIR}/<bin>",
+    "(absolute; default rccl-tests/build for this matrix).",
+    "bench_args: common bench flags | base_env: -x on every run",
+    "debug_env:  -x added only when RCCL_CI_DEBUG=1",
+    "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
+    "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout.",
+    "suites:     [ { name, bins:[...], args, env:[...] (optional) } ]"
+  ],
+
+  "bench_args": "-b 8 -e 1G -f 2 -g 1",
+
+  "base_env": ["NCCL_CUMEM_ENABLE=1", "HSA_FORCE_FINE_GRAIN_PCIE=1"],
+
+  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
+
+  "suites": [
+    {
+      "name": "symmetric",
+      "bins": ["broadcast_perf", "reduce_perf", "sendrecv_perf", "scatter_perf", "gather_perf"],
+      "args": "-R 2"
+    },
+    {
+      "name": "lsa-d1",
+      "bins": ["all_reduce_perf"],
+      "args": "-R 2 -D 1"
+    },
+    {
+      "name": "lsa-d2",
+      "bins": ["all_reduce_perf"],
+      "args": "-R 2 -D 2"
+    }
+  ]
+}

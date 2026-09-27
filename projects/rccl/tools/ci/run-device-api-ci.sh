@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Run the RCCL device-API benchmark suite (symmetric memory / GIN proxy)
-# against the freshly built rccl-tests tree. Mirrors the legacy rocJenkins
-# "device-api" testCommand. LSA all_reduce_perf (-D 1/-D 2) is not launched:
-# that binary still does not build under ENABLE_ROCSHMEM_GIN.
+# Run the RCCL device-API benchmark suite (symmetric memory / LSA device
+# kernels / GIN proxy) against a freshly built rccl-tests tree. Mirrors the
+# legacy rocJenkins "device-api" testCommand.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), ROCSHMEM_INSTALL_DIR
 # (rocshmem.env), and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR,
@@ -12,13 +11,20 @@
 # librccl.so comes from RCCL_INSTALL_PREFIX/lib when that is set, else
 # projects/rccl/build/release. RCCL_TESTS_BIN_DIR defaults to rccl-tests/build.
 #
+# device-api.sbatch invokes this twice:
+#   1. CONFIG=device-api-lsa-tests.json against the install.sh ENABLE_DEVICE_API
+#      build (symmetric + LSA), with RCCL_CI_SKIP_DEVTIME=1
+#   2. CONFIG=device-api-tests.json against the cmake ENABLE_ROCSHMEM_GIN build
+#      (GIN suites + AllToAllDevtime smoke)
+#
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
 # After the JSON matrix, runs pytest test/test_AllToAllDevtime.py (GIN AllToAll
-# in-kernel device-timing smoke: modes -B 1, -B 2, -B 2 -H 1).
+# in-kernel device-timing smoke: modes -B 1, -B 2, -B 2 -H 1) unless
+# RCCL_CI_SKIP_DEVTIME=1.
 #
-# Test matrix lives in lib/device-api-tests.json; RCCL_CI_DEBUG=1 adds its
-# debug_env to every run.
+# Test matrix lives in lib/device-api-tests.json by default; RCCL_CI_DEBUG=1
+# adds its debug_env to every run.
 #
 # Environment overrides:
 #   ROCM_PATH / MPI_HOME / ROCSHMEM_INSTALL_DIR / RCCL_INSTALL_PREFIX
@@ -33,6 +39,7 @@
 #   RCCL_CI_DEBUG          Set to 1 to add debug_env to every run
 #   RCCL_CI_DEBUG_DIR      Dir for NCCL_DEBUG_FILE output when RCCL_CI_DEBUG=1
 #                          (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
+#   RCCL_CI_SKIP_DEVTIME   Set to 1 to skip test_AllToAllDevtime.py
 
 set -euo pipefail
 
@@ -49,11 +56,18 @@ CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 
 # Prefer the build stages' env fragments over ambient build paths.
 # rccl.env is written by device-api.sbatch (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR).
+# Keep an already-exported RCCL_TESTS_BIN_DIR: device-api.sbatch sets it per
+# matrix (install.sh LSA build vs cmake GIN build) and rccl.env would clobber it.
+_saved_tests_bin_dir="${RCCL_TESTS_BIN_DIR-}"
 for frag in rocm ompi rocshmem rccl; do
   env_file="${WORKDIR}/.ci-out/${frag}.env"
   # shellcheck source=/dev/null  # runtime fragment written by the build stages
   [[ -f "${env_file}" ]] && source "${env_file}"
 done
+if [[ -n "${_saved_tests_bin_dir}" ]]; then
+  RCCL_TESTS_BIN_DIR="${_saved_tests_bin_dir}"
+fi
+unset _saved_tests_bin_dir
 
 if [[ -n "${RCCL_INSTALL_PREFIX:-}" ]]; then
   RCCL_LIB_DIR="${RCCL_INSTALL_PREFIX}/lib"
@@ -86,22 +100,19 @@ fi
 cd "${RCCL_TESTS_DIR}"
 
 export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
-if [[ -n "${ROCSHMEM_INSTALL_DIR:-}" ]]; then
-  export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${ROCSHMEM_INSTALL_DIR}/lib:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
-else
-  export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
-fi
+export LD_LIBRARY_PATH="${RCCL_LIB_DIR}${ROCSHMEM_INSTALL_DIR:+:${ROCSHMEM_INSTALL_DIR}/lib}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 
-if [[ -n "${RCCL_TESTS_BIN_DIR:-}" ]]; then
-  PERF_DIR="${RCCL_TESTS_BIN_DIR}"
-else
-  PERF_DIR="${RCCL_TESTS_DIR}/build"
-fi
-# all_reduce_perf is not a valid sentinel here: it still fails to build under
-# ENABLE_ROCSHMEM_GIN. alltoall_perf is the binary this GIN job always needs.
-if [[ ! -d "${PERF_DIR}" || ! -x "${PERF_DIR}/alltoall_perf" ]]; then
+PERF_DIR="${RCCL_TESTS_BIN_DIR:-${RCCL_TESTS_DIR}/build}"
+# Prefer alltoall_perf (always built for both matrices). Fall back to
+# all_reduce_perf for a pure LSA/install.sh tree that somehow omitted it.
+if [[ ! -d "${PERF_DIR}" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
-  ls -la "${PERF_DIR}" 2>/dev/null || ls -la "${RCCL_TESTS_DIR}"
+  ls -la "${RCCL_TESTS_DIR}" 2>/dev/null || true
+  exit 1
+fi
+if [[ ! -x "${PERF_DIR}/alltoall_perf" && ! -x "${PERF_DIR}/all_reduce_perf" ]]; then
+  echo "rccl-tests perf binaries not found under ${PERF_DIR}"
+  ls -la "${PERF_DIR}" 2>/dev/null || true
   exit 1
 fi
 echo "==> rccl-tests perf dir = ${PERF_DIR}"
@@ -195,6 +206,11 @@ if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
 fi
 
 echo "All device-api benchmark runs succeeded."
+
+if [[ -n "${RCCL_CI_SKIP_DEVTIME:-}" ]]; then
+  echo "==> skip AllToAllDevtime smoke (RCCL_CI_SKIP_DEVTIME=${RCCL_CI_SKIP_DEVTIME})"
+  exit 0
+fi
 
 # GIN AllToAll in-kernel device-timing smoke (wall_clock64 / *TimedKernel).
 # Requires ENABLE_DEVICE_API=ON rccl-tests build (alltoall_perf with -B flags).

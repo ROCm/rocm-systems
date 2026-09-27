@@ -17,8 +17,11 @@
 #   2. lib/build-ompi.sh     build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh   build rocSHMEM -> rocshmem.env
 #   4. projects/rccl/install.sh   build RCCL (in-tree, release, --rocshmem-gin)
-#   5. rccl-tests (cmake)         build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)
-#   6. run-device-api-ci.sh       run the device-API benchmark suite
+#   5. rccl-tests (install.sh)    ENABLE_DEVICE_API=1, no ENABLE_ROCSHMEM_GIN
+#                                  (symmetric + LSA all_reduce_perf coverage)
+#   6. rccl-tests (cmake)         ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN
+#                                  (GIN -D 3/-D 4 + allgather Anvil SDMA)
+#   7. run-device-api-ci.sh       LSA matrix, then GIN matrix
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -59,11 +62,13 @@ fi
 export RCCL_BUILD_JOBS
 build_jobs="${RCCL_BUILD_JOBS}"
 
-# --- build phase -> build-%j.{out,err} ---
-{
+# --- build phase -> build-%j.{out,err}. Runs in a subshell so any failure (a
+# hard `exit` or a set -e abort) is caught below and skips the test phase. ---
+build_rc=0
+(
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
 # workspace tree via rocm.env.
-echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
+echo "==> [1/7] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
   echo "ERROR: ${rocm_env} not found. The workflow must run the 'Provision ROCm" >&2
@@ -84,7 +89,7 @@ echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 # 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
 # (no shared cache), then ompi.env (MPI_HOME) is sourced below.
-echo "==> [2/6] build OpenMPI"
+echo "==> [2/7] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
@@ -110,7 +115,7 @@ echo "==> verified hipcc = ${resolved_hipcc}"
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
 # 3) rocSHMEM (in-tree, IPC+SDMA) -> rocshmem.env (ROCSHMEM_INSTALL_DIR)
-echo "==> [3/6] build rocSHMEM"
+echo "==> [3/7] build rocSHMEM"
 GPU_TARGETS="${amdgpu_targets}" "${ci_dir}/lib/build-rocshmem.sh"
 set -a
 # shellcheck source=/dev/null
@@ -119,8 +124,8 @@ set +a
 
 # 4) RCCL with GIN / rocSHMEM (device-API + GIN-SDMA -D 3 paths need rocshmem in the executable).
 # --prefix is required: without an install tree, lib/cmake/rccl/*config.cmake is
-# never written and the glob below aborts the job under pipefail before any test.
-echo "==> [4/6] build RCCL (GIN, targets=${amdgpu_targets})"
+# never written and the rccl_cfg check below fails the job before any test.
+echo "==> [4/7] build RCCL (GIN, targets=${amdgpu_targets})"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rm -rf "${rccl_prefix}"
 (
@@ -145,12 +150,38 @@ fi
 rccl_cmake_dir="$(dirname "${rccl_cfg}")"
 echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
-# 5) rccl-tests via cmake so every device-api matrix binary RDC-links rocshmem
+# 5) rccl-tests via install.sh with ENABLE_DEVICE_API only. This is the
+# device-API-without-rocSHMEM build: all_reduce_perf and the LSA kernels need
+# it, and it was previously the only CI path that exercised that configure.
+# install.sh always writes into projects/rccl-tests/build.
+echo "==> [5/7] build rccl-tests (ENABLE_DEVICE_API via install.sh)"
+rccl_tests_src="${workdir}/projects/rccl-tests"
+rccl_tests_lsa_build="${rccl_tests_src}/build"
+(
+  cd "${rccl_tests_src}" \
+  && ./install.sh --mpi --enable-device-api \
+       --mpi_home="${MPI_HOME}" --rccl_home="${rccl_prefix}" \
+       --rocm_home="${ROCM_PATH}" \
+       --gpu_targets="${amdgpu_targets}"
+)
+# Symmetric + LSA suites in device-api-lsa-tests.json.
+required_lsa_bins=(
+  all_reduce_perf broadcast_perf reduce_perf
+  sendrecv_perf scatter_perf gather_perf
+)
+for perf_bin in "${required_lsa_bins[@]}"; do
+  if [[ ! -x "${rccl_tests_lsa_build}/${perf_bin}" ]]; then
+    echo "ERROR: ${perf_bin} not built under ${rccl_tests_lsa_build}" >&2
+    ls -la "${rccl_tests_lsa_build}" 2>/dev/null >&2 || true
+    exit 1
+  fi
+done
+
+# 6) rccl-tests via cmake so every GIN matrix binary RDC-links rocshmem
 # (install.sh/Makefile path does not enable ENABLE_ROCSHMEM_GIN). Needed because
 # this job's librccl.so is --rocshmem-gin. RCCL_TESTS_BIN_DIR is consumed by
-# run-device-api-ci.sh.
-echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
-rccl_tests_src="${workdir}/projects/rccl-tests"
+# run-device-api-ci.sh for the GIN matrix.
+echo "==> [6/7] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
@@ -184,24 +215,62 @@ for perf_bin in "${required_perf_bins[@]}"; do
     exit 1
   fi
 done
-export RCCL_TESTS_BIN_DIR="${rccl_tests_build}"
 # Persist for a standalone run-device-api-ci.sh (the in-process export above
 # does not survive a new shell). Mirrors gin.sbatch's .ci-out/rccl.env.
 {
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
+  printf 'export RCCL_TESTS_LSA_BIN_DIR=%q\n' "${rccl_tests_lsa_build}"
   printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
 } > "${workdir}/.ci-out/rccl.env"
-} > "${build_out}" 2> "${build_err}"
+) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
 
+if [[ "${build_rc}" -ne 0 ]]; then
+  echo "ERROR: build phase failed (rc=${build_rc}); skipping device-api tests." >&2
+  echo "----- last 60 lines of ${build_err} -----" >&2
+  tail -n 60 "${build_err}" >&2 || true
+  exit "${build_rc}"
+fi
+
 # --- test phase -> test-%j.{out,err} ---
+# Source build fragments so ROCM_PATH / MPI_HOME / ROCSHMEM / RCCL paths are set
+# even though the build ran in a subshell.
+set -a
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/rocm.env"
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/ompi.env"
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/rocshmem.env"
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/rccl.env"
+set +a
+
+test_rc=0
 {
-# 6) Benchmarks.
-echo "==> [6/6] run benchmarks"
-# GIN/RoCE QP creation pins memory; a low memlock limit makes ibv_create_qp fail with ENOMEM. Raise it for the mpirun ranks and log it.
+# 7) Benchmarks: LSA/symmetric against the install.sh build, then GIN against
+# the cmake ENABLE_ROCSHMEM_GIN build. Skip the GIN AllToAllDevtime smoke on the
+# LSA pass; the GIN pass runs it.
+echo "==> [7/7] run benchmarks"
 ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
 echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
-"${ci_dir}/run-device-api-ci.sh"
-} > "${test_out}" 2> "${test_err}"
+
+echo "==> LSA / symmetric matrix (install.sh ENABLE_DEVICE_API build)"
+CONFIG="${ci_dir}/lib/device-api-lsa-tests.json" \
+RCCL_TESTS_BIN_DIR="${RCCL_TESTS_LSA_BIN_DIR}" \
+RCCL_CI_SKIP_DEVTIME=1 \
+  "${ci_dir}/run-device-api-ci.sh"
+
+echo "==> GIN matrix (cmake ENABLE_ROCSHMEM_GIN build)"
+CONFIG="${ci_dir}/lib/device-api-tests.json" \
+RCCL_TESTS_BIN_DIR="${RCCL_TESTS_BIN_DIR}" \
+  "${ci_dir}/run-device-api-ci.sh"
+} > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
+if [[ "${test_rc}" -ne 0 ]]; then
+  echo "ERROR: device-api tests failed (rc=${test_rc})" >&2
+  echo "----- last 60 lines of ${test_err} -----" >&2
+  tail -n 60 "${test_err}" >&2 || true
+  exit "${test_rc}"
+fi
