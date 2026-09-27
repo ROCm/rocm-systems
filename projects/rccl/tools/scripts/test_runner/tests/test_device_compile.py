@@ -240,12 +240,17 @@ class TargetIdTest(unittest.TestCase):
                 '{"vgpr_count": 8, "agpr_count": 0, "sgpr_count": 16}')
             bitcode = Path(temp_dir) / "librocshmem_device_gfx942.bc"
             bitcode.touch()
+            # build_link_cmd only emits --plugin-opt=mcpu when it is given an
+            # archive, so without one the link step carries no arch at all and
+            # there is nothing here to pin.
+            profile_rt = Path(temp_dir) / "libclang_rt.profile.a"
+            profile_rt.touch()
 
             args = argparse.Namespace(
                 clang="clang", arch="gfx942", target_id="gfx942:xnack+",
                 objects=[str(obj)], output=str(Path(temp_dir) / "device.elf"),
                 dispatcher="common.cu.cpp", keep_temps=False,
-                rocshmem_bitcode=str(bitcode), profile_rt=None)
+                rocshmem_bitcode=str(bitcode), profile_rt=str(profile_rt))
 
             saved = (driver.discover_tools, driver.run)
             driver.discover_tools = lambda _: ("clang", "ld.lld")
@@ -259,7 +264,10 @@ class TargetIdTest(unittest.TestCase):
         self.assertIn("--offload-arch=gfx942:xnack+", disp_compile)
         self.assertIn("-mcpu=gfx942:xnack+", disp_assemble)
         self.assertIn("-mcpu=gfx942:xnack+", rocshmem_compile)
-        self.assertNotIn("-mcpu=gfx942:xnack+", link)
+        # lld's LTO plugin does not parse target IDs, so this one site takes
+        # the bare processor name.
+        self.assertIn("--plugin-opt=mcpu=gfx942", link)
+        self.assertNotIn("--plugin-opt=mcpu=gfx942:xnack+", link)
 
     def test_compile_hands_the_target_id_to_both_codegen_steps(self):
         """The codegen path a whole build goes through. Only run() and the
