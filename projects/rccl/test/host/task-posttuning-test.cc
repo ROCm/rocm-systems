@@ -3560,8 +3560,13 @@ TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_SeveralTasks_AppendEachWor
   EXPECT_EQ(static_cast<uint32_t>(kLegacyRoot + 1), TaskPostTuning_WorkColl(nodes[2])->root);
 }
 
+// TaskPostTuning_LegacyWork always stamps a non-null acc on an AllReduce task, so a faithful port of
+// enqueue.cc:550 (accFlag = task->acc != nullptr) always resolves accFlag = 1 here.
+constexpr int kLegacyAccFlagSet = 1;
+
 uint64_t TaskPostTuning_RegVariantDevFuncKey(int algo, int proto, int regMode) {
   return TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevSum, ncclFloat32, algo, proto) |
+         (static_cast<uint64_t>(kLegacyAccFlagSet & RCCL_FUNC_ID_MASK) << RCCL_ACC_SHIFT) |
          (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
 }
 
@@ -3571,6 +3576,7 @@ TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_RegisteredLl128Collective_
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
   ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
     kRegisteredDevFuncId;
+  work.task()->datatype = ncclFloat32;
   work.task()->protocol = NCCL_PROTO_LL128;
   work.task()->regBufType = NCCL_IPC_REG_BUFFER;
   work.task()->devFuncId = kUnregisteredDevFuncId;
