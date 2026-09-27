@@ -24,6 +24,7 @@
 #include "comm.h"
 #include "enqueue.h"
 #include "enqueue/task_classify.h"
+#include "fakes/allocator_fakes.h"
 #include "fakes/ce_fakes.h"
 #include "fakes/comm_fakes.h"
 #include "fakes/dev_runtime_fakes.h"
@@ -38,6 +39,7 @@
 #include "fakes/recorder_fakes.h"
 #include "fakes/register_stubs.h"
 #include "fakes/rma_fakes.h"
+#include "fakes/sched_stubs.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "fakes/tuning_fakes.h"
@@ -265,6 +267,7 @@ class TaskPrepFakesFixture : public ::testing::Test {
     ResetHipFakes();
     ResetNcclFakes();
     ResetNcclStubs();
+    ResetAllocatorFakes();
     ResetCeFakes();
     ResetCommFakes();
     ResetDevRuntimeFakes();
@@ -275,6 +278,7 @@ class TaskPrepFakesFixture : public ::testing::Test {
     ResetRecorderFakes();
     ResetRegisterStubs();
     ResetRmaFakes();
+    ResetSchedStubs();
     ResetSymKernelsFakes();
     ResetTransportStubs();
     ResetTuningFakes();
