@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kernel-sched-hint"
+version = "0.1.0"
+description = "CPU-side duration and ALU/memory hint for LLVM-lowered AMDGPU kernels"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kernel_sched_hint*"]
