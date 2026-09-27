@@ -263,7 +263,7 @@ do_device_compile_guards() {
 # All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
 # the tools/scripts/test_runner unittests, then the __hip_atomic_* poison
 # compile probe. Collected with `|| rc=1` rather than run back to back so that
-# under `set -e` (line 53) an early failure still leaves the later guards
+# under the `set -euo pipefail` at the top an early failure still leaves the later guards
 # running and reported, instead of aborting the phase at the first one. Same
 # idiom as do_host_tests above.
 do_guards() {
