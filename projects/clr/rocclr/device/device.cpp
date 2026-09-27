@@ -413,15 +413,15 @@ MemObjMap::RemoveStatus MemObjMap::TryRemoveMemObj(const void* k, const amd::Mem
   }
   if (tracked) {
     ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
-            "TryRemoveMemObj: ptr 0x%zx is not a base address of memory %p (interior pointer "
+            "TryRemoveMemObj: ptr %p is not a base address of memory %p (interior pointer "
             "or overlapping-range resolution); leaving the maps untouched",
-            key, mem);
+            k, mem);
     return RemoveStatus::kBaseMismatch;
   }
   ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
-          "TryRemoveMemObj: no map entry anywhere for memory %p freed via ptr 0x%zx "
+          "TryRemoveMemObj: no map entry anywhere for memory %p freed via ptr %p "
           "(external or per-device-only memory?); nothing to de-index",
-          mem, key);
+          mem, k);
   return RemoveStatus::kNotTracked;
 }
 

@@ -26,6 +26,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 
@@ -123,6 +124,20 @@ TEST(EraseCoveringMemObjTest, SelectsCorrectCoveringEntryAmongMany) {
   EXPECT_EQ(removed, &b);
   EXPECT_EQ(map.count(0x2000), 0u);
   EXPECT_EQ(map.size(), 2u);
+}
+
+// An entry at the top of the address space must still be matched: the range
+// test is phrased as key - base < size so base + size never wraps and misses
+// (or falsely covers) a pointer.
+TEST(EraseCoveringMemObjTest, HandlesEntryAtTopOfAddressSpace) {
+  constexpr uintptr_t kMax = ~uintptr_t{0};
+  FakeMem a{kMax - 0xfff, 0x2000};  // base + size wraps around to 0xfff
+  Map map{{a.base, &a}};
+
+  EXPECT_EQ(amd::EraseCoveringMemObj(map, uintptr_t(0x10), sizeOf), nullptr);  // wrapped, not covered
+  EXPECT_EQ(map.size(), 1u);
+  EXPECT_EQ(amd::EraseCoveringMemObj(map, kMax - 0x10, sizeOf), &a);  // interior, covered
+  EXPECT_TRUE(map.empty());
 }
 
 // A free must drop every alias of the object it releases: an allocation

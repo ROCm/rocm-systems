@@ -19,23 +19,25 @@ namespace amd {
 //! with lookup (MemObjMap::FindAndRemoveMemObj) must apply the same range test
 //! rather than erasing by the exact key alone.
 //!
-//! Returns the removed mapped value (a pointer) on success, or a
-//! default-constructed value (nullptr) when no entry covers \a key (nothing is
-//! erased). \a size_of maps a stored value to its byte span. Isolating this
-//! here keeps the range logic -- duplicated across the FindMemObj* helpers --
-//! in one unit-tested place.
+//! Returns the removed mapped value on success, or a value-initialized
+//! mapped_type (nullptr for the pointer maps) when no entry covers \a key
+//! (nothing is erased). \a size_of maps a stored value to its byte span.
+//! Isolating this here keeps the range logic -- duplicated across the
+//! FindMemObj* helpers -- in one unit-tested place.
 template <typename Map, typename SizeFn>
 inline typename Map::mapped_type EraseCoveringMemObj(Map& map, uintptr_t key, SizeFn size_of) {
   // upper_bound(key) is the first entry strictly above key; the entry that may
-  // cover key is its immediate predecessor.
+  // cover key is its immediate predecessor, so base <= key holds and the range
+  // test can be phrased as key - base < size without base + size ever
+  // overflowing near the top of the address space.
   auto it = map.upper_bound(key);
   if (it == map.begin()) {
-    return nullptr;
+    return typename Map::mapped_type{};
   }
   --it;
   const uintptr_t base = it->first;
-  if (key < base || key >= base + size_of(it->second)) {
-    return nullptr;
+  if (key - base >= size_of(it->second)) {
+    return typename Map::mapped_type{};
   }
   typename Map::mapped_type value = it->second;
   map.erase(it);
