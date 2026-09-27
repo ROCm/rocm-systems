@@ -5421,29 +5421,72 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredBypassesCtaPol
       });
 }
 
-// ceReduceScatterOpSupported's OR-chain (Sum||Prod||Min||Max) had only ever
-// been driven through Sum. ncclProd proves the second disjunct fires on its
-// own. No other arm can claim the call instead: symEligible needs Sum or Avg,
-// and Direct is out on arch rather than on op (its `op < ncclAvg` guard does
-// accept ncclProd, but MakeSelectComm is gfx90a and rcclUseReduceScatterDirect
-// is gfx950-only), so CE_REGISTERED is unambiguously the arm that answered.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWithProdOp) {
+// ceReduceScatterOpSupported's OR-chain (Sum||Prod||Min||Max) at
+// rccl_wrap.cc:1906 had only ever been driven through Sum. Each of the other
+// three is driven here on its own, so dropping any single disjunct puts that
+// op silently back on the ring kernel and fails exactly one iteration. The
+// second copy of the chain, rcclUseCeReduceScatter's own op gate, is out of
+// this test's reach: that call is made here, but it feeds the 2-shot arm,
+// which has no staging buffer to fire from, so its answer cannot change which
+// arm wins. CeTwoShotChosenWithNonSumOps below sweeps that copy.
+//
+// No other arm can claim any of these calls instead: symEligible needs Sum or
+// Avg, Hierarchical needs Sum, and Direct is out on arch rather than on op
+// (its `op < ncclAvg` guard does accept all three, but MakeSelectComm is
+// gfx90a and rcclUseReduceScatterDirect is gfx950-only), so CE_REGISTERED is
+// unambiguously the arm that answered.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWithNonSumOps) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_CeRegisteredChosenWithProdOp",
+      "Wrap_SelectReduceScatter_CeRegisteredChosenWithNonSumOps",
       []() {
         g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
-        comm->symmetricSupport = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                       ncclProd, /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        DeleteCommWithArch(comm);
+        for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
+          SCOPED_TRACE("op=" + std::to_string((int)op));
+          ncclComm* comm = MakeSelectComm();
+          comm->symmetricSupport = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                         op, /*query=*/false, &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The 2-shot arm's own op gate, the copy of the same chain inside
+// rcclUseCeReduceScatter (rccl_wrap.cc:1253, written as a rejecting
+// `op != ...` chain). CeRegisteredChosenWithNonSumOps above makes that call
+// too, but without a staging buffer its answer cannot change the arm that
+// wins, so only this test pins it; dropping a term here rejects that op and
+// the iteration falls to the ring kernel instead.
+// Forced params plus a staging buffer, as in
+// CeTwoShotChosenWhenForcedAndStagingBufferReady, so the 2-shot arm returns
+// before the registered one and the answer is unambiguous.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotChosenWithNonSumOps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotChosenWithNonSumOps",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
+        for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
+          SCOPED_TRACE("op=" + std::to_string((int)op));
+          ncclComm* comm = MakeSelectComm();
+          comm->symmetricSupport = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force must bypass this
+          uint8_t stagingBuf[16];
+          comm->ceColl.ceARTmpBuf = stagingBuf;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                         op, /*query=*/false, &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+          EXPECT_EQ(19, decision.nMaxChannels);
+          DeleteCommWithArch(comm);
+        }
       });
 }
 
@@ -5489,6 +5532,34 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SysmemSegmentBlocksCeRegistered)
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         TestDevrWindows registered(comm, &sendSentinel, true, &recvSentinel, false);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, &sendSentinel, &recvSentinel, /*recvcount=*/8,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain kernel
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Complementary proof for the recv-window side of hasSysmemSegment's `||`:
+// only the receive window is backed by memory carrying a sysmem segment, the
+// send window is clean. Without this the second operand of the `||` is never
+// the one that fires and deleting it leaves the suite green. Mirrors the
+// AllReduce twin SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegistered.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered",
+      []() {
+        int sendSentinel = 0, recvSentinel = 0;
+        g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -5590,6 +5661,59 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LatchedGraphModeExcludesBothCeAr
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The other way into ceArGraphAllowed=false: `if (query && graphCapturingHint)`
+// at rccl_wrap.cc:1827, which LatchedGraphModeExcludesBothCeArms above reaches
+// through graphModeSeen instead and so leaves untested. Run twice over one
+// setup that otherwise reports CE_2SHOT, with the hint as the only difference,
+// so the second half cannot pass for any reason the first half already rules
+// out; dropping the line makes the hint=true half report CE again. The
+// registered arm is out of reach behind 2-shot's earlier return, but it carries
+// its own `ceArGraphAllowed` conjunct, and once the hint shuts 2-shot out that
+// conjunct is the only thing left holding it back, which is what the second
+// EXPECT_NE is for.
+//
+// The ReduceScatter selector never probes the stream in either mode: unlike
+// rcclSelectAllReduce it has no live-path branch of its own, since
+// ncclReduceScatter_impl ticks the shared latch before calling in. The probe
+// hook is here to pin that: its counter must stay at 0 across both calls.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook graphProbe(g_cudaGetCapturingGraph,
+                              [](struct ncclCudaGraph*, hipStream_t, int) { return ncclSuccess; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+
+        rcclCollDecision allowed{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/true, &allowed,
+                                                       /*graphCapturingHint=*/false));
+        EXPECT_TRUE(allowed.ceArGraphAllowed);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, allowed.algo);
+
+        rcclCollDecision capturing{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/true, &capturing,
+                                                       /*graphCapturingHint=*/true));
+        EXPECT_FALSE(capturing.ceArGraphAllowed);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, capturing.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, capturing.algo);
+
+        EXPECT_EQ(0, graphProbe.calls);            // the selector never probes the stream
+        EXPECT_FALSE(comm->ceColl.graphModeSeen);  // and never ticks the latch
         DeleteCommWithArch(comm);
       });
 }
