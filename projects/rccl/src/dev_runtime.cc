@@ -1130,10 +1130,7 @@ static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vi
 remove_winSorted:
   // Every checked call above jumps here, then winHost is freed. Deregister
   // first so those exits still release the registration the caller handed off.
-  {
-    ncclResult_t deregRet = ncclCommDeregister(comm, winHost->localRegHandle);
-    if (ret == ncclSuccess) ret = deregRet;
-  }
+  NCCLCHECKIGNORE(ncclCommDeregister(comm, winHost->localRegHandle), ret);
   {
     int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
                               reinterpret_cast<uintptr_t>(winHost->userPtr));

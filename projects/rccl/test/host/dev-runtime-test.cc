@@ -2932,7 +2932,10 @@ protected:
   }
 
   // A window over freshly obtained memory, so the whole teardown chain is valid.
-  ncclWindow_vidmem* MakeWindow(void* userPtr) {
+  // localReg is the registration the window owns. Pass a non-null handle when
+  // the test needs to see destroy release it, including on an early jump to
+  // remove_winSorted.
+  ncclWindow_vidmem* MakeWindow(void* userPtr, void* localReg = nullptr) {
     ncclDevrMemory* mem = nullptr;
     EXPECT_EQ(symMemoryObtain(comm, memHandles.data(), 1, userPtr, 4096, 0, &mem, false), ncclSuccess);
     // EXPECT_ does not return, and symWindowCreate dereferences mem
@@ -2940,7 +2943,7 @@ protected:
     // obtain would turn a reported failure into a segfault with no gtest output.
     if (mem == nullptr) return nullptr;
     ncclWindow_vidmem* winDev = nullptr;
-    EXPECT_EQ(symWindowCreate(comm, mem, 0, userPtr, 4096, 0, nullptr, &winDev, nullptr, nullptr), ncclSuccess);
+    EXPECT_EQ(symWindowCreate(comm, mem, 0, userPtr, 4096, 0, localReg, &winDev, nullptr, nullptr), ncclSuccess);
     return winDev;
   }
 };
@@ -3022,22 +3025,31 @@ TEST_F(SymWindowDestroyTest, TeardownFailure_StillRemovesFromSortedList) {
 }
 
 // Branch: clearing the window's slot in the device-side table fails. That jumps
-// straight to remove_winSorted, so the later shadow frees and the deregister
-// are all skipped -- but the sorted list is still tidied up. As with
-// TeardownFailure above, the returned code is not asserted: the same
+// straight to remove_winSorted, so the later shadow frees are skipped. The
+// deregister is the first statement at that label, so a registration handed
+// off with the window is still released. The sorted list is still tidied up.
+// As with TeardownFailure above, the returned code is not asserted: the same
 // overwrite-with-success at the cleanup label applies here.
 TEST_F(SymWindowDestroyTest, TableClearFails_StillRemovesFromSortedList) {
-  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+  void* localReg = reinterpret_cast<void*>(0xD0);
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000), localReg);
   ASSERT_EQ(comm->devrState.winSortedCount, 1);
 
   ScopedHook clear(g_hipMemsetAsync,
                    [](void*, int, size_t, hipStream_t) { return hipErrorInvalidValue; });
   ScopedHook poolFree(g_devrShadowPoolFree,
                       [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+  void* deregHandle = nullptr;
+  ScopedHook dereg(g_devrNcclCommDeregister, [&](const ncclComm_t, void* handle) {
+    deregHandle = handle;
+    return ncclSuccess;
+  });
 
   symWindowDestroy(comm, winDev, nullptr);
   EXPECT_EQ(clear.calls, 1);
   EXPECT_EQ(poolFree.calls, 0);  // jumped past the frees
+  EXPECT_EQ(dereg.calls, 1);     // early jump still releases the handed-off registration
+  EXPECT_EQ(deregHandle, localReg);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -3652,6 +3664,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, StreamCreateFails_UnwindsObtainedMemory
                     [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
   ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipSuccess; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
@@ -3660,6 +3673,9 @@ TEST_F(DevrWindowRegisterInGroupSymTest, StreamCreateFails_UnwindsObtainedMemory
   EXPECT_EQ(create.calls, 1);
   EXPECT_EQ(destroy.calls, 0);
   EXPECT_EQ(dereg.calls, 1);
+  // One cuMemRelease from ncclCuMemGetAddressRange's sysmem probe, plus one
+  // from symMemoryDestroy for this memory's single segment.
+  EXPECT_EQ(release.calls, 2);
 }
 
 // Branch: the deepest rollback. cudaStreamSynchronize is the only checked call
