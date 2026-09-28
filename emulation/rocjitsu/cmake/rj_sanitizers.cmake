@@ -130,68 +130,85 @@ function(
     endif()
 
     foreach(_sanitizer IN LISTS RJ_SANI_LIB_SANITIZERS)
-        set(_runtime_name)
+        set(_runtime_names)
         if(RJ_SANI_LIB_COMPILER_ID STREQUAL "GNU")
             if(_sanitizer STREQUAL "address")
-                set(_runtime_name "libasan.so")
+                list(APPEND _runtime_names "libasan.so")
             elseif(_sanitizer STREQUAL "undefined")
-                set(_runtime_name "libubsan.so")
+                list(APPEND _runtime_names "libubsan.so")
             elseif(_sanitizer STREQUAL "thread")
-                set(_runtime_name "libtsan.so")
+                list(APPEND _runtime_names "libtsan.so")
             endif()
         elseif(RJ_SANI_LIB_COMPILER_ID MATCHES "Clang")
             if(_sanitizer STREQUAL "address")
-                set(_runtime_name "libclang_rt.asan-${_sanitizer_arch}.so")
+                list(
+                    APPEND _runtime_names
+                    "libclang_rt.asan-${_sanitizer_arch}.so"
+                    "libclang_rt.asan.so"
+                )
             elseif(_sanitizer STREQUAL "undefined")
-                set(_runtime_name
+                list(
+                    APPEND _runtime_names
                     "libclang_rt.ubsan_standalone-${_sanitizer_arch}.so"
+                    "libclang_rt.ubsan_standalone.so"
                 )
             elseif(_sanitizer STREQUAL "thread")
-                set(_runtime_name "libclang_rt.tsan-${_sanitizer_arch}.so")
+                list(
+                    APPEND _runtime_names
+                    "libclang_rt.tsan-${_sanitizer_arch}.so"
+                    "libclang_rt.tsan.so"
+                )
             endif()
         endif()
 
-        if(NOT _runtime_name)
+        if(NOT _runtime_names)
             continue()
         endif()
 
-        execute_process(
-            COMMAND ${_compiler_command} --print-file-name=${_runtime_name}
-            RESULT_VARIABLE _runtime_result
-            OUTPUT_VARIABLE _runtime_output
-            ERROR_QUIET
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
         set(_runtime_library "")
-        if(
-            _runtime_result EQUAL 0
-            AND IS_ABSOLUTE "${_runtime_output}"
-            AND EXISTS "${_runtime_output}"
-        )
-            set(_runtime_library "${_runtime_output}")
-        endif()
+        foreach(_runtime_name IN LISTS _runtime_names)
+            execute_process(
+                COMMAND ${_compiler_command} --print-file-name=${_runtime_name}
+                RESULT_VARIABLE _runtime_result
+                OUTPUT_VARIABLE _runtime_output
+                ERROR_QUIET
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            if(
+                _runtime_result EQUAL 0
+                AND IS_ABSOLUTE "${_runtime_output}"
+                AND EXISTS "${_runtime_output}"
+            )
+                set(_runtime_library "${_runtime_output}")
+                break()
+            endif()
+        endforeach()
 
         if(
             NOT _runtime_library
             AND _resource_dir_result EQUAL 0
             AND IS_DIRECTORY "${_resource_dir}"
         )
-            file(
-                GLOB _runtime_candidates
-                "${_resource_dir}/lib/*/${_runtime_name}"
-            )
-            list(SORT _runtime_candidates)
-            if(_runtime_candidates)
-                list(GET _runtime_candidates 0 _runtime_library)
-            endif()
+            foreach(_runtime_name IN LISTS _runtime_names)
+                file(
+                    GLOB _runtime_candidates
+                    "${_resource_dir}/lib/*/${_runtime_name}"
+                )
+                list(SORT _runtime_candidates)
+                if(_runtime_candidates)
+                    list(GET _runtime_candidates 0 _runtime_library)
+                    break()
+                endif()
+            endforeach()
         endif()
 
         if(NOT _runtime_library)
+            string(JOIN " or " _runtime_description ${_runtime_names})
             message(
                 FATAL_ERROR
                 "RJ_SANITIZER_RUNTIME=SHARED requires the ${_sanitizer} "
                 "sanitizer shared runtime, but CMake could not locate "
-                "${_runtime_name} with ${RJ_SANI_LIB_COMPILER}."
+                "${_runtime_description} with ${RJ_SANI_LIB_COMPILER}."
             )
         endif()
 

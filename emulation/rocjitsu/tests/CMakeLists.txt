@@ -603,6 +603,14 @@ add_test(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME SanitizerRuntimeDiscoveryTest
+        COMMAND
+            ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DROCJITSU_TEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR} -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_sanitizer_runtime_discovery.cmake
+    )
+
     set(PLUGIN_LOADER_FIXTURE_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
     )
