@@ -2492,8 +2492,14 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
 // the report is that two runs of the same workload diff cleanly.
 TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
   PluginFixture f(/*num_wf_slots=*/1);
+  // Wavefront slots are created on demand by the CU's dispatch path, so take
+  // the wave from there; reaching into an unpopulated slot would dereference
+  // null. The same slot is reused on purpose -- recycling is what makes the
+  // merge order vary.
+  amdgpu::Wavefront *slot = f.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(slot, nullptr);
 
-  auto run = [&f](bool reversed) {
+  auto run = [&](bool reversed) {
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     ExecutionPluginGroup group(std::move(sink_config));
@@ -2504,7 +2510,7 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
     const uint16_t first = reversed ? 421 : 417;
     const uint16_t second = reversed ? 417 : 421;
     for (const uint16_t encoding : {first, second}) {
-      amdgpu::Wavefront &wf = *f.cu()->wf(0);
+      amdgpu::Wavefront &wf = *slot;
       wf.set_dispatch_id(1);
       group.onAmdgpuWavefrontDispatched(wf);
       EncodedTestInstruction inst("v_lshlrev_b64", encoding);
@@ -2535,8 +2541,14 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
 // report stops being diffable.
 TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
   PluginFixture f(/*num_wf_slots=*/1);
+  // Wavefront slots are created on demand by the CU's dispatch path, so take
+  // the wave from there; reaching into an unpopulated slot would dereference
+  // null. The same slot is reused on purpose -- recycling is what makes the
+  // merge order vary.
+  amdgpu::Wavefront *slot = f.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(slot, nullptr);
 
-  auto run = [&f](bool reversed) {
+  auto run = [&](bool reversed) {
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     ExecutionPluginGroup group(std::move(sink_config));
@@ -2547,7 +2559,7 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
     const int first = reversed ? 8 : 4;
     const int second = reversed ? 4 : 8;
     for (const int size : {first, second}) {
-      amdgpu::Wavefront &wf = *f.cu()->wf(0);
+      amdgpu::Wavefront &wf = *slot;
       wf.set_dispatch_id(1);
       group.onAmdgpuWavefrontDispatched(wf);
       EncodedTestInstruction inst("v_mov_b32_e32", /*encoding_id=*/63, /*opcode=*/1, size);
@@ -2582,9 +2594,14 @@ TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
   ExecutionPluginGroup group(std::move(sink_config));
   ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
 
+  // Wavefront slots are created on demand by the CU's dispatch path; an
+  // unpopulated slot is null.
+  amdgpu::Wavefront *slot = f.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(slot, nullptr);
+
   // Dispatch 1 completes; dispatch 2 halts its wave but never ends.
   for (const uint32_t dispatch_id : {1u, 2u}) {
-    amdgpu::Wavefront &wf = *f.cu()->wf(0);
+    amdgpu::Wavefront &wf = *slot;
     wf.set_dispatch_id(dispatch_id);
     group.onAmdgpuWavefrontDispatched(wf);
     InstructionMixTestInstruction inst(dispatch_id == 1 ? "s_nop" : "v_add_f32");
@@ -2633,7 +2650,12 @@ TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
   ExecutionPluginGroup group(std::move(sink_config));
   ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
 
-  amdgpu::Wavefront &wf = *f.cu()->wf(0);
+  // Wavefront slots are created on demand by the CU's dispatch path; an
+  // unpopulated slot is null.
+  amdgpu::Wavefront *slot = f.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(slot, nullptr);
+
+  amdgpu::Wavefront &wf = *slot;
   wf.set_dispatch_id(1);
   group.onAmdgpuWavefrontDispatched(wf);
   {
