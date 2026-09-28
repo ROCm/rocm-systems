@@ -3113,7 +3113,9 @@ allowing an unbounded `limit` through. The amd-smi CLI's
 `set --node-power-limit` additionally performs the same range check itself
 ahead of calling this function, purely to fail fast and present a friendlier,
 earlier user-facing error message; it is not the only validation and is not
-required for correctness.
+required for correctness. The CLI also rejects the request up front if NPM
+itself is disabled on the node (`amdsmi_npm_info_t::status ==
+AMDSMI_NPM_STATUS_DISABLED`) -- this function does not perform that check.
 
 Input parameters:
 

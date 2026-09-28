@@ -3259,6 +3259,11 @@ class AMDSMIHelpers:
         or design-doc source documents a real minimum), so the lower bound enforced
         here is simply "> 0".
 
+        Also rejects the request up front if NPM itself is disabled on this node
+        (amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED) -- there is no
+        max bound to validate against in that case, and writing
+        board/cur_node_power_limit while NPM is disabled has no defined effect.
+
         Fails closed when the platform max is unavailable ("N/A"): rather than
         allowing any positive value through in that degraded-driver scenario, the
         request is rejected outright here too, matching amdsmi_set_npm_limit()'s
@@ -3276,7 +3281,14 @@ class AMDSMIHelpers:
             npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
             max_node_power_limit = npm_info["max_node_power_limit"]
 
-            if max_node_power_limit == "N/A":
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint="Node power limit cannot be set: NPM is disabled on this node",
+                )
+            elif max_node_power_limit == "N/A":
                 # Fail closed: the platform max is unreadable (degraded driver /
                 # unavailable sysfs), so there is no bound to validate the
                 # request against. Reject rather than let an unbounded value

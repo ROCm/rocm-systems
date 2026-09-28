@@ -107,6 +107,8 @@ SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_D
 _STATUS_NOT_SUPPORTED = 2
 _STATUS_NO_PERM = 10
 _STATUS_INVAL = 5
+_NPM_STATUS_DISABLED = 0
+_NPM_STATUS_ENABLED = 1
 
 
 class _FakeLibraryException(Exception):
@@ -133,10 +135,15 @@ def _install_fake_amdsmi():
     wrapper.AMDSMI_STATUS_NOT_SUPPORTED = _STATUS_NOT_SUPPORTED
     wrapper.AMDSMI_STATUS_NO_PERM = _STATUS_NO_PERM
     wrapper.AMDSMI_STATUS_INVAL = _STATUS_INVAL
+    wrapper.AMDSMI_NPM_STATUS_DISABLED = _NPM_STATUS_DISABLED
+    wrapper.AMDSMI_NPM_STATUS_ENABLED = _NPM_STATUS_ENABLED
     interface.amdsmi_wrapper = wrapper
     # Overwritten per-test.
     interface.amdsmi_set_npm_limit = lambda _handle, _limit: None
-    interface.amdsmi_get_npm_info = lambda _handle: {"max_node_power_limit": "N/A"}
+    interface.amdsmi_get_npm_info = lambda _handle: {
+        "max_node_power_limit": "N/A",
+        "status": _NPM_STATUS_ENABLED,
+    }
 
     exception.AmdSmiLibraryException = _FakeLibraryException
 
@@ -404,9 +411,10 @@ class TestValidateAndSetNodePowerLimit(unittest.TestCase):
         self.calls = []
         self.interface.amdsmi_set_npm_limit = lambda h, l: self.calls.append((h, l))
 
-    def _validate(self, requested_limit, max_node_power_limit):
+    def _validate(self, requested_limit, max_node_power_limit, npm_status=_NPM_STATUS_ENABLED):
         self.interface.amdsmi_get_npm_info = lambda _h: {
-            "max_node_power_limit": max_node_power_limit
+            "max_node_power_limit": max_node_power_limit,
+            "status": npm_status,
         }
         # A lightweight duck-typed ``self`` -- exercises the real, unbound
         # ``validate_and_set_node_power_limit`` method body without paying for
@@ -434,6 +442,17 @@ class TestValidateAndSetNodePowerLimit(unittest.TestCase):
         self.assertIn("Successfully set node power limit to 6000 W", result)
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][1], 6000)
+
+    def test_npm_disabled_rejects(self):
+        # NPM disabled on this node: reject before even looking at the max
+        # bound (writing cur_node_power_limit while NPM is disabled has no
+        # defined effect).
+        with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException) as ctx:
+            self._validate(
+                requested_limit=250, max_node_power_limit=6400, npm_status=_NPM_STATUS_DISABLED
+            )
+        self.assertIn("NPM is disabled", str(ctx.exception))
+        self.assertEqual(self.calls, [], "API must not be called when NPM is disabled")
 
     def test_na_max_now_rejects(self):
         # F-2 fail-closed fix: an unreadable platform max ("N/A") must reject

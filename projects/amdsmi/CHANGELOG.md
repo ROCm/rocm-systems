@@ -33,6 +33,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New API: `amdsmi_set_npm_limit()`.
   - New `current_node_power` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the current (instantaneous) node power in watts, queried once per node rather than once per GPU; `amd-smi node -p` now displays it when available.
   - New `max_node_power_limit` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the platform max bound for `amdsmi_set_npm_limit()` requests.
+  - `amd-smi set --node-power-limit` now rejects the request up front when NPM is disabled on the node (`amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED`), instead of writing a limit that would have no defined effect.
 
 ### Changed
 
