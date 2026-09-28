@@ -208,6 +208,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
+- **Fixed a memory leak in GPU process-list queries**.  
+  - Each GPU's process-list cache was never freed, so leak checkers such as LeakSanitizer and Valgrind reported a leak in any program that listed GPU processes.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
