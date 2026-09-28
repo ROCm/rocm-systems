@@ -21,8 +21,11 @@ CachePanelRow = Union[
     tuple[str, Any, str, str, bool],
 ]
 
+# Compute Units panel width, shared by every architecture's chart
+CU_PANEL_W = 22
+
 COLORS = {
-    "kernel": "green",
+    "cu": "green",
     "block": "blue",
     "tcp": "cyan",
     "lds": "magenta",
@@ -248,20 +251,27 @@ def build_cu_panel(
     Falls back to decorative placeholder text when omitted.
     """
     if stats:
+        # Borders and padding leave CU_PANEL_W - 4 columns for text
+        text_width = CU_PANEL_W - 4
         lines: list[str] = []
         for label, value, unit in stats:
-            lines.append(metric_line(label, value, unit))
+            rendered = format_value(value, unit)
+            if len(label) + 1 + len(rendered) > text_width:
+                lines.append(label)
+                lines.append(colored(rendered, "bright_green"))
+            else:
+                lines.append(metric_line(label, value, unit))
         content = "\n".join(lines)
     else:
         content = (
             "\n" * padding_lines + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]"
         )
-    color = COLORS["kernel"]
+    color = COLORS["cu"]
     return Panel(
         content,
         title=f"[bold {color}]Compute Units[/bold {color}]",
         border_style=color,
-        width=22,
+        width=CU_PANEL_W,
         height=height,
     )
 

@@ -4,7 +4,7 @@
 """RDNA3.5 memory chart renderer.
 
 Hierarchy (GCEA = Graphics Core Efficiency Arbiter):
-  Kernel -> GL0 (TCP) / SQC -> GL1 -> GL2 -> GCEA -> System Memory
+  Compute Units -> GL0 (TCP) / SQC -> GL1 -> GL2 -> GCEA -> System Memory
          -> LDS (on-CU, no GL1 connection)
 
 Metric keys must match ``gfx115x/0300_memory_chart.yaml``.
@@ -100,7 +100,7 @@ MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
 
 DEFAULT_SAMPLE_METRICS: dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_ROWS)
 
-_EDGE_LABEL_W = 11  # fits longest kernel-edge label ("ICache Read")
+_EDGE_LABEL_W = 11  # fits longest CU-edge label ("ICache Read")
 
 # Panel dimensions
 _L0_PANEL_W = 20  # LDS/TCP/SQC: fits hit% + bar + BW line
@@ -110,7 +110,7 @@ _TOTAL_H = 3 * _L0_PANEL_H  # all columns align to this height
 
 # Arrow lengths
 _STD_ARROW_LEN = 8  # edge arrows between cache panels
-_KERNEL_EDGE_W = 20  # wider Kernel->L0 arrows (longer labels)
+_CU_EDGE_W = 20  # wider CU->L0 arrows (longer labels)
 _EDGE_COLS = (5, 7, 9)  # grid column indices that use vertical="middle"
 
 # Console dimensions
@@ -217,12 +217,12 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
-def _build_kernel_and_l0(
+def _build_cu_and_l0(
     metrics: dict[str, Any],
-    kernel_arrows: dict[str, str],
+    cu_arrows: dict[str, str],
     std_arrows: dict[str, str],
 ) -> tuple[Panel, Text, Group, Text]:
-    """Kernel panel, kernel edges, L0 stack, and GL1 edges."""
+    """Compute Units panel, CU edges, L0 stack, and GL1 edges."""
 
     color_read = COLORS["read"]
     color_write = COLORS["write"]
@@ -239,47 +239,47 @@ def _build_kernel_and_l0(
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", metrics["workgroups"], ""),
     ]
-    kernel_panel = build_cu_panel(_TOTAL_H, stats=cu_stats)
+    cu_panel = build_cu_panel(_TOTAL_H, stats=cu_stats)
 
-    kernel_arrow_left = kernel_arrows["left"]
-    kernel_arrow_right = kernel_arrows["right"]
+    cu_arrow_left = cu_arrows["left"]
+    cu_arrow_right = cu_arrows["right"]
 
     # LDS edge: instruction count only (not data movement)
     lds_edge_zone = [
         "     [white]Request[/white]",
         format_edge("LDS", metrics["lds_req"], _EDGE_LABEL_W),
-        kernel_arrows["plain"],
+        cu_arrows["plain"],
     ]
     tcp_edge_zone = [
         colored(
             format_edge("Read", metrics["tcp_read_req"], _EDGE_LABEL_W),
             color_read,
         ),
-        colored(kernel_arrow_left, color_read),
+        colored(cu_arrow_left, color_read),
         colored(
             format_edge("Write", metrics["tcp_write_req"], _EDGE_LABEL_W),
             color_write,
         ),
-        colored(kernel_arrow_right, color_write),
+        colored(cu_arrow_right, color_write),
     ]
     sqc_edge_zone = [
         colored(
             format_edge("ICache Read", metrics["icache_req"], _EDGE_LABEL_W),
             color_read,
         ),
-        colored(kernel_arrow_left, color_read),
+        colored(cu_arrow_left, color_read),
         colored(
             format_edge("DCache Read", metrics["dcache_req"], _EDGE_LABEL_W),
             color_read,
         ),
-        colored(kernel_arrow_left, color_read),
+        colored(cu_arrow_left, color_read),
     ]
-    kernel_edges_lines = (
+    cu_edges_lines = (
         pad_to(lds_edge_zone, _L0_PANEL_H)
         + pad_to(tcp_edge_zone, _L0_PANEL_H)
         + pad_to(sqc_edge_zone, _L0_PANEL_H)
     )
-    kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
+    cu_edges_text = Text.from_markup("\n".join(cu_edges_lines))
 
     # LDS panel
     lds_util_line = (
@@ -366,7 +366,7 @@ def _build_kernel_and_l0(
     )
     gl1_edges_text = Text.from_markup("\n".join(gl1_edges_lines))
 
-    return kernel_panel, kernel_edges_text, l0_stack, gl1_edges_text
+    return cu_panel, cu_edges_text, l0_stack, gl1_edges_text
 
 
 def _build_cache_columns(
@@ -457,11 +457,11 @@ def create_mem_chart_diagram(
     metrics = _extract_metrics(metric_dict)
 
     std_arrows = make_arrows(_STD_ARROW_LEN)
-    kernel_arrows = make_arrows(_KERNEL_EDGE_W)
+    cu_arrows = make_arrows(_CU_EDGE_W)
 
     # Build layout columns
-    kernel_panel, kernel_edges, l0_stack, gl1_edges = _build_kernel_and_l0(
-        metrics, kernel_arrows, std_arrows
+    cu_panel, cu_edges, l0_stack, gl1_edges = _build_cu_and_l0(
+        metrics, cu_arrows, std_arrows
     )
     gl1_panel, gl1_gl2_edges, gl2_panel = _build_cache_columns(metrics, std_arrows)
     gl2_gcea_edges, gcea_panel, dram_edges, dram_panel = _build_memory_columns(
@@ -475,8 +475,8 @@ def create_mem_chart_diagram(
         main_layout.add_column(vertical=vert)
 
     main_layout.add_row(
-        kernel_panel,
-        kernel_edges,
+        cu_panel,
+        cu_edges,
         l0_stack,
         gl1_edges,
         gl1_panel,

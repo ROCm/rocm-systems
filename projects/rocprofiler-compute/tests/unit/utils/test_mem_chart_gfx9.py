@@ -96,6 +96,29 @@ GFX9_SAMPLE_METRICS = {
     for k, v in mem_chart_gfx9.DEFAULT_SAMPLE_METRICS.items()
 }
 
+# gfx950 is the only gfx9 architecture wired for xGMI/PCIe bandwidth counters.
+GFX950_IO_METRICS = {
+    "HBM Read BW": 100e9,
+    "HBM Write BW": 50e9,
+    "HBM Atomic BW": 1e9,
+    "xGMI Read BW": 20e9,
+    "xGMI Write BW": 10e9,
+    "xGMI Atomic BW": 500e6,
+    "PCIe Read BW": 15e9,
+    "PCIe Write BW": 8e9,
+    "PCIe Atomic BW": 200e6,
+}
+
+# Which Data Fabric blocks each architecture is expected to render.
+GFX9_EXPECTED_FABRIC_BLOCKS = {
+    "gfx908": {"MALL": False, "xGMI": True, "PCIe": False},
+    "gfx90a": {"MALL": False, "xGMI": True, "PCIe": False},
+    "gfx940": {"MALL": True, "xGMI": True, "PCIe": False},
+    "gfx941": {"MALL": True, "xGMI": True, "PCIe": False},
+    "gfx942": {"MALL": True, "xGMI": True, "PCIe": False},
+    "gfx950": {"MALL": True, "xGMI": True, "PCIe": True},
+}
+
 
 def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE, gpu_arch=None):
     return strip_ansi(
@@ -209,35 +232,16 @@ class TestPlotMemChartGfx9:
         output = render_gfx9_chart({"LDS Util": 45})
         assert "Util 45.0%" in output
 
-    def test_gfx908_no_mall_has_xgmi(self):
-        output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx908")
-        assert "MALL" not in output
-        assert "xGMI" in output
-        assert "PCIe" not in output
-
-    def test_gfx940_has_mall_and_xgmi(self):
-        output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx940")
-        assert "MALL" in output
-        assert "xGMI" in output
-        assert "PCIe" not in output
-
-    def test_gfx950_has_mall_and_io(self):
+    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
+    def test_fabric_blocks_render_per_architecture(self, architecture):
         metrics = dict(GFX9_SAMPLE_METRICS)
-        metrics.update({
-            "HBM Read BW": 100e9,
-            "HBM Write BW": 50e9,
-            "HBM Atomic BW": 1e9,
-            "xGMI Read BW": 20e9,
-            "xGMI Write BW": 10e9,
-            "xGMI Atomic BW": 500e6,
-            "PCIe Read BW": 15e9,
-            "PCIe Write BW": 8e9,
-            "PCIe Atomic BW": 200e6,
-        })
-        output = render_gfx9_chart(metrics, gpu_arch="gfx950")
-        assert "MALL" in output
-        assert "xGMI" in output
-        assert "PCIe" in output
+        if architecture == "gfx950":
+            metrics.update(GFX950_IO_METRICS)
+        output = render_gfx9_chart(metrics, gpu_arch=architecture)
+        for block, expected in GFX9_EXPECTED_FABRIC_BLOCKS[architecture].items():
+            assert (block in output) is expected, (
+                f"{architecture}: expected {block} present={expected}"
+            )
 
 
 class TestPanelYamlGfx9:

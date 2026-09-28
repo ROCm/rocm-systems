@@ -46,7 +46,7 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
     ("LDS Allocation", 32768),
     ("Scratch Allocation", 0),
     ("Workgroups", 256),
-    # Kernel→L1 request edges
+    # Compute Units→L1 request edges
     ("Flat Read", 80),
     ("Flat Write", 20),
     ("Flat Atomic", 4),
@@ -128,7 +128,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics["lds_alloc"] = metric_dict.get("LDS Allocation")
     metrics["workgroups"] = metric_dict.get("Workgroups")
 
-    # Kernel→L1 request edges
+    # Compute Units→L1 request edges
     metrics["flat_read"] = metric_dict.get("Flat Read")
     metrics["flat_write"] = metric_dict.get("Flat Write")
     metrics["flat_atomic"] = metric_dict.get("Flat Atomic")
@@ -194,7 +194,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 # Arrow lengths
-_KERNEL_ARROW_LEN = 16  # wider arrows from Kernel to L1 (long edge labels)
+_CU_ARROW_LEN = 16  # wider arrows from Compute Units to L1 (long edge labels)
 _STD_ARROW_LEN = 12  # standard inter-cache edge arrows
 
 # Panel heights (L1 sub-panels stack to _TOTAL_H)
@@ -204,7 +204,7 @@ _SL1D_H = 4
 _L1I_H = 4
 _TOTAL_H = _VL1D_H + _LDS_H + _SL1D_H + _L1I_H
 
-# Panel widths — all non-Kernel IP blocks share one width for a uniform grid
+# Panel widths — all non-CU IP blocks share one width for a uniform grid
 _IP_BLOCK_W = 22
 # IO row panels (separate layout above/below the main grid)
 _XGMI_PANEL_W = 24  # fits "xGMI (to Peer GPU)" label
@@ -216,7 +216,7 @@ _IO_PAD_OFFSET = 3  # gap between fabric_col edge and xGMI/PCIe arrow text
 _MALL_ARCHS = frozenset({"gfx940", "gfx941", "gfx942", "gfx950"})
 # Console dimensions
 _CONSOLE_WIDTH = 240  # CDNA layout is wider (more IP blocks than RDNA3.5)
-_FABRIC_COL_INDEX = 6  # kernel, req_edges, l1_stack, l1_l2_edges, l2, l2_fab_edges
+_FABRIC_COL_INDEX = 6  # cu_panel, req_edges, l1_stack, l1_l2_edges, l2, l2_fab_edges
 
 
 def _rwa_triplet(
@@ -243,7 +243,7 @@ def _build_request_edges(
     metrics: dict[str, Any],
     arrows: dict[str, str],
 ) -> Text:
-    """Edges from Kernel to L1 caches, aligned to panel heights."""
+    """Edges from Compute Units to L1 caches, aligned to panel heights."""
     # VL1D scope — Non-buffer + Buffer requests
     vl1d_lines = [
         "[white]Non-buffer Request[/white]",
@@ -585,7 +585,7 @@ def create_mem_chart_diagram(
     membw: Optional[MemBwAnalysisResult] = None,
 ) -> None:
     metrics = _extract_metrics(metric_dict)
-    kernel_arrows = make_arrows(_KERNEL_ARROW_LEN)
+    cu_arrows = make_arrows(_CU_ARROW_LEN)
     std_arrows = make_arrows(_STD_ARROW_LEN)
     is_gfx950 = gpu_arch is not None and gpu_arch.startswith("gfx950")
     has_mall = gpu_arch in _MALL_ARCHS
@@ -603,8 +603,8 @@ def create_mem_chart_diagram(
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", metrics["workgroups"], ""),
     ]
-    kernel = build_cu_panel(_TOTAL_H, stats=cu_stats)
-    req_edges = _build_request_edges(metrics, kernel_arrows)
+    cu_panel = build_cu_panel(_TOTAL_H, stats=cu_stats)
+    req_edges = _build_request_edges(metrics, cu_arrows)
     l1_stack = _build_l1_stack(metrics, membw=membw)
     l1_l2_edges = _build_l1_l2_edges(metrics, std_arrows)
     l2_rows: list[CachePanelRow] = [
@@ -654,7 +654,7 @@ def create_mem_chart_diagram(
         hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H)
 
     grid_cols: list[tuple[RenderableType, VerticalAlignMethod]] = [
-        (kernel, "top"),
+        (cu_panel, "top"),
         (req_edges, "top"),
         (l1_stack, "top"),
         (l1_l2_edges, "top"),
