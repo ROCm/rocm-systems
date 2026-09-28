@@ -12,4 +12,4 @@
 
 ROCJITSU_DEFINE_PLUGIN(
     rocjitsu::plugins::perfsim::PerfsimPlugin, "perfsim",
-    R"({"library_path":{"type":"string","description":"Absolute path to the separately supplied Perfsim backend shared object, such as libgpucsim_ffm_plugin.so"},"max_staged_bytes":{"type":"number","description":"Maximum charged bytes for staged event records","default":268435456}})")
+    R"({"library_path":{"type":"string","description":"Absolute path to the separately supplied Perfsim backend shared object, such as libgpucsim_ffm_plugin.so"},"max_staged_bytes":{"type":"number","description":"Maximum charged bytes for staged event records","default":268435456},"dispatch_name":{"type":"string","description":"Optional exact kernel name; nonmatching dispatches still execute functionally but are not staged or replayed to Perfsim","optional":true},"max_observed_wgps":{"type":"number","description":"Optional diagnostic cap on distinct workgroups staged per selected dispatch","optional":true}})")
