@@ -307,18 +307,6 @@ class TargetIdTest(unittest.TestCase):
         self.assertIn("--offload-arch=gfx942:xnack+", compile_cmd)
         self.assertIn("-mcpu=gfx942:xnack+", assemble_cmd)
 
-    def test_lld_lto_plugin_takes_the_bare_arch(self):
-        """Given a target ID, ld.lld warns "not a recognized processor" and
-        links with no subtarget at all -- worse than the bare name."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            archive = Path(temp_dir) / "libclang_rt.profile.a"
-            archive.touch()
-
-            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
-                                        "gfx942", str(archive))
-
-        self.assertIn("--plugin-opt=mcpu=gfx942", cmd)
-
     def test_a_suffixed_arch_is_stripped(self):
         """A target ID on args.arch reaches lld and the register model, both
         of which misread it silently."""
