@@ -713,8 +713,8 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
   void* entry = (void*)(packet->kernel_object + kernel_object->kernel_code_entry_byte_offset);
   assert((size_t)entry % AMD_ISA_ALIGN_BYTES == 0);
 
-  pr_debug("kernel object property=%x entry=%p lds=%x+%x\n", kernel_object->kernel_code_properties,
-           entry, kernel_object->workgroup_group_segment_byte_size, packet->group_segment_size);
+  pr_debug("kernel object property=%x entry=%p lds=%x\n", kernel_object->kernel_code_properties,
+           entry, packet->group_segment_size);
 
   if (packet->setup == 0 || packet->setup > 3) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   if (packet->group_segment_size > device->LdsSize()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
