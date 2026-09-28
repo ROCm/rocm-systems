@@ -768,7 +768,7 @@ public:
 
             default:
             {
-                if constexpr(!Wrapper::k_are_nccl_fp8_types_available)
+                if constexpr(Wrapper::k_are_nccl_fp8_types_available)
                 {
                     if(datatype == Wrapper::NCCL_FP8_E4M3 ||
                        datatype == Wrapper::NCCL_FP8_E5M2)
