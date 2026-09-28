@@ -26,6 +26,7 @@
 #include "att_no_intercept.hpp"
 #include "config.hpp"
 #include "execution_profile.hpp"
+#include "finalization_gate.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
 #include "kernel_iteration_filter.hpp"
@@ -212,12 +213,12 @@ is_handled_signal(int signum)
 
 struct signal_worker_state
 {
-    int                   eventfd       = -1;   // handler -> worker wakeup fd
-    std::atomic<uint32_t> finalize_done = {};   // worker sets when flush done (futex word)
-    std::atomic<uint32_t> handling      = {0};  // 1 once our handler owns the path
-    std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
-    int                   signo         = {0};               // signal handled (0 == normal exit)
-    std::thread           thread        = {};                // the finalization worker
+    int                     eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t>   finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t>   handling      = {0};  // 1 once our handler owns the path
+    tool::finalization_gate finalization  = {};   // runs finalize_rocprofv3 once; others wait
+    int                     signo         = {0};  // signal handled (0 == normal exit)
+    std::thread             thread        = {};   // the finalization worker
 
     ~signal_worker_state() { join(); }
 
@@ -2445,23 +2446,40 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
     } while(static_cast<unsigned long>(_sem_val) < _peers_pid.size());
 }
 
+// How long a caller waits for a finalization another thread started; <= 0 waits indefinitely.
+int finalize_wait_timeout_sec = rocprofiler::tool::get_env("ROCPROF_FINALIZE_TIMEOUT_SECONDS", 600);
+
 void
 finalize_rocprofv3(std::string_view context)
 {
-    auto& sw = get_signal_worker();
-    if(sw.finalized.test_and_set(std::memory_order_acq_rel))
+    using status_t = tool::finalization_gate::status;
+
+    auto& sw     = get_signal_worker();
+    auto  status = sw.finalization.run_or_wait(
+        [context]() {
+            ROCP_INFO << "invoked: finalize_rocprofv3";
+            if(client_finalizer && client_identifier)
+            {
+                ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
+                client_finalizer(*client_identifier);
+                client_finalizer  = nullptr;
+                client_identifier = nullptr;
+            }
+        },
+        finalize_wait_timeout_sec);
+
+    if(status == status_t::timed_out)
+    {
+        ROCP_WARNING << "finalize_rocprofv3('" << context << "') timed out after "
+                     << finalize_wait_timeout_sec
+                     << " sec waiting for another thread to finish finalizing; output may be "
+                        "incomplete (see ROCPROF_FINALIZE_TIMEOUT_SECONDS)";
+        return;
+    }
+    if(status != status_t::ran)
     {
         ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
         return;
-    }
-
-    ROCP_INFO << "invoked: finalize_rocprofv3";
-    if(client_finalizer && client_identifier)
-    {
-        ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
-        client_finalizer(*client_identifier);
-        client_finalizer  = nullptr;
-        client_identifier = nullptr;
     }
 
     // Join the worker thread (from atexit / rocprofv3_main; a call from the worker itself no-ops).

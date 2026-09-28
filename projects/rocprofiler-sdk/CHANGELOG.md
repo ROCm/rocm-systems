@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - rocprofv3 output lost, or the process crashed with SIGSEGV, when a process exited while another thread was still finalizing (for example, decoding thread trace data). Multi-process servers hit this on Ctrl+C: every worker starts finalizing on the group-wide SIGINT, even workers that ignore it, and the server then asks them to exit. The exit hook returned because finalization had started, so `exit()` ended the process mid-write. Exit now waits for the finalization to finish, for up to `ROCPROF_FINALIZE_TIMEOUT_SECONDS` (default 600; `0` or less waits indefinitely).
+
 ### Known issues
 
 ### Removed
