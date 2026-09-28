@@ -7,9 +7,9 @@
 // Setup shared by more than one AIE test binary: the runtime and agent fixture, agent discovery,
 // and the queue-error-callback plumbing.
 //
-// Only what more than one file uses belongs here. Pool discovery differs between dispatch.cc and
-// memory.cc, and each fixture beyond the common base is specific to its binary, so those live
-// with the tests that use them.
+// Only what more than one file uses belongs here. Pool discovery differs between test_dispatch.cc
+// and test_memory.cc, and each fixture beyond the common base is specific to its binary, so those
+// live with the tests that use them.
 //
 // This header depends on gtest, so it is for the test suite only. The aie-performance benchmarks
 // repeat some of the same discovery, but they are plain main() programs that do not link gtest.
