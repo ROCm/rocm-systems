@@ -258,6 +258,10 @@ namespace RcclUnitTesting
             // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
             // stops instead of indexing an empty childList -> SEGV.
             TeardownPool();
+            this->numActiveChildren = 0;
+            this->numActiveRanks = 0;
+            this->rankToChildMap.clear();
+            this->rankToDeviceMap.clear();
             FAIL() << "Unable to start pool child process " << d;
           }
         }
@@ -307,6 +311,11 @@ namespace RcclUnitTesting
           delete failedChild;
           childList.resize(childId);
           this->numActiveChildren = childId;
+          // FAIL() only returns from InitComms and callers may carry on, so no
+          // rank may still map to a child that was never started.
+          this->numActiveRanks = 0;
+          this->rankToChildMap.clear();
+          this->rankToDeviceMap.clear();
           FAIL() << "Unable to start child process " << childId;
         }
       }
@@ -661,6 +670,11 @@ namespace RcclUnitTesting
     std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
     for (int rank = 0; rank < currentRanks.size(); ++rank)
     {
+      if (currentRanks[rank] < 0 || currentRanks[rank] >= this->numActiveRanks)
+      {
+        FAIL() << "ExecuteCollectives rank " << currentRanks[rank] << " is not active ("
+               << this->numActiveRanks << " active ranks)";
+      }
       ranksPerChild[rankToChildMap[currentRanks[rank]]].push_back(rank);
     }
 
