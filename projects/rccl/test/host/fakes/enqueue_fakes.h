@@ -20,6 +20,7 @@
 #include "comm_fakes.h"          // src/init.cc comm lifecycle
 #include "dev_runtime_fakes.h"   // src/dev_runtime.cc
 #include "env_fakes.h"           // src/misc/param.cc + getenv interposition
+#include "group_fakes.h"         // src/group.cc
 #include "hip_fakes.h"           // HIP runtime seams
 #include "nccl_fakes.h"          // reusable nccl* seams
 #include "nccl_stubs.h"          // core/lifecycle functors; nccl_stubs.cc is linked into this binary too

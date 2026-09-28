@@ -10,7 +10,15 @@
 
 #include <cstdint>
 
+#include "group.h"       // the real declarations of the thread-locals defined below
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
+
+// group.cc's thread-local group state. ncclGroupCommJoin is inline in group.h,
+// so any TU that joins a comm to a group needs these even though it never calls
+// into group.cc. ncclGroupDepth/ncclGroupError sit in nccl_stubs.cc because the
+// fail-loud floor already needed them.
+thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {nullptr};
+thread_local int ncclGroupBlocking = -1;  // group.cc's "default mode" sentinel
 
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }

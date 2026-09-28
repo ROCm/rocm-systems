@@ -397,6 +397,7 @@ set(SRC_FILES
   include/proxy.h
   include/proxy_diag_counters.h
   include/ras.h
+  include/rccl_arch_thresholds.h
   include/rccl_common.h
   include/rccl_decision.h
   include/rccl_float8.h
@@ -522,6 +523,7 @@ set(SRC_FILES
   ras/ras_param.cc
   ras/ras_param.h
   ras/rasnet.cc
+  rccl_arch_thresholds.cc
   rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc

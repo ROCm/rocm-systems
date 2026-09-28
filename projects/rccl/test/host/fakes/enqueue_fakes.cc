@@ -17,6 +17,7 @@ void ResetEnqueueFakes() {
   ResetCeFakes();
   ResetCommFakes();
   ResetDevRuntimeFakes();
+  ResetGroupFakes();
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
