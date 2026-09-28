@@ -339,25 +339,22 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::NDRangeContaine
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  const device::Info& info = device->info();
-
-  // Re-derive the launch violations that matter here from the NDRange we were handed, so the
-  // limits come from the device this launch actually targets. The checks stay in their historical
-  // order, as the reported error code depends on which one fires first.
   const amd::NDRange32& global = ndrange.global();
   const amd::NDRange16& local = ndrange.local();
-  if (global[0] == 0 || global[1] == 0 || global[2] == 0) {
-    return hipErrorInvalidConfiguration;
-  }
-  if (local[0] == 0 || local[1] == 0 || local[2] == 0) {
-    return hipErrorInvalidConfiguration;
-  }
-  if (sharedMemBytes > std::numeric_limits<uint32_t>::max() ||
-      static_cast<uint32_t>(sharedMemBytes) > info.localMemSizePerCU_) {
-    return hipErrorInvalidValue;
-  }
-  if (local.product() > info.maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
+
+  // Re-derive the launch violations that matter here from the NDRange we were handed, so the
+  // limits come from the device this launch actually targets. The checks themselves are shared
+  // with the launch builders; the rule order below is what decides the reported error code.
+  static constexpr LaunchErrorRule kValidateRules[] = {
+      {kZeroGlobal,                               hipErrorInvalidConfiguration},
+      {kZeroBlock,                                hipErrorInvalidConfiguration},
+      {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
+      {kBlockExceedsMaxWG,                        hipErrorInvalidConfiguration},
+  };
+  hipError_t configStatus = MapLaunchViolations(
+      CheckNDRangeAgainstDevice(global, local, sharedMemBytes, *device), kValidateRules);
+  if (configStatus != hipSuccess) {
+    return configStatus;
   }
 
   amd::Kernel* kernel = hip::asKernel(f);
