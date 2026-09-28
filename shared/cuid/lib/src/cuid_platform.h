@@ -22,6 +22,8 @@ class CuidPlatform : public CuidDevice {
   amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_PLATFORM; }
   amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
   amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
+  bool key_gated_identity() const override { return true; }
+  amdcuid_status_t get_auxiliary_primary_cuid(amdcuid_primary_id& id) const override;
 
   // The SMBIOS system UUID, if the firmware supplies a real one. Returns false
   // when it is absent or an all-0x00 / all-0xFF sentinel. When present, it is

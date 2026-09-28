@@ -24,6 +24,8 @@ class CuidNpu : public CuidDevice {
   CuidNpu(const amdcuid_npu_info& i);
   amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_NPU; }
   amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
+  bool key_gated_identity() const override { return true; }
+  amdcuid_status_t get_auxiliary_primary_cuid(amdcuid_primary_id& id) const override;
   amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
   static amdcuid_status_t discover(std::vector<DevicePtr>& npus);
   static amdcuid_status_t discover_single(amdcuid_npu_info* npu_info,

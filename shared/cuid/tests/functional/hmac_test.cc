@@ -10,19 +10,14 @@
 TestHMAC::TestHMAC() {
   SetTitle("HMAC Key Operations");
   SetDescription(
-      "Verify amdcuid_generate_hash_key produces a non-zero key and that "
-      "amdcuid_set_hash_key accepts it. Both operations require root.");
+      "Verify amdcuid_generate_hash_key produces a non-zero key, and that "
+      "amdcuid_set_hash_key is unsupported.");
 }
 
 // No device enumeration needed for HMAC key operations.
 void TestHMAC::SetUp() {}
 
 void TestHMAC::Run() {
-  // This test provisions a real seed on the node it runs on, which changes
-  // every derived CUID the kernel does not answer for. Put the node's own seed
-  // back afterwards.
-  KeyStoreGuard key_guard;
-
   uint8_t generated_key[32] = {0};
   amdcuid_status_t status = amdcuid_generate_hash_key(generated_key);
   CHK_ERR_ASRT(status);
@@ -41,8 +36,7 @@ void TestHMAC::Run() {
            generated_key[1], generated_key[2], generated_key[3]);
   }
 
-  status = amdcuid_set_hash_key(generated_key);
-  CHK_ERR_ASRT(status);
-
-  IF_VERB(1) { printf("  amdcuid_set_hash_key: %s\n", amdcuid_status_to_string(status)); }
+  EXPECT_EQ(amdcuid_set_hash_key(generated_key), AMDCUID_STATUS_UNSUPPORTED);
+  amdcuid_key_info_t info{};
+  EXPECT_EQ(amdcuid_get_key_info(&info), AMDCUID_STATUS_UNSUPPORTED);
 }
