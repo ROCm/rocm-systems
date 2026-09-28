@@ -752,6 +752,58 @@ TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiKeepsBothDirectionsAtTheReportedWid
   ncclTopoFree(built);
 }
 
+// All eight CPX partitions of one physical device are XGMI peers, but a platform only has to
+// report the links it observes. An eight-partition device that reports a ring names 8 of the 56
+// ordered pairs and leaves the other 48 to ncclTopoConnectMloPartSiblings(), which is the only
+// case that exercises the N-way mesh it fabricates. Every pair must come out LINK_NVL at the width
+// the device reports for the pairs it does name: ncclTopoComputeP2pChannelsPerPeer() mins the
+// channel count over the whole communicator, so one narrower direction pins every rank to it.
+TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
+  const uint64_t host = 0xc4;
+  const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
+  const float reportedBw = 4 * ncclTopoXGMISpeed("gfx942");
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpus[0]), ncclSuccess);
+  ASSERT_NE(gpus[0], nullptr);
+  for (int p = 1; p < nParts; p++) gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  // Only the ring is reported: partition p names its successor and nothing else.
+  for (int p = 0; p < nParts; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % nParts);
+    addGpuLink(gpus[p], tgt, 4, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, nParts);
+  ASSERT_EQ(built->nodes[GPU].count, nParts);
+
+  // Every ordered pair, so the assertion does not depend on which DEV node holds which partition.
+  for (int a = 0; a < nParts; a++) {
+    for (int b = 0; b < nParts; b++) {
+      if (a == b) continue;
+      struct ncclTopoLink* link = findLink(built->nodes[DEV].nodes + a, built->nodes[DEV].nodes + b);
+      ASSERT_NE(link, nullptr) << "no XGMI link from DEV " << a << " to DEV " << b;
+      EXPECT_FLOAT_EQ(link->bw, reportedBw) << "DEV " << a << " to DEV " << b;
+    }
+  }
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  for (int a = 0; a < nParts; a++) {
+    for (int b = 0; b < nParts; b++) {
+      if (a == b) continue;
+      struct ncclTopoLinkList* path = built->nodes[GPU].nodes[a].paths[GPU] + b;
+      EXPECT_EQ(path->type, PATH_NVL) << "GPU " << a << " to GPU " << b;
+      EXPECT_FLOAT_EQ(path->bw, reportedBw) << "GPU " << a << " to GPU " << b;
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
 // GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
 // logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
 // GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
