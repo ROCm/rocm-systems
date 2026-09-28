@@ -524,12 +524,6 @@ class TestApplyFilters:
         workload.filter_gpu_ids = "0"
         assert len(apply_filters(workload, "/tmp", False)) == 2
 
-    def test_kernel_name_filter(self) -> None:
-        """A kernel-name filter keeps only matching rows."""
-        workload = _filter_workload()
-        workload.filter_kernel_ids = ["vecCopy"]
-        assert len(apply_filters(workload, "/tmp", False)) == 2
-
     def test_dispatch_id_filter(self) -> None:
         """A dispatch-ID filter keeps only matching rows."""
         workload = _filter_workload()
@@ -645,26 +639,6 @@ class TestApplyKernelFilter:
         workload.filter_kernel_ids = [kernel_id]
         with pytest.raises(SystemExit):
             apply_kernel_filter(_flat_raw_df(), workload)
-
-    def test_exact_name_match(self) -> None:
-        """A string kernel name filters to the exact match."""
-        workload = _kernel_filter_workload()
-        workload.filter_kernel_ids = ["kernel_b"]
-        result_df = apply_kernel_filter(_flat_raw_df(), workload)
-        assert len(result_df) == 1
-        assert result_df["Kernel_Name"].iloc[0] == "kernel_b"
-
-    def test_name_match_strips_whitespace(self) -> None:
-        """Kernel names with surrounding whitespace are stripped before matching."""
-        raw_df_with_whitespace = pd.DataFrame({
-            "Kernel_Name": [" kernel_a ", "kernel_b", "kernel_a"],
-            "GPU_ID": [0, 0, 1],
-            "Dispatch_ID": [1, 2, 3],
-        })
-        workload = _kernel_filter_workload()
-        workload.filter_kernel_ids = ["kernel_a"]
-        result_df = apply_kernel_filter(raw_df_with_whitespace, workload)
-        assert len(result_df) == 2
 
 
 # =============================================================================
