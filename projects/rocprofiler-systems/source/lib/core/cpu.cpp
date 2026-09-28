@@ -142,7 +142,10 @@ void
 query_cpu_agents()
 {
     auto cpu_data = get_cpu_info();
-    if(cpu_data.empty()) return;
+    if(cpu_data.empty())
+    {
+        return;
+    }
 
     // Group CPUs by socket (physical_id), collect model_name per socket
     std::map<size_t, std::string> socket_model_names;

@@ -546,7 +546,10 @@ comm_split_type([[maybe_unused]] comm_t comm, [[maybe_unused]] int split_size,
 inline comm_t
 get_node_comm()
 {
-    if(!is_initialized()) return comm_world_v;
+    if(!is_initialized())
+    {
+        return comm_world_v;
+    }
     auto _get_node_comm = []() {
         comm_t local_comm;
         comm_split_type(mpi::comm_world_v, mpi::comm_type_shared_v, 0, mpi::info_null_v,
@@ -562,7 +565,10 @@ get_node_comm()
 inline std::int32_t
 get_num_ranks_per_node()
 {
-    if(!is_initialized()) return 1;
+    if(!is_initialized())
+    {
+        return 1;
+    }
     return size(get_node_comm());
 }
 
@@ -571,7 +577,10 @@ get_num_ranks_per_node()
 inline std::int32_t
 get_num_nodes()
 {
-    if(!is_initialized()) return 1;
+    if(!is_initialized())
+    {
+        return 1;
+    }
     auto _world_size = size(comm_world_v);
     auto _ncomm_size = get_num_ranks_per_node();
     return (_world_size >= _ncomm_size) ? (_world_size / _ncomm_size) : 1;
@@ -582,7 +591,10 @@ get_num_nodes()
 inline std::int32_t
 get_node_index()
 {
-    if(!is_initialized()) return 0;
+    if(!is_initialized())
+    {
+        return 0;
+    }
     return rank() / get_num_ranks_per_node();
 }
 

@@ -106,6 +106,17 @@ struct ExecutionThreadSettings {
 ExecutionThreadSettings load_execution_thread_settings(const std::string &json_path,
                                                        const std::string &schema_text);
 
+/// @brief Read thread requests and topology dimensions from config JSON text.
+/// @details Same as the path overload, for a config a launch has already rewritten
+/// in memory and does not need to place on disk.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @returns Settings for evaluating the allocation at a given host-thread count.
+/// @throws std::runtime_error when the text cannot be parsed.
+/// @throws std::invalid_argument when required allocation metadata is invalid.
+ExecutionThreadSettings load_execution_thread_settings_from_string(const std::string &json,
+                                                                   const std::string &schema_text);
+
 /// @brief Check whether the ISA supports asynchronous MMA execution.
 bool configured_async_mma_supported(rj_code_arch_t arch);
 /// @brief Create lazy VM-owned resources for the requested helper count.

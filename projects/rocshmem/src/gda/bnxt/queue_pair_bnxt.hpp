@@ -421,11 +421,11 @@ __device__ inline void QueuePairBNXT::poll_cq_until(uint32_t requested_available
 
 #ifdef BUILD_DEBUG_DEVICE
     uint32_t flg_val =
-        __hip_atomic_load(static_cast<uint32_t*>(
+        __scoped_atomic_load_n(static_cast<uint32_t*>(
             __builtin_assume_aligned((char*)cqe + sizeof(struct bnxt_re_req_cqe)
                                                 + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
                                      4)),
-            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+            __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
     uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
     if (status != BNXT_RE_REQ_ST_OK) {
       print_cqe_error(status);
@@ -438,7 +438,7 @@ __device__ inline void QueuePairBNXT::poll_cq_until(uint32_t requested_available
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     sq.head = sq_head;
 
-    sq_tail = __hip_atomic_load(&sq.tail, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
+    sq_tail = __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 
     consumed_slots  = (sq_tail - sq_head + sq_depth) % sq_depth;
     available_slots = sq_depth - consumed_slots;
@@ -462,7 +462,7 @@ __device__ __forceinline__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) 
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
   __threadfence_system();
-  __hip_atomic_store(dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n(dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ __forceinline__ void* QueuePairBNXT::get_hwqe(
@@ -540,14 +540,14 @@ __device__ __forceinline__ void QueuePairBNXT::acquire_lock(uint32_t* lock) {
 
   do {
     expected = 0;
-  } while (0 == __hip_atomic_compare_exchange_strong(lock, &expected, 1,
-                                                     __ATOMIC_ACQUIRE,
-                                                     __ATOMIC_ACQUIRE,
-                                                     __HIP_MEMORY_SCOPE_SYSTEM));
+  } while (0 == __scoped_atomic_compare_exchange_n(lock, &expected, 1, false,
+                                                    __ATOMIC_ACQUIRE,
+                                                    __ATOMIC_ACQUIRE,
+                                                    __MEMORY_SCOPE_SYSTEM));
 }
 
 __device__ __forceinline__ void QueuePairBNXT::release_lock(uint32_t* lock) {
-  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n(lock, 0, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 }
 
 #if defined(BUILD_DEBUG_DEVICE)

@@ -53,6 +53,7 @@ public:
     uint32_t num_iods = 0;   ///< Number of I/O Dies (0 = no IOD modeling).
     amdgpu::Xcd::Config xcd; ///< Config applied to each XCD.
     simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL; ///< Execution mode.
+    uint32_t scratch_slots_per_cu = 0; ///< Zero preserves the CU execution-slot default.
   };
 
   /// @brief Construct a named SoC from configuration.

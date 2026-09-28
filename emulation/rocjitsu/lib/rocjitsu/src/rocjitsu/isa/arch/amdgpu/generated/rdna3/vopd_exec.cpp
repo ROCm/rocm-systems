@@ -71,6 +71,7 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
   if (uses_src_neg_modifier(slot.op))
     src0 = apply_neg(src0, slot.neg, 0);
+  // MOV has no src1: its unused encoding bits may name a pending register.
   if (slot.op == kVopdMovB32)
     return src0;
   uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
@@ -135,7 +136,8 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition = slot.uses_vcc ? wf.vcc() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
+    uint64_t condition = slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane)
+                                       : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxF32: {

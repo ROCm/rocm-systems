@@ -46,7 +46,10 @@ numa_gotcha::configure()
         for(size_t i = 0; i < numa_gotcha_t::capacity(); ++i)
         {
             auto* itr = numa_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
+            if(itr)
+            {
+                itr->verbose = -1;
+            }
         }
     }
 

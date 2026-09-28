@@ -17,7 +17,7 @@ namespace
 template <typename... Tp>
 struct ensure_storage
 {
-    void operator()() const { (((*this)(tim::type_list<Tp>{})), ...); }
+    void operator()() const { ((*this)(tim::type_list<Tp>{}), ...); }
 
 private:
     template <typename Up>
@@ -31,7 +31,10 @@ private:
             scope::destructor{ []() { operation::set_storage<Up>{}(nullptr, _tid); } };
 
         tim::operation::set_storage<Up>{}(_storage, _tid);
-        if(_tid == 0 && !_storage) tim::trait::runtime_enabled<Up>::set(false);
+        if(_tid == 0 && !_storage)
+        {
+            tim::trait::runtime_enabled<Up>::set(false);
+        }
     }
 
     template <typename Up>
