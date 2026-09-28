@@ -157,7 +157,8 @@ struct __CudaFatBinaryWrapper {
 
 // Forward declarations
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
-hipError_t ihipModuleLaunchKernel(hipFunction_t f, LaunchParams& launch_params,
+hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::NDRangeContainer& ndrange,
+                                  const amd::NDRange32& grid, size_t sharedMemBytes,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
                                   uint32_t flags = 0, uint32_t params = 0,
@@ -428,19 +429,20 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
                  exec.sharedMem_, extra);
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
-                                exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
-                                exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
   static constexpr LaunchErrorRule kRules[] = {
       {kCommonRulesBits | kBlockExceedsMaxWG, hipErrorInvalidValue},
   };
-  hipError_t status = launch_params.Validate(kRules);
+  amd::NDRangeContainer ndrange(3);
+  amd::NDRange32 grid(1, 1, 1);
+  hipError_t status = MakeLaunchNDRangeFromGrid(
+      ndrange, grid, exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z, exec.blockDim_.x,
+      exec.blockDim_.y, exec.blockDim_.z, 0, 0, 0, 1, 1, 1, exec.sharedMem_, *device, kRules);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
 
-  HIP_RETURN(ihipModuleLaunchKernel(
-      func, launch_params, exec.hStream_, nullptr, extra, nullptr, nullptr));
+  HIP_RETURN(ihipModuleLaunchKernel(func, ndrange, grid, exec.sharedMem_, exec.hStream_, nullptr,
+                                    extra, nullptr, nullptr));
 }
 
 // ================================================================================================
@@ -775,15 +777,21 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     return hipErrorInvalidConfiguration;
   }
 
-  HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                blockDim.z, sharedMemBytes, *device,
-                                0, 0, 0, clusterDim.x, clusterDim.y, clusterDim.z);
-  if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
+  static constexpr LaunchErrorRule kConfigRules[] = {
+      {kInvalidConfigBits, hipErrorInvalidConfiguration},
+  };
+  amd::NDRangeContainer ndrange(3);
+  amd::NDRange32 grid(1, 1, 1);
+  hipError_t status = MakeLaunchNDRangeFromGrid(
+      ndrange, grid, gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y, blockDim.z, 0, 0, 0,
+      clusterDim.x, clusterDim.y, clusterDim.z, sharedMemBytes, *device, kConfigRules);
+  if (status != hipSuccess) {
+    return status;
   }
 
-  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
+  return ihipModuleLaunchKernel(func, ndrange, grid, sharedMemBytes, stream, args, nullptr,
+                                startEvent, stopEvent, flags, 0, 0, 0, 0, 0, 0,
+                                dynDataPrefetchConfig);
 }
 
 // ================================================================================================
