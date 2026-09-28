@@ -9,7 +9,9 @@
 #include "hipfile.h"
 #include "stream.h"
 #include "sys.h"
+#include "thread-pool.h"
 
+#include <atomic>
 #include <memory>
 #include <stdexcept>
 #include <syslog.h>
@@ -27,13 +29,14 @@ enum class IoType;
 
 namespace hipFile {
 
-AsyncMonitor::AsyncMonitor() : is_finished{false}
+AsyncMonitor::AsyncMonitor() : task_group{Context<IThreadPool>::get()->makeTaskGroup()}, is_finished{false}
 {
     thread = std::thread(&AsyncMonitor::completion_thread, this);
 }
 
 AsyncMonitor::~AsyncMonitor()
 {
+    task_group->wait();
     {
         std::lock_guard<std::mutex> lock{mutex};
         is_finished = true;
@@ -44,6 +47,21 @@ AsyncMonitor::~AsyncMonitor()
         Context<Sys>::get()->syslog(LOG_CRIT,
                                     "Async state is being destructed while operations are outstanding.");
     }
+}
+
+static void
+signalOffloadComplete(AsyncOp *op)
+{
+    std::atomic_ref<uint64_t>{*op->stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+}
+
+void
+AsyncMonitor::submitIo(AsyncOp *op)
+{
+    task_group->run([op]() {
+        op->io_fn(op);
+        signalOffloadComplete(op);
+    });
 }
 
 void
@@ -113,6 +131,20 @@ AsyncOp::~AsyncOp()
 }
 
 extern "C" {
+void
+async_dispatch(void *userargs)
+{
+    using namespace hipFile;
+    auto op = static_cast<AsyncOp *>(userargs);
+    try {
+        Context<AsyncMonitor>::get()->submitIo(op);
+    }
+    catch (...) {
+        op->io_fn(op);
+        std::atomic_ref<uint64_t>{*op->stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+    }
+}
+
 void
 async_io_cleanup(void *userargs)
 {

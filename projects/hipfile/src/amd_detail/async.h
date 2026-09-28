@@ -5,8 +5,10 @@
 #pragma once
 
 #include "hipfile.h"
+#include "thread-pool.h"
 
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <sys/types.h>
@@ -48,6 +50,8 @@ public:
     std::shared_ptr<AsyncFailoverState>  failover{};
     bool                                 write_result{true};
     bool                                 committed{true};
+    void (*io_fn)(void *){nullptr};
+    uint64_t wait_target{0};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
@@ -67,11 +71,13 @@ public:
 
     virtual void addOp(std::shared_ptr<AsyncOp> op);
     virtual void completeOp(AsyncOp *op);
+    virtual void submitIo(AsyncOp *op);
 
 private:
     void                                                 completion_thread();
     std::unordered_map<void *, std::shared_ptr<AsyncOp>> submitted_ops;
     std::vector<AsyncOp *>                               completed_ops;
+    std::unique_ptr<ITaskGroup>                          task_group;
     std::thread                                          thread;
     std::mutex                                           mutex;
     std::condition_variable                              cv;
@@ -81,4 +87,5 @@ private:
 
 extern "C" {
 void async_io_cleanup(void *userargs);
+void async_dispatch(void *userargs);
 }
