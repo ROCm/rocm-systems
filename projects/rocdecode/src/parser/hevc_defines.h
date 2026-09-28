@@ -355,9 +355,10 @@ typedef struct {
     uint32_t vps_max_latency_increase_plus1[7];          //ue(v)
     uint32_t vps_max_layer_id;                           //u(6)
     uint32_t vps_num_layer_sets_minus1;                  //ue(v)
-    //vps_num_layer_sets_minus1 max is  1023  (dont +1 since starts from 1)
-    //vps_max_layer_id max is 62                   (+1 since starts from 0 and <= condition)
-    bool layer_id_included_flag[1023][63];               //u(1)
+    //vps_num_layer_sets_minus1 max is 1023 and it is used as an inclusive upper bound, so 1024 entries are needed
+    //vps_max_layer_id is range checked to a max of 62 (7.4.3.1) and it is used as an inclusive upper bound,
+    //so 63 entries are needed
+    bool layer_id_included_flag[1024][63];               //u(1)
     bool vps_timing_info_present_flag;                   //u(1)
     uint32_t vps_num_units_in_tick;                      //u(32)
     uint32_t vps_time_scale;                             //u(32)

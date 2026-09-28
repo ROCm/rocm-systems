@@ -1337,6 +1337,9 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
         }
     }
     p_vps->vps_max_layer_id = Parser::ReadBits(nalu, offset, 6);
+    // 7.4.3.1: vps_max_layer_id shall be less than 63 in bitstreams conforming to this version of the
+    // specification. 63 is reserved for future use and is not supported by this single layer decoder.
+    CHECK_ALLOWED_RANGE("vps_max_layer_id", p_vps->vps_max_layer_id, 0, 62);
     p_vps->vps_num_layer_sets_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
     CHECK_ALLOWED_RANGE("vps_num_layer_sets_minus1", p_vps->vps_num_layer_sets_minus1, 0, 1023);
     for (int i = 1; i <= p_vps->vps_num_layer_sets_minus1; i++) {
