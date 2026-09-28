@@ -585,6 +585,8 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
       work_group_info->kernelPreferredShmemCarveout_ = value;
       if (!work_group_info->hasFuncPreferredShmemCarveout_) {
         work_group_info->groupMemCarveout_ = value;
+        // override whatever setting we had in coarseMemCarveout_
+        work_group_info->coarseMemCarveout_ = 0;
       }
       break;
     case hipFuncAttributeRequiredClusterWidth:
