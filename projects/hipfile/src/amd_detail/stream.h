@@ -29,13 +29,15 @@ public:
     virtual void                        *asyncBufferDevPtr() const     = 0;
     virtual size_t                       asyncBufferSize() const       = 0;
     virtual bool                         canUseStreamWaitValue() const = 0;
+    virtual hipStream_t                  copyStream() const            = 0;
+    virtual uint64_t                    *signalSlot() const            = 0;
 };
 
 class StreamMap;
 
 class Stream : public IStream {
 public:
-    virtual ~Stream() override = default;
+    virtual ~Stream() override;
 
     virtual hipStream_t                  getHipStream() const override;
     virtual hipDevice_t                  getHipDevice() const override;
@@ -48,6 +50,8 @@ public:
     virtual void                        *asyncBufferDevPtr() const override;
     virtual size_t                       asyncBufferSize() const override;
     virtual bool                         canUseStreamWaitValue() const override;
+    virtual hipStream_t                  copyStream() const override;
+    virtual uint64_t                    *signalSlot() const override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
 
@@ -65,6 +69,9 @@ private:
     bool        page_aligned;
     bool        can_use_stream_wait_value;
     std::mutex  mutex;
+
+    hipStream_t copy_stream;
+    uint64_t   *signal_slot;
 
     std::unique_ptr<void, void (*)(void *)> async_buffer;
     void                                   *async_buffer_dev_ptr;
