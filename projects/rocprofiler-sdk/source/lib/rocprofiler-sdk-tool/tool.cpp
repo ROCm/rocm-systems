@@ -372,8 +372,32 @@ auto pause_resume_contexts = context_id_set_t{};
 // small, so this is lossless and preserves the thread id the record still carries.
 thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 
-// Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
-thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
+// What kernel replay decided for one logical dispatch when the SDK asked for its pass count.
+//
+// The iteration filter is stateful: every consultation advances the kernel's iteration count, and
+// --kernel-iteration-range numbers the launches the application made. Replay turns one launch into
+// several executions, so the filter is consulted exactly once per logical dispatch, at CONFIG, and
+// every later callback for the same dispatch id -- each replay pass, or the single run of a dispatch
+// that ends up not replayed -- reuses the answer. Deciding at CONFIG rather than on the first pass
+// also lets a dispatch that no filter selects run once instead of being replayed for nothing.
+//
+// CONFIG, the passes and the dispatch callbacks all run synchronously on the enqueuing thread, and
+// a lookup only matches the dispatch id the plan was made for, so a plan cannot leak into another
+// dispatch.
+struct replay_dispatch_plan_t
+{
+    rocprofiler_dispatch_id_t dispatch_id    = 0;
+    bool                      targeted       = false;
+    uint64_t                  counter_passes = 0;
+
+    uint64_t total_passes() const { return counter_passes; }
+};
+
+thread_local auto tl_replay_plan = std::optional<replay_dispatch_plan_t>{};
+
+// Iteration counts behind counter collection's targeting decision. Kernel replay's CONFIG consults
+// the same counts, so a kernel numbers its launches the same way whether or not replay handles them.
+auto counter_kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
@@ -404,25 +428,9 @@ bool
 is_targeted_kernel(uint64_t                                        _kern_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
-    // The iteration filter is stateful: every consultation advances the kernel's iteration count,
-    // and --kernel-iteration-range numbers the launches the application made. Kernel replay
-    // re-dispatches one launch once per counter group, and each pass reaches this function, so
-    // consulting the filter per pass would charge a single launch one iteration per pass and reject
-    // every pass past the end of the range -- the counter groups behind those passes are then never
-    // configured and their data is silently dropped.
-    //
-    // The answer therefore belongs to the dispatch, not the pass. Pass 0 consults the filter, which
-    // advances the count by the one launch that actually happened, and the rest of that dispatch's
-    // passes reuse it. Memoizing here rather than in a caller keeps the "consulted once per logical
-    // dispatch" invariant with the state it protects, so every caller gets it. Passes run
-    // synchronously and in order on the enqueuing thread, and tl_replay_dispatch_targeted is reset
-    // when each replay loop begins, so the cached answer cannot outlive its dispatch.
-    if(tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value())
-        return *tl_replay_dispatch_targeted;
-
     // hold target_kernels around kernel_iteration so the range stays valid; both
     // are only locked here / in add_kernel_target(), so the nesting is safe
-    const auto _is_target = target_kernels.rlock(
+    return target_kernels.rlock(
         [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
             return _kernel_iteration.wlock(
                 [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
@@ -435,9 +443,6 @@ is_targeted_kernel(uint64_t                                        _kern_id,
                 _kern_id_v);
         },
         _kern_id);
-
-    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
-    return _is_target;
 }
 
 auto&
@@ -1753,6 +1758,36 @@ get_replay_group_count(rocprofiler_agent_id_t agent_id)
     return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
 }
 
+// The plan kernel replay made at CONFIG for this dispatch, or null when replay never planned it (a
+// HIP graph launch or a multi-packet submission, which the SDK runs without CONFIG).
+const replay_dispatch_plan_t*
+get_replay_plan(rocprofiler_dispatch_id_t dispatch_id)
+{
+    return (tl_replay_plan && tl_replay_plan->dispatch_id == dispatch_id) ? &*tl_replay_plan
+                                                                          : nullptr;
+}
+
+replay_dispatch_plan_t
+plan_replay_dispatch(const rocprofiler_kernel_dispatch_info_t& dispatch_info)
+{
+    auto plan        = replay_dispatch_plan_t{};
+    plan.dispatch_id = dispatch_info.dispatch_id;
+    plan.targeted    = is_targeted_kernel(dispatch_info.kernel_id, counter_kernel_iteration);
+    if(plan.targeted) plan.counter_passes = get_replay_group_count(dispatch_info.agent_id);
+    return plan;
+}
+
+// Whether a dispatch is profiled. One that kernel replay planned reuses the plan's answer, so its
+// passes do not consult the stateful iteration filter again; any other dispatch consults it.
+bool
+is_targeted_dispatch(rocprofiler_kernel_id_t                         kernel_id,
+                     rocprofiler_dispatch_id_t                       dispatch_id,
+                     common::Synchronized<kernel_iteration_t, true>& kernel_iteration)
+{
+    if(const auto* plan = get_replay_plan(dispatch_id)) return plan->targeted;
+    return is_targeted_kernel(kernel_id, kernel_iteration);
+}
+
 int64_t
 get_instruction_index(rocprofiler_pc_t pc)
 {
@@ -2055,12 +2090,11 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
                           rocprofiler_user_data_t*                     user_data,
                           void* /*callback_data_args*/)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
-    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    if(!is_targeted_dispatch(
+           kernel_id, dispatch_data.dispatch_info.dispatch_id, counter_kernel_iteration))
     {
         return;
     }
@@ -2564,21 +2598,21 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
 // The pass count must match the number of counter groups collectable on THIS dispatch's agent --
 // the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
 // that pass i maps to group i with no wrap/skip on agents with a different or partial group set
-// (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
-// disables replay.
+// (the global --pmc group count can differ per agent). Returning 1 (a single group, none, or a
+// dispatch no filter selects) disables replay.
 uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
-    auto&      agent_profiles = get_agent_profiles();
-    const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
-    const auto n =
-        (profiles == agent_profiles.profiles.end()) ? size_t{0} : profiles->second.size();
+    const auto* plan = get_replay_plan(dispatch_info.dispatch_id);
+    ROCP_CI_LOG_IF(ERROR, !plan) << "kernel replay: no CONFIG plan for dispatch "
+                                 << dispatch_info.dispatch_id;
+    const auto n = (plan) ? plan->total_passes() : get_replay_group_count(dispatch_info.agent_id);
     return (n == 0) ? 1 : n;
 }
 
-// Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
-// query the number of replay passes for each dispatch.
+// Kernel replay CONFIG callback: plan the dispatch and install the pass-count callback during
+// PHASE_ENTER so the SDK can query the number of replay passes for it.
 void
 kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t* /*user_data*/,
@@ -2591,11 +2625,8 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        tl_replay_plan             = plan_replay_dispatch(payload->dispatch_info);
         payload->replay_pass_count = kernel_replay_pass_count_callback;
-        // A new replay loop begins here, so the previous dispatch's iteration-filter decision must
-        // not carry into it; pass 0 below will record a fresh one.
-        tl_replay_dispatch_targeted.reset();
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
