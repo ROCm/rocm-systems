@@ -224,9 +224,9 @@ std::string plugin_config_with_dispatch_name(std::string_view dispatch_name) {
          ",\"dispatch_name\":" + json_string(dispatch_name) + "}";
 }
 
-std::string plugin_config_with_observed_wgp_cap(uint64_t max_observed_wgps) {
+std::string plugin_config_with_observed_workgroup_cap(uint64_t max_observed_workgroups) {
   return std::string{"{\"library_path\":"} + json_string(PERFSIM_FAKE_BACKEND_PATH) +
-         ",\"max_observed_wgps\":" + std::to_string(max_observed_wgps) + "}";
+         ",\"max_observed_workgroups\":" + std::to_string(max_observed_workgroups) + "}";
 }
 
 std::string read_file(const std::string &path) {
@@ -372,9 +372,10 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidDispatchNames) {
   }
 }
 
-TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWgpCaps) {
+TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWorkgroupCaps) {
   const std::string prefix = std::string{"{\"library_path\":"} +
-                             json_string(PERFSIM_FAKE_BACKEND_PATH) + ",\"max_observed_wgps\":";
+                             json_string(PERFSIM_FAKE_BACKEND_PATH) +
+                             ",\"max_observed_workgroups\":";
   for (std::string_view value : {"0", "-1", "1.5", "\"1\""}) {
     SCOPED_TRACE(value);
     const std::string config = prefix + std::string(value) + "}";
@@ -509,9 +510,85 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
   EXPECT_NE(line_with_prefix(trace, "end 41 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
+  WaveFixture fixture(1);
+  const std::string config = plugin_config_with_dispatch_name("target_kernel");
+  testing::internal::CaptureStderr();
+  {
+    PerfsimPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    KernelDispatchInfo filtered = dispatch_info(46);
+    filtered.kernel_name = "other_kernel";
+    plugin.onAmdgpuDispatchPacketProcessed(filtered);
+    plugin.onAmdgpuDispatchExecutionBegin(filtered.dispatch_id);
+    Wavefront &filtered_wave = fixture.wave(filtered.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(filtered_wave);
+    EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&filtered_wave));
+
+    // Terminal VM-fault recovery does not deliver an execution-end callback.
+    // A dispatch excluded by dispatch_name must still be silently discarded.
+    fixture.cu->abort_dispatch(filtered.dispatch_id);
+
+    KernelDispatchInfo target = dispatch_info(47);
+    target.kernel_name = "target_kernel";
+    plugin.onAmdgpuDispatchPacketProcessed(target);
+    plugin.onAmdgpuDispatchExecutionBegin(target.dispatch_id);
+    Wavefront &target_wave = fixture.wave(target.dispatch_id, 1, {1, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(target_wave);
+    EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&target_wave));
+
+    const std::array<uint32_t, 1> end_words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, end, target_wave);
+    plugin.onAmdgpuWavefrontHalted(target_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(target.dispatch_id);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(diagnostic.find("skipped dispatch 46"), std::string::npos);
+  EXPECT_EQ(diagnostic.find("dispatch was incomplete at plugin shutdown"), std::string::npos);
+  EXPECT_EQ(diagnostic.find("matched no dispatches"), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 46 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 46 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "begin 47 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 47 "), trace.size());
+}
+
+TEST_F(PerfsimPluginTest, ReportsConfiguredDispatchNameWhenEveryDispatchMisses) {
+  const std::string config = plugin_config_with_dispatch_name("missing_kernel");
+  testing::internal::CaptureStderr();
+  {
+    PerfsimPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    for (uint32_t dispatch_id : {48u, 49u}) {
+      KernelDispatchInfo info = dispatch_info(dispatch_id);
+      info.kernel_name = dispatch_id == 48 ? "other_kernel" : "missing_kernel_suffix";
+      plugin.onAmdgpuDispatchPacketProcessed(info);
+      plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+      plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+    }
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string expected =
+      "[rocjitsu:perfsim] configured dispatch_name 'missing_kernel' matched no dispatches";
+  const size_t first = diagnostic.find(expected);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(diagnostic.find(expected, first + expected.size()), std::string::npos);
+  EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 48 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "begin 49 "), trace.size());
+}
+
 TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingReplay) {
   WaveFixture fixture(3);
-  const std::string config = plugin_config_with_observed_wgp_cap(1);
+  const std::string config = plugin_config_with_observed_workgroup_cap(1);
   testing::internal::CaptureStderr();
   {
     PerfsimPlugin plugin(config.c_str());
@@ -2115,9 +2192,11 @@ TEST_F(PerfsimPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
-TEST_F(PerfsimPluginTest, LoadsAsRocjitsuPluginWithStagingBudgetSchema) {
-  const std::string config =
-      std::string{"{\"plugins\":{\"perfsim\":"} + plugin_config_with_staging_budget(4096) + "}}";
+TEST_F(PerfsimPluginTest, LoadsAsRocjitsuPluginWithPublicOptionSchema) {
+  const std::string adapter_config = std::string{"{\"library_path\":"} +
+                                     json_string(PERFSIM_FAKE_BACKEND_PATH) +
+                                     ",\"max_staged_bytes\":4096,\"max_observed_workgroups\":1}";
+  const std::string config = std::string{"{\"plugins\":{\"perfsim\":"} + adapter_config + "}}";
   ExecutionPluginGroup group(PluginSinkConfig{});
   testing::internal::CaptureStderr();
   const size_t loaded = PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR);

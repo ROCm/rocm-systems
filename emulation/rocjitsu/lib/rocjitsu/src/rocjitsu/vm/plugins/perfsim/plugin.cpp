@@ -119,7 +119,7 @@ struct AdapterConfig {
   std::string library_path;
   size_t max_staged_bytes = kDefaultMaxStagedBytes;
   std::optional<std::string> dispatch_name;
-  std::optional<size_t> max_observed_wgps;
+  std::optional<size_t> max_observed_workgroups;
 };
 
 AdapterConfig parse_config(const char *config_json) {
@@ -165,18 +165,20 @@ AdapterConfig parse_config(const char *config_json) {
     result.max_staged_bytes = static_cast<size_t>(value);
   }
 
-  const auto max_observed_wgps = config["max_observed_wgps"];
-  if (!max_observed_wgps.IsNull()) {
-    if (!max_observed_wgps.IsIntOrUint() ||
-        (max_observed_wgps.IsInt() && max_observed_wgps.AsInt64() <= 0)) {
-      throw std::invalid_argument("Perfsim plugin 'max_observed_wgps' must be a positive integer");
+  const auto max_observed_workgroups = config["max_observed_workgroups"];
+  if (!max_observed_workgroups.IsNull()) {
+    if (!max_observed_workgroups.IsIntOrUint() ||
+        (max_observed_workgroups.IsInt() && max_observed_workgroups.AsInt64() <= 0)) {
+      throw std::invalid_argument(
+          "Perfsim plugin 'max_observed_workgroups' must be a positive integer");
     }
-    const uint64_t value = max_observed_wgps.AsUInt64();
+    const uint64_t value = max_observed_workgroups.AsUInt64();
     if (value == 0)
-      throw std::invalid_argument("Perfsim plugin 'max_observed_wgps' must be a positive integer");
+      throw std::invalid_argument(
+          "Perfsim plugin 'max_observed_workgroups' must be a positive integer");
     if (value > std::numeric_limits<size_t>::max())
-      throw std::invalid_argument("Perfsim plugin 'max_observed_wgps' is too large");
-    result.max_observed_wgps = static_cast<size_t>(value);
+      throw std::invalid_argument("Perfsim plugin 'max_observed_workgroups' is too large");
+    result.max_observed_workgroups = static_cast<size_t>(value);
   }
   return result;
 }
@@ -637,13 +639,19 @@ struct PerfsimPlugin::Impl {
 
     std::vector<uint32_t> incomplete_dispatches;
     for (const auto &[dispatch_id, state] : dispatches)
-      if (state.begun && !state.ended)
+      if (state.selected && state.begun && !state.ended)
         incomplete_dispatches.push_back(dispatch_id);
     for (uint32_t dispatch_id : incomplete_dispatches)
       reject(dispatch_id, "dispatch was incomplete at plugin shutdown");
     replay_blockers.clear();
     drain_epoch(/*shutdown=*/true);
     physical_waves.clear();
+
+    if (initialized && config.dispatch_name && !dispatch_name_matched) {
+      write_sink(std::format("[rocjitsu:perfsim] configured dispatch_name '{}' matched no "
+                             "dispatches\n",
+                             *config.dispatch_name));
+    }
 
     if (initialized)
       invoke_foreign_abi(api.on_shutdown);
@@ -692,18 +700,18 @@ struct PerfsimPlugin::Impl {
   }
 
   bool observe_workgroup(DispatchState &dispatch, uint32_t workgroup_id) const {
-    if (!config.max_observed_wgps)
+    if (!config.max_observed_workgroups)
       return true;
     if (dispatch.observed_workgroups.contains(workgroup_id))
       return true;
-    if (dispatch.observed_workgroups.size() >= *config.max_observed_wgps)
+    if (dispatch.observed_workgroups.size() >= *config.max_observed_workgroups)
       return false;
     dispatch.observed_workgroups.insert(workgroup_id);
     return true;
   }
 
   bool intentionally_unobserved(uint32_t dispatch_id, uint32_t workgroup_id) const {
-    if (!config.max_observed_wgps)
+    if (!config.max_observed_workgroups)
       return false;
     const auto iter = dispatches.find(dispatch_id);
     return iter != dispatches.end() && iter->second.metadata_seen && iter->second.selected &&
@@ -1223,6 +1231,7 @@ struct PerfsimPlugin::Impl {
   uint32_t negotiated_api_version = 0;
   bool initialized = false;
   bool shutdown_called = false;
+  bool dispatch_name_matched = false;
   std::unordered_map<uint32_t, DispatchState> dispatches;
   // Only supported in-flight dispatches block ordered replay. Rejected
   // dispatch state remains until its real end callback, but it retains no
@@ -1263,6 +1272,7 @@ void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &in
       !impl_->config.dispatch_name || state.dispatch_name == *impl_->config.dispatch_name;
   if (!state.selected)
     return;
+  impl_->dispatch_name_matched = true;
   if (const auto reason = validate_dispatch(info))
     impl_->reject(info.dispatch_id, *reason);
 }
