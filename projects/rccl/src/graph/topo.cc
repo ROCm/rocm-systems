@@ -1139,40 +1139,19 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
   return ncclSuccess;
 }
 
-static bool ncclTopoNodesLinked(struct ncclTopoNode* node, struct ncclTopoNode* remNode) {
-  for (int l = 0; l < node->nlinks; l++)
-    if (node->links[l].remNode == remNode) return true;
-  return false;
-}
-
-// ncclTopoConnectNodes() accumulates onto an existing link of the same type, so a direction the
-// XGMI pass already reported must be left alone or it ends up at two XGMI widths while its
-// reverse stays at one, and the two ranks of the pair then read different bandwidths off their
-// paths. Each direction is its own link, so check the one being connected.
+// Rate one direction of a sibling hop at the on-package bw, whether or not the XGMI pass already
+// built it. ncclTopoConnectNodes() accumulates onto an existing link of the same type, so the
+// reported case has to be re-rated in place rather than topped up.
 static ncclResult_t ncclTopoConnectMloPartSibling(struct ncclTopoNode* dev, struct ncclTopoNode* sibDev, float bw) {
-  if (ncclTopoNodesLinked(dev, sibDev)) return ncclSuccess;
+  for (int l = 0; l < dev->nlinks; l++) {
+    if (dev->links[l].remNode != sibDev || dev->links[l].type != LINK_NVL) continue;
+    dev->links[l].bw = bw;
+    return ncclSuccess;
+  }
   INFO(NCCL_GRAPH, "No XGMI link reported from MLOPart sibling %lx to %lx, assuming %.1f GB/s", dev->id, sibDev->id,
        bw);
   NCCLCHECK(ncclTopoConnectNodes(dev, sibDev, LINK_NVL, bw));
   return ncclSuccess;
-}
-
-// A reported sibling link carries count * width (see ncclTopoAddXGMI above), while a fabricated
-// one has no count to read. ncclTopoComputeP2pChannelsPerPeer() mins the channel count over every
-// rank, so a bare width alongside wider reported links would pin the whole communicator down to
-// what the fabricated direction carries. Reuse what the device does report between its own
-// partitions, and fall back to a single width when it reports nothing at all.
-static float ncclTopoMloPartSiblingBw(struct ncclTopoNode** sibDevs, int nSibDevs, float defaultBw) {
-  float bw = 0.0;
-  for (int s = 0; s < nSibDevs; s++) {
-    struct ncclTopoNode* dev = sibDevs[s];
-    for (int l = 0; l < dev->nlinks; l++) {
-      if (dev->links[l].type != LINK_NVL || dev->links[l].bw <= bw) continue;
-      for (int r = 0; r < nSibDevs; r++)
-        if (dev->links[l].remNode == sibDevs[r]) bw = dev->links[l].bw;
-    }
-  }
-  return bw > 0.0 ? bw : defaultBw;
 }
 
 // Compute partitions of one physical device (CPX/DPX, carried as MLOPart) reach each other over
@@ -1182,20 +1161,22 @@ static float ncclTopoMloPartSiblingBw(struct ncclTopoNode** sibDevs, int nSibDev
 // not LINK_LOC -- PATH_LOC outranks PATH_NVL in the path search, so a LINK_LOC here would shadow
 // the real XGMI links and hide the peer from everything keyed on PATH_NVL (P2P channel counts,
 // XGMI topology classification), leaving it with the PCIe fallbacks.
+//
+// Rate every sibling hop at MLOPART_LOC_BW rather than at the width sysfs reports for the pair.
+// The on-package fabric is far wider than the inter-device XGMI link whose width that report
+// carries, and the search treats link bw as a budget: ncclTopoSearch's followPath() subtracts
+// bwIntra from every link it lays a channel over. Rating a sibling hop at one XGMI width lets a
+// partitioned node exhaust it, which walks the balanced-tree search down the whole speed array.
 static ncclResult_t ncclTopoConnectMloPartSiblings(struct ncclTopoSystem* system) {
   for (int d = 0; d < system->nodes[DEV].count; d++) {
     struct ncclTopoNode* dev = system->nodes[DEV].nodes + d;
     struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
     int nSibDevs = 0;
     NCCLCHECK(ncclTopoGetDevNodes(system, dev->id, sibDevs, &nSibDevs));
-    // Siblings are partitions of one physical device, so they share its GCN arch. A link an
-    // earlier device of this group fabricated carries this same bw, so reading it back here
-    // leaves the width unchanged.
-    float xgmiBw = ncclTopoMloPartSiblingBw(sibDevs, nSibDevs, ncclTopoXGMISpeed(dev->dev.gcn));
     for (int s = 0; s < nSibDevs; s++) {
       if (sibDevs[s] == dev) continue;
-      NCCLCHECK(ncclTopoConnectMloPartSibling(dev, sibDevs[s], xgmiBw));
-      NCCLCHECK(ncclTopoConnectMloPartSibling(sibDevs[s], dev, xgmiBw));
+      NCCLCHECK(ncclTopoConnectMloPartSibling(dev, sibDevs[s], MLOPART_LOC_BW));
+      NCCLCHECK(ncclTopoConnectMloPartSibling(sibDevs[s], dev, MLOPART_LOC_BW));
     }
   }
   return ncclSuccess;
